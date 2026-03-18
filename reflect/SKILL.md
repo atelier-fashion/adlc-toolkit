@@ -82,13 +82,23 @@ List each issue with:
 #### Clean Areas
 Briefly note areas that look good (1-2 sentences) so the user knows what was checked.
 
-### Step 5: Fix or Defer
+### Step 5: Questions for the User
+Review the implementation holistically and surface any questions or uncertainties, such as:
+- **Ambiguous requirements**: Anything in the spec that could be interpreted multiple ways — how did you interpret it, and is that correct?
+- **Design tradeoffs**: Decisions where there were multiple reasonable approaches — should the user weigh in?
+- **Assumptions made**: Any assumptions baked into the implementation that weren't explicitly stated in the requirement
+- **Edge cases deferred**: Scenarios you noticed but chose not to handle — should they be addressed?
+- **UX/behavioral questions**: "When X happens, should the app do Y or Z?"
+
+Present these as a numbered list. If there are no questions, state that explicitly. Do not proceed past this step until the user has answered — their responses may change what needs to be fixed.
+
+### Step 6: Fix or Defer
 1. If Critical issues are found, fix them immediately
 2. If Major issues are found, ask the user whether to fix now or note for `/review`
 3. Minor issues can be listed for the user to decide
 4. After fixes, re-run tests to verify nothing broke
 
-### Step 6: Recommend Next Action
+### Step 7: Recommend Next Action
 - If no issues or only minor ones: "Ready for `/review`"
 - If fixes were applied: "Fixes applied. Re-run `/reflect` to verify, or proceed to `/review`"
 - If blockers remain: "Address these issues before `/review`"
