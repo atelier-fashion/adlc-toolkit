@@ -99,7 +99,7 @@ Create a concise summary suitable for sharing with the team:
 ### Step 6: Deploy
 1. Determine which components were changed by examining the files in the PR/commits:
    - **API changes** (`api/` files modified): Already deployed via CI/CD pipeline in Step 2. Confirm the deploy succeeded.
-   - **iOS changes** (`app/` files modified): Build and deploy to both devices (Carol + Clark) using the xcodebuild commands from CLAUDE.md. Deploy to both unless told otherwise.
+   - **iOS changes** (`app/` files modified): Deploy to both devices via WiFi using `cd app && ./deploy.sh`. Deploy to both unless told otherwise.
    - **Infrastructure changes** (`infrastructure/` files): Note that Terraform apply is needed and confirm with user.
 2. If no deployable changes exist (e.g., only SDLC docs changed), skip this step.
 
