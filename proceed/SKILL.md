@@ -19,6 +19,14 @@ The user provides a requirement ID, e.g., `/proceed REQ-023` or `/proceed 23`.
 
 Execute these phases in order. Each phase has a validation gate — if validation fails, fix the issues and re-validate. Loop up to 3 times per gate; if still failing after 3 attempts, stop and present the remaining issues to the user.
 
+### Step 0: Create Feature Branch (ALWAYS FIRST)
+
+**Before doing anything else**, create the feature branch:
+
+1. Ensure you're on the latest main/default branch and pull
+2. Create and checkout a new branch: `feat/REQ-xxx-short-description`
+3. All subsequent work happens on this branch
+
 ---
 
 ### Phase 1: Validate the Requirement Spec
@@ -87,15 +95,14 @@ Execute these phases in order. Each phase has a validation gate — if validatio
 
 1. Build the dependency graph from task frontmatter
 2. Identify independent tasks (no unmet dependencies) — these can run in parallel
-3. Create a feature branch: `feat/REQ-xxx-short-description`
-4. For each task (or batch of independent tasks):
+3. For each task (or batch of independent tasks):
    - Read the task file for requirements, files to modify, ACs, technical notes
    - Implement the changes following project conventions (from `.sdlc/context/conventions.md`)
    - Write tests as specified in the task
    - Run the project's test suite to verify nothing is broken
    - Mark the task status as `complete` in its frontmatter
    - Commit with message format: `feat(scope): description [TASK-xxx]`
-5. Use parallel subagents for tasks that have no dependency relationship with each other. Wait for all tasks in a dependency tier to complete before starting the next tier.
+4. Use parallel subagents for tasks that have no dependency relationship with each other. Wait for all tasks in a dependency tier to complete before starting the next tier.
 
 **Parallelization strategy**:
 - Group tasks into tiers based on the dependency graph
