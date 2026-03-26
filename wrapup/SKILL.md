@@ -104,9 +104,13 @@ Create a concise summary suitable for sharing with the team:
 2. If no deployable changes exist (e.g., only SDLC docs changed), skip this step.
 
 ### Step 7: Clean Up
-1. If the feature branch still exists locally (it shouldn't after squash-merge with --delete-branch), clean it up: `git branch -d agent/REQ-xxx-slug`
-2. Check for any temporary files, debug logging, or feature flags that should be removed
-3. Verify CLAUDE.md or other docs don't need updates based on what shipped
+1. If a worktree was used (`.worktrees/REQ-xxx` exists), remove it:
+   ```bash
+   git worktree remove .worktrees/REQ-xxx
+   ```
+2. If the feature branch still exists locally (it shouldn't after squash-merge with --delete-branch), clean it up: `git branch -d feat/REQ-xxx-slug`
+3. Check for any temporary files, debug logging, or feature flags that should be removed
+4. Verify CLAUDE.md or other docs don't need updates based on what shipped
 
 ### Step 8: Recommend Next Steps
 - If deferred items exist: "Consider creating `/spec` for deferred items: [list]"

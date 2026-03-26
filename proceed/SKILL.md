@@ -19,13 +19,22 @@ The user provides a requirement ID, e.g., `/proceed REQ-023` or `/proceed 23`.
 
 Execute these phases in order. Each phase has a validation gate — if validation fails, fix the issues and re-validate. Loop up to 3 times per gate; if still failing after 3 attempts, stop and present the remaining issues to the user.
 
-### Step 0: Create Feature Branch (ALWAYS FIRST)
+### Step 0: Create Worktree (ALWAYS FIRST)
 
-**Before doing anything else**, create the feature branch:
+**Before doing anything else**, isolate this work in a git worktree so parallel sessions don't collide:
 
-1. Ensure you're on the latest main/default branch and pull
-2. Create and checkout a new branch: `feat/REQ-xxx-short-description`
-3. All subsequent work happens on this branch
+1. Ensure main is up to date: `git checkout main && git pull`
+2. Create a worktree with a dedicated branch:
+   ```bash
+   git worktree add .worktrees/REQ-xxx feat/REQ-xxx-short-description
+   ```
+3. Change your working directory to `.worktrees/REQ-xxx` — **all subsequent work happens there**
+4. When the pipeline completes (PR merged), clean up:
+   ```bash
+   git worktree remove .worktrees/REQ-xxx
+   ```
+
+This ensures multiple `/proceed` sessions on different REQs never touch each other's files.
 
 ---
 

@@ -26,8 +26,18 @@ Feature request: $ARGUMENTS
 3. If the feature request is vague or ambiguous, ask clarifying questions before proceeding. Wait for answers.
 
 ### Step 2: Determine the Next REQ ID
-1. Scan `.sdlc/specs/` for existing `REQ-xxx` directories
-2. Use the next sequential number (e.g., if `REQ-022` exists, use `REQ-023`)
+1. Check for the atomic counter file `.sdlc/.next-req`
+2. If it exists, read the number, use it as the REQ ID, and **immediately** write the incremented value back:
+   ```bash
+   REQ_NUM=$(cat .sdlc/.next-req)
+   echo $((REQ_NUM + 1)) > .sdlc/.next-req
+   ```
+3. If `.sdlc/.next-req` does not exist, fall back to scanning `.sdlc/specs/` for the highest `REQ-xxx` number, use the next one, and create `.sdlc/.next-req` with the number after that:
+   ```bash
+   # e.g., if highest existing is REQ-024, use REQ-025 and write 26 to .next-req
+   echo 26 > .sdlc/.next-req
+   ```
+4. This avoids collisions when multiple sessions run `/spec` concurrently
 
 ### Step 3: Create the Requirement Spec
 1. Create directory: `.sdlc/specs/REQ-xxx-feature-slug/`
