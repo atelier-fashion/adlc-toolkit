@@ -19,6 +19,40 @@ The user provides a requirement ID, e.g., `/proceed REQ-023` or `/proceed 23`.
 
 Execute these phases in order. Each phase has a validation gate — if validation fails, fix the issues and re-validate. Loop up to 3 times per gate; if still failing after 3 attempts, stop and present the remaining issues to the user.
 
+## Pipeline State Tracking
+
+**CRITICAL**: You MUST maintain a state file to track pipeline progress. This prevents phases from being skipped during long-running pipelines.
+
+**State file location**: `.sdlc/specs/REQ-xxx-*/pipeline-state.json`
+
+**Schema**:
+```json
+{
+  "req": "REQ-xxx",
+  "branch": "feat/REQ-xxx-short-description",
+  "startedAt": "2026-03-27T10:00:00Z",
+  "completed": false,
+  "currentPhase": 0,
+  "completedPhases": [],
+  "phaseHistory": [
+    { "phase": 0, "name": "Create Worktree", "completedAt": "2026-03-27T10:01:00Z" }
+  ]
+}
+```
+
+**Rules — follow these exactly**:
+
+1. **Initialize** the state file at the start of Step 0 with `currentPhase: 0, completedPhases: [], completed: false`
+2. **After completing each phase**: append the phase number to `completedPhases`, add an entry to `phaseHistory` with the completion timestamp, and set `currentPhase` to the next phase number
+3. **BEFORE starting any phase (Phases 1–9)**: read `pipeline-state.json` and verify:
+   - The previous phase number is in `completedPhases`
+   - `currentPhase` equals the phase you are about to start
+   - If either check fails, **STOP** — you have skipped a phase. Go back and complete the missing phase before continuing.
+4. **Resume from interruption**: If the state file already exists when you start the pipeline, read it and resume from `currentPhase` instead of starting over
+5. **On completion**: After Phase 9 (Wrapup) finishes, set `"completed": true` in the state file
+
+---
+
 ### Step 0: Create Worktree (ALWAYS FIRST)
 
 **Before doing anything else**, isolate this work in a git worktree so parallel sessions don't collide:
@@ -29,16 +63,21 @@ Execute these phases in order. Each phase has a validation gate — if validatio
    git worktree add .worktrees/REQ-xxx feat/REQ-xxx-short-description
    ```
 3. Change your working directory to `.worktrees/REQ-xxx` — **all subsequent work happens there**
-4. When the pipeline completes (PR merged), clean up:
+4. **Initialize `pipeline-state.json`** in the spec directory (`.sdlc/specs/REQ-xxx-*/pipeline-state.json`) with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>`. If the file already exists, read it and resume from `currentPhase`.
+5. When the pipeline completes (PR merged), clean up:
    ```bash
    git worktree remove .worktrees/REQ-xxx
    ```
 
 This ensures multiple `/proceed` sessions on different REQs never touch each other's files.
 
+**After completing Step 0**: Update `pipeline-state.json` — add `0` to `completedPhases`, add Step 0 to `phaseHistory`, set `currentPhase` to `1`.
+
 ---
 
 ### Phase 1: Validate the Requirement Spec
+
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `1` and `0` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `1` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `2`.
 
 **Goal**: Ensure the requirement is complete and well-formed before designing architecture.
 
@@ -56,6 +95,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 ---
 
 ### Phase 2: Architect & Break Into Tasks
+
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `2` and `1` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `2` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `3`.
 
 **Goal**: Design the technical approach and create implementation tasks.
 
@@ -81,6 +122,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 3: Validate Architecture & Tasks
 
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `3` and `2` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `3` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `4`.
+
 **Goal**: Ensure the architecture and task breakdown are solid before implementation.
 
 1. Run architecture validation:
@@ -101,6 +144,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 ---
 
 ### Phase 4: Implement
+
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `4` and `3` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `4` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `5`.
 
 **Goal**: Execute all tasks, producing working code with tests.
 
@@ -128,6 +173,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 5: Reflect & Fix
 
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `5` and `4` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `5` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `6`.
+
 **Goal**: Self-assess the implementation and address any concerns.
 
 1. Review all changes made during implementation:
@@ -145,6 +192,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 ---
 
 ### Phase 6: Code Review & Fix
+
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `6` and `5` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `6` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `7`.
 
 **Goal**: Run a multi-agent code review and address all findings before creating the PR.
 
@@ -165,6 +214,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 ---
 
 ### Phase 7: Create Pull Request
+
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `7` and `6` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `7` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `8`.
 
 **Goal**: Package everything into a reviewable PR.
 
@@ -200,6 +251,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 8: PR Review & Fix
 
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `8` and `7` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `8` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `9`.
+
 **Goal**: Review the PR as a whole, catch anything the earlier review missed, and ensure it's merge-ready.
 
 1. Review the full PR diff using `gh pr diff`
@@ -220,11 +273,14 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 9: Wrapup
 
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `9` and `8` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `9` to `completedPhases`, log in `phaseHistory`, set `"completed": true`.
+
 **Goal**: Merge, deploy, capture knowledge, and close out the feature.
 
 1. Run the `/wrapup` skill with the REQ ID
    - This handles: merge, SDLC artifact updates, knowledge capture, deployment, cleanup, and ship summary
-2. The pipeline is now complete
+2. Update `pipeline-state.json` with `"completed": true`
+3. The pipeline is now complete
 
 **Status update**: Report the ship summary from wrapup and confirm deployment status.
 
