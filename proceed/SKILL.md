@@ -62,6 +62,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 1. Read context files:
    - `.sdlc/context/architecture.md`
    - `.sdlc/context/conventions.md`
+   - `.sdlc/knowledge/assumptions/` for prior decisions that may affect design
+   - `.sdlc/knowledge/lessons/` — scan titles and read any relevant to this requirement's domain, patterns, or tech. Apply applicable lessons to architecture decisions and implementation approach.
    - Relevant source files to understand current implementation
 2. Design the architecture:
    - Create `.sdlc/specs/REQ-xxx-*/architecture.md` if architectural decisions are needed
