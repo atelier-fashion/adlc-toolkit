@@ -1,6 +1,6 @@
 ---
 name: proceed
-description: End-to-end SDLC pipeline that takes a requirement from spec through to PR. Takes a REQ number as argument and runs validate → fix → architect → fix → implement → reflect → fix → create PR. Use when the user says "proceed", "proceed with REQ-xxx", "run the pipeline", "take REQ-xxx to completion", "implement REQ-xxx end to end", or wants to advance a drafted requirement all the way through architecture, implementation, and PR creation in one shot.
+description: End-to-end SDLC pipeline that takes a requirement from spec through to deployed. Takes a REQ number as argument and runs validate → fix → architect → fix → implement → reflect → fix → create PR → review/fix → wrapup (merge, deploy, knowledge capture). Use when the user says "proceed", "proceed with REQ-xxx", "run the pipeline", "take REQ-xxx to completion", "implement REQ-xxx end to end", or wants to advance a drafted requirement all the way through to deployment in one shot.
 ---
 
 # Proceed — Full SDLC Pipeline
@@ -198,6 +198,38 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ---
 
+### Phase 8: PR Review & Fix
+
+**Goal**: Review the PR as a whole, catch anything the earlier review missed, and ensure it's merge-ready.
+
+1. Review the full PR diff using `gh pr diff`
+2. Check for:
+   - Stray debug logs, TODOs, or commented-out code
+   - Files that shouldn't have been included (secrets, generated files, unrelated changes)
+   - Commit message consistency and cleanliness
+   - That the PR description accurately reflects the changes
+3. If issues are found:
+   - Fix them, commit with message: `fix(scope): PR cleanup [REQ-xxx]`
+   - Push to the feature branch
+   - Re-review the diff (up to 2 loops)
+4. If CI checks are configured, verify they pass: `gh pr checks`
+
+**Status update**: Report "PR is clean and ready for merge" or list any remaining concerns.
+
+---
+
+### Phase 9: Wrapup
+
+**Goal**: Merge, deploy, capture knowledge, and close out the feature.
+
+1. Run the `/wrapup` skill with the REQ ID
+   - This handles: merge, SDLC artifact updates, knowledge capture, deployment, cleanup, and ship summary
+2. The pipeline is now complete
+
+**Status update**: Report the ship summary from wrapup and confirm deployment status.
+
+---
+
 ## Error Handling
 
 - **Test failures during implementation**: Stop the current task, diagnose the failure, fix it, and re-run tests before continuing. If you can't fix it after 2 attempts, pause and ask the user.
@@ -208,4 +240,3 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 ## What This Skill Does NOT Do
 
 - It does not create the initial spec — run `/spec` first
-- It does not deploy — run `/wrapup` after the PR is merged if you want deployment
