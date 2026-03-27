@@ -30,6 +30,9 @@ Scope: $ARGUMENTS
 ### Step 2: Read All Changed Files
 Read the complete current version of every changed file (not just the diff) to understand full context.
 
+### Step 2.5: Check Lessons Learned
+Scan `.sdlc/knowledge/lessons/` for lessons relevant to the areas touched by this implementation. Check whether any known pitfalls (e.g., flaky test patterns, casing boundary issues, @Observable crashes, startup validation coupling) apply to the current changes. Flag any matches as findings in Step 4.
+
 ### Step 3: Self-Review Checklist
 Evaluate the implementation against each category. Be honest — the goal is to catch problems now rather than in `/review`.
 

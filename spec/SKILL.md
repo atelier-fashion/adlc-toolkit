@@ -23,7 +23,8 @@ Feature request: $ARGUMENTS
 ### Step 1: Understand the Request
 1. Read `.sdlc/context/project-overview.md` for grounding context
 2. Read `.sdlc/context/architecture.md` for existing patterns
-3. If the feature request is vague or ambiguous, ask clarifying questions before proceeding. Wait for answers.
+3. Scan `.sdlc/knowledge/lessons/` — read any lessons relevant to the feature area. Use them to inform assumptions, surface known risks in the spec, and avoid specifying approaches that failed previously.
+4. If the feature request is vague or ambiguous, ask clarifying questions before proceeding. Wait for answers.
 
 ### Step 2: Determine the Next REQ ID
 1. Check for the atomic counter file `.sdlc/.next-req`

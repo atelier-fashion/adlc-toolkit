@@ -27,6 +27,7 @@ Requirement: $ARGUMENTS
 3. Verify the requirement status is `draft` or `approved` (not already `complete`)
 4. Read `.sdlc/context/architecture.md` and `.sdlc/context/conventions.md` for existing patterns
 5. Check `.sdlc/knowledge/assumptions/` for prior decisions that may affect design
+6. Scan `.sdlc/knowledge/lessons/` for lessons learned from prior features — read any whose titles suggest relevance to this requirement (e.g., similar domain, patterns, or tech). Note applicable lessons in your architecture rationale so past mistakes aren't repeated and proven patterns are reused.
 
 ### Step 2: Explore the Codebase
 1. Launch 2-3 Explore agents in parallel to understand the relevant parts of the codebase:
