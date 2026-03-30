@@ -81,14 +81,9 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 **Goal**: Ensure the requirement is complete and well-formed before designing architecture.
 
-1. Read `.sdlc/specs/REQ-xxx-*/requirement.md`
-2. Run requirement validation (the checks from `/validate`):
-   - Completeness: all template sections present, YAML frontmatter correct
-   - AC quality: each AC independently testable, checkbox format, 5-10 ACs
-   - Scope hygiene: Out of Scope is specific, assumptions explicit, questions formatted
-   - Cross-references: no overlap with other specs in `.sdlc/specs/`
-3. If **APPROVED**: set requirement status to `approved` and move to Phase 2
-4. If **NEEDS REVISION**: fix all FAIL items, then re-validate (up to 3 loops)
+1. Invoke the `/validate` skill with the REQ ID
+2. If **APPROVED**: set requirement status to `approved` and move to Phase 2
+3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
 
 **Status update**: After this phase, report "Spec validated and approved" before continuing.
 
@@ -100,21 +95,8 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 **Goal**: Design the technical approach and create implementation tasks.
 
-1. Read context files:
-   - `.sdlc/context/architecture.md`
-   - `.sdlc/context/conventions.md`
-   - `.sdlc/knowledge/assumptions/` for prior decisions that may affect design
-   - `.sdlc/knowledge/lessons/` — scan titles and read any relevant to this requirement's domain, patterns, or tech. Apply applicable lessons to architecture decisions and implementation approach.
-   - Relevant source files to understand current implementation
-2. Design the architecture:
-   - Create `.sdlc/specs/REQ-xxx-*/architecture.md` if architectural decisions are needed
-   - Document approach, affected components, ADRs, data model changes, API contracts, trade-offs
-3. Break into tasks:
-   - Create task files at `.sdlc/specs/REQ-xxx-*/tasks/TASK-xxx-description.md`
-   - Each task: frontmatter (id, title, status: draft, parent, dependencies), description, files to modify, ACs, technical notes
-   - Respect sizing: 3-5 files per task, tests with their code, infra separate from features
-   - Respect ordering: data layer → service → route → client
-   - Ensure every requirement AC maps to at least one task AC
+1. Invoke the `/architect` skill with the REQ ID
+2. This handles: reading context, designing architecture, creating task files with dependencies, and updating requirement status
 
 **Status update**: Summarize the architecture approach and list all tasks with dependency graph.
 
@@ -126,18 +108,9 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 **Goal**: Ensure the architecture and task breakdown are solid before implementation.
 
-1. Run architecture validation:
-   - Every requirement AC addressable by the architecture
-   - ADRs documented with decision, rationale, alternatives
-   - File paths reference real files or are marked "new file"
-   - Data model changes backward-compatible or migration noted
-2. Run task breakdown validation:
-   - AC traceability: every requirement AC covered by at least one task
-   - Dependency graph is acyclic, no task has >2 dependencies
-   - Sizing within limits, file paths verified
-   - Frontmatter complete and consistent
-3. If **APPROVED**: move to Phase 4
-4. If **NEEDS REVISION**: fix all FAIL items, then re-validate (up to 3 loops)
+1. Invoke the `/validate` skill with the REQ ID (it will auto-detect the architecture+tasks phase)
+2. If **APPROVED**: move to Phase 4
+3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
 
 **Status update**: Report "Architecture and tasks validated" before continuing.
 
@@ -177,15 +150,12 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 **Goal**: Self-assess the implementation and address any concerns.
 
-1. Review all changes made during implementation:
-   - What went well, what's fragile, what you'd do differently
-   - Assumptions made, edge cases that might not be covered
-   - Test gaps, hidden coupling, production risks
+1. Invoke the `/reflect` skill with the REQ ID
 2. If the reflection surfaces concrete issues (not just observations):
    - Fix them immediately
    - Run tests again to verify
    - Commit fixes with message: `fix(scope): address reflection finding [REQ-xxx]`
-3. Loop: re-reflect on fixes, fix again if needed (up to 3 loops, stop if only observations remain)
+3. Loop: re-invoke `/reflect` on fixes, fix again if needed (up to 3 loops, stop if only observations remain)
 
 **Status update**: Share the reflection summary and note any fixes applied.
 
@@ -264,7 +234,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 3. If issues are found:
    - Fix them, commit with message: `fix(scope): PR cleanup [REQ-xxx]`
    - Push to the feature branch
-   - Re-review the diff (up to 2 loops)
+   - Re-invoke `/review` after fixes to confirm all issues resolved (up to 2 loops)
 4. If CI checks are configured, verify they pass: `gh pr checks`
 
 **Status update**: Report "PR is clean and ready for merge" or list any remaining concerns.
@@ -290,8 +260,16 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 - **Test failures during implementation**: Stop the current task, diagnose the failure, fix it, and re-run tests before continuing. If you can't fix it after 2 attempts, pause and ask the user.
 - **Validation stuck after 3 loops**: Present the remaining FAIL items and ask the user how to proceed (fix manually, skip validation, or abort).
-- **Missing context files**: If `.sdlc/context/` files don't exist, suggest the user run `/init` first.
+- **Missing context files**: If `.sdlc/context/` files don't exist, stop and tell the user to run `/init` first. Do not proceed without context files.
 - **Merge conflicts**: If the feature branch has conflicts with the base branch, stop and ask the user how to resolve.
+
+## Prerequisites
+
+Before starting the pipeline, verify these exist (stop with a clear message if any are missing):
+1. `.sdlc/context/project-overview.md` — run `/init` if missing
+2. `.sdlc/context/architecture.md` — run `/init` if missing
+3. `.sdlc/context/conventions.md` — run `/init` if missing
+4. `.sdlc/specs/REQ-xxx-*/requirement.md` — run `/spec` if missing
 
 ## What This Skill Does NOT Do
 

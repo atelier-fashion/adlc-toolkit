@@ -24,8 +24,9 @@ Filter: $ARGUMENTS
 1. Read all `requirement.md` files under `.sdlc/specs/REQ-*/`
 2. Read all task files under `.sdlc/specs/REQ-*/tasks/`
 3. Read all bug reports under `.sdlc/bugs/`
-4. Also check for nested `.sdlc/` directories (e.g., `api/.sdlc/`)
-5. Extract frontmatter (id, title, status, updated) from each artifact
+4. Read all `pipeline-state.json` files under `.sdlc/specs/REQ-*/` for live pipeline progress
+5. Also check for nested `.sdlc/` directories (e.g., `api/.sdlc/`)
+6. Extract frontmatter (id, title, status, updated) from each artifact
 
 ### Step 2: Build Status Report
 Organize the report as follows:
@@ -38,6 +39,13 @@ For each requirement:
 - Count total tasks and completed tasks
 - Calculate progress percentage
 - Show status from frontmatter
+
+#### Active Pipelines
+If any `pipeline-state.json` files exist with `"completed": false`, show:
+| REQ | Branch | Current Phase | Started | Last Phase Completed |
+|-----|--------|---------------|---------|---------------------|
+
+Phase names: 0=Worktree, 1=Validate Spec, 2=Architect, 3=Validate Tasks, 4=Implement, 5=Reflect, 6=Review, 7=Create PR, 8=PR Review, 9=Wrapup
 
 #### In-Progress Work
 List any artifacts with status `in-review`, `approved`, or in-progress tasks:

@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Design architecture and break requirement into tasks (SDLC Phase 2-3)
+description: Design architecture and break requirement into tasks
 argument-hint: REQ-xxx ID or requirement description
 ---
 
@@ -18,6 +18,10 @@ You are designing architecture and breaking a requirement into implementable tas
 ## Input
 
 Requirement: $ARGUMENTS
+
+## Prerequisites
+
+Before proceeding, verify that `.sdlc/context/architecture.md` and `.sdlc/context/conventions.md` exist. If either is missing, stop and tell the user: "The `.sdlc/` structure hasn't been fully initialized. Run `/init` first to set up the project context."
 
 ## Instructions
 

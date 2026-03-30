@@ -19,6 +19,10 @@ You are performing a self-review of recently implemented code to catch issues be
 
 Scope: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.sdlc/` structure hasn't been initialized. Run `/init` first to set up conventions."
+
 ## Instructions
 
 ### Step 1: Determine Scope

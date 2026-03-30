@@ -44,6 +44,7 @@ Target: $ARGUMENTS
 2. Set all task statuses to `complete`
 3. Update the `updated` date on all modified artifacts to today's date
 4. If any tasks were deferred or descoped, note them in the requirement file under a "Deferred" section
+5. If `pipeline-state.json` exists in the spec directory, update it: set `"completed": true` and add a final entry to `phaseHistory`
 
 ### Step 4: Capture Knowledge
 Evaluate whether any decisions, patterns, or lessons should be persisted:
@@ -55,12 +56,17 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 #### Assumptions Validated or Invalidated
 - Review assumptions from the requirement spec
 - Log any that were validated, invalidated, or still unresolved to `.sdlc/knowledge/assumptions/`
+- Use the template from `.sdlc/templates/assumption-template.md` (frontmatter: id, title, status, req, created, resolved)
+- Name files: `ASSUME-xxx-slug.md` (scan existing files for next ID)
 
 #### Lessons Learned
 - Any surprises during implementation?
 - Approaches that didn't work and why?
 - Things that worked particularly well?
 - Log notable lessons to `.sdlc/knowledge/lessons/` if they'd help future work
+- Use the template from `.sdlc/templates/lesson-template.md` (frontmatter: id, title, domain, tags, req, created)
+- Name files: `LESSON-xxx-slug.md` (scan existing files for next ID)
+- Include `domain` and `tags` so that `/spec`, `/architect`, and `/reflect` can filter by relevance
 
 #### Convention Updates
 - Were any new conventions established? Propose updates to `.sdlc/context/conventions.md`

@@ -43,6 +43,8 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
   knowledge/
     assumptions/
       .gitkeep
+    lessons/
+      .gitkeep
   templates/
     requirement-template.md
     task-template.md
@@ -108,19 +110,26 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 # SDLC worktrees (used by /proceed for parallel session isolation)
 .worktrees/
 
-# SDLC atomic REQ counter (local state, not shared)
-.sdlc/.next-req
+# SDLC global REQ counter is at ~/.claude/.global-next-req (not per-project)
+# SDLC local BUG counter (per-project state, not shared)
+.sdlc/.next-bug
 ```
 
 ### Step 6: Copy Templates
-Copy template files from the toolkit's `templates/` directory (sibling to the skill directories at `~/.claude/skills/templates/`) into `.sdlc/templates/`:
+Copy template files into `.sdlc/templates/` from the toolkit's `templates/` directory. Check these paths in order:
+1. `~/.claude/skills/templates/` (symlink to toolkit)
+2. The toolkit repo's `templates/` directory (sibling to the skill directories)
+
+Files to copy:
 1. `requirement-template.md`
 2. `task-template.md`
 3. `bug-template.md`
+4. `lesson-template.md`
+5. `assumption-template.md`
 
-If the templates directory is not found at that path, create the templates inline using the content from the toolkit repo's `templates/` directory as reference.
+If neither path is found, create the templates inline using the standard SDLC template format.
 
 ### Step 7: Summary
 1. Display the created directory structure
-2. Explain the SDLC workflow: `/spec` → `/validate` → `/architect` → `/validate` → implement → `/review` → merge
+2. Explain the SDLC workflow: `/spec` → `/validate` → `/architect` → `/validate` → implement → `/reflect` → `/review` → `/wrapup` (or use `/proceed` to run the full pipeline automatically)
 3. Suggest adding SDLC skill references to the project's `CLAUDE.md` if one exists

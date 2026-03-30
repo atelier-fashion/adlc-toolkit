@@ -18,6 +18,10 @@ You are performing a thorough code review of recent changes in the Atelier Fashi
 
 Scope: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.sdlc/` structure hasn't been initialized. Run `/init` first to set up conventions."
+
 ## Instructions
 
 ### Step 1: Determine Review Scope

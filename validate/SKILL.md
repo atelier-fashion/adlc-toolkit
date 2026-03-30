@@ -16,6 +16,10 @@ You are validating SDLC artifacts to ensure quality before advancing to the next
 
 Target: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that `.sdlc/specs/` exists. If it doesn't, stop and tell the user: "The `.sdlc/` structure hasn't been initialized. Run `/init` first."
+
 ## Instructions
 
 ### Step 1: Identify What to Validate

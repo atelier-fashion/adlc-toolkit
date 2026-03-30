@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Write requirement specs from feature requests (SDLC Phase 1)
+description: Write requirement specs from feature requests
 argument-hint: Feature description or request
 ---
 
@@ -18,6 +18,10 @@ You are writing a requirement spec for the Atelier Fashion project following the
 
 Feature request: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that `.sdlc/context/project-overview.md` exists. If it doesn't, stop and tell the user: "The `.sdlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+
 ## Instructions
 
 ### Step 1: Understand the Request
@@ -27,18 +31,19 @@ Feature request: $ARGUMENTS
 4. If the feature request is vague or ambiguous, ask clarifying questions before proceeding. Wait for answers.
 
 ### Step 2: Determine the Next REQ ID
-1. Check for the atomic counter file `.sdlc/.next-req`
-2. If it exists, read the number, use it as the REQ ID, and **immediately** write the incremented value back:
+1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs)
+2. Read the number, use it as the REQ ID, and **immediately** write the incremented value back:
    ```bash
-   REQ_NUM=$(cat .sdlc/.next-req)
-   echo $((REQ_NUM + 1)) > .sdlc/.next-req
+   REQ_NUM=$(cat ~/.claude/.global-next-req)
+   echo $((REQ_NUM + 1)) > ~/.claude/.global-next-req
    ```
-3. If `.sdlc/.next-req` does not exist, fall back to scanning `.sdlc/specs/` for the highest `REQ-xxx` number, use the next one, and create `.sdlc/.next-req` with the number after that:
+3. If `~/.claude/.global-next-req` does not exist, create it by scanning all `.sdlc/specs/` directories under `~/Documents/GitHub/` for the highest `REQ-xxx` number, use the next one, and write the number after that:
    ```bash
-   # e.g., if highest existing is REQ-024, use REQ-025 and write 26 to .next-req
-   echo 26 > .sdlc/.next-req
+   HIGHEST=$(find ~/Documents/GitHub -path '*/.sdlc/specs/REQ-*' -type d 2>/dev/null | grep -oP 'REQ-\K\d+' | sort -n | tail -1)
+   REQ_NUM=$((HIGHEST + 1))
+   echo $((REQ_NUM + 1)) > ~/.claude/.global-next-req
    ```
-4. This avoids collisions when multiple sessions run `/spec` concurrently
+4. This avoids collisions across repos and concurrent sessions
 
 ### Step 3: Create the Requirement Spec
 1. Create directory: `.sdlc/specs/REQ-xxx-feature-slug/`

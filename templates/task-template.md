@@ -24,7 +24,3 @@ What this task accomplishes.
 ## Technical Notes
 
 Implementation details, patterns to follow, edge cases.
-
-## Dependencies
-
-- None

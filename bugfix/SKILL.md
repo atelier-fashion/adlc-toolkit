@@ -18,11 +18,20 @@ You are fixing a bug in the Atelier Fashion project using a streamlined workflow
 
 Bug report: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that `.sdlc/bugs/` exists. If it doesn't, stop and tell the user: "The `.sdlc/` structure hasn't been initialized. Run `/init` first."
+
 ## Instructions
 
 ### Phase 1: Report
 1. If given a bug description (not a BUG ID), create a bug report:
-   - Determine the next BUG ID by scanning `.sdlc/bugs/`
+   - Determine the next BUG ID using the atomic counter at `.sdlc/.next-bug`. Read the number, use it, and immediately write the incremented value back:
+     ```bash
+     BUG_NUM=$(cat .sdlc/.next-bug 2>/dev/null || echo "1")
+     echo $((BUG_NUM + 1)) > .sdlc/.next-bug
+     ```
+     If `.sdlc/.next-bug` doesn't exist, scan `.sdlc/bugs/` for the highest BUG-xxx number, use the next one, and write the number after that.
    - Create `.sdlc/bugs/BUG-xxx-slug.md` using the template from `.sdlc/templates/bug-template.md`
    - Fill in: description, reproduction steps (if known), expected vs actual behavior, environment
    - Set status to `open`, severity based on impact
