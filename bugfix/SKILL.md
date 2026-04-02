@@ -44,13 +44,14 @@ Before proceeding, verify that `.sdlc/bugs/` exists. If it doesn't, stop and tel
    - Identify the root cause (not just symptoms)
 2. Read the identified files to understand the context
 3. Document the root cause in the bug report's "Root Cause" section
-4. Present findings to the user:
-   - What's happening and why
-   - Which files are affected
-   - Proposed fix approach
+4. Validate the analysis:
+   - Re-read the affected code paths to confirm the root cause is correct
+   - Check for secondary issues or edge cases related to the bug
+   - Adjust the root cause and fix approach if validation reveals inaccuracies
+5. Update the bug report with the validated findings
 
 ### Phase 3: Fix
-1. Wait for user confirmation of the fix approach
+1. Proceed directly with the validated fix approach — do not pause for user confirmation
 2. Implement the fix following project conventions
 3. Ensure the fix addresses the root cause, not just symptoms
 4. Update related test files if the fix changes behavior
