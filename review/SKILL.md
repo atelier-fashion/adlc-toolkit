@@ -8,6 +8,10 @@ argument-hint: Optional file paths, branch name, or REQ/TASK ID to scope the rev
 
 You are performing a thorough code review of recent changes in the Atelier Fashion project using multiple specialized review agents.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
 - Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`

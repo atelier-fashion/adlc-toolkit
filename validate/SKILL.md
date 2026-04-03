@@ -8,9 +8,13 @@ argument-hint: REQ-xxx ID or phase name (spec, architecture, tasks, implementati
 
 You are validating SDLC artifacts to ensure quality before advancing to the next phase.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
-- Existing specs: !`ls .sdlc/specs/ 2>/dev/null || echo "No specs directory found"`
+- Active specs: !`grep -rl 'status: draft\|status: approved\|status: in-progress' .sdlc/specs/*/requirement.md 2>/dev/null | head -20 || echo "No active specs"`
 
 ## Input
 

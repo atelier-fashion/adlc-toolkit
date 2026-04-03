@@ -8,9 +8,13 @@ argument-hint: REQ-xxx ID to wrap up
 
 You are closing out a completed feature after it has been merged. This skill ensures SDLC artifacts are finalized, knowledge is captured, and the team has a clear summary of what shipped.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
-- Existing specs: !`ls .sdlc/specs/ 2>/dev/null || echo "No specs found"`
+- Active specs: !`grep -rl 'status: approved\|status: in-progress\|status: complete' .sdlc/specs/*/requirement.md 2>/dev/null | tail -20 || echo "No specs found"`
 - Knowledge directory: !`ls .sdlc/knowledge/ 2>/dev/null || echo "No knowledge directory"`
 - Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
 - Recent merges: !`git log --oneline --merges -10 2>/dev/null || echo "No merge history"`
@@ -56,7 +60,7 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 #### Assumptions Validated or Invalidated
 - Review assumptions from the requirement spec
 - Log any that were validated, invalidated, or still unresolved to `.sdlc/knowledge/assumptions/`
-- Use the template from `.sdlc/templates/assumption-template.md` (frontmatter: id, title, status, req, created, resolved)
+- Use the assumption template (check `.sdlc/templates/assumption-template.md` first, fall back to `~/.claude/skills/templates/assumption-template.md`)
 - Name files: `ASSUME-xxx-slug.md` (scan existing files for next ID)
 
 #### Lessons Learned
@@ -64,9 +68,9 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Approaches that didn't work and why?
 - Things that worked particularly well?
 - Log notable lessons to `.sdlc/knowledge/lessons/` if they'd help future work
-- Use the template from `.sdlc/templates/lesson-template.md` (frontmatter: id, title, domain, tags, req, created)
+- Use the lesson template (check `.sdlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
 - Name files: `LESSON-xxx-slug.md` (scan existing files for next ID)
-- Include `domain` and `tags` so that `/spec`, `/architect`, and `/reflect` can filter by relevance
+- Include `domain`, `component`, and `tags` so that `/spec`, `/architect`, and `/reflect` can filter by relevance. The `component` field should be more specific than `domain` (e.g., `domain: API`, `component: API/auth` or `domain: iOS`, `component: iOS/SwiftUI`)
 
 #### Convention Updates
 - Were any new conventions established? Propose updates to `.sdlc/context/conventions.md`

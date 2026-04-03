@@ -2,6 +2,7 @@
 id: REQ-xxx
 title: "Feature Title"
 status: draft
+deployable: true
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 ---
