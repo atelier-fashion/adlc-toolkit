@@ -8,6 +8,10 @@ argument-hint: Optional filter (e.g., REQ-xxx, "in-progress", "bugs")
 
 You are generating a status report of all SDLC work in the current project.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
 - Specs directory: !`ls .sdlc/specs/ 2>/dev/null || echo "No specs found"`
@@ -45,7 +49,7 @@ If any `pipeline-state.json` files exist with `"completed": false`, show:
 | REQ | Branch | Current Phase | Started | Last Phase Completed |
 |-----|--------|---------------|---------|---------------------|
 
-Phase names: 0=Worktree, 1=Validate Spec, 2=Architect, 3=Validate Tasks, 4=Implement, 5=Reflect, 6=Review, 7=Create PR, 8=PR Review, 9=Wrapup
+Phase names: 0=Worktree, 1=Validate Spec, 2=Architect, 3=Validate Tasks, 4=Implement, 5=Verify, 6=Create PR, 7=PR Cleanup, 7.5=Canary, 8=Wrapup
 
 #### In-Progress Work
 List any artifacts with status `in-review`, `approved`, or in-progress tasks:

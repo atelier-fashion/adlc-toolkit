@@ -8,6 +8,10 @@ argument-hint: Optional scope (e.g., "api", "app", specific directory, or focus 
 
 You are performing a comprehensive codebase health audit for the Atelier Fashion project.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
 - Architecture: !`cat .sdlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`

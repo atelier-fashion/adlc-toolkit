@@ -8,6 +8,10 @@ argument-hint: Optional focus area (e.g., "ai", "caching", "queries", "latency")
 
 You are scanning the Atelier Fashion API for cost and performance optimization opportunities.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
 - Architecture: !`cat .sdlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`

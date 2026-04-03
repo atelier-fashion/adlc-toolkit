@@ -8,9 +8,13 @@ argument-hint: Bug description or BUG-xxx ID
 
 You are fixing a bug in the Atelier Fashion project using a streamlined workflow that skips the full spec ceremony.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
-- Bug template: !`cat .sdlc/templates/bug-template.md 2>/dev/null || echo "No bug template found"`
+- Bug template: !`cat .sdlc/templates/bug-template.md 2>/dev/null || cat ~/.claude/skills/templates/bug-template.md 2>/dev/null || echo "No bug template found"`
 - Conventions: !`cat .sdlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
 - Existing bugs: !`ls .sdlc/bugs/ 2>/dev/null || echo "No bugs directory found"`
 

@@ -2,6 +2,7 @@
 id: LESSON-xxx
 title: "Lesson Title"
 domain: "area this applies to (e.g., testing, iOS, API, deployment, architecture)"
+component: "specific component (e.g., iOS/memory, API/auth, API/caching, iOS/SwiftUI, testing/mocks)"
 tags: []
 req: REQ-xxx
 created: YYYY-MM-DD

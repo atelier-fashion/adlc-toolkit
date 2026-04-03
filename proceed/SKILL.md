@@ -1,11 +1,15 @@
 ---
 name: proceed
-description: End-to-end SDLC pipeline that takes a requirement from spec through to deployed. Takes a REQ number as argument and runs validate → fix → architect → fix → implement → reflect → fix → create PR → review/fix → wrapup (merge, deploy, knowledge capture). Use when the user says "proceed", "proceed with REQ-xxx", "run the pipeline", "take REQ-xxx to completion", "implement REQ-xxx end to end", or wants to advance a drafted requirement all the way through to deployment in one shot.
+description: End-to-end SDLC pipeline that takes a requirement from spec through to deployed. Takes a REQ number as argument and runs validate → fix → architect → fix → implement → verify (reflect + review) → create PR → wrapup (merge, deploy, knowledge capture). Use when the user says "proceed", "proceed with REQ-xxx", "run the pipeline", "take REQ-xxx to completion", "implement REQ-xxx end to end", or wants to advance a drafted requirement all the way through to deployment in one shot.
 ---
 
 # Proceed — Full SDLC Pipeline
 
 You are an autonomous SDLC orchestrator. Given a requirement number (REQ-xxx), you drive it from validated spec all the way to a pull request — validating at each gate, fixing issues automatically, and only pausing when you're stuck or need human input.
+
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Arguments
 
@@ -144,48 +148,33 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ---
 
-### Phase 5: Reflect & Fix
+### Phase 5: Verify (Reflect + Review)
 
 **Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `5` and `4` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `5` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `6`.
 
-**Goal**: Self-assess the implementation and address any concerns.
+**Goal**: Self-assess the implementation, then run a multi-agent code review, and fix all findings in a single pass.
 
-1. Invoke the `/reflect` skill with the REQ ID
-2. If the reflection surfaces concrete issues (not just observations):
-   - Fix them immediately
-   - Run tests again to verify
-   - Commit fixes with message: `fix(scope): address reflection finding [REQ-xxx]`
-3. Loop: re-invoke `/reflect` on fixes, fix again if needed (up to 3 loops, stop if only observations remain)
+**Step A — Reflect**: Invoke the `/reflect` skill with the REQ ID. If it surfaces concrete issues (Critical or Major), fix them immediately and run tests. Do NOT loop `/reflect` — one pass is sufficient since `/review` covers overlapping ground.
 
-**Status update**: Share the reflection summary and note any fixes applied.
-
----
-
-### Phase 6: Code Review & Fix
-
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `6` and `5` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `6` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `7`.
-
-**Goal**: Run a multi-agent code review and address all findings before creating the PR.
-
-1. Run the `/review` skill against all changes on the feature branch
-2. For each finding categorized as **must-fix** (bugs, security issues, convention violations, missing tests):
+**Step B — Review**: Run the `/review` skill against all changes on the feature branch (including any reflect fixes).
+1. For each finding categorized as **must-fix** (bugs, security issues, convention violations, missing tests):
    - Fix the issue
    - Run the test suite to verify the fix doesn't break anything
    - Commit with message: `fix(scope): address review finding [REQ-xxx]`
-3. For findings categorized as **should-fix** (code quality, naming, minor improvements):
+2. For findings categorized as **should-fix** (code quality, naming, minor improvements):
    - Fix them unless doing so would be a significant refactor — in that case, note them as follow-ups
-4. For findings categorized as **nit** or **observation**:
+3. For findings categorized as **nit** or **observation**:
    - Fix trivial ones inline; skip the rest
-5. Re-run `/review` after fixes to confirm all must-fix items are resolved (up to 2 loops)
-6. If findings remain unresolvable after 2 loops, list them for the user and ask how to proceed
+4. Re-run `/review` only if must-fix items were found and fixed (up to 1 confirmation loop)
+5. If findings remain unresolvable, list them for the user and ask how to proceed
 
-**Status update**: Report the review summary — total findings, how many fixed, any deferred.
+**Status update**: Report the combined verify summary — reflection observations, review findings, how many fixed, any deferred.
 
 ---
 
-### Phase 7: Create Pull Request
+### Phase 6: Create Pull Request
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `7` and `6` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `7` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `8`.
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `6` and `5` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `6` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `7`.
 
 **Goal**: Package everything into a reviewable PR.
 
@@ -219,11 +208,11 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ---
 
-### Phase 8: PR Review & Fix
+### Phase 7: PR Cleanup & CI
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `8` and `7` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `8` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `9`.
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `7` and `6` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `7` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `8`.
 
-**Goal**: Review the PR as a whole, catch anything the earlier review missed, and ensure it's merge-ready.
+**Goal**: Lightweight sanity check on the PR — the full code review already happened in Phase 5. Do NOT re-run `/review`.
 
 1. Review the full PR diff using `gh pr diff`
 2. Check for:
@@ -234,16 +223,33 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 3. If issues are found:
    - Fix them, commit with message: `fix(scope): PR cleanup [REQ-xxx]`
    - Push to the feature branch
-   - Re-invoke `/review` after fixes to confirm all issues resolved (up to 2 loops)
 4. If CI checks are configured, verify they pass: `gh pr checks`
 
 **Status update**: Report "PR is clean and ready for merge" or list any remaining concerns.
 
 ---
 
-### Phase 9: Wrapup
+### Phase 7.5: Canary Deploy (Optional)
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `9` and `8` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `9` to `completedPhases`, log in `phaseHistory`, set `"completed": true`.
+**Gate**: Read `pipeline-state.json`. Confirm `7` is in `completedPhases`. This phase is **optional** — only run it if the requirement's frontmatter includes `deployable: true`, OR if no `deployable` field exists and the changes include deployable API or web service code (`api/`, `admin-api/`, or web app files). Skip when `deployable: false` or for iOS-only, documentation-only, or infrastructure-only changes. After completing this phase, update the state file: add `7.5` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `8`.
+
+**Goal**: Deploy to a canary revision with zero traffic, run smoke tests, and promote only on success — ensuring the deploy works before merging.
+
+1. Determine which service(s) were changed (fashion-api, admin-api, atelier-web)
+2. For each affected service, invoke the `/canary` skill
+3. If canary passes: proceed to Phase 8
+4. If canary fails: stop and present the failure to the user. Options:
+   - Fix the issue and re-run `/canary`
+   - Skip canary and proceed to merge (user must explicitly confirm)
+   - Abort the pipeline
+
+**Status update**: Report canary results — service, revision, smoke test pass/fail.
+
+---
+
+### Phase 8: Wrapup
+
+**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `8` and `7` is in `completedPhases` (or `7.5` if canary was run). If not, stop and complete the missing phase first. After completing this phase, update the state file: add `8` to `completedPhases`, log in `phaseHistory`, set `"completed": true`.
 
 **Goal**: Merge, deploy, capture knowledge, and close out the feature.
 
@@ -253,6 +259,23 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 3. The pipeline is now complete
 
 **Status update**: Report the ship summary from wrapup and confirm deployment status.
+
+---
+
+## Phase Map
+
+| Phase | Name | Old Phase | Notes |
+|-------|------|-----------|-------|
+| 0 | Create Worktree | 0 | Unchanged |
+| 1 | Validate Spec | 1 | Unchanged |
+| 2 | Architect & Tasks | 2 | Unchanged |
+| 3 | Validate Architecture | 3 | Unchanged |
+| 4 | Implement | 4 | Unchanged |
+| 5 | Verify (Reflect + Review) | 5 + 6 | Merged — one reflect pass then one review pass |
+| 6 | Create PR | 7 | Renumbered |
+| 7 | PR Cleanup & CI | 8 | Simplified — no re-review, just sanity check |
+| 7.5 | Canary Deploy (Optional) | 8.5 | Renumbered, now respects `deployable` field |
+| 8 | Wrapup | 9 | Renumbered |
 
 ---
 

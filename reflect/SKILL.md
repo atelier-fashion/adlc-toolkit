@@ -8,6 +8,10 @@ argument-hint: Optional REQ-xxx ID or branch name to scope the reflection
 
 You are performing a self-review of recently implemented code to catch issues before the formal `/review` step. This is a fast, honest assessment of your own work.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
 - Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
@@ -35,7 +39,7 @@ Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it does
 Read the complete current version of every changed file (not just the diff) to understand full context.
 
 ### Step 2.5: Check Lessons Learned
-Scan `.sdlc/knowledge/lessons/` for lessons relevant to the areas touched by this implementation. Check whether any known pitfalls (e.g., flaky test patterns, casing boundary issues, @Observable crashes, startup validation coupling) apply to the current changes. Flag any matches as findings in Step 4.
+Scan `.sdlc/knowledge/lessons/` — filter by `domain` and `component` frontmatter fields to find lessons relevant to the files changed in this implementation (e.g., if touching `api/src/services/auth`, grep for `component:.*API/auth` or `domain:.*API`). Read only matching lessons. Check whether any known pitfalls apply to the current changes. Flag any matches as findings in Step 4.
 
 ### Step 3: Self-Review Checklist
 Evaluate the implementation against each category. Be honest — the goal is to catch problems now rather than in `/review`.

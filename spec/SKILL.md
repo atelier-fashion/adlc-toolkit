@@ -8,11 +8,15 @@ argument-hint: Feature description or request
 
 You are writing a requirement spec for the Atelier Fashion project following the spec-driven SDLC process.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Context
 
 - SDLC context: !`cat .sdlc/context/project-overview.md 2>/dev/null || echo "No project overview found"`
-- Requirement template: !`cat .sdlc/templates/requirement-template.md 2>/dev/null || echo "No requirement template found"`
-- Existing specs: !`ls .sdlc/specs/ 2>/dev/null || echo "No specs directory found"`
+- Requirement template: !`cat .sdlc/templates/requirement-template.md 2>/dev/null || cat ~/.claude/skills/templates/requirement-template.md 2>/dev/null || echo "No requirement template found"`
+- Active specs: !`grep -rl 'status: draft\|status: approved\|status: in-progress' .sdlc/specs/*/requirement.md 2>/dev/null | head -20 || echo "No active specs"`
 
 ## Input
 
@@ -27,15 +31,18 @@ Before proceeding, verify that `.sdlc/context/project-overview.md` exists. If it
 ### Step 1: Understand the Request
 1. Read `.sdlc/context/project-overview.md` for grounding context
 2. Read `.sdlc/context/architecture.md` for existing patterns
-3. Scan `.sdlc/knowledge/lessons/` — read any lessons relevant to the feature area. Use them to inform assumptions, surface known risks in the spec, and avoid specifying approaches that failed previously.
+3. Scan `.sdlc/knowledge/lessons/` — filter by `domain` and `component` frontmatter fields to find lessons relevant to the feature area (e.g., if the feature involves API auth, grep for `component:.*API/auth` or `domain:.*API`). Read only matching lessons. Use them to inform assumptions, surface known risks in the spec, and avoid specifying approaches that failed previously.
 4. If the feature request is vague or ambiguous, ask clarifying questions before proceeding. Wait for answers.
 
 ### Step 2: Determine the Next REQ ID
 1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs)
-2. Read the number, use it as the REQ ID, and **immediately** write the incremented value back:
+2. Read the number, use it as the REQ ID, and **immediately** write the incremented value back — using `flock` to prevent concurrent collisions:
    ```bash
-   REQ_NUM=$(cat ~/.claude/.global-next-req)
-   echo $((REQ_NUM + 1)) > ~/.claude/.global-next-req
+   REQ_NUM=$(flock ~/.claude/.global-next-req.lock bash -c '
+     NUM=$(cat ~/.claude/.global-next-req)
+     echo $((NUM + 1)) > ~/.claude/.global-next-req
+     echo $NUM
+   ')
    ```
 3. If `~/.claude/.global-next-req` does not exist, create it by scanning all `.sdlc/specs/` directories under `~/Documents/GitHub/` for the highest `REQ-xxx` number, use the next one, and write the number after that:
    ```bash
@@ -43,7 +50,7 @@ Before proceeding, verify that `.sdlc/context/project-overview.md` exists. If it
    REQ_NUM=$((HIGHEST + 1))
    echo $((REQ_NUM + 1)) > ~/.claude/.global-next-req
    ```
-4. This avoids collisions across repos and concurrent sessions
+4. The `flock` ensures that concurrent `/sprint` sessions don't read the same counter value
 
 ### Step 3: Create the Requirement Spec
 1. Create directory: `.sdlc/specs/REQ-xxx-feature-slug/`

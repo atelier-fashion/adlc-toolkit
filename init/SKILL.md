@@ -8,6 +8,10 @@ argument-hint: Optional target directory (defaults to current directory)
 
 You are setting up the `.sdlc/` directory structure for spec-driven development.
 
+## Ethos
+
+!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+
 ## Input
 
 Target: $ARGUMENTS
@@ -45,10 +49,6 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
       .gitkeep
     lessons/
       .gitkeep
-  templates/
-    requirement-template.md
-    task-template.md
-    bug-template.md
 ```
 
 ### Step 4: Populate Context Files
@@ -115,19 +115,12 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 .sdlc/.next-bug
 ```
 
-### Step 6: Copy Templates
-Copy template files into `.sdlc/templates/` from the toolkit's `templates/` directory. Check these paths in order:
-1. `~/.claude/skills/templates/` (symlink to toolkit)
-2. The toolkit repo's `templates/` directory (sibling to the skill directories)
+### Step 6: Verify Toolkit Templates Are Accessible
+Verify that templates are accessible at `~/.claude/skills/templates/` (the toolkit symlink). Do NOT copy templates into per-project `.sdlc/templates/` — all skills reference the toolkit templates directly at runtime.
 
-Files to copy:
-1. `requirement-template.md`
-2. `task-template.md`
-3. `bug-template.md`
-4. `lesson-template.md`
-5. `assumption-template.md`
+If `~/.claude/skills/templates/` doesn't exist, warn: "Toolkit templates not found at `~/.claude/skills/templates/`. Ensure `~/.claude/skills` is symlinked to the sdlc-toolkit repo."
 
-If neither path is found, create the templates inline using the standard SDLC template format.
+**Note**: The `.sdlc/templates/` directory is no longer created. Existing projects with local templates will continue to work — skills check the local path first, then fall back to the toolkit path.
 
 ### Step 7: Summary
 1. Display the created directory structure
