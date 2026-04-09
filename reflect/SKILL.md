@@ -16,8 +16,8 @@ You are performing a self-review of recently implemented code to catch issues be
 
 - Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
 - Recent changes: !`git diff main --stat 2>/dev/null || echo "No diff available"`
-- Conventions: !`cat .sdlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
-- Architecture: !`cat .sdlc/context/architecture.md 2>/dev/null || echo "No architecture found"`
+
+**Context files loaded on demand**: `.sdlc/context/conventions.md` and `.sdlc/context/architecture.md` are loaded by Step 1 below — **skip the Read if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads them at Phase 0).
 
 ## Input
 
@@ -34,12 +34,13 @@ Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it does
 2. If given a branch name, review all changes on that branch vs `main`
 3. If no argument, review all changes on the current branch vs `main`
 4. Get the full diff: `git diff main...HEAD`
+5. **Context files**: if `.sdlc/context/conventions.md` and `.sdlc/context/architecture.md` are NOT already in your conversation context, Read them now. Otherwise skip — they're already loaded.
 
 ### Step 2: Read All Changed Files
 Read the complete current version of every changed file (not just the diff) to understand full context.
 
 ### Step 2.5: Check Lessons Learned
-Scan `.sdlc/knowledge/lessons/` — filter by `domain` and `component` frontmatter fields to find lessons relevant to the files changed in this implementation (e.g., if touching `api/src/services/auth`, grep for `component:.*API/auth` or `domain:.*API`). Read only matching lessons. Check whether any known pitfalls apply to the current changes. Flag any matches as findings in Step 4.
+**Grep first, read only matches**: use the Grep tool on `.sdlc/knowledge/lessons/` with patterns like `component:.*<affected-area>` or `domain:.*<domain>` matching the files changed in this implementation (e.g., if touching `api/src/services/auth`, grep for `component:.*API/auth` or `domain:.*API`). Then Read ONLY the matched files. Do NOT read all lessons. Check whether any known pitfalls apply to the current changes. Flag any matches as findings in Step 4.
 
 ### Step 3: Self-Review Checklist
 Evaluate the implementation against each category. Be honest — the goal is to catch problems now rather than in `/review`.

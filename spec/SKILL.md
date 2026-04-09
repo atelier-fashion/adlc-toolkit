@@ -29,9 +29,9 @@ Before proceeding, verify that `.sdlc/context/project-overview.md` exists. If it
 ## Instructions
 
 ### Step 1: Understand the Request
-1. Read `.sdlc/context/project-overview.md` for grounding context
-2. Read `.sdlc/context/architecture.md` for existing patterns
-3. Scan `.sdlc/knowledge/lessons/` — filter by `domain` and `component` frontmatter fields to find lessons relevant to the feature area (e.g., if the feature involves API auth, grep for `component:.*API/auth` or `domain:.*API`). Read only matching lessons. Use them to inform assumptions, surface known risks in the spec, and avoid specifying approaches that failed previously.
+1. Read `.sdlc/context/project-overview.md` for grounding context (skip if already in conversation)
+2. Read `.sdlc/context/architecture.md` for existing patterns (skip if already in conversation)
+3. **Lessons — grep first, then read only matches**: use the Grep tool on `.sdlc/knowledge/lessons/` with patterns like `component:.*<affected-area>` or `domain:.*<domain>` matching the feature area (e.g., for an API auth feature, grep `component:.*API/auth` or `domain:.*API`). Then Read ONLY the matched files. Do NOT read all lessons. Use them to inform assumptions, surface known risks in the spec, and avoid specifying approaches that failed previously.
 4. If the feature request is vague or ambiguous, ask clarifying questions before proceeding. Wait for answers.
 
 ### Step 2: Determine the Next REQ ID

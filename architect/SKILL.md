@@ -14,10 +14,10 @@ You are designing architecture and breaking a requirement into implementable tas
 
 ## Context
 
-- Architecture context: !`cat .sdlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`
-- Conventions: !`cat .sdlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
 - Task template: !`cat .sdlc/templates/task-template.md 2>/dev/null || cat ~/.claude/skills/templates/task-template.md 2>/dev/null || echo "No task template found"`
 - Active specs: !`grep -rl 'status: draft\|status: approved\|status: in-progress' .sdlc/specs/*/requirement.md 2>/dev/null | head -20 || echo "No active specs"`
+
+**Context files loaded on demand**: `.sdlc/context/architecture.md` and `.sdlc/context/conventions.md` are loaded by Step 1 below — **skip the Read if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads them at Phase 0).
 
 ## Input
 
@@ -33,9 +33,9 @@ Before proceeding, verify that `.sdlc/context/architecture.md` and `.sdlc/contex
 1. If given a REQ ID, read `.sdlc/specs/REQ-xxx-*/requirement.md`
 2. If given a description, search `.sdlc/specs/` for the matching requirement
 3. Verify the requirement status is `draft` or `approved` (not already `complete`)
-4. Read `.sdlc/context/architecture.md` and `.sdlc/context/conventions.md` for existing patterns
+4. **Context files**: if `.sdlc/context/architecture.md` and `.sdlc/context/conventions.md` are NOT already in your conversation context (e.g., this skill is being run standalone, not from `/proceed`), Read them now. Otherwise skip — they're already loaded.
 5. Check `.sdlc/knowledge/assumptions/` for prior decisions that may affect design
-6. Scan `.sdlc/knowledge/lessons/` — filter by `domain` and `component` frontmatter fields to find lessons relevant to this requirement's affected areas (e.g., grep for `component:.*API/auth` or `domain:.*iOS`). Read only matching lessons. Note applicable lessons in your architecture rationale so past mistakes aren't repeated and proven patterns are reused.
+6. **Lessons — grep first, then read only matches**: use the Grep tool on `.sdlc/knowledge/lessons/` with patterns like `component:.*<affected-area>` or `domain:.*<domain>` to identify matching files. Then Read ONLY those matched files. Do NOT read all lessons. Note applicable lessons in your architecture rationale so past mistakes aren't repeated and proven patterns are reused.
 
 ### Step 2: Explore the Codebase
 1. Launch 2-3 Explore agents in parallel to understand the relevant parts of the codebase:

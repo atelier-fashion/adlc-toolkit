@@ -44,36 +44,46 @@ Execute these phases in order. Each phase has a validation gate — if validatio
 }
 ```
 
-**Rules — follow these exactly**:
+**Gate Protocol — follow exactly**:
 
 1. **Initialize** the state file at the start of Step 0 with `currentPhase: 0, completedPhases: [], completed: false`
-2. **After completing each phase**: append the phase number to `completedPhases`, add an entry to `phaseHistory` with the completion timestamp, and set `currentPhase` to the next phase number
-3. **BEFORE starting any phase (Phases 1–9)**: read `pipeline-state.json` and verify:
-   - The previous phase number is in `completedPhases`
-   - `currentPhase` equals the phase you are about to start
-   - If either check fails, **STOP** — you have skipped a phase. Go back and complete the missing phase before continuing.
-4. **Resume from interruption**: If the state file already exists when you start the pipeline, read it and resume from `currentPhase` instead of starting over
-5. **On completion**: After Phase 9 (Wrapup) finishes, set `"completed": true` in the state file
+2. **Before starting any phase**: read `pipeline-state.json`. Verify `currentPhase` equals the phase you're about to start AND the previous phase is in `completedPhases`. If either check fails, **STOP** — you skipped a phase. Go back and complete it.
+3. **After completing any phase**: append the phase number to `completedPhases`, append an entry to `phaseHistory` with the completion timestamp, set `currentPhase` to the next phase number.
+4. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`.
+5. **If context has been compressed**: re-read `pipeline-state.json` before doing anything and treat it as the source of truth for `currentPhase`. Do not rely on memory of what phase you're in.
+6. **On completion**: After Phase 8 (Wrapup) finishes, set `"completed": true` in the state file.
+
+Each phase below has a one-line **Gate** reminder. The full protocol above applies to every gate.
 
 ---
 
-### Step 0: Create Worktree (ALWAYS FIRST)
+### Step 0: Create Worktree + Preflight + Load Shared Context (ALWAYS FIRST)
 
-**Before doing anything else**, isolate this work in a git worktree so parallel sessions don't collide:
+**Before doing anything else**, isolate this work in a git worktree and prime the shared context so subskills don't re-read the same files:
 
-1. Ensure main is up to date: `git checkout main && git pull`
-2. Create a worktree with a dedicated branch:
+1. **Preflight** — verify all prerequisite files exist (stop with a clear message if any are missing):
+   - `.sdlc/context/project-overview.md` — run `/init` if missing
+   - `.sdlc/context/architecture.md` — run `/init` if missing
+   - `.sdlc/context/conventions.md` — run `/init` if missing
+   - `.sdlc/specs/REQ-xxx-*/requirement.md` — run `/spec` if missing
+2. Ensure main is up to date: `git checkout main && git pull`
+3. Create a worktree with a dedicated branch:
    ```bash
    git worktree add .worktrees/REQ-xxx feat/REQ-xxx-short-description
    ```
-3. Change your working directory to `.worktrees/REQ-xxx` — **all subsequent work happens there**
-4. **Initialize `pipeline-state.json`** in the spec directory (`.sdlc/specs/REQ-xxx-*/pipeline-state.json`) with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>`. If the file already exists, read it and resume from `currentPhase`.
-5. When the pipeline completes (PR merged), clean up:
+4. Change your working directory to `.worktrees/REQ-xxx` — **all subsequent work happens there**
+5. **Load shared context ONCE** — use the Read tool to load these into conversation context so every subskill can reference them without re-reading:
+   - `.sdlc/context/architecture.md`
+   - `.sdlc/context/conventions.md`
+   - `.sdlc/context/project-overview.md`
+   - `.sdlc/specs/REQ-xxx-*/requirement.md`
+6. **Initialize `pipeline-state.json`** in the spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>`. If the file already exists, read it and resume from `currentPhase`.
+7. When the pipeline completes (PR merged), clean up:
    ```bash
    git worktree remove .worktrees/REQ-xxx
    ```
 
-This ensures multiple `/proceed` sessions on different REQs never touch each other's files.
+**Preflight verified** — when you invoke subskills in later phases, they may skip their own prerequisite checks (already validated here) AND they may skip re-reading `architecture.md` / `conventions.md` / `project-overview.md` (already in context). Treat the Step 0 loads as authoritative for the rest of the pipeline.
 
 **After completing Step 0**: Update `pipeline-state.json` — add `0` to `completedPhases`, add Step 0 to `phaseHistory`, set `currentPhase` to `1`.
 
@@ -81,7 +91,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 1: Validate the Requirement Spec
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `1` and `0` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `1` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `2`.
+**Gate**: `currentPhase` must be `1`. After completion: append `1`, set `currentPhase=2`.
 
 **Goal**: Ensure the requirement is complete and well-formed before designing architecture.
 
@@ -95,7 +105,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 2: Architect & Break Into Tasks
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `2` and `1` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `2` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `3`.
+**Gate**: `currentPhase` must be `2`. After completion: append `2`, set `currentPhase=3`.
 
 **Goal**: Design the technical approach and create implementation tasks.
 
@@ -108,7 +118,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 3: Validate Architecture & Tasks
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `3` and `2` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `3` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `4`.
+**Gate**: `currentPhase` must be `3`. After completion: append `3`, set `currentPhase=4`.
 
 **Goal**: Ensure the architecture and task breakdown are solid before implementation.
 
@@ -122,7 +132,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 4: Implement
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `4` and `3` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `4` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `5`.
+**Gate**: `currentPhase` must be `4`. After completion: append `4`, set `currentPhase=5`.
 
 **Goal**: Execute all tasks, producing working code with tests.
 
@@ -148,33 +158,36 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ---
 
-### Phase 5: Verify (Reflect + Review)
+### Phase 5: Verify (Reflect + Review in Parallel)
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `5` and `4` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `5` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `6`.
+**Gate**: `currentPhase` must be `5`. After completion: append `5`, set `currentPhase=6`.
 
-**Goal**: Self-assess the implementation, then run a multi-agent code review, and fix all findings in a single pass.
+**Goal**: Self-assess AND multi-agent review the implementation, then fix all findings in a single consolidated pass.
 
-**Step A — Reflect**: Invoke the `/reflect` skill with the REQ ID. If it surfaces concrete issues (Critical or Major), fix them immediately and run tests. Do NOT loop `/reflect` — one pass is sufficient since `/review` covers overlapping ground.
+**Step A — Launch reflect and review concurrently as READ-ONLY subagents**. In a single message, dispatch two Agent tool calls in parallel:
 
-**Step B — Review**: Run the `/review` skill against all changes on the feature branch (including any reflect fixes).
-1. For each finding categorized as **must-fix** (bugs, security issues, convention violations, missing tests):
-   - Fix the issue
-   - Run the test suite to verify the fix doesn't break anything
-   - Commit with message: `fix(scope): address review finding [REQ-xxx]`
-2. For findings categorized as **should-fix** (code quality, naming, minor improvements):
-   - Fix them unless doing so would be a significant refactor — in that case, note them as follow-ups
-3. For findings categorized as **nit** or **observation**:
-   - Fix trivial ones inline; skip the rest
-4. Re-run `/review` only if must-fix items were found and fixed (up to 1 confirmation loop)
-5. If findings remain unresolvable, list them for the user and ask how to proceed
+1. **Reflect subagent** — Execute the `/reflect` skill protocol for REQ-xxx, but **do not apply fixes**. Return a structured findings report: Critical / Major / Minor issues, plus any user-facing questions. The subagent reads changed files, runs the self-review checklist, and reports.
+2. **Review subagent** — Execute the `/review` skill protocol for REQ-xxx, but **do not apply fixes**. Return a structured findings report: Critical / Major / Minor / Nit issues organized by file. The subagent launches its own 3 specialized review agents and consolidates their output.
 
-**Status update**: Report the combined verify summary — reflection observations, review findings, how many fixed, any deferred.
+Both subagents must explicitly be told: "Report findings only. The parent pipeline will apply fixes."
+
+**Step B — Consolidate**: When both subagents return, dedupe overlapping findings (reflect and review often catch the same convention/architecture issues). Produce a single ranked list by severity.
+
+**Step C — Fix in one pass**:
+1. **Critical + must-fix Major** (bugs, security, convention violations, missing tests): fix immediately, run the test suite after each related cluster of fixes, commit with `fix(scope): address verify finding [REQ-xxx]`.
+2. **Should-fix Minor** (code quality, naming): fix unless doing so would be a significant refactor — note those as follow-ups.
+3. **Nit / observation**: fix trivial ones inline, skip the rest.
+4. **User-facing questions from reflect**: if any, surface them to the user as a numbered list and wait for answers before continuing.
+
+**Step D — Re-verify (conditional)**: Re-run ONLY `/review` (not reflect) as a single subagent if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied.
+
+**Status update**: Report the combined verify summary — reflect observations, review findings, dedupe count, how many fixed, any deferred, any outstanding user questions.
 
 ---
 
 ### Phase 6: Create Pull Request
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `6` and `5` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `6` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `7`.
+**Gate**: `currentPhase` must be `6`. After completion: append `6`, set `currentPhase=7`.
 
 **Goal**: Package everything into a reviewable PR.
 
@@ -210,7 +223,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 7: PR Cleanup & CI
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `7` and `6` is in `completedPhases`. If not, stop and complete the missing phase first. After completing this phase, update the state file: add `7` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `8`.
+**Gate**: `currentPhase` must be `7`. After completion: append `7`, set `currentPhase=8` (or `7.5` if canary will run).
 
 **Goal**: Lightweight sanity check on the PR — the full code review already happened in Phase 5. Do NOT re-run `/review`.
 
@@ -231,7 +244,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 7.5: Canary Deploy (Optional)
 
-**Gate**: Read `pipeline-state.json`. Confirm `7` is in `completedPhases`. This phase is **optional** — only run it if the requirement's frontmatter includes `deployable: true`, OR if no `deployable` field exists and the changes include deployable API or web service code (`api/`, `admin-api/`, or web app files). Skip when `deployable: false` or for iOS-only, documentation-only, or infrastructure-only changes. After completing this phase, update the state file: add `7.5` to `completedPhases`, log in `phaseHistory`, set `currentPhase` to `8`.
+**Gate**: `7` must be in `completedPhases`. After completion: append `7.5`, set `currentPhase=8`. This phase is **optional** — only run it if the requirement's frontmatter includes `deployable: true`, OR if no `deployable` field exists and the changes include deployable API or web service code (`api/`, `admin-api/`, or web app files). Skip when `deployable: false` or for iOS-only, documentation-only, or infrastructure-only changes.
 
 **Goal**: Deploy to a canary revision with zero traffic, run smoke tests, and promote only on success — ensuring the deploy works before merging.
 
@@ -249,7 +262,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ### Phase 8: Wrapup
 
-**Gate**: Read `pipeline-state.json`. Confirm `currentPhase` is `8` and `7` is in `completedPhases` (or `7.5` if canary was run). If not, stop and complete the missing phase first. After completing this phase, update the state file: add `8` to `completedPhases`, log in `phaseHistory`, set `"completed": true`.
+**Gate**: `currentPhase` must be `8` and `7` (or `7.5`) must be in `completedPhases`. After completion: append `8`, set `"completed": true`.
 
 **Goal**: Merge, deploy, capture knowledge, and close out the feature.
 
@@ -271,7 +284,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 | 2 | Architect & Tasks | 2 | Unchanged |
 | 3 | Validate Architecture | 3 | Unchanged |
 | 4 | Implement | 4 | Unchanged |
-| 5 | Verify (Reflect + Review) | 5 + 6 | Merged — one reflect pass then one review pass |
+| 5 | Verify (Reflect + Review) | 5 + 6 | Merged — reflect and review run in parallel as read-only subagents, findings consolidated and fixed in one pass |
 | 6 | Create PR | 7 | Renumbered |
 | 7 | PR Cleanup & CI | 8 | Simplified — no re-review, just sanity check |
 | 7.5 | Canary Deploy (Optional) | 8.5 | Renumbered, now respects `deployable` field |
@@ -288,11 +301,7 @@ This ensures multiple `/proceed` sessions on different REQs never touch each oth
 
 ## Prerequisites
 
-Before starting the pipeline, verify these exist (stop with a clear message if any are missing):
-1. `.sdlc/context/project-overview.md` — run `/init` if missing
-2. `.sdlc/context/architecture.md` — run `/init` if missing
-3. `.sdlc/context/conventions.md` — run `/init` if missing
-4. `.sdlc/specs/REQ-xxx-*/requirement.md` — run `/spec` if missing
+Verified by Phase 0 Preflight — see Step 0 above.
 
 ## What This Skill Does NOT Do
 

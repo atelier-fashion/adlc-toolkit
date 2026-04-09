@@ -16,7 +16,8 @@ You are performing a thorough code review of recent changes in the Atelier Fashi
 
 - Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
 - Recent changes: !`git diff main --stat 2>/dev/null || echo "No diff available"`
-- Conventions: !`cat .sdlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
+
+**Context files loaded on demand**: `.sdlc/context/conventions.md` is loaded by Step 1 below — **skip the Read if it is already in the current conversation** (e.g., when invoked from `/proceed`, which preloads it at Phase 0).
 
 ## Input
 
@@ -34,6 +35,7 @@ Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it does
 3. If given a REQ/TASK ID, find the associated branch and review its changes
 4. If no argument, review all uncommitted changes + commits on the current branch vs `main`
 5. Get the full diff: `git diff main...HEAD` (or `git diff` for uncommitted changes)
+6. **Context files**: if `.sdlc/context/conventions.md` is NOT already in your conversation context, Read it now. Otherwise skip — it's already loaded.
 
 ### Step 2: Read All Changed Files
 Read the complete current version of every changed file (not just the diff) to understand full context.
