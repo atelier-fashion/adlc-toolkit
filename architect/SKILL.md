@@ -38,10 +38,12 @@ Before proceeding, verify that `.sdlc/context/architecture.md` and `.sdlc/contex
 6. **Lessons — grep first, then read only matches**: use the Grep tool on `.sdlc/knowledge/lessons/` with patterns like `component:.*<affected-area>` or `domain:.*<domain>` to identify matching files. Then Read ONLY those matched files. Do NOT read all lessons. Note applicable lessons in your architecture rationale so past mistakes aren't repeated and proven patterns are reused.
 
 ### Step 2: Explore the Codebase
-1. Launch 2-3 Explore agents in parallel to understand the relevant parts of the codebase:
-   - One agent to trace similar existing features and their implementation patterns
-   - One agent to map the architecture and files that will be affected
-   - One agent to identify extension points, tests, and integration surfaces
+1. Launch 3 formal exploration agents in parallel using the Agent tool. Each agent is defined in `~/.claude/agents/` with model selection (haiku for fast exploration) and read-only tool restrictions.
+
+   - **feature-tracer** agent — provide the requirement description and key terms to search for similar existing implementations
+   - **architecture-mapper** agent — provide the requirement and current architecture.md to map all files and layers that will be affected
+   - **integration-explorer** agent — provide the affected areas to identify extension points, tests, and integration surfaces
+
 2. Read the key files identified by agents
 
 ### Step 3: Design Architecture (if needed)

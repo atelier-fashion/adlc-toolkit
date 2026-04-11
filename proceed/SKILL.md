@@ -7,6 +7,15 @@ description: End-to-end SDLC pipeline that takes a requirement from spec through
 
 You are an autonomous SDLC orchestrator. Given a requirement number (REQ-xxx), you drive it from validated spec all the way to a pull request — validating at each gate, fixing issues automatically, and only pausing when you're stuck or need human input.
 
+## Execution Mode
+
+This skill supports two modes:
+
+1. **Main conversation mode** (default): Dispatches formal agents (defined in `~/.claude/agents/`) for parallelism at Phase 4 (task implementation) and Phase 5 (verify). Use this mode when running `/proceed` directly.
+2. **Subagent mode** (when running as a `pipeline-runner` agent inside `/sprint`): Execute ALL phases sequentially in-context. Do NOT dispatch sub-agents. At Phase 4, implement tasks one at a time. At Phase 5, run the reflector + reviewer checklists sequentially in your own context using the criteria from the agent definitions. Subagents cannot spawn other subagents.
+
+You are in subagent mode if you were explicitly told so in your launch prompt.
+
 ## Ethos
 
 !`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
@@ -145,14 +154,17 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - Run the project's test suite to verify nothing is broken
    - Mark the task status as `complete` in its frontmatter
    - Commit with message format: `feat(scope): description [TASK-xxx]`
-4. Use parallel subagents for tasks that have no dependency relationship with each other. Wait for all tasks in a dependency tier to complete before starting the next tier.
 
-**Parallelization strategy**:
+**Main conversation mode** — parallel execution:
 - Group tasks into tiers based on the dependency graph
-- Tier 0: tasks with no dependencies (launch all in parallel)
-- Tier 1: tasks depending only on Tier 0 tasks (launch after Tier 0 completes)
+- Tier 0: tasks with no dependencies — launch a **task-implementer** agent for each
+- Tier 1: tasks depending only on Tier 0 — launch after Tier 0 completes
 - Continue until all tiers complete
-- Each subagent gets the full task file, conventions, and architecture context
+- Each task-implementer agent (defined in `~/.claude/agents/`) receives: the full task file, conventions.md, and architecture.md
+
+**Subagent mode** — sequential execution:
+- Execute tasks one at a time in dependency order
+- Implement each task directly in your own context (do not dispatch agents)
 
 **Status update**: After each tier completes, report which tasks finished and any issues encountered.
 
@@ -164,22 +176,27 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
 **Goal**: Self-assess AND multi-agent review the implementation, then fix all findings in a single consolidated pass.
 
-**Step A — Launch reflect and review concurrently as READ-ONLY subagents**. In a single message, dispatch two Agent tool calls in parallel:
+**Main conversation mode** — parallel agents:
 
-1. **Reflect subagent** — Execute the `/reflect` skill protocol for REQ-xxx, but **do not apply fixes**. Return a structured findings report: Critical / Major / Minor issues, plus any user-facing questions. The subagent reads changed files, runs the self-review checklist, and reports.
-2. **Review subagent** — Execute the `/review` skill protocol for REQ-xxx, but **do not apply fixes**. Return a structured findings report: Critical / Major / Minor / Nit issues organized by file. The subagent launches its own 3 specialized review agents and consolidates their output.
+**Step A — Launch 4 READ-ONLY agents in parallel**. In a single message, dispatch four Agent tool calls using the formal agent definitions from `~/.claude/agents/`:
 
-Both subagents must explicitly be told: "Report findings only. The parent pipeline will apply fixes."
+1. **reflector** agent — provide REQ-xxx, changed files, diff, conventions.md, architecture.md. Tell it: "Report findings only. The parent pipeline will apply fixes."
+2. **correctness-reviewer** agent — provide changed files, diff, conventions.md. Tell it: "Report findings only. Do not apply fixes."
+3. **quality-reviewer** agent — provide changed files, diff, conventions.md. Tell it: "Report findings only. Do not apply fixes."
+4. **architecture-reviewer** agent — provide changed files, diff, architecture.md. Tell it: "Report findings only. Do not apply fixes."
 
-**Step B — Consolidate**: When both subagents return, dedupe overlapping findings (reflect and review often catch the same convention/architecture issues). Produce a single ranked list by severity.
+**Subagent mode** — sequential inline review:
+Run the reflector checklist, then the correctness, quality, and architecture review checklists sequentially in your own context. Use the criteria from the agent definitions in `~/.claude/agents/`. Do NOT dispatch sub-agents.
+
+**Step B — Consolidate**: When all 4 agents return (or all checklists complete in subagent mode), dedupe overlapping findings (reflector and reviewers often catch the same convention/architecture issues). Produce a single ranked list by severity.
 
 **Step C — Fix in one pass**:
 1. **Critical + must-fix Major** (bugs, security, convention violations, missing tests): fix immediately, run the test suite after each related cluster of fixes, commit with `fix(scope): address verify finding [REQ-xxx]`.
 2. **Should-fix Minor** (code quality, naming): fix unless doing so would be a significant refactor — note those as follow-ups.
 3. **Nit / observation**: fix trivial ones inline, skip the rest.
-4. **User-facing questions from reflect**: if any, surface them to the user as a numbered list and wait for answers before continuing.
+4. **User-facing questions from reflector**: if any, surface them to the user as a numbered list and wait for answers before continuing.
 
-**Step D — Re-verify (conditional)**: Re-run ONLY `/review` (not reflect) as a single subagent if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied.
+**Step D — Re-verify (conditional)**: Re-run ONLY the 3 reviewer agents (**correctness-reviewer**, **quality-reviewer**, **architecture-reviewer** — not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. In subagent mode, re-run the 3 reviewer checklists inline.
 
 **Status update**: Report the combined verify summary — reflect observations, review findings, dedupe count, how many fixed, any deferred, any outstanding user questions.
 

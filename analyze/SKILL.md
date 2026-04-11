@@ -29,38 +29,14 @@ Scope: $ARGUMENTS
 3. If no argument, audit the entire project
 
 ### Step 2: Launch Audit Agents
-Launch 4 specialized agents in parallel:
+Launch 4 formal audit agents in parallel using the Agent tool. Each agent is defined in `~/.claude/agents/` with its full audit checklist, model selection (sonnet for deep analysis, haiku for pattern matching), and tool restrictions.
 
-**Agent 1 — Code Quality & Technical Debt**
-- Dead code (unused exports, unreachable branches)
-- Code duplication across files
-- Overly complex functions (high cyclomatic complexity)
-- Inconsistent patterns (doing the same thing different ways)
-- TODOs, FIXMEs, and HACKs in the codebase
-- Files that are too large or have too many responsibilities
+1. **code-quality-auditor** agent — provide the audit scope determined in Step 1
+2. **convention-auditor** agent — provide the audit scope and conventions.md content
+3. **security-auditor** agent — provide the audit scope
+4. **test-auditor** agent — provide the audit scope
 
-**Agent 2 — Convention Compliance**
-- Naming violations (files, variables, routes, constants)
-- Logging violations (console.log instead of logger)
-- Hardcoded values that should be in config
-- API response format inconsistencies
-- Error handling pattern violations
-- Import/export style consistency (ESM)
-
-**Agent 3 — Security & Reliability**
-- Input validation gaps (missing or insufficient)
-- Authentication/authorization bypass risks
-- Sensitive data exposure (PII in logs, unencrypted fields)
-- Rate limiting coverage (unprotected expensive endpoints)
-- Error messages leaking internal details
-- Dependency vulnerabilities (`npm audit`)
-
-**Agent 4 — Testing & Coverage**
-- Test coverage gaps (run `npm test -- --coverage` if in API)
-- Missing test cases for error paths
-- Mock completeness (all module exports included)
-- Test quality (testing behavior vs implementation details)
-- Integration test coverage for API routes
+Each agent returns structured findings with severity, file paths, and descriptions.
 
 ### Step 3: Consolidate Results
 Organize findings into a health report:

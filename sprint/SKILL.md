@@ -71,18 +71,20 @@ Ask the user to confirm the sprint lineup before proceeding.
 
 ### Step 3: Launch Parallel Pipelines
 
-For each eligible REQ, launch a background agent:
+For each eligible REQ, launch a **pipeline-runner** agent (defined in `~/.claude/agents/`) using the Agent tool with `run_in_background: true`.
 
 **Agent prompt for each REQ**:
 ```
 Run the /proceed skill for REQ-xxx in the repository at [current repo path].
+You are in SUBAGENT MODE — execute all phases sequentially, do not dispatch sub-agents.
 This is part of a parallel sprint — other REQs are running concurrently in separate worktrees.
-Follow all /proceed phases (0-9) exactly as documented.
+Follow all /proceed phases (0-8) exactly as documented.
 If you encounter a blocker that requires human input, update pipeline-state.json with the blocker details and stop gracefully.
 Do not attempt to merge if other pipelines are still running — the sprint orchestrator will handle merge sequencing.
 ```
 
-Launch all agents in a single message to maximize parallelism. Each agent:
+Launch all agents in a single message to maximize parallelism. Each pipeline-runner agent:
+- Runs in subagent mode (all phases sequential, no nested sub-agent dispatch)
 - Works in its own worktree (`.worktrees/REQ-xxx`) — isolation is handled by `/proceed` Phase 0
 - Maintains its own `pipeline-state.json`
 - Operates independently — failure in one does not affect others

@@ -41,30 +41,13 @@ Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it does
 Read the complete current version of every changed file (not just the diff) to understand full context.
 
 ### Step 3: Launch Review Agents
-Launch 3 specialized review agents in parallel:
+Launch 3 formal review agents in parallel using the Agent tool. Each agent is defined in `~/.claude/agents/` with its full checklist, model selection, and tool restrictions.
 
-**Agent 1 — Correctness & Bugs**
-- Logic errors, off-by-one, null/undefined handling
-- Race conditions, async/await issues
-- Error handling gaps (missing try/catch, unhandled promise rejections)
-- Security issues (injection, auth bypass, data exposure)
-- Edge cases not covered
+1. **correctness-reviewer** agent — provide it the list of changed files, the full diff, and conventions.md content. Tell it: "Report findings only. Do not apply fixes."
+2. **quality-reviewer** agent — provide it the list of changed files, the full diff, and conventions.md content. Tell it: "Report findings only. Do not apply fixes."
+3. **architecture-reviewer** agent — provide it the list of changed files, the full diff, and architecture.md content. Tell it: "Report findings only. Do not apply fixes."
 
-**Agent 2 — Code Quality & Conventions**
-- Adherence to `.sdlc/context/conventions.md`
-- Naming conventions (camelCase JS, kebab-case URLs, snake_case JSON)
-- Proper use of logger (no console.log)
-- Config centralization (no hardcoded values)
-- Code duplication, unnecessary complexity
-- Missing or incorrect input validation
-
-**Agent 3 — Architecture & Testing**
-- Layered architecture compliance (routes → services → repositories)
-- Proper separation of concerns
-- Test coverage for new code
-- Mock completeness (all exports mocked in test files)
-- API response format compliance (`{ error, message }` for errors)
-- Backward compatibility of API changes
+Each agent returns structured findings with severity (Critical/Major/Minor/Nit), file path, line number, and suggested fix.
 
 ### Step 4: Consolidate Findings
 1. Collect results from all 3 agents

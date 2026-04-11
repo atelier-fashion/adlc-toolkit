@@ -29,33 +29,13 @@ Focus: $ARGUMENTS
 3. Read `.sdlc/context/architecture.md` for current caching and optimization patterns
 
 ### Step 2: Launch Scanner Agents
-Launch 3 specialized agents in parallel:
+Launch 3 formal scanner agents in parallel using the Agent tool. Each agent is defined in `~/.claude/agents/` with its full scanning checklist and model selection (sonnet for deep analysis).
 
-**Agent 1 — AI/API Cost Analysis**
-- Identify all AI API calls (Anthropic Claude, Google Gemini, SerpAPI)
-- For each call: which model, estimated token usage, frequency, caching strategy
-- Identify calls that could use a cheaper model (e.g., Sonnet → Haiku)
-- Check for prompt caching opportunities (`cache_control: { type: 'ephemeral' }`)
-- Identify redundant or duplicate AI calls
-- Check if responses are being cached effectively (L1 in-memory + L2 Firestore)
-- Look for missing cache keys or suboptimal TTLs
-- Estimate monthly cost impact of each optimization
+1. **api-cost-scanner** agent — provide the focus scope and architecture.md for caching context
+2. **db-perf-scanner** agent — provide the focus scope
+3. **latency-scanner** agent — provide the focus scope
 
-**Agent 2 — Database & Storage Performance**
-- Firestore query patterns: missing indexes, unbounded queries, N+1 patterns
-- GCS operations: unnecessary signed URL generation, missing thumbnail usage
-- Pagination: verify all list endpoints use proper pagination (not fetching all docs)
-- Atomic operations: verify counter updates use atomic increments
-- Batch operations: identify sequential Firestore calls that could be batched
-- Cache hit rates: identify frequently accessed data that isn't cached
-
-**Agent 3 — Request Latency & Throughput**
-- Identify slow endpoints (sequential async operations that could be parallelized)
-- Check for `await` chains that could use `Promise.all`
-- Middleware overhead: rate limiter efficiency, auth token verification
-- Response payload sizes: over-fetching data, missing field selection
-- Image processing: Sharp operations, resize strategies, format optimization
-- Cold start impact: module initialization, lazy loading opportunities
+Each agent returns structured findings with estimated impact, effort, and risk.
 
 ### Step 3: Build Optimization Report
 
