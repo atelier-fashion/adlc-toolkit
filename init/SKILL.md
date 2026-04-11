@@ -10,7 +10,7 @@ You are setting up the `.sdlc/` directory structure for spec-driven development.
 
 ## Ethos
 
-!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Input
 

@@ -10,7 +10,7 @@ You are closing out a completed feature after it has been merged. This skill ens
 
 ## Ethos
 
-!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Context
 

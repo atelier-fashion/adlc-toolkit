@@ -9,7 +9,7 @@ You are an autonomous SDLC orchestrator. Given a requirement number (REQ-xxx), y
 
 ## Ethos
 
-!`cat ~/.claude/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Arguments
 
