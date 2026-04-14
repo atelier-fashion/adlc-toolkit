@@ -28,6 +28,8 @@ Shared skills and templates for spec-driven development with Claude Code.
 
 ## Setup
 
+This toolkit uses a **symlink-based live install**: one canonical git clone on disk, exposed to Claude Code at `~/.claude/skills/` via an absolute-path symlink. There is no separate "installed" copy and no sync step — edits you commit to the clone are instantly visible to every Claude Code session on the machine.
+
 ### 1. Clone this repo
 
 ```bash
@@ -35,15 +37,27 @@ cd ~/Documents/GitHub  # or wherever you keep repos
 git clone https://github.com/atelier-fashion/sdlc-toolkit.git
 ```
 
-### 2. Symlink to Claude Code skills directory
+### 2. Symlink to Claude Code's skills and agents directories
 
 ```bash
-# Back up existing skills if any
-mv ~/.claude/skills ~/.claude/skills.bak
+# Back up any existing directories (rename is safe and reversible)
+[ -e ~/.claude/skills ] && mv ~/.claude/skills ~/.claude/skills.bak
+[ -e ~/.claude/agents ] && mv ~/.claude/agents ~/.claude/agents.bak
 
-# Create symlink
-ln -s ~/Documents/GitHub/sdlc-toolkit ~/.claude/skills
+# Create symlinks — use ABSOLUTE paths so they resolve from any cwd
+ln -s "$HOME/Documents/GitHub/sdlc-toolkit" "$HOME/.claude/skills"
+ln -s "$HOME/Documents/GitHub/sdlc-toolkit/agents" "$HOME/.claude/agents"
 ```
+
+Verify:
+
+```bash
+readlink ~/.claude/skills   # → /Users/<you>/Documents/GitHub/sdlc-toolkit
+readlink ~/.claude/agents   # → /Users/<you>/Documents/GitHub/sdlc-toolkit/agents
+ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
+```
+
+Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably.
 
 ### 3. Initialize a project
 
