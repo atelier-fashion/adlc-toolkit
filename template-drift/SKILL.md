@@ -1,12 +1,12 @@
 ---
 name: template-drift
-description: Detect drift between this project's `.sdlc/templates/` copies and the canonical templates in `~/.claude/skills/templates/`. Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template updates have landed in this project yet. Reports a per-file diff summary and flags intentional customizations from accidental staleness.
+description: Detect drift between this project's `.adlc/templates/` copies and the canonical templates in `~/.claude/skills/templates/`. Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template updates have landed in this project yet. Reports a per-file diff summary and flags intentional customizations from accidental staleness.
 argument-hint: Optional template name (e.g., "requirement-template") to scope the check to a single file
 ---
 
 # /template-drift — Template Drift Detector
 
-You are checking whether the project's local `.sdlc/templates/` copies still match the canonical templates in the sdlc-toolkit. Templates are copied per-repo (not symlinked like skills/agents), so they drift over time. Some drift is **intentional** (project-specific customization); some is **accidental** (toolkit updated and the project never pulled the change). This skill surfaces both and helps you decide what to reconcile.
+You are checking whether the project's local `.adlc/templates/` copies still match the canonical templates in the adlc-toolkit. Templates are copied per-repo (not symlinked like skills/agents), so they drift over time. Some drift is **intentional** (project-specific customization); some is **accidental** (toolkit updated and the project never pulled the change). This skill surfaces both and helps you decide what to reconcile.
 
 ## Ethos
 
@@ -14,7 +14,7 @@ You are checking whether the project's local `.sdlc/templates/` copies still mat
 
 ## Context
 
-- Project templates dir: !`ls .sdlc/templates/ 2>/dev/null || echo "No .sdlc/templates/ directory — run /init first"`
+- Project templates dir: !`ls .adlc/templates/ 2>/dev/null || echo "No .adlc/templates/ directory — run /init first"`
 - Toolkit templates dir: !`ls ~/.claude/skills/templates/ 2>/dev/null || echo "Toolkit templates not found at ~/.claude/skills/templates/"`
 - Current directory: !`pwd`
 
@@ -24,19 +24,19 @@ Scope: $ARGUMENTS (optional — single template name to check; otherwise all tem
 
 ## Prerequisites
 
-1. `.sdlc/templates/` must exist in the current project. If it does not, stop and tell the user: "This project has no local templates — it uses toolkit templates directly. No drift to check." (New projects per the `/init` Step 6 policy don't copy templates locally.)
-2. `~/.claude/skills/templates/` must resolve through the symlink. If it does not, stop and tell the user: "The sdlc-toolkit symlink is broken. Verify `readlink ~/.claude/skills` points to the toolkit repo."
+1. `.adlc/templates/` must exist in the current project. If it does not, stop and tell the user: "This project has no local templates — it uses toolkit templates directly. No drift to check." (New projects per the `/init` Step 6 policy don't copy templates locally.)
+2. `~/.claude/skills/templates/` must resolve through the symlink. If it does not, stop and tell the user: "The adlc-toolkit symlink is broken. Verify `readlink ~/.claude/skills` points to the toolkit repo."
 
 ## Instructions
 
 ### Step 1: Enumerate Templates to Compare
 
-1. If the user passed a scope argument (e.g. `requirement-template`), only check `.sdlc/templates/<scope>.md` vs `~/.claude/skills/templates/<scope>.md`.
-2. Otherwise list every `*.md` file in `.sdlc/templates/` AND every `*.md` file in `~/.claude/skills/templates/`. Compare the union of both sets — this catches templates that exist in the toolkit but not in the project (new templates added upstream) and templates in the project but not in the toolkit (legacy or custom-to-project files).
+1. If the user passed a scope argument (e.g. `requirement-template`), only check `.adlc/templates/<scope>.md` vs `~/.claude/skills/templates/<scope>.md`.
+2. Otherwise list every `*.md` file in `.adlc/templates/` AND every `*.md` file in `~/.claude/skills/templates/`. Compare the union of both sets — this catches templates that exist in the toolkit but not in the project (new templates added upstream) and templates in the project but not in the toolkit (legacy or custom-to-project files).
 
 ### Step 2: Diff Each Template
 
-For each template in the comparison set, run `diff -u ~/.claude/skills/templates/<name>.md .sdlc/templates/<name>.md`. Capture:
+For each template in the comparison set, run `diff -u ~/.claude/skills/templates/<name>.md .adlc/templates/<name>.md`. Capture:
 - **Missing upstream**: template exists locally but not in toolkit (legacy or custom)
 - **Missing locally**: template exists in toolkit but not in project (upstream added, not yet copied)
 - **Identical**: no diff (drift = 0)
@@ -49,7 +49,7 @@ Also compute a rough drift size: total lines added + total lines removed (exclud
 For each drifted template, **read both full versions** (not just the diff) and make a judgment call. The goal is to separate:
 
 **Intentional customization signals** (do NOT reconcile without explicit user consent):
-- Added sections that are domain-specific to this project (e.g. `## System Model`, `## Entities`, `## Permissions`, `## Business Rules` in `admin-api/.sdlc/templates/requirement-template.md`)
+- Added sections that are domain-specific to this project (e.g. `## System Model`, `## Entities`, `## Permissions`, `## Business Rules` in `admin-api/.adlc/templates/requirement-template.md`)
 - Added field names in frontmatter that reference project-specific concepts
 - Rewritten wording that reflects a deliberate editorial choice
 - Any change that appears in `git log` with a commit message indicating project-specific intent
@@ -70,7 +70,7 @@ Emit a summary table, then per-file detail:
 ## Template Drift Report — [date]
 
 Project: <repo name>
-Toolkit ref: <`git -C ~/Documents/GitHub/sdlc-toolkit rev-parse --short HEAD`>
+Toolkit ref: <`git -C ~/Documents/GitHub/adlc-toolkit rev-parse --short HEAD`>
 
 | Template | Status | Drift | Classification |
 |---|---|---|---|
@@ -108,7 +108,7 @@ Diff is 3 added / 1 removed lines, all whitespace and one field rename:
 - `status: [status]` → `status: pending`
 - Extra blank line after frontmatter
 
-Action: safe to sync from toolkit. Propose a one-line change: copy `~/.claude/skills/templates/task-template.md` over `.sdlc/templates/task-template.md`.
+Action: safe to sync from toolkit. Propose a one-line change: copy `~/.claude/skills/templates/task-template.md` over `.adlc/templates/task-template.md`.
 ```
 
 ### Step 5: Offer Reconciliation Actions
@@ -119,18 +119,18 @@ For each **accidental** drift and each **missing locally** template, offer the u
 ## Proposed Actions
 
 1. **task-template.md**: Copy from toolkit to project (accidental cosmetic drift).
-   Command: `cp ~/.claude/skills/templates/task-template.md .sdlc/templates/task-template.md`
+   Command: `cp ~/.claude/skills/templates/task-template.md .adlc/templates/task-template.md`
 
 2. **lesson-template.md**: Copy from toolkit to project (toolkit added filename-lock comment).
-   Command: `cp ~/.claude/skills/templates/lesson-template.md .sdlc/templates/lesson-template.md`
+   Command: `cp ~/.claude/skills/templates/lesson-template.md .adlc/templates/lesson-template.md`
 
 3. **assumption-template.md**: Copy from toolkit to project (upstream added, not yet in project).
-   Command: `cp ~/.claude/skills/templates/assumption-template.md .sdlc/templates/assumption-template.md`
+   Command: `cp ~/.claude/skills/templates/assumption-template.md .adlc/templates/assumption-template.md`
 
 Reply with action numbers to apply (e.g. "1 2 3" or "all"), or "skip" to take no action.
 ```
 
-**Do not apply any changes without explicit user approval.** Writing to `.sdlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. If the user approves, apply only the numbered actions they listed and re-run Step 2 for those files to confirm drift is now zero.
+**Do not apply any changes without explicit user approval.** Writing to `.adlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. If the user approves, apply only the numbered actions they listed and re-run Step 2 for those files to confirm drift is now zero.
 
 For **intentional** drift, do not propose reconciliation — just note it in the report so the user is aware.
 
@@ -143,9 +143,9 @@ At the end of the report:
 
 ## What This Skill Does NOT Do
 
-- It does not modify toolkit templates — changes to the canonical version go through the sdlc-toolkit repo via PR.
+- It does not modify toolkit templates — changes to the canonical version go through the adlc-toolkit repo via PR.
 - It does not rename or delete project template files — only copies or reports.
-- It does not touch `.sdlc/templates/` in other projects — it's scoped to the current working directory.
+- It does not touch `.adlc/templates/` in other projects — it's scoped to the current working directory.
 - It does not check drift of skills or agents — those are symlinked, so drift is structurally impossible.
 
 ## Implementation Notes

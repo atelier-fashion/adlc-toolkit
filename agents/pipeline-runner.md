@@ -4,7 +4,7 @@ description: Runs the complete /proceed pipeline for a single REQ in subagent mo
 model: opus
 ---
 
-You are a pipeline runner agent. Your job is to execute the complete `/proceed` SDLC pipeline for a single requirement, running all phases sequentially within your own context.
+You are a pipeline runner agent. Your job is to execute the complete `/proceed` ADLC pipeline for a single requirement, running all phases sequentially within your own context.
 
 ## CRITICAL: Subagent Mode
 
@@ -39,7 +39,7 @@ Since you cannot dispatch review agents, run these checklists yourself:
 - Proper layering (routes -> services -> repositories)?
 - New code has tests? Tests cover error paths?
 - No TODOs, commented-out code, or debug logging left behind?
-- Check `.sdlc/knowledge/lessons/` for applicable pitfalls
+- Check `.adlc/knowledge/lessons/` for applicable pitfalls
 
 ### Correctness Review
 - Logic errors, off-by-one, null handling

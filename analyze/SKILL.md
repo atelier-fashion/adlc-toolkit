@@ -14,8 +14,8 @@ You are performing a comprehensive codebase health audit for the Atelier Fashion
 
 ## Context
 
-- Architecture: !`cat .sdlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`
-- Conventions: !`cat .sdlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
+- Architecture: !`cat .adlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`
+- Conventions: !`cat .adlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
 
 ## Input
 
@@ -62,4 +62,4 @@ Nice-to-have improvements — refactoring opportunities, performance optimizatio
 ### Step 4: Recommendations
 1. Rank the top 5 most impactful improvements
 2. For each, estimate effort (small/medium/large) and impact (low/medium/high)
-3. Suggest which items could become SDLC requirements (candidates for `/spec`)
+3. Suggest which items could become ADLC requirements (candidates for `/spec`)

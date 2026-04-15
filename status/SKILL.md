@@ -1,12 +1,12 @@
 ---
 name: status
-description: Show current state of all SDLC work across the project
+description: Show current state of all ADLC work across the project
 argument-hint: Optional filter (e.g., REQ-xxx, "in-progress", "bugs")
 ---
 
-# /status — SDLC Status Dashboard
+# /status — ADLC Status Dashboard
 
-You are generating a status report of all SDLC work in the current project.
+You are generating a status report of all ADLC work in the current project.
 
 ## Ethos
 
@@ -14,8 +14,8 @@ You are generating a status report of all SDLC work in the current project.
 
 ## Context
 
-- Specs directory: !`ls .sdlc/specs/ 2>/dev/null || echo "No specs found"`
-- Bugs directory: !`ls .sdlc/bugs/ 2>/dev/null || echo "No bugs found"`
+- Specs directory: !`ls .adlc/specs/ 2>/dev/null || echo "No specs found"`
+- Bugs directory: !`ls .adlc/bugs/ 2>/dev/null || echo "No bugs found"`
 - Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
 
 ## Input
@@ -24,12 +24,12 @@ Filter: $ARGUMENTS
 
 ## Instructions
 
-### Step 1: Scan All SDLC Artifacts
-1. Read all `requirement.md` files under `.sdlc/specs/REQ-*/`
-2. Read all task files under `.sdlc/specs/REQ-*/tasks/`
-3. Read all bug reports under `.sdlc/bugs/`
-4. Read all `pipeline-state.json` files under `.sdlc/specs/REQ-*/` for live pipeline progress
-5. Also check for nested `.sdlc/` directories (e.g., `api/.sdlc/`)
+### Step 1: Scan All ADLC Artifacts
+1. Read all `requirement.md` files under `.adlc/specs/REQ-*/`
+2. Read all task files under `.adlc/specs/REQ-*/tasks/`
+3. Read all bug reports under `.adlc/bugs/`
+4. Read all `pipeline-state.json` files under `.adlc/specs/REQ-*/` for live pipeline progress
+5. Also check for nested `.adlc/` directories (e.g., `api/.adlc/`)
 6. Extract frontmatter (id, title, status, updated) from each artifact
 
 ### Step 2: Build Status Report

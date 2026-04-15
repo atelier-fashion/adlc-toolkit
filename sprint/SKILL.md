@@ -16,8 +16,8 @@ You are a sprint orchestrator that launches multiple `/proceed` pipelines in par
 
 - Current directory: !`pwd`
 - Existing worktrees: !`git worktree list 2>/dev/null || echo "Not a git repo"`
-- Available specs: !`ls .sdlc/specs/ 2>/dev/null || echo "No specs found"`
-- Pipeline states: !`find .sdlc/specs -name "pipeline-state.json" -exec echo {} \; -exec cat {} \; 2>/dev/null || echo "No active pipelines"`
+- Available specs: !`ls .adlc/specs/ 2>/dev/null || echo "No specs found"`
+- Pipeline states: !`find .adlc/specs -name "pipeline-state.json" -exec echo {} \; -exec cat {} \; 2>/dev/null || echo "No active pipelines"`
 
 ## Input
 
@@ -26,16 +26,16 @@ Target REQs: $ARGUMENTS
 ## Prerequisites
 
 Before proceeding, verify:
-1. `.sdlc/context/project-overview.md` exists — run `/init` if missing
-2. `.sdlc/context/architecture.md` exists — run `/init` if missing
-3. `.sdlc/context/conventions.md` exists — run `/init` if missing
+1. `.adlc/context/project-overview.md` exists — run `/init` if missing
+2. `.adlc/context/architecture.md` exists — run `/init` if missing
+3. `.adlc/context/conventions.md` exists — run `/init` if missing
 
 ## Instructions
 
 ### Step 1: Identify Sprint REQs
 
 1. If given specific REQ IDs (e.g., `REQ-091 REQ-092`), normalize each to `REQ-xxx` format
-2. If given `all`, scan `.sdlc/specs/REQ-*/requirement.md` for all specs with `status: approved` or `status: draft`
+2. If given `all`, scan `.adlc/specs/REQ-*/requirement.md` for all specs with `status: approved` or `status: draft`
 3. If no argument, scan for all `status: approved` specs
 4. Exclude any REQ that already has `pipeline-state.json` with `"completed": true`
 5. Exclude any REQ that already has an active worktree (check `git worktree list`)
@@ -45,7 +45,7 @@ If no eligible REQs found, report "No eligible REQs for sprint" and stop.
 ### Step 2: Validate Sprint Eligibility
 
 For each REQ, verify:
-1. The spec file exists at `.sdlc/specs/REQ-xxx-*/requirement.md`
+1. The spec file exists at `.adlc/specs/REQ-xxx-*/requirement.md`
 2. Read the spec — confirm it has: Description, Acceptance Criteria (at least 1), and no unresolved Questions marked as blockers
 3. Context files exist (project-overview, architecture, conventions)
 
@@ -95,7 +95,7 @@ Background `pipeline-runner` agents send an automatic notification when they fin
 
 1. **Immediately after launch**: read every `pipeline-state.json` that was just initialized and print the initial sprint dashboard (see below). This confirms all agents launched and shows their starting phase.
 
-2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.sdlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
+2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.adlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
 
 3. **When the user takes a turn during the sprint** (asks a question, issues a command): re-read all `pipeline-state.json` files first, so any answer reflects current pipeline state rather than a stale snapshot from launch.
 

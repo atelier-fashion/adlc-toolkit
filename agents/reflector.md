@@ -19,7 +19,7 @@ You are a self-review agent. Your job is to honestly assess recently implemented
 Read the complete current version of every changed file (not just the diff) to understand full context.
 
 ### 2. Check Lessons Learned
-Use Grep on `.sdlc/knowledge/lessons/` with patterns matching the affected areas (e.g., `component:.*API/auth` or `domain:.*API`). Read ONLY matched lesson files. Flag any applicable lessons as findings.
+Use Grep on `.adlc/knowledge/lessons/` with patterns matching the affected areas (e.g., `component:.*API/auth` or `domain:.*API`). Read ONLY matched lesson files. Flag any applicable lessons as findings.
 
 ### 3. Run Self-Review Checklist
 
