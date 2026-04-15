@@ -6,7 +6,7 @@ argument-hint: Optional file paths, branch name, or REQ/TASK ID to scope the rev
 
 # /review — Multi-Agent Code Review
 
-You are performing a thorough code review of recent changes in the Atelier Fashion project using multiple specialized review agents.
+You are performing a thorough code review of recent changes using multiple specialized review agents.
 
 This skill is the **pre-push ADLC review gate**. It runs 5 specialized review agents in parallel, covering the same dimensions the CI `llm-review` workflow would cover if it ran (correctness, conventions, test coverage, security) plus an architecture dimension the CI workflow doesn't have. Running this before pushing means the ADLC gate catches issues regardless of whether the CI layer is available — CI-layer LLM reviews can be blocked (billing, infra, outages) and must not become the sole safety net.
 

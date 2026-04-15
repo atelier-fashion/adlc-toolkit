@@ -36,81 +36,36 @@ Before proceeding, verify that `.adlc/context/conventions.md` exists. If it does
 4. Get the full diff: `git diff main...HEAD`
 5. **Context files**: if `.adlc/context/conventions.md` and `.adlc/context/architecture.md` are NOT already in your conversation context, Read them now. Otherwise skip — they're already loaded.
 
-### Step 2: Read All Changed Files
-Read the complete current version of every changed file (not just the diff) to understand full context.
+### Step 2: Dispatch the `reflector` agent
+Launch the **reflector** agent via the Agent tool. The agent owns the canonical self-review checklist (Correctness, Convention Compliance, Architecture, Testing, Completeness) and handles reading changed files and cross-referencing lessons learned. Keeping the checklist in the agent ensures a single source of truth that `/proceed` Phase 5 also uses.
 
-### Step 2.5: Check Lessons Learned
-**Grep first, read only matches**: use the Grep tool on `.adlc/knowledge/lessons/` with patterns like `component:.*<affected-area>` or `domain:.*<domain>` matching the files changed in this implementation (e.g., if touching `api/src/services/auth`, grep for `component:.*API/auth` or `domain:.*API`). Then Read ONLY the matched files. Do NOT read all lessons. Check whether any known pitfalls apply to the current changes. Flag any matches as findings in Step 4.
+Provide the agent with:
+- The scope (REQ ID, branch name, or "current uncommitted changes")
+- The full diff from Step 1
+- `conventions.md` and `architecture.md` content (from Step 1)
 
-### Step 3: Self-Review Checklist
-Evaluate the implementation against each category. Be honest — the goal is to catch problems now rather than in `/review`.
+Instruct it: "Read all changed files in full, grep `.adlc/knowledge/lessons/` for applicable lessons, run your checklist, and report findings + questions. Do not apply fixes."
 
-#### Correctness
-- [ ] Does the code do what the requirement/task specifies?
-- [ ] Are all acceptance criteria met?
-- [ ] Are edge cases handled (empty inputs, nulls, boundaries)?
-- [ ] Are error paths handled properly?
-- [ ] Any race conditions or async issues?
+The agent will return:
+- **Issues Found** — grouped by severity (Critical / Major / Minor) with file/line, description, suggested fix
+- **Clean Areas** — 1-2 sentences on what was checked and looked good
+- **Questions for the User** — ambiguities, design tradeoffs, assumptions, deferred edge cases
 
-#### Convention Compliance
-- [ ] Follows naming conventions (camelCase JS, PascalCase Swift types, kebab-case URLs)
-- [ ] Uses `logger` not `console.log`
-- [ ] Config values in `config.js`, not hardcoded
-- [ ] API responses follow `{ error, message }` format for errors
-- [ ] CodingKeys for snake_case API to camelCase Swift mapping
-- [ ] MVVM with @Observable pattern on iOS side
+### Step 3: Present the Agent's Report
+Relay the agent's Issues Found and Clean Areas sections to the user verbatim. Do not re-run the checklist yourself — that would duplicate work and risk drift.
 
-#### Architecture
-- [ ] Proper layering: routes -> services -> repositories
-- [ ] No business logic in route handlers
-- [ ] No direct Firestore access from routes
-- [ ] ViewModels receive dependencies via init (DI), not singletons
-- [ ] Barrel re-exports maintained if files were split
+### Step 4: Surface Questions from the Agent
+The reflector agent returns a "Questions for the User" block covering ambiguous requirements, design tradeoffs, assumptions made, deferred edge cases, and UX/behavioral uncertainties. Relay that block to the user as a numbered list. If the agent returned "No questions — implementation is unambiguous," state that explicitly.
 
-#### Testing
-- [ ] New code has corresponding tests
-- [ ] Tests cover error/failure paths, not just happy paths
-- [ ] Mock files include all new exports
-- [ ] No brittle assertions (exact string matching on prompts, etc.)
-- [ ] Tests are deterministic (no flaky timing, no external dependencies)
+Do not proceed past this step until the user has answered — their responses may change what needs to be fixed.
 
-#### Completeness
-- [ ] No TODOs or FIXMEs left behind
-- [ ] No commented-out code
-- [ ] No debug logging accidentally left in
-- [ ] All import paths resolve correctly
-- [ ] If files were added, they're included in the Xcode project (iOS)
-
-### Step 4: Report Findings
-Present findings in two sections:
-
-#### Issues Found
-List each issue with:
-- **Severity**: Critical / Major / Minor
-- **File**: file path and line number
-- **Issue**: what's wrong
-- **Fix**: what to do about it
-
-#### Clean Areas
-Briefly note areas that look good (1-2 sentences) so the user knows what was checked.
-
-### Step 5: Questions for the User
-Review the implementation holistically and surface any questions or uncertainties, such as:
-- **Ambiguous requirements**: Anything in the spec that could be interpreted multiple ways — how did you interpret it, and is that correct?
-- **Design tradeoffs**: Decisions where there were multiple reasonable approaches — should the user weigh in?
-- **Assumptions made**: Any assumptions baked into the implementation that weren't explicitly stated in the requirement
-- **Edge cases deferred**: Scenarios you noticed but chose not to handle — should they be addressed?
-- **UX/behavioral questions**: "When X happens, should the app do Y or Z?"
-
-Present these as a numbered list. If there are no questions, state that explicitly. Do not proceed past this step until the user has answered — their responses may change what needs to be fixed.
-
-### Step 6: Fix or Defer
+### Step 5: Fix or Defer
 1. If Critical issues are found, fix them immediately
 2. If Major issues are found, ask the user whether to fix now or note for `/review`
 3. Minor issues can be listed for the user to decide
 4. After fixes, re-run tests to verify nothing broke
 
-### Step 7: Recommend Next Action
+### Step 6: Recommend Next Action
 - If no issues or only minor ones: "Ready for `/review`"
 - If fixes were applied: "Fixes applied. Re-run `/reflect` to verify, or proceed to `/review`"
 - If blockers remain: "Address these issues before `/review`"
