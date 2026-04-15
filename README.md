@@ -12,8 +12,11 @@ Shared skills and templates for spec-driven development with Claude Code.
 | `/spec` | Write requirement specs from feature requests |
 | `/architect` | Design architecture and break requirements into tasks |
 | `/validate` | Validate any ADLC phase output before advancing |
-| `/review` | Multi-agent code review |
+| `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup |
+| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs |
 | `/reflect` | Post-implementation self-review before formal review |
+| `/review` | Multi-agent code review (correctness, quality, architecture, tests, security) |
+| `/canary` | Canary deployment with smoke tests — deploy zero-traffic revision and promote on success |
 | `/wrapup` | Close out a feature — commit, merge, deploy, update artifacts |
 | `/bugfix` | Streamlined bug fix workflow |
 | `/status` | Show current state of all ADLC work |
@@ -26,6 +29,8 @@ Shared skills and templates for spec-driven development with Claude Code.
 - `requirement-template.md` — Requirement spec template
 - `task-template.md` — Technical task template
 - `bug-template.md` — Bug report template
+- `assumption-template.md` — Validated-assumption knowledge entry
+- `lesson-template.md` — Lesson-learned knowledge entry
 
 ## Setup
 
