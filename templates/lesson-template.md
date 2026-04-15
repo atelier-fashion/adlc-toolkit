@@ -1,6 +1,6 @@
 <!--
 Filename MUST be `LESSON-xxx-slug.md` (e.g., `LESSON-041-signed-url-ttl-mismatch.md`).
-- `xxx` is the next available integer, zero-padded to 3 digits, unique across `.sdlc/knowledge/lessons/`.
+- `xxx` is the next available integer, zero-padded to 3 digits, unique across `.adlc/knowledge/lessons/`.
 - `slug` is lowercase kebab-case, ≤6 words.
 - Do NOT use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`).
   Those are legacy schemes and are not valid for new lessons.

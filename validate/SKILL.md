@@ -1,12 +1,12 @@
 ---
 name: validate
-description: Validate any SDLC phase output before advancing
+description: Validate any ADLC phase output before advancing
 argument-hint: REQ-xxx ID or phase name (spec, architecture, tasks, implementation)
 ---
 
-# /validate — SDLC Phase Validation
+# /validate — ADLC Phase Validation
 
-You are validating SDLC artifacts to ensure quality before advancing to the next phase.
+You are validating ADLC artifacts to ensure quality before advancing to the next phase.
 
 ## Ethos
 
@@ -14,7 +14,7 @@ You are validating SDLC artifacts to ensure quality before advancing to the next
 
 ## Context
 
-- Active specs: !`grep -rl 'status: draft\|status: approved\|status: in-progress' .sdlc/specs/*/requirement.md 2>/dev/null | head -20 || echo "No active specs"`
+- Active specs: !`grep -rl 'status: draft\|status: approved\|status: in-progress' .adlc/specs/*/requirement.md 2>/dev/null | head -20 || echo "No active specs"`
 
 ## Input
 
@@ -22,12 +22,12 @@ Target: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.sdlc/specs/` exists. If it doesn't, stop and tell the user: "The `.sdlc/` structure hasn't been initialized. Run `/init` first."
+Before proceeding, verify that `.adlc/specs/` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first."
 
 ## Instructions
 
 ### Step 1: Identify What to Validate
-1. If given a REQ ID, locate all artifacts under `.sdlc/specs/REQ-xxx-*/`
+1. If given a REQ ID, locate all artifacts under `.adlc/specs/REQ-xxx-*/`
 2. If given a phase name, validate the most recently modified artifacts for that phase
 3. Determine the current phase based on what artifacts exist:
    - **Spec phase**: Only `requirement.md` exists
@@ -48,10 +48,10 @@ Before proceeding, verify that `.sdlc/specs/` exists. If it doesn't, stop and te
 - [ ] No duplicate or overlapping requirements with existing specs
 
 #### Validating Architecture
-- [ ] Architecture follows existing patterns from `.sdlc/context/architecture.md`
+- [ ] Architecture follows existing patterns from `.adlc/context/architecture.md`
 - [ ] New ADRs include rationale (not just decisions)
 - [ ] Data model changes are compatible with existing Firestore schema
-- [ ] API endpoint design follows REST conventions from `.sdlc/context/conventions.md`
+- [ ] API endpoint design follows REST conventions from `.adlc/context/conventions.md`
 - [ ] Service layer follows the layered pattern (routes → services → repositories)
 - [ ] No architectural conflicts with other in-progress requirements
 
@@ -67,10 +67,10 @@ Before proceeding, verify that `.sdlc/specs/` exists. If it doesn't, stop and te
 #### Validating Implementation
 - [ ] All task acceptance criteria are met
 - [ ] Tests pass (`npm test` or equivalent)
-- [ ] Code follows conventions from `.sdlc/context/conventions.md`
+- [ ] Code follows conventions from `.adlc/context/conventions.md`
 - [ ] No new lint warnings or errors
 - [ ] All requirement acceptance criteria are satisfied
-- [ ] SDLC artifacts are updated (task statuses set to `complete`)
+- [ ] ADLC artifacts are updated (task statuses set to `complete`)
 
 ### Step 3: Report Results
 1. Display validation results as a checklist with pass/fail for each item

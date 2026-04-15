@@ -1,4 +1,4 @@
-# SDLC Toolkit
+# ADLC Toolkit
 
 Shared skills and templates for spec-driven development with Claude Code.
 
@@ -8,18 +8,18 @@ Shared skills and templates for spec-driven development with Claude Code.
 
 | Skill | Description |
 |-------|-------------|
-| `/init` | Bootstrap `.sdlc/` structure in a new repo |
+| `/init` | Bootstrap `.adlc/` structure in a new repo |
 | `/spec` | Write requirement specs from feature requests |
 | `/architect` | Design architecture and break requirements into tasks |
-| `/validate` | Validate any SDLC phase output before advancing |
+| `/validate` | Validate any ADLC phase output before advancing |
 | `/review` | Multi-agent code review |
 | `/reflect` | Post-implementation self-review before formal review |
 | `/wrapup` | Close out a feature — commit, merge, deploy, update artifacts |
 | `/bugfix` | Streamlined bug fix workflow |
-| `/status` | Show current state of all SDLC work |
+| `/status` | Show current state of all ADLC work |
 | `/analyze` | Codebase health audit |
 | `/optimize` | API cost & performance scanner |
-| `/template-drift` | Detect drift between a project's local `.sdlc/templates/` and the canonical toolkit templates |
+| `/template-drift` | Detect drift between a project's local `.adlc/templates/` and the canonical toolkit templates |
 
 ### Templates
 
@@ -35,7 +35,7 @@ This toolkit uses a **symlink-based live install**: one canonical git clone on d
 
 ```bash
 cd ~/Documents/GitHub  # or wherever you keep repos
-git clone https://github.com/atelier-fashion/sdlc-toolkit.git
+git clone https://github.com/atelier-fashion/adlc-toolkit.git
 ```
 
 ### 2. Symlink to Claude Code's skills and agents directories
@@ -46,15 +46,15 @@ git clone https://github.com/atelier-fashion/sdlc-toolkit.git
 [ -e ~/.claude/agents ] && mv ~/.claude/agents ~/.claude/agents.bak
 
 # Create symlinks — use ABSOLUTE paths so they resolve from any cwd
-ln -s "$HOME/Documents/GitHub/sdlc-toolkit" "$HOME/.claude/skills"
-ln -s "$HOME/Documents/GitHub/sdlc-toolkit/agents" "$HOME/.claude/agents"
+ln -s "$HOME/Documents/GitHub/adlc-toolkit" "$HOME/.claude/skills"
+ln -s "$HOME/Documents/GitHub/adlc-toolkit/agents" "$HOME/.claude/agents"
 ```
 
 Verify:
 
 ```bash
-readlink ~/.claude/skills   # → /Users/<you>/Documents/GitHub/sdlc-toolkit
-readlink ~/.claude/agents   # → /Users/<you>/Documents/GitHub/sdlc-toolkit/agents
+readlink ~/.claude/skills   # → /Users/<you>/Documents/GitHub/adlc-toolkit
+readlink ~/.claude/agents   # → /Users/<you>/Documents/GitHub/adlc-toolkit/agents
 ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
 ```
 
@@ -69,7 +69,7 @@ claude
 > /init
 ```
 
-This bootstraps the `.sdlc/` directory with project-specific context, specs, and copies of the templates.
+This bootstraps the `.adlc/` directory with project-specific context, specs, and copies of the templates.
 
 ## Workflow
 
@@ -84,7 +84,7 @@ For bugs: `/bugfix` (report → analyze → fix → verify)
 After `/init`, each code repo will have:
 
 ```
-.sdlc/
+.adlc/
   context/           # Project-specific architecture, conventions, overview
   specs/             # Requirement docs, architecture docs, tasks
   knowledge/         # Assumptions validated, lessons learned
@@ -98,7 +98,7 @@ The toolkit repo contains the **process** (skills + templates). Each code repo c
 Pull the latest toolkit to update all skills across all projects:
 
 ```bash
-cd ~/Documents/GitHub/sdlc-toolkit
+cd ~/Documents/GitHub/adlc-toolkit
 git pull
 ```
 

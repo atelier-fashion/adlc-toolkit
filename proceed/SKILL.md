@@ -1,11 +1,11 @@
 ---
 name: proceed
-description: End-to-end SDLC pipeline that takes a requirement from spec through to deployed. Takes a REQ number as argument and runs validate → fix → architect → fix → implement → verify (reflect + review) → create PR → wrapup (merge, deploy, knowledge capture). Use when the user says "proceed", "proceed with REQ-xxx", "run the pipeline", "take REQ-xxx to completion", "implement REQ-xxx end to end", or wants to advance a drafted requirement all the way through to deployment in one shot.
+description: End-to-end ADLC pipeline that takes a requirement from spec through to deployed. Takes a REQ number as argument and runs validate → fix → architect → fix → implement → verify (reflect + review) → create PR → wrapup (merge, deploy, knowledge capture). Use when the user says "proceed", "proceed with REQ-xxx", "run the pipeline", "take REQ-xxx to completion", "implement REQ-xxx end to end", or wants to advance a drafted requirement all the way through to deployment in one shot.
 ---
 
-# Proceed — Full SDLC Pipeline
+# Proceed — Full ADLC Pipeline
 
-You are an autonomous SDLC orchestrator. Given a requirement number (REQ-xxx), you drive it from validated spec all the way to a pull request — validating at each gate, fixing issues automatically, and only pausing when you're stuck or need human input.
+You are an autonomous ADLC orchestrator. Given a requirement number (REQ-xxx), you drive it from validated spec all the way to a pull request — validating at each gate, fixing issues automatically, and only pausing when you're stuck or need human input.
 
 ## Execution Mode
 
@@ -25,7 +25,7 @@ You are in subagent mode if you were explicitly told so in your launch prompt.
 The user provides a requirement ID, e.g., `/proceed REQ-023` or `/proceed 23`.
 
 - Normalize to `REQ-xxx` format (zero-pad to 3 digits if needed)
-- Locate the spec at `.sdlc/specs/REQ-xxx-*/requirement.md`
+- Locate the spec at `.adlc/specs/REQ-xxx-*/requirement.md`
 - If the spec doesn't exist, stop and tell the user to run `/spec` first
 
 ## The Pipeline
@@ -36,7 +36,7 @@ Execute these phases in order. Each phase has a validation gate — if validatio
 
 **CRITICAL**: You MUST maintain a state file to track pipeline progress. This prevents phases from being skipped during long-running pipelines.
 
-**State file location**: `.sdlc/specs/REQ-xxx-*/pipeline-state.json`
+**State file location**: `.adlc/specs/REQ-xxx-*/pipeline-state.json`
 
 **Schema**:
 ```json
@@ -79,10 +79,10 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 **Before doing anything else**, isolate this work in a git worktree and prime the shared context so subskills don't re-read the same files:
 
 1. **Preflight** — verify all prerequisite files exist (stop with a clear message if any are missing):
-   - `.sdlc/context/project-overview.md` — run `/init` if missing
-   - `.sdlc/context/architecture.md` — run `/init` if missing
-   - `.sdlc/context/conventions.md` — run `/init` if missing
-   - `.sdlc/specs/REQ-xxx-*/requirement.md` — run `/spec` if missing
+   - `.adlc/context/project-overview.md` — run `/init` if missing
+   - `.adlc/context/architecture.md` — run `/init` if missing
+   - `.adlc/context/conventions.md` — run `/init` if missing
+   - `.adlc/specs/REQ-xxx-*/requirement.md` — run `/spec` if missing
 2. Ensure main is up to date: `git checkout main && git pull`
 3. Create a worktree with a dedicated branch:
    ```bash
@@ -90,10 +90,10 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    ```
 4. Change your working directory to `.worktrees/REQ-xxx` — **all subsequent work happens there**
 5. **Load shared context ONCE** — use the Read tool to load these into conversation context so every subskill can reference them without re-reading:
-   - `.sdlc/context/architecture.md`
-   - `.sdlc/context/conventions.md`
-   - `.sdlc/context/project-overview.md`
-   - `.sdlc/specs/REQ-xxx-*/requirement.md`
+   - `.adlc/context/architecture.md`
+   - `.adlc/context/conventions.md`
+   - `.adlc/context/project-overview.md`
+   - `.adlc/specs/REQ-xxx-*/requirement.md`
 6. **Initialize `pipeline-state.json`** in the spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4).
 7. When the pipeline completes (PR merged), clean up:
    ```bash
@@ -159,7 +159,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 4. For each task (or batch of independent tasks):
    - Write `phase4.currentTask` to the TASK-xxx ID before starting work
    - Read the task file for requirements, files to modify, ACs, technical notes
-   - Implement the changes following project conventions (from `.sdlc/context/conventions.md`)
+   - Implement the changes following project conventions (from `.adlc/context/conventions.md`)
    - Write tests as specified in the task
    - Run the project's test suite to verify nothing is broken
    - Mark the task status as `complete` in its frontmatter
@@ -298,7 +298,7 @@ Run the reflector checklist, then the correctness, quality, architecture, test-a
 **Goal**: Merge, deploy, capture knowledge, and close out the feature.
 
 1. Run the `/wrapup` skill with the REQ ID
-   - This handles: merge, SDLC artifact updates, knowledge capture, deployment, cleanup, and ship summary
+   - This handles: merge, ADLC artifact updates, knowledge capture, deployment, cleanup, and ship summary
 2. Update `pipeline-state.json` with `"completed": true`
 3. The pipeline is now complete
 
@@ -310,7 +310,7 @@ Run the reflector checklist, then the correctness, quality, architecture, test-a
 
 - **Test failures during implementation**: Stop the current task, diagnose the failure, fix it, and re-run tests before continuing. If you can't fix it after 2 attempts, pause and ask the user.
 - **Validation stuck after 3 loops**: Present the remaining FAIL items and ask the user how to proceed (fix manually, skip validation, or abort).
-- **Missing context files**: If `.sdlc/context/` files don't exist, stop and tell the user to run `/init` first. Do not proceed without context files.
+- **Missing context files**: If `.adlc/context/` files don't exist, stop and tell the user to run `/init` first. Do not proceed without context files.
 - **Merge conflicts**: If the feature branch has conflicts with the base branch, stop and ask the user how to resolve.
 
 ## Prerequisites
