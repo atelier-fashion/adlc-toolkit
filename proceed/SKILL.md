@@ -49,18 +49,26 @@ Execute these phases in order. Each phase has a validation gate — if validatio
   "completedPhases": [],
   "phaseHistory": [
     { "phase": 0, "name": "Create Worktree", "completedAt": "2026-03-27T10:01:00Z" }
-  ]
+  ],
+  "phase4": {
+    "currentTask": null,
+    "completedTasks": [],
+    "failedTasks": []
+  }
 }
 ```
 
+The `phase4` block tracks task-level progress during implementation so that a mid-Phase-4 context compression can resume from the exact task in progress rather than restarting the phase. `currentTask` holds the TASK-xxx ID being worked on right now; `completedTasks` holds IDs of tasks whose status is `complete` and whose commit has landed; `failedTasks` holds IDs that hit unrecoverable errors and were surfaced to the user. Other phases do not need sub-state.
+
 **Gate Protocol — follow exactly**:
 
-1. **Initialize** the state file at the start of Step 0 with `currentPhase: 0, completedPhases: [], completed: false`
+1. **Initialize** the state file at the start of Step 0 with `currentPhase: 0, completedPhases: [], completed: false, phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`
 2. **Before starting any phase**: read `pipeline-state.json`. Verify `currentPhase` equals the phase you're about to start AND the previous phase is in `completedPhases`. If either check fails, **STOP** — you skipped a phase. Go back and complete it.
 3. **After completing any phase**: append the phase number to `completedPhases`, append an entry to `phaseHistory` with the completion timestamp, set `currentPhase` to the next phase number.
-4. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`.
-5. **If context has been compressed**: re-read `pipeline-state.json` before doing anything and treat it as the source of truth for `currentPhase`. Do not rely on memory of what phase you're in.
-6. **On completion**: After Phase 8 (Wrapup) finishes, set `"completed": true` in the state file.
+4. **Phase 4 task-level writes**: When starting a task, set `phase4.currentTask` to its TASK-xxx ID. When its commit lands, append the ID to `phase4.completedTasks` and clear `currentTask`. On unrecoverable failure surfaced to the user, append to `phase4.failedTasks` instead.
+5. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`. If `currentPhase` is 4 and `phase4.currentTask` is non-null, resume that specific task (re-read its file, re-check whether its commit already landed, continue or restart as appropriate) before moving to the next task in the dependency graph. Never replay tasks already in `completedTasks`.
+6. **If context has been compressed**: re-read `pipeline-state.json` before doing anything and treat it as the source of truth for `currentPhase` and `phase4`. Do not rely on memory of which phase or task you're in.
+7. **On completion**: After Phase 8 (Wrapup) finishes, set `"completed": true` in the state file.
 
 Each phase below has a one-line **Gate** reminder. The full protocol above applies to every gate.
 
@@ -86,7 +94,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - `.sdlc/context/conventions.md`
    - `.sdlc/context/project-overview.md`
    - `.sdlc/specs/REQ-xxx-*/requirement.md`
-6. **Initialize `pipeline-state.json`** in the spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>`. If the file already exists, read it and resume from `currentPhase`.
+6. **Initialize `pipeline-state.json`** in the spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4).
 7. When the pipeline completes (PR merged), clean up:
    ```bash
    git worktree remove .worktrees/REQ-xxx
@@ -147,13 +155,17 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
 1. Build the dependency graph from task frontmatter
 2. Identify independent tasks (no unmet dependencies) — these can run in parallel
-3. For each task (or batch of independent tasks):
+3. On resume: read `pipeline-state.json`. Skip any task in `phase4.completedTasks`. If `phase4.currentTask` is non-null, start there (not at the dependency root).
+4. For each task (or batch of independent tasks):
+   - Write `phase4.currentTask` to the TASK-xxx ID before starting work
    - Read the task file for requirements, files to modify, ACs, technical notes
    - Implement the changes following project conventions (from `.sdlc/context/conventions.md`)
    - Write tests as specified in the task
    - Run the project's test suite to verify nothing is broken
    - Mark the task status as `complete` in its frontmatter
    - Commit with message format: `feat(scope): description [TASK-xxx]`
+   - After the commit lands, append the TASK-xxx ID to `phase4.completedTasks` and clear `phase4.currentTask`
+5. If a task hits an unrecoverable failure surfaced to the user: append its ID to `phase4.failedTasks`, clear `phase4.currentTask`, and stop the phase.
 
 **Main conversation mode** — parallel execution:
 - Group tasks into tiers based on the dependency graph
@@ -178,17 +190,19 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
 **Main conversation mode** — parallel agents:
 
-**Step A — Launch 4 READ-ONLY agents in parallel**. In a single message, dispatch four Agent tool calls using the formal agent definitions from `~/.claude/agents/`:
+**Step A — Launch 6 READ-ONLY agents in parallel**. In a single message, dispatch six Agent tool calls using the formal agent definitions from `~/.claude/agents/`. This matches the dimensions covered by `/review` (correctness, quality, architecture, test coverage, security) plus the reflector self-assessment, so that feature work shipped via `/proceed` gets the same gate coverage as work shipped via `/review`:
 
 1. **reflector** agent — provide REQ-xxx, changed files, diff, conventions.md, architecture.md. Tell it: "Report findings only. The parent pipeline will apply fixes."
 2. **correctness-reviewer** agent — provide changed files, diff, conventions.md. Tell it: "Report findings only. Do not apply fixes."
 3. **quality-reviewer** agent — provide changed files, diff, conventions.md. Tell it: "Report findings only. Do not apply fixes."
 4. **architecture-reviewer** agent — provide changed files, diff, architecture.md. Tell it: "Report findings only. Do not apply fixes."
+5. **test-auditor** agent — provide changed files, diff, conventions.md. Tell it: "Audit test coverage only for the diff under review. Report findings only. Do not apply fixes."
+6. **security-auditor** agent — provide changed files, diff, conventions.md. Tell it: "Audit security posture only for the diff under review. Report findings only. Do not apply fixes."
 
 **Subagent mode** — sequential inline review:
-Run the reflector checklist, then the correctness, quality, and architecture review checklists sequentially in your own context. Use the criteria from the agent definitions in `~/.claude/agents/`. Do NOT dispatch sub-agents.
+Run the reflector checklist, then the correctness, quality, architecture, test-auditor, and security-auditor checklists sequentially in your own context. Use the criteria from the agent definitions in `~/.claude/agents/`. Do NOT dispatch sub-agents.
 
-**Step B — Consolidate**: When all 4 agents return (or all checklists complete in subagent mode), dedupe overlapping findings (reflector and reviewers often catch the same convention/architecture issues). Produce a single ranked list by severity.
+**Step B — Consolidate**: When all 6 agents return (or all checklists complete in subagent mode), dedupe overlapping findings (reflector and reviewers often catch the same convention/architecture issues; test-auditor and security-auditor can overlap on missing input validation tests). Produce a single ranked list by severity.
 
 **Step C — Fix in one pass**:
 1. **Critical + must-fix Major** (bugs, security, convention violations, missing tests): fix immediately, run the test suite after each related cluster of fixes, commit with `fix(scope): address verify finding [REQ-xxx]`.
@@ -196,7 +210,7 @@ Run the reflector checklist, then the correctness, quality, and architecture rev
 3. **Nit / observation**: fix trivial ones inline, skip the rest.
 4. **User-facing questions from reflector**: if any, surface them to the user as a numbered list and wait for answers before continuing.
 
-**Step D — Re-verify (conditional)**: Re-run ONLY the 3 reviewer agents (**correctness-reviewer**, **quality-reviewer**, **architecture-reviewer** — not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. In subagent mode, re-run the 3 reviewer checklists inline.
+**Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (**correctness-reviewer**, **quality-reviewer**, **architecture-reviewer**, **test-auditor**, **security-auditor** — not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the dimensions that had fixes: e.g., if only correctness fixes landed, rerun correctness + any other dimensions whose findings overlapped. In subagent mode, re-run the corresponding reviewer checklists inline.
 
 **Status update**: Report the combined verify summary — reflect observations, review findings, dedupe count, how many fixed, any deferred, any outstanding user questions.
 
@@ -289,23 +303,6 @@ Run the reflector checklist, then the correctness, quality, and architecture rev
 3. The pipeline is now complete
 
 **Status update**: Report the ship summary from wrapup and confirm deployment status.
-
----
-
-## Phase Map
-
-| Phase | Name | Old Phase | Notes |
-|-------|------|-----------|-------|
-| 0 | Create Worktree | 0 | Unchanged |
-| 1 | Validate Spec | 1 | Unchanged |
-| 2 | Architect & Tasks | 2 | Unchanged |
-| 3 | Validate Architecture | 3 | Unchanged |
-| 4 | Implement | 4 | Unchanged |
-| 5 | Verify (Reflect + Review) | 5 + 6 | Merged — reflect and review run in parallel as read-only subagents, findings consolidated and fixed in one pass |
-| 6 | Create PR | 7 | Renumbered |
-| 7 | PR Cleanup & CI | 8 | Simplified — no re-review, just sanity check |
-| 7.5 | Canary Deploy (Optional) | 8.5 | Renumbered, now respects `deployable` field |
-| 8 | Wrapup | 9 | Renumbered |
 
 ---
 

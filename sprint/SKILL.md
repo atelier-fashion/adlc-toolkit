@@ -89,12 +89,17 @@ Launch all agents in a single message to maximize parallelism. Each pipeline-run
 - Maintains its own `pipeline-state.json`
 - Operates independently — failure in one does not affect others
 
-### Step 4: Monitor Progress
+### Step 4: Monitor Progress (Notification-Driven)
 
-After launching, enter a monitoring loop:
+Background `pipeline-runner` agents send an automatic notification when they finish (complete, blocked, or failed). The orchestrator does **not** actively poll on a timer — attempting to `sleep`/loop mid-turn would block the conversation without any benefit. Instead, the orchestrator reacts to agent-completion notifications and refreshes state whenever the user takes a turn.
 
-1. Every 60 seconds (or when an agent completes), read all `pipeline-state.json` files
-2. Display the sprint dashboard:
+1. **Immediately after launch**: read every `pipeline-state.json` that was just initialized and print the initial sprint dashboard (see below). This confirms all agents launched and shows their starting phase.
+
+2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.sdlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
+
+3. **When the user takes a turn during the sprint** (asks a question, issues a command): re-read all `pipeline-state.json` files first, so any answer reflects current pipeline state rather than a stale snapshot from launch.
+
+4. **Dashboard format**:
 
 ```
 ## Sprint Dashboard — [timestamp]
@@ -108,30 +113,37 @@ After launching, enter a monitoring loop:
 Completed: 0/3 | Blocked: 0 | Running: 3
 ```
 
-3. If a pipeline's `pipeline-state.json` shows it hasn't advanced in 10+ minutes, check if its agent is still running
-4. If a pipeline reports a blocker, surface it to the user immediately:
+5. **Stall detection**: stalls are detected on dashboard refreshes (triggered by notifications or user turns), not on a timer. If a pipeline's `pipeline-state.json` has not advanced between two consecutive refreshes AND the gap between refreshes is >10 minutes of wall clock, flag it as potentially stalled in the next dashboard and check whether its background agent is still alive.
+
+6. **Blocker handling**: if a pipeline's state file reports a blocker (e.g. `phase4.failedTasks` is non-empty, or validation has failed 3 times), surface it immediately on the next refresh:
    ```
    BLOCKER: REQ-091 is stuck at Phase 5 (Verify) — validation failed 3 times.
    Remaining issues: [list from pipeline-state.json]
    Options: (1) Fix manually, (2) Skip validation, (3) Abort this REQ
    ```
+   Wait for the user's choice before taking action on that pipeline. Other pipelines continue running.
 
 ### Step 5: Handle Merge Sequencing
 
-When pipelines reach Phase 8 (Wrapup), batch-merge to minimize rebase churn:
+**Default policy: merge as each pipeline completes.** When a pipeline finishes Phase 7 and is marked merge-ready, merge it immediately — don't wait for the batch. Faster feedback, less idle time, and the rebase cost on subsequent pipelines is paid as they reach merge-ready anyway (each one runs its own `/wrapup` Step 2 rebase-onto-main guard, so main drift is handled automatically).
 
-1. **Wait for all pipelines to reach merge-ready state** (Phase 7 complete, or blocked/stopped). Do not merge one-by-one as they finish — wait for the batch.
-2. Once all running pipelines have completed (or are blocked), sort merge-ready pipelines by:
+The sequential flow per pipeline:
+1. Merge the PR: `gh pr merge --squash --delete-branch`
+2. Pull main: `git checkout main && git pull`
+3. Move on — other pipelines keep running in the background
+
+**Batch mode (only when N ≥ 3)**: when the sprint has 3 or more pipelines AND the orchestrator has strong prior knowledge that their diffs overlap (same files, same modules), switch to batching:
+1. Wait for all pipelines to reach merge-ready state (Phase 7 complete, blocked, or stopped)
+2. Sort merge-ready pipelines by:
    - Independent changes first (no overlapping files), then
    - Lower REQ numbers first (tie-breaker)
 3. Merge sequentially from the sorted list:
-   - Merge the first pipeline: `gh pr merge --squash --delete-branch`
-   - Pull main: `git checkout main && git pull`
-   - For the next pipeline: rebase onto updated main, force-push, then merge
-   - If rebase has conflicts, skip that pipeline and surface to user — continue with the rest
-4. **Exception**: If only 1-2 pipelines are in the sprint, merge immediately as each completes (no batching benefit).
+   - Merge the first PR
+   - Pull main
+   - For each subsequent pipeline, its `/wrapup` Step 2 will re-fetch and rebase onto the new main before merging
+   - If any rebase hits conflicts, skip that pipeline and surface to the user — continue with the rest
 
-This reduces the total number of rebases from N-1 (sequential) to at most N-1 (batch) but eliminates the idle wait where completed pipelines sit while others are still running.
+Batch mode is the exception, not the rule. If you're uncertain whether diffs overlap, default to merging as each completes.
 
 ### Step 6: Sprint Summary
 

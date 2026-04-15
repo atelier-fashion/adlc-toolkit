@@ -19,6 +19,7 @@ Shared skills and templates for spec-driven development with Claude Code.
 | `/status` | Show current state of all SDLC work |
 | `/analyze` | Codebase health audit |
 | `/optimize` | API cost & performance scanner |
+| `/template-drift` | Detect drift between a project's local `.sdlc/templates/` and the canonical toolkit templates |
 
 ### Templates
 

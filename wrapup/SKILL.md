@@ -31,20 +31,26 @@ Target: $ARGUMENTS
 3. Read the requirement spec, architecture doc, and all task files
 
 ### Step 2: Commit, Push, and Merge
-1. Check `git status` and `git diff` for any uncommitted changes related to the feature
-2. If there are uncommitted changes:
+1. **Branch check FIRST** — never commit on `main`. Run `git branch --show-current`. If it reports `main` (or `master`), stop: create a feature branch (e.g., `agent/REQ-xxx-slug` or `feat/REQ-xxx-slug`) and switch to it with `git checkout -b <branch>` BEFORE touching any files. If you're already on a worktree branch from `/proceed` Phase 0, continue.
+2. Check `git status` and `git diff` for any uncommitted changes related to the feature
+3. If there are uncommitted changes:
    - Stage all relevant files (avoid secrets, `.env`, credentials)
    - Create a commit with message: `feat(REQ-xxx): <summary of changes>`
    - Include `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
-3. Ensure a feature branch exists (e.g., `agent/REQ-xxx-slug`). If on `main`, create one and switch to it before committing.
 4. Push the branch to remote with `git push -u origin <branch>`
 5. If no PR exists for this branch, create one using `gh pr create` with a summary of what shipped
 6. If CI checks exist, monitor the pipeline with `gh run watch` and report the result
-7. Merge the PR using `gh pr merge --squash --delete-branch`
-8. Pull main locally: `git checkout main && git pull`
-9. Clean up local branch and worktree immediately after merge:
-   - If the feature branch still exists locally, delete it: `git branch -D <branch>`
-   - If a worktree was used (`.worktrees/REQ-xxx` exists), remove it: `git worktree remove .worktrees/REQ-xxx`
+7. **Rebase onto current main before merging** — in a sprint or long-running pipeline, upstream `main` may have advanced since the branch was cut. Run `git fetch origin main` and check whether the branch is behind: `git merge-base --is-ancestor origin/main HEAD`. If that command fails (exit 1), the branch is behind main and must be updated:
+   - `git rebase origin/main`
+   - If there are conflicts, STOP and surface them to the user — do not try to resolve semantic conflicts blindly
+   - On clean rebase, force-push with lease: `git push --force-with-lease`
+   - Re-run `gh pr checks` and wait for CI to re-pass before merging
+8. Verify PR status is mergeable: `gh pr view --json mergeable,mergeStateStatus` should report `MERGEABLE` and a clean merge state. If not, stop and surface the reason.
+9. Merge the PR using `gh pr merge --squash --delete-branch`
+10. Pull main locally: `git checkout main && git pull`
+11. Clean up local branch and worktree immediately after merge:
+    - If the feature branch still exists locally, delete it: `git branch -D <branch>`
+    - If a worktree was used (`.worktrees/REQ-xxx` exists), remove it: `git worktree remove .worktrees/REQ-xxx`
 
 ### Step 3: Update SDLC Artifact Statuses
 1. Set the requirement's frontmatter status to `complete`
@@ -72,8 +78,9 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Things that worked particularly well?
 - Log notable lessons to `.sdlc/knowledge/lessons/` if they'd help future work
 - Use the lesson template (check `.sdlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
-- Name files: `LESSON-xxx-slug.md` (scan existing files for next ID)
-- Include `domain`, `component`, and `tags` so that `/spec`, `/architect`, and `/reflect` can filter by relevance. The `component` field should be more specific than `domain` (e.g., `domain: API`, `component: API/auth` or `domain: iOS`, `component: iOS/SwiftUI`)
+- **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). To find the next ID, scan the directory for the highest existing `LESSON-xxx-` file and increment. Slugs are lowercase kebab-case, ≤6 words.
+- **Legacy files**: older projects may still have date-prefixed or bare-numeric lessons from before this convention was locked. Do not rename them in a wrapup PR — migration is a separate, dedicated operation. When scanning for the next ID, only count files matching `LESSON-*.md`; treat the legacy files as read-only history.
+- Include `domain`, `component`, and `tags` so that `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance. The `component` field should be more specific than `domain` (e.g., `domain: API`, `component: API/auth` or `domain: iOS`, `component: iOS/SwiftUI`)
 
 #### Convention Updates
 - Were any new conventions established? Propose updates to `.sdlc/context/conventions.md`
