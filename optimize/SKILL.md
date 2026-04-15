@@ -14,8 +14,8 @@ You are scanning the Atelier Fashion API for cost and performance optimization o
 
 ## Context
 
-- Architecture: !`cat .sdlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`
-- Project overview: !`cat .sdlc/context/project-overview.md 2>/dev/null || echo "No project overview found"`
+- Architecture: !`cat .adlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`
+- Project overview: !`cat .adlc/context/project-overview.md 2>/dev/null || echo "No project overview found"`
 
 ## Input
 
@@ -26,7 +26,7 @@ Focus: $ARGUMENTS
 ### Step 1: Determine Focus
 1. If given a focus area, prioritize that dimension
 2. If no argument, scan all dimensions
-3. Read `.sdlc/context/architecture.md` for current caching and optimization patterns
+3. Read `.adlc/context/architecture.md` for current caching and optimization patterns
 
 ### Step 2: Launch Scanner Agents
 Launch 3 formal scanner agents in parallel using the Agent tool. Each agent is defined in `~/.claude/agents/` with its full scanning checklist and model selection (sonnet for deep analysis).
@@ -66,4 +66,4 @@ For each opportunity:
 ### Step 4: Prioritized Recommendations
 1. Rank optimizations by impact/effort ratio
 2. Group into quick wins (small effort, high impact) and strategic improvements
-3. Suggest which items warrant a full SDLC requirement (candidates for `/spec`)
+3. Suggest which items warrant a full ADLC requirement (candidates for `/spec`)

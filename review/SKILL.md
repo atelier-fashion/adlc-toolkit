@@ -8,7 +8,7 @@ argument-hint: Optional file paths, branch name, or REQ/TASK ID to scope the rev
 
 You are performing a thorough code review of recent changes in the Atelier Fashion project using multiple specialized review agents.
 
-This skill is the **pre-push SDLC review gate**. It runs 5 specialized review agents in parallel, covering the same dimensions the CI `llm-review` workflow would cover if it ran (correctness, conventions, test coverage, security) plus an architecture dimension the CI workflow doesn't have. Running this before pushing means the SDLC gate catches issues regardless of whether the CI layer is available — CI-layer LLM reviews can be blocked (billing, infra, outages) and must not become the sole safety net.
+This skill is the **pre-push ADLC review gate**. It runs 5 specialized review agents in parallel, covering the same dimensions the CI `llm-review` workflow would cover if it ran (correctness, conventions, test coverage, security) plus an architecture dimension the CI workflow doesn't have. Running this before pushing means the ADLC gate catches issues regardless of whether the CI layer is available — CI-layer LLM reviews can be blocked (billing, infra, outages) and must not become the sole safety net.
 
 ## Ethos
 
@@ -19,7 +19,7 @@ This skill is the **pre-push SDLC review gate**. It runs 5 specialized review ag
 - Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
 - Recent changes: !`git diff main --stat 2>/dev/null || echo "No diff available"`
 
-**Context files loaded on demand**: `.sdlc/context/conventions.md` and recent lessons are loaded by Step 1 below — **skip the Reads if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads `conventions.md` at Phase 0).
+**Context files loaded on demand**: `.adlc/context/conventions.md` and recent lessons are loaded by Step 1 below — **skip the Reads if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads `conventions.md` at Phase 0).
 
 ## Input
 
@@ -27,7 +27,7 @@ Scope: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.sdlc/` structure hasn't been initialized. Run `/init` first to set up conventions."
+Before proceeding, verify that `.adlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up conventions."
 
 ## Instructions
 
@@ -37,11 +37,11 @@ Before proceeding, verify that `.sdlc/context/conventions.md` exists. If it does
 3. If given a REQ/TASK ID, find the associated branch and review its changes
 4. If no argument, review all uncommitted changes + commits on the current branch vs `main`
 5. Get the full diff: `git diff main...HEAD` (or `git diff` for uncommitted changes)
-6. **Conventions**: if `.sdlc/context/conventions.md` is NOT already in your conversation context, Read it now. Otherwise skip — it's already loaded.
+6. **Conventions**: if `.adlc/context/conventions.md` is NOT already in your conversation context, Read it now. Otherwise skip — it's already loaded.
 7. **Relevant lessons** (mirrors the spirit of `llm-review.yml`, but relevance-ranked instead of time-ranked):
    a. Derive the set of touched **components** from the diff. Components are inferred from file paths — e.g. `api/auth/*` → `API/auth`, `app/Sources/Views/*.swift` → `iOS/SwiftUI`, `admin-api/src/users/*` → `API/admin/users`, `infrastructure/terraform/*` → `infra/terraform`. Produce a short list of plausible `component` values and a broader list of `domain` values (e.g. `API`, `iOS`, `infra`).
-   b. Glob `.sdlc/knowledge/lessons/*.md` and read each file's frontmatter (`domain`, `component`, `tags`). Keep lessons where `component` matches any touched component exactly, OR where `domain` matches any touched domain AND `component` is a prefix of a touched component, OR where any tag matches a touched component/domain. This is the **relevance set**.
-   c. If the relevance set has fewer than 5 entries, top it up with the most recently modified lessons from `.sdlc/knowledge/lessons/` (the previous time-based heuristic) until the set has up to 10 entries. This keeps small or cross-cutting diffs from losing context entirely.
+   b. Glob `.adlc/knowledge/lessons/*.md` and read each file's frontmatter (`domain`, `component`, `tags`). Keep lessons where `component` matches any touched component exactly, OR where `domain` matches any touched domain AND `component` is a prefix of a touched component, OR where any tag matches a touched component/domain. This is the **relevance set**.
+   c. If the relevance set has fewer than 5 entries, top it up with the most recently modified lessons from `.adlc/knowledge/lessons/` (the previous time-based heuristic) until the set has up to 10 entries. This keeps small or cross-cutting diffs from losing context entirely.
    d. Cap the final list at 15 lessons. Read their bodies in full.
    e. Pass the content of every selected lesson as context to every review agent in Step 3. When a finding later matches one of these lessons, cite its `id` explicitly (Step 4 uses this to elevate severity).
    **Fallback**: if any lesson has no `component` / `domain` / `tags` frontmatter (legacy file), fall back to reading its title + first paragraph and include it only if the title contains any touched domain or component substring. Do not skip it silently — it may be load-bearing.

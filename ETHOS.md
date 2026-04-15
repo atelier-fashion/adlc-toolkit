@@ -1,6 +1,6 @@
 # Builder Ethos
 
-These principles guide how we build. They are injected into every SDLC skill to ensure consistent, high-quality agent behavior across all phases of development.
+These principles guide how we build. They are injected into every ADLC skill to ensure consistent, high-quality agent behavior across all phases of development.
 
 ---
 
@@ -26,7 +26,7 @@ If tasks are independent, run them concurrently. Sequential execution is a choic
 
 LLM output is a draft, not a deliverable. Every phase has a validation gate. Every deploy has a canary. Every review has a second pass. Trust is earned through automated checks, not assumed from confidence.
 
-**Applies when**: Completing any SDLC phase, deploying code, reviewing AI-generated changes, merging PRs.
+**Applies when**: Completing any ADLC phase, deploying code, reviewing AI-generated changes, merging PRs.
 
 ## 5. Process Is Not Optional
 

@@ -89,7 +89,7 @@ If health checks fail after 3 retries, go to Step 6 (Rollback).
 
 ### Step 4: Smoke Tests
 
-Run smoke tests against the canary URL. Load test definitions from `.sdlc/context/smoke-tests.md` if it exists, otherwise use defaults:
+Run smoke tests against the canary URL. Load test definitions from `.adlc/context/smoke-tests.md` if it exists, otherwise use defaults:
 
 **Default smoke tests** (API services):
 ```
@@ -97,7 +97,7 @@ GET  /health              -> 200
 GET  /api/health          -> 200
 ```
 
-**Custom smoke tests** (from `.sdlc/context/smoke-tests.md`):
+**Custom smoke tests** (from `.adlc/context/smoke-tests.md`):
 Each entry should specify: method, path, expected status, optional body pattern.
 
 For each test:
@@ -192,7 +192,7 @@ If `pipeline-state.json` exists for the current REQ:
 
 ## Smoke Test Configuration
 
-To customize smoke tests, create `.sdlc/context/smoke-tests.md` with this format:
+To customize smoke tests, create `.adlc/context/smoke-tests.md` with this format:
 
 ```markdown
 # Smoke Tests
