@@ -10,7 +10,7 @@ You are generating a status report of all ADLC work in the current project.
 
 ## Ethos
 
-!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Context
 

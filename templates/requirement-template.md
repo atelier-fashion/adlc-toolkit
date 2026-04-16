@@ -11,6 +11,35 @@ updated: YYYY-MM-DD
 
 What the feature does and why.
 
+## System Model
+
+_Define the structured data model for this feature. Remove sections that don't apply._
+
+### Entities
+
+| Entity | Field | Type | Constraints |
+|--------|-------|------|-------------|
+| [EntityName] | [field] | [string/number/boolean/timestamp] | [required, unique, max length, etc.] |
+
+### Events
+
+| Event | Trigger | Payload |
+|-------|---------|---------|
+| [event_name] | [What causes it] | [Key data included] |
+
+### Permissions
+
+| Action | Roles Allowed |
+|--------|---------------|
+| [action_name] | [authenticated, owner, admin, etc.] |
+
+## Business Rules
+
+_Explicit, testable constraints governing this feature's behavior._
+
+- [ ] BR-1: [Rule statement — e.g., "Only item owner can delete wardrobe items"]
+- [ ] BR-2: [Rule statement]
+
 ## Acceptance Criteria
 
 - [ ] Criterion 1
@@ -24,7 +53,7 @@ What the feature does and why.
 
 - None
 
-## Questions
+## Open Questions
 
 - [ ] Open question 1
 

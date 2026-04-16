@@ -10,7 +10,7 @@ You are deploying code through a canary process: deploy a zero-traffic revision,
 
 ## Ethos
 
-!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Context
 

@@ -10,7 +10,7 @@ You are validating ADLC artifacts to ensure quality before advancing to the next
 
 ## Ethos
 
-!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Context
 

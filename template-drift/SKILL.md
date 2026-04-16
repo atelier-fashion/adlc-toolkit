@@ -10,7 +10,7 @@ You are checking whether the project's local `.adlc/templates/` copies still mat
 
 ## Ethos
 
-!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Context
 

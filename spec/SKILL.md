@@ -10,7 +10,7 @@ You are writing a requirement spec for the Atelier Fashion project following the
 
 ## Ethos
 
-!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Context
 
@@ -36,21 +36,25 @@ Before proceeding, verify that `.adlc/context/project-overview.md` exists. If it
 
 ### Step 2: Determine the Next REQ ID
 1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs)
-2. Read the number, use it as the REQ ID, and **immediately** write the incremented value back — using `flock` to prevent concurrent collisions:
+2. Read the number, use it as the REQ ID, and **immediately** write the incremented value back — using a POSIX `mkdir`-based lock to prevent concurrent collisions (works on macOS and Linux; `flock` is not available by default on macOS):
    ```bash
-   REQ_NUM=$(flock ~/.claude/.global-next-req.lock bash -c '
+   REQ_NUM=$(
+     LOCK=~/.claude/.global-next-req.lock.d
+     for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
      NUM=$(cat ~/.claude/.global-next-req)
      echo $((NUM + 1)) > ~/.claude/.global-next-req
+     rmdir "$LOCK" 2>/dev/null
      echo $NUM
-   ')
+   )
    ```
-3. If `~/.claude/.global-next-req` does not exist, create it by scanning all `.adlc/specs/` directories under `~/Documents/GitHub/` for the highest `REQ-xxx` number, use the next one, and write the number after that:
+3. If `~/.claude/.global-next-req` does not exist, create it by scanning all `.adlc/specs/` directories under `~/Documents/GitHub/` for the highest `REQ-xxx` number, use the next one, and write the number after that. Use `grep -oE` + `sed` (BSD-compatible) instead of `grep -oP` (GNU-only):
    ```bash
-   HIGHEST=$(find ~/Documents/GitHub -path '*/.adlc/specs/REQ-*' -type d 2>/dev/null | grep -oP 'REQ-\K\d+' | sort -n | tail -1)
+   HIGHEST=$(find ~/Documents/GitHub -path '*/.adlc/specs/REQ-*' -type d 2>/dev/null \
+     | grep -oE 'REQ-[0-9]+' | sed 's/REQ-//' | sort -n | tail -1)
    REQ_NUM=$((HIGHEST + 1))
    echo $((REQ_NUM + 1)) > ~/.claude/.global-next-req
    ```
-4. The `flock` ensures that concurrent `/sprint` sessions don't read the same counter value
+4. The `mkdir` lock ensures that concurrent `/sprint` sessions don't read the same counter value. `mkdir` is atomic on all POSIX filesystems — if another process holds the lock, the retry loop waits up to ~5 seconds.
 
 ### Step 3: Create the Requirement Spec
 1. Create directory: `.adlc/specs/REQ-xxx-feature-slug/`
@@ -58,10 +62,12 @@ Before proceeding, verify that `.adlc/context/project-overview.md` exists. If it
 3. Fill in all sections:
    - **Frontmatter**: id, title, status (`draft`), created date, updated date
    - **Description**: What the feature does and why — be specific and grounded in the project context
+   - **System Model**: Structured data model — Entities (fields, types, constraints), Events (triggers, payloads), Permissions (actions, roles). Remove sub-sections that don't apply to this feature.
+   - **Business Rules**: Explicit, testable constraints governing behavior (e.g., "Only item owner can delete"). Numbered BR-1, BR-2, etc.
    - **Acceptance Criteria**: Concrete, testable criteria as checkboxes
    - **External Dependencies**: Any new APIs, services, or libraries needed
    - **Assumptions**: Things assumed to be true that could affect the design
-   - **Questions**: Open questions that need answers before implementation
+   - **Open Questions**: Questions that need answers before implementation
    - **Out of Scope**: Items explicitly excluded to prevent scope creep
 
 ### Step 4: Present for Review

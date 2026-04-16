@@ -10,7 +10,7 @@ You are setting up the `.adlc/` directory structure for spec-driven development.
 
 ## Ethos
 
-!`cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
 
 ## Input
 
@@ -36,6 +36,7 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
 ### Step 3: Create Directory Structure
 ```
 .adlc/
+  ETHOS.md               # Copy of ~/.claude/skills/ETHOS.md — ensures skills work inside git worktrees
   context/
     project-overview.md    # What the project does, tech stack, scope
     architecture.md        # System diagram, layers, key patterns, ADRs
@@ -49,7 +50,15 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
       .gitkeep
     lessons/
       .gitkeep
+  templates/             # Copies of ~/.claude/skills/templates/*.md — ensures skills work inside git worktrees
+    assumption-template.md
+    bug-template.md
+    lesson-template.md
+    requirement-template.md
+    task-template.md
 ```
+
+**Why the local copies of ETHOS.md and templates?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `~/.claude/skills/ETHOS.md` and `~/.claude/skills/templates/*.md` become unreadable by subagents and any tool that uses `Read` mid-skill. Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
 
 ### Step 4: Populate Context Files
 
@@ -115,12 +124,30 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 .adlc/.next-bug
 ```
 
-### Step 6: Verify Toolkit Templates Are Accessible
-Verify that templates are accessible at `~/.claude/skills/templates/` (the toolkit symlink). Do NOT copy templates into per-project `.adlc/templates/` — all skills reference the toolkit templates directly at runtime.
+### Step 6: Copy ETHOS.md and Templates Into the Project
 
-If `~/.claude/skills/templates/` doesn't exist, warn: "Toolkit templates not found at `~/.claude/skills/templates/`. Ensure `~/.claude/skills` is symlinked to the adlc-toolkit repo."
+Copy the canonical ETHOS.md and all templates from the toolkit into the project so skills keep working inside git worktrees (where Read is sandboxed to the worktree root).
 
-**Note**: The `.adlc/templates/` directory is no longer created. Existing projects with local templates will continue to work — skills check the local path first, then fall back to the toolkit path.
+```bash
+# Verify source exists
+if [ ! -f ~/.claude/skills/ETHOS.md ] || [ ! -d ~/.claude/skills/templates ]; then
+  echo "ERROR: Toolkit not found at ~/.claude/skills/. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
+  exit 1
+fi
+
+# Copy ETHOS.md (overwrite — canonical is source of truth)
+cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md
+
+# Copy templates (overwrite — canonical is source of truth)
+mkdir -p .adlc/templates
+cp ~/.claude/skills/templates/*.md .adlc/templates/
+
+# Clean up Finder-style duplicates if present (e.g., "requirement-template 2.md")
+find .adlc -type f -name "* 2.md" -delete 2>/dev/null
+find .adlc -type d -name "* 2" -exec rm -rf {} + 2>/dev/null
+```
+
+If the user has previously made intentional customizations to their local `.adlc/ETHOS.md` or `.adlc/templates/*.md`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
 
 ### Step 7: Summary
 1. Display the created directory structure
