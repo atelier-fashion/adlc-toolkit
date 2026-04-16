@@ -142,9 +142,13 @@ cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md
 mkdir -p .adlc/templates
 cp ~/.claude/skills/templates/*.md .adlc/templates/
 
-# Clean up Finder-style duplicates if present (e.g., "requirement-template 2.md")
-find .adlc -type f -name "* 2.md" -delete 2>/dev/null
-find .adlc -type d -name "* 2" -exec rm -rf {} + 2>/dev/null
+# Clean up Finder-style duplicates if present. Matches:
+#   - .md files: "requirement-template 2.md"
+#   - non-.md files: "pipeline-state 2.json", ".next-bug 2"
+#   - directories: "knowledge 2", "specs 2"
+# The `-depth` flag processes directory contents before the directory itself,
+# so `rm -rf` on a "* 2" dir doesn't fail due to prior deletions.
+find .adlc -depth \( -name "* 2" -o -name "* 2.*" \) -exec rm -rf {} + 2>/dev/null
 ```
 
 If the user has previously made intentional customizations to their local `.adlc/ETHOS.md` or `.adlc/templates/*.md`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
