@@ -41,6 +41,7 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
     project-overview.md    # What the project does, tech stack, scope
     architecture.md        # System diagram, layers, key patterns, ADRs
     conventions.md         # File organization, naming, testing, git conventions
+    taxonomy.md            # Retrieval tag vocabulary (component/domain/stack/concerns)
   specs/
     .gitkeep
   bugs/
@@ -153,7 +154,34 @@ find .adlc -depth \( -name "* 2" -o -name "* 2.*" \) -exec rm -rf {} + 2>/dev/nu
 
 If the user has previously made intentional customizations to their local `.adlc/ETHOS.md` or `.adlc/templates/*.md`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
 
-### Step 7: Summary
+### Step 7: Scaffold Retrieval Taxonomy
+
+Copy the canonical taxonomy template to `.adlc/context/taxonomy.md` so authors of new REQs, bugs, and lessons have a reference vocabulary for retrieval tags.
+
+**This step is idempotent — skip if the file already exists** (preserve any project-local customizations).
+
+```bash
+# Verify source exists
+if [ ! -f ~/.claude/skills/templates/taxonomy-template.md ]; then
+  echo "ERROR: Taxonomy template not found at ~/.claude/skills/templates/taxonomy-template.md. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
+  exit 1
+fi
+
+# Ensure destination directory exists (safe if Step 3 already created it)
+mkdir -p .adlc/context
+
+# Idempotent copy: only copy if destination does not already exist
+if [ ! -f .adlc/context/taxonomy.md ]; then
+  cp ~/.claude/skills/templates/taxonomy-template.md .adlc/context/taxonomy.md
+  echo "Created .adlc/context/taxonomy.md from canonical template."
+else
+  echo "Preserved existing .adlc/context/taxonomy.md (idempotent — not overwritten)."
+fi
+```
+
+Advise the user: "Open `.adlc/context/taxonomy.md` and customize the example values for this codebase. Authors of new REQs, bugs, and lessons will reference this file when choosing tag values (`component`, `domain`, `stack`, `concerns`). The `tags` dimension stays free-form."
+
+### Step 8: Summary
 1. Display the created directory structure
 2. Explain the ADLC workflow: `/spec` → `/validate` → `/architect` → `/validate` → implement → `/reflect` → `/review` → `/wrapup` (or use `/proceed` to run the full pipeline automatically)
 3. Suggest adding ADLC skill references to the project's `CLAUDE.md` if one exists

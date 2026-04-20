@@ -8,11 +8,14 @@ Filename MUST be `LESSON-xxx-slug.md` (e.g., `LESSON-041-signed-url-ttl-mismatch
 ---
 id: LESSON-xxx
 title: "Lesson Title"
-domain: "area this applies to (e.g., testing, iOS, API, deployment, architecture)"
-component: "specific component (e.g., iOS/memory, API/auth, API/caching, iOS/SwiftUI, testing/mocks)"
-tags: []
+component: ""       # narrow area, e.g., "API/auth", "iOS/SwiftUI"
+domain: ""          # broad area, e.g., "auth", "testing", "adlc"
+stack: []           # tech layers touched, e.g., ["swift", "firestore"]
+concerns: []        # cross-cutting dimensions, e.g., ["security", "performance", "a11y"]
+tags: []            # free-form keywords, e.g., ["timer-cleanup", "snapshot-testing"]
 req: REQ-xxx
 created: YYYY-MM-DD
+updated: YYYY-MM-DD
 ---
 
 ## What Happened

@@ -5,6 +5,11 @@ status: open
 severity: critical | high | medium | low
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
+component: ""       # narrow area, e.g., "API/auth", "iOS/SwiftUI", "adlc/spec"
+domain: ""          # broad area, e.g., "auth", "payments", "ui"
+stack: []           # tech layers touched, e.g., ["express", "firestore"]
+concerns: []        # cross-cutting dimensions, e.g., ["security", "performance", "a11y"]
+tags: []            # free-form keywords, e.g., ["password-reset", "tokens"]
 ---
 
 ## Description
