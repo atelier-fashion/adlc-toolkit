@@ -1,7 +1,7 @@
 ---
 id: REQ-258
 title: "Unified Tag-Based Retrieval for /spec (Pilot)"
-status: approved
+status: complete
 deployable: true
 created: 2026-04-19
 updated: 2026-04-19
