@@ -1,7 +1,7 @@
 ---
 id: REQ-262
 title: "Backfill tag frontmatter across 4 consumer repos"
-status: approved
+status: complete
 deployable: false
 created: 2026-04-20
 updated: 2026-04-20
