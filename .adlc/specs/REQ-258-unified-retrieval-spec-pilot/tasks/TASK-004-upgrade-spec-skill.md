@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: "Upgrade /spec skill with unified retriever, query derivation, citations, self-tagging"
-status: draft
+status: complete
 parent: REQ-258
 created: 2026-04-19
 updated: 2026-04-19
