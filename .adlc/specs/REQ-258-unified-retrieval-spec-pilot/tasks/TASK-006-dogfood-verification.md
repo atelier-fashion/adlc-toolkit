@@ -1,7 +1,7 @@
 ---
 id: TASK-006
 title: "Dogfood verification — invoke upgraded /spec on synthetic feature and validate output against REQ-258 ACs"
-status: draft
+status: complete
 parent: REQ-258
 created: 2026-04-19
 updated: 2026-04-19
