@@ -47,10 +47,16 @@ Target: $ARGUMENTS
    - Re-run `gh pr checks` and wait for CI to re-pass before merging
 8. Verify PR status is mergeable: `gh pr view --json mergeable,mergeStateStatus` should report `MERGEABLE` and a clean merge state. If not, stop and surface the reason.
 9. Merge the PR using `gh pr merge --squash --delete-branch`
-10. Pull main locally: `git checkout main && git pull`
-11. Clean up local branch and worktree immediately after merge:
-    - If the feature branch still exists locally, delete it: `git branch -D <branch>`
-    - If a worktree was used (`.worktrees/REQ-xxx` exists), remove it: `git worktree remove .worktrees/REQ-xxx`
+10. **Capture cleanup state BEFORE leaving the branch**. You must record three things while you are still on the feature branch in the feature worktree, because the subsequent `git checkout main` may only work in the main worktree and you will lose the ability to look these up afterwards:
+    - Branch name: `BRANCH=$(git branch --show-current)`
+    - Current working-tree path: `WT_PATH=$(git rev-parse --show-toplevel)`
+    - Main worktree path: `MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p; exit}')`
+11. Move to the main worktree and update it: `cd "$MAIN_WT" && git checkout main && git pull`
+12. **Clean up local branch and worktree** (run from main worktree):
+    - If `"$WT_PATH"` differs from `"$MAIN_WT"` (i.e., the work happened in a separate worktree), remove it: `git worktree remove "$WT_PATH"`. This handles BOTH the `/proceed` pattern (`.worktrees/REQ-xxx`) and the Claude Code harness pattern (`.claude/worktrees/<slug>`) without hardcoding either path.
+    - If the feature branch still exists locally after the squash-merge (git does not recognize squash-merges as merged, so `git branch --merged` will miss it), delete it: `git branch -D "$BRANCH"`. Squash-merge is the default, so expect this to be the common case.
+    - Prune any lingering remote-tracking refs: `git fetch --prune`
+13. Verify cleanup: `git worktree list` should no longer include `$WT_PATH`, and `git branch` should no longer include `$BRANCH`. If either is still present, stop and surface the reason rather than silently moving on.
 
 ### Step 3: Update ADLC Artifact Statuses
 1. Set the requirement's frontmatter status to `complete`
