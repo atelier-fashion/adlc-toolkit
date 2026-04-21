@@ -1,0 +1,9 @@
+# Claude Code worktrees (created by /proceed for parallel session isolation)
+.claude/worktrees/
+.worktrees/
+
+# Per-user Claude Code overrides (team settings live in .claude/settings.json)
+.claude/settings.local.json
+
+# OS noise
+.DS_Store
