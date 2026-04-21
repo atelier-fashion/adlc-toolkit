@@ -16,6 +16,19 @@ This skill supports two modes:
 
 You are in subagent mode if you were explicitly told so in your launch prompt.
 
+## Autonomous Execution Contract
+
+`/proceed` is an **autonomous orchestrator**. It is designed to run end-to-end without human input. The skill has exactly **four** legitimate halt points; every other instruction below is a log step, not a pause:
+
+1. **Validation fails 3 times at any gate** (Phase 1 or Phase 3) — surface blockers.
+2. **Reflector surfaces user-facing questions** (Phase 5, Step C item 4) — surface as a numbered list and wait.
+3. **Canary deploy fails** (Phase 7.5) — surface the failure and wait for direction.
+4. **Merge conflicts during rebase** (Phase 8 / wrapup) — surface conflicts and wait.
+
+For everything else — including every **End-of-phase log** block below, every agent dispatch, every commit, every PR creation, every CI wait — you **continue immediately** to the next step without asking the user. Prompt only for tool-level permissions on truly destructive operations (these are governed by `.claude/settings.json`, not this skill).
+
+**Writing logs vs asking questions**: when the skill says "report X" or "log Y", emit a one-line status line to the conversation and continue. Do NOT phrase it as a question or wait for acknowledgment. A bad example: "Spec validated — shall I proceed to Phase 2?" A good example: "Spec validated. Moving to Phase 2."
+
 ## Ethos
 
 !`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
@@ -116,7 +129,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 2. If **APPROVED**: set requirement status to `approved` and move to Phase 2
 3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
 
-**Status update**: After this phase, report "Spec validated and approved" before continuing.
+**End-of-phase log**: Emit one line — "Spec validated and approved." Continue to Phase 2 immediately; do not wait for user acknowledgment.
 
 ---
 
@@ -129,7 +142,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 1. Invoke the `/architect` skill with the REQ ID
 2. This handles: reading context, designing architecture, creating task files with dependencies, and updating requirement status
 
-**Status update**: Summarize the architecture approach and list all tasks with dependency graph.
+**End-of-phase log**: Emit a one-paragraph summary of the architecture approach plus the task dependency graph. Continue to Phase 3 immediately.
 
 ---
 
@@ -143,7 +156,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 2. If **APPROVED**: move to Phase 4
 3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
 
-**Status update**: Report "Architecture and tasks validated" before continuing.
+**End-of-phase log**: Emit one line — "Architecture and tasks validated." Continue to Phase 4 immediately.
 
 ---
 
@@ -178,7 +191,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 - Execute tasks one at a time in dependency order
 - Implement each task directly in your own context (do not dispatch agents)
 
-**Status update**: After each tier completes, report which tasks finished and any issues encountered.
+**End-of-phase log**: After each tier completes, emit one line listing finished tasks and any task-level failures (failed tasks are also written to `phase4.failedTasks`). Do not pause between tiers; advance to the next tier as soon as its dependencies are met.
 
 ---
 
@@ -190,7 +203,9 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
 **Main conversation mode** — parallel agents:
 
-**Step A — Launch 6 READ-ONLY agents in parallel**. In a single message, dispatch six Agent tool calls using the formal agent definitions from `~/.claude/agents/`. This matches the dimensions covered by `/review` (correctness, quality, architecture, test coverage, security) plus the reflector self-assessment, so that feature work shipped via `/proceed` gets the same gate coverage as work shipped via `/review`:
+**Step A — Single-gate parallel dispatch (6 agents, ONE message)**. This whole step is ONE gate, not six. Dispatch all six Agent tool calls in a **single assistant message** using the formal agent definitions from `~/.claude/agents/`. Do NOT report findings, do NOT pause, do NOT log progress between agent returns — wait until all six have returned, then consolidate in Step B.
+
+The six agents match the dimensions covered by `/review` (correctness, quality, architecture, test coverage, security) plus the reflector self-assessment, so that feature work shipped via `/proceed` gets the same gate coverage as work shipped via `/review`:
 
 1. **reflector** agent — provide REQ-xxx, changed files, diff, conventions.md, architecture.md. Tell it: "Report findings only. The parent pipeline will apply fixes."
 2. **correctness-reviewer** agent — provide changed files, diff, conventions.md. Tell it: "Report findings only. Do not apply fixes."
@@ -212,7 +227,7 @@ Run the reflector checklist, then the correctness, quality, architecture, test-a
 
 **Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (**correctness-reviewer**, **quality-reviewer**, **architecture-reviewer**, **test-auditor**, **security-auditor** — not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the dimensions that had fixes: e.g., if only correctness fixes landed, rerun correctness + any other dimensions whose findings overlapped. In subagent mode, re-run the corresponding reviewer checklists inline.
 
-**Status update**: Report the combined verify summary — reflect observations, review findings, dedupe count, how many fixed, any deferred, any outstanding user questions.
+**End-of-phase log**: Emit the combined verify summary — reflect observations, review findings, dedupe count, how many fixed, any deferred. If reflector surfaced user-facing questions, halt here (legitimate halt #2). Otherwise continue to Phase 6.
 
 ---
 
@@ -269,7 +284,7 @@ Run the reflector checklist, then the correctness, quality, architecture, test-a
    - Push to the feature branch
 4. If CI checks are configured, verify they pass: `gh pr checks`
 
-**Status update**: Report "PR is clean and ready for merge" or list any remaining concerns.
+**End-of-phase log**: Emit one line — "PR clean, CI green, ready for merge" — or list any remaining concerns. Continue to Phase 7.5 (or Phase 8) immediately.
 
 ---
 
@@ -287,7 +302,7 @@ Run the reflector checklist, then the correctness, quality, architecture, test-a
    - Skip canary and proceed to merge (user must explicitly confirm)
    - Abort the pipeline
 
-**Status update**: Report canary results — service, revision, smoke test pass/fail.
+**End-of-phase log**: Emit canary results — service, revision, smoke test pass/fail. On pass, continue to Phase 8 immediately. On fail, halt (legitimate halt #3).
 
 ---
 
@@ -302,7 +317,7 @@ Run the reflector checklist, then the correctness, quality, architecture, test-a
 2. Update `pipeline-state.json` with `"completed": true`
 3. The pipeline is now complete
 
-**Status update**: Report the ship summary from wrapup and confirm deployment status.
+**End-of-phase log**: Emit the ship summary from wrapup and deployment status. Pipeline complete.
 
 ---
 

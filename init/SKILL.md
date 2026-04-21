@@ -120,6 +120,9 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 # ADLC worktrees (used by /proceed for parallel session isolation)
 .worktrees/
 
+# Claude Code per-user permission overrides (team settings live in .claude/settings.json)
+.claude/settings.local.json
+
 # ADLC global REQ counter is at ~/.claude/.global-next-req (not per-project)
 # ADLC local BUG counter (per-project state, not shared)
 .adlc/.next-bug
@@ -181,7 +184,36 @@ fi
 
 Advise the user: "Open `.adlc/context/taxonomy.md` and customize the example values for this codebase. Authors of new REQs, bugs, and lessons will reference this file when choosing tag values (`component`, `domain`, `stack`, `concerns`). The `tags` dimension stays free-form."
 
-### Step 8: Summary
+### Step 8: Scaffold Claude Code Permissions Allowlist
+
+Copy the canonical Claude Code settings template to `.claude/settings.json` so `/proceed` (and every other skill in this toolkit) can run end-to-end without prompting for permission on every routine `git`, `gh`, test, and agent-dispatch operation. This is the single biggest mitigation against per-phase gating in long-running pipelines.
+
+**This step is idempotent — skip if the file already exists** (preserve any project-local customizations).
+
+```bash
+# Verify source exists
+if [ ! -f ~/.claude/skills/templates/claude-settings-template.json ]; then
+  echo "ERROR: Settings template not found at ~/.claude/skills/templates/claude-settings-template.json. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
+  exit 1
+fi
+
+# Ensure destination directory exists
+mkdir -p .claude
+
+# Idempotent copy: only copy if destination does not already exist
+if [ ! -f .claude/settings.json ]; then
+  cp ~/.claude/skills/templates/claude-settings-template.json .claude/settings.json
+  echo "Created .claude/settings.json from canonical template."
+else
+  echo "Preserved existing .claude/settings.json (idempotent — not overwritten)."
+fi
+```
+
+The template pre-approves the routine `git`, `gh`, `npm`, Read/Write/Edit, and agent-dispatch operations the ADLC pipeline fires. Destructive operations (`rm -rf`, `git reset --hard`, `gh pr merge`, `./deploy.sh`, `terraform apply/destroy`, force-push to `main`) remain on the **ask** list so a human still confirms the one-way moves. Customize for project-specific commands (e.g., add `Bash(cd app && ./deploy.sh:*)` for iOS deploys) by editing `.claude/settings.json` directly.
+
+Advise the user: "`.claude/settings.json` was scaffolded with a default allowlist. Commit this file — it is team-shared. Use `.claude/settings.local.json` (gitignored by Claude Code) for personal overrides."
+
+### Step 9: Summary
 1. Display the created directory structure
 2. Explain the ADLC workflow: `/spec` → `/validate` → `/architect` → `/validate` → implement → `/reflect` → `/review` → `/wrapup` (or use `/proceed` to run the full pipeline automatically)
 3. Suggest adding ADLC skill references to the project's `CLAUDE.md` if one exists
