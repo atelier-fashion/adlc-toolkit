@@ -59,16 +59,19 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 ### Step 4: Break Into Tasks
 1. Create `.adlc/specs/REQ-xxx-*/tasks/` directory
 2. Determine the next TASK ID by checking existing tasks across ALL specs (not just this one)
-3. Create `TASK-xxx-description.md` for each task using the template from `.adlc/templates/task-template.md`
-4. Each task must specify:
-   - **Frontmatter**: id, title, status (`draft`), parent REQ, created/updated dates, dependencies
+3. **Detect repository mode**: check whether `.adlc/config.yml` exists in the primary repo and declares a `repos:` block with more than one entry.
+   - **Single-repo mode** (no config or single entry): set `repo:` on each task to the primary repo id (or omit — `/proceed` will backfill). Files listed under "Files to Create/Modify" all live in the primary repo.
+   - **Cross-repo mode** (config has siblings): **every task MUST declare a `repo:` field** naming one of the ids under `repos:`. Group files by repo — a single task should not modify files in multiple repos. If a piece of work spans repos (e.g., an API contract change requires matching backend and frontend edits), split it into at least two tasks with an explicit dependency between them.
+4. Create `TASK-xxx-description.md` for each task using the template from `.adlc/templates/task-template.md`
+5. Each task must specify:
+   - **Frontmatter**: id, title, status (`draft`), parent REQ, created/updated dates, dependencies, `repo:` (required in cross-repo mode)
    - **Description**: What this task accomplishes
-   - **Files to Create/Modify**: Specific file paths with descriptions of changes
+   - **Files to Create/Modify**: Specific file paths with descriptions of changes — all paths must live in the task's target repo
    - **Acceptance Criteria**: Concrete, testable criteria
-   - **Technical Notes**: Implementation details, patterns to follow, edge cases
-   - **Dependencies**: Other tasks that must complete first
-5. Tasks must form a valid dependency graph (no cycles)
-6. Order tasks so foundational work comes first (data layer → service → routes → UI)
+   - **Technical Notes**: Implementation details, patterns to follow, edge cases. In cross-repo mode, call out any cross-repo contracts this task establishes or consumes.
+   - **Dependencies**: Other tasks that must complete first — dependencies may cross repos (a frontend task can depend on a backend task)
+6. Tasks must form a valid dependency graph (no cycles), even when spanning repos
+7. Order tasks so foundational work comes first (data layer → service → routes → UI). In cross-repo mode, backend/API tasks typically precede their frontend consumers.
 
 ### Step 5: Update Requirement Status
 1. Update the requirement's frontmatter status from `draft` to `approved`
@@ -83,7 +86,8 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 ## Quality Checklist
 - [ ] Architecture follows existing patterns (layered: routes → services → repositories)
 - [ ] Tasks are small enough to implement in a single session
-- [ ] Task dependencies form a valid DAG (no cycles)
+- [ ] Task dependencies form a valid DAG (no cycles), including cross-repo edges
 - [ ] Every file to be modified is listed in at least one task
 - [ ] Tests are included in task acceptance criteria
 - [ ] No task has more than 3 dependencies
+- [ ] In cross-repo mode: every task has a `repo:` field naming a valid repo id from `.adlc/config.yml`, and all files in that task live in that repo
