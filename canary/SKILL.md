@@ -1,7 +1,7 @@
 ---
 name: canary
 description: Canary deployment with smoke tests — deploy to a zero-traffic revision, run health checks, and promote on success. Use when the user says "canary deploy", "deploy with canary", "smoke test the deploy", or wants deployment confidence before going live.
-argument-hint: Optional service name (fashion-api, admin-api, atelier-web) — auto-detected from current repo if omitted
+argument-hint: Optional repo id (from .adlc/config.yml) or service name — auto-detected from current worktree if omitted
 ---
 
 # /canary — Canary Deployment with Smoke Tests
@@ -29,17 +29,38 @@ Target: $ARGUMENTS
 2. The service must already exist on Cloud Run (this skill deploys revisions, not new services)
 3. A Docker image must be available (either build locally or use the latest from Artifact Registry)
 
-## Service Detection
+## Service Resolution
 
-Map the current repo/directory to Cloud Run service configuration:
+Service configuration lives in **`.adlc/config.yml`** in the primary repo under a `services:` block, keyed by repo id. This is the single source of truth — no service names, regions, or image paths should be hardcoded in this skill.
 
-| Repo / Directory | Service Name | Region | Image Path |
-|-----------------|--------------|--------|------------|
-| `atelier-fashion/api` or `atelier-fashion` | `fashion-api` | `us-central1` | `us-central1-docker.pkg.dev/sharp-maker-488811-g1/fashion-api/fashion-api` |
-| `admin-api` | `admin-api` | `us-central1` | `us-central1-docker.pkg.dev/sharp-maker-488811-g1/admin-api/admin-api` |
-| `atelier-web` | `atelier-web` | `us-central1` | `us-central1-docker.pkg.dev/sharp-maker-488811-g1/atelier-web/atelier-web` |
+**Expected config shape** (primary repo `.adlc/config.yml`):
 
-If the argument specifies a service name, use that. Otherwise, detect from the current working directory.
+```yaml
+repos:
+  admin-api:
+    path: ../admin-api
+  admin-web:
+    path: ../admin-web
+
+services:
+  admin-api:
+    cloud_run_service: admin-api
+    region: us-central1
+    image_path: us-central1-docker.pkg.dev/sharp-maker-488811-g1/admin-api/admin-api
+  admin-web:
+    cloud_run_service: admin-web
+    region: us-central1
+    image_path: us-central1-docker.pkg.dev/sharp-maker-488811-g1/atelier-web/atelier-web
+```
+
+**Resolution order**:
+1. If `$ARGUMENTS` is a repo id defined under `repos:` in the primary's config, look up `services[<repo-id>]` and use that. If the repo id has no `services:` entry, stop and ask the user to add one.
+2. If `$ARGUMENTS` is a Cloud Run service name already (e.g., the user passed `admin-api` and it matches `services.*.cloud_run_service`), use that entry.
+3. If no argument: detect which repo the current cwd is inside by walking up to find a git root and matching it against `repos[*].path` (resolve each to an absolute path first). Then look up its service.
+4. If the project has no `.adlc/config.yml` (single-repo legacy setup) AND the current repo has a top-level `Dockerfile` and a single Cloud Run service name that matches the repo basename, fall back to auto-detection: service name = repo basename, region = `us-central1`, image path = `$(gcloud config get-value project)/<service>`. Surface this fallback in the logs so the user knows it's being inferred.
+5. If none of the above resolves, stop with a clear error: "Could not determine Cloud Run service. Add a `services:` block to `.adlc/config.yml` or pass the service name as an argument."
+
+**Operating worktree**: if the resolved repo has a feature-branch worktree (e.g., `.worktrees/REQ-xxx`) that matches the current `/proceed` pipeline, build from inside that worktree. Otherwise build from the repo's main checkout. The caller (usually `/proceed` Phase 7.5) can also pass the worktree path explicitly.
 
 ## Instructions
 
@@ -89,7 +110,7 @@ If health checks fail after 3 retries, go to Step 6 (Rollback).
 
 ### Step 4: Smoke Tests
 
-Run smoke tests against the canary URL. Load test definitions from `.adlc/context/smoke-tests.md` if it exists, otherwise use defaults:
+Run smoke tests against the canary URL. Load test definitions from the **primary repo's** `.adlc/context/smoke-tests.md` if it exists, otherwise use defaults. In cross-repo mode the primary's smoke-tests.md is the authoritative source for every service — sibling repos do not need their own copy.
 
 **Default smoke tests** (API services):
 ```

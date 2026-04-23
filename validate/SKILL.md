@@ -57,12 +57,19 @@ Before proceeding, verify that `.adlc/specs/` exists. If it doesn't, stop and te
 
 #### Validating Tasks
 - [ ] Every task has valid frontmatter (id, title, status, parent, created, updated, dependencies)
-- [ ] Tasks form a valid DAG — no circular dependencies
+- [ ] Tasks form a valid DAG — no circular dependencies (including cross-repo dependencies)
 - [ ] Every acceptance criterion from the requirement is covered by at least one task
 - [ ] Each task lists specific files to create/modify
 - [ ] Tasks are appropriately scoped (not too large, not too granular)
 - [ ] Test requirements are included in task acceptance criteria
 - [ ] Dependencies reference valid task IDs
+
+**Cross-repo tasks** — only applies if `.adlc/config.yml` in the primary repo declares more than one entry under `repos:`. Skip these checks in single-repo mode.
+- [ ] Every task has a `repo:` field in its frontmatter
+- [ ] Every `repo:` value matches an id declared in `.adlc/config.yml` under `repos:`
+- [ ] No task modifies files outside its declared `repo:` — all paths under "Files to Create/Modify" live in that repo
+- [ ] At least one task targets the primary repo (even if just spec/doc updates) OR a follow-up confirms the primary needs no code changes
+- [ ] Cross-repo dependencies make sense (e.g., a frontend task depending on a backend task, not the reverse)
 
 #### Validating Implementation
 - [ ] All task acceptance criteria are met
