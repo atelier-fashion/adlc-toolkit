@@ -1,0 +1,68 @@
+# .adlc/config.yml — ADLC project configuration
+#
+# This file lives in every repo that originates REQs. "Primary" is per-REQ,
+# not a fixed designation: whichever repo you invoke /proceed from becomes
+# the primary for that REQ, so every repo that can host REQs needs its own
+# `.adlc/` (from /init) and its own config.yml.
+#
+# The config in THIS repo describes the world from this repo's perspective:
+# this repo is primary, the others are siblings. The sibling repos that also
+# originate REQs will have their own config.yml files that mirror this —
+# they'll mark themselves primary and list this one as a sibling. That's
+# expected; the configs are symmetric by design.
+#
+# A repo that only ever participates as a sibling (never originates REQs)
+# doesn't strictly need a config, but it's cheap insurance to set one up
+# anyway so it can host a REQ later.
+#
+# Single-repo projects can leave this file absent OR include only a single
+# entry under `repos:`. All ADLC skills fall back to legacy single-repo
+# behavior in that case.
+#
+# ---------------------------------------------------------------------------
+# repos: This repo plus every sibling it might coordinate with.
+# ---------------------------------------------------------------------------
+# The key is a short stable id (used in task frontmatter as `repo: <id>`).
+# The entry for THIS repo has `primary: true` and no `path` (path is implicit).
+# Sibling entries declare a `path:` relative to this repo's root (or absolute).
+# Every sibling must be cloned locally at that path.
+
+repos:
+  # Example: primary is the admin web app
+  admin-app:
+    primary: true
+  # Example: siblings
+  admin-api:
+    path: ../admin-api
+  admin-web:
+    path: ../admin-web
+
+# ---------------------------------------------------------------------------
+# merge_order: Order Phase 8 merges PRs.
+# ---------------------------------------------------------------------------
+# List touched repo ids in the order they should merge. Typical pattern:
+# data/backend first, then the services that consume them.
+# If omitted, /proceed uses the order repos appear under `repos:` above.
+
+merge_order:
+  - admin-api
+  - admin-app
+  - admin-web
+
+# ---------------------------------------------------------------------------
+# services: Cloud Run / deploy config keyed by repo id.
+# ---------------------------------------------------------------------------
+# Consumed by /canary. Repos without a `services:` entry are treated as
+# non-deployable (e.g., docs-only, iOS, infrastructure-only repos).
+# Repos that deploy via a different mechanism (TestFlight, custom script)
+# can be omitted here and handled in /wrapup Step 6.
+
+services:
+  admin-api:
+    cloud_run_service: admin-api
+    region: us-central1
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-api/admin-api
+  admin-web:
+    cloud_run_service: admin-web
+    region: us-central1
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-web/admin-web

@@ -6,6 +6,9 @@ parent: REQ-xxx
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 dependencies: []
+# repo: <repo-id>   # REQUIRED in cross-repo projects (see .adlc/config.yml).
+                    # One of the ids under `repos:` in .adlc/config.yml.
+                    # In single-repo projects, omit or set to the primary repo id.
 ---
 
 ## Description

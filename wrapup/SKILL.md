@@ -29,34 +29,45 @@ Target: $ARGUMENTS
 1. If given a REQ ID, locate all artifacts under `.adlc/specs/REQ-xxx-*/`
 2. If no REQ ID given, infer from the current branch name or recent merge commits
 3. Read the requirement spec, architecture doc, and all task files
+4. **Detect repository mode** — read `.adlc/config.yml` in the primary repo. If it declares more than one entry under `repos:`, this is **cross-repo mode**; otherwise **single-repo mode**. In cross-repo mode also read `pipeline-state.json` from the spec directory — it holds the per-repo branch/worktree/PR/merge state.
 
 ### Step 2: Commit, Push, and Merge
-1. **Branch check FIRST** — never commit on `main`. Run `git branch --show-current`. If it reports `main` (or `master`), stop: create a feature branch (e.g., `agent/REQ-xxx-slug` or `feat/REQ-xxx-slug`) and switch to it with `git checkout -b <branch>` BEFORE touching any files. If you're already on a worktree branch from `/proceed` Phase 0, continue.
-2. Check `git status` and `git diff` for any uncommitted changes related to the feature
+
+**Determine the repo set to operate on**:
+- **Single-repo mode**: operate on the current repo only. Skip to the single-repo steps below.
+- **Cross-repo mode from `/proceed`**: `pipeline-state.json` already lists touched repos; each `repos[<id>].merged` reflects whether `/proceed` Phase 8 already merged that PR. Walk `mergeOrder` and for each repo either confirm it's merged (no-op) or run the single-repo merge sequence inside that repo's worktree.
+- **Cross-repo mode standalone**: no `pipeline-state.json` — fall back to detecting touched repos from the config and checking for feature branches/open PRs in each. Proceed with the single-repo merge sequence in each repo that has pending work, in `merge_order` from the config.
+
+**Single-repo merge sequence** — run this block inside each target repo's worktree (same mechanics as before):
+
+1. **Branch check FIRST** — never commit on `main`. Run `git -C <worktree> branch --show-current`. If it reports `main` (or `master`), stop: create a feature branch (e.g., `agent/REQ-xxx-slug` or `feat/REQ-xxx-slug`) and switch to it with `git checkout -b <branch>` BEFORE touching any files. If you're already on a worktree branch from `/proceed` Phase 0, continue.
+2. Check `git -C <worktree> status` and `git -C <worktree> diff` for any uncommitted changes related to the feature
 3. If there are uncommitted changes:
    - Stage all relevant files (avoid secrets, `.env`, credentials)
    - Create a commit with message: `feat(REQ-xxx): <summary of changes>`
    - Include `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
-4. Push the branch to remote with `git push -u origin <branch>`
-5. If no PR exists for this branch, create one using `gh pr create` with a summary of what shipped
+4. Push the branch to remote with `git -C <worktree> push -u origin <branch>`
+5. If no PR exists for this branch, create one using `gh pr create` (from inside the worktree, or with `gh -R <owner/repo>`) with a summary of what shipped
 6. If CI checks exist, monitor the pipeline with `gh run watch` and report the result
-7. **Rebase onto current main before merging** — in a sprint or long-running pipeline, upstream `main` may have advanced since the branch was cut. Run `git fetch origin main` and check whether the branch is behind: `git merge-base --is-ancestor origin/main HEAD`. If that command fails (exit 1), the branch is behind main and must be updated:
-   - `git rebase origin/main`
+7. **Rebase onto current main before merging** — in a sprint or long-running pipeline, upstream `main` may have advanced since the branch was cut. Run `git -C <worktree> fetch origin main` and check whether the branch is behind: `git -C <worktree> merge-base --is-ancestor origin/main HEAD`. If that command fails (exit 1), the branch is behind main and must be updated:
+   - `git -C <worktree> rebase origin/main`
    - If there are conflicts, STOP and surface them to the user — do not try to resolve semantic conflicts blindly
-   - On clean rebase, force-push with lease: `git push --force-with-lease`
-   - Re-run `gh pr checks` and wait for CI to re-pass before merging
-8. Verify PR status is mergeable: `gh pr view --json mergeable,mergeStateStatus` should report `MERGEABLE` and a clean merge state. If not, stop and surface the reason.
-9. Merge the PR using `gh pr merge --squash --delete-branch`
+   - On clean rebase, force-push with lease: `git -C <worktree> push --force-with-lease`
+   - Re-run `gh pr checks <prUrl>` and wait for CI to re-pass before merging
+8. Verify PR status is mergeable: `gh pr view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE` and a clean merge state. If not, stop and surface the reason.
+9. Merge the PR using `gh pr merge <prUrl> --squash --delete-branch`. In cross-repo mode, update `pipeline-state.json` — set `repos[<id>].merged = true`.
 10. **Capture cleanup state BEFORE leaving the branch**. You must record three things while you are still on the feature branch in the feature worktree, because the subsequent `git checkout main` may only work in the main worktree and you will lose the ability to look these up afterwards:
-    - Branch name: `BRANCH=$(git branch --show-current)`
-    - Current working-tree path: `WT_PATH=$(git rev-parse --show-toplevel)`
-    - Main worktree path: `MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p; exit}')`
-11. Move to the main worktree and update it: `cd "$MAIN_WT" && git checkout main && git pull`
-12. **Clean up local branch and worktree** (run from main worktree):
-    - If `"$WT_PATH"` differs from `"$MAIN_WT"` (i.e., the work happened in a separate worktree), remove it: `git worktree remove "$WT_PATH"`. This handles BOTH the `/proceed` pattern (`.worktrees/REQ-xxx`) and the Claude Code harness pattern (`.claude/worktrees/<slug>`) without hardcoding either path.
-    - If the feature branch still exists locally after the squash-merge (git does not recognize squash-merges as merged, so `git branch --merged` will miss it), delete it: `git branch -D "$BRANCH"`. Squash-merge is the default, so expect this to be the common case.
-    - Prune any lingering remote-tracking refs: `git fetch --prune`
-13. Verify cleanup: `git worktree list` should no longer include `$WT_PATH`, and `git branch` should no longer include `$BRANCH`. If either is still present, stop and surface the reason rather than silently moving on.
+    - Branch name: `BRANCH=$(git -C <worktree> branch --show-current)`
+    - Current working-tree path: `WT_PATH=<worktree>`
+    - Main worktree path: `MAIN_WT=$(git -C <worktree> worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p; exit}')`
+11. Move to the main worktree and update it: `git -C "$MAIN_WT" checkout main && git -C "$MAIN_WT" pull`
+12. **Clean up local branch and worktree** (run from `$MAIN_WT`):
+    - If `"$WT_PATH"` differs from `"$MAIN_WT"` (i.e., the work happened in a separate worktree), remove it: `git -C "$MAIN_WT" worktree remove "$WT_PATH"`. This handles BOTH the `/proceed` pattern (`.worktrees/REQ-xxx`) and the Claude Code harness pattern (`.claude/worktrees/<slug>`) without hardcoding either path.
+    - If the feature branch still exists locally after the squash-merge (git does not recognize squash-merges as merged, so `git branch --merged` will miss it), delete it: `git -C "$MAIN_WT" branch -D "$BRANCH"`. Squash-merge is the default, so expect this to be the common case.
+    - Prune any lingering remote-tracking refs: `git -C "$MAIN_WT" fetch --prune`
+13. Verify cleanup: `git -C "$MAIN_WT" worktree list` should no longer include `$WT_PATH`, and `git -C "$MAIN_WT" branch` should no longer include `$BRANCH`. If either is still present, stop and surface the reason rather than silently moving on.
+
+**Cross-repo aggregate log**: after walking every touched repo, emit a one-line summary per repo: `<repo-id>: merged <prUrl>, worktree cleaned` or `<repo-id>: already merged (from /proceed Phase 8)`.
 
 ### Step 3: Update ADLC Artifact Statuses
 1. Set the requirement's frontmatter status to `complete`
@@ -93,8 +104,9 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Were any existing conventions found to be problematic?
 
 ### Step 5: Generate Ship Summary
-Create a concise summary suitable for sharing with the team:
+Create a concise summary suitable for sharing with the team. In cross-repo mode, list each repo/PR under a Repos section.
 
+**Single-repo template**:
 ```
 ## REQ-xxx: Feature Title
 
@@ -122,12 +134,39 @@ Create a concise summary suitable for sharing with the team:
 - Any remaining work, monitoring, or verification required
 ```
 
+**Cross-repo template** (replace the single `PR`/`Branch` lines with a Repos table):
+```
+## REQ-xxx: Feature Title
+
+**Status**: Shipped
+**Merged**: YYYY-MM-DD
+
+### Repos
+| Repo | Branch | PR | Files | +/- |
+|------|--------|----|-------|-----|
+| admin-api | feat/REQ-xxx-... | #12 | 7 | +320 / -15 |
+| admin-app | feat/REQ-xxx-... | #45 | 3 | +88 / -2 |
+| admin-web | feat/REQ-xxx-... | #31 | 5 | +210 / -40 |
+
+### What shipped
+- Bullet points (call out cross-repo changes like new API contracts explicitly)
+
+### Key decisions
+### Metrics (aggregate across repos)
+### Deferred items
+### Follow-up needed
+```
+
 ### Step 6: Deploy
-1. Determine which components were changed by examining the files in the PR/commits:
-   - **API changes** (`api/` files modified): Already deployed via CI/CD pipeline in Step 2. Confirm the deploy succeeded.
-   - **iOS changes** (`app/` files modified): Deploy to both devices via WiFi using `cd app && ./deploy.sh`. Deploy to both unless told otherwise.
-   - **Infrastructure changes** (`infrastructure/` files): Note that Terraform apply is needed and confirm with user.
-2. If no deployable changes exist (e.g., only ADLC docs changed), skip this step.
+Walk the touched repos and deploy each deployable service.
+
+1. Determine which components were changed by examining each touched repo's PR/commits. Deploy decisions per repo:
+   - **API/backend services** (Cloud Run-deployed services): Already deployed via CI/CD when their PR merged. Confirm each deploy succeeded (`gcloud run services describe ...`).
+   - **iOS changes**: Deploy to both devices via WiFi using `cd <ios-repo-worktree-or-checkout> && ./deploy.sh`.
+   - **Web frontend**: Confirm CI/CD deploy succeeded.
+   - **Infrastructure changes**: Note that Terraform apply is needed and confirm with user.
+2. If no touched repo has deployable changes (e.g., only ADLC docs changed), skip this step.
+3. In cross-repo mode, emit a one-line deploy status per touched repo in the ship summary.
 
 ### Step 7: Clean Up
 1. Check for any temporary files, debug logging, or feature flags that should be removed

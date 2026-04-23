@@ -213,7 +213,39 @@ The template pre-approves the routine `git`, `gh`, `npm`, Read/Write/Edit, and a
 
 Advise the user: "`.claude/settings.json` was scaffolded with a default allowlist. Commit this file — it is team-shared. Use `.claude/settings.local.json` (gitignored by Claude Code) for personal overrides."
 
-### Step 9: Summary
+### Step 9: Scaffold Cross-Repo Config (Optional)
+
+Ask the user: "Will this repo ever share features with other repos you also work on (e.g., an admin app + its API + an iOS app)? If yes, `/proceed` can coordinate REQs across them — this repo needs a `.adlc/config.yml` to list its siblings."
+
+**Conceptual note** — explain if the user seems uncertain: "Primary" is per-REQ, not a fixed role. The current repo is primary for REQs that originate here (`/proceed` invoked from this repo). The siblings you list are other repos that might participate when a cross-repo REQ starts here. If you also originate REQs from one of those siblings, you'll run `/init` there too — each repo that hosts REQs gets its own `.adlc/` and its own `config.yml` listing the others as siblings (mirror images of each other).
+
+If the user confirms cross-repo **and** `.adlc/config.yml` does not already exist, copy the template:
+
+```bash
+# Verify source exists
+if [ ! -f ~/.claude/skills/templates/config-template.yml ]; then
+  echo "ERROR: Config template not found at ~/.claude/skills/templates/config-template.yml."
+  exit 1
+fi
+
+if [ ! -f .adlc/config.yml ]; then
+  cp ~/.claude/skills/templates/config-template.yml .adlc/config.yml
+  echo "Created .adlc/config.yml from template — edit it to match your repo layout."
+else
+  echo "Preserved existing .adlc/config.yml."
+fi
+```
+
+Advise the user:
+- "Edit `.adlc/config.yml`. The entry for THIS repo should have `primary: true` and no `path` (path is implicit since it's this repo). Each sibling entry gets a `path:` (relative to this repo root, or absolute). Every sibling must already be cloned locally at that path."
+- "If you also run REQs from one of the siblings, run `/init` there too. That repo's config will mark itself as primary and list the others as siblings — the structure is symmetric."
+- "If this is a single-repo project (REQs only ever originate here and never touch other repos), skip this step. ADLC skills fall back to single-repo behavior when no config or no siblings are declared."
+- "After editing, verify with `cat .adlc/config.yml` and make sure each sibling path resolves: `git -C <sibling-path> rev-parse --git-dir`."
+
+If the project is single-repo, skip the copy (no config file needed).
+
+### Step 10: Summary
 1. Display the created directory structure
 2. Explain the ADLC workflow: `/spec` → `/validate` → `/architect` → `/validate` → implement → `/reflect` → `/review` → `/wrapup` (or use `/proceed` to run the full pipeline automatically)
-3. Suggest adding ADLC skill references to the project's `CLAUDE.md` if one exists
+3. If cross-repo config was scaffolded, remind the user that `/proceed` will create worktrees in every touched sibling and open one PR per repo
+4. Suggest adding ADLC skill references to the project's `CLAUDE.md` if one exists
