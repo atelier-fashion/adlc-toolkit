@@ -90,6 +90,7 @@ After `/init`, each code repo will have:
 
 ```
 .adlc/
+  config.yml         # (Optional) Cross-repo configuration — see below
   context/           # Project-specific architecture, conventions, overview
   specs/             # Requirement docs, architecture docs, tasks
   knowledge/         # Assumptions validated, lessons learned
@@ -97,6 +98,58 @@ After `/init`, each code repo will have:
 ```
 
 The toolkit repo contains the **process** (skills + templates). Each code repo contains the **artifacts** (specs, architecture, knowledge).
+
+## Cross-Repo REQs
+
+Some features span multiple repos (e.g., an admin control plane that touches a backend API, a mobile app, and a web app). The toolkit supports these via an optional `.adlc/config.yml` in each participating repo.
+
+### Key concept: "primary" is per-REQ
+
+There is no fixed "primary repo." Whichever repo you invoke `/proceed` (or `/bugfix`) from becomes the primary for that REQ — it holds the spec, tasks, and `pipeline-state.json` for that work. A different REQ that originates in a sibling repo makes that sibling the primary. Every repo that may originate REQs gets its own `.adlc/` structure and its own `config.yml`; the configs are **mirror images** of each other (each repo marks itself `primary: true` and lists the others as siblings).
+
+### config.yml shape
+
+```yaml
+repos:
+  admin-api:
+    primary: true       # only in this repo's config
+  infrastructure:
+    path: ../infrastructure
+  atelier-fashion:
+    path: ../atelier-fashion
+  atelier-web:
+    path: ../atelier-web
+
+merge_order:            # default Phase 8 merge sequence
+  - infrastructure
+  - admin-api
+  - atelier-fashion
+  - atelier-web
+
+services:               # consumed by /canary, keyed by repo id
+  admin-api:
+    cloud_run_service: admin-api
+    region: us-central1
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-api/admin-api
+  # (infrastructure has no service entry — it deploys via Terraform)
+```
+
+See [`templates/config-template.yml`](templates/config-template.yml) for the full annotated template.
+
+### What changes when cross-repo is configured
+
+- `/proceed` creates a worktree in every touched sibling, routes tasks by `repo:` frontmatter, opens one PR per repo, and merges in `merge_order`
+- `/architect` requires a `repo:` field on every task it generates
+- `/validate` checks that `repo:` values resolve to configured repo ids and that task files stay in their declared repo
+- `/wrapup` walks `mergeOrder` to land PRs in order and cleans up worktrees across every touched repo
+- `/canary` resolves service metadata from `services:` instead of a hardcoded table
+- `/status` reports cross-repo activity (REQs originating elsewhere that touch this repo)
+- `/sprint` delegates cross-repo mechanics to each `/proceed`; one sprint still originates all REQs from the invoking repo
+- `/bugfix` supports cross-repo bugs via `repo:` or `touched_repos:` on the bug frontmatter
+
+### Single-repo mode (default)
+
+If no `config.yml` exists or it has only a single `repos:` entry, every skill falls back to legacy single-repo behavior. Existing projects are unaffected until they opt in by creating `config.yml`.
 
 ## Updating
 

@@ -36,10 +36,11 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
      echo $((BUG_NUM + 1)) > .adlc/.next-bug
      ```
      If `.adlc/.next-bug` doesn't exist, scan `.adlc/bugs/` for the highest BUG-xxx number, use the next one, and write the number after that.
-   - Create `.adlc/bugs/BUG-xxx-slug.md` using the template from `.adlc/templates/bug-template.md`
+   - Create `.adlc/bugs/BUG-xxx-slug.md` (always in the current repo — this becomes the "primary" for the bug) using the template from `.adlc/templates/bug-template.md`
    - Fill in: description, reproduction steps (if known), expected vs actual behavior, environment
    - Set status to `open`, severity based on impact
-2. If given a BUG ID, read the existing bug report
+   - **Cross-repo**: if `.adlc/config.yml` declares siblings AND the bug's fix likely lives in a sibling (e.g., a frontend symptom whose root cause is in a backend repo), add a `repo: <sibling-id>` field to the bug frontmatter. If the fix spans multiple repos, add a `touched_repos: [<id>, <id>]` field. The `repo:` field determines where Phase 3's commit and Phase 4's PR land.
+2. If given a BUG ID, read the existing bug report — note any `repo:` or `touched_repos:` field for routing.
 
 ### Phase 2: Analyze
 1. Launch Explore agents to trace the bug:
@@ -55,11 +56,12 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 5. Update the bug report with the validated findings
 
 ### Phase 3: Fix
-1. Proceed directly with the validated fix approach — do not pause for user confirmation
-2. Implement the fix following project conventions
-3. Ensure the fix addresses the root cause, not just symptoms
-4. Update related test files if the fix changes behavior
-5. Track progress with TodoWrite
+1. **Determine target repo**: if the bug's frontmatter has `repo:` and it names a sibling (not this repo), cd into that sibling's path from `.adlc/config.yml` and do all fix work there. For `touched_repos: [...]`, cd into each in turn — one commit per repo, on a shared branch name. Otherwise fix in the current repo.
+2. Proceed directly with the validated fix approach — do not pause for user confirmation
+3. Implement the fix following project conventions
+4. Ensure the fix addresses the root cause, not just symptoms
+5. Update related test files if the fix changes behavior
+6. Track progress with TodoWrite
 
 ### Phase 4: Verify
 1. Run the test suite: `npm test` (or appropriate test command)
@@ -76,9 +78,17 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
    - Test results
 
 ## Branch Naming
-Use `fix/bug-xxx-slug` for the branch name.
+Use `fix/bug-xxx-slug` for the branch name. In cross-repo bugs, use the same branch name in every touched repo so PRs can be linked visually.
 
 ## Commit Message Format
 ```
 fix(BUG-xxx): short description of the fix
 ```
+
+## Cross-Repo Bugs (brief)
+When a bug's fix spans repos (via `touched_repos:` in the bug frontmatter):
+- The bug report itself always lives in the repo `/bugfix` was invoked from (the "primary" for this bug).
+- Phase 3 makes one commit per touched repo, each on a branch with the same name (`fix/bug-xxx-slug`).
+- Phase 4 opens one PR per touched repo, cross-linking them in PR bodies (similar to `/proceed` Phase 6).
+- Merges land in the order the repos are listed in `touched_repos:`. If the bug report doesn't specify an order, use the `merge_order` from `.adlc/config.yml`.
+- If this gets complicated (more than 2 touched repos, or ordering matters), consider promoting the bug into a full REQ and using `/proceed` instead.
