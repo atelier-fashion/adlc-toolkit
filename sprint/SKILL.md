@@ -183,8 +183,25 @@ After all pipelines complete (or are stopped), produce a sprint summary:
 - **Resource exhaustion**: If the system is slow or agents are timing out, reduce concurrency — pause lower-priority pipelines and let active ones finish first.
 - **Merge conflict during sequencing**: Stop the conflicting pipeline, surface the conflict to the user, and continue merging other completed pipelines.
 
+## Cross-Repo Sprints
+
+`/sprint` supports sprints that include cross-repo REQs. Cross-repo handling is delegated entirely to each `/proceed` pipeline — `/sprint` itself still originates every pipeline from the same repo (the one it was invoked in), but each `/proceed` reads `.adlc/config.yml` and may create worktrees in sibling repos as needed.
+
+**Collision avoidance**: concurrent cross-repo REQs that share a sibling each create their own worktree at `<sibling-path>/.worktrees/REQ-xxx` (different REQ numbers → different paths → no collision). If two REQs accidentally try to use the same REQ number, `git worktree add` fails loudly on the second — surface that in the pre-flight report.
+
+**Pre-flight check for cross-repo sprints**: for each REQ whose frontmatter or tasks declare sibling repos (via `repo:` values from `.adlc/config.yml`), verify in Step 2:
+- Every declared sibling is present on disk and is a git repo
+- No existing `.worktrees/REQ-xxx` exists in any touched sibling (would indicate a previous incomplete run)
+- Each touched sibling's `main` is clean or has no conflicting branch
+
+If any check fails, mark the REQ ineligible with a specific issue in the pre-flight table. The user may choose to clean up and retry, or exclude that REQ from the sprint.
+
+**Dashboard**: the sprint dashboard's per-REQ row should show "primary repo → N touched" when a REQ is cross-repo (e.g., `admin-api → 3 touched`) so the user sees fleet-wide activity at a glance, not just local work.
+
+**Merge sequencing**: cross-repo REQs produce multiple PRs, merged in the REQ's own `mergeOrder` (by its `/proceed` Phase 8). `/sprint` still merges REQs "as each pipeline completes" — a completed cross-repo pipeline means all its per-repo PRs have landed. Only the next REQ's pipelines need to re-fetch main.
+
 ## What This Skill Does NOT Do
 
 - It does not create specs — run `/spec` first for each REQ
 - It does not replace `/proceed` — it orchestrates multiple `/proceed` sessions
-- It does not handle cross-repo REQs (e.g., REQ spanning atelier-fashion + atelier-web) — each sprint runs within a single repo
+- It does not originate REQs from different primary repos in a single sprint — every REQ in one `/sprint` invocation is assumed to originate from the repo the command was run in. Cross-repo REQs whose primary is a sibling must be sprinted from that sibling instead.
