@@ -422,6 +422,21 @@ Do all the steps below **for every touched repo's PR**:
 
 **Goal**: Merge, deploy, capture knowledge, and close out the feature.
 
+**Completion claim** (terminal state contract): the run's final report MUST lead with **exactly one** tag from `{merged, pr-ready, blocked, failed}`:
+
+| Tag | Required preconditions |
+|---|---|
+| `merged` | All touched-repo PRs are `MERGED` (verifiable via `gh pr view --json state,mergedAt`). `repos[<id>].merged == true` for every touched repo. |
+| `pr-ready` | All touched-repo PRs are `OPEN`, `MERGEABLE`, all required CI green. Used in cross-repo mode when the orchestrator owns merge sequencing, or in single-repo mode when the run is explicitly told not to merge. |
+| `blocked` | Blocker requires human input. `pipeline-state.json.blockers` populated. |
+| `failed` | Pipeline failed past automatic recovery. Failure details in `pipeline-state.json.notes`. |
+
+A vague "Pipeline complete" claim without one of these tags is a protocol violation. When dispatched by `/sprint`, the orchestrator will reject untagged claims and treat them as `blocked`.
+
+**Topology-driven merge actor**:
+- **Single-repo REQ** (one touched repo): the pipeline owns the merge in this phase. Run `gh pr merge <prUrl> --squash --delete-branch` from the parent repo path (`repos[<id>].path`), NOT from the worktree. Terminal claim is `merged`.
+- **Cross-repo REQ** (multiple touched repos): use the cross-repo merge sequencing block below. Terminal claim is `merged` after all repos land, or `pr-ready` if dispatched by an orchestrator that owns merge sequencing.
+
 **Cross-repo merge sequencing**:
 
 1. Walk `mergeOrder` from `pipeline-state.json`. For each repo id in order:
