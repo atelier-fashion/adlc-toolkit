@@ -80,7 +80,7 @@ You are in SUBAGENT MODE — execute all phases sequentially, do not dispatch su
 This is part of a parallel sprint — other REQs are running concurrently in separate worktrees.
 Follow all /proceed phases (0-8) exactly as documented.
 If you encounter a blocker that requires human input, update pipeline-state.json with the blocker details and stop gracefully.
-Do not attempt to merge if other pipelines are still running — the sprint orchestrator will handle merge sequencing.
+Phase 8 merge ownership follows REQ topology: single-repo REQs — you own the merge and report `merged`. Cross-repo REQs — stop after Phase 7 and report `pr-ready` so the orchestrator can sequence merges per `mergeOrder`. Your final report MUST lead with one of `{merged, pr-ready, blocked, failed}`.
 ```
 
 Launch all agents in a single message to maximize parallelism. Each pipeline-runner agent:
@@ -96,6 +96,14 @@ Background `pipeline-runner` agents send an automatic notification when they fin
 1. **Immediately after launch**: read every `pipeline-state.json` that was just initialized and print the initial sprint dashboard (see below). This confirms all agents launched and shows their starting phase.
 
 2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.adlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
+
+   **Verify the agent's terminal-state claim before accepting it.** A pipeline-runner's final report MUST lead with one of `{merged, pr-ready, blocked, failed}` (see `~/.claude/agents/pipeline-runner.md` Terminal state contract). The orchestrator MUST NOT trust the claim at face value:
+   - For `merged` and `pr-ready` claims: run `gh pr view <prUrl> --json state,mergedAt` against every touched-repo PR before updating the dashboard.
+     - If the agent claimed `merged` but the PR is `OPEN`: treat the claim as `pr-ready` and merge the PR per Step 5.
+     - If the agent claimed `pr-ready` but the PR is `MERGED`: just move on (agent was conservative, no harm done).
+     - If the PR is `CLOSED` (not merged) or in any other unexpected state: surface as a blocker.
+   - For `blocked` and `failed`: read `pipeline-state.json.blockers` / `notes` and surface to the user per the existing blocker-handling flow (Step 4.6).
+   - **Untagged claims** (e.g., a vague "Pipeline complete" without one of the four tags) are protocol violations. Treat as `blocked` and surface to the user — do not assume the agent finished cleanly.
 
 3. **When the user takes a turn during the sprint** (asks a question, issues a command): re-read all `pipeline-state.json` files first, so any answer reflects current pipeline state rather than a stale snapshot from launch.
 
@@ -127,7 +135,12 @@ Completed: 0/3 | Blocked: 0 | Running: 3
 
 **Default policy: merge as each pipeline completes.** When a pipeline finishes Phase 7 and is marked merge-ready, merge it immediately — don't wait for the batch. Faster feedback, less idle time, and the rebase cost on subsequent pipelines is paid as they reach merge-ready anyway (each one runs its own `/wrapup` Step 2 rebase-onto-main guard, so main drift is handled automatically).
 
-The sequential flow per pipeline:
+**Who actually performs the merge depends on REQ topology** (see `~/.claude/agents/pipeline-runner.md` Phase 8):
+
+- **Single-repo REQ** (one touched repo in `pipeline-state.repos`): the pipeline-runner agent already merged its own PR in its Phase 8 and reports `merged`. The orchestrator's job here is to **verify** (per Step 4 verify gate) and move on — do NOT re-merge. If verification shows the PR is still `OPEN` despite the `merged` claim, fall through to the cross-repo flow below and merge it yourself.
+- **Cross-repo REQ** (multiple touched repos): the pipeline-runner stops at Phase 7 and reports `pr-ready`. The orchestrator owns merge sequencing and walks the per-REQ `mergeOrder` itself.
+
+The sequential flow when the orchestrator is the merge actor (cross-repo, or single-repo fallback after a failed agent merge):
 1. Merge the PR: `gh pr merge --squash --delete-branch`
 2. Pull main: `git checkout main && git pull`
 3. Move on — other pipelines keep running in the background
