@@ -25,7 +25,7 @@ Execute these phases in order, maintaining `pipeline-state.json` throughout:
 5. **Verify**: Run inline review using the checklists below
 6. **Create PR**: Package into a reviewable PR
 7. **PR Cleanup**: Sanity check the PR diff
-8. **Wrapup**: Update state to completed
+8. **Wrapup and Merge**: See "Phase 8 — Wrapup and Merge" below for the topology rule
 
 ## Phase 5 Inline Review Checklists
 
@@ -60,12 +60,43 @@ Since you cannot dispatch review agents, run these checklists yourself:
 
 After running all checklists, fix Critical and Major issues inline. Commit fixes with `fix(scope): address verify finding [REQ-xxx]`.
 
+## Phase 8 — Wrapup and Merge
+
+The merge actor depends on REQ topology, decided from `pipeline-state.json.repos`:
+
+- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** Run `gh pr merge <prUrl> --squash --delete-branch` from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. Your terminal claim is `merged`.
+
+- **Cross-repo REQ** (more than one touched repo): **STOP after Phase 7.** Do NOT attempt to merge — the orchestrator sequences merges per `mergeOrder`. Your terminal claim is `pr-ready`.
+
+If the orchestrator's dispatch prompt explicitly overrides the topology rule (e.g., "you own the merge for this single-repo REQ", or conversely "do not merge — orchestrator will handle"), follow the override and reflect it in your terminal claim.
+
+### Worktree gotchas
+
+When merging from inside a pipeline-runner subagent:
+
+1. **Merge from parent repo, not worktree.** `gh pr merge --delete-branch` invoked from the worktree fails because git refuses to delete a branch that's currently checked out (the worktree owns it). Always `cd` to `repos[<id>].path` before invoking. Use absolute paths since shell state does not persist between Bash calls.
+2. **Worktree cleanup after remote merge.** If `git branch -D <branch>` fails locally after the remote PR is merged, the worktree still owns the branch. Run `git worktree remove --force <worktree-path>` first, then `git branch -D <branch>`. The remote PR being `MERGED` is the canonical signal of success — local cleanup failure is recoverable and does not block the terminal `merged` claim.
+3. **State write is mandatory.** Immediately after a successful `gh pr merge`, set `repos[<id>].merged = true` in `pipeline-state.json` so a mid-Phase-8 interruption can resume without double-merging.
+
+## Terminal state contract
+
+Your final report MUST lead with **exactly one** terminal-state tag from the table below. Vague phrases like "Pipeline complete" without a tag are a protocol violation that the orchestrator will reject.
+
+| Tag | Required preconditions | Orchestrator response |
+|---|---|---|
+| `merged` | All touched-repo PRs are `MERGED` (verifiable via `gh pr view --json state,mergedAt`). `repos[<id>].merged == true` for every touched repo in pipeline-state. | Orchestrator verifies, then moves on. |
+| `pr-ready` | All touched-repo PRs are `OPEN`, `MERGEABLE`, with all required CI green. | Orchestrator merges per `mergeOrder`. |
+| `blocked` | Blocker requires human input. `pipeline-state.json.blockers` populated with details. PR may be in any state. | Orchestrator surfaces to user, halts that REQ. |
+| `failed` | Pipeline failed past automatic recovery. Failure details in `pipeline-state.json.notes`. | Orchestrator surfaces to user, halts that REQ. |
+
+Format your report's first line as: `Terminal state: <tag>` followed by the standard report body.
+
 ## Blocker Handling
 
 If you encounter a blocker that requires human input:
-1. Update `pipeline-state.json` with blocker details
+1. Update `pipeline-state.json` with blocker details (`blockers` array)
 2. Stop gracefully
-3. Do NOT attempt to merge — the sprint orchestrator handles merge sequencing
+3. Emit terminal claim `blocked`. Do NOT attempt to merge regardless of topology when blocked.
 
 ## Input
 
@@ -76,8 +107,8 @@ You will receive:
 
 ## Output
 
-Report:
+Report (first line MUST be `Terminal state: <tag>`):
 - Final pipeline state (completed / blocked at phase N)
-- PR URL (if completed)
+- PR URL (if applicable)
 - Any blockers or concerns
 - Lessons learned candidates
