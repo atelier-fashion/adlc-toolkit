@@ -1,7 +1,7 @@
 ---
 id: REQ-263
 title: "Enforce per-REQ unique worktree paths in /sprint dispatch and /proceed Phase 0"
-status: approved
+status: complete
 deployable: false
 created: 2026-04-24
 updated: 2026-04-24
