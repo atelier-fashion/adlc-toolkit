@@ -1,7 +1,7 @@
 ---
 id: TASK-007
 title: "Add path-parse + worktree validation to /proceed Step 0"
-status: draft
+status: complete
 parent: REQ-263
 created: 2026-04-25
 updated: 2026-04-25

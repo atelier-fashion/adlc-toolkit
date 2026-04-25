@@ -152,7 +152,7 @@ The `phase4` block tracks task-level progress during implementation so that a mi
 2. **Before starting any phase**: read `pipeline-state.json`. Verify `currentPhase` equals the phase you're about to start AND the previous phase is in `completedPhases`. If either check fails, **STOP** — you skipped a phase. Go back and complete it.
 3. **After completing any phase**: append the phase number to `completedPhases`, append an entry to `phaseHistory` with the completion timestamp, set `currentPhase` to the next phase number.
 4. **Phase 4 task-level writes**: When starting a task, set `phase4.currentTask` to its TASK-xxx ID. When its commit lands (in the task's target-repo worktree), append the ID to `phase4.completedTasks` and clear `currentTask`. On unrecoverable failure surfaced to the user, append to `phase4.failedTasks` instead.
-5. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`. Trust `repos` as the source of truth for worktree paths — do not re-derive from cwd. If `currentPhase` is 4 and `phase4.currentTask` is non-null, resume that specific task (re-read its file, cd into its repo's worktree, re-check whether its commit already landed, continue or restart as appropriate) before moving to the next task in the dependency graph. Never replay tasks already in `completedTasks`.
+5. **Worktree paths are immutable post-Step-0** (resume and non-resume alike): once Step 0 records `repos[<id>].worktree`, every subsequent phase MUST read the path from state and MUST NOT re-derive it from cwd, the REQ id, or any naming convention. This applies on the happy path, not just on resume. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`. Trust `repos` as the source of truth for worktree paths. If `currentPhase` is 4 and `phase4.currentTask` is non-null, resume that specific task (re-read its file, cd into its repo's worktree from `repos[<task.repo>].worktree`, re-check whether its commit already landed, continue or restart as appropriate) before moving to the next task in the dependency graph. Never replay tasks already in `completedTasks`.
 6. **If context has been compressed**: re-read `pipeline-state.json` before doing anything and treat it as the source of truth for `currentPhase`, `repos`, and `phase4`. Do not rely on memory of which phase, task, or repo you're in.
 7. **Per-repo writes during Phases 6–8**: when a PR is created, write its URL to `repos[id].prUrl`. When a PR merges, set `repos[id].merged = true`. These writes let a mid-Phase-8 interruption resume merges in order without double-merging.
 8. **On completion**: After Phase 8 (Wrapup) finishes, set `"completed": true` in the state file.
@@ -181,11 +181,34 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    ```bash
    git -C <repo-path> checkout main && git -C <repo-path> pull
    ```
-5. Create a worktree in each touched repo on the same branch name:
+4a. **Parse the declared worktree path (primary repo only)** — scan the launch prompt for the dispatch-line contract:
+   - Regex: `^WORKTREE PATH \(mandatory\): (.+)$` (entire line, capture group is the absolute path).
+   - If present, use the captured path **verbatim** as the primary repo's worktree path. Do not modify, normalize, or append to it.
+   - If absent (e.g., a direct `/proceed REQ-xxx` invocation by a user), fall back to deriving `<primary-repo-path>/.worktrees/REQ-xxx`. This preserves existing behavior for direct invocations.
+   - Sibling repo worktree paths are always derived as `<sibling-repo-path>/.worktrees/REQ-xxx` from `.adlc/config.yml` — the dispatch line declares only the primary path.
+4b. **Validate against `git worktree list` before adding** — for **every** touched repo (primary and sibling), run:
+   ```bash
+   git -C <repo-path> worktree list --porcelain
+   ```
+   Parse the line-oriented output: blocks separated by blank lines; each block has `worktree <abs-path>`, `HEAD <sha>`, and either `branch <ref>` or `detached`. For the target worktree path resolved in 4a:
+   - **No match** (path not registered): proceed to step 5 (`git worktree add` as normal).
+   - **Match on the expected branch** (`refs/heads/feat/REQ-xxx-short-description`): treat as resume per ADR-2 — record the path in state and **skip** the `git worktree add` for this repo. No halt, no re-add.
+   - **Match on a different branch**: halt the pipeline immediately with a clear error naming the repo, the target path, the conflicting branch, and the cleanup commands the user must run:
+     ```
+     Worktree collision in <repo-id>: <path> is already registered to <other-branch>,
+     but REQ-xxx requires feat/REQ-xxx-short-description. Resolve with:
+
+       git -C <repo-path> worktree remove <path>
+       git -C <repo-path> branch -D <other-branch>     # add --force if the branch has unmerged commits
+
+     Then retry.
+     ```
+     This is a fail-loud halt (not one of the four legitimate halts; it's a precondition error). The same error format applies whether the colliding repo is primary or sibling.
+5. Create a worktree in each touched repo on the same branch name (skip any repo where step 4b detected a same-branch resume):
    ```bash
    git -C <repo-path> worktree add .worktrees/REQ-xxx feat/REQ-xxx-short-description
    ```
-   Record each repo's absolute `worktree` path and `branch` in the state file's `repos` block.
+   Record each repo's absolute `worktree` path and `branch` in the state file's `repos` block. The recorded path is **immutable** for the rest of the run — Phases 1–8 read it from `repos[<id>].worktree`, never re-derive from cwd.
 6. Change your working directory to the **primary repo's worktree** — orchestration (state file reads/writes, spec edits, PR coordination) happens there. Task implementation in Phase 4 will `cd` into the target repo's worktree per task.
 7. **Load shared context ONCE from the primary** — use the Read tool to load these into conversation context so every subskill can reference them without re-reading:
    - `.adlc/context/architecture.md`
