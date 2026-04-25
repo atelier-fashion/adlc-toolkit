@@ -51,7 +51,7 @@ For each REQ, verify:
 4. **Worktree path collision check**: parse `git worktree list --porcelain` in the primary repo and intersect each candidate's target path `<repo-path>/.worktrees/REQ-xxx` against registered worktrees. If the path is already registered to a different branch (i.e., not the candidate's own `feat/REQ-xxx-...` branch), mark the REQ ineligible with the issue text `worktree path in use by branch <name>`. The surfaced message MUST name the cleanup commands the user can run to clear the stale worktree. **Quote the substituted `<branch>` and `<path>` values with single quotes** so a copy-paste cannot execute injected shell from a hostile branch name:
    ```
    git -C '<repo>' worktree remove '<path>'      # add --force if the worktree has uncommitted work you intend to discard
-   git -C '<repo>' branch -D '<branch>'          # -D already forces deletion regardless of merge status; verify with `git log main..<branch>` first if you may have unmerged work to keep
+   git -C '<repo>' branch -D '<branch>'          # -D already forces deletion regardless of merge status; verify with `git log main..'<branch>'` first if you may have unmerged work to keep
    ```
    **Scope (OQ-2 default)**: this collision check scans only the **primary repo**. Sibling-repo collisions are caught at `/proceed` Step 0 by the per-repo `git worktree add` validation gate, so do not extend this pre-flight to siblings without a deliberate decision — see REQ-263 architecture.md ("Cross-repo behavior") for why.
 
@@ -100,7 +100,7 @@ The `WORKTREE PATH (mandatory): <absolute-path>` line is a contract fixed in REQ
 
 Launch all agents in a single message to maximize parallelism. Each pipeline-runner agent:
 - Runs in subagent mode (all phases sequential, no nested sub-agent dispatch)
-- Works in its own worktree (`.worktrees/REQ-xxx`) — isolation is handled by `/proceed` Phase 0
+- Works in its own worktree (the absolute path declared in the `WORKTREE PATH (mandatory):` line — typically `<repo-path>/.worktrees/REQ-xxx` by convention) — isolation is handled by `/proceed` Phase 0
 - Maintains its own `pipeline-state.json`
 - Operates independently — failure in one does not affect others
 
