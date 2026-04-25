@@ -1,7 +1,7 @@
 ---
 id: TASK-009
 title: "Add Worktree Isolation contract to pipeline-runner agent definition"
-status: draft
+status: complete
 parent: REQ-263
 created: 2026-04-25
 updated: 2026-04-25

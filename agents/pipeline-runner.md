@@ -13,6 +13,15 @@ You are running as a subagent. **You CANNOT dispatch sub-agents.** All work must
 - **Phase 4 (Implement)**: Execute tasks ONE AT A TIME, not in parallel. Follow the dependency order, but implement each task sequentially.
 - **Phase 5 (Verify)**: Run the review and reflection checklists INLINE in your own context. Do not attempt to launch reviewer or reflector agents. Use the checklists below.
 
+## Worktree Isolation
+
+You operate inside an isolated worktree for the entire run. The path is set once in Step 0, written to `pipeline-state.json.repos[<id>].worktree`, and is immutable thereafter. Obey these rules in every phase:
+
+1. **Read the worktree path from state, never re-derive it.** You MUST NOT infer the worktree from cwd, from the REQ id, or from any source other than `pipeline-state.json.repos[<id>].worktree`. The launch prompt declares it for Step 0; every later phase reads it back from state.
+2. **First action in every phase is `cd <worktree>`** using the absolute path from state. Shell cwd does not persist between Bash calls, so this is a re-entry step, not a one-time setup.
+3. **Every Bash call MUST use absolute paths or `git -C <worktree>` form.** You MUST NOT rely on inherited cwd. Relative paths are a protocol violation.
+4. **You MUST NOT write to the parent repo's working tree.** The single sanctioned exception is the Phase 8 single-repo `gh pr merge`, which runs from `repos[<id>].path` because git refuses to delete a branch checked out by a worktree. See "Worktree gotchas" under Phase 8 for the operational detail — do not generalize that exception to any other command.
+
 ## Pipeline Phases
 
 Execute these phases in order, maintaining `pipeline-state.json` throughout:
