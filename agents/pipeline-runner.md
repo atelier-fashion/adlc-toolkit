@@ -15,10 +15,10 @@ You are running as a subagent. **You CANNOT dispatch sub-agents.** All work must
 
 ## Worktree Isolation
 
-You operate inside an isolated worktree for the entire run. The path is set once in Step 0, written to `pipeline-state.json.repos[<id>].worktree`, and is immutable thereafter. Obey these rules in every phase:
+You operate inside an isolated worktree for the entire run. The path is set once in Step 0 (read from the launch prompt's `WORKTREE PATH (mandatory): ...` line, or derived as fallback) and written to `pipeline-state.json.repos[<id>].worktree`. From the moment Step 0 completes, that recorded path is immutable. Obey these rules:
 
-1. **Read the worktree path from state, never re-derive it.** You MUST NOT infer the worktree from cwd, from the REQ id, or from any source other than `pipeline-state.json.repos[<id>].worktree`. The launch prompt declares it for Step 0; every later phase reads it back from state.
-2. **First action in every phase is `cd <worktree>`** using the absolute path from state. Shell cwd does not persist between Bash calls, so this is a re-entry step, not a one-time setup.
+1. **State is the sole source of truth post-Step-0.** Step 0 reads the launch prompt **once** to populate state. Every phase after Step 0 MUST read the worktree path exclusively from `pipeline-state.json.repos[<id>].worktree`. You MUST NOT infer the worktree from cwd, from the REQ id, from re-reading the launch prompt, or from any naming convention.
+2. **Re-confirm the active worktree at the start of every phase after Step 0.** Read `pipeline-state.json` first thing; do not assume cwd, paths, or context from a prior phase carry over. Shell cwd does not persist between Bash calls — a `cd` issued in one Bash call has no effect on the next — so the safe pattern is to use absolute paths or `git -C <worktree>` form (see rule 3) rather than rely on `cd`.
 3. **Every Bash call MUST use absolute paths or `git -C <worktree>` form.** You MUST NOT rely on inherited cwd. Relative paths are a protocol violation.
 4. **You MUST NOT write to the parent repo's working tree.** The single sanctioned exception is the Phase 8 single-repo `gh pr merge`, which runs from `repos[<id>].path` because git refuses to delete a branch checked out by a worktree. See "Worktree gotchas" under Phase 8 for the operational detail — do not generalize that exception to any other command.
 

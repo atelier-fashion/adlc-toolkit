@@ -74,7 +74,7 @@ _Not applicable — internal toolkit changes only._
 - [ ] AC-4: `sprint/SKILL.md` Step 2 pre-flight section adds the collision check (BR-5) and shows it as a row in the example pre-flight table. Verifiable by reading the updated skill file.
 - [ ] AC-5: `agents/pipeline-runner.md` adds a top-level "Worktree isolation" section per BR-6. The existing "Worktree gotchas" subsection under Phase 8 stays — the new section sits at the agent-definition level, not buried under one phase. Verifiable by reading the updated agent definition.
 - [ ] AC-6: A repro test (manual or scripted): with a stale `<repo>/.worktrees/REQ-999` left behind from a prior run on a different branch, invoking `/proceed REQ-999` halts at Step 0 with an error naming the conflicting branch and the cleanup command (BR-3, BR-9). Verifiable by setting up the stale state and observing the halt.
-- [ ] AC-7: Documentation: the LESSON-003 file (already drafted in this REQ's branch) links back to this REQ in its `## Related` section. Verifiable by reading the lesson file.
+- [x] AC-7: Documentation: the LESSON-003 file (already drafted in this REQ's branch) links back to this REQ in its `## Related` section. Verified — LESSON-003 line 59 contains `REQ-263 — bugfix REQ that codifies these three changes…`.
 - [ ] AC-8: No behavior change for the happy path: invoking `/proceed REQ-xxx` directly on a clean repo with no existing worktree completes Phase 0 identically to the pre-change behavior — same worktree path, same state file initialization, same logs. Verifiable by spot-checking a `/proceed` run.
 
 ## External Dependencies

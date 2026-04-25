@@ -38,7 +38,7 @@ Before proceeding, verify:
 2. If given `all`, scan `.adlc/specs/REQ-*/requirement.md` for all specs with `status: approved` or `status: draft`
 3. If no argument, scan for all `status: approved` specs
 4. Exclude any REQ that already has `pipeline-state.json` with `"completed": true`
-5. Exclude any REQ that already has an active worktree (check `git worktree list`)
+5. Exclude any REQ that already has an active pipeline-runner — i.e., a worktree on its `feat/REQ-xxx-...` branch AND a `pipeline-state.json` whose `completed` is `false` and whose phase has advanced recently. (A stale same-branch worktree from a crashed prior run is **not** an active pipeline; it falls through to Step 2 item 4 below, which surfaces it with a cleanup recipe rather than silently excluding the REQ.)
 
 If no eligible REQs found, report "No eligible REQs for sprint" and stop.
 
@@ -48,10 +48,10 @@ For each REQ, verify:
 1. The spec file exists at `.adlc/specs/REQ-xxx-*/requirement.md`
 2. Read the spec — confirm it has: Description, Acceptance Criteria (at least 1), and no unresolved Questions marked as blockers
 3. Context files exist (project-overview, architecture, conventions)
-4. **Worktree path collision check**: parse `git worktree list --porcelain` in the primary repo and intersect each candidate's target path `<repo-path>/.worktrees/<REQ-id>` against registered worktrees. If the path is already registered to a different branch (i.e., not the candidate's own `feat/REQ-xxx-...` branch), mark the REQ ineligible with the issue text `worktree path in use by branch <name>`. The surfaced message MUST name the cleanup commands the user can run to clear the stale worktree:
+4. **Worktree path collision check**: parse `git worktree list --porcelain` in the primary repo and intersect each candidate's target path `<repo-path>/.worktrees/REQ-xxx` against registered worktrees. If the path is already registered to a different branch (i.e., not the candidate's own `feat/REQ-xxx-...` branch), mark the REQ ineligible with the issue text `worktree path in use by branch <name>`. The surfaced message MUST name the cleanup commands the user can run to clear the stale worktree. **Quote the substituted `<branch>` and `<path>` values with single quotes** so a copy-paste cannot execute injected shell from a hostile branch name:
    ```
-   git -C <repo> worktree remove <path>     # add --force if the worktree has uncommitted work you intend to discard
-   git -C <repo> branch -D <branch>          # add --force equivalent (-D is already the force form of -d)
+   git -C '<repo>' worktree remove '<path>'      # add --force if the worktree has uncommitted work you intend to discard
+   git -C '<repo>' branch -D '<branch>'          # -D already forces deletion regardless of merge status; verify with `git log main..<branch>` first if you may have unmerged work to keep
    ```
    **Scope (OQ-2 default)**: this collision check scans only the **primary repo**. Sibling-repo collisions are caught at `/proceed` Step 0 by the per-repo `git worktree add` validation gate, so do not extend this pre-flight to siblings without a deliberate decision — see REQ-263 architecture.md ("Cross-repo behavior") for why.
 
@@ -80,20 +80,23 @@ Ask the user to confirm the sprint lineup before proceeding.
 
 For each eligible REQ, launch a **pipeline-runner** agent (defined in `~/.claude/agents/`) using the Agent tool with `run_in_background: true`.
 
-**Agent prompt for each REQ** (the orchestrator computes `<absolute-path>` as `<repo-path>/.worktrees/<REQ-id>` and substitutes it verbatim):
+**Agent prompt for each REQ** (the orchestrator computes `<absolute-path>` as `<repo-path>/.worktrees/REQ-xxx` and substitutes it verbatim):
+
+> **BEFORE dispatching, substitute `<absolute-path>` and `REQ-xxx` and `[current repo path]` with the actual computed values.** Do **NOT** emit any of these placeholders literally — `/proceed` Step 0 will use the captured WORKTREE PATH verbatim, and a literal `<absolute-path>` would cause `git worktree add` to fail with an unhelpful error. The agent definition for `pipeline-runner` (canonical source for worktree-isolation rules) takes precedence over the in-prompt reminder below if they ever diverge.
+
 ```
 WORKTREE PATH (mandatory): <absolute-path>
 
 Run the /proceed skill for REQ-xxx in the repository at [current repo path].
 You are in SUBAGENT MODE — execute all phases sequentially, do not dispatch sub-agents.
 This is part of a parallel sprint — other REQs are running concurrently in separate worktrees.
-Use the WORKTREE PATH above verbatim for `git worktree add` in Phase 0. All later phases MUST read the worktree path from `pipeline-state.json.repos[<id>].worktree` (set by Phase 0 from this contract line) — do not re-derive it. The only sanctioned operation against the parent repo path is `gh pr merge` in Phase 8 single-repo topology; every other read/write/cd belongs inside the worktree.
+Use the WORKTREE PATH above verbatim for `git worktree add` in Phase 0. All later phases MUST read the worktree path from `pipeline-state.json.repos[<id>].worktree` (set by Phase 0 from this contract line) — do not re-derive it. The only sanctioned operation against the parent repo path is `gh pr merge` in Phase 8 single-repo topology; every other read/write/cd belongs inside the worktree. (See `agents/pipeline-runner.md` "Worktree Isolation" section for the canonical rules.)
 Follow all /proceed phases (0-8) exactly as documented.
 If you encounter a blocker that requires human input, update pipeline-state.json with the blocker details and stop gracefully.
 Phase 8 merge ownership follows REQ topology: single-repo REQs — you own the merge and report `merged`. Cross-repo REQs — stop after Phase 7 and report `pr-ready` so the orchestrator can sequence merges per `mergeOrder`. Your final report MUST lead with one of `{merged, pr-ready, blocked, failed}`.
 ```
 
-The `WORKTREE PATH (mandatory): <absolute-path>` line is a contract fixed in REQ-263 architecture.md — exactly one space after each colon, POSIX absolute path, no quoting, no trailing slash, line stands alone. `/proceed` Step 0 parses it with regex `^WORKTREE PATH \(mandatory\): (.+)$`. Do not reformat. The orchestrator MUST emit this line for every dispatched pipeline-runner; it is the producer side of the dispatch-line contract (BR-1, BR-7).
+The `WORKTREE PATH (mandatory): <absolute-path>` line is a contract fixed in REQ-263 architecture.md — **exactly one space after `WORKTREE PATH` (before the opening parenthesis), exactly one space after `(mandatory):`**, POSIX absolute path, no quoting, no trailing slash, line stands alone. `/proceed` Step 0 parses it with regex `^WORKTREE PATH \(mandatory\): (.+)$` and uses the **first** match if the prompt accidentally contains multiple. Do not reformat. The orchestrator MUST emit this line for every dispatched pipeline-runner; it is the producer side of the dispatch-line contract (BR-1, BR-7).
 
 Launch all agents in a single message to maximize parallelism. Each pipeline-runner agent:
 - Runs in subagent mode (all phases sequential, no nested sub-agent dispatch)
@@ -216,8 +219,9 @@ After all pipelines complete (or are stopped), produce a sprint summary:
 
 **Pre-flight check for cross-repo sprints**: for each REQ whose frontmatter or tasks declare sibling repos (via `repo:` values from `.adlc/config.yml`), verify in Step 2:
 - Every declared sibling is present on disk and is a git repo
-- No existing `.worktrees/REQ-xxx` exists in any touched sibling (would indicate a previous incomplete run)
 - Each touched sibling's `main` is clean or has no conflicting branch
+
+**Sibling-repo worktree collisions are deferred to `/proceed` Step 0** (per REQ-263 architecture.md "Cross-repo behavior" + OQ-2 default). The `/sprint` Step 2 collision check (item 4 above) intentionally scans **only the primary repo**; sibling collisions are caught by `/proceed` Step 0's per-repo `git worktree add` validation gate, which runs the same fail-loud halt with the same error format. Do not extend Step 2 to scan siblings without a deliberate decision — it would duplicate the validation logic ADR-1 was designed to keep in one place.
 
 If any check fails, mark the REQ ineligible with a specific issue in the pre-flight table. The user may choose to clean up and retry, or exclude that REQ from the sprint.
 
