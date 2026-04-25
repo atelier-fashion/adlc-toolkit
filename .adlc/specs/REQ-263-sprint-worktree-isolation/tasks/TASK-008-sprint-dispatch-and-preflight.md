@@ -1,7 +1,7 @@
 ---
 id: TASK-008
 title: "Add dispatch-line contract and pre-flight collision check to /sprint"
-status: draft
+status: complete
 parent: REQ-263
 created: 2026-04-25
 updated: 2026-04-25
