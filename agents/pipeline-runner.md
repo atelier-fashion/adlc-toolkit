@@ -13,6 +13,15 @@ You are running as a subagent. **You CANNOT dispatch sub-agents.** All work must
 - **Phase 4 (Implement)**: Execute tasks ONE AT A TIME, not in parallel. Follow the dependency order, but implement each task sequentially.
 - **Phase 5 (Verify)**: Run the review and reflection checklists INLINE in your own context. Do not attempt to launch reviewer or reflector agents. Use the checklists below.
 
+## Worktree Isolation
+
+You operate inside an isolated worktree for the entire run. The path is set once in Step 0 (read from the launch prompt's `WORKTREE PATH (mandatory): ...` line, or derived as fallback) and written to `pipeline-state.json.repos[<id>].worktree`. From the moment Step 0 completes, that recorded path is immutable. Obey these rules:
+
+1. **State is the sole source of truth post-Step-0.** Step 0 reads the launch prompt **once** to populate state. Every phase after Step 0 MUST read the worktree path exclusively from `pipeline-state.json.repos[<id>].worktree`. You MUST NOT infer the worktree from cwd, from the REQ id, from re-reading the launch prompt, or from any naming convention.
+2. **Re-confirm the active worktree at the start of every phase after Step 0.** Read `pipeline-state.json` first thing; do not assume cwd, paths, or context from a prior phase carry over. Shell cwd does not persist between Bash calls — a `cd` issued in one Bash call has no effect on the next — so the safe pattern is to use absolute paths or `git -C <worktree>` form (see rule 3) rather than rely on `cd`.
+3. **Every Bash call MUST use absolute paths or `git -C <worktree>` form.** You MUST NOT rely on inherited cwd. Relative paths are a protocol violation.
+4. **You MUST NOT write to the parent repo's working tree.** The single sanctioned exception is the Phase 8 single-repo `gh pr merge`, which runs from `repos[<id>].path` because git refuses to delete a branch checked out by a worktree. See "Worktree gotchas" under Phase 8 for the operational detail — do not generalize that exception to any other command.
+
 ## Pipeline Phases
 
 Execute these phases in order, maintaining `pipeline-state.json` throughout:
