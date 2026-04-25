@@ -17,7 +17,7 @@ You are a sprint orchestrator that launches multiple `/proceed` pipelines in par
 - Current directory: !`pwd`
 - Existing worktrees: !`git worktree list 2>/dev/null || echo "Not a git repo"`
 - Available specs: !`ls .adlc/specs/ 2>/dev/null || echo "No specs found"`
-- Pipeline states: !`find .adlc/specs -name "pipeline-state.json" -exec echo {} \; -exec cat {} \; 2>/dev/null || echo "No active pipelines"`
+- Pipeline states: !`find .adlc/specs -name "pipeline-state.json" -print 2>/dev/null | while read -r f; do echo "$f"; cat "$f"; done || echo "No active pipelines"`
 
 ## Input
 
