@@ -87,7 +87,12 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Review assumptions from the requirement spec
 - Log any that were validated, invalidated, or still unresolved to `.adlc/knowledge/assumptions/`
 - Use the assumption template (check `.adlc/templates/assumption-template.md` first, fall back to `~/.claude/skills/templates/assumption-template.md`)
-- Name files: `ASSUME-xxx-slug.md` (scan existing files for next ID)
+- Name files: `ASSUME-xxx-slug.md`. Determine the next ID using the atomic counter at `.adlc/.next-assume` (LESSON-110):
+  ```bash
+  ASSUME_NUM=$(cat .adlc/.next-assume 2>/dev/null || echo "1")
+  echo $((ASSUME_NUM + 1)) > .adlc/.next-assume
+  ```
+  If `.adlc/.next-assume` doesn't exist, scan `.adlc/knowledge/assumptions/` for the highest existing `ASSUME-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY — never re-scan after the counter exists. The counter prevents collisions when concurrent `/sprint` pipelines wrap up at the same time.
 
 #### Lessons Learned
 - Any surprises during implementation?
@@ -95,7 +100,13 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Things that worked particularly well?
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work
 - Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
-- **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). To find the next ID, scan the directory for the highest existing `LESSON-xxx-` file and increment. Slugs are lowercase kebab-case, ≤6 words.
+- **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
+- **Allocate the next ID atomically via `.adlc/.next-lesson`** (LESSON-110 — directory scans race against concurrent `/sprint` pipelines):
+  ```bash
+  LESSON_NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
+  echo $((LESSON_NUM + 1)) > .adlc/.next-lesson
+  ```
+  If `.adlc/.next-lesson` doesn't exist, scan `.adlc/knowledge/lessons/` for the highest existing `LESSON-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY thereafter — never re-scan after the counter exists.
 - **Legacy files**: older projects may still have date-prefixed or bare-numeric lessons from before this convention was locked. Do not rename them in a wrapup PR — migration is a separate, dedicated operation. When scanning for the next ID, only count files matching `LESSON-*.md`; treat the legacy files as read-only history.
 - Include `domain`, `component`, and `tags` so that `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance. The `component` field should be more specific than `domain` (e.g., `domain: API`, `component: API/auth` or `domain: iOS`, `component: iOS/SwiftUI`)
 
