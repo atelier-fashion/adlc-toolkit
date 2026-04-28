@@ -42,4 +42,4 @@ If you have a stack combination not covered here, drop a new YAML file in this d
 - `mobile-rn-firebase-aws.yml`
 - `none-postgres-k8s.yml`
 
-Open a PR against [adlc-toolkit](https://github.com/atelier-fashion/adlc-toolkit) — presets benefit from being shared.
+Open a PR against the canonical `adlc-toolkit` upstream — presets benefit from being shared.

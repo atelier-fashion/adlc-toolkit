@@ -6,7 +6,7 @@
 #   - One or more Cloud Run services as the backend tier
 #   - GitHub Actions CI/CD with staging-first promotion (PR merges → staging
 #     deploy → smoke tests → auto-promote to production)
-#   - Multi-repo coordination (typical: ios-app, admin-api, admin-web, etc.)
+#   - Multi-repo coordination (e.g., a mobile repo, an api repo, a web repo)
 #
 # Copy this file to .adlc/config.yml in the repo where you run /init, then
 # replace every `<placeholder>` with a real value.
@@ -32,20 +32,20 @@ stack:
 # layout. The repo where /proceed is invoked becomes the primary for that REQ.
 repos:
   # Example: primary is the iOS app
-  ios-app:
+  mobile:
     primary: true
   # Siblings — each must be cloned locally at the path below
-  admin-api:
-    path: ../admin-api
-  admin-web:
-    path: ../admin-web
+  api:
+    path: ../api
+  web:
+    path: ../web
 
 # Order PRs are merged in. Backends first, then frontends — a frontend that
 # expects a new API field shouldn't ship before the backend that provides it.
 merge_order:
-  - admin-api
-  - admin-web
-  - ios-app
+  - api
+  - web
+  - mobile
 
 # GCP projects for the staging-first deploy gate. The CI/CD pipeline is
 # expected to deploy on PR merge and auto-promote staging → production.
@@ -71,11 +71,11 @@ ios:
 # revisions and run smoke tests. Repos without a services entry are treated as
 # non-deployable (docs-only, iOS, infrastructure-only).
 services:
-  admin-api:
-    cloud_run_service: admin-api
+  api:
+    cloud_run_service: api
     region: us-central1
-    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-api/admin-api
-  admin-web:
-    cloud_run_service: admin-web
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/api/api
+  web:
+    cloud_run_service: web
     region: us-central1
-    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-web/admin-web
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/web/web

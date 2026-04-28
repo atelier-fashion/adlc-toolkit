@@ -43,7 +43,7 @@ The user provides a requirement ID, e.g., `/proceed REQ-023` or `/proceed 23`.
 
 ## Repository Configuration (single-repo vs cross-repo)
 
-Some requirements touch one repo; others (e.g., an admin control plane for an iOS feature that spans a mobile app, an API, and a web app) touch multiple repos. `/proceed` supports both.
+Some requirements touch one repo; others (e.g., a feature that simultaneously changes a mobile app, an API, and a web frontend) touch multiple repos. `/proceed` supports both.
 
 **"Primary" is per-REQ, not a fixed role.** The primary repo for a given REQ is simply **the repo where you invoked `/proceed` from** — that repo's `.adlc/` holds the spec, tasks, and `pipeline-state.json` for this REQ. A different REQ can originate in a different repo; that REQ's primary is the other repo. Every repo that might host a REQ needs its own `.adlc/` structure (from `/init`) and its own `.adlc/config.yml` so it can act as primary when a REQ starts there.
 
@@ -58,22 +58,22 @@ repos:
   # Self — mark the current repo as primary. Path is implicit (it's this repo).
   # Each repo's config marks ITSELF as primary. The configs across repos end
   # up being mirror images of each other; that's expected and correct.
-  admin-app:
+  web:
     primary: true
   # Siblings — other repos this one might coordinate with. Path is relative
   # to THIS repo's root, or absolute. Every sibling must be cloned locally.
-  admin-api:
-    path: ../admin-api
-  ios-app:
-    path: ../ios-app
+  api:
+    path: ../api
+  mobile:
+    path: ../mobile
 
 # Merge order for Phase 8 when this repo is primary. If omitted, defaults to
 # the order repos appear above. Only touched repos (those with tasks in the
 # current REQ) are merged; untouched ones are skipped.
 merge_order:
-  - admin-api
-  - admin-app
-  - ios-app
+  - api
+  - web
+  - mobile
 ```
 
 **Rules**:
@@ -112,26 +112,26 @@ Execute these phases in order. Each phase has a validation gate — if validatio
     { "phase": 0, "name": "Create Worktree", "completedAt": "2026-03-27T10:01:00Z" }
   ],
   "repos": {
-    "admin-app": {
+    "web": {
       "primary": true,
-      "path": "/absolute/path/to/admin-app",
-      "worktree": "/absolute/path/to/admin-app/.worktrees/REQ-xxx",
+      "path": "/absolute/path/to/web",
+      "worktree": "/absolute/path/to/web/.worktrees/REQ-xxx",
       "branch": "feat/REQ-xxx-short-description",
       "touched": true,
       "prUrl": null,
       "merged": false
     },
-    "admin-api": {
+    "api": {
       "primary": false,
-      "path": "/absolute/path/to/admin-api",
-      "worktree": "/absolute/path/to/admin-api/.worktrees/REQ-xxx",
+      "path": "/absolute/path/to/api",
+      "worktree": "/absolute/path/to/api/.worktrees/REQ-xxx",
       "branch": "feat/REQ-xxx-short-description",
       "touched": true,
       "prUrl": null,
       "merged": false
     }
   },
-  "mergeOrder": ["admin-api", "admin-app"],
+  "mergeOrder": ["api", "web"],
   "phase4": {
     "currentTask": null,
     "completedTasks": [],
@@ -313,7 +313,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 - Execute tasks one at a time in cross-repo dependency order
 - Implement each task directly in your own context (do not dispatch agents), cd-ing into the target worktree for each task
 
-**End-of-phase log**: After each tier completes, emit one line listing finished tasks with their target repos (e.g., `TASK-003 [admin-api] ✓`) and any task-level failures (failed tasks are also written to `phase4.failedTasks`). Do not pause between tiers; advance to the next tier as soon as its dependencies are met.
+**End-of-phase log**: After each tier completes, emit one line listing finished tasks with their target repos (e.g., `TASK-003 [api] ✓`) and any task-level failures (failed tasks are also written to `phase4.failedTasks`). Do not pause between tiers; advance to the next tier as soon as its dependencies are met.
 
 ---
 
@@ -341,7 +341,7 @@ The six agents match the dimensions covered by `/review` (correctness, quality, 
 **Subagent mode** — sequential inline review:
 For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Use the criteria from the agent definitions in `~/.claude/agents/`. Do NOT dispatch sub-agents.
 
-**Step B — Consolidate**: When all agents return (or all checklists complete in subagent mode), dedupe overlapping findings **within each repo** and also flag cross-repo issues (e.g., API contract drift between admin-api and admin-web). Produce a single ranked list by severity, tagging each finding with the repo id it applies to.
+**Step B — Consolidate**: When all agents return (or all checklists complete in subagent mode), dedupe overlapping findings **within each repo** and also flag cross-repo issues (e.g., API contract drift between an api repo and its consumer). Produce a single ranked list by severity, tagging each finding with the repo id it applies to.
 
 **Step C — Fix in one pass**:
 1. **Critical + must-fix Major** (bugs, security, convention violations, missing tests): fix immediately in the finding's target repo worktree, run that repo's test suite after each related cluster of fixes, commit inside that worktree with `fix(scope): address verify finding [REQ-xxx]`.
@@ -349,7 +349,7 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
 3. **Nit / observation**: fix trivial ones inline, skip the rest.
 4. **User-facing questions from reflector**: if any, surface them to the user as a numbered list and wait for answers before continuing.
 
-**Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the (repo, dimension) pairs that had fixes: e.g., if correctness fixes landed only in admin-api, rerun correctness-reviewer for admin-api only. In subagent mode, re-run the corresponding reviewer checklists inline.
+**Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the (repo, dimension) pairs that had fixes: e.g., if correctness fixes landed only in the api repo, rerun correctness-reviewer for that repo only. In subagent mode, re-run the corresponding reviewer checklists inline.
 
 **End-of-phase log**: Emit the combined verify summary across repos — per-repo findings, dedupe count, how many fixed, any deferred. If reflector surfaced user-facing questions, halt here (legitimate halt #2). Otherwise continue to Phase 6.
 
@@ -365,7 +365,7 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
    - Inside that repo's worktree, ensure all changes are committed and push the feature branch: `git -C <worktree> push -u origin feat/REQ-xxx-short-description`
 2. Set the requirement status to `complete` in its frontmatter (primary repo only).
 3. Create a PR **in each touched repo** using `gh pr create` (invoke via `gh -R <owner/repo>` or by running `gh` from inside each worktree). In cross-repo mode, create the PR for the primary repo **last** so the primary PR body can link to all sibling PRs.
-   - **Title (per repo)**: Short description referencing the REQ, tagged with the repo id when cross-repo (e.g., `feat(admin-api): outfit endpoint [REQ-023]`).
+   - **Title (per repo)**: Short description referencing the REQ, tagged with the repo id when cross-repo (e.g., `feat(api): new endpoint [REQ-023]`).
    - **Body (per repo)**:
      ```
      ## Summary
@@ -378,8 +378,8 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
      ## Related PRs (cross-repo)
      [Populated for siblings and also in the primary once its PR is created last.
       Omit entirely in single-repo mode.]
-     - admin-api: <url>
-     - admin-web: <url>
+     - api: <url>
+     - web: <url>
 
      ## Tasks Completed (this repo)
      - [x] TASK-001: [title]
