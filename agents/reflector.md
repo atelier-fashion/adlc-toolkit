@@ -31,25 +31,26 @@ Use Grep on `.adlc/knowledge/lessons/` with patterns matching the affected areas
 - Any race conditions or async issues?
 
 #### Convention Compliance
-- Follows naming conventions (camelCase JS, PascalCase Swift types, kebab-case URLs)
-- Uses `logger` not `console.log`
-- Config values in `config.js`, not hardcoded
-- API responses follow `{ error, message }` format for errors
-- CodingKeys for snake_case API to camelCase Swift mapping
-- MVVM with @Observable pattern on iOS side
+Read `.adlc/context/conventions.md` first — it is the source of truth for this project's conventions. Check the changed code against every rule it declares. Common categories to verify:
+- Naming (files, types, variables, functions, constants, route paths) per the project's declared scheme
+- Logging — uses the project's logger abstraction, not raw `console.log` / `print` / `println`
+- Configuration — environment-specific values come from config, not hardcoded literals
+- API response format — error and success shapes match the project's declared format
+- Cross-boundary serialization (e.g., snake_case ↔ camelCase mapping) — matches the project's convention if one is declared
 
 #### Architecture
-- Proper layering: routes -> services -> repositories
-- No business logic in route handlers
-- No direct Firestore access from routes
-- ViewModels receive dependencies via init (DI), not singletons
-- Barrel re-exports maintained if files were split
+Read `.adlc/context/architecture.md` first — it declares the project's layering and dependency rules. Check the changed code against:
+- Layering — routes/handlers don't bypass services; services don't bypass data-access layers
+- Business logic location — sits in the layer the architecture says, not leaked into adjacent layers
+- Data-access boundaries — only the data layer touches the database/storage directly
+- Dependency injection — components receive collaborators per the declared DI pattern (init args, container, etc.) rather than reaching for globals or singletons
+- Barrel/index exports — maintained per the declared module convention if files were split
 
 #### Testing
 - New code has corresponding tests
 - Tests cover error/failure paths, not just happy paths
 - Mock files include all new exports
-- No brittle assertions (exact string matching on prompts, etc.)
+- No brittle assertions (exact string matching on long content, timestamp equality, etc.)
 - Tests are deterministic (no flaky timing, no external dependencies)
 
 #### Completeness
@@ -57,7 +58,7 @@ Use Grep on `.adlc/knowledge/lessons/` with patterns matching the affected areas
 - No commented-out code
 - No debug logging accidentally left in
 - All import paths resolve correctly
-- If files were added, they're included in the Xcode project (iOS)
+- For platforms with project files (Xcode, Android Studio, etc.), new files are added to the project
 
 ## Input
 

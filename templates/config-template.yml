@@ -20,6 +20,55 @@
 # behavior in that case.
 #
 # ---------------------------------------------------------------------------
+# QUICKSTART: copy a preset
+# ---------------------------------------------------------------------------
+# The fastest way to fill this in is to start from a preset that matches your
+# stack, then replace the placeholder values.
+#
+#   cp ~/.claude/skills/presets/ios-firebase-cloudrun.yml .adlc/config.yml
+#
+# Available presets (see ~/.claude/skills/presets/):
+#   - ios-firebase-cloudrun.yml — iOS app + Firebase + Cloud Run backend
+#
+# If no preset matches, fill out the sections below from scratch.
+
+# ---------------------------------------------------------------------------
+# project: Display name and (optional) preset reference.
+# ---------------------------------------------------------------------------
+# `name` is shown in skill output and PR/commit metadata. It's the only place
+# the project's human name appears — every skill reads it from here.
+# `preset` is informational only: it records which preset (if any) this config
+# was seeded from. Skills don't read it; it's a hint for `/template-drift`.
+
+project:
+  name: "My Project"
+  # preset: ios-firebase-cloudrun
+
+# ---------------------------------------------------------------------------
+# stack: Tech stack declaration. Drives conditional skill behavior.
+# ---------------------------------------------------------------------------
+# Skills consult these lists before running stack-specific steps. For example,
+# `/bugfix` and `/wrapup` only emit iOS deploy instructions when `frontends`
+# includes `ios`. `/canary` only runs when `backends` includes `cloud-run`.
+#
+# Keep these lists honest — listing a platform you don't actually use will
+# produce noisy output; omitting one will skip steps you actually need.
+#
+# Recognized values (extend by editing the relevant skill):
+#   languages:  swift | typescript | javascript | python | go | rust | kotlin | java
+#   frontends:  ios | android | web | mobile-rn | mobile-flutter
+#   backends:   cloud-run | aws-lambda | k8s | nodejs-server | django | rails | none
+#   databases:  firestore | postgres | mysql | dynamodb | mongodb | sqlite | none
+#   ci:         github-actions | gitlab-ci | circleci | none
+
+stack:
+  languages: []
+  frontends: []
+  backends: []
+  databases: []
+  ci: github-actions
+
+# ---------------------------------------------------------------------------
 # repos: This repo plus every sibling it might coordinate with.
 # ---------------------------------------------------------------------------
 # The key is a short stable id (used in task frontmatter as `repo: <id>`).
@@ -48,6 +97,40 @@ merge_order:
   - admin-api
   - admin-app
   - admin-web
+
+# ---------------------------------------------------------------------------
+# gcp: GCP-specific deploy config. Only relevant if `stack.backends` includes
+# `cloud-run` or your CI/CD targets GCP.
+# ---------------------------------------------------------------------------
+# `staging_project` and `production_project` are the GCP project IDs that
+# `/bugfix` and `/wrapup` query to confirm a deploy succeeded.
+# `default_region` is used by `/canary` and the deploy-confirmation gcloud
+# commands when a service entry doesn't specify its own region.
+#
+# If you don't deploy to GCP, omit this whole section.
+
+gcp:
+  staging_project: <staging-gcp-project-id>
+  production_project: <production-gcp-project-id>
+  default_region: us-central1
+
+# ---------------------------------------------------------------------------
+# ios: iOS-specific deploy config. Only relevant if `stack.frontends`
+# includes `ios`.
+# ---------------------------------------------------------------------------
+# `deploy_targets` is the list of WiFi-paired devices (or simulators) that
+# `/bugfix` and `/wrapup` deploy to after merge. Listing more than one means
+# every device gets the build — drop devices you don't need to keep current.
+# `derived_data_clean: true` runs `rm -rf ~/Library/Developer/Xcode/DerivedData/*`
+# before each deploy (recommended — avoids stale-build issues).
+# `deploy_command` is the script the skill invokes from the iOS repo root.
+#
+# If you don't ship iOS, omit this whole section.
+
+ios:
+  deploy_targets: []
+  derived_data_clean: true
+  deploy_command: "./deploy.sh"
 
 # ---------------------------------------------------------------------------
 # services: Cloud Run / deploy config keyed by repo id.
