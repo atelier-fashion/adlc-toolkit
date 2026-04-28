@@ -85,7 +85,7 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
 
 1. Push the fix branch: `git -C <worktree> push -u origin fix/bug-xxx-slug`
 2. Create the PR with `gh pr create` (run from inside the worktree, or use `gh -R <owner/repo>`). In cross-repo mode, create the **primary** repo's PR **last** so its body can link every sibling.
-   - **Title**: `fix(BUG-xxx): short description` — when cross-repo, scope to the repo (e.g., `fix(admin-api): null deref in user serializer [BUG-042]`).
+   - **Title**: `fix(BUG-xxx): short description` — when cross-repo, scope to the repo (e.g., `fix(api): null deref in user serializer [BUG-042]`).
    - **Body**:
      ```
      ## Summary

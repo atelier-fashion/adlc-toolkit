@@ -55,7 +55,7 @@ services:
 
 **Resolution order**:
 1. If `$ARGUMENTS` is a repo id defined under `repos:` in the primary's config, look up `services[<repo-id>]` and use that. If the repo id has no `services:` entry, stop and ask the user to add one.
-2. If `$ARGUMENTS` is a Cloud Run service name already (e.g., the user passed `admin-api` and it matches `services.*.cloud_run_service`), use that entry.
+2. If `$ARGUMENTS` is a Cloud Run service name already (e.g., the user passed `api` and it matches `services.*.cloud_run_service`), use that entry.
 3. If no argument: detect which repo the current cwd is inside by walking up to find a git root and matching it against `repos[*].path` (resolve each to an absolute path first). Then look up its service.
 4. If the project has no `.adlc/config.yml` (single-repo legacy setup) AND the current repo has a top-level `Dockerfile` and a single Cloud Run service name that matches the repo basename, fall back to auto-detection: service name = repo basename, region = `us-central1`, image path = `$(gcloud config get-value project)/<service>`. Surface this fallback in the logs so the user knows it's being inferred.
 5. If none of the above resolves, stop with a clear error: "Could not determine Cloud Run service. Add a `services:` block to `.adlc/config.yml` or pass the service name as an argument."

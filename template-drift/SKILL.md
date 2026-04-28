@@ -49,7 +49,7 @@ Also compute a rough drift size: total lines added + total lines removed (exclud
 For each drifted template, **read both full versions** (not just the diff) and make a judgment call. The goal is to separate:
 
 **Intentional customization signals** (do NOT reconcile without explicit user consent):
-- Added sections that are domain-specific to this project (e.g. `## System Model`, `## Entities`, `## Permissions`, `## Business Rules` in `admin-api/.adlc/templates/requirement-template.md`)
+- Added sections that are domain-specific to this project (e.g. `## System Model`, `## Entities`, `## Permissions`, `## Business Rules` added to a project's local `.adlc/templates/requirement-template.md`)
 - Added field names in frontmatter that reference project-specific concepts
 - Rewritten wording that reflects a deliberate editorial choice
 - Any change that appears in `git log` with a commit message indicating project-specific intent

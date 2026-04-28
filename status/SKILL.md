@@ -69,7 +69,7 @@ If the cross-repo scan found REQs originating elsewhere that touch this repo, su
 
 | REQ | Primary (origin) | Current Phase | This Repo's Role | Branch Here |
 |-----|------------------|---------------|------------------|-------------|
-| REQ-091 | admin-api | 4/8 Implement | sibling (touched) | feat/REQ-091-... |
+| REQ-091 | api       | 4/8 Implement | sibling (touched) | feat/REQ-091-... |
 
 "Branch Here" is detected by checking `git -C <this-repo> branch --list feat/REQ-xxx-*`. If absent, the REQ hasn't reached Phase 4 yet or this repo isn't touched after all.
 

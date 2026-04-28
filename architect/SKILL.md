@@ -6,7 +6,7 @@ argument-hint: REQ-xxx ID or requirement description
 
 # /architect — Architecture & Task Breakdown
 
-You are designing architecture and breaking a requirement into implementable tasks for the Atelier Fashion project.
+You are designing architecture and breaking a requirement into implementable tasks.
 
 ## Ethos
 

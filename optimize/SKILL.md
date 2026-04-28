@@ -6,7 +6,7 @@ argument-hint: Optional focus area (e.g., "ai", "caching", "queries", "latency")
 
 # /optimize — API Cost & Performance Scanner
 
-You are scanning the Atelier Fashion API for cost and performance optimization opportunities.
+You are scanning this project's API and infrastructure for cost and performance optimization opportunities.
 
 ## Ethos
 

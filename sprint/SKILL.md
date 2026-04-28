@@ -225,7 +225,7 @@ After all pipelines complete (or are stopped), produce a sprint summary:
 
 If any check fails, mark the REQ ineligible with a specific issue in the pre-flight table. The user may choose to clean up and retry, or exclude that REQ from the sprint.
 
-**Dashboard**: the sprint dashboard's per-REQ row should show "primary repo → N touched" when a REQ is cross-repo (e.g., `admin-api → 3 touched`) so the user sees fleet-wide activity at a glance, not just local work.
+**Dashboard**: the sprint dashboard's per-REQ row should show "primary repo → N touched" when a REQ is cross-repo (e.g., `api → 3 touched`) so the user sees fleet-wide activity at a glance, not just local work.
 
 **Merge sequencing**: cross-repo REQs produce multiple PRs, merged in the REQ's own `mergeOrder` (by its `/proceed` Phase 8). `/sprint` still merges REQs "as each pipeline completes" — a completed cross-repo pipeline means all its per-repo PRs have landed. Only the next REQ's pipelines need to re-fetch main.
 
