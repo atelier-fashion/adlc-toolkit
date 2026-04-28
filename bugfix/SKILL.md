@@ -6,7 +6,7 @@ argument-hint: Bug description or BUG-xxx ID
 
 # /bugfix — Bug Fix Workflow
 
-You are fixing a bug in the Atelier Fashion project using a streamlined workflow that skips the full spec ceremony but follows the **same deployment strategy as a feature**: changes land via PR, ride the staging-first CI/CD pipeline, and aren't marked resolved until both staging and production deploys are confirmed.
+You are fixing a bug using a streamlined workflow that skips the full spec ceremony but follows the **same deployment strategy as a feature**: changes land via PR, ride the project's CI/CD pipeline (staging-first if the project has one), and aren't marked resolved until every declared deploy target is confirmed.
 
 ## Ethos
 
@@ -14,6 +14,7 @@ You are fixing a bug in the Atelier Fashion project using a streamlined workflow
 
 ## Context
 
+- Project config: !`cat .adlc/config.yml 2>/dev/null || echo "No config — single-repo legacy mode"`
 - Bug template: !`cat .adlc/templates/bug-template.md 2>/dev/null || cat ~/.claude/skills/templates/bug-template.md 2>/dev/null || echo "No bug template found"`
 - Conventions: !`cat .adlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
 - Existing bugs: !`ls .adlc/bugs/ 2>/dev/null || echo "No bugs directory found"`
@@ -122,7 +123,7 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
 - The bug's `severity` is low/medium AND the staging gate in CI/CD is sufficient confidence
 
 **Run when**:
-- The fix touches a Cloud Run service (admin-api, admin-web, fashion-api, …) AND severity is high/critical, OR you want extra confidence before merge
+- The fix touches a deployable backend service declared under `services:` in `.adlc/config.yml` AND severity is high/critical, OR you want extra confidence before merge
 
 Steps (mirrors `/proceed` Phase 7.5):
 1. Determine which touched repos map to deployable services — look up `services:` in the primary repo's `.adlc/config.yml`.
@@ -141,27 +142,36 @@ This is the equivalent of `/proceed`'s Phase 8 / `/wrapup` steps, condensed for 
 1. Verify the PR is mergeable: `gh pr view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE`. If main has advanced, rebase the fix branch onto `origin/main`, force-push with lease, and wait for CI to re-pass.
 2. Merge with squash + branch delete: `gh pr merge <prUrl> --squash --delete-branch`. In cross-repo mode, walk `touched_repos:` order (or `merge_order:` from `.adlc/config.yml` if not specified on the bug).
 
-**Step 2 — Confirm both staging and production deploys** (this is the staging-first gate the user cares about — same model as features).
+**Step 2 — Confirm deploys** (this is the staging-first gate when the project has one — same model as features).
 
-For each Cloud Run service touched (per memory `project_staging_environment.md`):
-- Staging project: `atelier-fashion-staging`
-  ```bash
-  gcloud run services describe <service> --project=atelier-fashion-staging --region=us-central1 \
-    --format="value(status.latestReadyRevisionName,status.traffic[0].revisionName)"
-  ```
-  Confirm the merge SHA's revision is serving 100% traffic.
-- Production project: `sharp-maker-488811-g1`
-  ```bash
-  gcloud run services describe <service> --project=sharp-maker-488811-g1 --region=us-central1 \
-    --format="value(status.latestReadyRevisionName,status.traffic[0].revisionName)"
-  ```
-  Confirm production has been promoted (the CI/CD pipeline auto-promotes on staging smoke-test pass).
+Skip this step entirely if the project doesn't deploy via Cloud Run (i.e., `stack.backends` in `.adlc/config.yml` doesn't include `cloud-run` and there's no `gcp:` block).
 
-If staging deployed but production has NOT yet been promoted, wait — the pipeline runs them sequentially. If staging or production fails, surface to the user with the failed deploy log link before claiming the bug resolved.
+Otherwise, for each touched service that has a `services:` entry in `.adlc/config.yml`, look up `gcp.staging_project` and `gcp.production_project` from the config and confirm both:
 
-**iOS-only or iOS-touching bugs** (per memory `feedback_always_deploy_ios.md` + `feedback_deploy_both_devices.md` + `feedback_deriveddata_deploy.md`):
-1. Clean DerivedData first: `rm -rf ~/Library/Developer/Xcode/DerivedData/*`
-2. Run `./deploy.sh` from the iOS repo and deploy to **both** Carol AND Clark — never just one. Don't leave this as a follow-up for the user.
+```bash
+# Staging
+gcloud run services describe <service> \
+  --project=<gcp.staging_project from config> \
+  --region=<services[<id>].region or gcp.default_region> \
+  --format="value(status.latestReadyRevisionName,status.traffic[0].revisionName)"
+
+# Production
+gcloud run services describe <service> \
+  --project=<gcp.production_project from config> \
+  --region=<services[<id>].region or gcp.default_region> \
+  --format="value(status.latestReadyRevisionName,status.traffic[0].revisionName)"
+```
+
+Confirm the merge SHA's revision is serving 100% traffic in each. If `gcp.production_project` is omitted (no separate prod project), only confirm staging.
+
+If staging deployed but production has NOT yet been promoted, wait — the pipeline runs them sequentially. If either fails, surface to the user with the failed deploy log link before claiming the bug resolved.
+
+**iOS deploy** (only when `stack.frontends` in `.adlc/config.yml` includes `ios` AND the fix touched the iOS repo):
+1. Read `ios.deploy_targets`, `ios.derived_data_clean`, and `ios.deploy_command` from `.adlc/config.yml`.
+2. If `ios.derived_data_clean` is true: `rm -rf ~/Library/Developer/Xcode/DerivedData/*`
+3. From the iOS repo's worktree, run `<ios.deploy_command>` and deploy to **every** device in `ios.deploy_targets` — never skip one. Don't leave this as a follow-up for the user.
+
+If `stack.frontends` doesn't include `ios`, skip this section entirely.
 
 **Step 3 — Update the bug report.**
 - Set status to `resolved`
@@ -212,7 +222,7 @@ If the bug genuinely produced no useful lesson (one-line typo, etc.), say so exp
 ### Deployment
 - Staging: <service> revision <hash> @ 100% traffic
 - Production: <service> revision <hash> @ 100% traffic
-- iOS: deployed to Carol + Clark (or "n/a — backend-only fix")
+- iOS: deployed to <list of ios.deploy_targets from config> (or "n/a — backend-only fix")
 
 ### Lessons captured
 - `.adlc/knowledge/lessons/LESSON-xxx-slug.md` — one-line hook

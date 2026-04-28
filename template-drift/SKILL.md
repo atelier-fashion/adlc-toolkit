@@ -70,7 +70,7 @@ Emit a summary table, then per-file detail:
 ## Template Drift Report — [date]
 
 Project: <repo name>
-Toolkit ref: <`git -C ~/Documents/GitHub/adlc-toolkit rev-parse --short HEAD`>
+Toolkit ref: <`git -C "$(readlink ~/.claude/skills)" rev-parse --short HEAD`>
 
 | Template | Status | Drift | Classification |
 |---|---|---|---|

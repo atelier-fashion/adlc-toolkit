@@ -1,0 +1,81 @@
+# Preset: iOS + Firebase + Cloud Run
+# ---------------------------------------------------------------------------
+# Stack shape:
+#   - iOS app (Swift / SwiftUI), built and deployed via WiFi-paired devices
+#   - Firebase (Auth, Firestore) as the data and identity layer
+#   - One or more Cloud Run services as the backend tier
+#   - GitHub Actions CI/CD with staging-first promotion (PR merges → staging
+#     deploy → smoke tests → auto-promote to production)
+#   - Multi-repo coordination (typical: ios-app, admin-api, admin-web, etc.)
+#
+# Copy this file to .adlc/config.yml in the repo where you run /init, then
+# replace every `<placeholder>` with a real value.
+#
+#   cp ~/.claude/skills/presets/ios-firebase-cloudrun.yml .adlc/config.yml
+#
+# Skills (especially /bugfix, /wrapup, /canary) read this file at runtime to
+# resolve project IDs, deploy targets, and service names. Nothing is hardcoded
+# in the skills themselves — this file is the single source of truth.
+
+project:
+  name: "<Project Display Name>"
+  preset: ios-firebase-cloudrun
+
+stack:
+  languages: [swift, typescript]
+  frontends: [ios, web]
+  backends: [cloud-run]
+  databases: [firestore]
+  ci: github-actions
+
+# Repos this primary coordinates with. Replace ids and paths to match your
+# layout. The repo where /proceed is invoked becomes the primary for that REQ.
+repos:
+  # Example: primary is the iOS app
+  ios-app:
+    primary: true
+  # Siblings — each must be cloned locally at the path below
+  admin-api:
+    path: ../admin-api
+  admin-web:
+    path: ../admin-web
+
+# Order PRs are merged in. Backends first, then frontends — a frontend that
+# expects a new API field shouldn't ship before the backend that provides it.
+merge_order:
+  - admin-api
+  - admin-web
+  - ios-app
+
+# GCP projects for the staging-first deploy gate. The CI/CD pipeline is
+# expected to deploy on PR merge and auto-promote staging → production.
+# /bugfix and /wrapup query both projects after merge to confirm the new
+# revision is serving 100% traffic.
+gcp:
+  staging_project: <staging-gcp-project-id>
+  production_project: <production-gcp-project-id>
+  default_region: us-central1
+
+# iOS deploy config. After merge, /bugfix and /wrapup run `deploy_command`
+# from the iOS repo and deploy to every device in `deploy_targets`. Keep this
+# list to physical devices you actually want to keep current — every name
+# here gets a deploy on every iOS-touching merge.
+ios:
+  deploy_targets:
+    - <Device-Name-1>
+    - <Device-Name-2>
+  derived_data_clean: true
+  deploy_command: "./deploy.sh"
+
+# Cloud Run services keyed by repo id. /canary uses these to deploy zero-traffic
+# revisions and run smoke tests. Repos without a services entry are treated as
+# non-deployable (docs-only, iOS, infrastructure-only).
+services:
+  admin-api:
+    cloud_run_service: admin-api
+    region: us-central1
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-api/admin-api
+  admin-web:
+    cloud_run_service: admin-web
+    region: us-central1
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-web/admin-web

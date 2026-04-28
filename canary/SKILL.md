@@ -37,20 +37,20 @@ Service configuration lives in **`.adlc/config.yml`** in the primary repo under 
 
 ```yaml
 repos:
-  admin-api:
-    path: ../admin-api
-  admin-web:
-    path: ../admin-web
+  api:
+    path: ../api
+  web:
+    path: ../web
 
 services:
-  admin-api:
-    cloud_run_service: admin-api
+  api:
+    cloud_run_service: api
     region: us-central1
-    image_path: us-central1-docker.pkg.dev/sharp-maker-488811-g1/admin-api/admin-api
-  admin-web:
-    cloud_run_service: admin-web
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/api/api
+  web:
+    cloud_run_service: web
     region: us-central1
-    image_path: us-central1-docker.pkg.dev/sharp-maker-488811-g1/atelier-web/atelier-web
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/web/web
 ```
 
 **Resolution order**:
@@ -218,25 +218,21 @@ To customize smoke tests, create `.adlc/context/smoke-tests.md` with this format
 ```markdown
 # Smoke Tests
 
-## fashion-api
+## api
 | Method | Path | Expected Status | Body Pattern |
 |--------|------|-----------------|--------------|
 | GET | /health | 200 | |
 | GET | /api/health | 200 | |
 | GET | /api/v1/config | 200 | "version" |
 
-## admin-api
-| Method | Path | Expected Status | Body Pattern |
-|--------|------|-----------------|--------------|
-| GET | /health | 200 | |
-| GET | /api/health | 200 | |
-
-## atelier-web
+## web
 | Method | Path | Expected Status | Body Pattern |
 |--------|------|-----------------|--------------|
 | GET | / | 200 | |
 | GET | /api/health | 200 | |
 ```
+
+The keys above (`api`, `web`) are repo ids — the same ids you used under `repos:` in `.adlc/config.yml`. `/canary` looks up the smoke tests for the service it's deploying by matching repo id.
 
 ## What This Skill Does NOT Do
 

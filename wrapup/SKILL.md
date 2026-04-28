@@ -169,13 +169,13 @@ Create a concise summary suitable for sharing with the team. In cross-repo mode,
 ```
 
 ### Step 6: Deploy
-Walk the touched repos and deploy each deployable service.
+Walk the touched repos and deploy each deployable component. Read `.adlc/config.yml` for stack and deploy config — every step below is conditional on what the project actually declares.
 
 1. Determine which components were changed by examining each touched repo's PR/commits. Deploy decisions per repo:
-   - **API/backend services** (Cloud Run-deployed services): Already deployed via CI/CD when their PR merged. Confirm each deploy succeeded (`gcloud run services describe ...`).
-   - **iOS changes**: Deploy to both devices via WiFi using `cd <ios-repo-worktree-or-checkout> && ./deploy.sh`.
+   - **Backend services declared under `services:`**: If the project's CI/CD already deploys on merge (typical for `cloud-run` + `github-actions`), confirm the deploy succeeded for each touched service — `gcloud run services describe <service> --project=<gcp.production_project> --region=<services[<id>].region or gcp.default_region>`. If the project doesn't deploy on merge, run the appropriate manual deploy.
+   - **iOS** (when `stack.frontends` includes `ios` AND the iOS repo was touched): read `ios.deploy_targets`, `ios.derived_data_clean`, and `ios.deploy_command` from the primary's `.adlc/config.yml`. If `derived_data_clean` is true, run `rm -rf ~/Library/Developer/Xcode/DerivedData/*` first. Then `cd <ios-repo-worktree-or-checkout>` and run `<ios.deploy_command>`, deploying to **every** device in `deploy_targets`. Don't skip a device.
    - **Web frontend**: Confirm CI/CD deploy succeeded.
-   - **Infrastructure changes**: Note that Terraform apply is needed and confirm with user.
+   - **Infrastructure changes**: Note that the IaC apply (Terraform/Pulumi/etc.) is needed and confirm with user.
 2. If no touched repo has deployable changes (e.g., only ADLC docs changed), skip this step.
 3. In cross-repo mode, emit a one-line deploy status per touched repo in the ship summary.
 
