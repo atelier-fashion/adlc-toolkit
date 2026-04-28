@@ -155,9 +155,9 @@ Create a concise summary suitable for sharing with the team. In cross-repo mode,
 ### Repos
 | Repo | Branch | PR | Files | +/- |
 |------|--------|----|-------|-----|
-| admin-api | feat/REQ-xxx-... | #12 | 7 | +320 / -15 |
-| admin-app | feat/REQ-xxx-... | #45 | 3 | +88 / -2 |
-| admin-web | feat/REQ-xxx-... | #31 | 5 | +210 / -40 |
+| api    | feat/REQ-xxx-... | #12 | 7 | +320 / -15 |
+| web    | feat/REQ-xxx-... | #45 | 3 | +88 / -2  |
+| mobile | feat/REQ-xxx-... | #31 | 5 | +210 / -40 |
 
 ### What shipped
 - Bullet points (call out cross-repo changes like new API contracts explicitly)

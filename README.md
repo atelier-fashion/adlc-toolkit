@@ -55,7 +55,8 @@ Pick any directory you keep code in. The toolkit doesn't care where it lives, as
 
 ```bash
 cd ~/code  # or wherever you keep repos — anywhere works
-git clone https://github.com/atelier-fashion/adlc-toolkit.git
+# Replace <owner> with the canonical upstream's GitHub owner (or your fork's)
+git clone https://github.com/<owner>/adlc-toolkit.git
 ```
 
 ### 2. Symlink to Claude Code's skills and agents directories
@@ -138,7 +139,7 @@ The toolkit repo contains the **process** (skills + templates). Each code repo c
 
 ## Cross-Repo REQs
 
-Some features span multiple repos (e.g., an admin control plane that touches a backend API, a mobile app, and a web app). The toolkit supports these via the optional `repos:` block in `.adlc/config.yml`.
+Some features span multiple repos (e.g., a feature that touches a backend API, a web frontend, and a mobile app at the same time). The toolkit supports these via the optional `repos:` block in `.adlc/config.yml`.
 
 ### Key concept: "primary" is per-REQ
 

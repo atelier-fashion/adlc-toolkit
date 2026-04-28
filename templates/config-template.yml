@@ -77,14 +77,14 @@ stack:
 # Every sibling must be cloned locally at that path.
 
 repos:
-  # Example: primary is the admin web app
-  admin-app:
+  # Example: primary is the web frontend
+  web:
     primary: true
   # Example: siblings
-  admin-api:
-    path: ../admin-api
-  admin-web:
-    path: ../admin-web
+  api:
+    path: ../api
+  mobile:
+    path: ../mobile
 
 # ---------------------------------------------------------------------------
 # merge_order: Order Phase 8 merges PRs.
@@ -94,9 +94,9 @@ repos:
 # If omitted, /proceed uses the order repos appear under `repos:` above.
 
 merge_order:
-  - admin-api
-  - admin-app
-  - admin-web
+  - api
+  - web
+  - mobile
 
 # ---------------------------------------------------------------------------
 # gcp: GCP-specific deploy config. Only relevant if `stack.backends` includes
@@ -141,11 +141,11 @@ ios:
 # can be omitted here and handled in /wrapup Step 6.
 
 services:
-  admin-api:
-    cloud_run_service: admin-api
+  api:
+    cloud_run_service: api
     region: us-central1
-    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-api/admin-api
-  admin-web:
-    cloud_run_service: admin-web
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/api/api
+  web:
+    cloud_run_service: web
     region: us-central1
-    image_path: us-central1-docker.pkg.dev/<gcp-project>/admin-web/admin-web
+    image_path: us-central1-docker.pkg.dev/<gcp-project>/web/web

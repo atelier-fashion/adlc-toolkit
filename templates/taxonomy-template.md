@@ -17,7 +17,6 @@ Examples (customize for this project):
 - `API/payments`
 - `iOS/SwiftUI`
 - `iOS/networking`
-- `admin-api/users`
 - `infra/terraform`
 - `adlc/spec`
 
