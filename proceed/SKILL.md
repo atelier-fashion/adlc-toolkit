@@ -18,12 +18,13 @@ You are in subagent mode if you were explicitly told so in your launch prompt.
 
 ## Autonomous Execution Contract
 
-`/proceed` is an **autonomous orchestrator**. It is designed to run end-to-end without human input. The skill has exactly **four** legitimate halt points; every other instruction below is a log step, not a pause:
+`/proceed` is an **autonomous orchestrator**. It is designed to run end-to-end without human input. The skill has exactly **five** legitimate halt points; every other instruction below is a log step, not a pause:
 
 1. **Validation fails 3 times at any gate** (Phase 1 or Phase 3) — surface blockers.
 2. **Reflector surfaces user-facing questions** (Phase 5, Step C item 4) — surface as a numbered list and wait.
 3. **Canary deploy fails** (Phase 7.5) — surface the failure and wait for direction.
 4. **Merge conflicts during rebase** (Phase 8 / wrapup) — surface conflicts and wait.
+5. **Phase 8a 30-minute polling timeout** — staging tip not harness-green within wall-clock cap. Surface the staging tip SHA polled, the latest run URL inspected, the run's conclusion, and an actionable next step ("verify staging deploy + harness completed; resume /proceed when green"). Only fires when `pipeline.snapshot_promotion: true` is set in `.adlc/config.yml`.
 
 For everything else — including every **End-of-phase log** block below, every agent dispatch, every commit, every PR creation, every CI wait — you **continue immediately** to the next step without asking the user. Prompt only for tool-level permissions on truly destructive operations (these are governed by `.claude/settings.json`, not this skill).
 
@@ -119,7 +120,9 @@ Execute these phases in order. Each phase has a validation gate — if validatio
       "branch": "feat/REQ-xxx-short-description",
       "touched": true,
       "prUrl": null,
-      "merged": false
+      "merged": false,
+      "snapshotBranch": null,
+      "snapshotPR": null
     },
     "api": {
       "primary": false,
@@ -128,7 +131,9 @@ Execute these phases in order. Each phase has a validation gate — if validatio
       "branch": "feat/REQ-xxx-short-description",
       "touched": true,
       "prUrl": null,
-      "merged": false
+      "merged": false,
+      "snapshotBranch": null,
+      "snapshotPR": null
     }
   },
   "mergeOrder": ["api", "web"],
@@ -145,6 +150,8 @@ The `repos` block is the canonical registry for this pipeline run. Every cd/comm
 **Single-repo mode**: `repos` contains exactly one entry with `primary: true, touched: true`, and `mergeOrder` is `[that-one-id]`. All phase logic still reads from `repos` — there is no separate code path.
 
 The `phase4` block tracks task-level progress during implementation so that a mid-Phase-4 context compression can resume from the exact task in progress rather than restarting the phase. `currentTask` holds the TASK-xxx ID being worked on right now; `completedTasks` holds IDs of tasks whose status is `complete` and whose commit has landed; `failedTasks` holds IDs that hit unrecoverable errors and were surfaced to the user. Other phases do not need sub-state.
+
+The `snapshotBranch` and `snapshotPR` fields on each `repos.<id>` entry are populated by **Phase 8a** (Create Promotion Snapshot) when `pipeline.snapshot_promotion: true` is set in `.adlc/config.yml`. Their default is `null` so older state files written before this REQ-362 schema addition remain compatible — a missing field is treated as `null`. Only the primary repo's entry is populated by Phase 8a; sibling entries stay at `null`.
 
 **Gate Protocol — follow exactly**:
 
@@ -207,7 +214,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
      Then retry.
      ```
-     This is a fail-loud halt and is a **precondition error** — it does **NOT** count toward the four legitimate halt points listed in the Autonomous Execution Contract. The four-halt quota begins counting only once the pipeline is past Step 0. The same error format applies whether the colliding repo is primary or sibling.
+     This is a fail-loud halt and is a **precondition error** — it does **NOT** count toward the five legitimate halt points listed in the Autonomous Execution Contract. The five-halt quota begins counting only once the pipeline is past Step 0. The same error format applies whether the colliding repo is primary or sibling.
 5. Create a worktree in each touched repo on the same branch name (skip any repo where step 4b classified the registration as a same-branch resume):
    ```bash
    git -C <repo-path> worktree add <worktree-path> <branch-name>
@@ -442,13 +449,44 @@ Do all the steps below **for every touched repo's PR**:
    - Skip canary and proceed to merge (user must explicitly confirm)
    - Abort the pipeline
 
-**End-of-phase log**: Emit canary results — one line per service with repo id, revision, and smoke test pass/fail. On all-pass, continue to Phase 8 immediately. On any fail, halt (legitimate halt #3).
+**End-of-phase log**: Emit canary results — one line per service with repo id, revision, and smoke test pass/fail. On all-pass, continue to Phase 8a immediately (or directly to Phase 8 if `pipeline.snapshot_promotion` is unset/false). On any fail, halt (legitimate halt #3).
+
+---
+
+### Phase 8a: Create Promotion Snapshot
+
+**Gate**: `7.5` (or `7`) must be in `completedPhases`. After completion: append `8a`, set `currentPhase=8`. This phase is **optional** — only run it when the primary repo's `.adlc/config.yml` has `pipeline.snapshot_promotion: true`. When the flag is unset or `false`, log a one-line skip and advance immediately.
+
+**Goal**: Anchor a `promote/<short-sha>` snapshot branch at the staging-validated SHA and open the staging→main PR for byte-identical image promotion. The phase is a thin wrapper around `scripts/git/create-promotion-snapshot.sh` (REQ-362 ADR-362-G); the helper script owns all git/PR side effects and the 4-state idempotency machine. Phase 8a's job is to gate on config, resolve inputs from `.adlc/config.yml` and `pipeline-state.json`, poll for staging-tip CI greenness, invoke the helper, and persist its outputs to state.
+
+This phase enables parallel /proceed sessions to each create their own SHA-keyed snapshot branch without colliding — multiple in-flight promotions to prod work concurrently because each one anchors at the staging tip it observed when it ran.
+
+1. **Read project config**: load `.adlc/config.yml` from the primary repo (`repos[<primary-id>].path`). If `pipeline.snapshot_promotion` is unset or `false`, emit `phase_8a_skipped reason=snapshot_promotion_not_enabled` and advance to Phase 8 immediately. The flag is opt-in — repos that don't set it see Phase 8a as a one-line no-op.
+2. **Resolve staging tip SHA** via `gh api repos/{owner}/{repo}/branches/staging --jq '.commit.sha'` (resolve `{owner}/{repo}` from the primary repo's git remote or `gh repo view --json nameWithOwner`). The full 40-char SHA returned is the snapshot anchor.
+3. **Poll for staging-tip CI greenness** via `gh run list --workflow="Unified CI Pipeline" --branch staging --limit 1 --json conclusion,databaseId,headSha`. Accept the harness as green when the latest staging-branch run has `conclusion: success` AND `headSha` matches the staging tip SHA from step 2. If not green, wait 60 seconds and re-poll. Continue this 60s-interval loop up to a **30-minute wall-clock cap**. On timeout, halt the pipeline as legitimate halt #5 — surface a message including the staging tip SHA polled, the latest run URL inspected (`https://github.com/{owner}/{repo}/actions/runs/<databaseId>`), the run's `conclusion`, and the actionable next step ("verify staging deploy + harness completed; resume /proceed when green"). Operator-readable, not a stack trace.
+4. **Invoke the helper script** with the resolved inputs. Run from the primary repo's worktree (`repos[<primary-id>].worktree`):
+   ```bash
+   bash scripts/git/create-promotion-snapshot.sh \
+     --staging-sha <full-sha-from-step-2> \
+     --base-branch main \
+     --req REQ-xxx \
+     --staging-run-url <https-url-from-step-3>
+   ```
+   Capture the script's stdout (three structured key=value lines: `snapshot_branch=…`, `snapshot_pr=…`, `state=…`) and propagate its exit code:
+   - **exit 0** → parse `snapshot_branch` and `snapshot_pr` from stdout. Write `repos[<primary-id>].snapshotBranch` and `repos[<primary-id>].snapshotPR` to `pipeline-state.json`. Log `phase_8a_complete state=<created|already_present|already_merged> snapshot_branch=<branch> snapshot_pr=<url>`. Advance to Phase 8.
+   - **exit 2** (snapshot PR closed without merge) → halt with the script's stderr message verbatim. The recovery is operator-driven (reopen via `gh pr reopen` or delete the branch and re-run); do not auto-recover.
+   - **exit 3** (branch-name collision at a different SHA) → halt with the script's stderr message verbatim. Manual cleanup is required.
+5. **End-of-phase log**: Emit `phase_8a_complete state=<state> snapshot_branch=<branch> snapshot_pr=<url>` (skip path uses the step 1 log line). Continue to Phase 8 immediately.
+
+The phase invocation reads its arguments from `.adlc/config.yml` (`pipeline.snapshot_promotion`) and `pipeline-state.json` (`repos[<primary-id>].path` and `.worktree`); it does NOT hardcode any project-specific paths or repo names. Phase 8a treats the helper script as the source of truth for git/PR semantics — if a project needs different snapshot semantics, it forks the helper, not this phase.
+
+**Note on /proceed scope**: this phase does NOT drive dev→staging or staging→main MERGES. The snapshot creation step opens the staging→main PR; merging the PR remains operator-driven. The poll in step 3 assumes the operator (or a separate orchestration) drives staging promotion in a parallel session. The 30-min timeout is generous; if staging promotion takes longer, halt-and-resume is the right behavior.
 
 ---
 
 ### Phase 8: Wrapup
 
-**Gate**: `currentPhase` must be `8` and `7` (or `7.5`) must be in `completedPhases`. After completion: append `8`, set `"completed": true`.
+**Gate**: `currentPhase` must be `8` and either `8a` or `7.5` (or `7`) must be in `completedPhases`. After completion: append `8`, set `"completed": true`. When `pipeline.snapshot_promotion: true`, the legitimate predecessor is `8a` (which itself gates on `7.5`/`7`); when the flag is unset/false, the legitimate predecessor is `7.5` (or `7` if Phase 7.5 was also skipped per its own gate).
 
 **Goal**: Merge, deploy, capture knowledge, and close out the feature.
 
