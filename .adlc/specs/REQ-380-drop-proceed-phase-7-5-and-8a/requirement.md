@@ -102,7 +102,7 @@ This REQ does not touch the data model. It changes orchestration topology only.
 - **Deleting or rewriting the `/canary` skill itself.** Only the /proceed embedding is removed plus a one-line description annotation if needed. Decisions about whether `/canary` should be re-targeted at staging, deprecated, or kept as-is are explicitly out of scope — addressing them would require a separate REQ scoped to the skill's own design.
 - **Modifying `scripts/git/create-promotion-snapshot.sh`.** It is the contract; both REQ-379 (workflow) and Phase-8a-during-overlap-window consume it unchanged.
 - **Backfilling adlc-toolkit specs to fill the REQ-264 to REQ-379 gap.** The gap is intentional and is the price of fast-forwarding to a global counter.
-- **Removing `pipeline.snapshot_promotion` from `.adlc/config.yml` schemas / `/init` templates.** The key becomes a no-op after REQ-380; cleaning up the template is a follow-up.
+- **Removing `pipeline.snapshot_promotion` from `.adlc/config.yml` schemas / `/init` templates.** The key becomes a no-op after REQ-380; cleaning up the template is a follow-up. **(Resolved 2026-05-04: verified no-op — `snapshot_promotion` does not appear in `templates/config-template.yml` or `presets/ios-firebase-cloudrun.yml`. The dead-key follow-up requires no code change.)**
 - **Updating the `pipeline-state.json` JSON schema file (if one exists separately from the SKILL.md prose).** This REQ updates the prose documentation; if a separate schema file exists, that's a follow-up.
 
 ## Retrieved Context
