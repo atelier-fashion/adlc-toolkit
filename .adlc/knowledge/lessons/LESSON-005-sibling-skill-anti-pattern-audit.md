@@ -1,5 +1,5 @@
 ---
-id: LESSON-004
+id: LESSON-005
 title: "When you remove an anti-pattern from one skill, audit sibling skills for the same code path"
 component: "skills/bugfix"
 domain: "adlc"
