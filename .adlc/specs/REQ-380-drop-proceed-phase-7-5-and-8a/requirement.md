@@ -1,7 +1,7 @@
 ---
 id: REQ-380
 title: "Drop /proceed Phase 7.5 (canary) and Phase 8a (snapshot promotion); reduce halt points 5 → 3"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-04
 updated: 2026-05-04
