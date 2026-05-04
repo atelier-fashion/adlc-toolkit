@@ -2,7 +2,7 @@
 id: TASK-004
 title: "Mirror global REQ-counter policy in .adlc/context/project-overview.md"
 req: REQ-380
-status: pending
+status: complete
 created: 2026-05-04
 updated: 2026-05-04
 dependencies: []

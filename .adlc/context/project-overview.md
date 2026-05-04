@@ -34,3 +34,13 @@ The toolkit's own `.adlc/` (containing only `specs/` and `context/`) is minimal 
 ## Current scope
 
 As of 2026-04-19, the toolkit tracks its own feature work starting with REQ-258 (unified tag-based retrieval for `/spec`). Prior toolkit changes were tracked only in git history and PR descriptions. REQ-258 onward, the toolkit dogfoods its own spec-driven process at a minimal level.
+
+## REQ-numbering policy (cross-project global counter)
+
+As of REQ-380 (2026-05-04), this repo and atelier-fashion share a **global** REQ counter. Future REQ allocations from adlc-toolkit MUST take the next slot above the global high-water (currently anchored by atelier-fashion's REQ-380), not above adlc-toolkit's local high-water of REQ-263.
+
+Rationale: a single REQ id should resolve to one work item across every repo on the machine, so cross-repo references (links, lessons, branch names, PR titles) are unambiguous. atelier-fashion's `~/.claude/.global-next-req` counter is the source of truth; adlc-toolkit reads from the same file.
+
+Existing toolkit specs (REQ-258, REQ-262, REQ-263) keep their numbers — the policy applies to new allocations only. The intentional gap from REQ-264 through REQ-379 is the price of fast-forwarding to the global counter.
+
+Paired doc on the consumer side: atelier-fashion's `CLAUDE.md` "Cross-Project Considerations" section (shipped in atelier-fashion REQ-379, PR #774, merged 2026-05-04).
