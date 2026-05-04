@@ -2,7 +2,7 @@
 id: TASK-005
 title: "Capture wrapup lesson — Phase 7.5/8a removal + global REQ counter"
 req: REQ-380
-status: pending
+status: complete
 created: 2026-05-04
 updated: 2026-05-04
 dependencies: [TASK-001, TASK-002, TASK-003, TASK-004]
