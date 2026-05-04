@@ -1,0 +1,33 @@
+{
+  "req": "REQ-380",
+  "branch": "feat/REQ-380-drop-proceed-phase-7-5-and-8a",
+  "startedAt": "2026-05-04T00:00:00Z",
+  "completed": false,
+  "currentPhase": 4,
+  "completedPhases": [0, 1, 2, 3],
+  "phaseHistory": [
+    { "phase": 0, "name": "Setup", "completedAt": "2026-05-04T00:00:00Z" },
+    { "phase": 1, "name": "Validate Spec", "completedAt": "2026-05-04T00:01:00Z" },
+    { "phase": 2, "name": "Architect & Tasks", "completedAt": "2026-05-04T00:02:00Z" },
+    { "phase": 3, "name": "Validate Arch & Tasks", "completedAt": "2026-05-04T00:03:00Z" }
+  ],
+  "repos": {
+    "adlc-toolkit": {
+      "primary": true,
+      "path": "/Users/brettluelling/Documents/GitHub/adlc-toolkit",
+      "worktree": "/Users/brettluelling/Documents/GitHub/adlc-toolkit/.worktrees/REQ-380",
+      "branch": "feat/REQ-380-drop-proceed-phase-7-5-and-8a",
+      "touched": true,
+      "prUrl": null,
+      "merged": false,
+      "snapshotBranch": null,
+      "snapshotPR": null
+    }
+  },
+  "mergeOrder": ["adlc-toolkit"],
+  "phase4": {
+    "currentTask": null,
+    "completedTasks": ["TASK-001"],
+    "failedTasks": []
+  }
+}
