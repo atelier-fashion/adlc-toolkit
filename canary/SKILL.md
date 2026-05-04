@@ -62,7 +62,7 @@ services:
 
 **Operating worktree**: if the resolved repo has a feature-branch worktree (e.g., `.worktrees/REQ-xxx`) that matches the current `/proceed` pipeline, build from inside that worktree. Otherwise build from the repo's main checkout. The caller can also pass the worktree path explicitly.
 
-**Note (post-REQ-380)**: `/canary` is no longer auto-invoked from `/proceed`. Operators run it manually when a production canary is needed.
+**Note (post-REQ-380, REQ-381)**: `/canary` is no longer auto-invoked from `/proceed` (REQ-380) or `/bugfix` (REQ-381). Operators run it manually when a production canary is needed.
 
 ## Instructions
 

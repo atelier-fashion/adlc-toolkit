@@ -1,6 +1,6 @@
 ---
 name: bugfix
-description: End-to-end bug fix workflow — report, analyze, fix, verify, ship (PR + canary + merge + deploy + knowledge capture)
+description: End-to-end bug fix workflow — report, analyze, fix, verify, ship (PR + merge + deploy + knowledge capture)
 argument-hint: Bug description or BUG-xxx ID
 ---
 
@@ -67,7 +67,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 ### Phase 4: Verify
 1. Run the test suite: `npm test` (or appropriate test command)
 2. If tests fail, fix and re-run
-3. Update the bug report (do NOT mark `resolved` yet — that happens in Phase 7 after the fix is merged and deployed):
+3. Update the bug report (do NOT mark `resolved` yet — that happens in Phase 6 after the fix is merged and deployed):
    - Leave status as `open` (or set to `in-review` if your project uses that value)
    - Fill in "Resolution" section with what was changed and why
    - Fill in "Files Changed" section with specific file paths
@@ -109,32 +109,14 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
      ## Test Plan
      - [ ] Unit/integration tests pass locally
      - [ ] CI green on this PR
-     - [ ] Staging deploy succeeded (verified in Phase 7)
-     - [ ] Production deploy succeeded (verified in Phase 7)
+     - [ ] Staging deploy succeeded (verified in Phase 6)
+     - [ ] Production deploy succeeded (verified in Phase 6)
      ```
 3. After all sibling PRs exist, edit each one (`gh pr edit <prUrl> --body ...`) to fill in the Related PRs section.
 4. Wait for CI to pass on every PR: `gh pr checks <prUrl>`. If CI fails, diagnose and re-push — never bypass with `--no-verify` or admin-merge.
 5. Report all PR URLs to the user, grouped by repo.
 
-### Phase 6: Canary Deploy (Optional)
-
-**Skip when**:
-- The fix is iOS-only, documentation-only, or otherwise non-deployable
-- The bug's `severity` is low/medium AND the staging gate in CI/CD is sufficient confidence
-
-**Run when**:
-- The fix touches a deployable backend service declared under `services:` in `.adlc/config.yml` AND severity is high/critical, OR you want extra confidence before merge
-
-Steps (mirrors `/proceed` Phase 7.5):
-1. Determine which touched repos map to deployable services — look up `services:` in the primary repo's `.adlc/config.yml`.
-2. For each deployable service, invoke the `/canary` skill from that repo's worktree. The canary deploys a zero-traffic revision, runs smoke tests against it, and only promotes on success.
-3. If all canaries pass, continue to Phase 7.
-4. If any canary fails: stop and surface the failure. Options:
-   - Fix the issue and re-run `/canary` for the failing service only
-   - Skip canary and proceed to merge (requires explicit user confirmation)
-   - Abort
-
-### Phase 7: Wrapup — Merge, Deploy, Knowledge Capture
+### Phase 6: Wrapup — Merge, Deploy, Knowledge Capture
 
 This is the equivalent of `/proceed`'s Phase 8 / `/wrapup` steps, condensed for bugs.
 
@@ -242,6 +224,5 @@ When a bug's fix spans repos (via `touched_repos:` in the bug frontmatter):
 - The bug report itself always lives in the repo `/bugfix` was invoked from (the "primary" for this bug).
 - Phase 3 makes one commit per touched repo, each on a branch with the same name (`fix/bug-xxx-slug`).
 - Phase 5 opens one PR per touched repo and cross-links them (primary PR's body is created last so it can reference every sibling URL).
-- Phase 6 (canary) runs per service — invoke `/canary` from each affected repo's worktree.
-- Phase 7 merges in the order the repos are listed in `touched_repos:`. If the bug report doesn't specify an order, use the `merge_order` from `.adlc/config.yml`.
+- Phase 6 merges in the order the repos are listed in `touched_repos:`. If the bug report doesn't specify an order, use the `merge_order` from `.adlc/config.yml`.
 - If this gets complicated (more than 2 touched repos, or ordering matters), consider promoting the bug into a full REQ and using `/proceed` instead.
