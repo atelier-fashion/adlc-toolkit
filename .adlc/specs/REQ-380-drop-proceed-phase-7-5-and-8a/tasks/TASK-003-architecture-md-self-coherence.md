@@ -2,7 +2,7 @@
 id: TASK-003
 title: "Update .adlc/context/architecture.md pipeline diagram"
 req: REQ-380
-status: pending
+status: complete
 created: 2026-05-04
 updated: 2026-05-04
 dependencies: []
