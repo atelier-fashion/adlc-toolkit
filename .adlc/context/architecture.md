@@ -72,8 +72,6 @@ Create PR
    ↓
 PR cleanup + CI
    ↓
-/canary (optional, if deployable)
-   ↓
 /wrapup (merge, artifact updates, knowledge capture, deploy)
 ```
 
