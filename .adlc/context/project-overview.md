@@ -39,7 +39,7 @@ As of 2026-04-19, the toolkit tracks its own feature work starting with REQ-258 
 
 As of REQ-380 (2026-05-04), this repo and atelier-fashion share a **global** REQ counter. Future REQ allocations from adlc-toolkit MUST take the next slot above the global high-water (currently anchored by atelier-fashion's REQ-380), not above adlc-toolkit's local high-water of REQ-263.
 
-Rationale: a single REQ id should resolve to one work item across every repo on the machine, so cross-repo references (links, lessons, branch names, PR titles) are unambiguous. atelier-fashion's `~/.claude/.global-next-req` counter is the source of truth; adlc-toolkit reads from the same file.
+Rationale: a single REQ id should resolve to one work item across every repo on the machine, so cross-repo references (links, lessons, branch names, PR titles) are unambiguous. The global counter is maintained at `~/.claude/.global-next-req` and is the source of truth for every repo on the machine — adlc-toolkit, atelier-fashion, and any future participant all read from and increment the same file.
 
 Existing toolkit specs (REQ-258, REQ-262, REQ-263) keep their numbers — the policy applies to new allocations only. The intentional gap from REQ-264 through REQ-379 is the price of fast-forwarding to the global counter.
 
