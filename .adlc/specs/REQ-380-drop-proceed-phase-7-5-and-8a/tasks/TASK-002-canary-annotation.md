@@ -2,7 +2,7 @@
 id: TASK-002
 title: "Annotate canary/SKILL.md to reflect manual-only invocation"
 req: REQ-380
-status: pending
+status: complete
 created: 2026-05-04
 updated: 2026-05-04
 dependencies: []
