@@ -60,7 +60,9 @@ services:
 4. If the project has no `.adlc/config.yml` (single-repo legacy setup) AND the current repo has a top-level `Dockerfile` and a single Cloud Run service name that matches the repo basename, fall back to auto-detection: service name = repo basename, region = `us-central1`, image path = `$(gcloud config get-value project)/<service>`. Surface this fallback in the logs so the user knows it's being inferred.
 5. If none of the above resolves, stop with a clear error: "Could not determine Cloud Run service. Add a `services:` block to `.adlc/config.yml` or pass the service name as an argument."
 
-**Operating worktree**: if the resolved repo has a feature-branch worktree (e.g., `.worktrees/REQ-xxx`) that matches the current `/proceed` pipeline, build from inside that worktree. Otherwise build from the repo's main checkout. The caller (usually `/proceed` Phase 7.5) can also pass the worktree path explicitly.
+**Operating worktree**: if the resolved repo has a feature-branch worktree (e.g., `.worktrees/REQ-xxx`) that matches the current `/proceed` pipeline, build from inside that worktree. Otherwise build from the repo's main checkout. The caller can also pass the worktree path explicitly.
+
+**Note (post-REQ-380)**: `/canary` is no longer auto-invoked from `/proceed`. Operators run it manually when a production canary is needed.
 
 ## Instructions
 
