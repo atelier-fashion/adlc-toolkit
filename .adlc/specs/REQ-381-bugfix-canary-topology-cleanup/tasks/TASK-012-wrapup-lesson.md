@@ -1,7 +1,7 @@
 ---
 id: TASK-012
 title: "Write wrapup lesson capturing cross-reference rot + topology-hazard-inheritance pattern"
-status: draft
+status: complete
 parent: REQ-381
 created: 2026-05-04
 updated: 2026-05-04
