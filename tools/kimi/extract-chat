@@ -7,7 +7,17 @@ transformation — no API call, no MOONSHOT_API_KEY needed.
 """
 import argparse
 import json
+import re
 import sys
+
+
+# Minimum length at which a string composed entirely of base64-alphabet
+# characters is treated as a raw base64 blob and filtered. 500-char prose is
+# safe to pass through; at 600+ chars an all-base64-alphabet string is
+# overwhelmingly likely to be a real base64 payload rather than natural text.
+_RAW_BASE64_MIN_LEN = 512
+
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/=\s]+")
 
 
 def _looks_binary(text):
@@ -15,6 +25,8 @@ def _looks_binary(text):
         return False
     stripped = text.strip()
     if stripped.startswith("data:"):
+        return True
+    if len(stripped) >= _RAW_BASE64_MIN_LEN and _BASE64_RE.fullmatch(stripped):
         return True
     return False
 

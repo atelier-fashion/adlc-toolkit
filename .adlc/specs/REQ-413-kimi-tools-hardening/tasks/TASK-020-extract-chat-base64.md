@@ -1,7 +1,7 @@
 ---
 id: TASK-020
 title: "extract-chat: raw-base64 filter + tests/test_extract_chat.py"
-status: draft
+status: complete
 parent: REQ-413
 created: 2026-05-13
 updated: 2026-05-13
