@@ -1,7 +1,7 @@
 ---
 id: TASK-022
 title: "analyze/SKILL.md: add Step 1.5 (Kimi pre-read with command -v fallback)"
-status: draft
+status: complete
 parent: REQ-414
 created: 2026-05-13
 updated: 2026-05-13

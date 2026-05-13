@@ -28,6 +28,34 @@ Scope: $ARGUMENTS
 2. If given a focus area (e.g., "security", "testing", "performance"), prioritize that dimension
 3. If no argument, audit the entire project
 
+### Step 1.5: Optional pre-read via ask-kimi
+
+Before launching the audit agents, produce a one-paragraph "project shape" summary to pass as extra context to each agent in Step 2. Gate the delegation behind the BR-1 form:
+
+```sh
+if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
+  # delegated path
+else
+  # fallback path
+fi
+```
+
+**Shape-file set:** filter to files that exist on disk from this list — `README.md`, `.adlc/context/project-overview.md`, `.adlc/context/architecture.md`, `.adlc/context/conventions.md`, plus any of `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `Gemfile`.
+
+**Delegated path (gate passes):**
+- Invoke `ask-kimi --no-warn --paths <files...> --question "Summarize this project's shape in one paragraph: language, frameworks, layout convention, primary risk areas. 300 words max."`.
+- Capture stdout as the project-shape summary.
+- Emit on stderr: `/analyze: delegating bulk pre-read to kimi (read N shape files)`.
+- If `ask-kimi` exits non-zero, emit `/analyze: ask-kimi failed — falling back to Claude direct read` and fall through to the fallback path.
+
+**Fallback path (gate fails or delegated call errored):**
+- Use the Read tool on the same shape-file set and form an equivalent one-paragraph summary directly.
+- Emit on stderr: `/analyze: ask-kimi unavailable — Claude is reading shape files directly` (or `/analyze: ask-kimi disabled via ADLC_DISABLE_KIMI` when `ADLC_DISABLE_KIMI=1` is the cause).
+
+**Post-validation (BR-3):** if the summary cites any specific file path, REQ id, or LESSON id, verify each exists on disk before propagating — `test -f <path>` for files, `ls .adlc/specs/REQ-XXX-*/` for REQ ids, `ls .adlc/knowledge/lessons/LESSON-XXX-*` for LESSON ids. Drop or rewrite citations that fail validation.
+
+Pass the validated summary as an additional context paragraph in the dispatch prompt to each of the 4 audit agents launched in Step 2.
+
 ### Step 2: Launch Audit Agents + Repo Hygiene Scan (parallel)
 In a single message, launch the 4 audit agents AND run the repo hygiene bash checks below in parallel. The agents live in `~/.claude/agents/` with their full audit checklists, model selection (sonnet for deep analysis, haiku for pattern matching), and tool restrictions.
 
