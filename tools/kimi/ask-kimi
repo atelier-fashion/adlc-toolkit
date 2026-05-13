@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""ask-kimi — pack files into a corpus and ask Kimi K2.5 a question about them.
+
+Files go before the question in the request so Moonshot's prefix cache can be
+reused across multiple questions on the same corpus.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import _common  # noqa: E402
+
+_SYSTEM_PROMPT = (
+    "You are a precise code analyst. Answer the question using only the provided "
+    "files. Reply with a concise, structured summary (short sections / bullets) — "
+    "do not dump file contents verbatim."
+)
+
+
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="ask-kimi",
+        description="Ask Kimi K2.5 a question about one or more files.",
+    )
+    parser.add_argument("--paths", nargs="+", required=True, help="files to read")
+    parser.add_argument("--question", required=True, help="question to answer")
+    parser.add_argument("--max-tokens", type=int, default=8192)
+    parser.add_argument("--model", default=None)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print message structure and exit without calling the API",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    for p in args.paths:
+        if not os.path.isfile(p) or not os.access(p, os.R_OK):
+            sys.exit(f"not a readable file: {p}")
+
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": f"<corpus>\n{_common.pack_corpus(args.paths)}\n</corpus>"},
+        {"role": "user", "content": args.question},
+    ]
+
+    if args.dry_run:
+        for m in messages:
+            print(f"{m['role']}: {len(m['content'])} chars")
+        return 0
+
+    client = _common.get_client()
+    model = args.model or _common.get_model()
+    print(_common.complete(client, model, messages, args.max_tokens))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
