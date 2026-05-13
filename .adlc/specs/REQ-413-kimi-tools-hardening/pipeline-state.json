@@ -1,0 +1,28 @@
+{
+  "req": "REQ-413",
+  "branch": "feat/REQ-413-kimi-tools-hardening",
+  "startedAt": "2026-05-13T00:00:00Z",
+  "completed": false,
+  "currentPhase": 6,
+  "completedPhases": [0, 1, 2, 3, 4, 5],
+  "phaseHistory": [
+    { "phase": 0, "name": "Resolve Repos + Worktree + Context", "completedAt": "2026-05-13T00:00:00Z" }
+  ],
+  "repos": {
+    "adlc-toolkit": {
+      "primary": true,
+      "path": "/Users/brettluelling/Documents/GitHub/adlc-toolkit",
+      "worktree": "/Users/brettluelling/Documents/GitHub/adlc-toolkit/.worktrees/REQ-413",
+      "branch": "feat/REQ-413-kimi-tools-hardening",
+      "touched": true,
+      "prUrl": null,
+      "merged": false
+    }
+  },
+  "mergeOrder": ["adlc-toolkit"],
+  "phase4": {
+    "currentTask": null,
+    "completedTasks": [],
+    "failedTasks": []
+  }
+}
