@@ -1,7 +1,7 @@
 ---
 id: TASK-023
 title: "wrapup/SKILL.md: delegate Step 4 Lessons Learned drafting to Kimi (with fallback)"
-status: draft
+status: complete
 parent: REQ-414
 created: 2026-05-13
 updated: 2026-05-13

@@ -95,9 +95,51 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
   If `.adlc/.next-assume` doesn't exist, scan `.adlc/knowledge/assumptions/` for the highest existing `ASSUME-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY — never re-scan after the counter exists. The counter prevents collisions when concurrent `/sprint` pipelines wrap up at the same time.
 
 #### Lessons Learned
-- Any surprises during implementation?
-- Approaches that didn't work and why?
-- Things that worked particularly well?
+
+Decide drafting strategy via this gate, then proceed down the appropriate branch:
+
+```sh
+if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
+  # delegated path — see "Delegated drafting" below
+else
+  # fallback path — see "Fallback drafting" below
+fi
+```
+
+**Delegated drafting** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):
+
+1. Locate the most recent Claude Code session JSONL for the active project. Claude Code stores sessions under `~/.claude/projects/<encoded-cwd>/*.jsonl`, where `<encoded-cwd>` is the current working directory with `/` replaced by `-` (e.g., for cwd `/Users/brettluelling/Documents/GitHub/adlc-toolkit`, the directory is `-Users-brettluelling-Documents-GitHub-adlc-toolkit`). Pick the newest file:
+   ```bash
+   JSONL=$(ls -t ~/.claude/projects/<encoded-cwd>/*.jsonl 2>/dev/null | head -1)
+   ```
+2. Extract the chat to a temp file:
+   ```bash
+   extract-chat "$JSONL" -o "/tmp/kimi-wrapup-<reqid>.txt"
+   ```
+   If `extract-chat` exits non-zero, emit `/wrapup: extract-chat failed — falling back to Claude direct drafting` to stderr and fall through to the **Fallback drafting** branch below.
+3. Delegate the draft to Kimi:
+   ```bash
+   ask-kimi --no-warn --paths "/tmp/kimi-wrapup-<reqid>.txt" --question "Propose a LESSON-xxx draft for REQ-<reqid> following the template at .adlc/templates/lesson-template.md (or ~/.claude/skills/templates/lesson-template.md if absent). 400 words max. Include frontmatter (id, title, component, domain, stack, concerns, tags, req, dates) and the four template sections."
+   ```
+   Capture stdout as the draft. Emit `/wrapup: Lessons Learned drafted via kimi` to stderr.
+4. **Claude post-validation (BR-3, load-bearing — LESSON-007):** the draft is a *proposal*, not a deliverable. Before writing, Claude must validate every citation in the draft:
+   - **File path citations** → verify with `test -f <path>` from the repo root. Drop or rewrite citations whose target does not exist.
+   - **`REQ-xxx` citations** → verify with `ls .adlc/specs/REQ-XXX-*/` (substitute the cited number). Drop or rewrite if no spec directory matches.
+   - **`LESSON-xxx` citations** → verify with `ls .adlc/knowledge/lessons/LESSON-XXX-*` (substitute the cited number). Drop or rewrite if no lesson file matches.
+   Note any drops or rewrites in the wrapup log so the audit trail shows what Kimi proposed vs. what shipped.
+5. Claude reads the validated draft, edits for accuracy, voice, and scope, then writes the final lesson file using the file-naming + counter rules in **Fallback drafting** below (`.adlc/.next-lesson` atomic counter, `LESSON-xxx-slug.md` naming, required frontmatter fields).
+6. Delete the temp file after the lesson is written:
+   ```bash
+   rm -f "/tmp/kimi-wrapup-<reqid>.txt"
+   ```
+
+**Fallback drafting** (gate fails — `ask-kimi` not on PATH, or `ADLC_DISABLE_KIMI=1`, or any delegated step errored out):
+
+- Emit `/wrapup: ask-kimi unavailable — Claude drafting lesson directly` to stderr (or `/wrapup: ask-kimi disabled via ADLC_DISABLE_KIMI — Claude drafting lesson directly` when the gate failed specifically because `ADLC_DISABLE_KIMI=1`).
+- Claude drafts the lesson directly from in-context conversation memory. Consider:
+  - Any surprises during implementation?
+  - Approaches that didn't work and why?
+  - Things that worked particularly well?
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work
 - Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
