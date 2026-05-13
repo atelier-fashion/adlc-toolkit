@@ -9,6 +9,9 @@ import openai
 
 _API_KEY_VAR = "MOONSHOT_API_KEY"
 _BASE_URL = "https://api.moonshot.ai/v1"
+# Verified against the Moonshot/Kimi API docs (platform.kimi.ai), May 2026.
+# Other valid ids: "kimi-k2.6", "kimi-k2-thinking", "kimi-k2-turbo-preview" —
+# override with the KIMI_MODEL env var or the --model flag.
 _DEFAULT_MODEL = "kimi-k2.5"
 
 
