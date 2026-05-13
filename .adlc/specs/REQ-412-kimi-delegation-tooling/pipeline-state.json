@@ -3,8 +3,8 @@
   "branch": "feat/REQ-412-kimi-delegation-tooling",
   "startedAt": "2026-05-12T00:00:00Z",
   "completed": false,
-  "currentPhase": 6,
-  "completedPhases": [0, 1, 2, 3, 4, 5],
+  "currentPhase": 7,
+  "completedPhases": [0, 1, 2, 3, 4, 5, 6],
   "blockers": [],
   "phaseHistory": [
     { "phase": 0, "name": "Resolve Repos + Worktree + Context", "completedAt": "2026-05-12T00:00:00Z" },
@@ -19,7 +19,7 @@
       "worktree": "/Users/brettluelling/Documents/GitHub/adlc-toolkit/.worktrees/REQ-412",
       "branch": "feat/REQ-412-kimi-delegation-tooling",
       "touched": true,
-      "prUrl": null,
+      "prUrl": "https://github.com/atelier-fashion/adlc-toolkit/pull/34",
       "merged": false,
       "snapshotBranch": null,
       "snapshotPR": null
