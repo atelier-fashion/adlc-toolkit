@@ -55,17 +55,22 @@ def main(argv=None):
             sys.exit(f"not a readable file: {args.context}")
         with open(args.context, "r", encoding="utf-8") as fh:
             content = fh.read()
-        reference_block = f"<reference path='{args.context}'>\n{content}\n</reference>"
+        # BR-5: only the basename leaves the local machine. Full path stays in
+        # local SystemExit error messages for actionability.
+        reference_block = f"<reference path='{os.path.basename(args.context)}'>\n{content}\n</reference>"
 
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
     if reference_block is not None:
         messages.append({"role": "user", "content": reference_block})
     messages.append({"role": "user", "content": args.spec})
 
-    client = _common.get_client()
-    model = args.model or _common.get_model()
+    # Notice fires after all local guards (clobber, missing parent dir,
+    # unreadable context) but BEFORE get_client(), so the user always sees the
+    # privacy notice for any run that has reached the would-call-the-API stage.
     if not args.no_warn and os.environ.get("KIMI_NO_WARN") != "1":
         _common.emit_exfil_notice()
+    client = _common.get_client()
+    model = args.model or _common.get_model()
     result = _common._strip_fences(_common.complete(client, model, messages, args.max_tokens))
 
     with open(args.target, "w", encoding="utf-8") as fh:

@@ -1,6 +1,6 @@
 """Shared helpers for the Kimi delegation CLIs.
 
-Dependency-light by design: only ``os`` from the stdlib plus ``openai``.
+Dependency-light by design: only ``os`` and ``sys`` from the stdlib plus ``openai``.
 """
 
 import os

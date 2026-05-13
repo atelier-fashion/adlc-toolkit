@@ -110,3 +110,34 @@ def test_output_file_matches_stdout(tmp_path):
     out_file = tmp_path / "x.txt"
     _run(p, "-o", str(out_file))
     assert out_file.read_text(encoding="utf-8") == stdout_out
+
+
+# --- threshold-boundary + prose-passthrough regression nets ---
+
+def test_raw_base64_511_chars_passes(tmp_path):
+    # One char under the threshold: must pass through even though every char
+    # is in the base64 alphabet.
+    payload = "A" * 511
+    p = _write(tmp_path, [_line("user", [payload])])
+    out = _run(p).stdout
+    assert payload in out
+
+
+def test_raw_base64_512_chars_filtered(tmp_path):
+    # Exactly at the threshold: must be filtered.
+    payload = "A" * 512
+    p = _write(tmp_path, [_line("user", [payload])])
+    out = _run(p).stdout
+    assert payload not in out
+
+
+def test_600_char_prose_with_spaces_passes(tmp_path):
+    # 600 chars of letters + spaces. With the (correct) regex this is NOT
+    # base64 (spaces fail the fullmatch), so it must pass through. This test
+    # protects against the original `\s`-in-regex bug where ordinary prose at
+    # >= 512 chars would be silently filtered.
+    prose = ("the quick brown fox jumps over the lazy dog " * 20)[:600]
+    assert len(prose) == 600
+    p = _write(tmp_path, [_line("user", [prose])])
+    out = _run(p).stdout
+    assert prose in out

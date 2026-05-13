@@ -60,10 +60,13 @@ def main(argv=None):
             print(f"{m['role']}: {len(m['content'])} chars")
         return 0
 
-    client = _common.get_client()
-    model = args.model or _common.get_model()
+    # Notice fires after the dry-run gate and after path validation, but BEFORE
+    # get_client() so the user always sees the privacy notice for any real run —
+    # even one that will fail later due to a missing key or auth error.
     if not args.no_warn and os.environ.get("KIMI_NO_WARN") != "1":
         _common.emit_exfil_notice()
+    client = _common.get_client()
+    model = args.model or _common.get_model()
     print(_common.complete(client, model, messages, args.max_tokens))
     return 0
 

@@ -12,6 +12,12 @@ Three commands:
 - `kimi-write` — generate boilerplate (tests, config, docstrings, repetitive patterns) to a target file.
 - `extract-chat` — flatten a Claude Code session `.jsonl` transcript into plain text (feeds `ask-kimi`).
 
+> **Privacy:** `ask-kimi` and `kimi-write` send file contents to the Moonshot
+> API. Only the basename of each path is included in the request — full
+> filesystem paths stay local. Every real run prints a one-line stderr notice;
+> silence it with `--no-warn` or `KIMI_NO_WARN=1`. `extract-chat` is purely
+> local and makes no API calls.
+
 ## Setup
 
 1. **Get a Moonshot API key** from <https://platform.moonshot.ai/> (Console → API Keys).
