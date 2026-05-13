@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""extract-chat — clean a Claude Code session JSONL transcript into readable text.
+
+Emits only human prompts and assistant natural-language replies, stripping tool
+calls, tool results, system prompts, and binary/base64 blobs. Pure local
+transformation — no API call, no MOONSHOT_API_KEY needed.
+"""
+import argparse
+import json
+import sys
+
+
+def _looks_binary(text):
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if stripped.startswith("data:"):
+        return True
+    return False
+
+
+def _extract_text_from_content(content, drop_block_types):
+    """Return concatenated human-readable text from a message `content` value.
+
+    `content` may be a plain string or a list of content blocks (dicts or
+    strings). Blocks whose `type` is in `drop_block_types` are skipped, as are
+    blocks that look like images / base64 / data URIs.
+    """
+    if isinstance(content, str):
+        if _looks_binary(content):
+            return ""
+        return content.strip()
+
+    if not isinstance(content, list):
+        return ""
+
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            if _looks_binary(block):
+                continue
+            block = block.strip()
+            if block:
+                parts.append(block)
+            continue
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype in drop_block_types:
+            continue
+        if btype == "image":
+            continue
+        if btype == "text" or btype is None:
+            txt = block.get("text")
+            if isinstance(txt, str) and not _looks_binary(txt):
+                txt = txt.strip()
+                if txt:
+                    parts.append(txt)
+    return "\n\n".join(parts).strip()
+
+
+def _iter_turns(fh):
+    """Yield (role, text) tuples for recognized conversation turns."""
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        message = record.get("message")
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = message.get("content")
+        if role == "assistant":
+            drop = {"tool_use"}
+        else:  # user
+            drop = {"tool_result"}
+        text = _extract_text_from_content(content, drop)
+        if not text:
+            continue
+        yield role, text
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Clean a Claude Code session JSONL transcript into readable text.")
+    parser.add_argument("jsonl_path", help="path to the .jsonl session transcript")
+    parser.add_argument("-o", "--output", metavar="PATH",
+                        help="write output here instead of stdout")
+    args = parser.parse_args(argv)
+
+    try:
+        fh = open(args.jsonl_path, "r", encoding="utf-8", errors="replace")
+    except OSError as exc:
+        print("extract-chat: cannot open %s: %s" % (args.jsonl_path, exc),
+              file=sys.stderr)
+        return 1
+
+    chunks = []
+    with fh:
+        for role, text in _iter_turns(fh):
+            header = "## Human" if role == "user" else "## Assistant"
+            chunks.append("%s\n%s" % (header, text))
+
+    output = "\n\n".join(chunks)
+    if chunks:
+        output += "\n"
+
+    if args.output:
+        try:
+            with open(args.output, "w", encoding="utf-8") as out:
+                out.write(output)
+        except OSError as exc:
+            print("extract-chat: cannot write %s: %s" % (args.output, exc),
+                  file=sys.stderr)
+            return 1
+    else:
+        sys.stdout.write(output)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

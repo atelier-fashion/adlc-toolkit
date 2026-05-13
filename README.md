@@ -36,6 +36,10 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 
 Stack-shaped starter configs that seed `.adlc/config.yml` for common stacks. See [`presets/`](presets/) for the current list.
 
+### Tools
+
+Standalone command-line utilities (not skills, installed via their own `install.sh`). See [`tools/kimi/`](tools/kimi/README.md) — Kimi K2.5 delegation CLIs (`ask-kimi`, `kimi-write`, `extract-chat`) for offloading token-heavy I/O from Claude Code sessions.
+
 ## How it works
 
 The toolkit is split into two layers:
