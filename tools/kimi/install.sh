@@ -61,7 +61,53 @@ else
     echo "  (MOONSHOT_API_KEY is currently NOT set in this shell)"
 fi
 
+# --- CLAUDE.md routing block (marker-guarded append) --------------------
+CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+README="$REPO_ROOT/tools/kimi/README.md"
+mkdir -p "$HOME/.claude"
+if [ -f "$CLAUDE_MD" ] && grep -q 'kimi-delegation:start' "$CLAUDE_MD"; then
+    echo "Kimi routing block already present in $CLAUDE_MD"
+else
+    echo "Appending Kimi routing block to $CLAUDE_MD"
+    {
+        echo ""
+        sed -n '/kimi-delegation:start/,/kimi-delegation:end/p' "$README"
+    } >> "$CLAUDE_MD"
+fi
+
+# --- settings.json allowlist merge --------------------------------------
+SETTINGS="$HOME/.claude/settings.json"
+if [ -f "$SETTINGS" ]; then
+    cp "$SETTINGS" "$SETTINGS.bak"
+    echo "Backed up $SETTINGS to $SETTINGS.bak"
+    "$VENV_DIR/bin/python3" - "$SETTINGS" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+perms = data.get("permissions")
+if not isinstance(perms, dict):
+    perms = {}
+    data["permissions"] = perms
+allow = perms.get("allow")
+if not isinstance(allow, list):
+    allow = []
+    perms["allow"] = allow
+for entry in ("Bash(ask-kimi:*)", "Bash(kimi-write:*)", "Bash(extract-chat:*)"):
+    if entry not in allow:
+        allow.append(entry)
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PYEOF
+    echo "Merged Kimi allowlist entries into $SETTINGS"
+else
+    echo ""
+    echo "Note: $SETTINGS does not exist — not creating it."
+    echo "Add these to its permissions.allow list manually:"
+    echo '  "Bash(ask-kimi:*)", "Bash(kimi-write:*)", "Bash(extract-chat:*)"'
+fi
+
 # --- next steps ---------------------------------------------------------
 echo ""
-echo "Next steps (TASK-017): the CLAUDE.md routing block and the settings.json"
-echo "allowlist for these CLIs are not installed yet — see REQ-412 TASK-017."
+echo "Done. Restart your shell (or 'source ~/.zshrc') and set MOONSHOT_API_KEY."

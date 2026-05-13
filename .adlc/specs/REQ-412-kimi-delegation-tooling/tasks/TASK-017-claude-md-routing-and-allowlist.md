@@ -1,7 +1,7 @@
 ---
 id: TASK-017
 title: "CLAUDE.md delegation routing block, settings.json allowlist, README, conventions note"
-status: draft
+status: complete
 parent: REQ-412
 created: 2026-05-12
 updated: 2026-05-12
