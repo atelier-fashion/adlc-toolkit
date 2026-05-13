@@ -3,8 +3,8 @@
   "branch": "feat/REQ-414-adlc-skill-kimi-pilot",
   "startedAt": "2026-05-13T00:00:00Z",
   "completed": false,
-  "currentPhase": 4,
-  "completedPhases": [0, 1, 2, 3],
+  "currentPhase": 6,
+  "completedPhases": [0, 1, 2, 3, 4, 5],
   "phaseHistory": [
     { "phase": 0, "name": "Step 0", "completedAt": "2026-05-13T00:00:00Z" },
     { "phase": 1, "name": "Validate Spec", "completedAt": "2026-05-13T00:00:00Z" },

@@ -1,7 +1,7 @@
 ---
 id: REQ-414
 title: "Pilot Kimi delegation in /analyze and /wrapup, with hard fallback to Claude when ask-kimi is unavailable"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-13
 updated: 2026-05-13
