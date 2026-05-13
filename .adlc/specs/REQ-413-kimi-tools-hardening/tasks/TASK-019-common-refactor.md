@@ -1,7 +1,7 @@
 ---
 id: TASK-019
 title: "_common.py: basename pack_corpus, host _strip_fences, add emit_exfil_notice; tests"
-status: draft
+status: complete
 parent: REQ-413
 created: 2026-05-13
 updated: 2026-05-13

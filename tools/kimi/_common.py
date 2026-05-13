@@ -4,6 +4,7 @@ Dependency-light by design: only ``os`` from the stdlib plus ``openai``.
 """
 
 import os
+import sys
 
 import openai
 
@@ -34,10 +35,13 @@ def get_model():
     return os.environ.get("KIMI_MODEL", _DEFAULT_MODEL)
 
 
-def pack_corpus(paths):
+def pack_corpus(paths, *, use_basename=True):
     """Read each path and join them as ``<file path='...'>`` blocks, in order.
 
     Callers put files before the question so the corpus prefix can be cached.
+    When ``use_basename`` is true (default), the ``path`` attribute embeds only
+    ``os.path.basename(p)`` so absolute paths on the caller's machine don't
+    leak to the API. Local error messages keep the full path for actionability.
     """
     blocks = []
     for p in paths:
@@ -48,8 +52,38 @@ def pack_corpus(paths):
             raise SystemExit(f"file not found: {p}")
         except OSError as exc:
             raise SystemExit(f"cannot read {p}: {exc}")
-        blocks.append(f"<file path='{p}'>\n{content}\n</file>")
+        attr = os.path.basename(p) if use_basename else p
+        blocks.append(f"<file path='{attr}'>\n{content}\n</file>")
     return "\n\n".join(blocks)
+
+
+def _strip_fences(text):
+    lines = text.split("\n")
+    if lines and lines[0].lstrip().startswith("```"):
+        # find a trailing fence line
+        end = None
+        for i in range(len(lines) - 1, 0, -1):
+            if lines[i].strip().startswith("```"):
+                end = i
+                break
+        if end is not None:
+            return "\n".join(lines[1:end])
+    return text
+
+
+def emit_exfil_notice(stream=None):
+    """Write the one-line exfiltration warning to ``stream`` (default stderr).
+
+    The text mentions the model name (from :func:`get_model`) and the two
+    suppression mechanisms (``--no-warn`` flag, ``KIMI_NO_WARN`` env var).
+    The API key value/var name is never interpolated.
+    """
+    if stream is None:
+        stream = sys.stderr
+    stream.write(
+        f"kimi: sending file contents to Moonshot ({get_model()}). "
+        "Pass --no-warn or set KIMI_NO_WARN=1 to silence.\n"
+    )
 
 
 def complete(client, model, messages, max_tokens):
