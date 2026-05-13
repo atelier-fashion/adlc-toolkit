@@ -1,0 +1,27 @@
+{
+  "req": "REQ-414",
+  "branch": "feat/REQ-414-adlc-skill-kimi-pilot",
+  "startedAt": "2026-05-13T00:00:00Z",
+  "completed": false,
+  "currentPhase": 6,
+  "completedPhases": [0, 1, 2, 3, 4, 5],
+  "phaseHistory": [
+    { "phase": 0, "name": "Step 0", "completedAt": "2026-05-13T00:00:00Z" },
+    { "phase": 1, "name": "Validate Spec", "completedAt": "2026-05-13T00:00:00Z" },
+    { "phase": 2, "name": "Architect & Tasks", "completedAt": "2026-05-13T00:00:00Z" },
+    { "phase": 3, "name": "Validate Architecture & Tasks", "completedAt": "2026-05-13T00:00:00Z" }
+  ],
+  "repos": {
+    "adlc-toolkit": {
+      "primary": true,
+      "path": "/Users/brettluelling/Documents/GitHub/adlc-toolkit",
+      "worktree": "/Users/brettluelling/Documents/GitHub/adlc-toolkit/.worktrees/REQ-414",
+      "branch": "feat/REQ-414-adlc-skill-kimi-pilot",
+      "touched": true,
+      "prUrl": null,
+      "merged": false
+    }
+  },
+  "mergeOrder": ["adlc-toolkit"],
+  "phase4": { "currentTask": null, "completedTasks": [], "failedTasks": [] }
+}
