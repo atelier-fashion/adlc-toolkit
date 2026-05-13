@@ -1,7 +1,7 @@
 ---
 id: TASK-016
 title: "Implement extract-chat — Claude Code JSONL transcript cleaner CLI"
-status: draft
+status: complete
 parent: REQ-412
 created: 2026-05-12
 updated: 2026-05-12
