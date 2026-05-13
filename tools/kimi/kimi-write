@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""kimi-write — ask Kimi K2.5 to generate a file from a spec, for Claude to review.
+
+Generates a complete file from a spec string plus an optional reference file and
+writes it to a target path. Refuses to clobber an existing target without --force,
+and never creates parent directories.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import _common  # noqa: E402
+
+_SYSTEM_PROMPT = (
+    "You generate complete, idiomatic files matching the given conventions. "
+    "Output ONLY the file contents — no markdown code fences, no commentary."
+)
+
+
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="kimi-write",
+        description="Generate a file from a spec with Kimi K2.5.",
+    )
+    parser.add_argument("--spec", required=True, help="description of what to generate")
+    parser.add_argument("--context", default=None, help="reference file for patterns/conventions")
+    parser.add_argument("--target", required=True, help="output file path")
+    parser.add_argument("--force", action="store_true", help="allow overwriting an existing --target")
+    parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--model", default=None)
+    return parser.parse_args(argv)
+
+
+def _strip_fences(text):
+    lines = text.split("\n")
+    if lines and lines[0].lstrip().startswith("```"):
+        # find a trailing fence line
+        end = None
+        for i in range(len(lines) - 1, 0, -1):
+            if lines[i].strip() == "```":
+                end = i
+                break
+        if end is not None:
+            return "\n".join(lines[1:end])
+    return text
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    if os.path.exists(args.target) and not args.force:
+        sys.exit(f"target already exists (use --force to overwrite): {args.target}")
+
+    parent = os.path.dirname(os.path.abspath(args.target))
+    if not os.path.isdir(parent):
+        sys.exit(f"parent directory does not exist: {parent}")
+
+    reference_block = None
+    if args.context is not None:
+        if not os.path.isfile(args.context) or not os.access(args.context, os.R_OK):
+            sys.exit(f"not a readable file: {args.context}")
+        with open(args.context, "r", encoding="utf-8") as fh:
+            content = fh.read()
+        reference_block = f"<reference path='{args.context}'>\n{content}\n</reference>"
+
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    if reference_block is not None:
+        messages.append({"role": "user", "content": reference_block})
+    messages.append({"role": "user", "content": args.spec})
+
+    client = _common.get_client()
+    model = args.model or _common.get_model()
+    result = _strip_fences(_common.complete(client, model, messages, args.max_tokens))
+
+    with open(args.target, "w", encoding="utf-8") as fh:
+        fh.write(result)
+
+    print(f"wrote: {args.target}")
+    print("Review this generated file before using it — Kimi output is not vetted.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

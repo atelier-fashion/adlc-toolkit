@@ -1,7 +1,7 @@
 ---
 id: TASK-015
 title: "Implement kimi-write — boilerplate generator CLI"
-status: draft
+status: complete
 parent: REQ-412
 created: 2026-05-12
 updated: 2026-05-12
