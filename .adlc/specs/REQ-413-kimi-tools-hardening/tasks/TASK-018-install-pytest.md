@@ -1,7 +1,7 @@
 ---
 id: TASK-018
 title: "install.sh: add pytest to the kimi venv (idempotent)"
-status: draft
+status: complete
 parent: REQ-413
 created: 2026-05-13
 updated: 2026-05-13
