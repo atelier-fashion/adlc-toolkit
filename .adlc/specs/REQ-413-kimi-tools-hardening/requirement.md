@@ -1,7 +1,7 @@
 ---
 id: REQ-413
 title: "Kimi tools hardening: offline test suite, base64 filter, exfiltration notice"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-13
 updated: 2026-05-13
