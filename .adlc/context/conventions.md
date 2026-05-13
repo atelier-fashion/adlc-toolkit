@@ -8,6 +8,8 @@ Every skill and agent is a markdown file. No TypeScript, no Python, no package.j
 - **No test runner**: "tests" are dogfooding — invoke the skill on a real REQ and see if it produces the expected artifacts
 - **Linting is minimal**: markdown formatting, frontmatter validity, and bash syntax in `!`...`` macros. Nothing else.
 
+**Exception — `tools/`:** the `tools/` directory may contain real executable code (e.g. `tools/kimi/`, a set of Python delegation CLIs with its own `install.sh`). It is exempt from the markdown-only rule and from the symlink-install model — those tools are installed by running their `install.sh`, not via the skills symlink. Each `tools/<name>/` subdirectory carries its own README.
+
 ## File and directory naming
 
 - Skill directories: lowercase, single word or hyphenated (`spec`, `bugfix`, `template-drift`)
