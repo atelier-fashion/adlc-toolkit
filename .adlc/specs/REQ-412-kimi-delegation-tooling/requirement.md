@@ -1,7 +1,7 @@
 ---
 id: REQ-412
 title: "Kimi K2.5 Delegation Tooling for Token-Efficient Claude Code Sessions"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-12
 updated: 2026-05-12
