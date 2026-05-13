@@ -40,7 +40,7 @@ def _strip_fences(text):
         # find a trailing fence line
         end = None
         for i in range(len(lines) - 1, 0, -1):
-            if lines[i].strip() == "```":
+            if lines[i].strip().startswith("```"):
                 end = i
                 break
         if end is not None:

@@ -38,8 +38,13 @@ def pack_corpus(paths):
     """
     blocks = []
     for p in paths:
-        with open(p, "r") as fh:
-            content = fh.read()
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except FileNotFoundError:
+            raise SystemExit(f"file not found: {p}")
+        except OSError as exc:
+            raise SystemExit(f"cannot read {p}: {exc}")
         blocks.append(f"<file path='{p}'>\n{content}\n</file>")
     return "\n\n".join(blocks)
 
@@ -54,6 +59,8 @@ def complete(client, model, messages, max_tokens):
         messages=messages,
         max_tokens=max_tokens,
     )
+    if not getattr(resp, "choices", None):
+        raise SystemExit("API returned no choices — check the model id and your account quota")
     content = resp.choices[0].message.content
     if not content or not content.strip():
         raise SystemExit("empty completion — increase --max-tokens")

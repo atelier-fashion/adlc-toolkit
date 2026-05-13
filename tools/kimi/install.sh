@@ -21,6 +21,8 @@ echo "Installing/upgrading openai into venv"
 "$VENV_DIR/bin/pip" install --upgrade openai
 
 # --- ~/bin wrappers (regenerated each run) ------------------------------
+# Note: wrappers are path-stamped to this repo's location ($REPO_ROOT).
+# If you move the toolkit clone, re-run this script to regenerate them.
 mkdir -p "$BIN_DIR"
 for name in $CLIS; do
     wrapper="$BIN_DIR/$name"
@@ -29,26 +31,25 @@ for name in $CLIS; do
 exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/kimi/$name" "\$@"
 EOF
     chmod +x "$wrapper"
-    echo "Wrote wrapper $wrapper"
+    echo "Wrote wrapper $wrapper (-> $REPO_ROOT/tools/kimi/$name)"
 done
 
 # --- PATH entry in ~/.zshrc (marker-guarded) ----------------------------
-case ":$PATH:" in
-    *":$BIN_DIR:"*)
-        : # already on PATH
-        ;;
-    *)
-        if [ -f "$ZSHRC" ] && grep -F "$PATH_MARKER" "$ZSHRC" >/dev/null 2>&1; then
-            echo "PATH entry already present in $ZSHRC"
-        else
-            echo "Appending ~/bin to PATH in $ZSHRC"
-            {
-                echo ""
-                echo "$PATH_MARKER"
-                echo 'export PATH="$HOME/bin:$PATH"'
-            } >> "$ZSHRC"
-        fi
-        ;;
+# Idempotency is keyed solely on the marker line — do not also gate on the
+# current shell's $PATH, since a non-login shell may not have run ~/.zshrc yet.
+if [ -f "$ZSHRC" ] && grep -F "$PATH_MARKER" "$ZSHRC" >/dev/null 2>&1; then
+    echo "PATH entry already present in $ZSHRC"
+else
+    echo "Appending ~/bin to PATH in $ZSHRC"
+    {
+        echo ""
+        echo "$PATH_MARKER"
+        echo 'export PATH="$HOME/bin:$PATH"'
+    } >> "$ZSHRC"
+fi
+case "${SHELL:-}" in
+    */zsh) : ;;
+    *) echo "Note: your login shell is not zsh — add 'export PATH=\"\$HOME/bin:\$PATH\"' to the right rc file for $SHELL." ;;
 esac
 
 # --- MOONSHOT_API_KEY reminder (printed, never written) -----------------
@@ -80,11 +81,16 @@ SETTINGS="$HOME/.claude/settings.json"
 if [ -f "$SETTINGS" ]; then
     cp "$SETTINGS" "$SETTINGS.bak"
     echo "Backed up $SETTINGS to $SETTINGS.bak"
-    "$VENV_DIR/bin/python3" - "$SETTINGS" <<'PYEOF'
-import json, sys
+    if "$VENV_DIR/bin/python3" - "$SETTINGS" <<'PYEOF'
+import json, os, sys
 path = sys.argv[1]
-with open(path) as f:
-    data = json.load(f)
+try:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+except json.JSONDecodeError as exc:
+    sys.exit(f"{path} is not valid JSON ({exc}); not modified — fix it and re-run.")
+if not isinstance(data, dict):
+    sys.exit(f"{path} top level is not a JSON object; not modified.")
 perms = data.get("permissions")
 if not isinstance(perms, dict):
     perms = {}
@@ -96,11 +102,18 @@ if not isinstance(allow, list):
 for entry in ("Bash(ask-kimi:*)", "Bash(kimi-write:*)", "Bash(extract-chat:*)"):
     if entry not in allow:
         allow.append(entry)
-with open(path, "w") as f:
+tmp = path + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
+os.replace(tmp, path)
 PYEOF
-    echo "Merged Kimi allowlist entries into $SETTINGS"
+    then
+        echo "Merged Kimi allowlist entries into $SETTINGS"
+    else
+        echo "WARNING: could not update $SETTINGS — add these to its permissions.allow manually:"
+        echo '  "Bash(ask-kimi:*)", "Bash(kimi-write:*)", "Bash(extract-chat:*)"'
+    fi
 else
     echo ""
     echo "Note: $SETTINGS does not exist — not creating it."

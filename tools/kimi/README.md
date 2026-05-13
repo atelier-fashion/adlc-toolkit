@@ -98,7 +98,7 @@ rewriting docs directly.
 
 Do **not** route to Kimi for:
 
-- Tasks under ~2000 tokens — the delegation round-trip costs more than it saves.
+- Tasks under ~2000 tokens (roughly under ~150 lines of code, or a short back-and-forth) — the delegation round-trip costs more than it saves.
 - Architectural decisions.
 - Debugging.
 - Safety- and security-critical code.
