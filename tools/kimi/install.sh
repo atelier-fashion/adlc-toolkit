@@ -17,8 +17,8 @@ if [ ! -d "$VENV_DIR" ]; then
     mkdir -p "$HOME/.claude"
     python3 -m venv "$VENV_DIR"
 fi
-echo "Installing/upgrading openai into venv"
-"$VENV_DIR/bin/pip" install --upgrade openai
+echo "Installing/upgrading openai + pytest into venv"
+"$VENV_DIR/bin/pip" install --upgrade openai pytest
 
 # --- ~/bin wrappers (regenerated each run) ------------------------------
 # Note: wrappers are path-stamped to this repo's location ($REPO_ROOT).

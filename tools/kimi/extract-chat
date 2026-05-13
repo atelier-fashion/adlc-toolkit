@@ -7,7 +7,18 @@ transformation — no API call, no MOONSHOT_API_KEY needed.
 """
 import argparse
 import json
+import re
 import sys
+
+
+# Minimum length at which a string composed entirely of base64-alphabet
+# characters (RFC 4648 alphabet — no whitespace) is treated as a raw base64
+# blob and filtered. A string with embedded whitespace is treated as prose and
+# passes through, even at higher lengths, to avoid eating ordinary text that
+# happens to contain only letters and spaces.
+_RAW_BASE64_MIN_LEN = 512
+
+_BASE64_RE = re.compile(r"[A-Za-z0-9+/=]+")
 
 
 def _looks_binary(text):
@@ -15,6 +26,8 @@ def _looks_binary(text):
         return False
     stripped = text.strip()
     if stripped.startswith("data:"):
+        return True
+    if len(stripped) >= _RAW_BASE64_MIN_LEN and _BASE64_RE.fullmatch(stripped):
         return True
     return False
 
