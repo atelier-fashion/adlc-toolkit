@@ -67,7 +67,8 @@ one question would require reading 3+ files. Usage:
 ask-kimi --paths <f1> <f2> ... --question "<q>"
 ```
 
-Use the returned summary instead of reading the files yourself.
+Use the returned summary instead of reading the files yourself. Pass
+`--no-warn` (or export `KIMI_NO_WARN=1`) to suppress the privacy notice.
 
 ### kimi-write — boilerplate generation
 
@@ -79,7 +80,14 @@ kimi-write --spec "<what to generate>" --context <reference file> --target <outp
 ```
 
 Then review the generated file and edit only what needs fixing. Add `--force`
-to overwrite an existing target.
+to overwrite an existing target. Pass `--no-warn` (or export `KIMI_NO_WARN=1`)
+to suppress the privacy notice.
+
+### Privacy
+
+- File contents are sent to Moonshot (Kimi K2.5) whenever `ask-kimi` or `kimi-write` runs.
+- Only the **basename** of each path is embedded in the corpus block — full local paths stay on your machine.
+- Every run prints a one-line `kimi: ...` notice on stderr; silence it with `--no-warn` or `KIMI_NO_WARN=1`.
 
 ### Documentation workflow
 

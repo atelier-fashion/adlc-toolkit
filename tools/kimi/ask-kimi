@@ -34,6 +34,11 @@ def _parse_args(argv=None):
         action="store_true",
         help="print message structure and exit without calling the API",
     )
+    parser.add_argument(
+        "--no-warn",
+        action="store_true",
+        help="suppress the data-exfiltration notice",
+    )
     return parser.parse_args(argv)
 
 
@@ -57,6 +62,8 @@ def main(argv=None):
 
     client = _common.get_client()
     model = args.model or _common.get_model()
+    if not args.no_warn and os.environ.get("KIMI_NO_WARN") != "1":
+        _common.emit_exfil_notice()
     print(_common.complete(client, model, messages, args.max_tokens))
     return 0
 

@@ -31,21 +31,12 @@ def _parse_args(argv=None):
     parser.add_argument("--force", action="store_true", help="allow overwriting an existing --target")
     parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument("--model", default=None)
+    parser.add_argument(
+        "--no-warn",
+        action="store_true",
+        help="suppress the data-exfiltration notice",
+    )
     return parser.parse_args(argv)
-
-
-def _strip_fences(text):
-    lines = text.split("\n")
-    if lines and lines[0].lstrip().startswith("```"):
-        # find a trailing fence line
-        end = None
-        for i in range(len(lines) - 1, 0, -1):
-            if lines[i].strip().startswith("```"):
-                end = i
-                break
-        if end is not None:
-            return "\n".join(lines[1:end])
-    return text
 
 
 def main(argv=None):
@@ -73,7 +64,9 @@ def main(argv=None):
 
     client = _common.get_client()
     model = args.model or _common.get_model()
-    result = _strip_fences(_common.complete(client, model, messages, args.max_tokens))
+    if not args.no_warn and os.environ.get("KIMI_NO_WARN") != "1":
+        _common.emit_exfil_notice()
+    result = _common._strip_fences(_common.complete(client, model, messages, args.max_tokens))
 
     with open(args.target, "w", encoding="utf-8") as fh:
         fh.write(result)

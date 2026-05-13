@@ -1,7 +1,7 @@
 ---
 id: TASK-021
 title: "ask-kimi & kimi-write: --no-warn / KIMI_NO_WARN + emit exfil notice; drop kimi-write's inline _strip_fences"
-status: draft
+status: complete
 parent: REQ-413
 created: 2026-05-13
 updated: 2026-05-13
