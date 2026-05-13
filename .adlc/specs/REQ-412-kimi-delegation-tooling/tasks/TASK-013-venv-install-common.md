@@ -1,7 +1,7 @@
 ---
 id: TASK-013
 title: "Scaffold tools/kimi: venv bootstrap, install.sh, and _common.py helper"
-status: draft
+status: complete
 parent: REQ-412
 created: 2026-05-12
 updated: 2026-05-12
