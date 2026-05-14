@@ -1,7 +1,7 @@
 ---
 id: TASK-027
 title: "spec/SKILL.md Step 1.6 retrieval delegation with hard fallback + post-validation"
-status: draft
+status: complete
 parent: REQ-417
 created: 2026-05-14
 updated: 2026-05-14
