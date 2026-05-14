@@ -22,6 +22,10 @@ You are generating a status report of all ADLC work in the current project.
 
 Filter: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that the `.adlc/specs/` directory exists (this skill reads requirement and task files from there, plus `.adlc/bugs/` and any `pipeline-state.json` files). If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+
 ## Instructions
 
 ### Step 1: Scan All ADLC Artifacts

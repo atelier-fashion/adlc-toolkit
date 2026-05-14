@@ -1,7 +1,7 @@
 ---
 id: TASK-024
 title: "SKILL.md edits: path-traversal `..` rejection, broader credential redaction, Prerequisites blocks, model-agnostic Co-Authored-By"
-status: draft
+status: complete
 parent: REQ-415
 created: 2026-05-13
 updated: 2026-05-13

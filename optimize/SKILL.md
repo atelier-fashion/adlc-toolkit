@@ -21,6 +21,10 @@ You are scanning this project's API and infrastructure for cost and performance 
 
 Focus: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/project-overview.md` exist. If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+
 ## Instructions
 
 ### Step 1: Determine Focus
