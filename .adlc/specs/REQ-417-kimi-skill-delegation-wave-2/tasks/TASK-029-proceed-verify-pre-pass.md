@@ -1,7 +1,7 @@
 ---
 id: TASK-029
 title: "proceed/SKILL.md Phase 5 verify-agent pre-pass with hard fallback + post-validation"
-status: draft
+status: complete
 parent: REQ-417
 created: 2026-05-14
 updated: 2026-05-14
