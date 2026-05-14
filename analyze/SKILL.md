@@ -21,6 +21,10 @@ You are performing a comprehensive codebase health audit for the current project
 
 Scope: $ARGUMENTS
 
+## Prerequisites
+
+Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/conventions.md` exist. If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+
 ## Instructions
 
 ### Step 1: Determine Scope
@@ -55,7 +59,7 @@ fi
 - Emit on stderr: `/analyze: ask-kimi unavailable — Claude is reading shape files directly` (or `/analyze: ask-kimi disabled via ADLC_DISABLE_KIMI` when `ADLC_DISABLE_KIMI=1` is the cause). Skip this emit when arriving here from a delegation-failure fall-through — that branch already logged a combined line.
 
 **Post-validation (BR-3):** if the summary cites any specific file path, REQ id, or LESSON id, **first sanitize the citation token itself** to block path-traversal via Kimi-injected strings — then verify existence:
-- File paths must match `^[A-Za-z0-9_./-]+$` (no `..`, no shell metacharacters), then `test -f <path>` from the repo root.
+- File paths must match `^[A-Za-z0-9_./-]+$` AND must NOT contain the two-character substring `..` anywhere in the string (the regex character class permits `.` so `..` would otherwise allow parent-directory traversal). Explicit check: split the path on `/`, reject if any segment equals `..`, AND additionally reject if the raw string contains `..` adjacent to anything else. This rejects all of: `../etc/passwd`, `./../etc/passwd`, `subdir/../etc/passwd`, `safe/..//etc`, and any other `..`-based traversal. Only after both checks pass, run `test -f <path>` from the repo root. Drop or rewrite if any check fails.
 - REQ ids must match `^REQ-[0-9]{3,6}$`, then `ls .adlc/specs/<id>-*/`.
 - LESSON ids must match `^LESSON-[0-9]{3,6}$`, then `ls .adlc/knowledge/lessons/<id>-*`.
 Drop or rewrite (do not just `ls`) any citation that fails either the regex or the existence check.
