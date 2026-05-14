@@ -93,20 +93,28 @@ else
 fi
 
 # --- launchctl setenv for GUI-launched apps (macOS only) ---------------
+# Fast-path for the current boot session (the LaunchAgent below makes this
+# permanent across future reboots, but the agent only fires at next login).
 if command -v launchctl >/dev/null 2>&1; then
     if [ -n "${MOONSHOT_API_KEY:-}" ]; then
         launchctl setenv MOONSHOT_API_KEY "$MOONSHOT_API_KEY"
-        echo "Exported MOONSHOT_API_KEY into launchctl session env (visible to GUI-launched Claude Code until reboot)"
+        echo "Exported MOONSHOT_API_KEY into launchctl session env (current boot — LaunchAgent below handles future reboots)"
     else
         echo "Skipping launchctl setenv: MOONSHOT_API_KEY not set in this shell"
     fi
 fi
 
 # --- LaunchAgent persistence (macOS only) -------------------------------
-# Installs a LaunchAgent that runs at every login and re-exports
+# Installs a LaunchAgent that runs at every user login and re-exports
 # MOONSHOT_API_KEY into the launchctl session env, surviving reboots and
 # Claude Code restarts. The plist itself never contains the key value —
 # the agent invokes a helper script that reads from the rc file at runtime.
+#
+# Security note: `launchctl setenv` puts the key in the session env, where
+# any GUI app the user launches can read it via `launchctl getenv` or its
+# own process env. This is the deliberate trade-off of the feature (enables
+# GUI-launched Claude Code to see the key). A compromised user-space process
+# already has access to ~/.zshrc anyway.
 if command -v launchctl >/dev/null 2>&1; then
     AGENT_LABEL="com.adlc-toolkit.kimi-setenv"
     AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
@@ -115,21 +123,28 @@ if command -v launchctl >/dev/null 2>&1; then
     PLIST_SRC="$REPO_ROOT/tools/kimi/com.adlc-toolkit.kimi-setenv.plist.in"
 
     mkdir -p "$HOME/Library/LaunchAgents"
+    mkdir -p "$HOME/Library/Logs"
 
-    # Write helper script (copy + chmod)
+    # ORDER MATTERS: bootout FIRST (so no live agent is mid-execution while
+    # we overwrite its files), THEN write files, THEN bootstrap (loads new).
+    launchctl bootout "gui/$(id -u)" "$AGENT_PLIST" 2>/dev/null || true
+
+    # Write helper script (copy — plist invokes via /bin/sh <script>; +x harmless but kept for direct-invoke debugging)
     cp "$HELPER_SRC" "$AGENT_HELPER"
     chmod +x "$AGENT_HELPER"
 
     # Write plist with $HOME substituted (plist needs absolute path, not $HOME var)
     sed "s|__HOME__|$HOME|g" "$PLIST_SRC" > "$AGENT_PLIST"
 
-    # Idempotent reload: unload first (silent if not loaded), then load
-    launchctl bootout "gui/$(id -u)" "$AGENT_PLIST" 2>/dev/null || true
-    if launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST" 2>/dev/null; then
+    # Validate the plist BEFORE attempting to load — catches a malformed
+    # template / failed substitution at install time rather than at next login.
+    if ! plutil -lint "$AGENT_PLIST" >/dev/null 2>&1; then
+        echo "WARNING: generated plist at $AGENT_PLIST failed plutil -lint — agent NOT loaded."
+        echo "  This is a bug in install.sh's plist template substitution. File an issue with the contents of $AGENT_PLIST."
+    elif launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST" 2>/dev/null; then
         echo "Loaded LaunchAgent $AGENT_LABEL (persistent across reboots)"
     else
-        # Fall back to legacy load/unload form on older macOS
-        launchctl unload "$AGENT_PLIST" 2>/dev/null || true
+        # Fall back to legacy load form on older macOS
         if launchctl load "$AGENT_PLIST" 2>/dev/null; then
             echo "Loaded LaunchAgent $AGENT_LABEL (persistent across reboots) [legacy form]"
         else

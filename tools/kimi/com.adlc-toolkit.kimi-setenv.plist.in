@@ -13,9 +13,5 @@
     <true/>
     <key>KeepAlive</key>
     <false/>
-    <key>StandardErrorPath</key>
-    <string>/tmp/kimi-launchctl-setenv.err</string>
-    <key>StandardOutPath</key>
-    <string>/tmp/kimi-launchctl-setenv.out</string>
 </dict>
 </plist>
