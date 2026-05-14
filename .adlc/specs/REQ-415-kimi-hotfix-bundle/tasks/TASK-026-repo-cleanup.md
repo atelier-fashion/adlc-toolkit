@@ -1,7 +1,7 @@
 ---
 id: TASK-026
 title: "Repo cleanup: gitignore pipeline-state.json + remove tracked copies, delete stray LESSON dup, README troubleshooting subsection"
-status: draft
+status: complete
 parent: REQ-415
 created: 2026-05-13
 updated: 2026-05-13
