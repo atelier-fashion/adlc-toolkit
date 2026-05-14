@@ -1,7 +1,7 @@
 ---
 id: TASK-025
 title: "install.sh: detect login shell (zsh/bash), write to correct rc, run launchctl setenv for GUI inheritance"
-status: draft
+status: complete
 parent: REQ-415
 created: 2026-05-13
 updated: 2026-05-13

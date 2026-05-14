@@ -6,8 +6,16 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VENV_DIR="$HOME/.claude/kimi-venv"
 BIN_DIR="$HOME/bin"
-ZSHRC="$HOME/.zshrc"
 PATH_MARKER="# added by adlc-toolkit kimi install.sh"
+
+# Determine the user's persistent login shell — fall back to $SHELL.
+LOGIN_SHELL=$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}')
+[ -z "$LOGIN_SHELL" ] && LOGIN_SHELL="${SHELL:-}"
+case "$(basename "$LOGIN_SHELL")" in
+    zsh)  RC="$HOME/.zshrc" ;;
+    bash) RC="$HOME/.bash_profile" ;;
+    *)    RC="" ;;
+esac
 
 CLIS="ask-kimi kimi-write extract-chat"
 
@@ -34,23 +42,36 @@ EOF
     echo "Wrote wrapper $wrapper (-> $REPO_ROOT/tools/kimi/$name)"
 done
 
-# --- PATH entry in ~/.zshrc (marker-guarded) ----------------------------
+# --- PATH entry in shell rc (marker-guarded) ----------------------------
 # Idempotency is keyed solely on the marker line — do not also gate on the
-# current shell's $PATH, since a non-login shell may not have run ~/.zshrc yet.
-if [ -f "$ZSHRC" ] && grep -F "$PATH_MARKER" "$ZSHRC" >/dev/null 2>&1; then
-    echo "PATH entry already present in $ZSHRC"
+# current shell's $PATH, since a non-login shell may not have run the rc yet.
+if [ -n "$RC" ]; then
+    if [ -f "$RC" ] && grep -F "$PATH_MARKER" "$RC" >/dev/null 2>&1; then
+        echo "PATH entry already present in $RC"
+    else
+        echo "Appending ~/bin to PATH in $RC"
+        {
+            echo ""
+            echo "$PATH_MARKER"
+            echo 'export PATH="$HOME/bin:$PATH"'
+        } >> "$RC"
+    fi
 else
-    echo "Appending ~/bin to PATH in $ZSHRC"
-    {
-        echo ""
-        echo "$PATH_MARKER"
-        echo 'export PATH="$HOME/bin:$PATH"'
-    } >> "$ZSHRC"
+    echo "Login shell $(basename "$LOGIN_SHELL") not auto-supported — add these lines manually to your shell rc:"
+    echo "    $PATH_MARKER"
+    echo '    export PATH="$HOME/bin:$PATH"'
+    echo '    export MOONSHOT_API_KEY="..."'
 fi
-case "${SHELL:-}" in
-    */zsh) : ;;
-    *) echo "Note: your login shell is not zsh — add 'export PATH=\"\$HOME/bin:\$PATH\"' to the right rc file for $SHELL." ;;
-esac
+
+# --- launchctl setenv for GUI-launched apps (macOS only) ---------------
+if command -v launchctl >/dev/null 2>&1; then
+    if [ -n "${MOONSHOT_API_KEY:-}" ]; then
+        launchctl setenv MOONSHOT_API_KEY "$MOONSHOT_API_KEY"
+        echo "Exported MOONSHOT_API_KEY into launchctl session env (visible to GUI-launched Claude Code until reboot)"
+    else
+        echo "Skipping launchctl setenv: MOONSHOT_API_KEY not set in this shell"
+    fi
+fi
 
 # --- MOONSHOT_API_KEY reminder (printed, never written) -----------------
 echo ""
