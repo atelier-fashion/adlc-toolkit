@@ -1,7 +1,7 @@
 ---
 id: TASK-030
 title: "Add LaunchAgent helper + plist templates + install.sh integration for persistent MOONSHOT_API_KEY"
-status: draft
+status: complete
 parent: REQ-422
 created: 2026-05-14
 updated: 2026-05-14

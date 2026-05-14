@@ -102,6 +102,43 @@ if command -v launchctl >/dev/null 2>&1; then
     fi
 fi
 
+# --- LaunchAgent persistence (macOS only) -------------------------------
+# Installs a LaunchAgent that runs at every login and re-exports
+# MOONSHOT_API_KEY into the launchctl session env, surviving reboots and
+# Claude Code restarts. The plist itself never contains the key value —
+# the agent invokes a helper script that reads from the rc file at runtime.
+if command -v launchctl >/dev/null 2>&1; then
+    AGENT_LABEL="com.adlc-toolkit.kimi-setenv"
+    AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+    AGENT_HELPER="$HOME/.claude/kimi-launchctl-setenv.sh"
+    HELPER_SRC="$REPO_ROOT/tools/kimi/kimi-launchctl-setenv.sh.in"
+    PLIST_SRC="$REPO_ROOT/tools/kimi/com.adlc-toolkit.kimi-setenv.plist.in"
+
+    mkdir -p "$HOME/Library/LaunchAgents"
+
+    # Write helper script (copy + chmod)
+    cp "$HELPER_SRC" "$AGENT_HELPER"
+    chmod +x "$AGENT_HELPER"
+
+    # Write plist with $HOME substituted (plist needs absolute path, not $HOME var)
+    sed "s|__HOME__|$HOME|g" "$PLIST_SRC" > "$AGENT_PLIST"
+
+    # Idempotent reload: unload first (silent if not loaded), then load
+    launchctl bootout "gui/$(id -u)" "$AGENT_PLIST" 2>/dev/null || true
+    if launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST" 2>/dev/null; then
+        echo "Loaded LaunchAgent $AGENT_LABEL (persistent across reboots)"
+    else
+        # Fall back to legacy load/unload form on older macOS
+        launchctl unload "$AGENT_PLIST" 2>/dev/null || true
+        if launchctl load "$AGENT_PLIST" 2>/dev/null; then
+            echo "Loaded LaunchAgent $AGENT_LABEL (persistent across reboots) [legacy form]"
+        else
+            echo "WARNING: could not load LaunchAgent at $AGENT_PLIST — env will NOT persist across reboots."
+            echo "  Manual workaround: run 'launchctl setenv MOONSHOT_API_KEY \"\$MOONSHOT_API_KEY\"' after each reboot."
+        fi
+    fi
+fi
+
 # --- MOONSHOT_API_KEY reminder (printed, never written) -----------------
 echo ""
 REMINDER_RC="${RC:-your shell rc file}"
