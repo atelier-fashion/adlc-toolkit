@@ -120,3 +120,16 @@ Do **not** route to Kimi for:
 
 **Claude = thinking. Kimi = I/O.**
 <!-- kimi-delegation:end -->
+
+### Troubleshooting
+
+- **GUI-launched Claude Code can't see `MOONSHOT_API_KEY`** — env vars exported in
+  `~/.zshrc` or `~/.bash_profile` only reach terminal-launched processes, not GUI apps
+  opened from Spotlight / Dock / Finder. Fix: run `launchctl setenv MOONSHOT_API_KEY
+  "$MOONSHOT_API_KEY"` from a terminal where the var is loaded, then restart Claude
+  Code. (`install.sh` now does this automatically when run with the key already set in
+  the install shell.)
+- **bash login shell?** `install.sh` writes the PATH entry to `~/.bash_profile` (not
+  `~/.zshrc`) when your login shell is bash. If you previously hand-edited `~/.zshrc`
+  and you're on bash, either copy the lines to `~/.bash_profile` or run
+  `chsh -s /bin/zsh` and restart Terminal.app for the change to take effect.

@@ -7,3 +7,6 @@
 
 # OS noise
 .DS_Store
+
+# ADLC pipeline state (ephemeral, per-worktree)
+.adlc/specs/*/pipeline-state.json
