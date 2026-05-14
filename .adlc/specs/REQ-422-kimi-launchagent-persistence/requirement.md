@@ -1,7 +1,7 @@
 ---
 id: REQ-422
 title: "Persistent MOONSHOT_API_KEY via macOS LaunchAgent — survives reboot, Cmd-Q, app updates"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-14
 updated: 2026-05-14
