@@ -1,7 +1,7 @@
 ---
 id: REQ-417
 title: "Wave-2 Kimi skill delegation: /spec Step 1.6 retrieval, /analyze Step 2 audit pre-pass, /review verify agents in /proceed Phase 5"
-status: draft
+status: approved
 deployable: false
 created: 2026-05-14
 updated: 2026-05-14
