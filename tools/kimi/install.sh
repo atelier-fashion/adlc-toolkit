@@ -9,12 +9,18 @@ BIN_DIR="$HOME/bin"
 PATH_MARKER="# added by adlc-toolkit kimi install.sh"
 
 # Determine the user's persistent login shell — fall back to $SHELL.
-LOGIN_SHELL=$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}')
+# `dscl` is macOS-only; guard with command -v so the script works on Linux too.
+# `|| true` keeps set -eu from aborting if dscl exits nonzero on a fluke.
+USER_NAME="${USER:-$(id -un 2>/dev/null || echo "")}"
+LOGIN_SHELL=""
+if command -v dscl >/dev/null 2>&1 && [ -n "$USER_NAME" ]; then
+    LOGIN_SHELL=$(dscl . -read "/Users/$USER_NAME" UserShell 2>/dev/null | awk '{print $2}' || true)
+fi
 [ -z "$LOGIN_SHELL" ] && LOGIN_SHELL="${SHELL:-}"
 case "$(basename "$LOGIN_SHELL")" in
-    zsh)  RC="$HOME/.zshrc" ;;
-    bash) RC="$HOME/.bash_profile" ;;
-    *)    RC="" ;;
+    zsh*)  RC="$HOME/.zshrc" ;;
+    bash*) RC="$HOME/.bash_profile" ;;
+    *)     RC="" ;;
 esac
 
 CLIS="ask-kimi kimi-write extract-chat"
@@ -75,8 +81,9 @@ fi
 
 # --- MOONSHOT_API_KEY reminder (printed, never written) -----------------
 echo ""
-echo "Reminder: add the following to ~/.zshrc (not done automatically):"
-echo '  export MOONSHOT_API_KEY="..."'
+REMINDER_RC="${RC:-your shell rc file}"
+echo "Reminder: add the following to $REMINDER_RC (not done automatically):"
+echo '  export MOONSHOT_API_KEY="<your-key-here>"'
 if [ -n "${MOONSHOT_API_KEY:-}" ]; then
     echo "  (MOONSHOT_API_KEY is currently set in this shell)"
 else
@@ -144,4 +151,8 @@ fi
 
 # --- next steps ---------------------------------------------------------
 echo ""
-echo "Done. Restart your shell (or 'source ~/.zshrc') and set MOONSHOT_API_KEY."
+if [ -n "${RC:-}" ]; then
+    echo "Done. Restart your shell (or 'source $RC') and set MOONSHOT_API_KEY."
+else
+    echo "Done. Add the lines above to your shell rc, then restart your shell, and set MOONSHOT_API_KEY."
+fi
