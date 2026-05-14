@@ -68,3 +68,80 @@ def test_emit_exfil_notice_writes_to_stream():
     assert "KIMI_NO_WARN" in out
     assert "MOONSHOT_API_KEY" not in out
     assert out.endswith("\n")
+
+
+# --- REQ-422: rc-fallback when MOONSHOT_API_KEY is not in env ---
+
+def test_read_key_from_rc_finds_canonical_form(monkeypatch, tmp_path):
+    """Canonical `export VAR="..."` form is extracted from ~/.zshrc."""
+    home = tmp_path
+    (home / ".zshrc").write_text(
+        '# some comment\nexport MOONSHOT_API_KEY="sk-from-zshrc-xyz"\nexport OTHER="x"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    assert _common._read_key_from_rc() == "sk-from-zshrc-xyz"
+
+
+def test_read_key_from_rc_falls_back_to_bash_profile(monkeypatch, tmp_path):
+    """If ~/.zshrc lacks the key, ~/.bash_profile is checked next."""
+    home = tmp_path
+    (home / ".zshrc").write_text("# no key here\n", encoding="utf-8")
+    (home / ".bash_profile").write_text(
+        'export MOONSHOT_API_KEY="sk-from-bash-profile"\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    assert _common._read_key_from_rc() == "sk-from-bash-profile"
+
+
+def test_read_key_from_rc_returns_empty_when_no_rc_has_key(monkeypatch, tmp_path):
+    """If no rc file contains the export, returns empty string."""
+    home = tmp_path
+    (home / ".zshrc").write_text("# nothing\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    assert _common._read_key_from_rc() == ""
+
+
+def test_read_key_from_rc_ignores_indented_export(monkeypatch, tmp_path):
+    """Only matches lines starting at column 0 — defensive against partial matches."""
+    home = tmp_path
+    (home / ".zshrc").write_text(
+        '  export MOONSHOT_API_KEY="indented-not-canonical"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    assert _common._read_key_from_rc() == ""
+
+
+def test_get_client_uses_env_when_set(monkeypatch, tmp_path):
+    """Env var takes precedence over rc-fallback."""
+    home = tmp_path
+    (home / ".zshrc").write_text(
+        'export MOONSHOT_API_KEY="sk-from-rc"\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-from-env")
+    client = _common.get_client()
+    assert client.api_key == "sk-from-env"
+
+
+def test_get_client_falls_back_to_rc_when_env_missing(monkeypatch, tmp_path):
+    """When env var is absent, rc-fallback supplies the key (REQ-422 fix)."""
+    home = tmp_path
+    (home / ".zshrc").write_text(
+        'export MOONSHOT_API_KEY="sk-rc-fallback"\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    client = _common.get_client()
+    assert client.api_key == "sk-rc-fallback"
+
+
+def test_get_client_raises_when_neither_env_nor_rc_has_key(monkeypatch, tmp_path):
+    """Both sources empty → SystemExit naming the var, key value never echoed."""
+    home = tmp_path
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        _common.get_client()
+    assert "MOONSHOT_API_KEY" in str(exc.value)

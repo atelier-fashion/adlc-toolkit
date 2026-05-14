@@ -16,16 +16,62 @@ _BASE_URL = "https://api.moonshot.ai/v1"
 _DEFAULT_MODEL = "kimi-k2.5"
 
 
+def _read_key_from_rc():
+    """Last-resort fallback for ``get_client``.
+
+    On macOS, when Claude Code (or any GUI app) is launched before
+    ``launchctl setenv`` runs, its child Bash subprocesses inherit an empty
+    env — even though ``~/.zshrc`` has the export. Result: Kimi delegation
+    silently falls back even though the key is present on disk. To break that
+    failure mode, ``get_client`` falls back to this function, which reads the
+    key directly from canonical rc files. **Does NOT source or eval** the rc
+    file — uses the same narrow awk-style extraction as the LaunchAgent
+    helper (REQ-422). Returns the key or empty string.
+    """
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, ".zshrc"),
+        os.path.join(home, ".bash_profile"),
+        os.path.join(home, ".bashrc"),
+    ]
+    needle = f"export {_API_KEY_VAR}="
+    for rc in candidates:
+        try:
+            with open(rc, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    # Only match the canonical, non-indented `export VAR="..."` form.
+                    # Anything else (single-quoted, unquoted, indented) is intentionally
+                    # ignored — install.sh always writes the canonical form.
+                    if line.startswith(needle):
+                        # Extract content between the first pair of double quotes.
+                        try:
+                            _, after = line.split('="', 1)
+                            value, _ = after.split('"', 1)
+                        except ValueError:
+                            continue
+                        if value:
+                            return value
+        except OSError:
+            continue
+    return ""
+
+
 def get_client():
     """Return an ``openai.OpenAI`` client pointed at the Moonshot API.
 
-    Raises ``SystemExit`` naming the env var if it is unset. The key value is
-    never printed.
+    Resolution order for the key:
+      1. ``os.environ["MOONSHOT_API_KEY"]`` (the canonical path)
+      2. Fallback: read from ``~/.zshrc`` / ``~/.bash_profile`` / ``~/.bashrc``
+         (defends against macOS launchctl-env-not-propagated failure mode)
+
+    Raises ``SystemExit`` naming the env var if neither source has the key.
+    The key value is never printed.
     """
-    api_key = os.environ.get(_API_KEY_VAR)
+    api_key = os.environ.get(_API_KEY_VAR) or _read_key_from_rc()
     if not api_key:
         raise SystemExit(
-            f"{_API_KEY_VAR} is not set — add `export {_API_KEY_VAR}=\"...\"` to ~/.zshrc"
+            f"{_API_KEY_VAR} is not set and was not found in ~/.zshrc, "
+            f"~/.bash_profile, or ~/.bashrc — add `export {_API_KEY_VAR}=\"...\"` to one of those."
         )
     return openai.OpenAI(base_url=_BASE_URL, api_key=api_key)
 

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Run by ~/Library/LaunchAgents/com.adlc-toolkit.kimi-setenv.plist at every user login.
+# Pulls MOONSHOT_API_KEY from the user's shell rc and seeds the launchctl session env
+# so GUI-launched apps (Claude Code from Spotlight, etc.) inherit the var.
+#
+# Safety:
+# - Extracts only the literal `export MOONSHOT_API_KEY="..."` value with awk (canonical
+#   double-quoted form that install.sh writes). Hand-edited single-quoted, unquoted, or
+#   leading-whitespace forms are NOT supported and will produce a "no key found" log line.
+# - Does NOT source or eval the rc file (avoids running arbitrary user code at login).
+# - Exits 0 on missing key (KeepAlive=false in the plist; non-zero would just clutter logs).
+# - Logs to ~/Library/Logs/ (user-private, mode 600) — never /tmp (world-readable).
+set -u
+
+LOG_DIR="$HOME/Library/Logs"
+LOG="$LOG_DIR/kimi-launchctl-setenv.log"
+mkdir -p "$LOG_DIR"
+# Ensure the log file is owner-only readable (defense in depth — umask should already do this)
+umask 077
+echo "[$(date '+%Y-%m-%dT%H:%M:%S')] kimi-launchctl-setenv starting" >> "$LOG"
+
+KEY=""
+for rc in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    if [ -r "$rc" ]; then
+        K=$(awk -F'"' '/^export MOONSHOT_API_KEY=/ { print $2; exit }' "$rc" 2>/dev/null || true)
+        if [ -n "$K" ]; then
+            KEY="$K"
+            echo "[$(date '+%Y-%m-%dT%H:%M:%S')] found key in $rc" >> "$LOG"
+            break
+        fi
+    fi
+done
+
+if [ -n "$KEY" ]; then
+    launchctl setenv MOONSHOT_API_KEY "$KEY"
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S')] launchctl setenv MOONSHOT_API_KEY done (length=${#KEY})" >> "$LOG"
+else
+    echo "[$(date '+%Y-%m-%dT%H:%M:%S')] no MOONSHOT_API_KEY found in any rc file — skipping" >> "$LOG"
+fi
+
+exit 0
