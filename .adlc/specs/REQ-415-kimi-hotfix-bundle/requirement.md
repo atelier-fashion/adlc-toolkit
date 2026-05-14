@@ -1,7 +1,7 @@
 ---
 id: REQ-415
 title: "Kimi hotfix bundle: path-traversal regex, broader credential redaction, install.sh shell detection + launchctl, gitignore pipeline-state, Prerequisites blocks, stale tags"
-status: draft
+status: approved
 deployable: false
 created: 2026-05-13
 updated: 2026-05-13
