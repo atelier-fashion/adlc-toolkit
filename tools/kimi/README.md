@@ -123,13 +123,26 @@ Do **not** route to Kimi for:
 
 ### Troubleshooting
 
-- **GUI-launched Claude Code can't see `MOONSHOT_API_KEY`** — env vars exported in
-  `~/.zshrc` or `~/.bash_profile` only reach terminal-launched processes, not GUI apps
-  opened from Spotlight / Dock / Finder. Fix: run `launchctl setenv MOONSHOT_API_KEY
-  "$MOONSHOT_API_KEY"` from a terminal where the var is loaded, then restart Claude
-  Code. (`install.sh` now does this automatically when run with the key already set in
-  the install shell.)
+- **GUI-launched Claude Code can't see `MOONSHOT_API_KEY`** — usually self-heals via the
+  LaunchAgent below, but `ask-kimi` also has a last-resort rc-file fallback that reads the
+  key directly from `~/.zshrc` (or `~/.bash_profile` / `~/.bashrc`) when the env is empty.
+  As long as the export is in one of those files, `ask-kimi` works regardless of how
+  Claude Code was launched.
+- **The LaunchAgent** — `install.sh` installs `com.adlc-toolkit.kimi-setenv` that runs at
+  every login and re-populates the launchctl session env from your rc. If you change the
+  key in `~/.zshrc` mid-session, run `launchctl setenv MOONSHOT_API_KEY "$MOONSHOT_API_KEY"`
+  once to update the current session (or log out + back in).
 - **bash login shell?** `install.sh` writes the PATH entry to `~/.bash_profile` (not
   `~/.zshrc`) when your login shell is bash. If you previously hand-edited `~/.zshrc`
   and you're on bash, either copy the lines to `~/.bash_profile` or run
   `chsh -s /bin/zsh` and restart Terminal.app for the change to take effect.
+- **Inspect the LaunchAgent** — `launchctl list | grep adlc-toolkit` confirms it's
+  loaded; `cat ~/Library/Logs/kimi-launchctl-setenv.log` shows what it did at the last
+  login (path checked, key length — never the key value itself).
+- **`.in` files** — `tools/kimi/*.in` are install-time templates. `install.sh` copies and
+  substitutes (`__HOME__` → your `$HOME`) into the deployed locations. Do not run them in
+  place; edit the `.in` source and re-run `install.sh`.
+- **Security trade-off (deliberate)** — once the launchctl session env has the key, ANY
+  GUI app the user launches can read it via `launchctl getenv` or its own process env.
+  This is the cost of making GUI-launched Claude Code see the key. A compromised
+  user-space process can already read `~/.zshrc`; this widens that exposure modestly.
