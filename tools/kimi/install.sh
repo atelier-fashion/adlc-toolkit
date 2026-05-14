@@ -3,7 +3,30 @@
 # POSIX sh only — no bashisms, no GNU-specific flags.
 set -eu
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Resolve REPO_ROOT to the CANONICAL repo, not any worktree (e.g. Claude Code's
+# per-session `.claude/worktrees/<id>` or ADLC pipeline `.worktrees/REQ-xxx`).
+# Wrappers must point at a path that survives session/pipeline cleanup. We use
+# `git rev-parse --git-common-dir` which returns the canonical .git directory
+# regardless of which worktree is calling — its parent is the canonical repo
+# root. Fall back to the script-relative path if git isn't available.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMMON_DIR="$(git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null || true)"
+if [ -n "$COMMON_DIR" ]; then
+    case "$COMMON_DIR" in
+        /*) ;;
+        *)  COMMON_DIR="$(cd "$SCRIPT_DIR" && cd "$COMMON_DIR" 2>/dev/null && pwd || echo "")" ;;
+    esac
+fi
+if [ -n "$COMMON_DIR" ] && [ -d "$COMMON_DIR" ]; then
+    REPO_ROOT="$(dirname "$COMMON_DIR")"
+else
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+# Sanity check — the resolved REPO_ROOT must contain tools/kimi/ask-kimi.
+if [ ! -f "$REPO_ROOT/tools/kimi/ask-kimi" ]; then
+    echo "ERROR: could not resolve canonical repo root (tried $REPO_ROOT). Re-run install.sh from the repo's tools/kimi/ directory." >&2
+    exit 1
+fi
 VENV_DIR="$HOME/.claude/kimi-venv"
 BIN_DIR="$HOME/bin"
 PATH_MARKER="# added by adlc-toolkit kimi install.sh"
