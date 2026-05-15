@@ -40,7 +40,30 @@ case $gate in
   2) # unavailable path — emit "/<skill>: ask-kimi unavailable — <purpose>"
      ;;
 esac
+# Telemetry reads the reason string the gate exported — never re-derives it:
+reason="$ADLC_KIMI_GATE_REASON"
 ```
+
+## Reason string
+
+`adlc_kimi_gate_check` ALSO exports `ADLC_KIMI_GATE_REASON` on every code
+path (REQ-426 BR-2, ADR-2). This is part of the public contract: callers
+that need to emit "why the gate denied" telemetry SHOULD read this var
+rather than re-interrogating `ADLC_DISABLE_KIMI` or running
+`command -v ask-kimi` a second time. The canonical values, paired with
+their return codes, are:
+
+| return | `ADLC_KIMI_GATE_REASON` | meaning                                |
+|--------|-------------------------|----------------------------------------|
+| 0      | `ok`                    | delegated — ask-kimi available, enabled|
+| 1      | `disabled-via-env`      | `ADLC_DISABLE_KIMI=1` opted out        |
+| 2      | `no-binary`             | `ask-kimi` not on PATH                 |
+
+`export` is intentional (not just assignment) so the variable is visible
+to child processes the skill spawns — e.g., a future `ask-kimi` invocation
+could read it for self-documentation. Adding a new gate condition (e.g.,
+a budget cap) means editing ONLY this file and `partials/kimi-gate.sh` —
+no per-skill churn.
 
 ## Canonical stderr emit pattern
 

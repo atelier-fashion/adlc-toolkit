@@ -1,0 +1,62 @@
+<!-- kimi-delegation:start -->
+## Kimi K2.5 Delegation Tools (token saving)
+
+You have three CLIs for offloading token-heavy I/O to Kimi K2.5. Use them to
+keep your context window focused on reasoning. The rules below are mandatory.
+
+### ask-kimi — bulk reading
+
+Use when you'd otherwise read a file longer than ~400 lines, or when answering
+one question would require reading 3+ files. Usage:
+
+```
+ask-kimi --paths <f1> <f2> ... --question "<q>"
+```
+
+Use the returned summary instead of reading the files yourself. Pass
+`--no-warn` (or export `KIMI_NO_WARN=1`) to suppress the privacy notice.
+
+### kimi-write — boilerplate generation
+
+Use for tests, config scaffolding, docstrings, and other repetitive patterns.
+Usage:
+
+```
+kimi-write --spec "<what to generate>" --context <reference file> --target <output file>
+```
+
+Then review the generated file and edit only what needs fixing. Add `--force`
+to overwrite an existing target. Pass `--no-warn` (or export `KIMI_NO_WARN=1`)
+to suppress the privacy notice.
+
+### Privacy
+
+- File contents are sent to Moonshot (Kimi K2.5) whenever `ask-kimi` or `kimi-write` runs.
+- Only the **basename** of each path is embedded in the corpus block — full local paths stay on your machine.
+- Every run prints a one-line `kimi: ...` notice on stderr; silence it with `--no-warn` or `KIMI_NO_WARN=1`.
+
+### Documentation workflow
+
+To update docs after a working session, don't re-read the conversation and
+rewrite the docs by hand. Instead:
+
+```
+extract-chat ~/.claude/projects/<proj>/<session>.jsonl -o /tmp/chat.txt
+ask-kimi --paths /tmp/chat.txt <doc>.md --question "What doc updates are needed? Give exact edits."
+```
+
+Then apply the returned edits. Prefer this over re-reading the conversation and
+rewriting docs directly.
+
+### When NOT to delegate
+
+Do **not** route to Kimi for:
+
+- Tasks under ~2000 tokens (roughly under ~150 lines of code, or a short back-and-forth) — the delegation round-trip costs more than it saves.
+- Architectural decisions.
+- Debugging.
+- Safety- and security-critical code.
+- Anything that requires exact line numbers for editing.
+
+**Claude = thinking. Kimi = I/O.**
+<!-- kimi-delegation:end -->

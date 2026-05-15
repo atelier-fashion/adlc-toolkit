@@ -53,73 +53,38 @@ extract-chat ~/.claude/projects/<proj>/<session>.jsonl -o /tmp/chat.txt
 
 ## CLAUDE.md routing block
 
-`install.sh` appends everything between the two `kimi-delegation` HTML-comment
-markers below to `~/.claude/CLAUDE.md`, and skips the append if those markers
-are already present so re-running is safe. To preview what gets appended, run
-the marker-range `sed` extraction over this file.
+`install.sh` appends the canonical Kimi routing block to `~/.claude/CLAUDE.md`,
+and skips the append if the `kimi-delegation:start` marker is already present
+so re-running is safe.
 
-<!-- kimi-delegation:start -->
-## Kimi K2.5 Delegation Tools (token saving)
+<!-- Canonical routing block lives at claude-md-routing.txt — hash-pinned at claude-md-routing.txt.sha256 -->
 
-You have three CLIs for offloading token-heavy I/O to Kimi K2.5. Use them to
-keep your context window focused on reasoning. The rules below are mandatory.
+The block content (including its `<!-- kimi-delegation:start -->` /
+`<!-- kimi-delegation:end -->` HTML-comment markers) is the verbatim contents
+of [`claude-md-routing.txt`](claude-md-routing.txt). To preview what gets
+appended, `cat` that file.
 
-### ask-kimi — bulk reading
+### Updating the Claude routing block
 
-Use when you'd otherwise read a file longer than ~400 lines, or when answering
-one question would require reading 3+ files. Usage:
+The routing block is hash-pinned (REQ-426 BR-1 / ADR-1) so a casual edit
+to the canonical file cannot silently change every developer's
+`~/.claude/CLAUDE.md` on the next `install.sh` run. Workflow:
 
-```
-ask-kimi --paths <f1> <f2> ... --question "<q>"
-```
+1. Edit `tools/kimi/claude-md-routing.txt` with the new content.
+2. Regenerate the pin:
 
-Use the returned summary instead of reading the files yourself. Pass
-`--no-warn` (or export `KIMI_NO_WARN=1`) to suppress the privacy notice.
+   ```sh
+   shasum -a 256 tools/kimi/claude-md-routing.txt | awk '{print $1}' > tools/kimi/claude-md-routing.txt.sha256
+   ```
 
-### kimi-write — boilerplate generation
+   (Use `sha256sum` instead of `shasum -a 256` on Linux — both produce the
+   same hex digest.)
+3. Commit both files in the same PR. Reviewers see the diff in both, so a
+   stealth edit to the .txt without bumping the .sha256 is impossible to land.
 
-Use for tests, config scaffolding, docstrings, and other repetitive patterns.
-Usage:
-
-```
-kimi-write --spec "<what to generate>" --context <reference file> --target <output file>
-```
-
-Then review the generated file and edit only what needs fixing. Add `--force`
-to overwrite an existing target. Pass `--no-warn` (or export `KIMI_NO_WARN=1`)
-to suppress the privacy notice.
-
-### Privacy
-
-- File contents are sent to Moonshot (Kimi K2.5) whenever `ask-kimi` or `kimi-write` runs.
-- Only the **basename** of each path is embedded in the corpus block — full local paths stay on your machine.
-- Every run prints a one-line `kimi: ...` notice on stderr; silence it with `--no-warn` or `KIMI_NO_WARN=1`.
-
-### Documentation workflow
-
-To update docs after a working session, don't re-read the conversation and
-rewrite the docs by hand. Instead:
-
-```
-extract-chat ~/.claude/projects/<proj>/<session>.jsonl -o /tmp/chat.txt
-ask-kimi --paths /tmp/chat.txt <doc>.md --question "What doc updates are needed? Give exact edits."
-```
-
-Then apply the returned edits. Prefer this over re-reading the conversation and
-rewriting docs directly.
-
-### When NOT to delegate
-
-Do **not** route to Kimi for:
-
-- Tasks under ~2000 tokens (roughly under ~150 lines of code, or a short back-and-forth) — the delegation round-trip costs more than it saves.
-- Architectural decisions.
-- Debugging.
-- Safety- and security-critical code.
-- Anything that requires exact line numbers for editing.
-
-**Claude = thinking. Kimi = I/O.**
-<!-- kimi-delegation:end -->
+`install.sh` recomputes the hash of the .txt at install time and refuses
+to modify `~/.claude/CLAUDE.md` if the digest does not match the pinned
+value. The marker-guarded append (no double-injection) is unchanged.
 
 ### Updating dependencies
 
