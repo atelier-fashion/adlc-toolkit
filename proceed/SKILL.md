@@ -332,6 +332,16 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
 **Optional verify candidate-list pre-pass via `ask-kimi`** (added by REQ-417): for each touched repo, run an advisory Kimi pre-pass before the Step A 6-agent dispatch. The pre-pass produces a per-dimension candidate-findings list (correctness, quality, architecture, test-coverage, security) that is passed only to the 5 reviewer agents — **the reflector receives no advisory block** (reflector's value is independent self-assessment of Claude's own work, which advisory candidates would compromise).
 
+**Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
+
+```sh
+flag=$(tools/kimi/skill-flag.sh create)
+trap 'tools/kimi/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
+start_s=20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s)
+ASK_KIMI_INVOKED=""
+KIMI_EXIT=0
+```
+
 Gate the pre-pass on tool availability and the project opt-out flag:
 
 ```sh
@@ -353,9 +363,12 @@ fi
    ```bash
    sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE" && rm -f "$TMPFILE.bak"
    ```
-4. Invoke Kimi over the redacted diff:
+4. Invoke Kimi over the redacted diff. Set `ASK_KIMI_INVOKED=1` immediately before the call (REQ-424 telemetry), capture exit status, and clear the skill-flag immediately after the call exits (success OR failure):
    ```bash
+   ASK_KIMI_INVOKED=1
    ask-kimi --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
+   KIMI_EXIT=$?
+   tools/kimi/skill-flag.sh clear "$flag"
    ```
    **If `ask-kimi` exits non-zero**, emit one combined stderr line and fall through to the fallback dispatch for this repo (BR-4: one line per invocation — this REPLACES the intent line for this repo; the success/announce line in step 1 is the only emit when delegation succeeds):
    ```
@@ -389,6 +402,28 @@ fi
   (substitute `… disabled via ADLC_DISABLE_KIMI …` when the opt-out is the cause).
 - On a per-repo delegation failure already logged in step 6 above, do NOT re-emit the unavailable line — the failure line has already been written. Just dispatch reviewers for that repo without the advisory block.
 - Behavior of the 6-agent dispatch is otherwise unchanged.
+
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes for this Phase 5 pre-pass, before continuing to the 6-agent dispatch:
+
+```sh
+duration_ms=20 20 12 61 80 33 98 100 204 250 395 398 399 400( (20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s) - ) * 1000 ))
+if [ -z "$ASK_KIMI_INVOKED" ]; then
+    tools/kimi/skill-flag.sh clear "$flag"
+    mode="fallback"
+    if [ "${ADLC_DISABLE_KIMI:-0}" = "1" ]; then reason="disabled-via-env"; else reason="no-binary"; fi
+    gate_result="fail"
+elif tools/kimi/skill-flag.sh check "$flag" >/dev/null 2>&1; then
+    mode="ghost-skip"; reason="gate-passed-no-call"
+    tools/kimi/skill-flag.sh clear "$flag"
+    gate_result="pass"
+elif [ "$KIMI_EXIT" -eq 0 ]; then
+    mode="delegated"; reason="ok"; gate_result="pass"
+else
+    mode="fallback"; reason="api-error"; gate_result="pass"
+fi
+tools/kimi/emit-telemetry.sh proceed-phase-5 Phase-5-Verify "${REQ_NUM:-unknown}" "$gate_result" "$mode" "$reason" "$duration_ms"
+tools/kimi/skill-flag.sh clear "$flag"
+```
 
 **In subagent mode (`/sprint` pipeline-runner)**: do NOT dispatch the Kimi pre-pass. Subagents cannot reliably reach a parent's shell env for `ask-kimi`, and the pre-pass would be skipped or fail unpredictably. Skip the entire pre-pass block in subagent mode and run the reviewer checklists as before.
 
