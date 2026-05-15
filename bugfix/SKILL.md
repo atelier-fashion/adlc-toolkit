@@ -169,7 +169,7 @@ Evaluate honestly: did this bug reveal something a future implementer should kno
 - A check that would have caught this earlier?
 - An assumption from a prior REQ that turned out false?
 
-If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the atomic counter, wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-013). The lock path `.adlc/.next-lesson.lock.d` is shared with `/wrapup` so a concurrent `/bugfix` and `/wrapup` mutually exclude and cannot double-allocate the same LESSON id:
+If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the atomic counter, wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014). The lock path `.adlc/.next-lesson.lock.d` is shared with `/wrapup` so a concurrent `/bugfix` and `/wrapup` mutually exclude and cannot double-allocate the same LESSON id:
 ```bash
 LESSON_NUM=$(
   LOCK=.adlc/.next-lesson.lock.d
