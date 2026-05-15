@@ -94,18 +94,26 @@ _GATE_PROBE = (
 )
 
 
+def _stub_ask_kimi_on_path(tmp_path):
+    """Drop a no-op `ask-kimi` stub into a tmp bin dir and return a PATH
+    that prepends it. Removes dependency on the host having ask-kimi
+    installed — the gate predicate only inspects `command -v`, so a
+    no-op script is sufficient (REQ-426 verify H1)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    stub = bindir / "ask-kimi"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(0o755)
+    return f"{bindir}:/usr/bin:/bin"
+
+
 def test_kimi_gate_available(tmp_path, partials_dir):
     """Gate returns 0 / REASON=ok when ask-kimi is on PATH.
 
-    Soft prereq: requires `ask-kimi` on the host PATH. Skipped if absent
-    (the assertions assert RC=0, which is only achievable with the binary).
+    Self-contained: stubs a no-op ask-kimi in tmp_path so the test runs
+    without depending on the host having ask-kimi installed.
     """
-    ask_kimi = shutil.which("ask-kimi")
-    if not ask_kimi:
-        pytest.skip("ask-kimi not on host PATH; can't verify the 'available' branch")
-
-    # Provide a PATH that includes the dir holding ask-kimi.
-    path = f"{os.path.dirname(ask_kimi)}:/usr/bin:/bin"
+    path = _stub_ask_kimi_on_path(tmp_path)
     env = {"PATH": path, "HOME": str(tmp_path)}
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
     assert "RC=0" in r.stdout, r.stdout + r.stderr
@@ -113,12 +121,12 @@ def test_kimi_gate_available(tmp_path, partials_dir):
 
 
 def test_kimi_gate_disabled(tmp_path, partials_dir):
-    """ADLC_DISABLE_KIMI=1 → return 1, REASON=disabled-via-env."""
-    ask_kimi = shutil.which("ask-kimi")
-    if not ask_kimi:
-        pytest.skip("ask-kimi not on host PATH; needed to reach the disabled branch")
+    """ADLC_DISABLE_KIMI=1 → return 1, REASON=disabled-via-env.
 
-    path = f"{os.path.dirname(ask_kimi)}:/usr/bin:/bin"
+    Self-contained: uses a tmp ask-kimi stub so PATH-availability is
+    guaranteed and only the env-var opt-out is the variable.
+    """
+    path = _stub_ask_kimi_on_path(tmp_path)
     env = {"PATH": path, "HOME": str(tmp_path), "ADLC_DISABLE_KIMI": "1"}
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
     assert "RC=1" in r.stdout, r.stdout + r.stderr

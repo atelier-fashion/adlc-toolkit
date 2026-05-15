@@ -48,6 +48,52 @@ esac
 
 CLIS="ask-kimi kimi-write extract-chat"
 
+# --- CLAUDE.md routing block: pre-validate before any side effects ------
+# REQ-426 verify caught: the original placement of this block ran AFTER venv
+# creation, pip install, and launchctl bootout — so a tampered routing file
+# would still incur all those side effects before the script aborted. Move
+# the validation up here so a hash-mismatch is the first thing we hit.
+#
+# **Security model**: the SHA-256 pin enforces *review visibility*, not
+# cryptographic proof. An attacker who controls a PR can update both the
+# routing .txt and the .sha256 atomically — but the diff is then visible to
+# reviewers as TWO file changes side-by-side, which is exactly the gate we
+# want a human to consciously approve. This pin is review-discipline, not
+# crypto.
+ROUTING_TXT="$REPO_ROOT/tools/kimi/claude-md-routing.txt"
+ROUTING_SHA="$REPO_ROOT/tools/kimi/claude-md-routing.txt.sha256"
+
+if [ ! -f "$ROUTING_TXT" ] || [ ! -f "$ROUTING_SHA" ]; then
+    echo "ERROR: canonical routing files missing — expected:" >&2
+    echo "  $ROUTING_TXT" >&2
+    echo "  $ROUTING_SHA" >&2
+    exit 1
+fi
+
+if command -v shasum >/dev/null 2>&1; then
+    HASH_CMD="shasum -a 256"
+elif command -v sha256sum >/dev/null 2>&1; then
+    HASH_CMD="sha256sum"
+else
+    echo "ERROR: no SHA-256 tool found (tried shasum, sha256sum). Install one and retry." >&2
+    exit 1
+fi
+
+# Read once, hash the captured bytes, and append the SAME captured bytes
+# downstream — closes the file-read-twice TOCTOU window where an attacker
+# could swap the file between the hash check and the cat-into-CLAUDE.md.
+ROUTING_CONTENT=$(cat "$ROUTING_TXT")
+ACTUAL_HASH=$(printf '%s\n' "$ROUTING_CONTENT" | $HASH_CMD | awk '{print $1}')
+PINNED_HASH=$(awk '{print $1; exit}' "$ROUTING_SHA")
+
+if [ "$ACTUAL_HASH" != "$PINNED_HASH" ]; then
+    echo "ERROR: claude-md-routing.txt hash mismatch — aborting before ANY install side effects" >&2
+    echo "  Pinned:   $PINNED_HASH" >&2
+    echo "  Computed: $ACTUAL_HASH" >&2
+    echo "  If this change is intentional, update tools/kimi/claude-md-routing.txt.sha256 in the same commit." >&2
+    exit 1
+fi
+
 # --- venv ---------------------------------------------------------------
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating venv at $VENV_DIR"
@@ -174,39 +220,12 @@ else
     echo "  (MOONSHOT_API_KEY is currently NOT set in this shell)"
 fi
 
-# --- CLAUDE.md routing block (marker-guarded append, hash-pinned) -------
-# REQ-426 BR-1 / ADR-1 / TASK-037: the routing block lives in a canonical
-# file (claude-md-routing.txt) with a pinned SHA-256 hash. install.sh
-# recomputes the hash and REFUSES to modify ~/.claude/CLAUDE.md on
-# mismatch. To bump the routing block, edit the .txt and regenerate the
-# .sha256 in the same commit.
+# --- CLAUDE.md routing block (marker-guarded append) --------------------
+# Hash-validated above (immediately after CLIS, before any side effects).
+# We re-use the captured ROUTING_CONTENT rather than re-reading the file —
+# this closes the file-read-twice TOCTOU window.
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-ROUTING_TXT="$REPO_ROOT/tools/kimi/claude-md-routing.txt"
-ROUTING_SHA="$REPO_ROOT/tools/kimi/claude-md-routing.txt.sha256"
 mkdir -p "$HOME/.claude"
-
-if [ ! -f "$ROUTING_TXT" ] || [ ! -f "$ROUTING_SHA" ]; then
-    echo "ERROR: canonical routing files missing — expected:" >&2
-    echo "  $ROUTING_TXT" >&2
-    echo "  $ROUTING_SHA" >&2
-    exit 1
-fi
-
-if command -v shasum >/dev/null 2>&1; then
-    HASH_CMD="shasum -a 256"
-else
-    HASH_CMD="sha256sum"
-fi
-ACTUAL_HASH=$($HASH_CMD "$ROUTING_TXT" | awk '{print $1}')
-PINNED_HASH=$(awk '{print $1; exit}' "$ROUTING_SHA")
-
-if [ "$ACTUAL_HASH" != "$PINNED_HASH" ]; then
-    echo "ERROR: claude-md-routing.txt hash mismatch — refusing to modify ~/.claude/CLAUDE.md" >&2
-    echo "  Pinned:   $PINNED_HASH" >&2
-    echo "  Computed: $ACTUAL_HASH" >&2
-    echo "  If this change is intentional, update tools/kimi/claude-md-routing.txt.sha256 in the same commit." >&2
-    exit 1
-fi
 
 if [ -f "$CLAUDE_MD" ] && grep -q 'kimi-delegation:start' "$CLAUDE_MD"; then
     echo "Kimi routing block already present in $CLAUDE_MD"
@@ -214,7 +233,7 @@ else
     echo "Appending Kimi routing block to $CLAUDE_MD"
     {
         echo ""
-        cat "$ROUTING_TXT"
+        printf '%s\n' "$ROUTING_CONTENT"
     } >> "$CLAUDE_MD"
 fi
 

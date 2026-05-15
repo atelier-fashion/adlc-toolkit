@@ -20,6 +20,14 @@
 #   `export` is intentional — a child `ask-kimi` invocation may read it.
 #
 # No `set -eu` here — return codes ARE the contract.
+
+# Defensive default: a caller that reads $ADLC_KIMI_GATE_REASON without first
+# invoking adlc_kimi_gate_check (e.g., a partial sourced but the function
+# never called) gets "unset" rather than empty — making telemetry visibly
+# wrong instead of silently empty (REQ-426 verify H2). Callers that DO invoke
+# the function will overwrite this with one of the canonical values below.
+export ADLC_KIMI_GATE_REASON="unset"
+
 adlc_kimi_gate_check() {
   if ! command -v ask-kimi >/dev/null 2>&1; then
     export ADLC_KIMI_GATE_REASON="no-binary"
