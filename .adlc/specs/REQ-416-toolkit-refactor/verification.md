@@ -58,7 +58,7 @@ Exit: 1 (expect 1)
 Target unchanged: PASS
 ```
 
-The idiom present in the four mkdir-locked sites (per LESSON-013 / TASK-032)
+The idiom present in the four mkdir-locked sites (per LESSON-014 / TASK-032)
 correctly refuses to proceed when the lock path is a pre-planted symlink.
 
 ---

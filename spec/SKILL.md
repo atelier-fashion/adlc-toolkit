@@ -197,13 +197,23 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    ```bash
    REQ_NUM=$(
      LOCK=~/.claude/.global-next-req.lock.d
+     COUNTER=~/.claude/.global-next-req
      if [ -L "$LOCK" ]; then
        echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
        exit 1
      fi
      for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-     NUM=$(cat ~/.claude/.global-next-req)
-     echo $((NUM + 1)) > ~/.claude/.global-next-req
+     # Hard-fail if we never acquired the lock (50 retries × 0.1s = ~5s budget).
+     # Without this guard, a contended lock would silently fall through to the
+     # critical section unguarded — defeating mutual exclusion (REQ-416 verify C1).
+     [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate REQ id" >&2; exit 1; }
+     # Counter read inside lock — fail hard if the file disappears mid-critical-section
+     # rather than silently treating empty-as-zero and resetting the global counter (REQ-416 verify M2).
+     NUM=$(cat "$COUNTER" 2>/dev/null) || { echo "ERROR: counter $COUNTER unreadable inside lock — aborting" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
+     [ -n "$NUM" ] || { echo "ERROR: counter $COUNTER is empty — aborting (would reset to 1)" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
+     echo $((NUM + 1)) > "$COUNTER"
+     # rmdir is guarded by the same symlink check (residual TOCTOU window between
+     # check and rmdir is accepted risk per ADR-4 — see LESSON-014).
      if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
      echo $NUM
    )

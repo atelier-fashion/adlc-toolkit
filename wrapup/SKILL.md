@@ -94,14 +94,19 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Name files: `ASSUME-xxx-slug.md`. Determine the next ID using the atomic counter at `.adlc/.next-assume` (LESSON-110), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014) so concurrent `/sprint` wrapups can't lose updates and a swapped-in symlink can't redirect the counter:
   ```bash
   ASSUME_NUM=$(
-    LOCK=.adlc/.next-assume.lock.d
+    REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git worktree" >&2; exit 1; }
+    LOCK="$REPO_ROOT/.adlc/.next-assume.lock.d"
+    COUNTER="$REPO_ROOT/.adlc/.next-assume"
     if [ -L "$LOCK" ]; then
       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
       exit 1
     fi
     for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-    NUM=$(cat .adlc/.next-assume 2>/dev/null || echo "1")
-    echo $((NUM + 1)) > .adlc/.next-assume
+    # Hard-fail if we never acquired the lock (REQ-416 verify C1).
+    [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate ASSUME id" >&2; exit 1; }
+    NUM=$(cat "$COUNTER" 2>/dev/null || echo "1")
+    echo $((NUM + 1)) > "$COUNTER"
+    # rmdir guarded by symlink check; residual TOCTOU window accepted per ADR-4 / LESSON-014.
     if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
     echo $NUM
   )
@@ -262,14 +267,18 @@ esac
 - **Allocate the next ID atomically via `.adlc/.next-lesson`** (LESSON-110 — directory scans race against concurrent `/sprint` pipelines), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014). The lock path `.adlc/.next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude:
   ```bash
   LESSON_NUM=$(
-    LOCK=.adlc/.next-lesson.lock.d
+    REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git worktree" >&2; exit 1; }
+    LOCK="$REPO_ROOT/.adlc/.next-lesson.lock.d"
+    COUNTER="$REPO_ROOT/.adlc/.next-lesson"
     if [ -L "$LOCK" ]; then
       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
       exit 1
     fi
     for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-    NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
-    echo $((NUM + 1)) > .adlc/.next-lesson
+    [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate LESSON id" >&2; exit 1; }
+    NUM=$(cat "$COUNTER" 2>/dev/null || echo "1")
+    echo $((NUM + 1)) > "$COUNTER"
+    # rmdir guarded by symlink check; residual TOCTOU window accepted per ADR-4 / LESSON-014.
     if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
     echo $NUM
   )
