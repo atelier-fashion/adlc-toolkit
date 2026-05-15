@@ -1,7 +1,7 @@
 ---
 id: TASK-038
 title: "DRY Kimi gate reason-string via ADLC_KIMI_GATE_REASON"
-status: draft
+status: complete
 parent: REQ-426
 created: 2026-05-15
 updated: 2026-05-15

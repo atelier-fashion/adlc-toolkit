@@ -87,7 +87,7 @@ duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
     tools/kimi/skill-flag.sh clear "$flag"
     mode="fallback"
-    if [ "${ADLC_DISABLE_KIMI:-0}" = "1" ]; then reason="disabled-via-env"; else reason="no-binary"; fi
+    reason="$ADLC_KIMI_GATE_REASON"
     gate_result="fail"
 elif tools/kimi/skill-flag.sh check "$flag" >/dev/null 2>&1; then
     mode="ghost-skip"; reason="gate-passed-no-call"
@@ -162,7 +162,7 @@ duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
     tools/kimi/skill-flag.sh clear "$flag"
     mode="fallback"
-    if [ "${ADLC_DISABLE_KIMI:-0}" = "1" ]; then reason="disabled-via-env"; else reason="no-binary"; fi
+    reason="$ADLC_KIMI_GATE_REASON"
     gate_result="fail"
 elif tools/kimi/skill-flag.sh check "$flag" >/dev/null 2>&1; then
     mode="ghost-skip"; reason="gate-passed-no-call"
