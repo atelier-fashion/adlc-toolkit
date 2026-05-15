@@ -125,6 +125,15 @@ if command -v launchctl >/dev/null 2>&1; then
     mkdir -p "$HOME/Library/LaunchAgents"
     mkdir -p "$HOME/Library/Logs"
 
+    # Ensure existing telemetry log is owner-readable only (REQ-424 BR-11).
+    # Idempotent — emit-telemetry.sh creates the log via umask 077 on first write,
+    # but if a prior install or manual touch left it world-readable, fix it here.
+    TELEMETRY_LOG="$HOME/Library/Logs/adlc-skill-telemetry.log"
+    if [ -f "$TELEMETRY_LOG" ]; then
+        chmod 600 "$TELEMETRY_LOG"
+        echo "Ensured $TELEMETRY_LOG has mode 0600"
+    fi
+
     # ORDER MATTERS: bootout FIRST (so no live agent is mid-execution while
     # we overwrite its files), THEN write files, THEN bootstrap (loads new).
     launchctl bootout "gui/$(id -u)" "$AGENT_PLIST" 2>/dev/null || true
