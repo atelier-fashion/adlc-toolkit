@@ -1,7 +1,7 @@
 ---
 id: TASK-036
 title: "End-to-end verification: pytest suite + sample /proceed dry-run"
-status: draft
+status: complete
 parent: REQ-416
 created: 2026-05-15
 updated: 2026-05-15
