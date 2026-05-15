@@ -36,6 +36,34 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 
 Before launching the audit agents, produce a one-paragraph "project shape" summary to pass as extra context to each agent in Step 2.
 
+**Shared telemetry-resolve helper** — define once here; both Step 1.5 and Step 1.6 invoke it at their closing emit point. A future change to the `emit-telemetry.sh` argument signature or to mode-resolution logic is applied in this one place:
+
+```sh
+_adlc_emit_step_telemetry() {
+    # $1 = step label (e.g. "Step-1.5" or "Step-1.6")
+    # Reads caller's $start_s, $ASK_KIMI_INVOKED, $KIMI_EXIT, $flag, $ADLC_KIMI_GATE_REASON.
+    local _step="$1"
+    local duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
+    local mode reason gate_result
+    if [ -z "$ASK_KIMI_INVOKED" ]; then
+        tools/kimi/skill-flag.sh clear "$flag"
+        mode="fallback"
+        reason="$ADLC_KIMI_GATE_REASON"
+        gate_result="fail"
+    elif tools/kimi/skill-flag.sh check "$flag" >/dev/null 2>&1; then
+        mode="ghost-skip"; reason="gate-passed-no-call"
+        tools/kimi/skill-flag.sh clear "$flag"
+        gate_result="pass"
+    elif [ "$KIMI_EXIT" -eq 0 ]; then
+        mode="delegated"; reason="ok"; gate_result="pass"
+    else
+        mode="fallback"; reason="api-error"; gate_result="pass"
+    fi
+    tools/kimi/emit-telemetry.sh analyze "$_step" unknown "$gate_result" "$mode" "$reason" "$duration_ms"
+    tools/kimi/skill-flag.sh clear "$flag"
+}
+```
+
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
@@ -80,26 +108,10 @@ Drop or rewrite (do not just `ls`) any citation that fails either the regex or t
 
 Pass the validated, delimiter-wrapped summary as an additional context paragraph in the dispatch prompt to each of the 4 audit agents launched in Step 2.
 
-**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 1.6:
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 1.6, invoke the shared helper defined at the top of this step:
 
 ```sh
-duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
-if [ -z "$ASK_KIMI_INVOKED" ]; then
-    tools/kimi/skill-flag.sh clear "$flag"
-    mode="fallback"
-    reason="$ADLC_KIMI_GATE_REASON"
-    gate_result="fail"
-elif tools/kimi/skill-flag.sh check "$flag" >/dev/null 2>&1; then
-    mode="ghost-skip"; reason="gate-passed-no-call"
-    tools/kimi/skill-flag.sh clear "$flag"
-    gate_result="pass"
-elif [ "$KIMI_EXIT" -eq 0 ]; then
-    mode="delegated"; reason="ok"; gate_result="pass"
-else
-    mode="fallback"; reason="api-error"; gate_result="pass"
-fi
-tools/kimi/emit-telemetry.sh analyze Step-1.5 unknown "$gate_result" "$mode" "$reason" "$duration_ms"
-tools/kimi/skill-flag.sh clear "$flag"
+_adlc_emit_step_telemetry Step-1.5
 ```
 
 ### Step 1.6: Optional audit candidate-list pre-pass via ask-kimi
@@ -155,26 +167,10 @@ Split the validated output into the 4 per-dimension blocks (code-quality, conven
 - Emit on stderr: `/analyze: ask-kimi unavailable — agents running without candidate pre-pass` (or `/analyze: ask-kimi disabled via ADLC_DISABLE_KIMI` when `ADLC_DISABLE_KIMI=1` is the cause). Skip this emit when arriving here from a delegation-failure fall-through — that branch already logged a combined line.
 - Skip the candidate-list construction; Step 2 agents dispatch with no `<advisory-candidates>` block (current behavior).
 
-**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 2:
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 2, invoke the shared helper defined at the top of Step 1.5:
 
 ```sh
-duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
-if [ -z "$ASK_KIMI_INVOKED" ]; then
-    tools/kimi/skill-flag.sh clear "$flag"
-    mode="fallback"
-    reason="$ADLC_KIMI_GATE_REASON"
-    gate_result="fail"
-elif tools/kimi/skill-flag.sh check "$flag" >/dev/null 2>&1; then
-    mode="ghost-skip"; reason="gate-passed-no-call"
-    tools/kimi/skill-flag.sh clear "$flag"
-    gate_result="pass"
-elif [ "$KIMI_EXIT" -eq 0 ]; then
-    mode="delegated"; reason="ok"; gate_result="pass"
-else
-    mode="fallback"; reason="api-error"; gate_result="pass"
-fi
-tools/kimi/emit-telemetry.sh analyze Step-1.6 unknown "$gate_result" "$mode" "$reason" "$duration_ms"
-tools/kimi/skill-flag.sh clear "$flag"
+_adlc_emit_step_telemetry Step-1.6
 ```
 
 ### Step 1.8: Delegation-fidelity audit
