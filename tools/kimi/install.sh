@@ -174,17 +174,47 @@ else
     echo "  (MOONSHOT_API_KEY is currently NOT set in this shell)"
 fi
 
-# --- CLAUDE.md routing block (marker-guarded append) --------------------
+# --- CLAUDE.md routing block (marker-guarded append, hash-pinned) -------
+# REQ-426 BR-1 / ADR-1 / TASK-037: the routing block lives in a canonical
+# file (claude-md-routing.txt) with a pinned SHA-256 hash. install.sh
+# recomputes the hash and REFUSES to modify ~/.claude/CLAUDE.md on
+# mismatch. To bump the routing block, edit the .txt and regenerate the
+# .sha256 in the same commit.
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-README="$REPO_ROOT/tools/kimi/README.md"
+ROUTING_TXT="$REPO_ROOT/tools/kimi/claude-md-routing.txt"
+ROUTING_SHA="$REPO_ROOT/tools/kimi/claude-md-routing.txt.sha256"
 mkdir -p "$HOME/.claude"
+
+if [ ! -f "$ROUTING_TXT" ] || [ ! -f "$ROUTING_SHA" ]; then
+    echo "ERROR: canonical routing files missing — expected:" >&2
+    echo "  $ROUTING_TXT" >&2
+    echo "  $ROUTING_SHA" >&2
+    exit 1
+fi
+
+if command -v shasum >/dev/null 2>&1; then
+    HASH_CMD="shasum -a 256"
+else
+    HASH_CMD="sha256sum"
+fi
+ACTUAL_HASH=$($HASH_CMD "$ROUTING_TXT" | awk '{print $1}')
+PINNED_HASH=$(awk '{print $1; exit}' "$ROUTING_SHA")
+
+if [ "$ACTUAL_HASH" != "$PINNED_HASH" ]; then
+    echo "ERROR: claude-md-routing.txt hash mismatch — refusing to modify ~/.claude/CLAUDE.md" >&2
+    echo "  Pinned:   $PINNED_HASH" >&2
+    echo "  Computed: $ACTUAL_HASH" >&2
+    echo "  If this change is intentional, update tools/kimi/claude-md-routing.txt.sha256 in the same commit." >&2
+    exit 1
+fi
+
 if [ -f "$CLAUDE_MD" ] && grep -q 'kimi-delegation:start' "$CLAUDE_MD"; then
     echo "Kimi routing block already present in $CLAUDE_MD"
 else
     echo "Appending Kimi routing block to $CLAUDE_MD"
     {
         echo ""
-        sed -n '/kimi-delegation:start/,/kimi-delegation:end/p' "$README"
+        cat "$ROUTING_TXT"
     } >> "$CLAUDE_MD"
 fi
 
