@@ -1,7 +1,7 @@
 ---
 id: REQ-425
 title: "Pre-merge detection of corrupted shell constructs in SKILL.md files (catches REQ-424-style substitution disasters before they ship)"
-status: draft
+status: complete
 deployable: false
 created: 2026-05-15
 updated: 2026-05-15
@@ -106,8 +106,11 @@ LESSON-012 — structural telemetry / CI-style enforcement beats prose-only revi
       The check ignores text outside fenced blocks (skill prose may legitimately use
       unbalanced examples).
 - [ ] BR-5: The canonical-helper check MUST verify that any SKILL.md containing
-      `ADLC_DISABLE_KIMI` (i.e., a Kimi delegation gate) also contains the exact literals
-      from REQ-424's instrumentation: `start_s=$(date -u +%s)`, `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`, and `tools/kimi/emit-telemetry.sh `. Missing literals are findings.
+      `ADLC_DISABLE_KIMI` (i.e., a Kimi delegation gate) also contains the four exact
+      literals listed in the System Model `canonical helper rule` rows: the
+      `kimi-gate-form` line (`command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]`),
+      `start_s=$(date -u +%s)`, `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`,
+      and `tools/kimi/emit-telemetry.sh `. Missing literals are findings.
 - [ ] BR-6: `tools/lint-skills/check.py` MUST exit with code 0 if all checks pass, non-zero
       (count of findings, capped at 255) if any fail. The report is human-readable
       (`<file>:<line>: <check-name>: <message>`).

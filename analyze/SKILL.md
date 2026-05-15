@@ -228,6 +228,42 @@ Each unique `(step, REQ)` pair becomes a sub-bullet under the per-skill finding.
 
 Append the resulting `delegation-fidelity` block to the audit report alongside the standard 4 dimensions surfaced by Step 2's agents. The agent dispatch in Step 2 is unchanged — this is a parallel self-check, not an extra agent.
 
+### Step 1.9: SKILL.md corruption audit
+
+Run the `tools/lint-skills/` linter over the repo's `SKILL.md` files to surface findings under a new `skill-md-corruption` audit dimension. Defends against the REQ-424 failure class — literal-but-broken shell constructs that escape verify because review is prose-only.
+
+**Gate (silent skip on older installs):**
+
+```sh
+if [ -x tools/lint-skills/check.sh ]; then
+    lint_out=$(tools/lint-skills/check.sh 2>/dev/null)
+    lint_exit=$?
+else
+    lint_out=""
+    lint_exit=-1
+fi
+```
+
+If `tools/lint-skills/check.sh` does not exist (older install of the toolkit), silently skip Step 1.9 — emit nothing, raise no warning, and continue to Step 2.
+
+**Parse the output:** the linter emits one line per finding in the format `<file>:<line>: <check-name>: <message>` where `<check-name>` is one of `sentinel`, `balance`, `canonical-helper`. Each line is already report-ready; just prefix them with the `skill-md-corruption:` dimension marker.
+
+**Finding format:**
+
+```
+skill-md-corruption: <file>:<line>: <check-name>: <message>
+```
+
+**Happy path:** if `lint_exit == 0`, emit one positive line into the audit report rather than omitting the dimension:
+
+```
+/analyze: skill-md-corruption clean (0 findings)
+```
+
+**Failure mode:** if the linter exits non-zero but produces no parseable output (e.g., the script crashed before scanning), do NOT block — emit `/analyze: skill-md-corruption audit unavailable (check.sh failed)` into the report and continue. `/analyze` must never fail-loud on this dimension.
+
+Append the resulting `skill-md-corruption` block to the audit report alongside the standard 4 dimensions surfaced by Step 2's agents and the `delegation-fidelity` dimension from Step 1.8. The agent dispatch in Step 2 is unchanged — this is a parallel self-check, not an extra agent.
+
 ### Step 2: Launch Audit Agents + Repo Hygiene Scan (parallel)
 In a single message, launch the 4 audit agents AND run the repo hygiene bash checks below in parallel. The agents live in `~/.claude/agents/` with their full audit checklists, model selection (sonnet for deep analysis, haiku for pattern matching), and tool restrictions.
 
