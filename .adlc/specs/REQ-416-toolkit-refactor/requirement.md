@@ -1,10 +1,10 @@
 ---
 id: REQ-416
 title: "Toolkit refactor: DRY ethos macro and Kimi gate, shrink /proceed, lock-symlink TOCTOU review, requirements.txt pinning"
-status: draft
+status: approved
 deployable: false
 created: 2026-05-13
-updated: 2026-05-13
+updated: 2026-05-15
 component: "adlc/toolkit"
 domain: "adlc"
 stack: ["markdown", "bash", "python"]
@@ -91,11 +91,17 @@ but expects `/architect` to refine the approach before `/proceed`. Five items:
       ethos block in the rendered prompt.
 - [ ] BR-3: The Kimi delegation gate snippet MUST be the single source of truth — adding
       a delegation point to a new skill MUST reference the snippet, not copy-paste it.
-- [ ] BR-4: `/proceed` SKILL.md (the top-level instructions file) MUST be ≤ 300 lines after
+- [ ] BR-4: `/proceed` SKILL.md (the top-level instructions file) MUST be ≤ 450 lines after
       refactor, with companion files holding the moved content. No load-bearing invariant
       (state machine, gate protocol, dispatch contract, cross-repo schema) MUST be lost
       in the split — verified by `git diff` of the union (`SKILL.md` + companions) vs the
       pre-refactor `SKILL.md` showing only structural reorganization.
+      **Amendment 2026-05-15** (architecture ADR-3): the original ≤300 target required
+      extracting Phase 5 (Verify), but Phase 5 owns the Kimi pre-pass gate handoff
+      whose orchestration is load-bearing — splitting it fragments the gate logic and
+      creates a TOCTOU window between orchestrator and pre-pass. The target is amended
+      to ≤450 to keep Phase 5 + the Kimi gate cohesive. Phases 1–3, 4, and 6–8 still
+      extract to companions. See `architecture.md` ADR-3 for full rationale.
 - [ ] BR-5: Every `mkdir`-based lock in the toolkit MUST be reviewed for symlink-race
       vulnerability. Vulnerable sites MUST be either hardened (e.g., switch to `flock` on
       Linux while keeping `mkdir` fallback on macOS, or refuse to operate when the lock
@@ -121,7 +127,7 @@ ACs.)
       mechanism that every skill uses.
 - [ ] The Kimi delegation gate exists as a single reference; `/analyze` and `/wrapup`
       reference it instead of duplicating it.
-- [ ] `wc -l proceed/SKILL.md` reports ≤ 300.
+- [ ] `wc -l proceed/SKILL.md` reports ≤ 450 (amended from ≤ 300 — see BR-4 amendment).
 - [ ] Every lock site in the toolkit has a documented stance (hardened / accepted-risk).
 - [ ] `tools/kimi/requirements.txt` exists with pinned versions for `openai` and `pytest`.
 - [ ] `install.sh` uses `pip install -r tools/kimi/requirements.txt`.
