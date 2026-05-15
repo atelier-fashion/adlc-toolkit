@@ -122,13 +122,64 @@ fi
 
 **Delegated drafting** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):
 
-1. Locate the most recent Claude Code session JSONL for the active project. Claude Code stores sessions under `~/.claude/projects/<encoded-cwd>/*.jsonl`, where `<encoded-cwd>` is the **repo root path** (NOT the worktree path — if running from `.worktrees/REQ-xxx`, use the parent repo root) with the leading `/` dropped and every remaining `/` replaced by `-`. Compute it portably:
+1. Locate the Claude Code session JSONL whose recent content mentions the active REQ — **content-anchored discovery** (REQ-423). The prior heuristic ("newest JSONL under the repo-root-encoded path") silently picked the wrong transcript when a session was opened at a parent directory and later navigated into the repo. The fix walks the encoded-path tree from the repo root up to (and including) `$HOME`, collects candidate JSONLs at each level, and picks the one whose last 200 lines contain a word-boundary `\bREQ_ID\b` match. Falls back to newest overall (with a stderr warning) if no candidate mentions the active REQ; falls through to direct drafting if no candidates exist at all. Emits exactly one stderr line per invocation stating which JSONL was chosen and why.
    ```bash
    ROOT=$(git rev-parse --show-toplevel 2>/dev/null | sed 's|/\.worktrees/.*$||')
-   ENCODED=$(printf '%s' "$ROOT" | sed 's|^/||; s|/|-|g')
-   JSONL=$(ls -t ~/.claude/projects/-"$ENCODED"/*.jsonl 2>/dev/null | head -1)
+
+   # Build candidate list: walk from $ROOT up to (and including) $HOME, encoding each ancestor.
+   # Stop at $HOME — never enumerate above (defends against scanning other users' / system paths).
+   CANDIDATES=()
+   DIR="$ROOT"
+   if [ -n "$DIR" ]; then
+       while [ -n "$DIR" ] && [ "$DIR" != "/" ]; do
+           ENCODED=$(printf '%s' "$DIR" | sed 's|^/||; s|/|-|g')
+           BASENAME="-$ENCODED"
+           ENC_DIR="$HOME/.claude/projects/$BASENAME"
+           # BR-7 sanitization on the basename we're about to pass to ls.
+           # The character class below permits '.' so '..' would otherwise slip through; the
+           # explicit *..* case-reject blocks parent-directory traversal regardless of position.
+           case "$BASENAME" in
+               *..*) ;;  # reject — drop silently
+               *) if printf '%s' "$BASENAME" | grep -qE '^-[A-Za-z0-9_./-]+$' && [ -d "$ENC_DIR" ]; then
+                      while IFS= read -r f; do
+                          [ -n "$f" ] && CANDIDATES+=("$f")
+                      done < <(ls -t "$ENC_DIR"/*.jsonl 2>/dev/null)
+                  fi ;;
+           esac
+           # Terminate after processing $HOME — never walk above.
+           [ "$DIR" = "$HOME" ] && break
+           DIR=$(dirname "$DIR")
+       done
+   fi
+
+   JSONL=""
+   if [ ${#CANDIDATES[@]} -eq 0 ]; then
+       echo "/wrapup: session JSONL — no candidates found; skipping Kimi delegation" >&2
+       # Fall through to Fallback drafting (BR-9 — same as today's REQ-414 cold-path behavior).
+   else
+       # Phase 1: id-match — word-boundary grep on last 200 lines of each candidate (ADR-1).
+       # First match wins; walk-order is repo-root first, so the closest-to-repo match is preferred.
+       if [ -n "$REQ_ID" ]; then
+           for c in "${CANDIDATES[@]}"; do
+               if tail -n 200 "$c" 2>/dev/null | grep -qE "\\b$REQ_ID\\b"; then
+                   JSONL="$c"
+                   echo "/wrapup: session JSONL — matched $REQ_ID in $(basename "$c")" >&2
+                   break
+               fi
+           done
+       fi
+       # Phase 2: fallback to newest overall if no id-match (or no REQ id available).
+       if [ -z "$JSONL" ]; then
+           JSONL="${CANDIDATES[0]}"
+           if [ -n "$REQ_ID" ]; then
+               echo "/wrapup: session JSONL — $REQ_ID not mentioned in any candidate; using newest $(basename "$JSONL") as fallback" >&2
+           else
+               echo "/wrapup: session JSONL — no REQ id provided; using newest $(basename "$JSONL")" >&2
+           fi
+       fi
+   fi
    ```
-   (The leading `-` in the directory name is added by Claude Code; the `sed` strips the leading `/` from the path before substitution to avoid a doubled `--` prefix.)
+   (The leading `-` in each encoded directory name is added by Claude Code; the `sed` strips the leading `/` before substitution to avoid a doubled `--` prefix. The walk terminates at `$HOME` to defend against scanning other users' or system session data — see REQ-423 architecture ADR-2.)
 2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), then redact obvious credential-shaped strings before piping content to Kimi:
    ```bash
    TMPFILE=$(mktemp -t kimi-wrapup.XXXXXX) || exit 1
