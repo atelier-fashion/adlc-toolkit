@@ -82,6 +82,14 @@ PR cleanup + CI
 
 Each phase has a validation gate. Failed validation loops up to 3 times before pausing for human input.
 
+`proceed/SKILL.md` keeps Step 0, the Pipeline State Tracking gate protocol, and Phase 5 (Verify, with the Kimi pre-pass gate) inline, but extracts the thinner phases to companion files referenced via `<!-- companion: <path> -->` markers in SKILL.md:
+
+- `proceed/phases-1-3-validation.md` — Phases 1–3 (spec validation, architect, architecture/tasks validation)
+- `proceed/phase-4-implementation.md` — Phase 4 (implement)
+- `proceed/phases-6-8-ship.md` — Phases 6–8 (PR creation, cleanup/CI, wrapup/merge)
+
+The companion marker is documentation-only — Claude Code does not auto-load referenced files. SKILL.md's inline summary is sufficient to execute each extracted phase; the companion holds the full step list for maintainers and for in-depth reference. Phase 5 is intentionally not extracted (ADR-3 of REQ-416) because the Kimi pre-pass gate-handoff is load-bearing.
+
 ## Knowledge retrieval (current and evolving)
 
 Skills retrieve relevant prior knowledge at context-loading time. The current implementation is a **3-tier grep** over `.adlc/knowledge/lessons/*.md` frontmatter (component > domain+prefix > tag), used by `/review` and `/spec`. REQ-258 upgrades this to a **weighted-score retriever** over three corpora (lessons + specs + bugs), pooled globally to top-15 rather than per-corpus capped.

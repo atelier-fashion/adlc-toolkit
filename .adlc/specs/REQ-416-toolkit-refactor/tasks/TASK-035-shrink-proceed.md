@@ -1,7 +1,7 @@
 ---
 id: TASK-035
 title: "Shrink proceed/SKILL.md by extracting Phases 1–3 and 6–8 to companion files"
-status: draft
+status: complete
 parent: REQ-416
 created: 2026-05-15
 updated: 2026-05-15
