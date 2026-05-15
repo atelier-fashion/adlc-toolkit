@@ -121,6 +121,23 @@ Do **not** route to Kimi for:
 **Claude = thinking. Kimi = I/O.**
 <!-- kimi-delegation:end -->
 
+### Updating dependencies
+
+Python dependencies for the Kimi venv are pinned in `tools/kimi/requirements.txt`
+with exact `==` versions for reproducibility (REQ-416 BR-6/BR-7). `install.sh`
+installs strictly from that file — there is no `--upgrade` flag, so re-running
+the installer will not silently pull a newer `openai` SDK that breaks the CLIs.
+
+To bump a pinned version:
+
+1. Open a hotfix REQ (the pinned API surface is part of the toolkit contract —
+   a bump that changes call shapes is a real change worth tracking).
+2. Edit `tools/kimi/requirements.txt` to the new pin.
+3. Delete `~/.claude/kimi-venv` and re-run `bash tools/kimi/install.sh` on a
+   clean state to verify the new pin installs cleanly.
+4. Run the `tools/kimi/tests/` pytest suite against the new venv.
+5. Land the bump with the rest of the hotfix.
+
 ### Troubleshooting
 
 - **GUI-launched Claude Code can't see `MOONSHOT_API_KEY`** — usually self-heals via the

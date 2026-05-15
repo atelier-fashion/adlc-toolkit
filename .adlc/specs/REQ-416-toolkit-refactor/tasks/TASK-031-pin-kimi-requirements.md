@@ -1,7 +1,7 @@
 ---
 id: TASK-031
 title: "Pin tools/kimi/requirements.txt and update install.sh"
-status: draft
+status: complete
 parent: REQ-416
 created: 2026-05-15
 updated: 2026-05-15
