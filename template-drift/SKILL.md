@@ -1,6 +1,6 @@
 ---
 name: template-drift
-description: Detect drift between this project's `.adlc/templates/` copies and the canonical templates in `~/.claude/skills/templates/`. Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template updates have landed in this project yet. Reports a per-file diff summary and flags intentional customizations from accidental staleness.
+description: Detect drift between this project's `.adlc/templates/` copies and the canonical templates in `~/.claude/skills/templates/`, and between `.adlc/partials/*.sh` and `~/.claude/skills/partials/*.sh`. Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template or partial updates have landed in this project yet. Reports a per-file diff summary, flags intentional customizations from accidental staleness for templates, and reports any partial drift as `stale` (partials are shared executable code — no customization classification).
 argument-hint: Optional template name (e.g., "requirement-template") to scope the check to a single file
 ---
 
@@ -34,17 +34,39 @@ Scope: $ARGUMENTS (optional — single template name to check; otherwise all tem
 1. If the user passed a scope argument (e.g. `requirement-template`), only check `.adlc/templates/<scope>.md` vs `~/.claude/skills/templates/<scope>.md`.
 2. Otherwise list every `*.md` file in `.adlc/templates/` AND every `*.md` file in `~/.claude/skills/templates/`. Compare the union of both sets — this catches templates that exist in the toolkit but not in the project (new templates added upstream) and templates in the project but not in the toolkit (legacy or custom-to-project files).
 
-### Step 2: Diff Each Template
+### Step 2: Detect Template Drift
 
 For each template in the comparison set, run `diff -u ~/.claude/skills/templates/<name>.md .adlc/templates/<name>.md`. Capture:
 - **Missing upstream**: template exists locally but not in toolkit (legacy or custom)
-- **Missing locally**: template exists in toolkit but not in project (upstream added, not yet copied)
-- **Identical**: no diff (drift = 0)
-- **Drifted**: diff output — count added/removed lines
+- **Missing locally** (a.k.a. `missing`): template exists in toolkit but not in project (upstream added, not yet copied)
+- **Identical** (a.k.a. `synced`): no diff (drift = 0)
+- **Drifted** (a.k.a. `stale`): diff output — count added/removed lines
 
 Also compute a rough drift size: total lines added + total lines removed (excluding context lines). This gives a "how much has changed" number for the summary table.
 
-### Step 3: Classify Drift as Intentional vs Accidental
+### Step 3: Detect Partial Drift
+
+Partials (`*.sh` files) are a second sync surface alongside templates. Unlike templates, partials are copied per-repo for portability but are **not** intended for project-specific customization — they are shared executable code (e.g., `ethos-include.sh` injects the toolkit's ETHOS preamble into every skill). The classification vocabulary matches Step 2 (`synced`, `stale`, `missing`) so the final report can use one unified summary line.
+
+**Rationale — why no "intentional customization" classification for partials**:
+
+Partials are shared executable code, not customizable content; intentional consumer-side modification of a partial would shadow the toolkit's gate logic and is the threat model `/template-drift` is meant to detect. Therefore any drift in partials is reported as `stale` with no customization classification. This is a security posture: a consumer with a modified `ethos-include.sh` could silently strip the ETHOS preamble from every skill invocation, and a consumer with a modified gate partial could bypass ADLC phase gates. Treating every partial diff as `stale` (and surfacing it loudly) is the correct default.
+
+For each `*.sh` file in `~/.claude/skills/partials/` (use a POSIX-safe glob — guard with `[ -e "$f" ]` so that an empty toolkit partials directory does not iterate the literal pattern), compare against `.adlc/partials/<basename>`:
+
+- Run `diff -q .adlc/partials/<basename> ~/.claude/skills/partials/<basename>`.
+- Exit 0 → `synced` (both exist, identical)
+- Exit 1 → `stale` (both exist, content differs)
+- Consumer file absent (`.adlc/partials/<basename>` does not exist) → `missing` (toolkit has it, consumer doesn't — consumer needs to re-run `/init` to copy it down)
+
+Also check the reverse direction: any `*.sh` in `.adlc/partials/` that does NOT exist in `~/.claude/skills/partials/` should be reported as `missing upstream` (legacy or rogue partial — flag it; do not auto-delete).
+
+If `.adlc/partials/` does not exist at all in the consumer project, report every toolkit partial as `missing` and recommend running `/init`.
+
+### Step 4: Classify Template Drift as Intentional vs Accidental
+
+(This step applies to templates only — partials have no customization classification, per Step 3.)
+
 
 For each drifted template, **read both full versions** (not just the diff) and make a judgment call. The goal is to separate:
 
@@ -62,9 +84,9 @@ For each drifted template, **read both full versions** (not just the diff) and m
 
 When in doubt, classify as "needs human review" — do not silently reconcile.
 
-### Step 4: Produce the Drift Report
+### Step 5: Produce the Drift Report
 
-Emit a summary table, then per-file detail:
+Emit a summary table, then per-file detail. The report covers BOTH surfaces (templates and partials) — templates classify drift as intentional/accidental; partials classify drift only as `synced`/`stale`/`missing`.
 
 ```
 ## Template Drift Report — [date]
@@ -82,6 +104,14 @@ Toolkit ref: <`git -C "$(readlink ~/.claude/skills)" rev-parse --short HEAD`>
 
 Overall: 3 drifted, 1 missing locally, 1 identical.
 Intentional: 1. Accidental: 2. Missing: 1.
+
+| Partial | Status |
+|---|---|
+| ethos-include.sh | stale |
+| gate-check.sh | synced |
+| spec-gate.sh | missing |
+
+Partials overall: 1 stale, 1 synced, 1 missing. (No customization classification — every partial drift is `stale` by design; see Step 3 rationale.)
 ```
 
 Then, for each non-identical template, write a short per-file section:
@@ -111,9 +141,9 @@ Diff is 3 added / 1 removed lines, all whitespace and one field rename:
 Action: safe to sync from toolkit. Propose a one-line change: copy `~/.claude/skills/templates/task-template.md` over `.adlc/templates/task-template.md`.
 ```
 
-### Step 5: Offer Reconciliation Actions
+### Step 6: Offer Reconciliation Actions
 
-For each **accidental** drift and each **missing locally** template, offer the user a specific action they can take. Format as a numbered list so the user can approve selectively:
+For each **accidental** template drift, each **missing locally** template, and **every** `stale` or `missing` partial (no customization escape hatch for partials — see Step 3), offer the user a specific action they can take. Format as a numbered list so the user can approve selectively:
 
 ```
 ## Proposed Actions
@@ -127,14 +157,20 @@ For each **accidental** drift and each **missing locally** template, offer the u
 3. **assumption-template.md**: Copy from toolkit to project (upstream added, not yet in project).
    Command: `cp ~/.claude/skills/templates/assumption-template.md .adlc/templates/assumption-template.md`
 
+4. **ethos-include.sh** (partial, stale): Copy from toolkit to project. Partials have no customization classification — any drift is reported as `stale` (see Step 3 rationale).
+   Command: `cp ~/.claude/skills/partials/ethos-include.sh .adlc/partials/ethos-include.sh`
+
+5. **spec-gate.sh** (partial, missing): Copy from toolkit to project.
+   Command: `mkdir -p .adlc/partials && cp ~/.claude/skills/partials/spec-gate.sh .adlc/partials/spec-gate.sh`
+
 Reply with action numbers to apply (e.g. "1 2 3" or "all"), or "skip" to take no action.
 ```
 
-**Do not apply any changes without explicit user approval.** Writing to `.adlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. If the user approves, apply only the numbered actions they listed and re-run Step 2 for those files to confirm drift is now zero.
+**Do not apply any changes without explicit user approval.** Writing to `.adlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. Writing to `.adlc/partials/` affects gate logic and the ETHOS preamble injected into every skill — also deliberate. If the user approves, apply only the numbered actions they listed and re-run Step 2 (templates) and Step 3 (partials) for those files to confirm drift is now zero.
 
-For **intentional** drift, do not propose reconciliation — just note it in the report so the user is aware.
+For **intentional** template drift, do not propose reconciliation — just note it in the report so the user is aware. Partials have no "intentional" path: every partial drift is offered for reconciliation.
 
-### Step 6: Recommend Follow-Up
+### Step 7: Recommend Follow-Up
 
 At the end of the report:
 - If all drift is intentional and reconciled: "All templates are in sync or intentionally customized. No action needed."
@@ -152,4 +188,6 @@ At the end of the report:
 
 - Use `diff -u` for readable unified diffs. Fall back to `git diff --no-index` if preferred.
 - `wc -l` on the diff output is a decent proxy for drift size, but prefer counting `^+` and `^-` lines excluding the `+++`/`---` headers.
-- When running under `/status`, this skill should produce a one-line summary only (e.g. "Templates: 2 drifted, 1 missing") rather than the full report. Detect that case by checking whether `$ARGUMENTS` contains `--brief`.
+- When running under `/status`, this skill should produce a one-line summary only (e.g. "Templates: 2 drifted, 1 missing. Partials: 1 stale, 0 missing.") rather than the full report. Detect that case by checking whether `$ARGUMENTS` contains `--brief`.
+- Partial comparison uses `diff -q` (quiet, exit-code-only) rather than `diff -u` because per-file unified diffs are not actionable for partials — the only remediation is "copy from toolkit". Show the diff only if the user asks for `--verbose`.
+- Do not invoke `/template-drift` recursively against the adlc-toolkit's own `.adlc/` (would always report drift against itself by construction).
