@@ -1,7 +1,7 @@
 ---
 id: TASK-003
 title: "Insert /analyze Step 1.9 (skill-md-corruption audit dimension)"
-status: draft
+status: complete
 parent: REQ-425
 created: 2026-05-15
 updated: 2026-05-15
