@@ -1,7 +1,7 @@
 ---
 id: REQ-416
 title: "Toolkit refactor: DRY ethos macro and Kimi gate, shrink /proceed, lock-symlink TOCTOU review, requirements.txt pinning"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-13
 updated: 2026-05-15
