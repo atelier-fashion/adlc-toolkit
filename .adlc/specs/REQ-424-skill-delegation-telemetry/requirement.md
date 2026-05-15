@@ -1,7 +1,7 @@
 ---
 id: REQ-424
 title: "Skill-delegation telemetry: detect ghost invocations where a Kimi gate said 'go' but no actual API call landed"
-status: draft
+status: approved
 deployable: false
 created: 2026-05-14
 updated: 2026-05-14
