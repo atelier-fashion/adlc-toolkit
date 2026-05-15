@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: "Write pytest cases for tools/lint-skills/"
-status: draft
+status: complete
 parent: REQ-425
 created: 2026-05-15
 updated: 2026-05-15
