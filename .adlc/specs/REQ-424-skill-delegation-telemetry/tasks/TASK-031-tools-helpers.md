@@ -1,7 +1,7 @@
 ---
 id: TASK-031
 title: "tools/kimi/ telemetry helpers — emit-telemetry.sh, skill-flag.sh, check-delegation.sh + tests"
-status: draft
+status: complete
 parent: REQ-424
 created: 2026-05-14
 updated: 2026-05-14
