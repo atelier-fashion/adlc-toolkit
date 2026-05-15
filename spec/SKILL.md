@@ -195,10 +195,14 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    ```bash
    REQ_NUM=$(
      LOCK=~/.claude/.global-next-req.lock.d
+     if [ -L "$LOCK" ]; then
+       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+       exit 1
+     fi
      for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
      NUM=$(cat ~/.claude/.global-next-req)
      echo $((NUM + 1)) > ~/.claude/.global-next-req
-     rmdir "$LOCK" 2>/dev/null
+     if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
      echo $NUM
    )
    ```

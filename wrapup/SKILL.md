@@ -91,10 +91,20 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Review assumptions from the requirement spec
 - Log any that were validated, invalidated, or still unresolved to `.adlc/knowledge/assumptions/`
 - Use the assumption template (check `.adlc/templates/assumption-template.md` first, fall back to `~/.claude/skills/templates/assumption-template.md`)
-- Name files: `ASSUME-xxx-slug.md`. Determine the next ID using the atomic counter at `.adlc/.next-assume` (LESSON-110):
+- Name files: `ASSUME-xxx-slug.md`. Determine the next ID using the atomic counter at `.adlc/.next-assume` (LESSON-110), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-013) so concurrent `/sprint` wrapups can't lose updates and a swapped-in symlink can't redirect the counter:
   ```bash
-  ASSUME_NUM=$(cat .adlc/.next-assume 2>/dev/null || echo "1")
-  echo $((ASSUME_NUM + 1)) > .adlc/.next-assume
+  ASSUME_NUM=$(
+    LOCK=.adlc/.next-assume.lock.d
+    if [ -L "$LOCK" ]; then
+      echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+      exit 1
+    fi
+    for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+    NUM=$(cat .adlc/.next-assume 2>/dev/null || echo "1")
+    echo $((NUM + 1)) > .adlc/.next-assume
+    if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+    echo $NUM
+  )
   ```
   If `.adlc/.next-assume` doesn't exist, scan `.adlc/knowledge/assumptions/` for the highest existing `ASSUME-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY — never re-scan after the counter exists. The counter prevents collisions when concurrent `/sprint` pipelines wrap up at the same time.
 
@@ -247,10 +257,20 @@ fi
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work
 - Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
-- **Allocate the next ID atomically via `.adlc/.next-lesson`** (LESSON-110 — directory scans race against concurrent `/sprint` pipelines):
+- **Allocate the next ID atomically via `.adlc/.next-lesson`** (LESSON-110 — directory scans race against concurrent `/sprint` pipelines), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-013). The lock path `.adlc/.next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude:
   ```bash
-  LESSON_NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
-  echo $((LESSON_NUM + 1)) > .adlc/.next-lesson
+  LESSON_NUM=$(
+    LOCK=.adlc/.next-lesson.lock.d
+    if [ -L "$LOCK" ]; then
+      echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+      exit 1
+    fi
+    for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+    NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
+    echo $((NUM + 1)) > .adlc/.next-lesson
+    if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+    echo $NUM
+  )
   ```
   If `.adlc/.next-lesson` doesn't exist, scan `.adlc/knowledge/lessons/` for the highest existing `LESSON-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY thereafter — never re-scan after the counter exists.
 - **Legacy files**: older projects may still have date-prefixed or bare-numeric lessons from before this convention was locked. Do not rename them in a wrapup PR — migration is a separate, dedicated operation. When scanning for the next ID, only count files matching `LESSON-*.md`; treat the legacy files as read-only history.

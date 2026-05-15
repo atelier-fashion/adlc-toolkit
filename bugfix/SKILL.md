@@ -169,10 +169,20 @@ Evaluate honestly: did this bug reveal something a future implementer should kno
 - A check that would have caught this earlier?
 - An assumption from a prior REQ that turned out false?
 
-If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the atomic counter:
+If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the atomic counter, wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-013). The lock path `.adlc/.next-lesson.lock.d` is shared with `/wrapup` so a concurrent `/bugfix` and `/wrapup` mutually exclude and cannot double-allocate the same LESSON id:
 ```bash
-LESSON_NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
-echo $((LESSON_NUM + 1)) > .adlc/.next-lesson
+LESSON_NUM=$(
+  LOCK=.adlc/.next-lesson.lock.d
+  if [ -L "$LOCK" ]; then
+    echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+    exit 1
+  fi
+  for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+  NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
+  echo $((NUM + 1)) > .adlc/.next-lesson
+  if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+  echo $NUM
+)
 ```
 If `.adlc/.next-lesson` doesn't exist, scan `.adlc/knowledge/lessons/` for the highest existing `LESSON-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY thereafter — never re-scan after the counter exists.
 

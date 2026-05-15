@@ -1,7 +1,7 @@
 ---
 id: TASK-032
 title: "Lock-symlink TOCTOU review and harden all counter sites"
-status: draft
+status: complete
 parent: REQ-416
 created: 2026-05-15
 updated: 2026-05-15

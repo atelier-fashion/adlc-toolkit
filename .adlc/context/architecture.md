@@ -83,6 +83,7 @@ Skills retrieve relevant prior knowledge at context-loading time. The current im
 
 ## Key cross-cutting dependencies
 
-- **Atomic REQ counter**: `~/.claude/.global-next-req` is a shared counter across all consumer repos to guarantee unique REQ IDs. Protected by a POSIX `mkdir`-based lock for concurrent-safe increments.
+- **Atomic REQ counter**: `~/.claude/.global-next-req` is a shared counter across all consumer repos to guarantee unique REQ IDs. Protected by a POSIX `mkdir`-based lock at `~/.claude/.global-next-req.lock.d` for concurrent-safe increments. The lock acquisition pre-checks `[ -L "$LOCK" ]` and refuses to run if the path is a symlink, defending against a TOCTOU symlink-swap that would otherwise let an attacker redirect `mkdir`/`rmdir` traffic (LESSON-013, REQ-416 ADR-4).
+- **Atomic per-project counters**: `.adlc/.next-lesson` (LESSON ids) and `.adlc/.next-assume` (ASSUME ids) are per-project counters that prevent concurrent `/sprint` pipelines from double-allocating ids during wrapup. Both are protected by the same `mkdir`-lock + symlink pre-check pattern as the global REQ counter (lock dirs `.adlc/.next-lesson.lock.d` and `.adlc/.next-assume.lock.d`). `/wrapup` and `/bugfix` deliberately share the `.next-lesson.lock.d` path so they mutually exclude when both run concurrently against the same repo.
 - **Worktree isolation**: `/proceed` creates a git worktree per REQ at `.worktrees/REQ-xxx` so multiple pipelines run without collision. `/sprint` orchestrates parallel worktrees.
 - **Symlink install**: changes committed to this repo are live immediately for every Claude Code session on the machine. No build, no deploy.
