@@ -1,7 +1,7 @@
 ---
 id: REQ-428
 title: "Dedupe analyze SKILL telemetry resolution block"
-status: draft
+status: complete
 deployable: false
 created: 2026-05-15
 updated: 2026-05-15
@@ -26,20 +26,20 @@ _Not applicable — this is a refactor of an existing skill markdown file with n
 
 ## Business Rules
 
-- [ ] BR-1: After the refactor, the telemetry resolution+emit logic for Steps 1.5 and 1.6 must be defined in exactly one place in `analyze/SKILL.md` (single source of truth). A future change to the `emit-telemetry.sh` argument signature must require editing exactly one location.
-- [ ] BR-2: The semantic behavior of telemetry emission must be preserved exactly. Both call sites must still emit one telemetry record with the existing field set: `skill=analyze`, `step=Step-1.5` or `Step-1.6`, `req=unknown`, plus the resolved `gate_result`, `mode`, `reason`, and `duration_ms`. Mode resolution rules (fallback / ghost-skip / delegated / api-error) and the order of `skill-flag.sh clear` calls must be unchanged.
-- [ ] BR-3: `tools/lint-skills/check.py` must exit 0 against the toolkit after the refactor. The canonical-helper rule currently requires the literals `start_s=$(date -u +%s)`, `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`, and `tools/kimi/emit-telemetry.sh ` to appear in any SKILL.md that mentions `ADLC_DISABLE_KIMI`. The refactored `analyze/SKILL.md` must still contain each of these literals at least once (informed by REQ-425 canonical-helper rule).
-- [ ] BR-4: The two existing `start_s=$(date -u +%s)` declarations (one per step, before each gate check) remain untouched. The refactor targets only the post-path resolve+emit block, not the per-step start-time capture or the gate-check setup.
-- [ ] BR-5: The shared helper must be a Bourne-shell function defined inside a `sh`/`bash`/`shell` fenced code block in the skill markdown. It must not introduce a new file under `tools/kimi/` unless function scoping inside the skill turns out to be fragile in practice (fallback option).
+- [x] BR-1: After the refactor, the telemetry resolution+emit logic for Steps 1.5 and 1.6 must be defined in exactly one place in `analyze/SKILL.md` (single source of truth). A future change to the `emit-telemetry.sh` argument signature must require editing exactly one location.
+- [x] BR-2: The semantic behavior of telemetry emission must be preserved exactly. Both call sites must still emit one telemetry record with the existing field set: `skill=analyze`, `step=Step-1.5` or `Step-1.6`, `req=unknown`, plus the resolved `gate_result`, `mode`, `reason`, and `duration_ms`. Mode resolution rules (fallback / ghost-skip / delegated / api-error) and the order of `skill-flag.sh clear` calls must be unchanged.
+- [x] BR-3: `tools/lint-skills/check.py` must exit 0 against the toolkit after the refactor. The canonical-helper rule currently requires the literals `start_s=$(date -u +%s)`, `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`, and `tools/kimi/emit-telemetry.sh ` to appear in any SKILL.md that mentions `ADLC_DISABLE_KIMI`. The refactored `analyze/SKILL.md` must still contain each of these literals at least once (informed by REQ-425 canonical-helper rule).
+- [x] BR-4: The two existing `start_s=$(date -u +%s)` declarations (one per step, before each gate check) remain untouched. The refactor targets only the post-path resolve+emit block, not the per-step start-time capture or the gate-check setup.
+- [x] BR-5: The shared helper must be a Bourne-shell function defined inside a `sh`/`bash`/`shell` fenced code block in the skill markdown. It must not introduce a new file under `tools/kimi/` unless function scoping inside the skill turns out to be fragile in practice (fallback option).
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `analyze/SKILL.md` contains exactly one definition of the telemetry-resolve-and-emit logic, and Steps 1.5 and 1.6 each invoke it with their step label as an argument.
-- [ ] AC-2: `grep -c "tools/kimi/emit-telemetry.sh" analyze/SKILL.md` returns 1 (down from 2). `grep -c "duration_ms=\$(( " analyze/SKILL.md` returns 1 (down from 2).
-- [ ] AC-3: `tools/lint-skills/check.py --root .` exits 0 when run from the toolkit root.
-- [ ] AC-4: `tools/lint-skills/check.sh` (if present and used by CI) exits 0 when run from the toolkit root.
-- [ ] AC-5: The diff against `main` shows no behavioral change to mode resolution, `skill-flag.sh clear` ordering, the `ASK_KIMI_INVOKED` / `KIMI_EXIT` variable contract, or the trap on EXIT.
-- [ ] AC-6: A grep of the file shows the helper is defined before its first invocation (i.e. defined inside the Step 1.5 fence or earlier, not after Step 1.6).
+- [x] AC-1: `analyze/SKILL.md` contains exactly one definition of the telemetry-resolve-and-emit logic, and Steps 1.5 and 1.6 each invoke it with their step label as an argument.
+- [x] AC-2: `grep -c "tools/kimi/emit-telemetry.sh" analyze/SKILL.md` returns 1 (down from 2). `grep -c "duration_ms=\$(( " analyze/SKILL.md` returns 1 (down from 2).
+- [x] AC-3: `tools/lint-skills/check.py --root .` exits 0 when run from the toolkit root.
+- [x] AC-4: `tools/lint-skills/check.sh` (if present and used by CI) exits 0 when run from the toolkit root.
+- [x] AC-5: The diff against `main` shows no behavioral change to mode resolution, `skill-flag.sh clear` ordering, the `ASK_KIMI_INVOKED` / `KIMI_EXIT` variable contract, or the trap on EXIT.
+- [x] AC-6: A grep of the file shows the helper is defined before its first invocation (i.e. defined inside the Step 1.5 fence or earlier, not after Step 1.6).
 
 ## External Dependencies
 
@@ -53,7 +53,7 @@ _Not applicable — this is a refactor of an existing skill markdown file with n
 
 ## Open Questions
 
-- [ ] Should the helper function be named `_emit_step_telemetry` (leading underscore, "private" convention) or `adlc_emit_step_telemetry` (matches the existing `adlc_kimi_gate_check` naming in `partials/kimi-gate.sh`)? Default to `adlc_emit_step_telemetry` for consistency unless architect-phase says otherwise.
+- [x] Should the helper function be named `_emit_step_telemetry` (leading underscore, "private" convention) or `adlc_emit_step_telemetry` (matches the existing `adlc_kimi_gate_check` naming in `partials/kimi-gate.sh`)? **Resolved**: shipped as `_adlc_emit_step_telemetry` (underscore prefix + `adlc_` namespace) — private-to-skill convention since the helper is scoped inside `analyze/SKILL.md` and not intended to be sourced elsewhere.
 
 ## Out of Scope
 
