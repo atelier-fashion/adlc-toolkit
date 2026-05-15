@@ -171,6 +171,42 @@ tools/kimi/emit-telemetry.sh analyze Step-1.6 unknown "$gate_result" "$mode" "$r
 tools/kimi/skill-flag.sh clear "$flag"
 ```
 
+### Step 1.8: Delegation-fidelity audit
+
+Self-check the ADLC skill telemetry log for ghost-skips (gate passed but `ask-kimi` was not actually invoked). This audits delegation behavior across all skills, not the codebase. Runs in addition to the 4 standard dimensions (code-quality, convention, security, test) and surfaces findings under a new `delegation-fidelity` dimension.
+
+**Gate (silent skip on older installs):**
+
+```sh
+if [ -x tools/kimi/check-delegation.sh ]; then
+    deleg_tsv=$(tools/kimi/check-delegation.sh --window 7d 2>/dev/null || true)
+else
+    deleg_tsv=""
+fi
+```
+
+If `tools/kimi/check-delegation.sh` does not exist (older install of the toolkit), silently skip Step 1.8 — emit nothing, raise no warning, and continue to Step 2.
+
+**Parse the TSV:** the script emits one header row followed by per-skill rows and a `TOTAL` footer. Columns: `skill`, `delegated`, `fallback`, `ghost_skip`, `total`. Any row (excluding header and `TOTAL`) whose `ghost_skip` column is greater than 0 becomes a finding.
+
+**Finding format** (BR-10 — name the specific skill):
+
+```
+delegation-fidelity: <skill> Step-<n.n> had <N> ghost-skips in last 7 days — gate passed but ask-kimi was not invoked. Investigate transcripts to confirm.
+```
+
+The telemetry log records skill + step per event, but `check-delegation.sh` rolls up to per-skill counts. If the TSV does not carry per-step detail, name the skill alone and append "(see ~/Library/Logs/adlc-skill-telemetry.log for step-level detail)".
+
+**Happy path:** if the `TOTAL` row's `ghost_skip` column is 0 (or every per-skill row has 0), emit one positive line into the audit report rather than omitting the dimension:
+
+```
+/analyze: delegation-fidelity clean (0 ghost-skips in 7d window)
+```
+
+**Failure mode:** if `check-delegation.sh` exits non-zero or produces unparseable output, do NOT block — emit `/analyze: delegation-fidelity audit unavailable (check-delegation.sh failed)` into the report and continue. `/analyze` must never fail-loud on this dimension.
+
+Append the resulting `delegation-fidelity` block to the audit report alongside the standard 4 dimensions surfaced by Step 2's agents. The agent dispatch in Step 2 is unchanged — this is a parallel self-check, not an extra agent.
+
 ### Step 2: Launch Audit Agents + Repo Hygiene Scan (parallel)
 In a single message, launch the 4 audit agents AND run the repo hygiene bash checks below in parallel. The agents live in `~/.claude/agents/` with their full audit checklists, model selection (sonnet for deep analysis, haiku for pattern matching), and tool restrictions.
 
