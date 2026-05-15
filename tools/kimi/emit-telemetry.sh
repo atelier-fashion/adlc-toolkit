@@ -74,6 +74,10 @@ s_repo=$(sanitize "$repo")
 line=$(printf '{"timestamp":"%s","skill":"%s","step":"%s","req":"%s","gate":"%s","mode":"%s","reason":"%s","duration_ms":"%s","repo":"%s"}' \
     "$timestamp" "$s_skill" "$s_step" "$s_req" "$s_gate" "$s_mode" "$s_reason" "$s_duration" "$s_repo")
 
+# NOTE: invoke as a subprocess only (e.g. `tools/kimi/emit-telemetry.sh ...`).
+# Never `source` this file — the umask narrowing below would persist in the
+# caller's shell. All current call sites (SKILL.md prose, install.sh, tests)
+# already exec it as a subprocess.
 umask 077
 log_dir=$(dirname "$LOG")
 [ -d "$log_dir" ] || mkdir -p "$log_dir"

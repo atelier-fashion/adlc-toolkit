@@ -136,3 +136,51 @@ def test_emit_redacts_sk_secret_in_reason(tmp_path):
     content = log_path.read_text()
     assert secret not in content
     assert "[REDACTED]" in content
+
+
+# --- REQ-424 verify-pass additions: all-one-mode + two-skill coverage ---
+
+def test_check_delegation_all_delegated(tmp_path):
+    env = _env_with_log(tmp_path)
+    for i in range(3):
+        _run([EMIT, "one-skill", f"s{i}", "REQ-9", "pass", "delegated", "ok", "10"], env=env)
+    r = _run([CHECK], env=env)
+    lines = r.stdout.strip().splitlines()
+    assert lines[1] == "one-skill\t3\t0\t0\t3"
+    assert lines[-1] == "TOTAL\t3\t0\t0\t3"
+
+
+def test_check_delegation_all_fallback(tmp_path):
+    env = _env_with_log(tmp_path)
+    for i in range(2):
+        _run([EMIT, "one-skill", f"s{i}", "REQ-9", "fail", "fallback", "no-binary", "0"], env=env)
+    r = _run([CHECK], env=env)
+    lines = r.stdout.strip().splitlines()
+    assert lines[1] == "one-skill\t0\t2\t0\t2"
+    assert lines[-1] == "TOTAL\t0\t2\t0\t2"
+
+
+def test_check_delegation_all_ghost_skip(tmp_path):
+    env = _env_with_log(tmp_path)
+    for i in range(4):
+        _run([EMIT, "one-skill", f"s{i}", "REQ-9", "pass", "ghost-skip", "gate-passed-no-call", "0"], env=env)
+    r = _run([CHECK], env=env)
+    lines = r.stdout.strip().splitlines()
+    assert lines[1] == "one-skill\t0\t0\t4\t4"
+    assert lines[-1] == "TOTAL\t0\t0\t4\t4"
+
+
+def test_check_delegation_two_skills_separate_rows(tmp_path):
+    env = _env_with_log(tmp_path)
+    _run([EMIT, "alpha", "s1", "REQ-1", "pass", "delegated", "ok", "10"], env=env)
+    _run([EMIT, "alpha", "s2", "REQ-1", "pass", "ghost-skip", "gs", "0"], env=env)
+    _run([EMIT, "beta", "s1", "REQ-2", "fail", "fallback", "no-binary", "0"], env=env)
+    r = _run([CHECK], env=env)
+    lines = r.stdout.strip().splitlines()
+    # Header, two skill rows (any order), TOTAL footer = 4 lines minimum
+    assert lines[0] == "skill\tdelegated\tfallback\tghost_skip\ttotal"
+    skill_rows = [l for l in lines[1:-1]]
+    assert len(skill_rows) == 2
+    assert any(l == "alpha\t1\t0\t1\t2" for l in skill_rows), f"alpha row missing in: {skill_rows}"
+    assert any(l == "beta\t0\t1\t0\t1" for l in skill_rows), f"beta row missing in: {skill_rows}"
+    assert lines[-1] == "TOTAL\t1\t1\t1\t3"

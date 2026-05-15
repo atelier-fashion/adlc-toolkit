@@ -40,7 +40,8 @@ Before launching the audit agents, produce a one-paragraph "project shape" summa
 
 ```sh
 flag=$(tools/kimi/skill-flag.sh create)
-start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+trap 'tools/kimi/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
+start_s=20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s)
 ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
@@ -80,7 +81,7 @@ Pass the validated, delimiter-wrapped summary as an additional context paragraph
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 1.6:
 
 ```sh
-duration_ms=$(( $(python3 -c "import time; print(int(time.time()*1000))") - $start_ms ))
+duration_ms=20 20 12 61 80 33 98 100 204 250 395 398 399 400( (20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s) - ) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
     tools/kimi/skill-flag.sh clear "$flag"
     mode="fallback"
@@ -107,7 +108,8 @@ Before launching the audit agents, optionally produce a per-dimension candidate-
 
 ```sh
 flag=$(tools/kimi/skill-flag.sh create)
-start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+trap 'tools/kimi/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
+start_s=20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s)
 ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
@@ -152,7 +154,7 @@ Split the validated output into the 4 per-dimension blocks (code-quality, conven
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 2:
 
 ```sh
-duration_ms=$(( $(python3 -c "import time; print(int(time.time()*1000))") - $start_ms ))
+duration_ms=20 20 12 61 80 33 98 100 204 250 395 398 399 400( (20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s) - ) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
     tools/kimi/skill-flag.sh clear "$flag"
     mode="fallback"
@@ -195,7 +197,22 @@ If `tools/kimi/check-delegation.sh` does not exist (older install of the toolkit
 delegation-fidelity: <skill> Step-<n.n> had <N> ghost-skips in last 7 days — gate passed but ask-kimi was not invoked. Investigate transcripts to confirm.
 ```
 
-The telemetry log records skill + step per event, but `check-delegation.sh` rolls up to per-skill counts. If the TSV does not carry per-step detail, name the skill alone and append "(see ~/Library/Logs/adlc-skill-telemetry.log for step-level detail)".
+The TSV rolls up to per-skill counts, but per-event detail (step + REQ) lives in the raw log. For each per-skill row with `ghost_skip > 0`, also run a per-event grep against the log to expand the finding (BR-10 — name the specific (skill, step, REQ) triple):
+
+```bash
+grep '"mode":"ghost-skip"' "$HOME/Library/Logs/adlc-skill-telemetry.log" 2>/dev/null \
+  | grep -F '"skill":"<skill>"' \
+  | awk -F'"' '{
+      for(i=1;i<NF;i++){
+        if($i=="step")step=$(i+2);
+        if($i=="req")req=$(i+2);
+      }
+      print step "\t" req;
+    }' \
+  | sort -u
+```
+
+Each unique `(step, REQ)` pair becomes a sub-bullet under the per-skill finding. If the grep returns nothing (race condition, log already rotated), fall back to naming the skill alone and append "(see ~/Library/Logs/adlc-skill-telemetry.log for step-level detail)".
 
 **Happy path:** if the `TOTAL` row's `ghost_skip` column is 0 (or every per-skill row has 0), emit one positive line into the audit report rather than omitting the dimension:
 

@@ -104,7 +104,8 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 
 ```sh
 flag=$(tools/kimi/skill-flag.sh create)
-start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+trap 'tools/kimi/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
+start_s=20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s)
 ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
@@ -186,7 +187,7 @@ fi
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback drafting path completes, before continuing to Convention Updates:
 
 ```sh
-duration_ms=$(( $(python3 -c "import time; print(int(time.time()*1000))") - $start_ms ))
+duration_ms=20 20 12 61 80 33 98 100 204 250 395 398 399 400( (20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s) - ) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
     tools/kimi/skill-flag.sh clear "$flag"
     mode="fallback"
