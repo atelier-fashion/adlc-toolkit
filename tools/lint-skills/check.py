@@ -42,8 +42,16 @@ class Finding(NamedTuple):
 
 
 def find_skill_files(root: Path) -> Iterable[Path]:
+    root_resolved = root.resolve()
     for path in root.rglob("SKILL.md"):
         if any(part in SKIP_DIR_PARTS for part in path.parts):
+            continue
+        # Symlinks may point outside the scan root — defend against
+        # following them out of the tree.
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(root_resolved)
+        except (OSError, ValueError):
             continue
         yield path
 
@@ -73,31 +81,39 @@ def check_sentinels(text: str, sentinels: list[str], rel: str) -> list[Finding]:
 
 
 def _count_balance(fence_body: str) -> tuple[int, int]:
-    """Return (single_paren_balance, double_paren_balance) for a fence body.
+    """Return (single_deficit, double_deficit) for a fence body.
 
-    `$((` opens double, `))` closes double. `$(` opens single, `)` closes single.
-    We scan left to right, preferring the longer match.
+    The REQ-424 corruption shape is "an opening `$(` whose closing `)` was
+    removed." A precise paren-matcher over shell text gets defeated by valid
+    nesting like `$(( ($(x) - y) ))` — literal `(...)` groups inside
+    arithmetic substitution. Instead, count raw substring occurrences and
+    project them into orthogonal buckets:
+
+      raw_single_open  = count('$(')          # overcounts: $(( contains $(
+      raw_single_close = count(')')           # overcounts: )) contains two )
+      double_open      = count('$((')
+      double_close     = count('))')
+
+      single_open  = raw_single_open  - double_open
+      single_close = raw_single_close - 2 * double_close
+
+      single_deficit = max(0, single_open  - single_close)
+      double_deficit = max(0, double_open  - double_close)
+
+    Only the failure direction (deficit > 0) is reported — the REQ-424
+    shape is missing closes, and unbalanced extra `)` in shell prose is
+    common (e.g., end of a `case` arm) and not worth flagging.
     """
-    single = 0
-    double = 0
-    i = 0
-    n = len(fence_body)
-    while i < n:
-        if fence_body.startswith("$((", i):
-            double += 1
-            i += 3
-        elif fence_body.startswith("))", i):
-            double -= 1
-            i += 2
-        elif fence_body.startswith("$(", i):
-            single += 1
-            i += 2
-        elif fence_body[i] == ")":
-            single -= 1
-            i += 1
-        else:
-            i += 1
-    return single, double
+    raw_single_open = fence_body.count("$(")
+    raw_single_close = fence_body.count(")")
+    double_open = fence_body.count("$((")
+    double_close = fence_body.count("))")
+    single_open = raw_single_open - double_open
+    single_close = raw_single_close - 2 * double_close
+    return (
+        max(0, single_open - single_close),
+        max(0, double_open - double_close),
+    )
 
 
 def check_balance(text: str, rel: str) -> list[Finding]:
@@ -115,20 +131,25 @@ def check_balance(text: str, rel: str) -> list[Finding]:
         while i < len(lines) and not FENCE_CLOSE_RE.match(lines[i]):
             body_lines.append(lines[i])
             i += 1
+        if i >= len(lines):
+            findings.append(
+                Finding(rel, fence_start, "balance",
+                        f"fence at line {fence_start} — unclosed (no ``` before EOF)")
+            )
+            break
         body = "\n".join(body_lines)
-        single, double = _count_balance(body)
-        if single != 0:
+        single_deficit, double_deficit = _count_balance(body)
+        if single_deficit:
             findings.append(
                 Finding(rel, fence_start, "balance",
-                        f"fence at line {fence_start} — '$(' vs ')' imbalance {single:+d}")
+                        f"fence at line {fence_start} — '$(' opens exceed ')' closes by {single_deficit}")
             )
-        if double != 0:
+        if double_deficit:
             findings.append(
                 Finding(rel, fence_start, "balance",
-                        f"fence at line {fence_start} — '$((' vs '))' imbalance {double:+d}")
+                        f"fence at line {fence_start} — '$((' opens exceed '))' closes by {double_deficit}")
             )
-        if i < len(lines):
-            i += 1
+        i += 1
     return findings
 
 
