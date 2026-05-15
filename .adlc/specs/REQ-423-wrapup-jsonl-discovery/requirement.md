@@ -1,7 +1,7 @@
 ---
 id: REQ-423
 title: "/wrapup Step 4: robust JSONL discovery so Kimi doesn't draft a lesson from the wrong session's transcript"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-14
 updated: 2026-05-15
