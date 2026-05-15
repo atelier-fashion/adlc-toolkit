@@ -1,7 +1,7 @@
 ---
 id: REQ-426
 title: "REQ-416 follow-ups bundle: install.sh integrity, reason-string DRY, partials drift, partials tests"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-15
 updated: 2026-05-15
