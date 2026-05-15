@@ -54,8 +54,8 @@ if [ ! -d "$VENV_DIR" ]; then
     mkdir -p "$HOME/.claude"
     python3 -m venv "$VENV_DIR"
 fi
-echo "Installing/upgrading openai + pytest into venv"
-"$VENV_DIR/bin/pip" install --upgrade openai pytest
+echo "Installing pinned dependencies from requirements.txt into venv"
+"$VENV_DIR/bin/pip" install -r "$REPO_ROOT/tools/kimi/requirements.txt"
 
 # --- ~/bin wrappers (regenerated each run) ------------------------------
 # Note: wrappers are path-stamped to this repo's location ($REPO_ROOT).

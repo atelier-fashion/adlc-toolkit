@@ -10,7 +10,7 @@ You are setting up the `.adlc/` directory structure for spec-driven development.
 
 ## Ethos
 
-!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
 
 ## Input
 
@@ -57,9 +57,11 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
     lesson-template.md
     requirement-template.md
     task-template.md
+  partials/              # Copies of ~/.claude/skills/partials/*.sh — shared shell snippets sourced by SKILL.md files
+    ethos-include.sh
 ```
 
-**Why the local copies of ETHOS.md and templates?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `~/.claude/skills/ETHOS.md` and `~/.claude/skills/templates/*.md` become unreadable by subagents and any tool that uses `Read` mid-skill. Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
+**Why the local copies of ETHOS.md, templates, and partials?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `~/.claude/skills/ETHOS.md`, `~/.claude/skills/templates/*.md`, and `~/.claude/skills/partials/*.sh` become unreadable by subagents and any tool that uses `Read` mid-skill. Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
 
 ### Step 4: Populate Context Files
 
@@ -134,7 +136,7 @@ Copy the canonical ETHOS.md and all templates from the toolkit into the project 
 
 ```bash
 # Verify source exists
-if [ ! -f ~/.claude/skills/ETHOS.md ] || [ ! -d ~/.claude/skills/templates ]; then
+if [ ! -f ~/.claude/skills/ETHOS.md ] || [ ! -d ~/.claude/skills/templates ] || [ ! -d ~/.claude/skills/partials ]; then
   echo "ERROR: Toolkit not found at ~/.claude/skills/. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
   exit 1
 fi
@@ -146,6 +148,12 @@ cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md
 mkdir -p .adlc/templates
 cp ~/.claude/skills/templates/*.md .adlc/templates/
 
+# Copy partials (overwrite — canonical is source of truth). These are POSIX
+# shell snippets sourced by SKILL.md files (e.g., ethos-include.sh).
+mkdir -p .adlc/partials
+cp ~/.claude/skills/partials/*.sh .adlc/partials/
+chmod +x .adlc/partials/*.sh
+
 # Clean up Finder-style duplicates if present. Matches:
 #   - .md files: "requirement-template 2.md"
 #   - non-.md files: "pipeline-state 2.json", ".next-bug 2"
@@ -155,7 +163,7 @@ cp ~/.claude/skills/templates/*.md .adlc/templates/
 find .adlc -depth \( -name "* 2" -o -name "* 2.*" \) -exec rm -rf {} + 2>/dev/null
 ```
 
-If the user has previously made intentional customizations to their local `.adlc/ETHOS.md` or `.adlc/templates/*.md`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
+If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, or `.adlc/partials/*.sh`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
 
 ### Step 7: Scaffold Retrieval Taxonomy
 

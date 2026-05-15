@@ -10,7 +10,7 @@ You are writing a requirement spec following the spec-driven ADLC process.
 
 ## Ethos
 
-!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
 
 ## Context
 
@@ -114,14 +114,16 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    KIMI_EXIT=0
    ```
 
-   Decide via:
+   Decide via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`):
 
    ```sh
-   if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-     # delegated path — see "Delegated body-read" below
-   else
-     # fallback path — see "Fallback body-read" below
-   fi
+   . .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+   adlc_kimi_gate_check; gate=$?
+   case $gate in
+     0) ;;  # delegated path — see "Delegated body-read" below
+     1) ;;  # disabled path (ADLC_DISABLE_KIMI=1) — see "Fallback body-read" below
+     2) ;;  # unavailable path (ask-kimi not on PATH) — see "Fallback body-read" below
+   esac
    ```
 
    **Delegated body-read** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):
@@ -195,12 +197,29 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    ```bash
    REQ_NUM=$(
      LOCK=~/.claude/.global-next-req.lock.d
+     COUNTER=~/.claude/.global-next-req
+     if [ -L "$LOCK" ]; then
+       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+       exit 1
+     fi
      for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-     NUM=$(cat ~/.claude/.global-next-req)
-     echo $((NUM + 1)) > ~/.claude/.global-next-req
-     rmdir "$LOCK" 2>/dev/null
+     # Hard-fail if we never acquired the lock (50 retries × 0.1s = ~5s budget).
+     # Without this guard, a contended lock would silently fall through to the
+     # critical section unguarded — defeating mutual exclusion (REQ-416 verify C1).
+     [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate REQ id" >&2; exit 1; }
+     # Counter read inside lock — fail hard if the file disappears mid-critical-section
+     # rather than silently treating empty-as-zero and resetting the global counter (REQ-416 verify M2).
+     NUM=$(cat "$COUNTER" 2>/dev/null) || { echo "ERROR: counter $COUNTER unreadable inside lock — aborting" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
+     [ -n "$NUM" ] || { echo "ERROR: counter $COUNTER is empty — aborting (would reset to 1)" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
+     echo $((NUM + 1)) > "$COUNTER"
+     # rmdir is guarded by the same symlink check (residual TOCTOU window between
+     # check and rmdir is accepted risk per ADR-4 — see LESSON-014).
+     if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
      echo $NUM
    )
+   # `exit 1` inside the $(...) subshell terminates only the subshell — REQ_NUM
+   # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
+   [ -n "$REQ_NUM" ] || { echo "ERROR: failed to allocate REQ number — aborting before writing malformed spec" >&2; exit 1; }
    ```
 3. If `~/.claude/.global-next-req` does not exist, create it by scanning all `.adlc/specs/` directories under the user's repos root for the highest `REQ-xxx` number, use the next one, and write the number after that. The scan root is `$ADLC_REPOS_ROOT` if set, otherwise the parent directory of the current repo (which catches the common "all repos under one folder" layout). Use `grep -oE` + `sed` (BSD-compatible) instead of `grep -oP` (GNU-only):
    ```bash
