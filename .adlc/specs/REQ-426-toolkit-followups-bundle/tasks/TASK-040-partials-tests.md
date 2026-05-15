@@ -1,7 +1,7 @@
 ---
 id: TASK-040
 title: "Automated test fixtures for partials/*.sh"
-status: draft
+status: complete
 parent: REQ-426
 created: 2026-05-15
 updated: 2026-05-15
