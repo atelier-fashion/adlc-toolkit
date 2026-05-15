@@ -122,32 +122,42 @@ fi
 
 **Delegated drafting** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):
 
-1. Locate the Claude Code session JSONL whose recent content mentions the active REQ — **content-anchored discovery** (REQ-423). The prior heuristic ("newest JSONL under the repo-root-encoded path") silently picked the wrong transcript when a session was opened at a parent directory and later navigated into the repo. The fix walks the encoded-path tree from the repo root up to (and including) `$HOME`, collects candidate JSONLs at each level, and picks the one whose last 200 lines contain a word-boundary `\bREQ_ID\b` match. Falls back to newest overall (with a stderr warning) if no candidate mentions the active REQ; falls through to direct drafting if no candidates exist at all. Emits exactly one stderr line per invocation stating which JSONL was chosen and why.
+1. Locate the Claude Code session JSONL whose recent content mentions the active REQ — **content-anchored discovery** (REQ-423). The prior heuristic ("newest JSONL under the repo-root-encoded path") silently picked the wrong transcript when a session was opened at a parent directory and later navigated into the repo. The fix walks the encoded-path tree from the repo root up to (and including) `$HOME`, collects candidate JSONLs at each level, and picks the one whose last 200 lines contain a word-boundary match for the active REQ id. Falls back to newest overall (with a stderr warning) if no candidate mentions the active REQ; falls through to direct drafting if no candidates exist at all. Emits exactly one stderr line per invocation stating which JSONL was chosen and why.
    ```bash
    ROOT=$(git rev-parse --show-toplevel 2>/dev/null | sed 's|/\.worktrees/.*$||')
+   # Normalize $HOME (strip any trailing slash) so the loop terminator and prefix check are reliable.
+   HOME_NORM="${HOME%/}"
 
    # Build candidate list: walk from $ROOT up to (and including) $HOME, encoding each ancestor.
-   # Stop at $HOME — never enumerate above (defends against scanning other users' / system paths).
+   # Hard guard: only enumerate paths that are $HOME or a descendant of $HOME — defends against
+   # scanning other users' / system session data (BR-6) even if $ROOT is itself above $HOME
+   # (e.g., user opened Claude at /Users with no project loaded).
    CANDIDATES=()
    DIR="$ROOT"
-   if [ -n "$DIR" ]; then
+   case "$DIR/" in
+       "$HOME_NORM"/|"$HOME_NORM"/*) ;;  # OK — $DIR is $HOME or under $HOME
+       *) DIR="" ;;                       # outside $HOME — skip discovery entirely
+   esac
+   if [ -n "$DIR" ] && [ -n "$HOME_NORM" ]; then
        while [ -n "$DIR" ] && [ "$DIR" != "/" ]; do
            ENCODED=$(printf '%s' "$DIR" | sed 's|^/||; s|/|-|g')
            BASENAME="-$ENCODED"
-           ENC_DIR="$HOME/.claude/projects/$BASENAME"
-           # BR-7 sanitization on the basename we're about to pass to ls.
-           # The character class below permits '.' so '..' would otherwise slip through; the
-           # explicit *..* case-reject blocks parent-directory traversal regardless of position.
+           ENC_DIR="$HOME_NORM/.claude/projects/$BASENAME"
+           # BR-7 sanitization on the encoded basename before we pass it to ls. The character
+           # class below permits '.' so '..' would otherwise slip through; the explicit *..*
+           # case-reject is the definitive parent-directory-traversal guard. The regex is a
+           # secondary check on the permitted alphabet.
            case "$BASENAME" in
                *..*) ;;  # reject — drop silently
-               *) if printf '%s' "$BASENAME" | grep -qE '^-[A-Za-z0-9_./-]+$' && [ -d "$ENC_DIR" ]; then
+               *) if printf '%s' "$BASENAME" | grep -qE '^-[A-Za-z0-9_.-]+$' && [ -d "$ENC_DIR" ]; then
                       while IFS= read -r f; do
                           [ -n "$f" ] && CANDIDATES+=("$f")
                       done < <(ls -t "$ENC_DIR"/*.jsonl 2>/dev/null)
                   fi ;;
            esac
-           # Terminate after processing $HOME — never walk above.
-           [ "$DIR" = "$HOME" ] && break
+           # Terminate after processing $HOME — BR-6: never walk above (would otherwise scan
+           # /Users/, /, etc. and expose other users' session data).
+           [ "$DIR" = "$HOME_NORM" ] && break
            DIR=$(dirname "$DIR")
        done
    fi
@@ -155,20 +165,25 @@ fi
    JSONL=""
    if [ ${#CANDIDATES[@]} -eq 0 ]; then
        echo "/wrapup: session JSONL — no candidates found; skipping Kimi delegation" >&2
-       # Fall through to Fallback drafting (BR-9 — same as today's REQ-414 cold-path behavior).
+       # JSONL stays empty — step 2 below guards on [ -n "$JSONL" ] and falls through to
+       # Fallback drafting (BR-9 — same as today's REQ-414 cold-path behavior).
    else
-       # Phase 1: id-match — word-boundary grep on last 200 lines of each candidate (ADR-1).
-       # First match wins; walk-order is repo-root first, so the closest-to-repo match is preferred.
+       # Phase 1: id-match — word-boundary fixed-string grep on last 200 lines of each candidate
+       # (ADR-1). `-wF` is portable across BSD grep (macOS) and GNU grep AND is injection-safe
+       # against any regex metacharacters that might appear in $REQ_ID. First match wins; walk
+       # order is repo-root first, so the closest-to-repo match is preferred.
        if [ -n "$REQ_ID" ]; then
            for c in "${CANDIDATES[@]}"; do
-               if tail -n 200 "$c" 2>/dev/null | grep -qE "\\b$REQ_ID\\b"; then
+               if tail -n 200 "$c" 2>/dev/null | grep -qwF "$REQ_ID"; then
                    JSONL="$c"
                    echo "/wrapup: session JSONL — matched $REQ_ID in $(basename "$c")" >&2
                    break
                fi
            done
        fi
-       # Phase 2: fallback to newest overall if no id-match (or no REQ id available).
+       # Phase 2: fallback to newest-in-closest-dir if no id-match (or no REQ id available).
+       # Architecture note: this is newest-within-the-first-candidate-directory, not globally
+       # newest across all ancestor dirs — accepted approximation per REQ-423 architecture.
        if [ -z "$JSONL" ]; then
            JSONL="${CANDIDATES[0]}"
            if [ -n "$REQ_ID" ]; then
@@ -179,18 +194,24 @@ fi
        fi
    fi
    ```
-   (The leading `-` in each encoded directory name is added by Claude Code; the `sed` strips the leading `/` before substitution to avoid a doubled `--` prefix. The walk terminates at `$HOME` to defend against scanning other users' or system session data — see REQ-423 architecture ADR-2.)
-2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), then redact obvious credential-shaped strings before piping content to Kimi:
+   (Claude Code prefixes encoded project paths with `-` under `~/.claude/projects/`; the `sed` strips the leading `/` before substitution to avoid a `--` double-prefix. The walk terminates at `$HOME` per BR-6 — see REQ-423 architecture ADR-2.)
+2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), then redact obvious credential-shaped strings before piping content to Kimi. **Guard on `[ -n "$JSONL" ]`** — when discovery emitted "no candidates found", `$JSONL` is empty and this entire step is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line:
    ```bash
-   TMPFILE=$(mktemp -t kimi-wrapup.XXXXXX) || exit 1
-   trap 'rm -f "$TMPFILE"' EXIT
-   if ! extract-chat "$JSONL" -o "$TMPFILE"; then
-       # Combined single-line log replaces the standard fallback line (BR-4: one line per invocation).
-       echo "/wrapup: extract-chat failed — Claude drafting lesson directly" >&2
-       # Fall through to Fallback drafting (skip its stderr emit since we already logged).
+   if [ -z "$JSONL" ]; then
+       # No candidate JSONL — skip Kimi delegation entirely; fall through to Fallback drafting.
+       # Skip its standard stderr emit since the "no candidates found" line in step 1 already logged.
+       :
    else
-       # Best-effort key redaction so a stray pasted key in the transcript doesn't leave the machine.
-       sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE" && rm -f "$TMPFILE.bak"
+       TMPFILE=$(mktemp -t kimi-wrapup.XXXXXX) || exit 1
+       trap 'rm -f "$TMPFILE"' EXIT
+       if ! extract-chat "$JSONL" -o "$TMPFILE"; then
+           # Combined single-line log replaces the standard fallback line (BR-4: one line per invocation).
+           echo "/wrapup: extract-chat failed — Claude drafting lesson directly" >&2
+           # Fall through to Fallback drafting (skip its stderr emit since we already logged).
+       else
+           # Best-effort key redaction so a stray pasted key in the transcript doesn't leave the machine.
+           sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE" && rm -f "$TMPFILE.bak"
+       fi
    fi
    ```
 3. Delegate the draft to Kimi. Set `ASK_KIMI_INVOKED=1` immediately before the call (REQ-424 telemetry), capture exit status, and clear the skill-flag immediately after the call exits (success OR failure):

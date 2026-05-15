@@ -32,16 +32,25 @@ last 200 lines mention the active REQ id is, by construction, the right transcri
 
 ## ADRs
 
-### ADR-1: Word-boundary grep over fixed-string grep
+### ADR-1: Word-boundary fixed-string grep (`-wF`), NOT `-E \b…\b`
 
-**Decision**: use `grep -lE '\bREQ-XXX\b'` (or `grep -lwF REQ-XXX` — equivalent for `REQ-`-prefixed
-tokens) when matching the active REQ id, not `grep -lF REQ-XXX`.
+**Decision**: use `grep -qwF "$REQ_ID"` (fixed-string + word-regexp) when matching the active
+REQ id. Do NOT use `grep -qE "\b$REQ_ID\b"`.
 
 **Why**: resolves OQ-3 from the requirement. Fixed-string `REQ-422` matches inside `REQ-4220`,
-`REQ-42200`, etc., producing false positives. Word-boundary is a one-flag change with no perf cost.
+`REQ-42200`, etc., producing false positives — so a word-boundary form is required. Two forms
+were initially considered:
 
-**Supersedes**: BR-5 in the requirement (which spells out the fixed-string form). Update BR-5
-spelling in the task implementation.
+- `grep -qE "\b$REQ_ID\b"` — **rejected**. The `\b` word-boundary assertion is not reliably
+  supported by macOS BSD grep in `-E` mode; on the dominant deployment platform it may match
+  nothing, silently defeating the entire content-anchored discovery (caught in Phase 5 review).
+- `grep -qwF "$REQ_ID"` — **adopted**. `-w` is portable across BSD grep (macOS `/usr/bin/grep`)
+  and GNU grep. `-F` treats `$REQ_ID` as a literal fixed string, which both eliminates the
+  portability risk AND defends against regex injection if `$REQ_ID` ever contains regex
+  metacharacters from a future caller that lacks input validation.
+
+**Supersedes**: BR-5 in the requirement (which spells out the fixed-string form without `-w`).
+The task implementation uses `-qwF` — fixed-string AND word-boundary, neither alone.
 
 ### ADR-2: Termination at `$HOME`, not at filesystem root
 
