@@ -1,7 +1,7 @@
 ---
 id: REQ-425
 title: "Pre-merge detection of corrupted shell constructs in SKILL.md files (catches REQ-424-style substitution disasters before they ship)"
-status: draft
+status: in-progress
 deployable: false
 created: 2026-05-15
 updated: 2026-05-15

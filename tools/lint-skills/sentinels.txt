@@ -1,0 +1,8 @@
+# Forbidden literal substrings — one per line. Blank and '#'-prefixed lines ignored.
+# Any SKILL.md containing one of these substrings is reported as a finding.
+# When a new corruption shape is discovered, append a single line here.
+#
+# REQ-424: bash substituted `$(date)` / `$((...))` inside a perl `-i -pe`
+# command, writing a numeric-noise sequence into 4 SKILL.md files. This is
+# the resulting telltale sequence.
+20 20 12 61 80 33 98 100
