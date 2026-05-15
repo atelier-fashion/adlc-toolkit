@@ -1,7 +1,7 @@
 ---
 id: TASK-039
 title: "Extend /template-drift to cover partials/"
-status: draft
+status: complete
 parent: REQ-426
 created: 2026-05-15
 updated: 2026-05-15
