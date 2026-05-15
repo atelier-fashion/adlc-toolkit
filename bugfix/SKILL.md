@@ -187,6 +187,8 @@ LESSON_NUM=$(
   if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
   echo $NUM
 )
+# `exit 1` inside the subshell terminates only the subshell — guard parent context.
+[ -n "$LESSON_NUM" ] || { echo "ERROR: failed to allocate LESSON number — aborting" >&2; exit 1; }
 ```
 If `.adlc/.next-lesson` doesn't exist, scan `.adlc/knowledge/lessons/` for the highest existing `LESSON-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY thereafter — never re-scan after the counter exists.
 

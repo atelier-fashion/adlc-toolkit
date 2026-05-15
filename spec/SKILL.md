@@ -217,6 +217,9 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
      if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
      echo $NUM
    )
+   # `exit 1` inside the $(...) subshell terminates only the subshell — REQ_NUM
+   # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
+   [ -n "$REQ_NUM" ] || { echo "ERROR: failed to allocate REQ number — aborting before writing malformed spec" >&2; exit 1; }
    ```
 3. If `~/.claude/.global-next-req` does not exist, create it by scanning all `.adlc/specs/` directories under the user's repos root for the highest `REQ-xxx` number, use the next one, and write the number after that. The scan root is `$ADLC_REPOS_ROOT` if set, otherwise the parent directory of the current repo (which catches the common "all repos under one folder" layout). Use `grep -oE` + `sed` (BSD-compatible) instead of `grep -oP` (GNU-only):
    ```bash

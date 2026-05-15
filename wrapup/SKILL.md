@@ -110,6 +110,8 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
     if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
     echo $NUM
   )
+  # `exit 1` inside the subshell terminates only the subshell — guard parent context.
+  [ -n "$ASSUME_NUM" ] || { echo "ERROR: failed to allocate ASSUME number — aborting" >&2; exit 1; }
   ```
   If `.adlc/.next-assume` doesn't exist, scan `.adlc/knowledge/assumptions/` for the highest existing `ASSUME-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY — never re-scan after the counter exists. The counter prevents collisions when concurrent `/sprint` pipelines wrap up at the same time.
 
@@ -282,6 +284,8 @@ esac
     if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
     echo $NUM
   )
+  # `exit 1` inside the subshell terminates only the subshell — guard parent context.
+  [ -n "$LESSON_NUM" ] || { echo "ERROR: failed to allocate LESSON number — aborting" >&2; exit 1; }
   ```
   If `.adlc/.next-lesson` doesn't exist, scan `.adlc/knowledge/lessons/` for the highest existing `LESSON-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY thereafter — never re-scan after the counter exists.
 - **Legacy files**: older projects may still have date-prefixed or bare-numeric lessons from before this convention was locked. Do not rename them in a wrapup PR — migration is a separate, dedicated operation. When scanning for the next ID, only count files matching `LESSON-*.md`; treat the legacy files as read-only history.
