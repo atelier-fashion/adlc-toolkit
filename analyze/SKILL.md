@@ -303,9 +303,9 @@ git branch -r --merged "origin/$DEFAULT" | grep -vE "origin/(HEAD|$DEFAULT|maste
 
 **Duplicate files (identical content):**
 ```bash
-# Hash every tracked file and group by identical content
-git ls-files -z | xargs -0 shasum 2>/dev/null \
-  | sort | awk '{h=$1; $1=""; sub(/^ /,""); map[h]=map[h] ORS $0; count[h]++} END {for (h in count) if (count[h]>1) print "== "h" =="map[h]}'
+# Hash every tracked file and group by identical content (POSIX: cksum)
+git ls-files -z | tr '\0' '\n' | xargs cksum 2>/dev/null \
+  | sort | awk '{k=$1 OFS $2; $1=""; $2=""; sub(/^  /,""); map[k]=map[k] ORS $0; count[k]++} END {for (k in count) if (count[k]>1) print "== "k" =="map[k]}'
 ```
 
 **Unreferenced files (candidates — require judgment before acting):**
