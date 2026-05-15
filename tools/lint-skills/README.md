@@ -15,7 +15,8 @@ a general markdown linter and NOT a general shell linter.
    may legitimately use unbalanced examples).
 3. **Canonical-helper presence** — any SKILL.md that contains
    `ADLC_DISABLE_KIMI` (i.e., has a Kimi delegation gate) must also contain
-   three exact literals:
+   four exact literals:
+   - `command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]`
    - `start_s=$(date -u +%s)`
    - `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`
    - `tools/kimi/emit-telemetry.sh ` (note the trailing space)

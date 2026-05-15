@@ -42,9 +42,12 @@ dependency for negligible gain.
 
 ### ADR-3: Canonical-helper rule is anchored on `ADLC_DISABLE_KIMI`
 
-Any SKILL.md containing `ADLC_DISABLE_KIMI` must also contain three exact
-literals (per BR-5):
+Any SKILL.md containing `ADLC_DISABLE_KIMI` must also contain four exact
+literals — the three from REQ-424's telemetry instrumentation plus the
+gate condition itself (per BR-5, reconciled with the System Model table
+during Phase 5 verify):
 
+- `command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]`
 - `start_s=$(date -u +%s)`
 - `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`
 - `tools/kimi/emit-telemetry.sh `

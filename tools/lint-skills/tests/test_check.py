@@ -83,12 +83,13 @@ def test_unbalanced_parens_reports_balance_finding(tmp_path):
 def test_missing_canonical_reports_per_rule(tmp_path):
     root = _stage(tmp_path, "missing-canonical")
     result = _run(root)
-    assert result.returncode >= 3, result.stdout
-    # All three canonical literals should be reported as separate findings
-    assert result.stdout.count("canonical-helper") == 3
+    assert result.returncode >= 4, result.stdout
+    # All four canonical literals should be reported as separate findings
+    assert result.stdout.count("canonical-helper") == 4
     assert "start_s=$(date -u +%s)" in result.stdout
     assert "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))" in result.stdout
     assert "tools/kimi/emit-telemetry.sh " in result.stdout
+    assert 'command -v ask-kimi' in result.stdout
 
 
 def test_kimi_gate_happy_path_is_clean(tmp_path):

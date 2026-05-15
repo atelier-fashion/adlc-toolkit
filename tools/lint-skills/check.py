@@ -25,6 +25,7 @@ CANONICAL_LITERALS = (
     "start_s=$(date -u +%s)",
     "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))",
     "tools/kimi/emit-telemetry.sh ",
+    'command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]',
 )
 
 FENCE_OPEN_RE = re.compile(r"^\s*```(sh|bash|shell)\b")
