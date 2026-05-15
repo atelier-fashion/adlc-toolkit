@@ -10,7 +10,7 @@ You are closing out a completed feature after it has been merged. This skill ens
 
 ## Ethos
 
-!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
 
 ## Context
 
@@ -91,10 +91,27 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Review assumptions from the requirement spec
 - Log any that were validated, invalidated, or still unresolved to `.adlc/knowledge/assumptions/`
 - Use the assumption template (check `.adlc/templates/assumption-template.md` first, fall back to `~/.claude/skills/templates/assumption-template.md`)
-- Name files: `ASSUME-xxx-slug.md`. Determine the next ID using the atomic counter at `.adlc/.next-assume` (LESSON-110):
+- Name files: `ASSUME-xxx-slug.md`. Determine the next ID using the atomic counter at `.adlc/.next-assume` (LESSON-110), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014) so concurrent `/sprint` wrapups can't lose updates and a swapped-in symlink can't redirect the counter:
   ```bash
-  ASSUME_NUM=$(cat .adlc/.next-assume 2>/dev/null || echo "1")
-  echo $((ASSUME_NUM + 1)) > .adlc/.next-assume
+  ASSUME_NUM=$(
+    REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git worktree" >&2; exit 1; }
+    LOCK="$REPO_ROOT/.adlc/.next-assume.lock.d"
+    COUNTER="$REPO_ROOT/.adlc/.next-assume"
+    if [ -L "$LOCK" ]; then
+      echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+      exit 1
+    fi
+    for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+    # Hard-fail if we never acquired the lock (REQ-416 verify C1).
+    [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate ASSUME id" >&2; exit 1; }
+    NUM=$(cat "$COUNTER" 2>/dev/null || echo "1")
+    echo $((NUM + 1)) > "$COUNTER"
+    # rmdir guarded by symlink check; residual TOCTOU window accepted per ADR-4 / LESSON-014.
+    if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+    echo $NUM
+  )
+  # `exit 1` inside the subshell terminates only the subshell — guard parent context.
+  [ -n "$ASSUME_NUM" ] || { echo "ERROR: failed to allocate ASSUME number — aborting" >&2; exit 1; }
   ```
   If `.adlc/.next-assume` doesn't exist, scan `.adlc/knowledge/assumptions/` for the highest existing `ASSUME-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY — never re-scan after the counter exists. The counter prevents collisions when concurrent `/sprint` pipelines wrap up at the same time.
 
@@ -110,14 +127,16 @@ ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
 
-Decide drafting strategy via this gate, then proceed down the appropriate branch:
+Decide drafting strategy via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`), then proceed down the appropriate branch:
 
 ```sh
-if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-  # delegated path — see "Delegated drafting" below
-else
-  # fallback path — see "Fallback drafting" below
-fi
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated path — see "Delegated drafting" below
+  1) ;;  # disabled path (ADLC_DISABLE_KIMI=1) — see "Fallback drafting" below
+  2) ;;  # unavailable path (ask-kimi not on PATH) — see "Fallback drafting" below
+esac
 ```
 
 **Delegated drafting** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):
@@ -247,10 +266,26 @@ fi
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work
 - Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
-- **Allocate the next ID atomically via `.adlc/.next-lesson`** (LESSON-110 — directory scans race against concurrent `/sprint` pipelines):
+- **Allocate the next ID atomically via `.adlc/.next-lesson`** (LESSON-110 — directory scans race against concurrent `/sprint` pipelines), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014). The lock path `.adlc/.next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude:
   ```bash
-  LESSON_NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
-  echo $((LESSON_NUM + 1)) > .adlc/.next-lesson
+  LESSON_NUM=$(
+    REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git worktree" >&2; exit 1; }
+    LOCK="$REPO_ROOT/.adlc/.next-lesson.lock.d"
+    COUNTER="$REPO_ROOT/.adlc/.next-lesson"
+    if [ -L "$LOCK" ]; then
+      echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+      exit 1
+    fi
+    for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+    [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate LESSON id" >&2; exit 1; }
+    NUM=$(cat "$COUNTER" 2>/dev/null || echo "1")
+    echo $((NUM + 1)) > "$COUNTER"
+    # rmdir guarded by symlink check; residual TOCTOU window accepted per ADR-4 / LESSON-014.
+    if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+    echo $NUM
+  )
+  # `exit 1` inside the subshell terminates only the subshell — guard parent context.
+  [ -n "$LESSON_NUM" ] || { echo "ERROR: failed to allocate LESSON number — aborting" >&2; exit 1; }
   ```
   If `.adlc/.next-lesson` doesn't exist, scan `.adlc/knowledge/lessons/` for the highest existing `LESSON-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY thereafter — never re-scan after the counter exists.
 - **Legacy files**: older projects may still have date-prefixed or bare-numeric lessons from before this convention was locked. Do not rename them in a wrapup PR — migration is a separate, dedicated operation. When scanning for the next ID, only count files matching `LESSON-*.md`; treat the legacy files as read-only history.

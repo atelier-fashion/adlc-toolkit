@@ -30,7 +30,7 @@ For everything else — including every **End-of-phase log** block below, every 
 
 ## Ethos
 
-!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
 
 ## Arguments
 
@@ -241,84 +241,48 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 ---
 
 ### Phase 1: Validate the Requirement Spec
-
+<!-- companion: proceed/phases-1-3-validation.md -->
 **Gate**: `currentPhase` must be `1`. After completion: append `1`, set `currentPhase=2`.
 
-**Goal**: Ensure the requirement is complete and well-formed before designing architecture.
-
-1. Invoke the `/validate` skill with the REQ ID
-2. If **APPROVED**: set requirement status to `approved` and move to Phase 2
-3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
-
-**End-of-phase log**: Emit one line — "Spec validated and approved." Continue to Phase 2 immediately; do not wait for user acknowledgment.
+Run `/validate` against the REQ spec. APPROVED → mark `approved`, advance.
+NEEDS REVISION → fix FAILs and re-validate (up to 3 loops); remaining
+blockers are legitimate halt #1. End-of-phase log: "Spec validated and
+approved." Full step list in companion.
 
 ---
 
 ### Phase 2: Architect & Break Into Tasks
-
+<!-- companion: proceed/phases-1-3-validation.md -->
 **Gate**: `currentPhase` must be `2`. After completion: append `2`, set `currentPhase=3`.
 
-**Goal**: Design the technical approach and create implementation tasks.
-
-1. Invoke the `/architect` skill with the REQ ID. In cross-repo mode, also pass the configured repo ids (from `pipeline-state.json` `repos`) and require that every generated task's frontmatter include a `repo:` field naming one of those ids.
-2. This handles: reading context, designing architecture, creating task files with dependencies, and updating requirement status.
-3. **Reconcile touched repos**: after `/architect` returns, scan all task files for distinct `repo:` values. Update `pipeline-state.json`:
-   - For each configured repo with at least one task, ensure `touched: true`.
-   - For each configured repo with no tasks (and not primary), set `touched: false` and remove its worktree using the absolute path recorded in state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`.
-   - Rebuild `mergeOrder` filtered to touched repos, preserving the configured order.
-4. **Backfill missing `repo:` fields**: if any task omits `repo:`, default it to the primary repo id and write the field into its frontmatter. In single-repo mode this is the only valid value and can be set silently.
-
-**End-of-phase log**: Emit a one-paragraph summary of the architecture approach, the task dependency graph, and the final touched-repo set with task counts per repo. Continue to Phase 3 immediately.
+Invoke `/architect` to design the approach and emit task files (each tagged
+with `repo:` in cross-repo mode). Reconcile `pipeline-state.json`: mark
+touched/untouched repos, prune untouched-sibling worktrees, rebuild
+`mergeOrder`, backfill missing `repo:` to primary. End-of-phase log:
+one-paragraph architecture + task-graph + per-repo task counts.
 
 ---
 
 ### Phase 3: Validate Architecture & Tasks
-
+<!-- companion: proceed/phases-1-3-validation.md -->
 **Gate**: `currentPhase` must be `3`. After completion: append `3`, set `currentPhase=4`.
 
-**Goal**: Ensure the architecture and task breakdown are solid before implementation.
-
-1. Invoke the `/validate` skill with the REQ ID (it will auto-detect the architecture+tasks phase)
-2. If **APPROVED**: move to Phase 4
-3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
-
-**End-of-phase log**: Emit one line — "Architecture and tasks validated." Continue to Phase 4 immediately.
+Re-invoke `/validate` (it auto-detects the architecture+tasks phase). Same
+3-loop fix protocol as Phase 1; unresolved blockers are legitimate halt #1.
+End-of-phase log: "Architecture and tasks validated."
 
 ---
 
 ### Phase 4: Implement
-
+<!-- companion: proceed/phase-4-implementation.md -->
 **Gate**: `currentPhase` must be `4`. After completion: append `4`, set `currentPhase=5`.
 
-**Goal**: Execute all tasks, producing working code with tests. Each task runs in the worktree of its target repo (from `repo:` frontmatter).
-
-1. Build the dependency graph from task frontmatter. Dependencies may cross repos — a frontend task can depend on a backend task.
-2. Identify independent tasks (no unmet dependencies) — these can run in parallel, regardless of which repo they target.
-3. On resume: read `pipeline-state.json`. Skip any task in `phase4.completedTasks`. If `phase4.currentTask` is non-null, start there (not at the dependency root).
-4. For each task (or batch of independent tasks):
-   - Write `phase4.currentTask` to the TASK-xxx ID before starting work
-   - Read the task file for requirements, files to modify, ACs, technical notes, and `repo:` field
-   - Resolve the target worktree: `repos[<task.repo>].worktree` from `pipeline-state.json`. All file reads/writes, tests, and git operations for this task happen inside that worktree.
-   - Implement the changes following project conventions (from `.adlc/context/conventions.md`)
-   - Write tests as specified in the task
-   - Run the **target repo's** test suite (not the primary's, unless they're the same repo) to verify nothing is broken
-   - Mark the task status as `complete` in its frontmatter (task files live in the primary's `.adlc/specs/REQ-xxx-*/tasks/`)
-   - Commit inside the target worktree with message format: `feat(scope): description [TASK-xxx]`
-   - After the commit lands, append the TASK-xxx ID to `phase4.completedTasks` and clear `phase4.currentTask`
-5. If a task hits an unrecoverable failure surfaced to the user: append its ID to `phase4.failedTasks`, clear `phase4.currentTask`, and stop the phase.
-
-**Main conversation mode** — parallel execution:
-- Group tasks into tiers based on the cross-repo dependency graph
-- Tier 0: tasks with no dependencies — launch a **task-implementer** agent for each
-- Tier 1: tasks depending only on Tier 0 — launch after Tier 0 completes
-- Continue until all tiers complete
-- Each task-implementer agent (defined in `~/.claude/agents/`) receives: the full task file, conventions.md, architecture.md, **and the absolute path of the target repo's worktree** (from `repos[<task.repo>].worktree`). The agent must operate exclusively inside that worktree.
-
-**Subagent mode** — sequential execution:
-- Execute tasks one at a time in cross-repo dependency order
-- Implement each task directly in your own context (do not dispatch agents), cd-ing into the target worktree for each task
-
-**End-of-phase log**: After each tier completes, emit one line listing finished tasks with their target repos (e.g., `TASK-003 [api] ✓`) and any task-level failures (failed tasks are also written to `phase4.failedTasks`). Do not pause between tiers; advance to the next tier as soon as its dependencies are met.
+Execute the task graph across all touched-repo worktrees. Each task runs in
+`repos[<task.repo>].worktree`. Track per-task progress in `phase4.currentTask`
+/ `completedTasks` / `failedTasks` so a mid-phase compression resumes exactly.
+Main mode dispatches `task-implementer` agents in dependency tiers (parallel
+within a tier); subagent mode runs tasks sequentially in-context. End-of-phase
+log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 
 ---
 
@@ -342,14 +306,16 @@ ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
 
-Gate the pre-pass on tool availability and the project opt-out flag:
+Gate the pre-pass via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`):
 
 ```sh
-if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-  # delegated path — see "Delegated pre-pass" below
-else
-  # fallback path — see "Fallback" below
-fi
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated path — see "Delegated pre-pass" below
+  1) ;;  # disabled path (ADLC_DISABLE_KIMI=1) — see "Fallback" below
+  2) ;;  # unavailable path (ask-kimi not on PATH) — see "Fallback" below
+esac
 ```
 
 **Delegated pre-pass (per touched repo)** — iterate over the touched repos already enumerated by the prerequisite step. The per-repo diff and changed-files list MUST be derived from THAT repo's worktree (NOT a shared / monorepo list): use `git -C <repos[<id>].worktree> diff main...HEAD` for the diff and `git -C <repos[<id>].worktree> diff main...HEAD --name-only` for the changed-files list. The validation in step 6 below references the per-repo changed-files list, not a global one.
@@ -460,115 +426,38 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
 ---
 
 ### Phase 6: Create Pull Request(s)
-
+<!-- companion: proceed/phases-6-8-ship.md -->
 **Gate**: `currentPhase` must be `6`. After completion: append `6`, set `currentPhase=7`.
 
-**Goal**: Package the work into reviewable PRs — one PR per touched repo.
-
-1. For each touched repo:
-   - Inside that repo's worktree, ensure all changes are committed and push the feature branch: `git -C <worktree> push -u origin feat/REQ-xxx-short-description`
-2. Set the requirement status to `complete` in its frontmatter (primary repo only).
-3. Create a PR **in each touched repo** using `gh pr create` (invoke via `gh -R <owner/repo>` or by running `gh` from inside each worktree). In cross-repo mode, create the PR for the primary repo **last** so the primary PR body can link to all sibling PRs.
-   - **Title (per repo)**: Short description referencing the REQ, tagged with the repo id when cross-repo (e.g., `feat(api): new endpoint [REQ-023]`).
-   - **Body (per repo)**:
-     ```
-     ## Summary
-     [2-3 bullet points describing what was built in THIS repo]
-
-     ## Requirement
-     REQ-xxx: [requirement title]
-     Primary repo: <primary-repo-id>
-
-     ## Related PRs (cross-repo)
-     [Populated for siblings and also in the primary once its PR is created last.
-      Omit entirely in single-repo mode.]
-     - api: <url>
-     - web: <url>
-
-     ## Tasks Completed (this repo)
-     - [x] TASK-001: [title]
-     - [x] TASK-002: [title]
-
-     ## Architecture Decisions
-     [Key ADRs or "No architectural changes needed"]
-
-     ## Test Coverage
-     [Summary of tests added/modified in THIS repo]
-
-     ## Reflection Notes
-     [Key observations from the reflect phase — risks, assumptions, follow-ups]
-
-     ## Merge Order
-     [Only when cross-repo. List the mergeOrder from pipeline-state.json so
-      reviewers know which PR merges first.]
-     ```
-4. After each PR is created, write its URL to `repos[<id>].prUrl` in `pipeline-state.json`.
-5. After the last PR is created, go back and edit sibling PRs' bodies (`gh pr edit`) to add the cross-repo "Related PRs" section now that every URL is known.
-6. Report all PR URLs to the user, grouped by repo and in `mergeOrder` sequence.
+Push each touched repo's feature branch and open one PR per repo via
+`gh pr create`. Cross-repo: create primary's PR last and back-fill sibling
+bodies with the full URL list. Mark requirement `complete` in primary
+frontmatter. Persist each PR URL to `repos[<id>].prUrl`. Report URLs
+grouped by repo in `mergeOrder` sequence.
 
 ---
 
 ### Phase 7: PR Cleanup & CI
-
+<!-- companion: proceed/phases-6-8-ship.md -->
 **Gate**: `currentPhase` must be `7`. After completion: append `7`, set `currentPhase=8`.
 
-**Goal**: Lightweight sanity check on each PR — the full code review already happened in Phase 5. Do NOT re-run `/review`.
-
-Do all the steps below **for every touched repo's PR**:
-
-1. Review the full PR diff using `gh pr diff <prUrl>` (use the URL stored in `repos[<id>].prUrl`).
-2. Check for:
-   - Stray debug logs, TODOs, or commented-out code
-   - Files that shouldn't have been included (secrets, generated files, unrelated changes)
-   - Commit message consistency and cleanliness
-   - That the PR description accurately reflects the changes
-   - Cross-repo consistency: if a sibling PR changes an API contract, verify this PR's corresponding consumer/producer code matches
-3. If issues are found:
-   - Fix inside the owning repo's worktree, commit with message: `fix(scope): PR cleanup [REQ-xxx]`
-   - Push that worktree's branch: `git -C <worktree> push`
-4. If CI checks are configured, verify each PR passes: `gh pr checks <prUrl>`. Wait for in-flight checks before moving on.
-
-**End-of-phase log**: Emit one line per PR — "<repo-id>: clean, CI green" — followed by an aggregate "All N PRs ready for merge" or list any remaining concerns. Continue to Phase 8 immediately.
+Lightweight per-PR sanity check — review already ran in Phase 5, do NOT
+re-run `/review`. For every PR: review diff, catch stray debug/TODO/secret
+content, verify cross-repo contract consistency, push fixups in the owning
+worktree if needed, wait for `gh pr checks` to go green. End-of-phase log:
+one line per PR, then "All N PRs ready for merge".
 
 ---
 
 ### Phase 8: Wrapup
-
+<!-- companion: proceed/phases-6-8-ship.md -->
 **Gate**: `currentPhase` must be `8` and `7` must be in `completedPhases`. After completion: append `8`, set `"completed": true`.
 
-**Goal**: Merge, deploy, capture knowledge, and close out the feature.
-
-**Completion claim** (terminal state contract): the run's final report MUST lead with **exactly one** tag from `{merged, pr-ready, blocked, failed}`:
-
-| Tag | Required preconditions |
-|---|---|
-| `merged` | All touched-repo PRs are `MERGED` (verifiable via `gh pr view --json state,mergedAt`). `repos[<id>].merged == true` for every touched repo. |
-| `pr-ready` | All touched-repo PRs are `OPEN`, `MERGEABLE`, all required CI green. Used in cross-repo mode when the orchestrator owns merge sequencing, or in single-repo mode when the run is explicitly told not to merge. |
-| `blocked` | Blocker requires human input. `pipeline-state.json.blockers` populated. |
-| `failed` | Pipeline failed past automatic recovery. Failure details in `pipeline-state.json.notes`. |
-
-A vague "Pipeline complete" claim without one of these tags is a protocol violation. When dispatched by `/sprint`, the orchestrator will reject untagged claims and treat them as `blocked`.
-
-**Topology-driven merge actor**:
-- **Single-repo REQ** (one touched repo): the pipeline owns the merge in this phase. Run `gh pr merge <prUrl> --squash --delete-branch` from the parent repo path (`repos[<id>].path`), NOT from the worktree. Terminal claim is `merged`.
-- **Cross-repo REQ** (multiple touched repos): use the cross-repo merge sequencing block below. Terminal claim is `merged` after all repos land, or `pr-ready` if dispatched by an orchestrator that owns merge sequencing.
-
-**Cross-repo merge sequencing**:
-
-1. Walk `mergeOrder` from `pipeline-state.json`. For each repo id in order:
-   - Skip if `repos[<id>].merged == true` (already merged — recovering from an interrupted run).
-   - Merge that repo's PR (`gh pr merge <prUrl> --squash` or the project's configured merge strategy).
-   - Wait for the merge to land, then set `repos[<id>].merged = true` in state.
-   - If the next repo's PR was opened against `main` and depends on the just-merged changes being present, trigger a rebase/retarget before merging it. When siblings were developed in parallel worktrees against the same pre-REQ main, this is usually a no-op — but surface any auto-merge failure to the user as a conflict halt (legitimate halt #3).
-2. After all PRs are merged, run `/wrapup` with the REQ ID from the primary repo. In cross-repo mode, pass the list of touched repos so `/wrapup` can:
-   - Update ADLC artifacts (spec, decisions, knowledge) in the primary
-   - Trigger deploys for each deployable touched repo
-   - Emit a ship summary spanning all repos
-3. Remove the worktree in each touched repo using the absolute path from state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`. Do NOT use the relative `.worktrees/REQ-xxx` form here.
-4. Update `pipeline-state.json` with `"completed": true`.
-5. The pipeline is now complete.
-
-**End-of-phase log**: Emit the ship summary from wrapup including per-repo merge confirmations and deployment status. Pipeline complete.
+Merge in `mergeOrder`, run `/wrapup` from the primary (deploys + knowledge
+capture), tear down each touched-repo worktree via the absolute path in
+state, set `completed: true`. Terminal claim MUST be tagged exactly one of
+`{merged, pr-ready, blocked, failed}` — untagged claims are a protocol
+violation `/sprint` rejects. Merge conflicts are legitimate halt #3.
 
 ---
 

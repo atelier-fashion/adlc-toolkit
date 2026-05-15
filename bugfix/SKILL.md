@@ -10,7 +10,7 @@ You are fixing a bug using a streamlined workflow that skips the full spec cerem
 
 ## Ethos
 
-!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
 
 ## Context
 
@@ -169,10 +169,26 @@ Evaluate honestly: did this bug reveal something a future implementer should kno
 - A check that would have caught this earlier?
 - An assumption from a prior REQ that turned out false?
 
-If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the atomic counter:
+If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the atomic counter, wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014). The lock path `.adlc/.next-lesson.lock.d` is shared with `/wrapup` so a concurrent `/bugfix` and `/wrapup` mutually exclude and cannot double-allocate the same LESSON id:
 ```bash
-LESSON_NUM=$(cat .adlc/.next-lesson 2>/dev/null || echo "1")
-echo $((LESSON_NUM + 1)) > .adlc/.next-lesson
+LESSON_NUM=$(
+  REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git worktree" >&2; exit 1; }
+  LOCK="$REPO_ROOT/.adlc/.next-lesson.lock.d"
+  COUNTER="$REPO_ROOT/.adlc/.next-lesson"
+  if [ -L "$LOCK" ]; then
+    echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+    exit 1
+  fi
+  for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+  [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate LESSON id" >&2; exit 1; }
+  NUM=$(cat "$COUNTER" 2>/dev/null || echo "1")
+  echo $((NUM + 1)) > "$COUNTER"
+  # rmdir guarded by symlink check; residual TOCTOU window accepted per ADR-4 / LESSON-014.
+  if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+  echo $NUM
+)
+# `exit 1` inside the subshell terminates only the subshell — guard parent context.
+[ -n "$LESSON_NUM" ] || { echo "ERROR: failed to allocate LESSON number — aborting" >&2; exit 1; }
 ```
 If `.adlc/.next-lesson` doesn't exist, scan `.adlc/knowledge/lessons/` for the highest existing `LESSON-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY thereafter — never re-scan after the counter exists.
 
