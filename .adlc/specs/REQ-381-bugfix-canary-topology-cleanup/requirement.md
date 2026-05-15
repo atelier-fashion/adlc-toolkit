@@ -1,10 +1,10 @@
 ---
 id: REQ-381
 title: "Drop /bugfix Phase 6 (canary) and fix dangling Phase 7.5 cross-reference"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-04
-updated: 2026-05-04
+updated: 2026-05-15
 component: "skills/bugfix"
 domain: "adlc"
 stack: ["markdown"]
