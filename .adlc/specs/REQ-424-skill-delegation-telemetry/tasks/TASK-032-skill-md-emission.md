@@ -1,7 +1,7 @@
 ---
 id: TASK-032
 title: "SKILL.md emission edits — add flag+emit wrapping to 5 delegation points across 4 skills"
-status: draft
+status: complete
 parent: REQ-424
 created: 2026-05-14
 updated: 2026-05-14
