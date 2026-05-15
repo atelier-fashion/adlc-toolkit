@@ -9,6 +9,7 @@ adlc-toolkit/
 ├── <skill>/SKILL.md            # One directory per skill (spec/, architect/, proceed/, etc.)
 ├── agents/<agent>.md           # Specialized subagent definitions
 ├── templates/*.md              # Canonical templates (copied into consumer projects by /init)
+├── partials/                   # Shared snippets (ethos macro, kimi gate) sourced by SKILL.md files
 └── .adlc/                      # Minimal self-tracking for toolkit-internal REQs
     ├── context/                # This directory — project-overview, architecture, conventions
     └── specs/REQ-xxx-*/        # Requirement specs for toolkit changes
@@ -50,6 +51,10 @@ Templates at `templates/*.md` are the canonical shape for each artifact type:
 - `assumption-template.md` — validated-assumption knowledge entries
 
 Templates are copied into consumer projects by `/init` (into `.adlc/templates/`). Consumer projects may customize their local copies; `/template-drift` detects divergence from the canonical set.
+
+## Partials
+
+Partials at `partials/*.sh` are small POSIX shell snippets sourced by multiple SKILL.md files via Claude Code's `!`...`` macro syntax. Each partial emits a context block to stdout (e.g., `ethos-include.sh` emits the project ETHOS.md content with the consumer-project-first fallback). Skills invoke a partial with a two-level fallback — `!`sh .adlc/partials/<name>.sh 2>/dev/null || sh ~/.claude/skills/partials/<name>.sh`` — so the pattern works whether or not `/init` has copied the partials into the consumer repo. The `/init` skill copies `partials/` into `.adlc/partials/` alongside `templates/`. Keep partials trivially auditable: one snippet per file, no aggregator (`lib.sh`) until there are more than five.
 
 ## ADLC pipeline shape (consumer-project view)
 

@@ -32,10 +32,10 @@ Every skill begins with:
 ```markdown
 ## Ethos
 
-!`cat .adlc/ETHOS.md 2>/dev/null || cat ~/.claude/skills/ETHOS.md 2>/dev/null || echo "No ethos found"`
+!`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
 ```
 
-The fallback chain is deliberate: consumer-project copy first (may be customized), then toolkit-root fallback, then graceful failure message. Never hardcode the ethos body inside a skill — always reference `ETHOS.md`.
+The partial itself emits the canonical fallback chain (consumer-project ETHOS.md first, then toolkit-root, then graceful "No ethos found" message). The two-level fallback at the call site (project `partials/` first, then global `~/.claude/skills/partials/`) ensures the macro still works in consumer projects that haven't re-run `/init` after the toolkit shipped the partial. Never hardcode the ethos body inside a skill — always source the partial.
 
 ## Context loading pattern
 
@@ -46,6 +46,8 @@ Skills load context via `!bash` macros under a `## Context` section. Use the sam
 ```
 
 Never hardcode paths; always allow the skill to degrade gracefully when a file is absent.
+
+For shared multi-line snippets that would otherwise duplicate across many SKILL.md files, extract a POSIX shell partial under `partials/<name>.sh` and source it from each call site (see "Ethos injection pattern" above and the architecture.md "Partials" subsection). This keeps each SKILL.md focused on its own instructions and ensures updates land everywhere consistently.
 
 ## Prerequisites block
 
@@ -80,7 +82,7 @@ Skills that span multiple phases (`/proceed`) write a `pipeline-state.json` next
 
 - **Don't create new skill directories casually**: each new skill is a commitment to maintain. Prefer extending an existing skill unless the new responsibility is genuinely orthogonal.
 - **Don't bypass ethos**: the five principles (especially #4 Verify, Don't Trust and #5 Process Is Not Optional) exist because shortcuts silently fail. If you're tempted to skip a validation gate or add a `--no-verify` flag, surface the tension to the user instead.
-- **Don't duplicate context loading logic**: if the same bash macro appears in three skills, it's a candidate for a helper pattern (though the toolkit has not yet introduced one).
+- **Don't duplicate context loading logic**: if the same bash macro appears in three or more skills, extract it to `partials/<name>.sh` and source it from each call site (see the Ethos injection pattern above).
 - **Don't hardcode project-specific paths**: skills must work for any consumer project, not just atelier-fashion.
 - **Don't edit `templates/` without considering downstream**: consumer projects that ran `/init` got a copy of the templates. Template changes propagate via `/template-drift` detection, not auto-update.
 

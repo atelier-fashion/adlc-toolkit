@@ -1,7 +1,7 @@
 ---
 id: TASK-033
 title: "Introduce partials/ infrastructure and DRY ethos macro across 15 skills"
-status: draft
+status: complete
 parent: REQ-416
 created: 2026-05-15
 updated: 2026-05-15
