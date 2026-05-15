@@ -342,14 +342,16 @@ ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
 
-Gate the pre-pass on tool availability and the project opt-out flag:
+Gate the pre-pass via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`):
 
 ```sh
-if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-  # delegated path — see "Delegated pre-pass" below
-else
-  # fallback path — see "Fallback" below
-fi
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated path — see "Delegated pre-pass" below
+  1) ;;  # disabled path (ADLC_DISABLE_KIMI=1) — see "Fallback" below
+  2) ;;  # unavailable path (ask-kimi not on PATH) — see "Fallback" below
+esac
 ```
 
 **Delegated pre-pass (per touched repo)** — iterate over the touched repos already enumerated by the prerequisite step. The per-repo diff and changed-files list MUST be derived from THAT repo's worktree (NOT a shared / monorepo list): use `git -C <repos[<id>].worktree> diff main...HEAD` for the diff and `git -C <repos[<id>].worktree> diff main...HEAD --name-only` for the changed-files list. The validation in step 6 below references the per-repo changed-files list, not a global one.

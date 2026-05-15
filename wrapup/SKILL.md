@@ -120,14 +120,16 @@ ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
 
-Decide drafting strategy via this gate, then proceed down the appropriate branch:
+Decide drafting strategy via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`), then proceed down the appropriate branch:
 
 ```sh
-if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-  # delegated path — see "Delegated drafting" below
-else
-  # fallback path — see "Fallback drafting" below
-fi
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated path — see "Delegated drafting" below
+  1) ;;  # disabled path (ADLC_DISABLE_KIMI=1) — see "Fallback drafting" below
+  2) ;;  # unavailable path (ask-kimi not on PATH) — see "Fallback drafting" below
+esac
 ```
 
 **Delegated drafting** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):

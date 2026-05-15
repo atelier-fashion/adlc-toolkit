@@ -46,14 +46,16 @@ ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
 
-Gate the delegation behind the BR-1 form:
+Gate the delegation via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`):
 
 ```sh
-if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-  # delegated path
-else
-  # fallback path
-fi
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated path
+  1) ;;  # disabled path (ADLC_DISABLE_KIMI=1)
+  2) ;;  # unavailable path (ask-kimi not on PATH)
+esac
 ```
 
 **Shape-file set:** filter to files that exist on disk from this list — `README.md`, `.adlc/context/project-overview.md`, `.adlc/context/architecture.md`, `.adlc/context/conventions.md`, plus any of `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `Gemfile`.
@@ -114,14 +116,16 @@ ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
 
-Gate the delegation behind the BR-1 form:
+Gate the delegation via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`):
 
 ```sh
-if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-  # delegated path
-else
-  # fallback path
-fi
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated path
+  1) ;;  # disabled path (ADLC_DISABLE_KIMI=1)
+  2) ;;  # unavailable path (ask-kimi not on PATH)
+esac
 ```
 
 **Audit-scope file set:** determine the file set from the scope decided in Step 1 (specific directory, focus area, or whole project — the same set Step 2 agents would consider). Cap at **top-N files sorted by line count descending** (i.e. `wc -l <file>`, take top N) to prevent context-window blowouts; default **N=40**. If the scope has fewer than N files, pass all of them. Use line count (not byte count) to avoid letting a single minified bundle dominate the pre-pass.

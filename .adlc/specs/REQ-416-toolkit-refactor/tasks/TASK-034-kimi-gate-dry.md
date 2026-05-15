@@ -1,7 +1,7 @@
 ---
 id: TASK-034
 title: "DRY Kimi delegation gate using partials/"
-status: draft
+status: complete
 parent: REQ-416
 created: 2026-05-15
 updated: 2026-05-15

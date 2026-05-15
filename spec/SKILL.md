@@ -114,14 +114,16 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    KIMI_EXIT=0
    ```
 
-   Decide via:
+   Decide via the shared predicate (REQ-416 ADR-2 — see `partials/kimi-gate.md`):
 
    ```sh
-   if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-     # delegated path — see "Delegated body-read" below
-   else
-     # fallback path — see "Fallback body-read" below
-   fi
+   . .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+   adlc_kimi_gate_check; gate=$?
+   case $gate in
+     0) ;;  # delegated path — see "Delegated body-read" below
+     1) ;;  # disabled path (ADLC_DISABLE_KIMI=1) — see "Fallback body-read" below
+     2) ;;  # unavailable path (ask-kimi not on PATH) — see "Fallback body-read" below
+   esac
    ```
 
    **Delegated body-read** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):

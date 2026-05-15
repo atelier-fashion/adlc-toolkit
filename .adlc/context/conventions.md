@@ -37,6 +37,22 @@ Every skill begins with:
 
 The partial itself emits the canonical fallback chain (consumer-project ETHOS.md first, then toolkit-root, then graceful "No ethos found" message). The two-level fallback at the call site (project `partials/` first, then global `~/.claude/skills/partials/`) ensures the macro still works in consumer projects that haven't re-run `/init` after the toolkit shipped the partial. Never hardcode the ethos body inside a skill — always source the partial.
 
+## Kimi delegation pattern
+
+Skills that delegate bulk reads or drafting to `ask-kimi` MUST source the shared gate predicate rather than inlining `command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]`:
+
+```sh
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated
+  1) ;;  # disabled via ADLC_DISABLE_KIMI=1
+  2) ;;  # unavailable (ask-kimi not on PATH)
+esac
+```
+
+See `partials/kimi-gate.md` for the full protocol — return-code contract, the canonical stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4 one-line-per-invocation rule. Per-skill stderr messages and fallback bodies stay inline at the call site; only the predicate is shared.
+
 ## Context loading pattern
 
 Skills load context via `!bash` macros under a `## Context` section. Use the same fallback chain: prefer consumer-project `.adlc/...`, fall back to `~/.claude/skills/...`. Example:
