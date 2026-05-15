@@ -41,7 +41,7 @@ Before launching the audit agents, produce a one-paragraph "project shape" summa
 ```sh
 flag=$(tools/kimi/skill-flag.sh create)
 trap 'tools/kimi/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
-start_s=20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s)
+start_s=$(date -u +%s)
 ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
@@ -81,7 +81,7 @@ Pass the validated, delimiter-wrapped summary as an additional context paragraph
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 1.6:
 
 ```sh
-duration_ms=20 20 12 61 80 33 98 100 204 250 395 398 399 400( (20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s) - ) * 1000 ))
+duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
     tools/kimi/skill-flag.sh clear "$flag"
     mode="fallback"
@@ -109,7 +109,7 @@ Before launching the audit agents, optionally produce a per-dimension candidate-
 ```sh
 flag=$(tools/kimi/skill-flag.sh create)
 trap 'tools/kimi/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
-start_s=20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s)
+start_s=$(date -u +%s)
 ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
 ```
@@ -154,7 +154,7 @@ Split the validated output into the 4 per-dimension blocks (code-quality, conven
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 2:
 
 ```sh
-duration_ms=20 20 12 61 80 33 98 100 204 250 395 398 399 400( (20 20 12 61 80 33 98 100 204 250 395 398 399 400date -u +%s) - ) * 1000 ))
+duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
     tools/kimi/skill-flag.sh clear "$flag"
     mode="fallback"
