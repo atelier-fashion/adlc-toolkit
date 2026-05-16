@@ -15,11 +15,11 @@ a general markdown linter and NOT a general shell linter.
    may legitimately use unbalanced examples).
 3. **Canonical-helper presence** — any SKILL.md that contains
    `ADLC_DISABLE_KIMI` (i.e., has a Kimi delegation gate) must also contain
-   four exact literals:
-   - `. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh`
+   four exact literals (listed in `check.py` `CANONICAL_LITERALS` order):
    - `start_s=$(date -u +%s)`
    - `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`
    - `tools/kimi/emit-telemetry.sh ` (note the trailing space)
+   - `. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh` (the post-REQ-416-ADR-2 gate-source line)
 
    Each missing literal is a separate finding.
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""SKILL.md corruption linter — three orthogonal checks (REQ-425).
+"""SKILL.md corruption linter — three orthogonal checks (REQ-425; canonical
+literal #4 reconciled to the sourced kimi-gate form by REQ-437).
 
 Run from the repo root:
 

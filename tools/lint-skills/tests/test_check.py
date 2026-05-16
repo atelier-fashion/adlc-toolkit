@@ -96,6 +96,27 @@ def test_kimi_gate_happy_path_is_clean(tmp_path):
     root = _stage(tmp_path, "kimi-gate-ok")
     result = _run(root)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == ""
+
+
+def test_old_inline_gate_form_fires_single_finding(tmp_path):
+    """REQ-437 regression guard: a skill still using the pre-REQ-416 inline
+    gate predicate (with all three telemetry literals) but lacking the new
+    gate-source line must produce exactly one canonical-helper finding — for
+    the missing source-line literal #4 — not zero and not four. Guards against
+    an accidental re-introduction of the old literal into CANONICAL_LITERALS."""
+    root = _stage(tmp_path, "old-inline-gate")
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert result.stdout.count("canonical-helper") == 1
+    assert (
+        ". .adlc/partials/kimi-gate.sh 2>/dev/null || "
+        ". ~/.claude/skills/partials/kimi-gate.sh" in result.stdout
+    )
+    # The three telemetry literals are present in the fixture, so they must
+    # NOT be reported as missing.
+    assert "start_s=$(date -u +%s)" not in result.stdout
+    assert "tools/kimi/emit-telemetry.sh " not in result.stdout
 
 
 def test_mixed_clean_and_corrupt_scans_both(tmp_path):
