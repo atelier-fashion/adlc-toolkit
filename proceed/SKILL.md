@@ -299,8 +299,9 @@ log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
-flag=$(tools/kimi/skill-flag.sh create)
-trap 'tools/kimi/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
+. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
+flag=$("$KIMI_TOOLS"/skill-flag.sh create)
+trap '"$KIMI_TOOLS"/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
 start_s=$(date -u +%s)
 ASK_KIMI_INVOKED=""
 KIMI_EXIT=0
@@ -331,10 +332,11 @@ esac
    ```
 4. Invoke Kimi over the redacted diff. Set `ASK_KIMI_INVOKED=1` immediately before the call (REQ-424 telemetry), capture exit status, and clear the skill-flag immediately after the call exits (success OR failure):
    ```bash
+   . .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
    ASK_KIMI_INVOKED=1
    ask-kimi --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
    KIMI_EXIT=$?
-   tools/kimi/skill-flag.sh clear "$flag"
+   "$KIMI_TOOLS"/skill-flag.sh clear "$flag"
    ```
    **If `ask-kimi` exits non-zero**, emit one combined stderr line and fall through to the fallback dispatch for this repo (BR-4: one line per invocation — this REPLACES the intent line for this repo; the success/announce line in step 1 is the only emit when delegation succeeds):
    ```
@@ -372,23 +374,24 @@ esac
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes for this Phase 5 pre-pass, before continuing to the 6-agent dispatch:
 
 ```sh
+. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
 duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
 if [ -z "$ASK_KIMI_INVOKED" ]; then
-    tools/kimi/skill-flag.sh clear "$flag"
+    "$KIMI_TOOLS"/skill-flag.sh clear "$flag"
     mode="fallback"
     reason="$ADLC_KIMI_GATE_REASON"
     gate_result="fail"
-elif tools/kimi/skill-flag.sh check "$flag" >/dev/null 2>&1; then
+elif "$KIMI_TOOLS"/skill-flag.sh check "$flag" >/dev/null 2>&1; then
     mode="ghost-skip"; reason="gate-passed-no-call"
-    tools/kimi/skill-flag.sh clear "$flag"
+    "$KIMI_TOOLS"/skill-flag.sh clear "$flag"
     gate_result="pass"
 elif [ "$KIMI_EXIT" -eq 0 ]; then
     mode="delegated"; reason="ok"; gate_result="pass"
 else
     mode="fallback"; reason="api-error"; gate_result="pass"
 fi
-tools/kimi/emit-telemetry.sh proceed-phase-5 Phase-5-Verify "${REQ_NUM:-unknown}" "$gate_result" "$mode" "$reason" "$duration_ms"
-tools/kimi/skill-flag.sh clear "$flag"
+"$KIMI_TOOLS"/emit-telemetry.sh proceed-phase-5 Phase-5-Verify "${REQ_NUM:-unknown}" "$gate_result" "$mode" "$reason" "$duration_ms"
+"$KIMI_TOOLS"/skill-flag.sh clear "$flag"
 ```
 
 **In subagent mode (`/sprint` pipeline-runner)**: do NOT dispatch the Kimi pre-pass. Subagents cannot reliably reach a parent's shell env for `ask-kimi`, and the pre-pass would be skipped or fail unpredictably. Skip the entire pre-pass block in subagent mode and run the reviewer checklists as before.

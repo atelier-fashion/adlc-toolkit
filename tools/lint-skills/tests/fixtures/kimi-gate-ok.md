@@ -1,13 +1,19 @@
 # Fixture: full Kimi gate present.
 
-Uses ADLC_DISABLE_KIMI and includes the canonical helpers:
+Uses the post-REQ-416 sourced gate and includes the canonical helpers:
 
 ```sh
-if command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]; then
-    start_s=$(date -u +%s)
-    duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
-    tools/kimi/emit-telemetry.sh some-skill Some-Step REQ-xxx pass delegated ok 123
-fi
+. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
+adlc_kimi_gate_check; gate=$?
+case $gate in
+  0) ;;  # delegated
+  1) ;;  # disabled via ADLC_DISABLE_KIMI=1
+  2) ;;  # unavailable
+esac
+start_s=$(date -u +%s)
+"$KIMI_TOOLS"/emit-telemetry.sh some-skill Some-Step REQ-xxx pass delegated ok 123
+duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
 ```
 
 No findings expected.
