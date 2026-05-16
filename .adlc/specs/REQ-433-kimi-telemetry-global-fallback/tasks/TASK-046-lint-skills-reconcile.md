@@ -46,3 +46,45 @@ the anti-corruption guarantee is strengthened, not merely preserved.
 - The Python literal for the emit string must be single-quoted because it
   contains `"` (match the existing `'command -v ask-kimi …'` entry's style).
 - Re-run BOTH suites at the end: `pytest tools/kimi/tests/ tools/lint-skills/tests/ -q` (per README) to confirm no cross-suite regression.
+
+## Addendum — scope extension (architecture.md ADR-3a / ADR-3b), reopened in Phase 4
+
+The first pass (commits `343ebd2`/`639d85e`) handled the emit + resolver
+literals but its AC-5 verification was a **false negative**: it ran the linter
+`--root` *inside* `.worktrees`, where `SKIP_DIR_PARTS` makes the linter scan
+zero files. Re-verified correctly (skills staged outside `.worktrees`): the
+linter emits **4 `canonical-helper` findings** because the 4 skills do not
+contain the stale literal `command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]`
+(REQ-416 moved that into `partials/kimi-gate.sh`). AC-5 is therefore unmet.
+
+**Additional required changes (ADR-3a):**
+- `tools/lint-skills/check.py`: in `CANONICAL_LITERALS`, REPLACE
+  `'command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]'`
+  with `". .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh"`
+  (byte-exact; extract from a real skill: `grep -hn 'kimi-gate.sh' spec/SKILL.md`).
+  Tuple remains 5 entries.
+- `tools/lint-skills/tests/fixtures/kimi-gate-ok.md`: rewrite the `sh` block to
+  the faithful post-REQ-416 shape so it contains ALL 5 literals AND the
+  `ADLC_DISABLE_KIMI` anchor — i.e. both source lines (`kimi-gate.sh`,
+  `kimi-tools-path.sh`), then `start_s` / `duration_ms` / `"$KIMI_TOOLS"/emit-telemetry.sh …`,
+  with an `ADLC_DISABLE_KIMI` token retained (e.g. a `# … ADLC_DISABLE_KIMI=1`
+  gate-case comment). Remove the obsolete inline `if command -v ask-kimi … ADLC_DISABLE_KIMI` form.
+- `tools/lint-skills/tests/test_check.py`: in `test_missing_canonical_reports_per_rule`,
+  change the asserted literal string from the `command -v ask-kimi …` text to the
+  kimi-gate source line; **count stays `== 5`** (replacement, not addition);
+  ensure `test_kimi_gate_happy_path_is_clean` still asserts zero findings with
+  the rewritten fixture.
+- `tools/lint-skills/tests/fixtures/missing-canonical.md`: re-verify it contains
+  `ADLC_DISABLE_KIMI` but NONE of the (final) 5 literals → exactly 5 findings.
+- `tools/lint-skills/README.md`: replace the documented `command -v ask-kimi`
+  canonical literal with the kimi-gate source line.
+
+**Corrected AC-5 verification (mandatory method):** stage the 4 worktree skills
+into `<skilldir>/SKILL.md` layout in a tmp dir OUTSIDE any `.worktrees` path,
+then `python3 tools/lint-skills/check.py --root <tmpdir>` → MUST report **0
+`canonical-helper` findings**, EXIT 0. Running `--root` inside the worktree is
+not a valid check (vacuous — ADR-3b).
+
+**Out of scope (filed separately, ADR-3b):** fixing `SKIP_DIR_PARTS` so the
+linter / `/analyze` Step 1.9 is not vacuous inside `.worktrees`. Do NOT change
+`SKIP_DIR_PARTS` in this task.
