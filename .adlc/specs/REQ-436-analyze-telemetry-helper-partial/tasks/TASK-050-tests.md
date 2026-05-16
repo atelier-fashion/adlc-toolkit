@@ -1,7 +1,7 @@
 ---
 id: TASK-050
 title: "Tests: realistic post-change fixtures, posix-fence/cross-fence-fn/root-skip cases, AC-7 telemetry-equivalence harness"
-status: draft
+status: complete
 parent: REQ-436
 created: 2026-05-16
 updated: 2026-05-16
