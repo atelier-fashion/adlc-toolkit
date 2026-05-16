@@ -1,7 +1,7 @@
 ---
 id: TASK-051
 title: "Register the new partial: /init copy coverage + partials/README.md"
-status: draft
+status: complete
 parent: REQ-436
 created: 2026-05-16
 updated: 2026-05-16

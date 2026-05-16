@@ -1,7 +1,7 @@
 ---
 id: TASK-048
 title: "Rewire analyze/SKILL.md: remove inline helper, source the partial at both emit points"
-status: draft
+status: complete
 parent: REQ-436
 created: 2026-05-16
 updated: 2026-05-16

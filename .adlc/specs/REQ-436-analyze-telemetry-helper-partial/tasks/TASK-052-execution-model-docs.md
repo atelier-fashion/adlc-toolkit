@@ -1,7 +1,7 @@
 ---
 id: TASK-052
 title: "Document the SKILL.md fenced-block execution model in context docs"
-status: draft
+status: complete
 parent: REQ-436
 created: 2026-05-16
 updated: 2026-05-16

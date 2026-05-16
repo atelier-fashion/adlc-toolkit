@@ -87,6 +87,12 @@ _Not applicable — this is a refactor of skill markdown plus a new sourceable s
 - Adding a `tools/kimi/emit-step-telemetry.sh` executable wrapper — the sourceable `partials/` mechanism is the correct toolkit pattern; a `tools/kimi/` script is explicitly not pursued.
 - Retroactively auditing telemetry already lost to Defect-1 in historical logs.
 
+## Deferred
+
+- **pytest 8.4.2 → 9.0.3 (GHSA-6w46-j5rx-g56g)** — the Phase-5 security audit flagged a vulnerable `pytest` pin in `tools/kimi/requirements.txt`. It is **pre-existing on `main`** (not introduced by REQ-436) and a major-version bump with its own blast radius across the kimi/lint-skills suites. Out of REQ-436 scope; **recommend a dedicated follow-up REQ** to bump and re-validate.
+- **Accepted residual — canonical marker is a substring signal** — `check_canonical`'s `TELEMETRY_PARTIAL_MARKER` gate is a substring presence check. A SKILL.md corrupted such that it lost its real dot-source line but *retained* the marker string in surviving prose could still be rescued by a partial. Accepted within the trust model (SKILL.md authors are toolkit developers; the guard targets accidental misconfiguration/corruption, not an adversarial author; near-zero probability). Tightening to a precise dot-source regex would violate the linter's deliberate substring-simplicity (LESSON-016). Documented in LESSON-020.
+- **`$start_s` arithmetic has no `:-0` default** — flagged Low by the security audit. The bare `$(( ($(date -u +%s) - $start_s) * 1000 ))` is **intentionally byte-preserved** to satisfy AC-7/BR-4 (telemetry record byte-equivalent to REQ-428). Adding a default would change REQ-428-preserved behavior; if desired it belongs in a separate REQ that explicitly revisits the telemetry contract.
+
 ## Retrieved Context
 
 - REQ-428 (spec, score 12): Dedupe analyze SKILL telemetry resolution block — introduced the helper; recorded the cross-block scoping as an untested assumption and reserved this partial fallback

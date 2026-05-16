@@ -1,7 +1,7 @@
 ---
 id: TASK-047
 title: "Create partials/emit-step-telemetry.sh + companion .md (relocated POSIX helper)"
-status: draft
+status: complete
 parent: REQ-436
 created: 2026-05-16
 updated: 2026-05-16

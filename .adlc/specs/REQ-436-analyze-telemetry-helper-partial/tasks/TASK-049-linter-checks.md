@@ -1,7 +1,7 @@
 ---
 id: TASK-049
 title: "Linter: canonical-follows-indirection + root-skip fix + posix-fence + cross-fence-fn"
-status: draft
+status: complete
 parent: REQ-436
 created: 2026-05-16
 updated: 2026-05-16
