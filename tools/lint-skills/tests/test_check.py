@@ -89,7 +89,7 @@ def test_missing_canonical_reports_per_rule(tmp_path):
     assert "start_s=$(date -u +%s)" in result.stdout
     assert "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))" in result.stdout
     assert "tools/kimi/emit-telemetry.sh " in result.stdout
-    assert 'command -v ask-kimi' in result.stdout
+    assert ". .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh" in result.stdout
 
 
 def test_kimi_gate_happy_path_is_clean(tmp_path):
