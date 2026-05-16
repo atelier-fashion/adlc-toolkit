@@ -134,3 +134,27 @@ Not applicable — no actors/roles; this is build/infra plumbing.
 - LESSON-006 (lesson, score 3): tools/ carve-out & fail-loud installers — load-bearing rationale for the partial-resolver design (do NOT vendor tools/ into consumers)
 - REQ-416 (spec, score 3): Toolkit refactor — source of the ADR-2 kimi-gate vendored-first-then-global idiom being mirrored
 - LESSON-014 (lesson, score 2): Lock symlink TOCTOU — informs symlink-safety reasoning (resolver only reads the symlinked path; no mutation)
+
+## Deferred
+
+Surfaced during REQ-433 but deliberately out of scope; **already filed as
+separate spawned tasks** (do not re-file) and folded into knowledge as
+LESSON-019:
+
+- **lint-skills vacuous inside `.worktrees`** (architecture.md ADR-3b):
+  `tools/lint-skills/check.py` `SKIP_DIR_PARTS` includes `.worktrees`, so
+  `/analyze` Step 1.9 (and any in-pipeline lint) scans zero files and reports
+  clean inside every `/proceed` run. Distinct concern (dir-walk policy vs.
+  worktree pipelines), not the `$KIMI_TOOLS` resolver. Spawned task filed.
+- **Pre-existing REQ-428 defects in `analyze` `_adlc_emit_step_telemetry`**:
+  the shared helper is defined in one fenced `sh` block but invoked from
+  others (may be undefined at call time if blocks are independent shells), and
+  uses non-POSIX `local` in an `sh` fence. Verified unchanged on `main`
+  (REQ-433 did not introduce or worsen them); REQ-433 correctly sources the
+  resolver in both the definition and the call-site blocks. Spawned task filed.
+
+Accepted-as-is review findings (rationale recorded in architecture.md "Phase 5
+review disposition"): EXIT-time `$KIMI_TOOLS` trap expansion (Low, guarded);
+duplicate TASK-046 mark-complete commits (truthful reopen history);
+CWD-relative `tools/kimi` preference (not a regression; matches ADR-2);
+`pytest 8.4.2` GHSA tmpdir advisory (pre-existing, local-only).
