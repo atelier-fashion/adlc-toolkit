@@ -1,7 +1,7 @@
 ---
 id: REQ-437
 title: "Reconcile lint-skills canonical-helper rule with the REQ-416 ADR-2 kimi-gate.sh migration"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-16
 updated: 2026-05-16
