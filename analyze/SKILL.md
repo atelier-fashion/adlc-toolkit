@@ -36,34 +36,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 
 Before launching the audit agents, produce a one-paragraph "project shape" summary to pass as extra context to each agent in Step 2.
 
-**Shared telemetry-resolve helper** — define once here; both Step 1.5 and Step 1.6 invoke it at their closing emit point. A future change to the `emit-telemetry.sh` argument signature or to mode-resolution logic is applied in this one place:
-
-```sh
-. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
-_adlc_emit_step_telemetry() {
-    # $1 = step label (e.g. "Step-1.5" or "Step-1.6")
-    # Reads caller's $start_s, $ASK_KIMI_INVOKED, $KIMI_EXIT, $flag, $ADLC_KIMI_GATE_REASON.
-    local _step="$1"
-    local duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))
-    local mode reason gate_result
-    if [ -z "$ASK_KIMI_INVOKED" ]; then
-        "$KIMI_TOOLS"/skill-flag.sh clear "$flag"
-        mode="fallback"
-        reason="$ADLC_KIMI_GATE_REASON"
-        gate_result="fail"
-    elif "$KIMI_TOOLS"/skill-flag.sh check "$flag" >/dev/null 2>&1; then
-        mode="ghost-skip"; reason="gate-passed-no-call"
-        "$KIMI_TOOLS"/skill-flag.sh clear "$flag"
-        gate_result="pass"
-    elif [ "$KIMI_EXIT" -eq 0 ]; then
-        mode="delegated"; reason="ok"; gate_result="pass"
-    else
-        mode="fallback"; reason="api-error"; gate_result="pass"
-    fi
-    "$KIMI_TOOLS"/emit-telemetry.sh analyze "$_step" unknown "$gate_result" "$mode" "$reason" "$duration_ms"
-    "$KIMI_TOOLS"/skill-flag.sh clear "$flag"
-}
-```
+**Shared telemetry-resolve helper** — `_adlc_emit_step_telemetry` is sourced from `partials/emit-step-telemetry.sh` at each emit point (Step 1.5 and Step 1.6), immediately before the call, in the same fenced block. It is deliberately **not** defined inline here: SKILL.md fenced shell blocks do not share shell state across steps, so a function defined in one block is undefined when called from another (see `.adlc/context/conventions.md` "Bash in skills" and the `lint-skills` `cross-fence-fn` check that enforces this). The partial self-sources `kimi-tools-path.sh`, so call sites do not separately source the resolver. A future change to mode-resolution logic or the `emit-step-telemetry.sh` signature is applied in that one partial.
 
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
@@ -110,10 +83,10 @@ Drop or rewrite (do not just `ls`) any citation that fails either the regex or t
 
 Pass the validated, delimiter-wrapped summary as an additional context paragraph in the dispatch prompt to each of the 4 audit agents launched in Step 2.
 
-**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 1.6, invoke the shared helper defined at the top of this step:
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 1.6, source and invoke the shared helper from `partials/emit-step-telemetry.sh` — source + call in the same fenced block (the helper is no longer defined inline; see the note under Step 1.5's heading):
 
 ```sh
-. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
+. .adlc/partials/emit-step-telemetry.sh 2>/dev/null || . ~/.claude/skills/partials/emit-step-telemetry.sh
 _adlc_emit_step_telemetry Step-1.5
 ```
 
@@ -172,10 +145,10 @@ Split the validated output into the 4 per-dimension blocks (code-quality, conven
 - Emit on stderr: `/analyze: ask-kimi unavailable — agents running without candidate pre-pass` (or `/analyze: ask-kimi disabled via ADLC_DISABLE_KIMI` when `ADLC_DISABLE_KIMI=1` is the cause). Skip this emit when arriving here from a delegation-failure fall-through — that branch already logged a combined line.
 - Skip the candidate-list construction; Step 2 agents dispatch with no `<advisory-candidates>` block (current behavior).
 
-**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 2, invoke the shared helper defined at the top of Step 1.5:
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes, before continuing to Step 2, source and invoke the shared helper from `partials/emit-step-telemetry.sh` — source + call in the same fenced block (the helper is no longer defined inline; see the note under Step 1.5's heading):
 
 ```sh
-. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
+. .adlc/partials/emit-step-telemetry.sh 2>/dev/null || . ~/.claude/skills/partials/emit-step-telemetry.sh
 _adlc_emit_step_telemetry Step-1.6
 ```
 
@@ -249,7 +222,7 @@ fi
 
 If `tools/lint-skills/check.sh` does not exist (older install of the toolkit), silently skip Step 1.9 — emit nothing, raise no warning, and continue to Step 2.
 
-**Parse the output:** the linter emits one line per finding in the format `<file>:<line>: <check-name>: <message>` where `<check-name>` is one of `sentinel`, `balance`, `canonical-helper`. Each line is already report-ready; just prefix them with the `skill-md-corruption:` dimension marker.
+**Parse the output:** the linter emits one line per finding in the format `<file>:<line>: <check-name>: <message>` where `<check-name>` is one of `sentinel`, `balance`, `canonical-helper`, `posix-fence`, `cross-fence-fn`. Each line is already report-ready; just prefix them with the `skill-md-corruption:` dimension marker.
 
 **Finding format:**
 

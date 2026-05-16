@@ -25,7 +25,7 @@ Every skill is a single markdown file at `<skill-name>/SKILL.md` with this shape
 4. **Context loading**: explicit `!bash` commands to read project-overview, architecture, conventions, relevant knowledge
 5. **Input**: how the skill reads `$ARGUMENTS`
 6. **Prerequisites**: blocking checks (e.g., "verify `.adlc/context/project-overview.md` exists")
-7. **Instructions**: numbered steps, often with sub-steps and explicit bash for deterministic operations
+7. **Instructions**: numbered steps, often with sub-steps and explicit bash for deterministic operations (each ```sh fenced block may be an independent shell — a shared shell function must be re-sourced from a partial in the same block that calls it; see "Partials")
 8. **Quality checklist**: post-run self-check items
 
 Skills are pure markdown — no code, no package dependencies. Claude Code loads them at invocation time and executes the instructions in-context.
@@ -55,6 +55,8 @@ Templates are copied into consumer projects by `/init` (into `.adlc/templates/`)
 ## Partials
 
 Partials at `partials/*.sh` are small POSIX shell snippets sourced by multiple SKILL.md files via Claude Code's `!`...`` macro syntax. Each partial emits a context block to stdout (e.g., `ethos-include.sh` emits the project ETHOS.md content with the consumer-project-first fallback). Skills invoke a partial with a two-level fallback — `!`sh .adlc/partials/<name>.sh 2>/dev/null || sh ~/.claude/skills/partials/<name>.sh`` — so the pattern works whether or not `/init` has copied the partials into the consumer repo. The `/init` skill copies `partials/` into `.adlc/partials/` alongside `templates/`. Keep partials trivially auditable: one snippet per file, no aggregator (`lib.sh`) until there are more than five.
+
+A sourceable partial is also the **only** sanctioned mechanism for sharing a shell *function* across steps, because SKILL.md fenced blocks do not share shell state across steps — each may be an independent shell invocation, so a function defined in one fenced block is undefined in another (the silent telemetry-loss class — REQ-436, REQ-428). A shared function (e.g. `_adlc_emit_step_telemetry` in `partials/emit-step-telemetry.sh`, alongside the `kimi-gate.sh` precedent) must be re-sourced at *each* call site in the same fenced block as its invocation. This invariant is enforced structurally rather than by prose (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but called from a different fenced block. See conventions.md "Bash in skills" for the call-site rule.
 
 ## ADLC pipeline shape (consumer-project view)
 

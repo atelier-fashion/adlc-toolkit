@@ -77,6 +77,8 @@ Every skill that depends on the `.adlc/` scaffold must have a `## Prerequisites`
 - Quote file paths with spaces: `"$path"`
 - Avoid `cd` — prefer absolute paths so commands work from any working directory
 
+**Fenced blocks do not share shell state across steps.** Each ```sh fenced block in a SKILL.md may be an independent shell invocation — shell functions and non-exported variables defined in one fenced block are NOT visible in another (the Claude Code Bash-tool contract: "the working directory persists between commands, but shell state does not"). Therefore a shared shell **function** MUST be sourced from a `partials/*.sh` at *each* call site, in the **same fenced block as the invocation**, and MUST NEVER be defined in one fenced block and invoked from another (the silent-`command not found` telemetry-loss class — REQ-436, REQ-424). The canonical pattern is `partials/kimi-gate.sh` and `partials/emit-step-telemetry.sh`: a function-exporting partial sourced with the two-level fallback immediately before it is called. This is enforced structurally, not by prose/honor-system (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but invoked from a different fenced block in the same SKILL.md.
+
 ## Agent dispatch patterns
 
 - **Parallel review**: dispatch 5–6 review agents in a single message (`correctness-reviewer`, `quality-reviewer`, `architecture-reviewer`, `test-auditor`, `security-auditor`, `reflector`). Read-only mandate: every agent must be told "Report findings only. Do not apply fixes."
