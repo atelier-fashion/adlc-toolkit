@@ -29,6 +29,8 @@ args byte-for-byte and that arg 7 is a non-negative integer (and a multiple of
 1000 — the documented whole-second resolution).
 """
 
+from __future__ import annotations
+
 import subprocess
 from pathlib import Path
 
@@ -263,9 +265,12 @@ def test_step_label_passthrough(tmp_path, step):
         "flag": "F",
         "ADLC_KIMI_GATE_REASON": "r",
         "start_s": "100",
+        "STEP": step,
     }
+    # Pass the step label via the environment, not f-string interpolation, so a
+    # future parametrize value containing shell metacharacters cannot inject.
     r = subprocess.run(
-        ["sh", "-c", f". '{PARTIAL}'; _adlc_emit_step_telemetry {step}"],
+        ["sh", "-c", f'. \'{PARTIAL}\'; _adlc_emit_step_telemetry "$STEP"'],
         env=env,
         cwd=str(tmp_path),
         capture_output=True,

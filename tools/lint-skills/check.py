@@ -70,6 +70,14 @@ CANONICAL_LITERALS = (
     ". .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh",
 )
 
+# REQ-436 Phase-5 security hardening: the partial-aware canonical rule (ADR-4)
+# may only *rescue* a literal that moved behind indirection when the SKILL.md
+# under test actually sources the telemetry partial. Without this gate an
+# unrelated partial elsewhere in the repo would let a SKILL.md that omitted all
+# telemetry wiring pass clean — re-rotting the very guard ADR-4 keeps alive
+# (LESSON-019 #1).
+TELEMETRY_PARTIAL_MARKER = "partials/emit-step-telemetry.sh"
+
 FENCE_OPEN_RE = re.compile(r"^\s*```(sh|bash|shell)\b")
 FENCE_CLOSE_RE = re.compile(r"^\s*```\s*$")
 
@@ -244,7 +252,15 @@ def load_partials_blob(root: Path) -> str:
     blobs: list[str] = []
     for sub in ("partials", ".adlc/partials"):
         pdir = root / sub
-        if not pdir.is_dir():
+        try:
+            if not pdir.is_dir():
+                continue
+            # Directory-level symlink-escape guard (LESSON-014/019): a
+            # `partials/` that is itself a symlink pointing out of the tree
+            # must not even be enumerated (filename side-channel), mirroring
+            # the per-file guard below.
+            pdir.resolve().relative_to(root_resolved)
+        except (OSError, ValueError):
             continue
         for sh in sorted(pdir.glob("*.sh")):
             try:
@@ -262,12 +278,19 @@ def load_partials_blob(root: Path) -> str:
 def check_canonical(text: str, rel: str, partials_blob: str = "") -> list[Finding]:
     if KIMI_GATE_ANCHOR not in text:
         return []
+    # REQ-436 Phase-5 hardening: the partial may only satisfy a literal for a
+    # SKILL.md that actually sources the telemetry partial. A SKILL.md that
+    # mentions ADLC_DISABLE_KIMI but wires up no telemetry partial is a genuine
+    # misconfiguration and must still be flagged (LESSON-019 #1 — don't let the
+    # guard re-rot into vacuity behind the indirection it was taught to follow).
+    sources_partial = TELEMETRY_PARTIAL_MARKER in text
     findings: list[Finding] = []
     for literal in CANONICAL_LITERALS:
-        # REQ-436 ADR-4: canonical follows the indirection — a literal that is
-        # absent from the SKILL.md text is still satisfied if it lives in a
-        # sourced telemetry partial resolved under the scan root.
-        if literal not in text and literal not in partials_blob:
+        # REQ-436 ADR-4: canonical follows the indirection — a literal absent
+        # from the SKILL.md text is still satisfied if it lives in a sourced
+        # telemetry partial, but ONLY when this SKILL.md sources that partial.
+        in_partial = sources_partial and literal in partials_blob
+        if literal not in text and not in_partial:
             findings.append(
                 Finding(rel, 1, "canonical-helper",
                         f"missing required literal: {literal!r}")

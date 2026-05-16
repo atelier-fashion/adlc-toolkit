@@ -36,7 +36,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 
 Before launching the audit agents, produce a one-paragraph "project shape" summary to pass as extra context to each agent in Step 2.
 
-**Shared telemetry-resolve helper** — `_adlc_emit_step_telemetry` is sourced from `partials/emit-step-telemetry.sh` at each emit point (Step 1.5 and Step 1.6), immediately before the call, in the same fenced block. It is deliberately **not** defined inline here: SKILL.md fenced shell blocks do not share shell state across steps, so a function defined in one block is undefined when called from another (see `.adlc/context/conventions.md` "Bash in skills" / the REQ-436 LESSON, and the `lint-skills` `cross-fence-fn` check that enforces this). The partial self-sources `kimi-tools-path.sh`, so call sites do not separately source the resolver. A future change to mode-resolution logic or the `emit-step-telemetry.sh` signature is applied in that one partial.
+**Shared telemetry-resolve helper** — `_adlc_emit_step_telemetry` is sourced from `partials/emit-step-telemetry.sh` at each emit point (Step 1.5 and Step 1.6), immediately before the call, in the same fenced block. It is deliberately **not** defined inline here: SKILL.md fenced shell blocks do not share shell state across steps, so a function defined in one block is undefined when called from another (see `.adlc/context/conventions.md` "Bash in skills" and the `lint-skills` `cross-fence-fn` check that enforces this). The partial self-sources `kimi-tools-path.sh`, so call sites do not separately source the resolver. A future change to mode-resolution logic or the `emit-step-telemetry.sh` signature is applied in that one partial.
 
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
@@ -222,7 +222,7 @@ fi
 
 If `tools/lint-skills/check.sh` does not exist (older install of the toolkit), silently skip Step 1.9 — emit nothing, raise no warning, and continue to Step 2.
 
-**Parse the output:** the linter emits one line per finding in the format `<file>:<line>: <check-name>: <message>` where `<check-name>` is one of `sentinel`, `balance`, `canonical-helper`. Each line is already report-ready; just prefix them with the `skill-md-corruption:` dimension marker.
+**Parse the output:** the linter emits one line per finding in the format `<file>:<line>: <check-name>: <message>` where `<check-name>` is one of `sentinel`, `balance`, `canonical-helper`, `posix-fence`, `cross-fence-fn`. Each line is already report-ready; just prefix them with the `skill-md-corruption:` dimension marker.
 
 **Finding format:**
 

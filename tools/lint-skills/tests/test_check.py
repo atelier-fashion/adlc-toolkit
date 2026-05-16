@@ -264,27 +264,65 @@ def test_canonical_via_partial_negative_without_partial(tmp_path):
     assert ". .adlc/partials/kimi-tools-path.sh 2>/dev/null" not in result.stdout
 
 
-def test_posix_fence_flags_sh_not_bash(tmp_path):
-    """REQ-436 ADR-6: `local x=1` inside a ```sh fence is flagged exactly once,
-    on that line; the identical `local y=2` inside a ```bash fence is EXEMPT
-    and its line never appears in any posix-fence finding. Lines are computed
-    from the fixture, not hardcoded.
+def test_canonical_partial_does_not_rescue_skill_that_does_not_source_it(tmp_path):
+    """REQ-436 Phase-5 security hardening: a SKILL.md that mentions
+    ADLC_DISABLE_KIMI but sources NO telemetry partial must NOT be rescued by
+    an unrelated `partials/emit-step-telemetry.sh` elsewhere in the repo.
+    Otherwise the partial-aware canonical rule (ADR-4) re-rots into vacuity —
+    the exact LESSON-019 #1 failure ADR-4 exists to prevent.
+    """
+    sub = tmp_path / "no-source"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(
+        "# no-source\n\n"
+        "```sh\n"
+        ". .adlc/partials/kimi-gate.sh 2>/dev/null || "
+        ". ~/.claude/skills/partials/kimi-gate.sh\n"
+        ". .adlc/partials/kimi-tools-path.sh 2>/dev/null || "
+        ". ~/.claude/skills/partials/kimi-tools-path.sh\n"
+        "start_s=$(date -u +%s)\n"
+        "# anchor: ADLC_DISABLE_KIMI gate-case comment\n"
+        "```\n"
+    )
+    # A telemetry partial DOES exist in the repo (it supplies L2/L3) — but this
+    # SKILL.md never sources it, so the guard must still flag the missing L2/L3.
+    _stage_partial(tmp_path, layout="partials")
+    result = _run(tmp_path)
+    assert result.returncode >= 2, result.stdout
+    assert result.stdout.count("canonical-helper") == 2, result.stdout
+    assert "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))" in result.stdout
+    assert '"$KIMI_TOOLS"/emit-telemetry.sh ' in result.stdout
+    # The inline L1/L4/L5 are present, so they are NOT flagged (count==2 implies it).
+    assert "start_s=$(date -u +%s)" not in result.stdout
+
+
+def test_posix_fence_flags_sh_and_shell_not_bash(tmp_path):
+    """REQ-436 ADR-6: `local` at statement position inside a ```sh fence AND
+    inside a ```shell fence is flagged (one finding each, on the offending
+    line); the identical construct inside a ```bash fence is EXEMPT and never
+    appears in any posix-fence finding. Lines computed from the fixture.
     """
     root = _stage(tmp_path, "local-in-sh-fence")
     result = _run(root)
     assert result.returncode > 0, result.stdout
     sh_line = _line_of("local-in-sh-fence", "local x=1")
+    shell_line = _line_of("local-in-sh-fence", "local z=3")
     bash_line = _line_of("local-in-sh-fence", "local y=2")
 
     posix_lines = [
         ln for ln in result.stdout.splitlines() if " posix-fence:" in ln
     ]
-    # Exactly one posix-fence finding overall, and it is the sh `local` line.
-    assert len(posix_lines) == 1, result.stdout
-    assert (
-        f"local-in-sh-fence/SKILL.md:{sh_line}: posix-fence:" in posix_lines[0]
+    # sh AND shell fences flagged; bash exempt → exactly two findings.
+    assert len(posix_lines) == 2, result.stdout
+    assert any(
+        f"local-in-sh-fence/SKILL.md:{sh_line}: posix-fence:" in ln
+        for ln in posix_lines
     ), (posix_lines, sh_line)
-    assert "'local' is not POSIX in a ```sh fence" in posix_lines[0]
+    assert any(
+        f"local-in-sh-fence/SKILL.md:{shell_line}: posix-fence:" in ln
+        for ln in posix_lines
+    ), (posix_lines, shell_line)
+    assert all("is not POSIX" in ln for ln in posix_lines), posix_lines
     # The bash `local` line is NOT flagged by any posix-fence finding.
     assert not any(
         f":{bash_line}: posix-fence:" in ln for ln in posix_lines

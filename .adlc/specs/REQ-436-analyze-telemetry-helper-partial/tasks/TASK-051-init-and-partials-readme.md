@@ -27,7 +27,7 @@ new sourceable partial in `partials/README.md`. Implements BR-11.
 
 ## Acceptance Criteria
 
-- [ ] The `/init` partials handling provably copies both new files into a consumer's `.adlc/partials/` — demonstrated by reading the copy step (glob covers `partials/*` incl. `.sh` and `.md`) or by an explicit dry-run listing (AC-12).
+- [ ] The `/init` `cp ~/.claude/skills/partials/*.sh .adlc/partials/` glob provably vendors `emit-step-telemetry.sh` into a consumer's `.adlc/partials/` (verified by reading init/SKILL.md's partials-copy step). The companion `emit-step-telemetry.md` is correctly **not** vendored — it stays beside the `.sh` in the toolkit repo, exactly as `kimi-gate.md` is handled (the glob is deliberately `*.sh`-only; consumer runtime sources only the `.sh`). Matches requirement AC-12. (AC-12)
 - [ ] `partials/README.md` lists `emit-step-telemetry.sh` as a sourceable (model-2) partial with a companion `.md`, and references its `kimi-tools-path.sh` self-source.
 - [ ] No regression to how `kimi-gate.sh` / `kimi-tools-path.sh` / `ethos-include.sh` are copied.
 
