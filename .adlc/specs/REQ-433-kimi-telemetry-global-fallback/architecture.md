@@ -177,3 +177,45 @@ TASK-043 (resolver partial)            ← tier 1, no deps
 
 No cycles. Max in-degree 2 (≤3). Every spec AC is covered: AC-2→044,
 AC-3/AC-4→045, AC-5→046, AC-1/AC-6→043+044 (verified end-to-end in Phase 5).
+
+## Phase 5 review disposition
+
+6 agents (reflector + 5 reviewers) dispatched in one gate. **0 Critical, 0
+Major in REQ-433's own changes.** Disposition:
+
+**Fixed** (one consolidated commit `fix(kimi): address Phase 5 verify findings`):
+- *(must-fix, correctness)* partial used bare `$HOME` → `${HOME:-}` so an
+  unset `HOME` under a `set -eu` caller degrades instead of aborting (the
+  partial's own non-fatal contract).
+- partial mode `0755`→`0644` to match the sourced sibling `kimi-gate.sh`
+  (sourced ≠ executed; corrects TASK-043's spec wording).
+- test gaps closed: top-level `import subprocess`; exists-but-not-executable
+  probe; HOME-unset-under-`set -eu`; export-to-child (`export` contract);
+  tightened `test_kimi_gate_happy_path_is_clean` (assert zero findings);
+  new `missing-resolver-source.md` fixture + single-missing-literal test.
+- `lint-skills/README.md` literal order aligned to `check.py`.
+
+**Accepted, not changed** (rationale):
+- Trap body `'"$KIMI_TOOLS"/skill-flag.sh … ' EXIT` expands `$KIMI_TOOLS` at
+  EXIT time — Low: guarded by `2>/dev/null || true` (BR-4 preserved) and the
+  partial's defensive default always sets `KIMI_TOOLS`; churning 5 trap sites
+  late carries more risk than the cosmetic gain.
+- Duplicate `chore: mark TASK-046 complete` commits — truthful history of the
+  legitimate ADR-3a reopen; an interactive rebase to squash is riskier than
+  the cosmetic benefit on a branch about to merge.
+- CWD-relative `tools/kimi` preference — **not a regression** (pre-REQ-433
+  already ran `tools/kimi/…` from CWD unconditionally); matches ADR-2;
+  established toolkit trust model. `$HOME` trust likewise pre-existing.
+- `pytest 8.4.2` GHSA tmpdir advisory — pre-existing, local-only, not
+  introduced by REQ-433.
+
+**Filed as follow-up** (pre-existing REQ-428, verified unchanged on `main`,
+out of REQ-433 scope — spawned task): `_adlc_emit_step_telemetry` defined in
+one fenced block but called from others; `local` used in an `sh` fence.
+
+**Re-verify (Step D):** only Minor/Medium fixes were applied (no Critical /
+must-fix-Major in REQ-433's code), so per the skill the 5-agent re-verify loop
+is **intentionally skipped**; instead the orchestrator directly re-verified —
+cross-suite **74 passed**, AC-5 linter clean outside `.worktrees` (EXIT 0),
+and the AC-1 downstream dogfood still emits telemetry after the `${HOME:-}`
+change.
