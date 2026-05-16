@@ -25,7 +25,7 @@ CANONICAL_LITERALS = (
     "start_s=$(date -u +%s)",
     "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))",
     '"$KIMI_TOOLS"/emit-telemetry.sh ',
-    'command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]',
+    ". .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh",
     ". .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh",
 )
 
