@@ -1,7 +1,7 @@
 ---
 id: REQ-436
 title: "Extract analyze telemetry helper to a sourceable POSIX partial (fix cross-block + local defects)"
-status: approved
+status: complete
 deployable: false
 created: 2026-05-16
 updated: 2026-05-16
