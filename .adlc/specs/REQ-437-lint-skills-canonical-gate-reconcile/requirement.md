@@ -1,16 +1,35 @@
 ---
 id: REQ-437
 title: "Reconcile lint-skills canonical-helper rule with the REQ-416 ADR-2 kimi-gate.sh migration"
-status: complete
+status: superseded
 deployable: false
 created: 2026-05-16
 updated: 2026-05-16
+superseded_by: REQ-433
 component: "adlc/lint-skills"
 domain: "adlc"
 stack: ["python", "markdown"]
 concerns: ["maintainability", "correctness", "tooling-drift"]
 tags: ["lint-skills", "canonical-helper", "kimi-gate", "skill-md", "tooling-drift", "kimi-delegation", "linter"]
 ---
+
+> **SUPERSEDED (2026-05-16) — do not merge PR #52.**
+> While this REQ's `/proceed` pipeline was running, **REQ-433** merged to
+> `main` (PRs #50, #51; `main` 04ba690 → 7dfc646). REQ-433's **TASK-046 was
+> reopened in its own Phase 4 ("Addendum ADR-3a")** and made the *identical*
+> fix this REQ implements: replacing the obsolete inline `command -v ask-kimi …`
+> canonical literal with `. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh`,
+> with the same `kimi-gate-ok.md` rewrite and the same test/README cascade —
+> plus REQ-433's own emit-literal swap (`"$KIMI_TOOLS"/emit-telemetry.sh `) and
+> a 5th `kimi-tools-path.sh` resolver-source literal. `main`'s `check.py`
+> literal #4 is byte-identical to this REQ's; the linter over the 4 skills on
+> `main` already reports **0 `canonical-helper` findings**. The original task
+> premise ("REQ-433/TASK-046 … scoped not to touch it") was true when written
+> but invalidated by TASK-046's mid-flight reopen+extend. This REQ is therefore
+> redundant; force-merging PR #52 would *regress* REQ-433 (drop literal #5 and
+> the emit-swap) and ship a test invalid in the 5-literal world. Closed unmerged.
+> Pipeline halted at Phase 7 (legitimate halt #3 + supersession); user elected
+> to close as superseded.
 
 ## Description
 
