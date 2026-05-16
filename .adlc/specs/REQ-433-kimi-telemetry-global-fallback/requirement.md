@@ -1,7 +1,7 @@
 ---
 id: REQ-433
 title: "Kimi telemetry global-fallback resolver — make delegation telemetry work in downstream repos"
-status: approved
+status: complete
 deployable: true
 created: 2026-05-16
 updated: 2026-05-16
