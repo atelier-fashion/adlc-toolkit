@@ -9,8 +9,9 @@
 #
 # Resolution order:
 #   1. project-local  tools/kimi                       (canonical repo / dogfooding)
-#   2. global symlink  $HOME/.claude/skills/tools/kimi  (every downstream repo —
-#      ~/.claude/skills is symlinked to the canonical toolkit repo root)
+#   2. global symlink  ${HOME:-}/.claude/skills/tools/kimi  (every downstream
+#      repo — ~/.claude/skills is symlinked to the canonical toolkit repo root;
+#      ${HOME:-} so an unset HOME under a `set -u` caller degrades, not aborts)
 #   3. neither → tools/kimi (today's effective behavior; existing
 #      2>/dev/null / || true guards at call sites keep this a silent no-op —
 #      telemetry must never block a skill: REQ-424 / LESSON-008 BR-4)
@@ -24,8 +25,8 @@ export KIMI_TOOLS="tools/kimi"
 
 if [ -x "tools/kimi/emit-telemetry.sh" ]; then
   KIMI_TOOLS="tools/kimi"
-elif [ -x "$HOME/.claude/skills/tools/kimi/emit-telemetry.sh" ]; then
-  KIMI_TOOLS="$HOME/.claude/skills/tools/kimi"
+elif [ -x "${HOME:-}/.claude/skills/tools/kimi/emit-telemetry.sh" ]; then
+  KIMI_TOOLS="${HOME:-}/.claude/skills/tools/kimi"
 else
   KIMI_TOOLS="tools/kimi"
 fi

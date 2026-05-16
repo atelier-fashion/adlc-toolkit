@@ -15,15 +15,16 @@ a general markdown linter and NOT a general shell linter.
    may legitimately use unbalanced examples).
 3. **Canonical-helper presence** — any SKILL.md that contains
    `ADLC_DISABLE_KIMI` (i.e., has a Kimi delegation gate) must also contain
-   five exact literals:
-   - `. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh`
-     (the gate-source line that wires the Kimi delegation gate; required so
-     corruption that strips it while leaving `ADLC_DISABLE_KIMI` references is
-     caught)
+   five exact literals (listed in the same order as `CANONICAL_LITERALS` in
+   `check.py`):
    - `start_s=$(date -u +%s)`
    - `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`
    - `"$KIMI_TOOLS"/emit-telemetry.sh ` (note the trailing space — it proves
      an invocation, not a path substring)
+   - `. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh`
+     (the gate-source line that wires the Kimi delegation gate; required so
+     corruption that strips it while leaving `ADLC_DISABLE_KIMI` references is
+     caught)
    - `. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh`
      (the resolver-source line that sets `$KIMI_TOOLS`; required so corruption
      that strips it while leaving the `"$KIMI_TOOLS"/…` invocation is caught)

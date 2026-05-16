@@ -97,6 +97,25 @@ def test_kimi_gate_happy_path_is_clean(tmp_path):
     root = _stage(tmp_path, "kimi-gate-ok")
     result = _run(root)
     assert result.returncode == 0, result.stdout + result.stderr
+    # Not just rc 0 — assert the fixture produces NO findings at all, so a
+    # future regression that emits warnings while keeping exit 0 is caught
+    # (mirrors test_clean_fixture_is_clean's stricter assertion surface).
+    assert "canonical-helper" not in result.stdout, result.stdout
+    assert result.stdout.strip() == "", result.stdout
+
+
+def test_missing_only_resolver_source_reports_one(tmp_path):
+    """REQ-433 guard: a skill that kept the `"$KIMI_TOOLS"/…` invocation but
+    lost the kimi-tools-path resolver-source line must raise exactly ONE
+    canonical-helper finding naming that literal — proves the linter enforces
+    each literal independently, not as an all-or-nothing group."""
+    root = _stage(tmp_path, "missing-resolver-source")
+    result = _run(root)
+    assert result.returncode >= 1, result.stdout
+    # Exactly one finding, and it is the missing resolver-source literal (the
+    # count==1 already proves the other four present literals were NOT flagged).
+    assert result.stdout.count("canonical-helper") == 1, result.stdout
+    assert ". .adlc/partials/kimi-tools-path.sh 2>/dev/null" in result.stdout
 
 
 def test_mixed_clean_and_corrupt_scans_both(tmp_path):

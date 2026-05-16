@@ -14,6 +14,7 @@ Resolution contract under test (`partials/kimi-tools-path.sh`, sourced):
 It must never write to stdout/stderr and must not abort a `set -eu` caller.
 """
 
+import subprocess
 from pathlib import Path
 
 # Absolute path to the partial, resolved from this test file's location so the
@@ -37,8 +38,6 @@ def _run(script, env, cwd, posix_flags=False):
     posix_flags=True runs `sh -eu -c` to prove the sourced partial does not
     abort a strict-mode caller (unset var / nonzero command would `exit`).
     """
-    import subprocess
-
     argv = ["sh", "-eu", "-c", script] if posix_flags else ["sh", "-c", script]
     return subprocess.run(
         argv, env=env, cwd=str(cwd),
@@ -171,4 +170,72 @@ def test_set_eu_local_and_global_paths_also_non_fatal(tmp_path):
     r = _run(_PROBE, env, global_cwd, posix_flags=True)
     assert r.returncode == 0, (r.returncode, r.stderr)
     assert r.stdout == expected, repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Probe is `[ -x ]`: a present-but-NOT-executable emit-telemetry.sh must NOT
+# satisfy branch 1 — resolution falls through to global / degrade.
+# ---------------------------------------------------------------------------
+
+def test_local_present_but_not_executable_falls_through(tmp_path):
+    """`tools/kimi/emit-telemetry.sh` exists but is mode 0o644 → branch 1's
+    `[ -x ]` fails; with an executable global copy, KIMI_TOOLS must resolve to
+    the global path (NOT the non-executable local one)."""
+    local_kimi = tmp_path / "tools" / "kimi"
+    local_kimi.mkdir(parents=True)
+    non_exec = local_kimi / "emit-telemetry.sh"
+    non_exec.write_text("#!/bin/sh\nexit 0\n")
+    non_exec.chmod(0o644)  # deliberately NOT executable
+    fake_home = tmp_path / "home"
+    _make_emit(fake_home / ".claude" / "skills" / "tools" / "kimi")
+
+    expected = str(fake_home / ".claude" / "skills" / "tools" / "kimi")
+    env = {"HOME": str(fake_home), "PATH": _BASE_PATH}
+    r = _run(_PROBE, env, tmp_path)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == expected, repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# HOME unset entirely (not just empty) under `set -eu`: the `${HOME:-}` guard
+# must keep the partial non-fatal (a bare `$HOME` would trip `-u` and abort).
+# ---------------------------------------------------------------------------
+
+def test_home_unset_under_set_eu_is_non_fatal(tmp_path):
+    """env has NO `HOME` key at all; `sh -eu` would abort on a bare `$HOME`.
+    With `${HOME:-}` the partial degrades to tools/kimi, rc 0, silent."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()  # no local tools/kimi
+
+    env = {"PATH": _BASE_PATH}  # intentionally NO "HOME"
+    r = _run(_PROBE, env, cwd, posix_flags=True)
+
+    assert r.returncode == 0, (r.returncode, r.stderr)
+    assert r.stdout == "tools/kimi", repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# `export` contract (BR-1): KIMI_TOOLS must be visible to a CHILD process,
+# not merely set in the sourcing shell.
+# ---------------------------------------------------------------------------
+
+def test_kimi_tools_is_exported_to_child(tmp_path):
+    """Source the partial, then read $KIMI_TOOLS from a *child* `sh -c` — it is
+    only visible there if `export` actually took effect. Guards against a
+    future refactor that drops `export` (the same-shell probe wouldn't catch)."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()  # degrade path → KIMI_TOOLS=tools/kimi
+
+    child_probe = f'. "{PARTIAL}"; sh -c \'printf "%s" "$KIMI_TOOLS"\''
+    env = {"HOME": str(fake_home), "PATH": _BASE_PATH}
+    r = _run(child_probe, env, cwd)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "tools/kimi", repr(r.stdout)
     assert r.stderr == "", repr(r.stderr)
