@@ -32,6 +32,22 @@ mode=$5
 reason=$6
 duration_ms=$7
 
+# Ghost-skip unmasking (REQ-424 follow-up). Across every Kimi-delegating skill
+# (spec/proceed/wrapup/analyze) the shared resolution contract emits exactly ONE
+# sanctioned (gate=pass, mode=fallback) record: reason="api-error", meaning
+# ask-kimi was really invoked and the API rejected the call. ANY other reason in
+# that combination means the call was never attempted — a ghost-skip wearing a
+# fallback label (e.g. an agent reading docs directly and hand-writing
+# reason="manual-retrieval"). Coerce it to ghost-skip so the skip is visible in
+# the data and in check-delegation.sh counts instead of disguised as a benign
+# fallback. gate=fail fallbacks (no-binary / disabled-via-env) are legitimate
+# and untouched — this guard is scoped to gate=pass only.
+if [ "$gate" = "pass" ] && [ "$mode" = "fallback" ] && [ "$reason" != "api-error" ]; then
+    echo "emit-telemetry: unsanctioned gate=pass/mode=fallback reason='$reason' — recording as ghost-skip" >&2
+    reason="gate-passed-no-call (unmasked from fallback:$reason)"
+    mode="ghost-skip"
+fi
+
 LOG=${ADLC_TELEMETRY_LOG:-"$HOME/Library/Logs/adlc-skill-telemetry.log"}
 
 # Redaction: REQ-415 5-pattern chain, applied to every value before JSON quoting.

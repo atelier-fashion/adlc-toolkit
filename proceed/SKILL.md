@@ -321,6 +321,8 @@ esac
 
 **Delegated pre-pass (per touched repo)** — iterate over the touched repos already enumerated by the prerequisite step. The per-repo diff and changed-files list MUST be derived from THAT repo's worktree (NOT a shared / monorepo list): use `git -C <repos[<id>].worktree> diff main...HEAD` for the diff and `git -C <repos[<id>].worktree> diff main...HEAD --name-only` for the changed-files list. The validation in step 6 below references the per-repo changed-files list, not a global one.
 
+**MANDATORY — no agent discretion.** When the gate passes, invoking `ask-kimi` for the pre-pass is required for every touched repo, not optional. The *only* acceptable non-delegated outcome on the gate-pass path is per-repo: `ask-kimi` was actually invoked for that repo and exited non-zero (→ the per-repo delegation-failure fall-through, recorded as `api-error`). Producing the candidate-findings yourself by reading the repo diff directly *instead of* invoking `ask-kimi` — for ANY reason, including "small diff", "few changed files", or "faster to just review it" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+
 1. Emit ONE stderr line announcing intent BEFORE invoking Kimi (consistent with `/spec` and `/analyze`):
    ```
    /proceed Phase 5: delegating verify pre-pass to kimi (repo=<id>, <N> changed files)
@@ -371,7 +373,7 @@ esac
 - On a per-repo delegation failure already logged in step 6 above, do NOT re-emit the unavailable line — the failure line has already been written. Just dispatch reviewers for that repo without the advisory block.
 - Behavior of the 6-agent dispatch is otherwise unchanged.
 
-**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes for this Phase 5 pre-pass, before continuing to the 6-agent dispatch:
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes for this Phase 5 pre-pass, before continuing to the 6-agent dispatch. Emit telemetry ONLY by running the resolution block below verbatim — never hand-construct a telemetry line or invent a custom `reason` string; this block is the single source of truth for `mode`/`reason`:
 
 ```sh
 . .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh

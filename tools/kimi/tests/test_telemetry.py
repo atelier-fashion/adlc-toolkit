@@ -184,3 +184,53 @@ def test_check_delegation_two_skills_separate_rows(tmp_path):
     assert any(l == "alpha\t1\t0\t1\t2" for l in skill_rows), f"alpha row missing in: {skill_rows}"
     assert any(l == "beta\t0\t1\t0\t1" for l in skill_rows), f"beta row missing in: {skill_rows}"
     assert lines[-1] == "TOTAL\t1\t1\t1\t3"
+
+
+# --- Ghost-skip unmasking: a disguised (gate=pass, mode=fallback) record ---
+
+
+def test_emit_unmasks_disguised_fallback_as_ghost_skip(tmp_path):
+    """A hand-written gate=pass/fallback with a non-api-error reason is a
+    skipped call wearing a fallback label — coerce it to ghost-skip so the
+    skip is visible in the data and in check-delegation.sh counts."""
+    env = _env_with_log(tmp_path)
+    log_path = Path(env["ADLC_TELEMETRY_LOG"])
+    r = _run(
+        [EMIT, "spec", "Step-1.6", "REQ-441", "pass", "fallback", "manual-retrieval", "0"],
+        env=env,
+    )
+    obj = json.loads(log_path.read_text().splitlines()[0])
+    assert obj["mode"] == "ghost-skip"
+    # Original claimed reason is preserved as a forensic breadcrumb.
+    assert "manual-retrieval" in obj["reason"]
+    assert "unmasked from fallback" in obj["reason"]
+    # Runtime warning is emitted so the skip is visible immediately, not just in the log.
+    assert "recording as ghost-skip" in r.stderr
+
+
+def test_emit_preserves_legit_api_error_fallback(tmp_path):
+    """reason=api-error is the ONE sanctioned gate=pass fallback (ask-kimi was
+    really invoked and the API rejected it) — it must NOT be coerced."""
+    env = _env_with_log(tmp_path)
+    log_path = Path(env["ADLC_TELEMETRY_LOG"])
+    _run(
+        [EMIT, "spec", "Step-1.6", "REQ-9", "pass", "fallback", "api-error", "0"],
+        env=env,
+    )
+    obj = json.loads(log_path.read_text().splitlines()[0])
+    assert obj["mode"] == "fallback"
+    assert obj["reason"] == "api-error"
+
+
+def test_emit_preserves_gate_fail_fallback(tmp_path):
+    """gate=fail fallbacks (no-binary / disabled-via-env) are legitimate; the
+    guard is scoped to gate=pass and must leave these untouched."""
+    env = _env_with_log(tmp_path)
+    log_path = Path(env["ADLC_TELEMETRY_LOG"])
+    _run(
+        [EMIT, "wrapup", "Step-4", "REQ-9", "fail", "fallback", "no-binary", "0"],
+        env=env,
+    )
+    obj = json.loads(log_path.read_text().splitlines()[0])
+    assert obj["mode"] == "fallback"
+    assert obj["reason"] == "no-binary"

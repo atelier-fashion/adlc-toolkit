@@ -142,6 +142,8 @@ esac
 
 **Delegated drafting** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):
 
+**MANDATORY — no agent discretion.** When the gate passes, invoking `ask-kimi` to draft the lessons is required, not optional. The *only* acceptable non-delegated outcome on the gate-pass path is: `ask-kimi` was actually invoked and exited non-zero (→ `api-error` fallback). Drafting the lessons-learned yourself from the transcript *instead of* calling `ask-kimi` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+
 1. Locate the Claude Code session JSONL whose recent content mentions the active REQ — **content-anchored discovery** (REQ-423). The prior heuristic ("newest JSONL under the repo-root-encoded path") silently picked the wrong transcript when a session was opened at a parent directory and later navigated into the repo. The fix walks the encoded-path tree from the repo root up to (and including) `$HOME`, collects candidate JSONLs at each level, and picks the one whose last 200 lines contain a word-boundary match for the active REQ id. Falls back to newest overall (with a stderr warning) if no candidate mentions the active REQ; falls through to direct drafting if no candidates exist at all. Emits exactly one stderr line per invocation stating which JSONL was chosen and why.
    ```bash
    ROOT=$(git rev-parse --show-toplevel 2>/dev/null | sed 's|/\.worktrees/.*$||')
@@ -293,7 +295,7 @@ esac
 - **Legacy files**: older projects may still have date-prefixed or bare-numeric lessons from before this convention was locked. Do not rename them in a wrapup PR — migration is a separate, dedicated operation. When scanning for the next ID, only count files matching `LESSON-*.md`; treat the legacy files as read-only history.
 - Include `domain`, `component`, and `tags` so that `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance. The `component` field should be more specific than `domain` (e.g., `domain: API`, `component: API/auth` or `domain: iOS`, `component: iOS/SwiftUI`)
 
-**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback drafting path completes, before continuing to Convention Updates:
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback drafting path completes, before continuing to Convention Updates. Emit telemetry ONLY by running the resolution block below verbatim — never hand-construct a telemetry line or invent a custom `reason` string; this block is the single source of truth for `mode`/`reason`:
 
 ```sh
 . .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh

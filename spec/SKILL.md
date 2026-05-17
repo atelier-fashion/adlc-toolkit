@@ -129,6 +129,8 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 
    **Delegated body-read** (gate passes — `ask-kimi` is on PATH and `ADLC_DISABLE_KIMI` is not `1`):
 
+   **MANDATORY — no agent discretion.** When the gate passes, invoking `ask-kimi` here is required, not optional. The *only* acceptable non-delegated outcome on the gate-pass path is: `ask-kimi` was actually invoked and exited non-zero (→ `api-error` fallback). Reading the retrieved doc bodies directly with the Read tool *instead of* calling `ask-kimi` — for ANY reason, including "few docs", "short docs", "faster to just read them", or "manual retrieval" — is a Step-1.6 compliance violation, NOT a fallback. Small N is not an exemption: delegate the body-read of whatever N≤15 docs survived filtering, even when N is 1. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+
    1. Collect the top-15 paths from sub-steps 4–6 (already in-orchestrator from the frontmatter pass).
    2. Emit `/spec: delegating bulk retrieval read to kimi (<N> docs)` to stderr (where `<N>` is the actual number, ≤15).
    3. Delegate the body-read to Kimi. Set `ASK_KIMI_INVOKED=1` immediately before the call (REQ-424 telemetry), and clear the skill-flag immediately after the call exits (whether success or failure) so the flag's deletion represents "ask-kimi was invoked":
@@ -160,7 +162,7 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    - Emit `/spec: ask-kimi unavailable — Claude reading docs directly` to stderr (or `/spec: ask-kimi disabled via ADLC_DISABLE_KIMI — Claude reading docs directly` when the gate failed specifically because `ADLC_DISABLE_KIMI=1`). Skip this emit when arriving here from a delegation-failure fall-through above — those branches emit their own combined single line (BR-4: one line per invocation).
    - **Read the full body of each top-15 doc into context** directly with Read.
 
-   **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes (whichever ran), before continuing to sub-step 8:
+   **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes (whichever ran), before continuing to sub-step 8. Emit telemetry ONLY by running the resolution block below verbatim — never hand-construct a telemetry line or invent a custom `reason` string; this block is the single source of truth for `mode`/`reason`:
 
    ```sh
    . .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
