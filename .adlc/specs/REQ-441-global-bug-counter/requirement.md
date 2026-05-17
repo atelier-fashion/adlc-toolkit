@@ -1,7 +1,7 @@
 ---
 id: REQ-441
 title: "Global cross-repo BUG-ID counter (mirror the global REQ counter)"
-status: approved
+status: complete
 deployable: true
 created: 2026-05-17
 updated: 2026-05-17
