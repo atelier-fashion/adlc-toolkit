@@ -419,6 +419,22 @@ def check_cross_fence_fn(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def _safe_label(skill_path: Path, root: Path) -> str:
+    """Non-leaking finding label for ``skill_path``.
+
+    Findings are printed to stdout and land in CI logs, so the label must
+    never be an absolute filesystem path (BUG-054; REQ-435 verify Low #1/#2).
+    Root-relative when ``skill_path`` is under ``root``; basename fallback
+    otherwise. ``Path.relative_to`` is pure path arithmetic and raises only
+    ``ValueError`` (never ``OSError``), so the narrow except is exact. Applied
+    at *every* leak point in ``run()``, not just the main one (LESSON-007).
+    """
+    try:
+        return str(skill_path.relative_to(root))
+    except ValueError:
+        return skill_path.name
+
+
 def run(root: Path) -> list[Finding]:
     sentinels = load_sentinels(SENTINELS_FILE)
     # REQ-436 ADR-4: read the sourced telemetry partials ONCE per run (never
@@ -427,17 +443,21 @@ def run(root: Path) -> list[Finding]:
     partials_blob = load_partials_blob(root)
     findings: list[Finding] = []
     for skill_path in find_skill_files(root):
+        # Compute the non-leaking label BEFORE the read so the io-error
+        # branch can use it too (BUG-054 — was `str(skill_path)`).
+        rel = _safe_label(skill_path, root)
         try:
             text = skill_path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
+            # `str(exc)` is `[Errno N] <strerror>: '<abs path>'` and leaks the
+            # path; `exc.strerror` is the path-free POSIX reason. strerror is
+            # None only for a hand-constructed OSError (cannot arise from
+            # read_text), so the fallback is a constant — never `exc`.
             findings.append(
-                Finding(str(skill_path), 1, "io-error", f"could not read: {exc}")
+                Finding(rel, 1, "io-error",
+                        f"could not read: {exc.strerror or 'I/O error'}")
             )
             continue
-        try:
-            rel = str(skill_path.relative_to(root))
-        except ValueError:
-            rel = str(skill_path)
         findings.extend(check_sentinels(text, sentinels, rel))
         findings.extend(check_balance(text, rel))
         findings.extend(check_canonical(text, rel, partials_blob))

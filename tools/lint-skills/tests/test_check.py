@@ -6,6 +6,7 @@ importing internals.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -414,3 +415,39 @@ def test_descendant_worktrees_still_skipped(tmp_path):
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "", result.stdout
+
+
+def test_io_error_finding_does_not_leak_absolute_path(tmp_path):
+    """BUG-054 / REQ-435 verify Low #1: an unreadable SKILL.md must produce an
+    `io-error` finding whose label is root-relative and whose message is the
+    path-free POSIX reason. The absolute filesystem path must NOT appear
+    anywhere in stdout — findings are printed and land in CI logs. Pre-fix the
+    branch emitted `Finding(str(skill_path), 1, "io-error", f"...{exc}")`,
+    leaking the absolute path twice: once as the label and once via
+    `str(OSError)` = `[Errno N] <reason>: '<abs path>'`. LESSON-007: the
+    assertion is made at the leak point itself, not a proxy.
+    """
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("running as root: chmod 0 does not block read; cannot force OSError")
+    sub = tmp_path / "unreadable"
+    sub.mkdir()
+    skill = sub / "SKILL.md"
+    skill.write_text("# unreadable\n")
+    skill.chmod(0)
+    try:
+        result = _run(tmp_path)
+    finally:
+        # Restore mode so pytest's tmp_path teardown removes it cleanly.
+        skill.chmod(0o644)
+    assert result.returncode > 0, result.stdout + result.stderr
+    assert "io-error" in result.stdout, result.stdout
+    # The regression assertion: no absolute path component anywhere in stdout.
+    assert str(tmp_path) not in result.stdout, result.stdout
+    assert str(sub) not in result.stdout, result.stdout
+    # `str(OSError)` embeds `[Errno N] ...: '<abs path>'`; the hardened branch
+    # uses `exc.strerror` only, so the errno-prefixed form must be absent.
+    assert "[Errno" not in result.stdout, result.stdout
+    # Positive: the finding is present under the root-relative basename label.
+    assert (
+        "unreadable/SKILL.md:1: io-error: could not read:" in result.stdout
+    ), result.stdout
