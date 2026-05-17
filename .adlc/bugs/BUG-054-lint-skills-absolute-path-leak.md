@@ -1,7 +1,7 @@
 ---
 id: BUG-054
 title: "lint-skills check.py leaks absolute filesystem paths into stdout/CI logs"
-status: open
+status: resolved
 severity: low
 created: 2026-05-16
 updated: 2026-05-16
@@ -127,3 +127,22 @@ Scope was strictly the two `run()` branches — no check logic touched
   `test_io_error_finding_does_not_leak_absolute_path` asserting an unreadable
   SKILL.md yields a root-relative `io-error` finding with no absolute path and
   no `[Errno` prefix in stdout (root-skip via `pytest.skip` when euid 0).
+
+## Deployment
+
+- Fix PR: #55, squash-merged to `origin/main` as `0378830` (2026-05-17 UTC).
+- No deploy pipeline: adlc-toolkit is symlink-install with no staging layer
+  (conventions.md), no `.adlc/config.yml`, no Cloud Run / GCP / iOS targets —
+  staging/production deploy confirmation is **n/a** for this repo.
+- Symlink-install caveat: `~/.claude/skills` serves the main checkout's
+  working tree, which sits on a stale local `main`. This fix is live on
+  `origin/main` but is **not** active on the maintainer's machine until the
+  main checkout is refreshed (`git -C <main-checkout> pull`). Not done here —
+  the main checkout holds the maintainer's unrelated uncommitted work.
+
+## Lessons
+
+- `.adlc/knowledge/lessons/LESSON-021-str-oserror-embeds-absolute-path.md` —
+  `str(OSError)` embeds the absolute filename; use `exc.strerror` (constant
+  fallback) for any log/CI-visible output. The specific mechanism behind
+  LESSON-007's "harden every leak point" discipline.
