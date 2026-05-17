@@ -1,12 +1,13 @@
 """Shared helpers for the Kimi delegation CLIs.
 
 Dependency-light by design: only ``os`` and ``sys`` from the stdlib plus ``openai``.
+``openai`` is imported lazily inside ``get_client`` / ``complete`` so that the
+pre-API guard paths (privacy notice, --dry-run, clobber check) work even when
+the SDK isn't installed.
 """
 
 import os
 import sys
-
-import openai
 
 _API_KEY_VAR = "MOONSHOT_API_KEY"
 _BASE_URL = "https://api.moonshot.ai/v1"
@@ -73,6 +74,7 @@ def get_client():
             f"{_API_KEY_VAR} is not set and was not found in ~/.zshrc, "
             f"~/.bash_profile, or ~/.bashrc — add `export {_API_KEY_VAR}=\"...\"` to one of those."
         )
+    import openai
     return openai.OpenAI(base_url=_BASE_URL, api_key=api_key)
 
 
