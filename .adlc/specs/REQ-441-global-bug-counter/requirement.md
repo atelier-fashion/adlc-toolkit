@@ -110,7 +110,14 @@ _Not applicable — local developer tooling, no auth surface._
 - [ ] `grep -rn '\.adlc/\.next-bug' --include=SKILL.md` shows no remaining
   skill treats it as an authoritative source (only deprecation mentions).
 - [ ] Implementation equals the captured WIP patch applied verbatim (the
-  pipeline applies it, does not re-derive).
+  pipeline applies it, does not re-derive), with the verify-phase parity
+  fixes (canonical inline LESSON-014/015 comments restored; bootstrap
+  `find -type f`).
+- [ ] `.adlc/context/architecture.md` "Key cross-cutting dependencies"
+  gains a line stating BUG ids now use `~/.claude/.global-next-bug` with
+  the same `mkdir`-lock + symlink pre-check as the REQ/LESSON/ASSUME
+  counters (ADR-2 defers this to Phase 8 `/wrapup` knowledge capture — this
+  AC exists so it cannot be silently dropped).
 
 ## External Dependencies
 
