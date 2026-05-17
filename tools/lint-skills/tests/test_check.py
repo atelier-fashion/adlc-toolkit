@@ -451,3 +451,65 @@ def test_io_error_finding_does_not_leak_absolute_path(tmp_path):
     assert (
         "unreadable/SKILL.md:1: io-error: could not read:" in result.stdout
     ), result.stdout
+
+
+# ---------------------------------------------------------------------------
+# REQ-435: supplementary coverage for the REQ-436 ADR-5 root-skip fix.
+# REQ-436 already made find_skill_files root-relative and added
+# test_root_under_worktrees_still_scanned / test_descendant_worktrees_still_skipped.
+# These two tests cover surfaces REQ-436 left untested: the exact `check.sh`
+# entrypoint /analyze Step 1.9 uses, and the symlink-escape guard (BR-5).
+# ---------------------------------------------------------------------------
+
+
+def test_check_sh_wrapper_nonvacuous_from_worktree_cwd(tmp_path):
+    """REQ-435: /analyze Step 1.9 invokes `tools/lint-skills/check.sh` with
+    CWD = the worktree (`.worktrees/REQ-xxx`) and NO `--root` (defaults to
+    '.'). REQ-436's regression test exercises check.py via `_run` with an
+    explicit `--root`; this exercises the *wrapper* + CWD-default path that
+    Step 1.9 actually takes, so a future regression in check.sh or the
+    `--root` default is caught. Asserts the audit is non-vacuous from a
+    worktree CWD."""
+    check_sh = REPO_ROOT / "tools" / "lint-skills" / "check.sh"
+    worktree = tmp_path / ".worktrees" / "REQ-435"
+    sub = worktree / "someskill"
+    sub.mkdir(parents=True)
+    shutil.copyfile(FIXTURES / "corrupt-sentinel.md", sub / "SKILL.md")
+    result = subprocess.run(
+        ["sh", str(check_sh)],  # no --root → defaults to "." = cwd
+        cwd=str(worktree),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode > 0, result.stdout + result.stderr
+    assert "someskill/SKILL.md" in result.stdout
+    assert "sentinel" in result.stdout
+
+
+def test_symlink_outside_root_is_excluded(tmp_path):
+    """REQ-435 BR-5: the symlink-escape defense (resolve + relative_to guard)
+    must stay in force. A SKILL.md symlinked to a target OUTSIDE the scan
+    root resolves outside the root and is dropped, while a real SKILL.md
+    inside the root is still found. Load-bearing: this fails if the
+    `resolved.relative_to(root_resolved)` guard is removed (the escaping
+    symlink would then be followed and reported). REQ-436 added no
+    symlink-escape regression test."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    shutil.copyfile(FIXTURES / "corrupt-sentinel.md", outside / "SKILL.md")
+
+    root = tmp_path / "root"
+    real = root / "realskill"
+    real.mkdir(parents=True)
+    shutil.copyfile(FIXTURES / "corrupt-sentinel.md", real / "SKILL.md")
+    sneaky = root / "sneaky"
+    sneaky.mkdir(parents=True)
+    (sneaky / "SKILL.md").symlink_to(outside / "SKILL.md")
+
+    result = _run(root)
+    # The real in-root skill is found (walker is genuinely running)...
+    assert result.returncode > 0, result.stdout + result.stderr
+    assert "realskill/SKILL.md" in result.stdout
+    # ...but the symlink escaping the scan root is excluded.
+    assert "sneaky/SKILL.md" not in result.stdout
