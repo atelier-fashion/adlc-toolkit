@@ -1,7 +1,7 @@
 ---
 id: BUG-056
 title: "Eager top-level `import openai` in tools/kimi/_common.py defeats pre-API guards"
-status: in-review
+status: resolved
 severity: high
 created: 2026-05-17
 updated: 2026-05-17
@@ -110,4 +110,12 @@ SDK — including the dev machine — so the project's normal
 
 - `tools/kimi/_common.py` — remove top-level `import openai`; add lazy
   `import openai` inside `get_client()`; docstring note on why it is lazy.
+
+## Deployment
+
+- N/A — `adlc-toolkit` is a symlink-install repo (no Cloud Run / no `gcp:`
+  config); the change is live for every session the instant PR #57 merged
+  to `main` (commit `7addc46`). No staging/prod gate applies.
+- Knowledge captured: `LESSON-022-eager-imports-bypass-pre-api-guards.md`.
+
 
