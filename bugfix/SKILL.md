@@ -31,12 +31,44 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 
 ### Phase 1: Report
 1. If given a bug description (not a BUG ID), create a bug report:
-   - Determine the next BUG ID using the atomic counter at `.adlc/.next-bug`. Read the number, use it, and immediately write the incremented value back:
+   - Determine the next BUG ID using the **global** atomic counter file `~/.claude/.global-next-bug` (shared across all repos for unique IDs, mirroring the REQ counter — see LESSON-004). Read the number, use it, and immediately write the incremented value back — using a POSIX `mkdir`-based lock to prevent concurrent collisions (works on macOS and Linux; `flock` is not available by default on macOS):
      ```bash
-     BUG_NUM=$(cat .adlc/.next-bug 2>/dev/null || echo "1")
-     echo $((BUG_NUM + 1)) > .adlc/.next-bug
+     BUG_NUM=$(
+       LOCK=~/.claude/.global-next-bug.lock.d
+       COUNTER=~/.claude/.global-next-bug
+       if [ -L "$LOCK" ]; then
+         echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
+         exit 1
+       fi
+       for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
+       # Hard-fail if we never acquired the lock (50 retries × 0.1s = ~5s budget).
+       # Without this guard, a contended lock would silently fall through to the
+       # critical section unguarded — defeating mutual exclusion (REQ-416 verify C1).
+       [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate BUG id" >&2; exit 1; }
+       # Counter read inside lock — fail hard if the file disappears mid-critical-section
+       # rather than silently treating empty-as-zero and resetting the global counter (REQ-416 verify M2).
+       NUM=$(cat "$COUNTER" 2>/dev/null) || { echo "ERROR: counter $COUNTER unreadable inside lock — aborting" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
+       [ -n "$NUM" ] || { echo "ERROR: counter $COUNTER is empty — aborting (would reset to 1)" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
+       echo $((NUM + 1)) > "$COUNTER"
+       # rmdir is guarded by the same symlink check (residual TOCTOU window between
+       # check and rmdir is accepted risk per ADR-4 — see LESSON-014).
+       if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+       echo $NUM
+     )
+     # `exit 1` inside the $(...) subshell terminates only the subshell — BUG_NUM
+     # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
+     [ -n "$BUG_NUM" ] || { echo "ERROR: failed to allocate BUG number — aborting before writing malformed bug report" >&2; exit 1; }
      ```
-     If `.adlc/.next-bug` doesn't exist, scan `.adlc/bugs/` for the highest BUG-xxx number, use the next one, and write the number after that.
+     If `~/.claude/.global-next-bug` doesn't exist, create it by scanning all `.adlc/bugs/` directories under the user's repos root for the highest `BUG-xxx` number, use the next one, and write the number after that. The scan root is `$ADLC_REPOS_ROOT` if set, otherwise the parent directory of the current repo:
+     ```bash
+     SCAN_ROOT="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel)/.." && pwd)}"
+     HIGHEST=$(find "$SCAN_ROOT" -path '*/.adlc/bugs/BUG-*' -type f 2>/dev/null \
+       | grep -oE 'BUG-[0-9]+' | sed 's/BUG-//' | sort -n | tail -1)
+     BUG_NUM=$(( ${HIGHEST:-0} + 1 ))
+     echo $((BUG_NUM + 1)) > ~/.claude/.global-next-bug
+     ```
+     If the scan finds nothing (genuinely first BUG across all repos), `HIGHEST` is empty — `BUG_NUM` defaults to 1. Bug reports are `.md` files so the scan uses `-type f`; the analogous REQ-counter scan in `/spec` uses `-type d` because REQ specs are directories (deliberate, do not "correct" to `-type d`).
+     Note: the legacy per-repo `.adlc/.next-bug` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
    - Create `.adlc/bugs/BUG-xxx-slug.md` (always in the current repo — this becomes the "primary" for the bug) using the template from `.adlc/templates/bug-template.md`
    - Fill in: description, reproduction steps (if known), expected vs actual behavior, environment
    - Set status to `open`, severity based on impact

@@ -125,9 +125,10 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 # Claude Code per-user permission overrides (team settings live in .claude/settings.json)
 .claude/settings.local.json
 
-# ADLC global REQ counter is at ~/.claude/.global-next-req (not per-project)
-# ADLC local BUG counter (per-project state, not shared)
+# ADLC counters are global (~/.claude/.global-next-req, ~/.claude/.global-next-bug) — not per-project
+# Legacy per-project counters (deprecated, no longer read/written — ignored if present)
 .adlc/.next-bug
+.adlc/.next-req
 ```
 
 ### Step 6: Copy ETHOS.md and Templates Into the Project
