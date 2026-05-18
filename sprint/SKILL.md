@@ -44,7 +44,9 @@ If no eligible REQs found, report "No eligible REQs for sprint" and stop.
 
 ### Step 2: Validate Sprint Eligibility
 
-For each REQ, verify:
+**Precondition (LESSON-036):** each pipeline-runner branches its worktree from the integration branch (`origin/<integration-branch>` — `staging` in two-branch repos, else `main`), so a spec that exists only on an unmerged PR/feature branch is invisible to the pipeline even though it's on disk locally. `git fetch origin` first, then run the eligibility checks **against `origin/<integration-branch>`** (e.g. `git ls-tree -r --name-only origin/<integration-branch> | grep REQ-xxx`), not just the local working tree. If a freshly-`/spec`'d REQ isn't on the integration branch yet, mark it ineligible with issue `spec not on <integration-branch> — land its spec PR first`.
+
+For each REQ, verify (against `origin/<integration-branch>` per the precondition above):
 1. The spec file exists at `.adlc/specs/REQ-xxx-*/requirement.md`
 2. Read the spec — confirm it has: Description, Acceptance Criteria (at least 1), and no unresolved Questions marked as blockers
 3. Context files exist (project-overview, architecture, conventions)

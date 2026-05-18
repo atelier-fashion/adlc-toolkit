@@ -183,10 +183,16 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - If tasks already exist under `.adlc/specs/REQ-xxx-*/tasks/`, read each task's `repo:` field to compute the touched set.
    - If tasks don't exist yet (fresh pipeline), assume every configured repo is potentially touched and create worktrees in all of them. Post-Phase-2, untouched repos will be marked `touched: false` and their worktrees removed.
    - The primary is always touched (even if no primary tasks — it hosts the spec and state file).
-4. Ensure main is up to date in each touched repo:
+4. **Determine the integration branch, then fetch it in each touched repo.** The base for feature branches is NOT always `main` (LESSON-036 — sprinted runners that hardcoded `main` in a staging-first repo paid a mid-pipeline rebase + PR-retarget every time). Detect the repo's branch model; **any one** signal is sufficient:
+   - `.adlc/config.yml` declares a `gcp.staging_project` (or otherwise indicates a staging-first deploy), OR
+   - a `.github/workflows/*` enforces a `verify-head-ref` / branch-protection head-ref check, OR
+   - `CLAUDE.md` describes a "two-branch" / "staging-first" / "staging → main promotion" pipeline.
+
+   If any signal is present, `<integration-branch>` is the project's integration branch (`staging` unless the project names another); otherwise `<integration-branch>` is `main`. **Always fetch before reasoning about any ref or spec presence** (never trust a stale local ref — LESSON-036):
    ```bash
-   git -C <repo-path> checkout main && git -C <repo-path> pull
+   git -C <repo-path> fetch origin
    ```
+   Do NOT `git checkout <integration-branch>` in `<repo-path>` — it may be checked out in another worktree and fail. The worktree (step 5) is created directly from `origin/<integration-branch>`. Feature branches and the Phase 6 PR base MUST use `<integration-branch>`, never a hardcoded `main`.
 4a. **Parse the declared worktree path (primary repo only)** — scan the launch prompt for the dispatch-line contract. The format is normative in `REQ-263 architecture.md` ("The dispatch-line contract" section); do not change the regex or format here without updating that document.
    - Regex: `^WORKTREE PATH \(mandatory\): (.+)$` (entire line, capture group is the absolute path).
    - If multiple lines match the regex, use the **first** match and ignore the rest. (This makes parser behavior deterministic if a future change accidentally embeds free-text content that matches.)
@@ -215,10 +221,11 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
      This is a fail-loud halt and is a **precondition error** — it does **NOT** count toward the three legitimate halt points listed in the Autonomous Execution Contract. The three-halt quota begins counting only once the pipeline is past Step 0. The same error format applies whether the colliding repo is primary or sibling.
 5. Create a worktree in each touched repo on the same branch name (skip any repo where step 4b classified the registration as a same-branch resume):
    ```bash
-   git -C <repo-path> worktree add <worktree-path> <branch-name>
+   git -C <repo-path> worktree add -b <branch-name> <worktree-path> origin/<integration-branch>
    ```
+   - The new feature branch is cut from `origin/<integration-branch>` (the ref resolved in step 4 — `staging` in two-branch repos, `main` otherwise), NOT from local `main`/`HEAD` (LESSON-036). The `-b` creates the branch; the explicit `origin/<integration-branch>` start-point makes the base deterministic regardless of what is checked out in the repo path.
    - `<worktree-path>` is the **absolute** path resolved in 4a (`<primary-worktree-path>` for primary, `<sibling-worktree-path[s]>` for each sibling) — do **NOT** substitute a relative `.worktrees/REQ-xxx` here, even though the convention happens to produce an equivalent location. The whole point of the contract is that the orchestrator-declared absolute path is honored verbatim.
-   - `<branch-name>` is `<expected-branch-ref>` from 4b with the `refs/heads/` prefix stripped — i.e., literally `feat/REQ-xxx-<slug>`. Pass the bare branch name (not the full ref) to `git worktree add`.
+   - `<branch-name>` is `<expected-branch-ref>` from 4b with the `refs/heads/` prefix stripped — i.e., literally `feat/REQ-xxx-<slug>`. Pass the bare branch name (not the full ref) to `git worktree add -b`. (On a same-branch resume, step 4b already skipped this add — the existing worktree/branch is reused as-is.)
 
    Record each repo's absolute `worktree` path and `branch` in the state file's `repos` block. The recorded path is **immutable** for the rest of the run — Phases 1–8 read it from `repos[<id>].worktree`, never re-derive from cwd.
 6. Change your working directory to the **primary repo's worktree** — orchestration (state file reads/writes, spec edits, PR coordination) happens there. Task implementation in Phase 4 will `cd` into the target repo's worktree per task.
@@ -228,7 +235,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - `.adlc/context/project-overview.md`
    - `.adlc/specs/REQ-xxx-*/requirement.md`
    - `.adlc/config.yml` (if present)
-8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
+8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, integrationBranch: <integration-branch>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. `integrationBranch` is the value resolved in step 4 — Phase 6 (PR base) and Phase 8 (merge target) MUST read it from state, never re-derive or assume `main`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
 9. When the pipeline completes (all PRs merged in Phase 8), clean up every worktree using the absolute path recorded in state — read `repos[<id>].worktree` for each touched repo and pass that value to `git worktree remove`. Do NOT use the relative `.worktrees/REQ-xxx` form here — the contract requires the recorded absolute path:
    ```bash
    git -C <repo-path> worktree remove <repos[<id>].worktree>
@@ -435,10 +442,14 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
 **Gate**: `currentPhase` must be `6`. After completion: append `6`, set `currentPhase=7`.
 
 Push each touched repo's feature branch and open one PR per repo via
-`gh pr create`. Cross-repo: create primary's PR last and back-fill sibling
-bodies with the full URL list. Mark requirement `complete` in primary
-frontmatter. Persist each PR URL to `repos[<id>].prUrl`. Report URLs
-grouped by repo in `mergeOrder` sequence.
+`gh pr create --base <integrationBranch>` — read `integrationBranch` from
+`pipeline-state.json` (set in Phase 0 step 4); do **NOT** let `gh` default the
+base to the repo's default branch (`main`). Opening against `main` in a
+two-branch repo triggers a `verify-head-ref` failure and forces a
+rebase + retarget (LESSON-036). Cross-repo: create primary's PR last and
+back-fill sibling bodies with the full URL list. Mark requirement `complete`
+in primary frontmatter. Persist each PR URL to `repos[<id>].prUrl`. Report
+URLs grouped by repo in `mergeOrder` sequence.
 
 ---
 
