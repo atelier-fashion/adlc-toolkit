@@ -102,7 +102,9 @@ Format your report's first line as: `Terminal state: <tag>` followed by the stan
 
 ## Blocker Handling
 
-If you encounter a blocker that requires human input:
+**Before declaring `blocked` for a missing/absent artifact** (spec not found, "no REQ directory", expected file absent), you MUST first `git fetch origin` and re-check against `origin/<integration-branch>` (the integration branch resolved in `/proceed` Phase 0 step 4 — `staging` in two-branch repos, else `main`). A stale local ref produces a false "no spec exists" negative (LESSON-036 — this exact false-block cost an orchestrator recovery cycle in the REQ-442/443/444 sprint). Only after a fresh fetch confirms the artifact is genuinely absent on the integration branch may you proceed to the blocked steps below.
+
+If you encounter a blocker that genuinely requires human input:
 1. Update `pipeline-state.json` with blocker details (`blockers` array)
 2. Stop gracefully
 3. Emit terminal claim `blocked`. Do NOT attempt to merge regardless of topology when blocked.
