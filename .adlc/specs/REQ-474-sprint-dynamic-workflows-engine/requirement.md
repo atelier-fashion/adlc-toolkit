@@ -1,7 +1,7 @@
 ---
 id: REQ-474
 title: "Re-platform /sprint orchestration onto Claude Code Dynamic Workflows"
-status: draft
+status: approved
 deployable: true
 created: 2026-05-29
 updated: 2026-05-29
