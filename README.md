@@ -36,6 +36,10 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 
 Stack-shaped starter configs that seed `.adlc/config.yml` for common stacks. See [`presets/`](presets/) for the current list.
 
+### Workflows
+
+Deterministic Dynamic-Workflow scripts + the JSON-Schema literals they validate agent output against. See [`workflows/`](workflows/README.md) — reached via the skills symlink and vendored into a consumer's `.adlc/workflows/` by `/init` (same two-level path resolution as `templates/` and `partials/`).
+
 ### Tools
 
 Standalone command-line utilities (not skills, installed via their own `install.sh`). See [`tools/kimi/`](tools/kimi/README.md) — Kimi K2.5 delegation CLIs (`ask-kimi`, `kimi-write`, `extract-chat`) for offloading token-heavy I/O from Claude Code sessions.
@@ -137,6 +141,7 @@ After `/init`, each code repo will have:
   specs/             # Requirement docs, architecture docs, tasks
   knowledge/         # Assumptions validated, lessons learned
   templates/         # Copies of templates (from this toolkit)
+  workflows/         # Copies of Dynamic Workflow scripts + schemas (from this toolkit)
 ```
 
 The toolkit repo contains the **process** (skills + templates). Each code repo contains the **artifacts** (specs, architecture, knowledge).

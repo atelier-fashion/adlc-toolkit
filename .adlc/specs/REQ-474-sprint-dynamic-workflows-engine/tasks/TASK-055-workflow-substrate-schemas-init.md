@@ -1,7 +1,7 @@
 ---
 id: TASK-055
 title: "Workflow substrate — schemas module + workflows/ dir + /init distribution"
-status: draft
+status: complete
 parent: REQ-474
 created: 2026-05-29
 updated: 2026-05-29
