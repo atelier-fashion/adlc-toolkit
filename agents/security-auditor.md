@@ -1,7 +1,7 @@
 ---
 name: security-auditor
 description: Audits codebase for security vulnerabilities including input validation, authentication, authorization, data exposure, and dependency issues. Use when performing a security-focused codebase audit.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

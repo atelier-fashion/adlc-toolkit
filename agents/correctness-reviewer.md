@@ -1,7 +1,7 @@
 ---
 name: correctness-reviewer
 description: Reviews code changes for logic errors, race conditions, security vulnerabilities, and edge cases. Use when performing code review focused on correctness and bug detection.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

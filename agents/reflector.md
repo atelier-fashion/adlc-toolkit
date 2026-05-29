@@ -1,7 +1,7 @@
 ---
 name: reflector
 description: Performs post-implementation self-review using a comprehensive checklist and checks lessons learned for applicable pitfalls. Use for honest self-assessment of recently implemented code before formal review.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

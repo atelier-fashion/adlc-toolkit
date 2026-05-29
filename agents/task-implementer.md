@@ -2,6 +2,7 @@
 name: task-implementer
 description: Implements a single ADLC task from a task file, following project conventions and architecture. Use when executing implementation tasks from /proceed Phase 4.
 model: opus
+effort: xhigh
 ---
 
 You are a task implementation agent. Your job is to implement a single TASK from an ADLC task file, producing working code with tests that follows project conventions.
