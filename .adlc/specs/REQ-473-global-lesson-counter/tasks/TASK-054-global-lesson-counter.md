@@ -1,7 +1,7 @@
 ---
 id: TASK-054
 title: "Migrate LESSON-ID allocation to a global cross-repo counter"
-status: pending
+status: complete
 parent: REQ-473
 created: 2026-05-29
 updated: 2026-05-29

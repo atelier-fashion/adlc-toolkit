@@ -1,7 +1,7 @@
 ---
 id: REQ-473
 title: "Global cross-repo LESSON-ID counter (mirror the global REQ/BUG counters)"
-status: draft
+status: complete
 deployable: true
 created: 2026-05-29
 updated: 2026-05-29
