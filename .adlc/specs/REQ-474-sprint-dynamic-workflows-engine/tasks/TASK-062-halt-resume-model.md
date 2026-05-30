@@ -1,10 +1,10 @@
 ---
 id: TASK-062
 title: "Halt/resume model — blocked-as-value + args.answers + resumeFromRunId"
-status: draft
+status: complete
 parent: REQ-474
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-30
 dependencies: [TASK-058, TASK-059]
 ---
 

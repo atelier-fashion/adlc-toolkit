@@ -10,6 +10,7 @@ adlc-toolkit/
 ├── agents/<agent>.md           # Specialized subagent definitions
 ├── templates/*.md              # Canonical templates (copied into consumer projects by /init)
 ├── partials/                   # Shared snippets (ethos macro, kimi gate) sourced by SKILL.md files
+├── workflows/                  # Deterministic Dynamic Workflow scripts + schemas (copied into consumer projects by /init)
 └── .adlc/                      # Minimal self-tracking for toolkit-internal REQs
     ├── context/                # This directory — project-overview, architecture, conventions
     └── specs/REQ-xxx-*/        # Requirement specs for toolkit changes
@@ -91,6 +92,16 @@ Each phase has a validation gate. Failed validation loops up to 3 times before p
 - `proceed/phases-6-8-ship.md` — Phases 6–8 (PR creation, cleanup/CI, wrapup/merge)
 
 The companion marker is documentation-only — Claude Code does not auto-load referenced files. SKILL.md's inline summary is sufficient to execute each extracted phase; the companion holds the full step list for maintainers and for in-depth reference. Phase 5 is intentionally not extracted (ADR-3 of REQ-416) because the Kimi pre-pass gate-handoff is load-bearing.
+
+## Workflow engine
+
+Some orchestration is too dispatch-heavy for a single subagent (a subagent cannot nest further subagents). For those cases the toolkit ships **deterministic Dynamic Workflow scripts** under `workflows/` — a JS orchestration script plus the JSON-Schema literals it validates agent output against. Scripts are reached via the skills symlink (`~/.claude/skills/workflows/<name>.workflow.js`) and `/init` vendors them into a consumer's `.adlc/workflows/` alongside `templates/` and `partials/`. A skill resolves a script with the same **two-level fallback** used everywhere else — consumer copy first (`.adlc/workflows/<name>.workflow.js`), toolkit-symlink copy as fallback (`~/.claude/skills/workflows/<name>.workflow.js`) — so it works whether or not `/init` has run.
+
+**Agents are leaves; the script is the orchestrator.** The Workflow primitive has no shell or filesystem of its own, so every git/gh/file/state operation runs *inside* an `agent()` call; the script owns only control flow (sequence, fan-out, loops, merge ordering). This is the model that dissolves the "a subagent can't dispatch subagents" constraint: the script dispatches the leaves and parallelizes the read/report phases that pay for fan-out while serializing the single writer.
+
+**`/sprint` is a two-engine dispatcher.** It selects the **workflow** engine only when the `Workflow` tool is actually invocable in the session **and** the run opts in (`--workflow`, or once the engine graduates to default); otherwise it uses the **legacy** background-runner engine with no behavior change. Dynamic Workflows is a research-preview, plan-gated capability that can be absent (headless/cron runs, non-qualifying plans), so the legacy engine is an always-available, unchanged fallback — the dispatcher degrades to it (with an explicit notice) rather than failing when the workflow engine is requested but unavailable.
+
+**State has two layers.** The durable `pipeline-state.json` remains the cross-tool artifact that `/status` and the legacy engine read and that survives across sessions; the workflow **journal** is the in-run cache that powers `resumeFromRunId` (answer-a-halt-and-relaunch) within a single workflow run. They serve different layers and neither replaces the other — keeping `pipeline-state.json` is what lets `/status` and the legacy path keep working unchanged.
 
 ## Knowledge retrieval (current and evolving)
 

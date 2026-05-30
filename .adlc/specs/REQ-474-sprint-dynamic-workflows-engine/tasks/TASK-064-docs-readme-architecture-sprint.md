@@ -1,10 +1,10 @@
 ---
 id: TASK-064
 title: "Docs — README catalog + context/architecture.md + sprint NOT-DOES"
-status: draft
+status: complete
 parent: REQ-474
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-30
 dependencies: [TASK-061]
 ---
 

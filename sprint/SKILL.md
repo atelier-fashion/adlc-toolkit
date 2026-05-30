@@ -1,7 +1,7 @@
 ---
 name: sprint
 description: Parallel pipeline orchestrator — launch multiple /proceed sessions concurrently across REQs, monitor progress, and report status. Use when the user says "sprint", "run these REQs in parallel", "proceed with all approved REQs", "launch a sprint", or wants to advance multiple requirements simultaneously.
-argument-hint: REQ IDs to sprint (e.g., "REQ-091 REQ-092 REQ-093") or "all" for all approved specs
+argument-hint: REQ IDs to sprint (e.g., "REQ-091 REQ-092 REQ-093") or "all"; add --workflow to run on the Dynamic Workflows engine
 ---
 
 # /sprint — Parallel Pipeline Orchestrator
@@ -31,6 +31,65 @@ Before proceeding, verify:
 3. `.adlc/context/conventions.md` exists — run `/init` if missing
 
 ## Instructions
+
+### Step 0: Select the Sprint Engine
+
+`/sprint` has two engines behind one command (ADR-1):
+
+- **`workflow`** — the deterministic `adlc-sprint` Dynamic Workflows script, which restores each REQ's internal fan-out (explore trio, Phase-5 review panel) *while* keeping cross-REQ concurrency.
+- **`legacy`** — the background `pipeline-runner` engine documented in Steps 1–6 below. Always available; the hard fallback.
+
+**Decide which engine to run:**
+
+1. **Detect Dynamic Workflows availability**: the engine is *available* only if the `Workflow` tool is invocable in this session. Dynamic Workflows is research-preview and plan-gated, so it can be absent (headless/cron runs, non-qualifying plans). If you cannot invoke the `Workflow` tool, treat it as unavailable.
+2. **Read the `--workflow` flag** from `$ARGUMENTS`. Strip the flag token from the argument list before any REQ-ID parsing downstream, so it is never mistaken for a REQ id.
+3. **Select the engine**: choose `workflow` only when *available* **AND** (`--workflow` was passed **OR** the workflow engine has graduated to the default). Otherwise choose `legacy` — with no behavior change from today's `/sprint`.
+
+If the user passed `--workflow` but the `Workflow` tool is unavailable, say so explicitly and fall back to `legacy` rather than failing.
+
+**If the engine is `workflow`:**
+
+1. **Resolve the script path** with the standard two-level fallback (ADR-2): prefer the consumer-vendored copy, fall back to the toolkit copy.
+   - First choice: `.adlc/workflows/adlc-sprint.workflow.js` (present after the consumer ran `/init`).
+   - Fallback: `~/.claude/skills/workflows/adlc-sprint.workflow.js` (always present via the skills symlink).
+   - Use whichever path exists; if neither exists, report the missing script and fall back to `legacy`.
+2. **Invoke the `Workflow` tool** with the resolved script path and the documented args. The script itself is the orchestration engine (ADR-3) — this dispatcher is the only place the `Workflow` tool is invoked:
+   ```
+   Workflow({
+     scriptPath: <resolved path from step 1>,
+     args: {
+       reqs: <normalized REQ-id list from $ARGUMENTS, with --workflow stripped>,
+       integrationBranch: <resolved integration branch for the primary repo: "staging" in two-branch repos, else "main">,
+       answers: {}
+     }
+   })
+   ```
+   `args.reqs` is the same REQ-id list the legacy Step 1 would normalize (`REQ-xxx` form; expand `all` to every eligible spec). `args.integrationBranch` is a hint — the workflow's Phase-0 agent re-resolves it per repo against `origin/<branch>` and never hardcodes `main`. `args.answers` is `{}` on a first run.
+3. **The run returns `{results}` — one TERMINAL value per REQ.** Each result carries a `state` discriminant: `merged`, `pr-ready`, `blocked`, or `failed` (the workflow never throws on a halt — a halt is a *returned* `{state:'blocked', …}` value, so the run completes and the other REQs are unaffected). Inspect every result:
+   - **`merged` / `pr-ready` / `failed`** — report them as-is. A `failed` REQ has no user-answerable question; surface its `reason`/`detail` and move on (do not attempt a resume).
+   - **`blocked`** — this is a halt awaiting a human answer (a 3×-failed validation, a reflector `userFacing` question, or a merge conflict). Surface it to the user and **WAIT** for a reply — same "blocked → surface → re-engage" flow as the legacy engine's Step 4.6, but driven off the returned value rather than a state file. For each blocked REQ, print its `reason` and its `detail.questions` (when present) as a numbered list, e.g.:
+     ```
+     BLOCKER: REQ-091 is blocked (reflector-questions). The pipeline needs your answer before it can advance:
+       1. <detail.questions[0]>
+       2. <detail.questions[1]>
+     Reply with your guidance and I'll resume only REQ-091 from its halt.
+     ```
+     Other REQs (merged/pr-ready/failed) are already terminal — report them in the same turn so the user sees the full picture, not just the blocker.
+4. **Resume on the user's reply (`resumeFromRunId`).** When the user answers a blocked REQ, relaunch the SAME script with the prior run's id and the answer threaded through `args.answers[<REQ-id>]`:
+   ```
+   Workflow({
+     scriptPath: <same resolved path>,
+     resumeFromRunId: <the runId of the prior run>,
+     args: {
+       reqs: <same REQ-id list>,
+       integrationBranch: <same hint>,
+       answers: { '<blocked-REQ-id>': '<the user's reply>' }
+     }
+   })
+   ```
+   Keep `reqs` and `integrationBranch` identical to the prior run, and put the reply under the blocked REQ's id (answer multiple blocked REQs by adding more keys). The engine references `args.answers` **only** inside the blocked REQ's halt-prone agent prompts, so on resume only that REQ diverges from the journal cache and advances past its halt: every untouched REQ — and every already-`merged` REQ — replays from cache with **no re-executed side effects** (no recreated worktree, no re-implemented task, no double-merge). Re-inspect the returned `{results}` exactly as in step 3, repeating the surface→answer→resume loop until no REQ is `blocked`. (Steps 1–6 below do **not** apply to the workflow engine — they are the legacy engine.)
+
+**Else (the engine is `legacy`)** — run Steps 1–6 below exactly as written. This is the existing background-`pipeline-runner` orchestration, unchanged.
 
 ### Step 1: Identify Sprint REQs
 
@@ -236,3 +295,5 @@ If any check fails, mark the REQ ineligible with a specific issue in the pre-fli
 - It does not create specs — run `/spec` first for each REQ
 - It does not replace `/proceed` — it orchestrates multiple `/proceed` sessions
 - It does not originate REQs from different primary repos in a single sprint — every REQ in one `/sprint` invocation is assumed to originate from the repo the command was run in. Cross-repo REQs whose primary is a sibling must be sprinted from that sibling instead.
+- It does not require the workflow engine. Dynamic Workflows is a research-preview, plan-gated capability that can be absent (headless/cron runs, non-qualifying plans), so the workflow engine is never assumed present: `/sprint` runs the workflow engine only when the `Workflow` tool is invocable **and** the run opts in (`--workflow`, or once it graduates to default), and otherwise runs the legacy background-runner engine — the always-available, behavior-unchanged fallback. A `--workflow` request with the tool unavailable does not fail the sprint; it falls back to legacy with an explicit notice.
+- It does not make the two engines diverge in outcome. The workflow engine only changes *how* the pipeline is dispatched (restored per-REQ fan-out); it does not add, skip, or reorder pipeline phases relative to the legacy engine, and it does not gate the legacy engine behind the workflow engine.

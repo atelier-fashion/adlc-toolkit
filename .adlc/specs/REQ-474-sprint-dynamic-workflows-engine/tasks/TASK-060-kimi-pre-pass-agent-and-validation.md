@@ -1,10 +1,10 @@
 ---
 id: TASK-060
 title: "kimi-pre-pass agent + Phase-5 wiring + script-side LESSON-008 validation"
-status: draft
+status: complete
 parent: REQ-474
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-30
 dependencies: [TASK-058, TASK-056]
 ---
 
@@ -20,12 +20,12 @@ Build the **target** Kimi pre-pass: the new per-repo `kimi-pre-pass` leaf agent 
 
 ## Acceptance Criteria
 
-- [ ] The agent returns `CANDIDATES` (gate/diff/redact/ask-kimi); on gate-fail or non-zero `ask-kimi` it returns the degraded object (empty `candidates`) and never throws.
-- [ ] `validateCitations()` drops any candidate whose `path` contains `..`, is absent from `changedFiles`, or fails the `^[A-Za-z0-9_./-]+$` check; descriptions are sanitized; nothing dropped is forwarded.
-- [ ] The script asserts `candidates.length > 0 ⇒ invoked`; a violation is treated as a ghost-skip (rejected + recorded).
-- [ ] The **reflector receives no** advisory candidates; only the 5 reviewers get their per-dimension slice.
-- [ ] The agent emits unified telemetry via `emit-telemetry.sh` (`skill=kimi-pre-pass`) so `check-delegation.sh` counts it.
-- [ ] If TASK-056 found `ask-kimi` unreachable, the Phase-5 wiring is feature-flagged off (v1 skip retained) while the agent + `validateCitations` still land.
+- [x] The agent returns `CANDIDATES` (gate/diff/redact/ask-kimi); on gate-fail or non-zero `ask-kimi` it returns the degraded object (empty `candidates`) and never throws.
+- [x] `validateCitations()` drops any candidate whose `path` contains `..`, is absent from `changedFiles`, or fails the `^[A-Za-z0-9_./-]+$` check; descriptions are sanitized; nothing dropped is forwarded.
+- [x] The script asserts `candidates.length > 0 ⇒ invoked`; a violation is treated as a ghost-skip (rejected + recorded).
+- [x] The **reflector receives no** advisory candidates; only the 5 reviewers get their per-dimension slice.
+- [x] The agent emits unified telemetry via `emit-telemetry.sh` (`skill=kimi-pre-pass`) so `check-delegation.sh` counts it.
+- [x] N/A — TASK-056 (OQ-1) found `ask-kimi` REACHABLE (GO), so the Phase-5 wiring is ON (not flagged off). The agent additionally enforces the OQ-1 key-presence refinement (`[ -n "$MOONSHOT_API_KEY" ]`) and degrades gracefully (candidate-less panel) if gate/key is unavailable at runtime. The agent + `validateCitations` land regardless.
 
 ## Technical Notes
 

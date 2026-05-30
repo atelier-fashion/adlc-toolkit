@@ -59,9 +59,15 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
     task-template.md
   partials/              # Copies of ~/.claude/skills/partials/*.sh — shared shell snippets sourced by SKILL.md files
     ethos-include.sh
+  workflows/             # Copies of ~/.claude/skills/workflows/* — Dynamic Workflow scripts + schemas used by the workflow engine
+    adlc-sprint.workflow.js
+    helpers.js
+    schemas.js
+    tests/               # node:test unit tests for the pure helpers
+    README.md
 ```
 
-**Why the local copies of ETHOS.md, templates, and partials?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `~/.claude/skills/ETHOS.md`, `~/.claude/skills/templates/*.md`, and `~/.claude/skills/partials/*.sh` become unreadable by subagents and any tool that uses `Read` mid-skill. Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
+**Why the local copies of ETHOS.md, templates, partials, and workflows?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `~/.claude/skills/ETHOS.md`, `~/.claude/skills/templates/*.md`, `~/.claude/skills/partials/*.sh`, and `~/.claude/skills/workflows/*` become unreadable by subagents and any tool that uses `Read` mid-skill. Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
 
 ### Step 4: Populate Context Files
 
@@ -138,7 +144,7 @@ Copy the canonical ETHOS.md and all templates from the toolkit into the project 
 
 ```bash
 # Verify source exists
-if [ ! -f ~/.claude/skills/ETHOS.md ] || [ ! -d ~/.claude/skills/templates ] || [ ! -d ~/.claude/skills/partials ]; then
+if [ ! -f ~/.claude/skills/ETHOS.md ] || [ ! -d ~/.claude/skills/templates ] || [ ! -d ~/.claude/skills/partials ] || [ ! -d ~/.claude/skills/workflows ]; then
   echo "ERROR: Toolkit not found at ~/.claude/skills/. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
   exit 1
 fi
@@ -156,6 +162,14 @@ mkdir -p .adlc/partials
 cp ~/.claude/skills/partials/*.sh .adlc/partials/
 chmod +x .adlc/partials/*.sh
 
+# Copy workflows (overwrite — canonical is source of truth). These are the
+# Dynamic Workflow scripts + schema literals the workflow engine imports
+# (e.g., schemas.js). Resolved via the two-level fallback
+# (.adlc/workflows/... -> ~/.claude/skills/workflows/...) so the engine works
+# inside git worktrees where Read is sandboxed to the worktree root.
+mkdir -p .adlc/workflows
+cp -R ~/.claude/skills/workflows/. .adlc/workflows/
+
 # Clean up Finder-style duplicates if present. Matches:
 #   - .md files: "requirement-template 2.md"
 #   - non-.md files: "pipeline-state 2.json", ".next-bug 2"
@@ -165,7 +179,7 @@ chmod +x .adlc/partials/*.sh
 find .adlc -depth \( -name "* 2" -o -name "* 2.*" \) -exec rm -rf {} + 2>/dev/null
 ```
 
-If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, or `.adlc/partials/*.sh`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
+If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, `.adlc/partials/*.sh`, or `.adlc/workflows/*`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
 
 ### Step 7: Scaffold Retrieval Taxonomy
 

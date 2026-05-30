@@ -13,7 +13,7 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | `/architect` | Design architecture and break requirements into tasks |
 | `/validate` | Validate any ADLC phase output before advancing |
 | `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup |
-| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs |
+| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback |
 | `/reflect` | Post-implementation self-review before formal review |
 | `/review` | Multi-agent code review (correctness, quality, architecture, tests, security) |
 | `/canary` | Canary deployment with smoke tests — deploy zero-traffic revision and promote on success |
@@ -35,6 +35,10 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 ### Presets
 
 Stack-shaped starter configs that seed `.adlc/config.yml` for common stacks. See [`presets/`](presets/) for the current list.
+
+### Workflows
+
+Deterministic Dynamic-Workflow scripts + the JSON-Schema literals they validate agent output against. See [`workflows/`](workflows/README.md) — reached via the skills symlink and vendored into a consumer's `.adlc/workflows/` by `/init` (same two-level path resolution as `templates/` and `partials/`).
 
 ### Tools
 
@@ -137,6 +141,7 @@ After `/init`, each code repo will have:
   specs/             # Requirement docs, architecture docs, tasks
   knowledge/         # Assumptions validated, lessons learned
   templates/         # Copies of templates (from this toolkit)
+  workflows/         # Copies of Dynamic Workflow scripts + schemas (from this toolkit)
 ```
 
 The toolkit repo contains the **process** (skills + templates). Each code repo contains the **artifacts** (specs, architecture, knowledge).
