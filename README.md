@@ -13,7 +13,7 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | `/architect` | Design architecture and break requirements into tasks |
 | `/validate` | Validate any ADLC phase output before advancing |
 | `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup |
-| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs |
+| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback |
 | `/reflect` | Post-implementation self-review before formal review |
 | `/review` | Multi-agent code review (correctness, quality, architecture, tests, security) |
 | `/canary` | Canary deployment with smoke tests — deploy zero-traffic revision and promote on success |

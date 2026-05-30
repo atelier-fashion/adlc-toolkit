@@ -57,8 +57,8 @@ The state file remains the durable artifact (`/status`, the legacy engine, cross
 **ADR-10 — Testing: pure helpers get unit tests; orchestration is dogfooded.**
 The deterministic helpers (`validateCitations`, `dedupeAndRank`, eligibility scoring, `args.answers` cache-key behavior) are pure functions and get unit tests under `workflows/tests/`. Because the toolkit has no JS runner today, introduce a minimal harness (Node's built-in `node:test`, invoked from a pytest-style wrapper to match `tools/*/tests` conventions, or a standalone `node --test`). The orchestration itself is dogfooded via `/sprint --workflow` on a synthetic REQ; the `kimi-pre-pass` shell reuses already-tested partials. *Rationale:* honors "tests are dogfooding" for the agentic parts while giving the security-critical validation real unit coverage (LESSON-008 is load-bearing). *Alternative rejected:* no tests / pure dogfooding — citation validation is exactly the code that must not regress.
 
-**ADR-11 — Resolve OQ-1 with a spike before wiring the pre-pass.**
-A standalone spike (TASK-056) dispatches a trivial workflow leaf agent that runs `command -v ask-kimi` + checks `MOONSHOT_API_KEY` and reports back. If reachable, the pre-pass integration (TASK-060) proceeds; if not, BR-9 stays deferred (v1 ships skip-only) while the agent def + JS validation still land (usable when the platform allows). *Rationale:* the `pipeline-runner` prose asserts subagents can't reach the env, but a live main-session check contradicts it (LESSON-011 launchctl inheritance) — so test, don't assume. (OQ-1)
+**ADR-11 — Resolve OQ-1 with a spike before wiring the pre-pass. → RESOLVED: REACHABLE / GO.**
+A standalone spike (TASK-056) dispatches a trivial workflow leaf agent that runs `command -v ask-kimi` + checks `MOONSHOT_API_KEY` and reports back. If reachable, the pre-pass integration (TASK-060) proceeds; if not, BR-9 stays deferred (v1 ships skip-only) while the agent def + JS validation still land (usable when the platform allows). *Rationale:* the `pipeline-runner` prose asserts subagents can't reach the env, but a live main-session check contradicts it (LESSON-011 launchctl inheritance) — so test, don't assume. (OQ-1) **Outcome (see `oq1-spike-result.md`): REACHABLE — `ask-kimi` on `PATH`, `MOONSHOT_API_KEY` present, gate `rc=0`. GO: BR-9 is in scope; the pre-pass is wired in TASK-060 behind the flag, with an explicit `[ -n "$MOONSHOT_API_KEY" ]` leaf-boundary check + graceful skip to harden against any future leaf-spawn env divergence.**
 
 **ADR-12 — Cross-REQ merge ordering via a post-pipeline barrier keyed on shared repos.**
 Single-repo REQs self-merge in Phase 8 (no coordination). Cross-repo REQs stop at `pr-ready`; the script then walks each REQ's `mergeOrder`. When concurrent REQs touch a shared sibling repo, a small merge barrier serializes those REQs' merges (others stay parallel). *Rationale:* mirrors the legacy orchestrator's per-`mergeOrder` sequencing without forcing a global barrier. (OQ-3 resolution; OQ-4 concurrency stays on the built-in cap + `budget.total` + max-5 per BR-12)
@@ -78,7 +78,7 @@ Single-repo REQs self-merge in Phase 8 (no coordination). Cross-repo REQs stop a
 - LESSON-013/014/015/019/020 — POSIX/lock/shell-state/guard-rot → applied in TASK technical notes (the `kimi-pre-pass` shell + any `sprint/SKILL.md` fences)
 
 ## Open questions
-- **OQ-1** (leaf-agent `ask-kimi` reachability) — resolved by TASK-056 spike (ADR-11); gates TASK-060.
+- **OQ-1** (leaf-agent `ask-kimi` reachability) — **resolved REACHABLE / GO** by the TASK-056 spike (ADR-11, `oq1-spike-result.md`): the pre-pass is in scope and wired in TASK-060 (no longer skip-only).
 - **OQ-2** (single state source) — deferred; ADR-9 keeps both for now.
 - **OQ-3** (cross-REQ merge ordering) — resolved by ADR-12.
 - **OQ-4** (concurrency ceiling) — resolved: built-in cap + `budget.total` + max-5 (BR-12).
