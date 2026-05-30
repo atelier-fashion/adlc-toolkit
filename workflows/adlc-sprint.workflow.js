@@ -29,7 +29,10 @@
 // as an exception. The discriminant field is `state` (the TERMINAL schema's
 // name — schemas are the contract, ADR-7), NOT `terminal`. See `blocked()`.
 
-const { REPOS, VERDICT, TASKS, FINDINGS, CANDIDATES, PRS, TERMINAL } = require('./schemas.js');
+// TERMINAL is NOT imported: the script never validates against it directly — its
+// shape is produced by `blocked()`/`failed()` (helpers.js) and the Phase-8
+// merged/pr-ready returns. Importing it unused was dead. (REQ-474)
+const { REPOS, VERDICT, TASKS, FINDINGS, CANDIDATES, PRS } = require('./schemas.js');
 
 // The PURE, deterministic helpers live in a sibling CommonJS module so they can
 // be unit-tested with `node:test` (this workflow script only runs inside the
@@ -163,6 +166,20 @@ const PR_VERIFY_SCHEMA = {
         },
       },
     },
+  },
+};
+
+// COMPLETED_TASKS_SCHEMA — the Phase-4 resume-idempotency read. A read-only IO
+// leaf returns pipeline-state.json.phase4.completedTasks so `implement` can SKIP
+// tasks already finished+committed on a prior run, rather than re-committing them.
+// Declared here (above the top-level await) for the same TDZ reason as the schemas
+// above. LOCAL to the engine's control flow; pure literal; additionalProperties:false.
+const COMPLETED_TASKS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['completedTasks'],
+  properties: {
+    completedTasks: { type: 'array', items: { type: 'string' } },
   },
 };
 
@@ -362,9 +379,9 @@ async function runReq(id) {
   await implement(id, P, worktree, tasks);           // Phase 4 — serial writer
   const verifyResult = await verify(id, P, worktree, repos, ans); // Phase 5 — panel
   if (verifyResult !== true) return verifyResult;    // reflector-question halt
-  const PR_STATE = await openPRs(id, P, worktree, repos); // Phase 6 — open PR(s)
-  await cleanupAndWatchCI(id, P, worktree, PR_STATE);     // Phase 7 — sanity + CI
-  const term = await wrapupAndMerge(id, P, worktree, repos, PR_STATE); // Phase 8
+  const PR_STATE = await openPRs(id, P, repos);       // Phase 6 — open PR(s)
+  await cleanupAndWatchCI(id, P, PR_STATE);           // Phase 7 — sanity + CI
+  const term = await wrapupAndMerge(id, P, repos, PR_STATE); // Phase 8
 
   return term; // a TERMINAL value (merged | pr-ready | blocked | failed)
 }
@@ -585,6 +602,21 @@ function phase4StatePrompt(id, worktree, task) {
   ].join('\n');
 }
 
+// completedTasksPrompt — the Phase-4 resume-idempotency READ. A read-only IO leaf
+// reports pipeline-state.json.phase4.completedTasks so `implement` can skip the
+// tasks already finished+committed on a prior run. Returns [] when the file or the
+// phase4 object is absent (a fresh run), so a first run skips nothing. (AC-7)
+function completedTasksPrompt(id, worktree) {
+  return [
+    `Phase 4 resume check for ${id} in worktree ${worktree}: report which tasks`,
+    'are already done so the engine does not re-commit them. Read',
+    'pipeline-state.json.phase4.completedTasks and return its array of task ids',
+    'VERBATIM. If the file, the phase4 object, or the completedTasks array is',
+    'absent (a fresh run), return an empty array. This is a READ-ONLY check — do',
+    'NOT modify code, state, or run tests.',
+  ].join('\n');
+}
+
 // --- Phase 5 prompt builders (review panel + consolidation) -----------------
 
 function manifestPrompt(id, repos) {
@@ -767,7 +799,7 @@ function cleanupAndWatchCIPrompt(id, prs) {
 function mergePrompt(id, repo, pr) {
   return [
     `Phase 8 merge for ${id}: this is a SINGLE-REPO REQ, so YOU own the merge.`,
-    `Merge PR ${pr.url} (repo ${repo.repo}) into origin/${repo.integrationBranch || 'main'}.`,
+    `Merge PR ${pr.url} (repo ${repo.repo}) into origin/${repo.integrationBranch || '<integrationBranch-unresolved>'}.`,
     '',
     'Steps:',
     '  1. Confirm the PR is OPEN and MERGEABLE with CI green',
@@ -829,7 +861,29 @@ async function implement(id, P, worktree, tasks) {
   // script owns ordering; the agents own the writes. (ADR-3, ADR-5)
   const ordered = orderByTier(tasks);
 
+  // RESUME IDEMPOTENCY (AC-7): read the already-completed task ids from
+  // pipeline-state.json.phase4.completedTasks via a read-only IO leaf, so a
+  // resumed run SKIPS tasks it already finished+committed instead of re-running
+  // (and re-committing) them. The journal cache replays byte-identical calls, but
+  // it cannot un-commit a task whose implementer already ran on a prior session;
+  // this state read is the authoritative skip signal. Returns [] on a fresh run,
+  // so a first run skips nothing and is byte-identical (cache replays). The script
+  // has no fs — the read is an agent leaf. (ADR-3)
+  const done = await agent(completedTasksPrompt(id, worktree), {
+    ...P,
+    label: `${id} phase4-completed-read`,
+    schema: COMPLETED_TASKS_SCHEMA,
+    // Default subagent (no agentType) — a generic read-only state IO worker.
+  });
+  const completed = new Set((done && done.completedTasks) || []);
+
   for (const task of ordered) {
+    // Skip a task already recorded complete on a prior run — never re-commit it.
+    if (completed.has(task.id)) {
+      log(`${id} Phase 4: skipping ${task.id} (already in phase4.completedTasks).`);
+      continue;
+    }
+
     // ONE writer: await each task-implementer before dispatching the next. Using
     // a serial for-loop (NOT parallel()) is what prevents git-index contention
     // in the shared worktree. task-implementer is the unchanged specialist.
@@ -921,6 +975,10 @@ async function verify(id, P, worktree, repos, ans) {
   for (const r of repos) {
     const repoWt = r.worktree || worktree;
     const byDim = advisoryByRepo[r.repo] || {};
+    // parallel([]) is unspecified by the runtime contract and a throw would escape
+    // verify() (a throw is NOT a halt — ADR-6); guard the empty panel defensively.
+    // PANEL is a fixed 6-member literal today, so this is belt-and-suspenders.
+    if (PANEL.length === 0) { findingsByRepo[r.repo] = []; continue; }
     const panelFindings = (
       await parallel(
         PANEL.map((m) => () =>
@@ -950,7 +1008,14 @@ async function verify(id, P, worktree, repos, ans) {
   // /fix so a first run never silently fixes past an open question. (BR-4 halt #2,
   // BR-5 resume, System Model event halt:reflector-question)
   const questions = reflectorQuestions(findingsByRepo);
-  if (questions.length > 0 && !ans) {
+  // Whether THIS pass surfaced a reflector userFacing question. On resume the halt
+  // above is skipped, but the user's reply must still REACH the artifact: a typical
+  // reflector question is `mustFix:false` ⇒ `blocks:false`, so the blocks-driven fix
+  // path below would never fire and the human's answer would be silently discarded.
+  // Capture the flag here so the resume path can dispatch a guidance-carrying apply
+  // agent EVEN WHEN nothing blocks. (BR-5 resume, halt:reflector-question)
+  const hadReflectorQ = questions.length > 0;
+  if (hadReflectorQ && !ans) {
     return blocked(id, 'reflector-questions', { questions });
   }
 
@@ -958,12 +1023,27 @@ async function verify(id, P, worktree, repos, ans) {
   // by severity, and decide whether merge is blocked (any Critical or mustFix).
   let consolidated = dedupeAndRank(findingsByRepo);
 
-  if (consolidated.blocks) {
+  // Did the resumed user actually answer a reflector question this pass? If so the
+  // answer MUST change the artifact even when consolidation does not block (the
+  // common case: a `mustFix:false` reflector question). This is the Critical
+  // resume-answer-propagation fix: without it `ans` is consumed only by the
+  // blocks-gated fix below and a non-blocking reflector reply is lost, letting the
+  // REQ proceed as if the human had been heeded. (BR-5)
+  const applyResumeAnswer = Boolean(ans) && hadReflectorQ;
+
+  if (consolidated.blocks || applyResumeAnswer) {
     // Dispatch ONE serial fix pass in the shared worktree (one writer, ADR-5)
     // addressing the blocking findings, then conditionally RE-VERIFY only the
     // (repo,dimension) pairs that had fixes — and only the 5 REVIEWERS, never
     // the reflector (a reflector re-run could only surface a NEW question, which
     // is out of this ≤1 re-verify loop's contract). Bounded to ONE loop. (AC-5)
+    //
+    // TWO triggers reach this block: (a) `consolidated.blocks` — a Critical/mustFix
+    // finding that must be fixed; (b) `applyResumeAnswer` — the user answered a
+    // reflector question on resume and that answer must change the artifact even if
+    // nothing blocks. In case (b) `consolidated.blocking` is empty, so the fix agent
+    // applies the GUIDANCE alone and `fixedPairs([])` is `{}` (the re-verify loop is
+    // a no-op) — the human's reply still lands in the worktree. (BR-5)
     //
     // On resume the user's guidance is appended to the fix prompt (the halt-prone
     // Phase-5 site), so the answer to the reflector question — or to whatever the
@@ -987,6 +1067,9 @@ async function verify(id, P, worktree, repos, ans) {
       const dims = pairs[repoId]; // reviewer dimensions only
       const byDim = advisoryByRepo[repoId] || {};
       const members = PANEL.filter((m) => m.dimension !== 'reflector' && dims.includes(m.dimension));
+      // parallel([]) is unspecified by the runtime contract and a throw here would
+      // escape verify() (a throw is NOT a halt — ADR-6); guard the empty fan-out.
+      if (members.length === 0) { reverified[repoId] = []; continue; }
       const re = (
         await parallel(
           members.map((m) => () =>
@@ -1052,7 +1135,7 @@ async function runPrePass(id, P, worktree, repos) {
   const advisoryByRepo = {};
   for (const r of repos) {
     const repoWt = r.worktree || worktree;
-    const base = `origin/${r.integrationBranch || 'main'}`;
+    const base = `origin/${r.integrationBranch || '<integrationBranch-unresolved>'}`;
     // The pre-pass leaf returns CANDIDATES (schema-validated). It never throws;
     // a parallel/agent drop yields null, which we treat as "no candidates".
     const CAND = await agent(prePassPrompt(id, r.repo, repoWt, base), {
@@ -1095,7 +1178,7 @@ async function runPrePass(id, P, worktree, repos) {
 // pushes each touched repo's branch and opens its PR against
 // origin/<integrationBranch> (never a hardcoded main — BUG-060). Returns the PRS
 // schema object the later phases re-verify. (ADR-3, ADR-7, BR-2)
-async function openPRs(id, P, worktree, repos) {
+async function openPRs(id, P, repos) {
   const PR_STATE = await agent(openPRsPrompt(id, repos), {
     ...P,
     label: `${id} phase6-open-prs`,
@@ -1110,7 +1193,7 @@ async function openPRs(id, P, worktree, repos) {
 // sanity check and BLOCKS until `gh pr checks` is green for every PR. Phase 5
 // already gated correctness; this is purely the operational CI wait, so no
 // reviewer/specialist agent is involved. (ADR-3)
-async function cleanupAndWatchCI(id, P, worktree, PR_STATE) {
+async function cleanupAndWatchCI(id, P, PR_STATE) {
   const prs = (PR_STATE && PR_STATE.prs) || [];
   await agent(cleanupAndWatchCIPrompt(id, prs), {
     ...P,
@@ -1135,7 +1218,7 @@ async function cleanupAndWatchCI(id, P, worktree, PR_STATE) {
 // before it is returned (claim ≠ truth, BR-6). `repos[*].merged` is written to
 // state by the merge agent immediately after each successful merge (resumable,
 // no double-merge — AC-7). Returns a value conforming to the TERMINAL schema.
-async function wrapupAndMerge(id, P, worktree, repos, PR_STATE) {
+async function wrapupAndMerge(id, P, repos, PR_STATE) {
   const prs = (PR_STATE && PR_STATE.prs) || [];
   const touched = repos || [];
 

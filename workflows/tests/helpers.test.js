@@ -35,6 +35,14 @@ const {
   groupCrossRepoReqs,
   blocked,
   failed,
+  // Previously-untested halt/merge-driving helpers (REQ-474 Phase-5 verify fixes).
+  reflectorQuestions,
+  fixedPairs,
+  mergeReverified,
+  allMerged,
+  stripVerifyMarkers,
+  sharesRepo,
+  terminalValue,
 } = helpers;
 
 // ===========================================================================
@@ -210,14 +218,39 @@ test('dedupeAndRank: dedupes within a repo on (file, normalized-title), unioning
 test('dedupeAndRank: dedupe keeps the MOST SEVERE severity and OR-s mustFix/userFacing', () => {
   const byRepo = {
     repoA: [
-      fset('correctness', [finding('Minor', 'a.js', 'Race', { mustFix: false })]),
-      fset('security', [finding('Critical', 'a.js', 'race', { mustFix: true })]),
+      fset('correctness', [finding('Minor', 'a.js', 'Race', { mustFix: false, userFacing: false })]),
+      // The second copy carries mustFix AND userFacing — both must survive the OR-merge.
+      fset('security', [finding('Critical', 'a.js', 'race', { mustFix: true, userFacing: true })]),
     ],
   };
   const out = dedupeAndRank(byRepo);
   assert.equal(out.findings.length, 1);
   assert.equal(out.findings[0].severity, 'Critical');
   assert.equal(out.findings[0].mustFix, true);
+  // Previously vacuous: the test claimed to exercise the userFacing OR-merge but
+  // never asserted it. Pin the OR result so a regression in the merge is caught.
+  assert.equal(out.findings[0].userFacing, true);
+});
+
+test('dedupeAndRank: coerces a truthy non-boolean mustFix (e.g. 1) to block (defensive)', () => {
+  // The FINDINGS schema types mustFix as boolean, but the consolidation gate is the
+  // merge-safety backstop: a non-schema-conformant `mustFix:1` must STILL block, and
+  // the survivor's mustFix must be a REAL boolean (not the raw 1). (REQ-474 defensive)
+  const out = dedupeAndRank({ r: [fset('quality', [finding('Minor', 'a.js', 'x', { mustFix: 1 })])] });
+  assert.equal(out.blocks, true, 'a truthy mustFix:1 still blocks the merge gate');
+  assert.equal(out.blocking.length, 1);
+  assert.equal(out.findings[0].mustFix, true, 'the survivor mustFix is coerced to a real boolean');
+
+  // And on a DEDUPE merge: the truthy 1 arrives on the second copy and must win.
+  const merged = dedupeAndRank({
+    r: [
+      fset('correctness', [finding('Minor', 'a.js', 'dup', { mustFix: false })]),
+      fset('security', [finding('Minor', 'a.js', 'DUP', { mustFix: 1 })]),
+    ],
+  });
+  assert.equal(merged.findings.length, 1);
+  assert.equal(merged.findings[0].mustFix, true);
+  assert.equal(merged.blocks, true);
 });
 
 test('dedupeAndRank: tags a (file,title) seen in MORE THAN ONE repo as crossRepo', () => {
@@ -411,4 +444,195 @@ test('failed: emits state="failed" — distinct from blocked, same payload norma
     reason: 'phase0-no-worktree',
     detail: { detail: 'Phase 0 returned no repo records.' },
   });
+});
+
+// terminalValue — the shared TERMINAL builder. Cover the falsy-`detail` edge: a
+// null/empty reason or detail must be OMITTED (not smuggled in as null past the
+// closed additionalProperties:false schema).
+test('terminalValue: omits null/undefined reason and detail (closed-schema safe)', () => {
+  assert.deepEqual(terminalValue('blocked', 'REQ-9'), { state: 'blocked', id: 'REQ-9' });
+  assert.deepEqual(terminalValue('blocked', 'REQ-9', null, null), { state: 'blocked', id: 'REQ-9' });
+  // An empty-string detail is NOT null, so it is wrapped as {detail:''} — present
+  // but falsy. This pins the boundary: only null/undefined are dropped.
+  assert.deepEqual(terminalValue('failed', 'REQ-9', 'r', ''), {
+    state: 'failed', id: 'REQ-9', reason: 'r', detail: { detail: '' },
+  });
+});
+
+// ===========================================================================
+// reflectorQuestions — the Phase-5 halt driver. Collects userFacing reflector
+// question titles across repos; a non-empty result is the halt. Only the
+// reflector dimension and only `userFacing:true` findings count.
+// ===========================================================================
+
+test('reflectorQuestions: collects only userFacing reflector findings across repos', () => {
+  const byRepo = {
+    repoA: [
+      fset('reflector', [
+        finding('Major', 'x.js', 'Ship v1 without dark mode?', { userFacing: true }),
+        finding('Major', 'x.js', 'internal note', { userFacing: false }), // not userFacing → ignored
+      ]),
+      fset('security', [finding('Critical', 'x.js', 'SQLi', { userFacing: true })]), // not reflector → ignored
+    ],
+    repoB: [
+      fset('reflector', [finding('Minor', 'y.js', 'Drop legacy API?', { userFacing: true })]),
+    ],
+  };
+  assert.deepEqual(reflectorQuestions(byRepo), ['Ship v1 without dark mode?', 'Drop legacy API?']);
+});
+
+test('reflectorQuestions: empty when no reflector question is userFacing', () => {
+  const byRepo = {
+    r: [
+      fset('reflector', [finding('Major', 'x.js', 'q', { userFacing: false })]),
+      fset('correctness', [finding('Critical', 'x.js', 'bug', { mustFix: true })]),
+    ],
+  };
+  assert.deepEqual(reflectorQuestions(byRepo), []);
+  assert.deepEqual(reflectorQuestions({}), []);
+});
+
+test('reflectorQuestions: falls back to detail then a placeholder when title is absent', () => {
+  const byRepo = {
+    r: [fset('reflector', [
+      { severity: 'Major', file: 'x.js', detail: 'fallback detail', mustFix: false, userFacing: true },
+      { severity: 'Major', file: 'x.js', mustFix: false, userFacing: true },
+    ])],
+  };
+  assert.deepEqual(reflectorQuestions(byRepo), ['fallback detail', '(unspecified question)']);
+});
+
+// ===========================================================================
+// The Critical resume-answer-propagation DECISION (REQ-474 verify fix). The
+// engine dispatches a guidance-carrying fix agent when `consolidated.blocks ||
+// (Boolean(ans) && hadReflectorQ)`. This pins the PURE inputs to that decision so
+// a resumed reflector-only question (blocks=false, ans set) DOES dispatch — i.e.
+// the human's reply is never silently discarded. (mirrors verify()'s gate)
+// ===========================================================================
+
+test('resume dispatch decision: a resumed reflector-only question (blocks=false) DOES dispatch a guidance agent', () => {
+  // A lone reflector userFacing question with mustFix:false ⇒ the consolidation
+  // does NOT block (the bug: the blocks-gated fix would never run, dropping `ans`).
+  const findingsByRepo = {
+    r: [fset('reflector', [finding('Major', 'x.js', 'Ship without dark mode?', { userFacing: true, mustFix: false })])],
+  };
+  const hadReflectorQ = reflectorQuestions(findingsByRepo).length > 0;
+  const consolidated = dedupeAndRank(findingsByRepo);
+  assert.equal(hadReflectorQ, true);
+  assert.equal(consolidated.blocks, false, 'a mustFix:false reflector question does NOT block consolidation');
+
+  // On resume (`ans` set) the dispatch decision MUST be true even though nothing
+  // blocks — otherwise the user's answer is lost.
+  const ans = 'Yes, ship v1 without dark mode.';
+  const applyResumeAnswer = Boolean(ans) && hadReflectorQ;
+  const willDispatch = consolidated.blocks || applyResumeAnswer;
+  assert.equal(willDispatch, true, 'resumed reflector-only answer dispatches a guidance-carrying fix agent');
+
+  // First run (no answer): no dispatch here — the engine HALTS earlier instead.
+  const firstRunDispatch = consolidated.blocks || (Boolean(undefined) && hadReflectorQ);
+  assert.equal(firstRunDispatch, false, 'first run does not fix past the open question — it halts');
+});
+
+// ===========================================================================
+// fixedPairs — the ≤1 re-verify targeting. From the blocking findings, the set of
+// REVIEWER dimensions to re-check per repo; the reflector is excluded.
+// ===========================================================================
+
+test('fixedPairs: groups reviewer dimensions per repo, excluding the reflector', () => {
+  const blocking = [
+    { repo: 'api', dimensions: ['correctness', 'security'] },
+    { repo: 'api', dimension: 'quality' },                 // single-dimension fallback
+    { repo: 'web', dimensions: ['reflector', 'architecture'] }, // reflector dropped
+  ];
+  const out = fixedPairs(blocking);
+  assert.deepEqual(out.api.sort(), ['correctness', 'quality', 'security']);
+  assert.deepEqual(out.web, ['architecture']);
+  assert.ok(!out.web.includes('reflector'));
+});
+
+test('fixedPairs: dedupes a dimension repeated across findings; empty/blank inputs yield {}', () => {
+  const out = fixedPairs([
+    { repo: 'api', dimension: 'security' },
+    { repo: 'api', dimensions: ['security', 'correctness'] },
+  ]);
+  assert.deepEqual(out.api.sort(), ['correctness', 'security']);
+  assert.deepEqual(fixedPairs([]), {});
+  assert.deepEqual(fixedPairs(null), {});
+  // A blocking finding that ONLY raised the reflector dimension contributes nothing.
+  assert.deepEqual(fixedPairs([{ repo: 'api', dimension: 'reflector' }]), {});
+});
+
+// ===========================================================================
+// mergeReverified — overlay the re-verified reviewer findings over the original
+// panel result. For a re-checked (repo,dimension) the fresh set REPLACES the
+// stale one; the reflector and untouched dimensions are preserved verbatim.
+// ===========================================================================
+
+test('mergeReverified: replaces a re-checked dimension, preserves reflector + untouched dims', () => {
+  const original = {
+    api: [
+      fset('reflector', [finding('Major', 'a.js', 'question', { userFacing: true })]),
+      fset('security', [finding('Critical', 'a.js', 'old SQLi')]),
+      fset('quality', [finding('Minor', 'a.js', 'naming')]),
+    ],
+  };
+  const reverified = {
+    api: [fset('security', [finding('Major', 'a.js', 'fixed, now only Major')])],
+  };
+  const merged = mergeReverified(original, reverified);
+  const dims = merged.api.map((f) => f.dimension).sort();
+  assert.deepEqual(dims, ['quality', 'reflector', 'security'], 'one set per dimension — security replaced, not duplicated');
+  const sec = merged.api.find((f) => f.dimension === 'security');
+  assert.equal(sec.findings[0].title, 'fixed, now only Major', 'the fresh security set replaced the stale one');
+  // The reflector set is preserved verbatim.
+  const refl = merged.api.find((f) => f.dimension === 'reflector');
+  assert.equal(refl.findings[0].userFacing, true);
+});
+
+test('mergeReverified: a repo only present in reverified is appended', () => {
+  const merged = mergeReverified(
+    { api: [fset('security', [finding('Major', 'a.js', 'x')])] },
+    { web: [fset('quality', [finding('Minor', 'b.js', 'y')])] },
+  );
+  assert.ok('api' in merged && 'web' in merged);
+  assert.equal(merged.web[0].dimension, 'quality');
+});
+
+// ===========================================================================
+// allMerged / stripVerifyMarkers — the BR-6 "claim ≠ truth" merge-state proof.
+// ===========================================================================
+
+test('allMerged: true only when EVERY verified PR row reports gh state MERGED', () => {
+  assert.equal(allMerged([{ _state: 'MERGED' }, { _state: 'MERGED' }]), true);
+  assert.equal(allMerged([{ _state: 'MERGED' }, { _state: 'OPEN' }]), false);
+  assert.equal(allMerged([{ _state: 'CLOSED' }]), false);
+  // Empty input is NOT merged — nothing was confirmed (BR-6).
+  assert.equal(allMerged([]), false);
+  assert.equal(allMerged(null), false);
+});
+
+test('stripVerifyMarkers: projects rows to the closed {repo,url[,number]} PRS shape', () => {
+  const rows = [
+    { repo: 'api', url: 'https://x/1', number: 7, _state: 'MERGED' },
+    { repo: 'web', url: 'https://x/2', _state: 'OPEN' }, // no number → number omitted
+  ];
+  const out = stripVerifyMarkers(rows);
+  assert.deepEqual(out, [
+    { repo: 'api', url: 'https://x/1', number: 7 },
+    { repo: 'web', url: 'https://x/2' },
+  ]);
+  // The internal _state marker never survives into the TERMINAL value.
+  assert.ok(out.every((r) => !('_state' in r)));
+  assert.deepEqual(stripVerifyMarkers(null), []);
+});
+
+// ===========================================================================
+// sharesRepo — the groupCrossRepoReqs primitive: true iff two repo lists intersect.
+// ===========================================================================
+
+test('sharesRepo: true iff the two touched-repo lists intersect', () => {
+  assert.equal(sharesRepo(['api', 'web'], ['ios', 'api']), true);
+  assert.equal(sharesRepo(['api'], ['web']), false);
+  assert.equal(sharesRepo([], ['api']), false);
+  assert.equal(sharesRepo(['api'], []), false);
 });

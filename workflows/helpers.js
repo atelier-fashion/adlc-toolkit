@@ -20,6 +20,12 @@
 //
 // See workflows/tests/README.md.
 
+// The 5 reviewer dimensions are defined ONCE in schemas.js (the contract source of
+// truth) and imported here, so `validateCitations` and `fixedPairs` cannot drift
+// from the CANDIDATES enum. The only `require` permitted from a helper is this
+// sibling schemas module. (REQ-474, ADR-7, ADR-10)
+const { REVIEWER_DIMENSIONS } = require('./schemas.js');
+
 // blocked — a user-answerable halt. The TERMINAL contract names the discriminant
 // `state` (NOT `terminal`); schemas are the source of truth, so the constructor
 // emits `state`. `reason` is a short top-level slug string; `detail` is the
@@ -130,15 +136,25 @@ function dedupeAndRank(findingsByRepo) {
     const rk = `${f.repo}\x00${key}`;
     const prev = byRepoKey.get(rk);
     if (!prev) {
-      byRepoKey.set(rk, { ...f, dimensions: [f.dimension] });
+      // Coerce truthy `mustFix`/`userFacing` to a REAL boolean on the survivor, so
+      // a non-schema-conformant input like `mustFix:1` still blocks merge (the gate
+      // and the merge-OR below test `=== true`, which a bare `1` would slip past).
+      // Defensive: the FINDINGS schema types these as boolean, but the consolidation
+      // gate is the merge-safety backstop and must not be fooled by a truthy non-bool.
+      byRepoKey.set(rk, {
+        ...f,
+        mustFix: Boolean(f.mustFix),
+        userFacing: Boolean(f.userFacing),
+        dimensions: [f.dimension],
+      });
       continue;
     }
     // Merge into the survivor.
     if (SEVERITY_RANK[f.severity] < SEVERITY_RANK[prev.severity]) {
       prev.severity = f.severity;
     }
-    prev.mustFix = prev.mustFix || f.mustFix === true;
-    prev.userFacing = prev.userFacing || f.userFacing === true;
+    prev.mustFix = prev.mustFix || Boolean(f.mustFix);
+    prev.userFacing = prev.userFacing || Boolean(f.userFacing);
     if (!prev.dimensions.includes(f.dimension)) prev.dimensions.push(f.dimension);
   }
   const deduped = Array.from(byRepoKey.values());
@@ -173,6 +189,10 @@ function dedupeAndRank(findingsByRepo) {
 // differences between reviewers still collapse. Pure. (dedupeAndRank helper)
 function dedupeKey(f) {
   const title = (f.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // `\x00` (NUL) is the field separator because it cannot appear in a file path or
+  // a finding title, so `file + NUL + title` is an unambiguous composite key — no
+  // path/title combination can collide with another by spanning the boundary. The
+  // NUL lives only in an in-memory Map key string, never in any file or output.
   return `${f.file || ''}\x00${title}`;
 }
 
@@ -212,7 +232,6 @@ function cmp(a, b) {
 // Math.random / fs. (runtime contract)
 // ===========================================================================
 function validateCitations(candidates, changedFiles) {
-  const REVIEWER_DIMS = ['correctness', 'quality', 'architecture', 'test-coverage', 'security'];
   const PATH_RE = /^[A-Za-z0-9_./-]+$/;
   const LINE_RE = /^\d+(-\d+)?$/;
   const changed = new Set(changedFiles || []);
@@ -224,7 +243,7 @@ function validateCitations(candidates, changedFiles) {
     if (path.indexOf('..') !== -1) continue;            // no traversal
     if (!PATH_RE.test(path)) continue;                  // charset allowlist
     if (!changed.has(path)) continue;                   // must be in the real diff
-    if (!REVIEWER_DIMS.includes(c.dimension)) continue;  // reviewers only, never reflector
+    if (!REVIEWER_DIMENSIONS.includes(c.dimension)) continue;  // reviewers only, never reflector
     const survivor = {
       dimension: c.dimension,
       path,
@@ -279,7 +298,6 @@ function reflectorQuestions(findingsByRepo) {
 // dimensions to re-check per repo. The reflector is excluded (re-verify reruns
 // only the 5 reviewers). Returns { [repo]: dimension[] }. (AC-5)
 function fixedPairs(blocking) {
-  const REVIEWER_DIMS = ['correctness', 'quality', 'architecture', 'test-coverage', 'security'];
   const out = {};
   for (const f of blocking || []) {
     // A consolidated finding records every dimension that raised it; re-check
@@ -287,7 +305,7 @@ function fixedPairs(blocking) {
     // (the unioned list) when present, else the single `dimension`.
     const dims = f.dimensions || [f.dimension];
     for (const d of dims) {
-      if (!REVIEWER_DIMS.includes(d)) continue;
+      if (!REVIEWER_DIMENSIONS.includes(d)) continue;
       if (!out[f.repo]) out[f.repo] = [];
       if (!out[f.repo].includes(d)) out[f.repo].push(d);
     }

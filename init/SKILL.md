@@ -60,7 +60,10 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
   partials/              # Copies of ~/.claude/skills/partials/*.sh — shared shell snippets sourced by SKILL.md files
     ethos-include.sh
   workflows/             # Copies of ~/.claude/skills/workflows/* — Dynamic Workflow scripts + schemas used by the workflow engine
+    adlc-sprint.workflow.js
+    helpers.js
     schemas.js
+    tests/               # node:test unit tests for the pure helpers
     README.md
 ```
 

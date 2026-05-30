@@ -217,7 +217,6 @@ const TERMINAL = {
       },
     },
     reason: { type: 'string' },
-    question: { type: 'string' },
     // Halt-specific payload. Closed shape (additionalProperties:false) with the
     // known halt sub-fields — e.g. the reflector-question halt carries
     // `questions[]`. (System Model: events halt:reflector-question / halt:*)
@@ -233,4 +232,8 @@ const TERMINAL = {
   },
 };
 
-module.exports = { REPOS, VERDICT, TASKS, FINDINGS, CANDIDATES, PRS, TERMINAL };
+// REVIEWER_DIMENSIONS is exported too: it is the SINGLE source of truth for the
+// 5 reviewer dimensions, consumed by helpers.js (validateCitations / fixedPairs)
+// so the list is defined ONCE (no drift between the schema enum and the helpers'
+// allowlists). (REQ-474, ADR-7)
+module.exports = { REPOS, VERDICT, TASKS, FINDINGS, CANDIDATES, PRS, TERMINAL, REVIEWER_DIMENSIONS };
