@@ -220,6 +220,19 @@ async function runReq(id) {
   // race across REQs. (TASK-057 AC: opts.phase = id) (ADR-3)
   const P = { phase: id };
 
+  // The user's reply to THIS REQ's prior halt, threaded in on resume via
+  // resumeFromRunId (ADR-6 / BR-5). `args.answers` is `{}` on a first run, so
+  // `ans` is undefined and every call below is byte-identical to the first run —
+  // the journal cache replays. On resume `ans` is the user's guidance string,
+  // and it is injected into ONLY the halt-prone prompts (the gate validate/fix
+  // prompts and the Phase-5 fix prompt). That surgical divergence is the whole
+  // mechanism: only this blocked REQ's halt-prone calls miss the cache, so only
+  // it advances past its halt while every other call — and every untouched /
+  // already-merged REQ — replays. Read it HERE and nowhere else; do not reference
+  // `args.answers` anywhere outside this function or the cache divergence stops
+  // being surgical. (ADR-6, BR-5, AC-3)
+  const ans = args.answers?.[id];
+
   // -------------------------------------------------------------------------
   // Phase 0 — worktree + state. ONE agent does all the git/state I/O: it
   // resolves the integration branch, creates `.worktrees/<id>` from
@@ -260,6 +273,7 @@ async function runReq(id) {
       validatePrompt: phase1ValidatePrompt(id, worktree),
       fixPrompt: phase1FixPrompt(id, worktree),
     },
+    ans, // user guidance on resume (BR-5) — injected into this gate's halt-prone prompts only
   );
   if (specOk !== true) return specOk; // gate() returned a `blocked` terminal
 
@@ -306,6 +320,7 @@ async function runReq(id) {
       validatePrompt: phase3ValidatePrompt(id, worktree),
       fixPrompt: phase3FixPrompt(id, worktree),
     },
+    ans, // user guidance on resume (BR-5) — injected into this gate's halt-prone prompts only
   );
   if (archOk !== true) return archOk; // gate() returned a `blocked` terminal
 
@@ -315,7 +330,7 @@ async function runReq(id) {
   // propagated here exactly like the gate halts above — never thrown. (ADR-6)
   // -------------------------------------------------------------------------
   await implement(id, P, worktree, tasks);           // Phase 4 — serial writer
-  const verifyResult = await verify(id, P, worktree, repos); // Phase 5 — panel
+  const verifyResult = await verify(id, P, worktree, repos, ans); // Phase 5 — panel
   if (verifyResult !== true) return verifyResult;    // reflector-question halt
   const PR_STATE = await openPRs(id, P, worktree, repos); // Phase 6 — open PR(s)
   await cleanupAndWatchCI(id, P, worktree, PR_STATE);     // Phase 7 — sanity + CI
@@ -332,11 +347,22 @@ async function runReq(id) {
 //   spec = { label, fixLabel, target:'spec'|'arch', validatePrompt, fixPrompt }
 // `label` groups the validate attempts; `fixLabel` groups the fix rounds — kept
 // distinct so progress output never conflates a validate with its fix.
+//
+// `ans` (optional) is the user's resume guidance for THIS REQ (args.answers[id],
+// ADR-6 / BR-5). It is the ONLY thing that makes a resumed gate diverge from the
+// journal cache: it is appended to this gate's halt-prone prompts — the validate
+// prompt and the fix prompt — so on resume the re-validate/fix are guided by the
+// user's reply, while on a first run (`ans` undefined) the prompts are byte-
+// identical and the cache replays. No other call site references args.answers.
 // ===========================================================================
-async function gate(id, P, worktree, spec) {
+async function gate(id, P, worktree, spec, ans) {
+  // The guidance suffix: appended to the halt-prone prompts ONLY. Empty when
+  // there is no answer, so a first run is byte-identical (cache replays). (BR-5)
+  const guidance = ans ? ` — user guidance: ${ans}` : '';
   for (let i = 1; i <= MAX_GATE_ITERATIONS; i++) {
-    // Validate agent — read-only verdict against the VERDICT schema.
-    const verdict = await agent(spec.validatePrompt, {
+    // Validate agent — read-only verdict against the VERDICT schema. On resume
+    // the user's guidance is appended so the re-validate accounts for the reply.
+    const verdict = await agent(spec.validatePrompt + guidance, {
       ...P,
       label: `${spec.label} (attempt ${i}/${MAX_GATE_ITERATIONS})`,
       schema: VERDICT,
@@ -357,8 +383,9 @@ async function gate(id, P, worktree, spec) {
     }
 
     // Dispatch a task-implementer fix agent, handing it the validator's reason
-    // so the fix is targeted. The next loop iteration re-validates.
-    await agent(spec.fixPrompt(verdict), {
+    // so the fix is targeted (plus the user's resume guidance, if any). The next
+    // loop iteration re-validates.
+    await agent(spec.fixPrompt(verdict) + guidance, {
       ...P,
       label: `${spec.fixLabel} (round ${i})`,
       agentType: 'task-implementer',
@@ -862,9 +889,17 @@ function orderByTier(tasks) {
 // candidate-less — today's behavior, gracefully. (OQ-1 GO → wired on, not flagged
 // off.)
 //
+// On resume (`ans` set — the user already answered THIS REQ's reflector
+// question), the reflector halt is SKIPPED: we do not re-ask a question the user
+// already answered; instead the answer is threaded into the Phase-5 fix prompt
+// as guidance so the blocking findings are resolved with the user's direction.
+// On a first run (`ans` undefined) a reflector `userFacing` finding halts as
+// before. This is the surgical resume divergence for the Phase-5 halt. (ADR-6,
+// BR-5)
+//
 // Returns `true` when the panel is clean / non-blocking (the REQ proceeds to
 // Phase 6); returns a `{state:'blocked'}` value on a reflector question.
-async function verify(id, P, worktree, repos) {
+async function verify(id, P, worktree, repos, ans) {
   // The PANEL: agentType + the dimension label it reports under (the FINDINGS
   // `dimension` enum is distinct from the agentType name). The reflector leads;
   // the 5 reviewers follow. (schemas.js PANEL_DIMENSIONS / REVIEWER_DIMENSIONS)
@@ -918,11 +953,14 @@ async function verify(id, P, worktree, repos) {
     findingsByRepo[r.repo] = panelFindings;
   }
 
-  // A reflector `userFacing` finding is a question for the user — HALT. Checked
-  // BEFORE consolidation/fix so we never silently fix past an open question.
-  // (BR-4 halt #2, System Model event halt:reflector-question)
+  // A reflector `userFacing` finding is a question for the user — HALT, but ONLY
+  // when the user has NOT already answered it. On resume (`ans` set) we skip the
+  // halt and let the answer flow into the Phase-5 fix below as guidance, so the
+  // REQ advances past the halt instead of re-asking. Checked BEFORE consolidation
+  // /fix so a first run never silently fixes past an open question. (BR-4 halt #2,
+  // BR-5 resume, System Model event halt:reflector-question)
   const questions = reflectorQuestions(findingsByRepo);
-  if (questions.length > 0) {
+  if (questions.length > 0 && !ans) {
     return blocked(id, 'reflector-questions', { questions });
   }
 
@@ -936,7 +974,12 @@ async function verify(id, P, worktree, repos) {
     // (repo,dimension) pairs that had fixes — and only the 5 REVIEWERS, never
     // the reflector (a reflector re-run could only surface a NEW question, which
     // is out of this ≤1 re-verify loop's contract). Bounded to ONE loop. (AC-5)
-    await agent(fixFindingsPrompt(id, worktree, consolidated.blocking), {
+    //
+    // On resume the user's guidance is appended to the fix prompt (the halt-prone
+    // Phase-5 site), so the answer to the reflector question — or to whatever the
+    // user was asked — directs the fix. Empty on a first run (cache replays). (BR-5)
+    const fixGuidance = ans ? ` — user guidance: ${ans}` : '';
+    await agent(fixFindingsPrompt(id, worktree, consolidated.blocking) + fixGuidance, {
       ...P,
       label: `${id} phase5-fix`,
       agentType: 'task-implementer',

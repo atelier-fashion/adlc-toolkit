@@ -65,8 +65,29 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
    })
    ```
    `args.reqs` is the same REQ-id list the legacy Step 1 would normalize (`REQ-xxx` form; expand `all` to every eligible spec). `args.integrationBranch` is a hint — the workflow's Phase-0 agent re-resolves it per repo against `origin/<branch>` and never hardcodes `main`. `args.answers` is `{}` on a first run.
-   <!-- TASK-062: surfacing blocked REQs from the workflow's returned TERMINAL values + the resumeFromRunId relaunch (threading user replies through args.answers) is added here. -->
-3. The workflow runs to completion and returns per-REQ terminal results. Report them to the user. (Steps 1–6 below do **not** apply to the workflow engine — they are the legacy engine.)
+3. **The run returns `{results}` — one TERMINAL value per REQ.** Each result carries a `state` discriminant: `merged`, `pr-ready`, `blocked`, or `failed` (the workflow never throws on a halt — a halt is a *returned* `{state:'blocked', …}` value, so the run completes and the other REQs are unaffected). Inspect every result:
+   - **`merged` / `pr-ready` / `failed`** — report them as-is. A `failed` REQ has no user-answerable question; surface its `reason`/`detail` and move on (do not attempt a resume).
+   - **`blocked`** — this is a halt awaiting a human answer (a 3×-failed validation, a reflector `userFacing` question, or a merge conflict). Surface it to the user and **WAIT** for a reply — same "blocked → surface → re-engage" flow as the legacy engine's Step 4.6, but driven off the returned value rather than a state file. For each blocked REQ, print its `reason` and its `detail.questions` (when present) as a numbered list, e.g.:
+     ```
+     BLOCKER: REQ-091 is blocked (reflector-questions). The pipeline needs your answer before it can advance:
+       1. <detail.questions[0]>
+       2. <detail.questions[1]>
+     Reply with your guidance and I'll resume only REQ-091 from its halt.
+     ```
+     Other REQs (merged/pr-ready/failed) are already terminal — report them in the same turn so the user sees the full picture, not just the blocker.
+4. **Resume on the user's reply (`resumeFromRunId`).** When the user answers a blocked REQ, relaunch the SAME script with the prior run's id and the answer threaded through `args.answers[<REQ-id>]`:
+   ```
+   Workflow({
+     scriptPath: <same resolved path>,
+     resumeFromRunId: <the runId of the prior run>,
+     args: {
+       reqs: <same REQ-id list>,
+       integrationBranch: <same hint>,
+       answers: { '<blocked-REQ-id>': '<the user's reply>' }
+     }
+   })
+   ```
+   Keep `reqs` and `integrationBranch` identical to the prior run, and put the reply under the blocked REQ's id (answer multiple blocked REQs by adding more keys). The engine references `args.answers` **only** inside the blocked REQ's halt-prone agent prompts, so on resume only that REQ diverges from the journal cache and advances past its halt: every untouched REQ — and every already-`merged` REQ — replays from cache with **no re-executed side effects** (no recreated worktree, no re-implemented task, no double-merge). Re-inspect the returned `{results}` exactly as in step 3, repeating the surface→answer→resume loop until no REQ is `blocked`. (Steps 1–6 below do **not** apply to the workflow engine — they are the legacy engine.)
 
 **Else (the engine is `legacy`)** — run Steps 1–6 below exactly as written. This is the existing background-`pipeline-runner` orchestration, unchanged.
 
