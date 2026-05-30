@@ -1,7 +1,7 @@
 ---
 id: TASK-057
 title: "Workflow core — meta + Preflight + REQ pipeline + runReq Phases 0–3"
-status: draft
+status: complete
 parent: REQ-474
 created: 2026-05-29
 updated: 2026-05-29
