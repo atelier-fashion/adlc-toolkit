@@ -1,7 +1,7 @@
 ---
 id: TASK-061
 title: "/sprint two-engine dispatcher"
-status: draft
+status: complete
 parent: REQ-474
 created: 2026-05-29
 updated: 2026-05-29

@@ -1,7 +1,7 @@
 ---
 name: sprint
 description: Parallel pipeline orchestrator — launch multiple /proceed sessions concurrently across REQs, monitor progress, and report status. Use when the user says "sprint", "run these REQs in parallel", "proceed with all approved REQs", "launch a sprint", or wants to advance multiple requirements simultaneously.
-argument-hint: REQ IDs to sprint (e.g., "REQ-091 REQ-092 REQ-093") or "all" for all approved specs
+argument-hint: REQ IDs to sprint (e.g., "REQ-091 REQ-092 REQ-093") or "all"; add --workflow to run on the Dynamic Workflows engine
 ---
 
 # /sprint — Parallel Pipeline Orchestrator
@@ -31,6 +31,44 @@ Before proceeding, verify:
 3. `.adlc/context/conventions.md` exists — run `/init` if missing
 
 ## Instructions
+
+### Step 0: Select the Sprint Engine
+
+`/sprint` has two engines behind one command (ADR-1):
+
+- **`workflow`** — the deterministic `adlc-sprint` Dynamic Workflows script, which restores each REQ's internal fan-out (explore trio, Phase-5 review panel) *while* keeping cross-REQ concurrency.
+- **`legacy`** — the background `pipeline-runner` engine documented in Steps 1–6 below. Always available; the hard fallback.
+
+**Decide which engine to run:**
+
+1. **Detect Dynamic Workflows availability**: the engine is *available* only if the `Workflow` tool is invocable in this session. Dynamic Workflows is research-preview and plan-gated, so it can be absent (headless/cron runs, non-qualifying plans). If you cannot invoke the `Workflow` tool, treat it as unavailable.
+2. **Read the `--workflow` flag** from `$ARGUMENTS`. Strip the flag token from the argument list before any REQ-ID parsing downstream, so it is never mistaken for a REQ id.
+3. **Select the engine**: choose `workflow` only when *available* **AND** (`--workflow` was passed **OR** the workflow engine has graduated to the default). Otherwise choose `legacy` — with no behavior change from today's `/sprint`.
+
+If the user passed `--workflow` but the `Workflow` tool is unavailable, say so explicitly and fall back to `legacy` rather than failing.
+
+**If the engine is `workflow`:**
+
+1. **Resolve the script path** with the standard two-level fallback (ADR-2): prefer the consumer-vendored copy, fall back to the toolkit copy.
+   - First choice: `.adlc/workflows/adlc-sprint.workflow.js` (present after the consumer ran `/init`).
+   - Fallback: `~/.claude/skills/workflows/adlc-sprint.workflow.js` (always present via the skills symlink).
+   - Use whichever path exists; if neither exists, report the missing script and fall back to `legacy`.
+2. **Invoke the `Workflow` tool** with the resolved script path and the documented args. The script itself is the orchestration engine (ADR-3) — this dispatcher is the only place the `Workflow` tool is invoked:
+   ```
+   Workflow({
+     scriptPath: <resolved path from step 1>,
+     args: {
+       reqs: <normalized REQ-id list from $ARGUMENTS, with --workflow stripped>,
+       integrationBranch: <resolved integration branch for the primary repo: "staging" in two-branch repos, else "main">,
+       answers: {}
+     }
+   })
+   ```
+   `args.reqs` is the same REQ-id list the legacy Step 1 would normalize (`REQ-xxx` form; expand `all` to every eligible spec). `args.integrationBranch` is a hint — the workflow's Phase-0 agent re-resolves it per repo against `origin/<branch>` and never hardcodes `main`. `args.answers` is `{}` on a first run.
+   <!-- TASK-062: surfacing blocked REQs from the workflow's returned TERMINAL values + the resumeFromRunId relaunch (threading user replies through args.answers) is added here. -->
+3. The workflow runs to completion and returns per-REQ terminal results. Report them to the user. (Steps 1–6 below do **not** apply to the workflow engine — they are the legacy engine.)
+
+**Else (the engine is `legacy`)** — run Steps 1–6 below exactly as written. This is the existing background-`pipeline-runner` orchestration, unchanged.
 
 ### Step 1: Identify Sprint REQs
 
