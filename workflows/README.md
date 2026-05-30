@@ -10,7 +10,10 @@ and dispatches agents as leaves; it carries no business prose. See REQ-474
 
 | File | Role |
 |------|------|
+| `adlc-sprint.workflow.js` | The `adlc-sprint` engine — control flow only (sequence, fan-out, loops, merge ordering); dispatches `agent()` leaves for all I/O. Runs only inside the Workflow runtime. |
 | `schemas.js` | The JSON-Schema literals (`REPOS`, `VERDICT`, `TASKS`, `FINDINGS`, `CANDIDATES`, `PRS`, `TERMINAL`) every `agent({ schema })` call validates against. Imported by the workflow script and its tests. |
+| `helpers.js` | The **pure, deterministic** helpers (`validateCitations`, `dedupeAndRank`, `selectEligible`, `orderByTier`, `groupCrossRepoReqs`, the `blocked`/`failed` terminal constructors, …), extracted from the engine so they are `node:test`-importable. No runtime globals, no clock/randomness/fs. Imported by `adlc-sprint.workflow.js` and by the tests. |
+| `tests/` | `node:test` unit tests for `helpers.js` (the LESSON-008 citation boundary, the BR-7 consolidation gate, the BR-12 max-5 bound). Run: `node --test 'workflows/tests/*.test.js'`. See [`tests/README.md`](tests/README.md). |
 
 ## How `workflows/` is reached (no install change)
 
