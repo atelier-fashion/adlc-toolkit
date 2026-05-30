@@ -1,15 +1,19 @@
 # `workflows/tests/` — unit tests for the deterministic workflow helpers
 
-These are the **unit tests** for the pure, deterministic helpers in
-[`workflows/helpers.js`](../helpers.js) — the `adlc-sprint` Dynamic Workflows
-engine's security-critical and consolidation logic. (REQ-474, TASK-063, ADR-10)
+These are the **unit tests** for the pure, deterministic helpers of the
+`adlc-sprint` Dynamic Workflows engine — its security-critical and consolidation
+logic. The Workflow runtime has no `require`/`import`/`fs`, so the engine is ONE
+self-contained file ([`adlc-sprint.workflow.js`](../adlc-sprint.workflow.js)) and
+those helpers are **inlined** behind the `// ==== BEGIN/END PURE ====` sentinels.
+The shared loader [`_load-pure.js`](./_load-pure.js) reads just that section and
+evaluates it with the runtime globals absent, so `node:test` can cover the logic
+with **no build step**. (REQ-474, TASK-063, ADR-2, ADR-10)
 
-The orchestration itself (`adlc-sprint.workflow.js`) is **dogfooded** by running
-`/sprint --workflow` on a real REQ — it only runs inside the Workflow runtime and
-can't be imported by a plain Node test. The *pure* helpers, however, are exactly
-the code that must never silently regress (the LESSON-008 citation boundary, the
-BR-7 review-consolidation gate, the BR-12 max-5 bound), so they get real,
-deterministic unit coverage here.
+The orchestration itself (the control-flow below the sentinels) is **dogfooded**
+by running `/sprint --workflow` on a real REQ — it only runs inside the Workflow
+runtime. The *pure* helpers, however, are exactly the code that must never
+silently regress (the LESSON-008 citation boundary, the BR-7 review-consolidation
+gate, the BR-12 max-5 bound), so they get real, deterministic unit coverage here.
 
 ## What is covered
 
@@ -34,7 +38,7 @@ dependencies**. Run from the **toolkit repo root** (the directory that contains
 node --test 'workflows/tests/*.test.js'
 ```
 
-Expected: all tests pass (`ℹ pass 31  ℹ fail 0`).
+Expected: all tests pass (`ℹ pass 44  ℹ fail 0`).
 
 > **Note on Node versions.** The glob form above is the portable invocation. On
 > recent Node (≥ 22) you can also let the runner discover tests by walking the
@@ -52,7 +56,8 @@ Expected: all tests pass (`ℹ pass 31  ℹ fail 0`).
 ## Manual gate (no CI)
 
 Because the toolkit ships no `.github/workflows` JS pipeline, this suite is a
-**manual gate**: run it after any change to `workflows/helpers.js` (or to a
-helper's behavior). It is fast (< 100 ms) and fully deterministic — no clock, no
+**manual gate**: run it after any change to the inlined PURE section of
+`workflows/adlc-sprint.workflow.js` (or to a helper's behavior). It is fast
+(< 100 ms) and fully deterministic — no clock, no
 randomness, no filesystem or network — so a green run on one machine is a green
 run everywhere.

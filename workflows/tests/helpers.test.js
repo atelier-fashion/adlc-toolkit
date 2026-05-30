@@ -1,6 +1,9 @@
 // workflows/tests/helpers.test.js — deterministic unit tests for the PURE
-// `adlc-sprint` workflow helpers (workflows/helpers.js). (REQ-474, TASK-063,
-// ADR-10)
+// `adlc-sprint` workflow helpers, which are INLINED into the self-contained
+// `workflows/adlc-sprint.workflow.js` behind the `// ==== BEGIN/END PURE ====`
+// sentinels and loaded here via the shared `vm` loader (./_load-pure.js). The
+// Workflow runtime has no `require`/`import`/`fs`, so the engine is one file and
+// the pure section is the only thing under test. (REQ-474, TASK-063, ADR-10)
 //
 // These are the "Verify, Don't Trust" backstop for the parts of the engine that
 // can silently fail: the LESSON-008 citation boundary (`validateCitations`), the
@@ -12,7 +15,7 @@
 // Runner: Node's BUILT-IN `node:test` + `node:assert` — ZERO new dependencies
 // (the toolkit has no JS package manager). Run from the toolkit root:
 //
-//     node --test workflows/tests/
+//     node --test 'workflows/tests/*.test.js'
 //
 // See workflows/tests/README.md.
 
@@ -20,11 +23,14 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('node:path');
 
-// Resolve the module-under-test relative to this file so the suite runs
-// identically from any cwd (the toolkit root, a worktree, or CI).
-const helpers = require(path.join(__dirname, '..', 'helpers.js'));
+// The pure helpers are INLINED into the self-contained workflow script (the
+// Workflow runtime has no `require`/`import`/`fs`). The shared `vm` loader
+// evaluates only the `// ==== BEGIN/END PURE ====` section — schemas + helpers —
+// with the runtime globals absent and returns its `module.exports`, so node:test
+// covers the logic with no build step. Resolved relative to this file so the
+// suite runs identically from any cwd (toolkit root, a worktree, or CI). (REQ-474)
+const helpers = require('./_load-pure.js')(require('node:path').join(__dirname, '..', 'adlc-sprint.workflow.js'));
 const {
   validateCitations,
   sanitizeDescription,

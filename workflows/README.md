@@ -1,19 +1,51 @@
 # `workflows/` — Dynamic Workflow scripts
 
 This directory holds the deterministic **Workflow scripts** the toolkit's
-workflow engine runs (the `adlc-sprint` engine and its supporting modules). A
-Workflow script owns control flow — sequence, fan-out, loops, merge ordering —
-and dispatches agents as leaves; it carries no business prose. See REQ-474
-(`/sprint` two-engine re-platform) and the spec's ADR-2 / ADR-7.
+workflow engine runs (the `adlc-sprint` engine). A Workflow script owns control
+flow — sequence, fan-out, loops, merge ordering — and dispatches agents as
+leaves; it carries no business prose. See REQ-474 (`/sprint` two-engine
+re-platform) and the spec's ADR-2 / ADR-7.
+
+## Single self-contained file (no `require`, `meta` first)
+
+Dogfooding the real Dynamic-Workflows runtime proved it has **no `require` /
+`import` / `fs`** and requires `export const meta` to be the **first statement**.
+So the engine is **ONE self-contained file** — there are no sibling `schemas.js`
+/ `helpers.js` modules to import. Inside `adlc-sprint.workflow.js`:
+
+1. `export const meta = { … }` is the **first statement** (the runtime reads it
+   statically to render the phase timeline).
+2. A **PURE block** immediately follows, delimited by exact sentinel comments:
+
+   ```js
+   // ==== BEGIN PURE ====
+   <the 7 JSON-Schema literals + REVIEWER_DIMENSIONS, inlined>
+   <every pure helper: validateCitations, dedupeAndRank, selectEligible,
+    orderByTier, groupCrossRepoReqs, blocked/failed, …>
+   if (typeof module !== 'undefined') module.exports = { /* every name above */ };
+   // ==== END PURE ====
+   ```
+
+   The `if (typeof module !== 'undefined')` guard is **load-bearing**: in the
+   Workflow runtime `module` is undefined so the line is skipped (a bare
+   `module.exports = …` would throw); under the test loader `module` is defined
+   so the exports populate. The inlined consts/functions are in normal file
+   scope, so the orchestration below the sentinels references them directly (no
+   import).
+3. Everything below `// ==== END PURE ====` is the orchestration (Preflight +
+   the per-REQ Phase 0–8 chain) using `agent()` / `parallel()` / `pipeline()`.
+
+The toolkit forbids a build step, so the pure logic stays **inline** and is
+unit-tested via a shared `vm` loader (`tests/_load-pure.js`) that evaluates just
+the sentinel-delimited section with the runtime globals absent.
 
 ## Contents
 
 | File | Role |
 |------|------|
-| `adlc-sprint.workflow.js` | The `adlc-sprint` engine — control flow only (sequence, fan-out, loops, merge ordering); dispatches `agent()` leaves for all I/O. Runs only inside the Workflow runtime. |
-| `schemas.js` | The JSON-Schema literals (`REPOS`, `VERDICT`, `TASKS`, `FINDINGS`, `CANDIDATES`, `PRS`, `TERMINAL`) every `agent({ schema })` call validates against. Imported by the workflow script and its tests. |
-| `helpers.js` | The **pure, deterministic** helpers (`validateCitations`, `dedupeAndRank`, `selectEligible`, `orderByTier`, `groupCrossRepoReqs`, the `blocked`/`failed` terminal constructors, …), extracted from the engine so they are `node:test`-importable. No runtime globals, no clock/randomness/fs. Imported by `adlc-sprint.workflow.js` and by the tests. |
-| `tests/` | `node:test` unit tests for `helpers.js` (the LESSON-008 citation boundary, the BR-7 consolidation gate, the BR-12 max-5 bound). Run: `node --test 'workflows/tests/*.test.js'`. See [`tests/README.md`](tests/README.md). |
+| `adlc-sprint.workflow.js` | The `adlc-sprint` engine — ONE self-contained file: `meta` first, the inlined PURE block (schemas + helpers behind the sentinels), then the control-flow orchestration that dispatches `agent()` leaves for all I/O. Runs only inside the Workflow runtime. |
+| `tests/_load-pure.js` | Reusable `vm` loader: reads the `// ==== BEGIN/END PURE ====` section of a self-contained workflow script and evaluates it with the runtime globals absent, returning its `module.exports` so `node:test` can cover the pure logic with no build step. |
+| `tests/helpers.test.js` | `node:test` unit tests for the inlined pure helpers (the LESSON-008 citation boundary, the BR-7 consolidation gate, the BR-12 max-5 bound, cross-REQ merge grouping), loaded via `_load-pure.js`. Run: `node --test 'workflows/tests/*.test.js'`. See [`tests/README.md`](tests/README.md). |
 
 ## How `workflows/` is reached (no install change)
 
@@ -22,7 +54,7 @@ workflow script — and anything it imports — resolves through the existing sk
 symlink with no new install step:
 
 ```
-~/.claude/skills/workflows/schemas.js   →   <toolkit>/workflows/schemas.js
+~/.claude/skills/workflows/adlc-sprint.workflow.js   →   <toolkit>/workflows/adlc-sprint.workflow.js
 ```
 
 This mirrors how `templates/` and `partials/` are reached. Nothing in the
