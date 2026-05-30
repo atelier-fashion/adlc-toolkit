@@ -189,11 +189,19 @@ const PRS = {
 // TERMINAL — per-REQ terminal state. A halt is a RETURNED `{ state: 'blocked' }`
 // value, never a throw (BR-4). `merged`/`pr-ready` claims are re-verified before
 // the dashboard accepts them (BR-6).
+//
+// `id` is carried so the top-level orchestrator can correlate each terminal back
+// to its REQ for the ADR-12 cross-REQ merge-sequencing barrier (the post-pipeline
+// step keys on the REQ id + its touched repos). It is part of the contract — the
+// engine's `blocked()`/`failed()` constructors and the Phase-8 merged/pr-ready
+// returns all stamp it — so the closed schema must admit it (don't silently drop
+// the REQ identity past validation). (ADR-12, ADR-7)
 const TERMINAL = {
   type: 'object',
   additionalProperties: false,
   required: ['state'],
   properties: {
+    id: { type: 'string' },
     state: { type: 'string', enum: ['merged', 'pr-ready', 'blocked', 'failed'] },
     prs: {
       type: 'array',

@@ -1,10 +1,10 @@
 ---
 id: TASK-059
 title: "Phases 6–8 (ship) + TERMINAL gh-verify + cross-REQ merge sequencing"
-status: draft
+status: complete
 parent: REQ-474
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-30
 dependencies: [TASK-057]
 ---
 

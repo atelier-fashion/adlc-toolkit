@@ -24,11 +24,12 @@
 // sibling schemas module (resolved through the workflows path convention).
 //
 // Halt contract (load-bearing, ADR-6 / BR-4): a halt is a RETURNED value
-// `{terminal:'blocked', ...}`, NEVER a thrown error. A throw drops the pipeline
+// `{state:'blocked', ...}`, NEVER a thrown error. A throw drops the pipeline
 // item to null and loses the question, so `runReq` must never let a halt escape
-// as an exception. See `blocked()`.
+// as an exception. The discriminant field is `state` (the TERMINAL schema's
+// name — schemas are the contract, ADR-7), NOT `terminal`. See `blocked()`.
 
-const { REPOS, VERDICT, TASKS, FINDINGS, TERMINAL } = require('./schemas.js');
+const { REPOS, VERDICT, TASKS, FINDINGS, PRS, TERMINAL } = require('./schemas.js');
 
 // ---------------------------------------------------------------------------
 // meta — MUST be a pure literal and the first statement (no variables, calls,
@@ -83,6 +84,53 @@ const ELIGIBILITY_SCHEMA = {
           reason: { type: 'string' },
           integrationBranch: { type: 'string' },
           touchedRepos: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+  },
+};
+
+// MERGE_RESULT_SCHEMA / PR_VERIFY_SCHEMA — the Phase-8 IO leaves' structured
+// returns. Declared HERE, above the top-level `await pipeline(...)`, for the same
+// TDZ reason as ELIGIBILITY_SCHEMA: the top-level await suspends the module body,
+// so any `const` a runReq() leaf reads must be initialized BEFORE that await runs
+// — a later declaration would be a temporal-dead-zone ReferenceError. Both are
+// LOCAL to the engine's control flow (not the 7 shared contracts in schemas.js).
+// Pure literals; additionalProperties:false. (ADR-7, TDZ note in the header)
+//
+// MERGE_RESULT_SCHEMA: the single-repo self-merge agent's claim. `mergeConflict`
+// drives the blocked halt; `merged` is the AGENT's (untrusted) claim — the script
+// still re-verifies it via `gh pr view` (PR_VERIFY_SCHEMA) before accepting it.
+const MERGE_RESULT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['merged'],
+  properties: {
+    merged: { type: 'boolean' },        // agent's claim — re-verified by the script
+    mergeConflict: { type: 'boolean' }, // true ⇒ halt blocked(merge-conflict)
+    detail: { type: 'string' },
+  },
+};
+
+// PR_VERIFY_SCHEMA: ground-truth merge state per PR (from `gh pr view --json
+// state,mergedAt`). The script reads `state === 'MERGED'` (and mergedAt present)
+// as the ONLY accepted proof of merge — claim ≠ truth (BR-6).
+const PR_VERIFY_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['prs'],
+  properties: {
+    prs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['repo', 'url', 'state'],
+        properties: {
+          repo: { type: 'string' },
+          url: { type: 'string' },
+          state: { type: 'string' }, // OPEN | MERGED | CLOSED (gh literal)
+          mergedAt: { type: 'string' },
         },
       },
     },
@@ -144,16 +192,26 @@ for (const r of (ELIGIBILITY.reqs || []).filter((x) => !x.eligible)) {
 }
 
 // Per-REQ pipeline: each REQ flows through `runReq` independently (no cross-REQ
-// barrier here — cross-repo merge sequencing is handled in Phase 8 / ADR-12,
-// owned by TASK-059). A halt inside `runReq` is a RETURNED terminal value, so a
-// blocked REQ never poisons its siblings. (ADR-6 / BR-4)
+// barrier inside the pipeline). Single-repo REQs self-merge in Phase 8; cross-repo
+// REQs stop at `pr-ready` and are sequenced AFTER the pipeline by the ADR-12
+// barrier below. A halt inside `runReq` is a RETURNED terminal value, so a blocked
+// REQ never poisons its siblings. (ADR-6 / BR-4 / ADR-12)
 const results = await pipeline(todo, (r) => runReq(r.id));
 
-return { results };
+// Cross-REQ merge sequencing (ADR-12). The pipeline left every cross-repo REQ at
+// `pr-ready`; merge them now. REQs that share a touched sibling repo MUST merge
+// serially (a shared repo can take only one merge at a time without a rebase
+// race); REQs that touch disjoint repos stay parallel. Single-repo REQs already
+// merged in Phase 8 and are passed through untouched. This MERGES IN PLACE in the
+// results array so the returned terminals reflect the post-barrier state.
+const sequenced = await sequenceCrossRepoMerges(results, todo);
+
+return { results: sequenced };
 
 // ===========================================================================
-// runReq(id) — the per-REQ chain. Phases 0–3 are implemented here (TASK-057);
-// Phases 4–8 are dispatched to stubs owned by TASK-058 / TASK-059.
+// runReq(id) — the per-REQ chain. Phases 0–3 land here (TASK-057), Phase 4–5 in
+// `implement`/`verify` (TASK-058), and Phases 6–8 in `openPRs`/`cleanupAndWatchCI`
+// /`wrapupAndMerge` (TASK-059). Returns a TERMINAL value; never throws (ADR-6).
 // ===========================================================================
 async function runReq(id) {
   // Per-REQ progress grouping. CRITICAL: pass `phase: id` on every agent() call
@@ -254,14 +312,13 @@ async function runReq(id) {
   // -------------------------------------------------------------------------
   // Phase 4 (serial implement) + Phase 5 (review panel) — TASK-058. Phase 5 can
   // RETURN a `blocked` terminal (a reflector userFacing question); that halt is
-  // propagated here exactly like the gate halts above — never thrown. Phases 6–8
-  // remain TASK-059 stubs that throw until they land (the only throws left).
+  // propagated here exactly like the gate halts above — never thrown. (ADR-6)
   // -------------------------------------------------------------------------
   await implement(id, P, worktree, tasks);           // Phase 4 — serial writer
   const verifyResult = await verify(id, P, worktree, repos); // Phase 5 — panel
   if (verifyResult !== true) return verifyResult;    // reflector-question halt
-  const PR_STATE = await openPRs(id, P, worktree, repos); // Phase 6 — TASK-059
-  await cleanupAndWatchCI(id, P, worktree, PR_STATE);     // Phase 7 — TASK-059
+  const PR_STATE = await openPRs(id, P, worktree, repos); // Phase 6 — open PR(s)
+  await cleanupAndWatchCI(id, P, worktree, PR_STATE);     // Phase 7 — sanity + CI
   const term = await wrapupAndMerge(id, P, worktree, repos, PR_STATE); // Phase 8
 
   return term; // a TERMINAL value (merged | pr-ready | blocked | failed)
@@ -319,17 +376,38 @@ async function gate(id, P, worktree, spec) {
 // (ADR-6 / BR-4). Shapes conform to the TERMINAL schema (schemas.js).
 // ===========================================================================
 
-// blocked — a user-answerable halt. `detail` is the closed halt payload
-// (questions / reason / detail) the orchestrator surfaces; on resume the
-// answer is threaded via args.answers[id]. (ADR-6, BR-5)
+// blocked — a user-answerable halt. The TERMINAL contract names the discriminant
+// `state` (NOT `terminal`); schemas are the source of truth, so the constructor
+// emits `state`. `reason` is a short top-level slug string; `detail` is the
+// CLOSED halt payload object (`{questions?, reason?, detail?}`) the orchestrator
+// surfaces — on resume the answer is threaded via args.answers[id]. `id` lets the
+// top-level merge-sequencing barrier correlate the halt back to its REQ. Keys
+// that were not supplied are omitted so the value validates against the closed
+// TERMINAL schema (no `detail: undefined` smuggled past additionalProperties:false).
+// (ADR-6, ADR-7, ADR-12, BR-5)
 function blocked(id, reason, detail) {
-  return { terminal: 'blocked', id, reason, detail };
+  return terminalValue('blocked', id, reason, detail);
 }
 
 // failed — a non-user-answerable terminal failure (e.g. no worktree). Distinct
-// from `blocked`: there is no question for the user to answer.
+// from `blocked`: there is no question for the user to answer. Same `state`
+// discriminant + closed payload shape as `blocked`. (ADR-7)
 function failed(id, reason, detail) {
-  return { terminal: 'failed', id, reason, detail };
+  return terminalValue('failed', id, reason, detail);
+}
+
+// terminalValue — shared TERMINAL builder for the halt/failure constructors. The
+// `detail` argument is normalized to the closed payload object: a plain string is
+// wrapped as `{detail}` (so legacy two-string call sites still validate), an
+// object is passed through, and a missing value omits the key entirely. Pure JS;
+// no Date.now / Math.random / fs. (ADR-6, ADR-7)
+function terminalValue(state, id, reason, detail) {
+  const out = { state, id };
+  if (reason !== undefined && reason !== null) out.reason = reason;
+  if (detail !== undefined && detail !== null) {
+    out.detail = typeof detail === 'string' ? { detail } : detail;
+  }
+  return out;
 }
 
 // ===========================================================================
@@ -547,11 +625,123 @@ function fixFindingsPrompt(id, worktree, blocking) {
   ].join('\n');
 }
 
+// --- Phase 6 prompt builder (open PR(s)) ------------------------------------
+
+// openPRsPrompt — instruct ONE IO agent to push each touched repo's branch and
+// open its PR against the RESOLVED integration branch (read from the repo record,
+// NEVER a hardcoded "main" — BUG-060 / LESSON-036). One PR per touched repo. The
+// agent returns the PRS schema object (repo + url [+ number]). (ADR-3, BR-2)
+function openPRsPrompt(id, repos) {
+  const repoList = (repos || [])
+    .map((r) => `${r.repo} @ ${r.worktree} (base origin/${r.integrationBranch || '<resolve>'})`)
+    .join('; ');
+  return [
+    `Phase 6 for ${id}: open the pull request(s) for this REQ. One PR per touched`,
+    'repo, each based on that repo\'s RESOLVED integration branch — NEVER hardcode',
+    '"main"; use the integrationBranch recorded in the repo record (two-branch repo',
+    '→ "staging", else "main"). (BUG-060, LESSON-036)',
+    '',
+    'For EACH touched repo (repo @ absolute-worktree, base branch shown):',
+    `  ${repoList || '(none)'}`,
+    '',
+    'Steps per repo, run entirely within the absolute worktree path:',
+    '  1. Push the feature branch: `git -C <worktree> push -u origin HEAD`.',
+    '  2. Open the PR against the integration branch:',
+    '     `gh pr create --base <integrationBranch> --head <featureBranch>`',
+    '     --fill (or a concise title/body summarizing the REQ). If a PR already',
+    '     exists for this branch (resume), reuse it — do NOT open a duplicate.',
+    '  3. Capture the PR url (and number if available).',
+    '',
+    'Return the PRS schema object: one entry per touched repo with repo, url, and',
+    'number when known. Do not merge anything in this phase.',
+  ].join('\n');
+}
+
+// --- Phase 7 prompt builder (PR cleanup + CI watch, NO re-review) -----------
+
+// cleanupAndWatchCIPrompt — ONE IO agent runs the per-PR sanity check (diff is
+// coherent, no stray/debug files, branch is the right base) and then BLOCKS until
+// `gh pr checks` reports all required checks green for every PR. Explicitly NOT a
+// re-review (Phase 5 already gated correctness); this is the operational CI wait.
+function cleanupAndWatchCIPrompt(id, prs) {
+  const prList = (prs || [])
+    .map((p) => `${p.repo}: ${p.url}`)
+    .join('; ');
+  return [
+    `Phase 7 for ${id}: PR cleanup + CI watch. This is NOT a code re-review`,
+    '(Phase 5 already reviewed); it is the operational sanity check + CI gate.',
+    '',
+    `PRs to process (repo: url): ${prList || '(none)'}.`,
+    '',
+    'For EACH PR:',
+    '  1. Sanity check: `gh pr view <url> --json files,baseRefName` — confirm the',
+    '     diff is coherent (no stray build artifacts, debug logs, or unrelated',
+    '     files) and the base branch is the intended integration branch.',
+    '  2. Watch CI to completion: `gh pr checks <url> --watch` (or poll',
+    '     `gh pr checks <url>` until no check is pending). Wait until every',
+    '     REQUIRED check is green.',
+    '',
+    'Do NOT modify code and do NOT merge here. Report which PRs are green and any',
+    'that failed CI (the script gates merge on this in Phase 8).',
+  ].join('\n');
+}
+
+// --- Phase 8 prompt builders (wrapup / merge + gh re-verification) ----------
+
+// mergePrompt — instruct the IO agent to self-merge a SINGLE-REPO REQ. Per the
+// legacy topology (pipeline-runner.md Phase 8), `gh pr merge --delete-branch`
+// MUST run from the PARENT repo path, not the worktree, because git refuses to
+// delete a branch checked out by a worktree. After a successful merge the agent
+// sets pipeline-state.json.repos[<repo>].merged = true immediately (resumable,
+// no double-merge). The CRITICAL re-verification gate (gh pr view) is enforced by
+// the SCRIPT in a SEPARATE leaf (see verifyMergedPrompt) — claim ≠ truth (BR-6).
+function mergePrompt(id, repo, pr) {
+  return [
+    `Phase 8 merge for ${id}: this is a SINGLE-REPO REQ, so YOU own the merge.`,
+    `Merge PR ${pr.url} (repo ${repo.repo}) into origin/${repo.integrationBranch || 'main'}.`,
+    '',
+    'Steps:',
+    '  1. Confirm the PR is OPEN and MERGEABLE with CI green',
+    `     (\`gh pr view ${pr.url} --json state,mergeStateStatus\`). If it is NOT`,
+    '     mergeable due to a MERGE CONFLICT, STOP and report mergeConflict=true —',
+    '     do NOT force anything.',
+    `  2. Merge from the PARENT repo path (\`${repo.worktree}\`\'s repo root), NOT`,
+    '     the worktree, because git refuses to delete a branch checked out by a',
+    `     worktree: \`gh pr merge ${pr.url} --squash --delete-branch\`.`,
+    '  3. Immediately set pipeline-state.json.repos[<repo>].merged = true.',
+    '',
+    'Report mergeConflict (true ONLY on a real merge conflict) and merged (true if',
+    'you ran the merge command without error). The script independently re-verifies',
+    'the merge with `gh pr view` — your claim is not accepted on its own.',
+  ].join('\n');
+}
+
+// verifyMergedPrompt — the "claim ≠ truth" re-verification leaf (BR-6, ADR-7).
+// For each PR the agent runs `gh pr view <url> --json state,mergedAt` and reports
+// the GROUND TRUTH (state + whether mergedAt is set). The script decides merged /
+// not-merged off THIS, never off the merge agent's self-claim.
+function verifyMergedPrompt(id, prs) {
+  const prList = (prs || []).map((p) => `${p.repo}: ${p.url}`).join('; ');
+  return [
+    `Phase 8 verification for ${id}: re-verify the TRUE merge state of each PR.`,
+    'Do NOT merge or modify anything — this is a read-only ground-truth check that',
+    'the script trusts over any earlier merge claim. (BR-6, Verify Don\'t Trust)',
+    '',
+    `For EACH PR (repo: url): ${prList || '(none)'}`,
+    '  run `gh pr view <url> --json state,mergedAt` and report:',
+    '    - repo, url',
+    '    - state: the literal state string (OPEN | MERGED | CLOSED)',
+    '    - mergedAt: the timestamp string if set, else omit it',
+    '',
+    'Return the PR_VERIFY schema object: one entry per PR.',
+  ].join('\n');
+}
+
 // ===========================================================================
-// STUBS — Phases 6–8. Each throws so the file is syntactically complete and the
-// control flow in runReq() is reviewable, while the real implementations land
-// in their owning tasks. These are the ONLY throws in the engine; every real
-// phase must return values (the halt contract), not throw. (ADR-6)
+// Phase implementations — Phases 4–8. None of these throw: every phase RETURNS
+// values (the halt contract — a halt is a returned `{state:'blocked'}`, never a
+// throw, ADR-6). Phase 4–5 are TASK-058; Phase 6–8 + the cross-REQ merge barrier
+// are TASK-059.
 // ===========================================================================
 
 // Phase 4 — serial implement in the single REQ worktree. (ADR-5, BR-3)
@@ -617,7 +807,7 @@ function orderByTier(tasks) {
 // skipped and wired only by TASK-060 (BR-8).
 //
 // Returns `true` when the panel is clean / non-blocking (the REQ proceeds to
-// Phase 6); returns a `{terminal:'blocked'}` value on a reflector question.
+// Phase 6); returns a `{state:'blocked'}` value on a reflector question.
 async function verify(id, P, worktree, repos) {
   // The PANEL: agentType + the dimension label it reports under (the FINDINGS
   // `dimension` enum is distinct from the agentType name). The reflector leads;
@@ -897,25 +1087,317 @@ function panelMembers() {
   ];
 }
 
-// Phase 6 — open PR(s) based on the resolved integration branch. (OWNER: TASK-059)
-// TODO(TASK-059): one agent opens the PR(s); returns the PRS schema object.
-async function openPRs(/* id, P, worktree, repos */) {
-  throw new Error('Phase 6 (open PRs) not yet implemented — TASK-059');
+// Phase 6 — open PR(s) based on the RESOLVED integration branch. ONE IO agent
+// pushes each touched repo's branch and opens its PR against
+// origin/<integrationBranch> (never a hardcoded main — BUG-060). Returns the PRS
+// schema object the later phases re-verify. (ADR-3, ADR-7, BR-2)
+async function openPRs(id, P, worktree, repos) {
+  const PR_STATE = await agent(openPRsPrompt(id, repos), {
+    ...P,
+    label: `${id} phase6-open-prs`,
+    schema: PRS,
+    // Default workflow subagent (no agentType) — a generic git/gh IO worker
+    // driven by the inline prompt, NOT a specialist. (ethos #6)
+  });
+  return PR_STATE;
 }
 
-// Phase 7 — PR cleanup + CI watch (no re-review). (OWNER: TASK-059)
-// TODO(TASK-059): one agent runs the per-PR sanity check and watches CI.
-async function cleanupAndWatchCI(/* id, P, worktree, PR_STATE */) {
-  throw new Error('Phase 7 (cleanup + CI watch) not yet implemented — TASK-059');
+// Phase 7 — PR cleanup + CI watch (NO re-review). ONE IO agent runs the per-PR
+// sanity check and BLOCKS until `gh pr checks` is green for every PR. Phase 5
+// already gated correctness; this is purely the operational CI wait, so no
+// reviewer/specialist agent is involved. (ADR-3)
+async function cleanupAndWatchCI(id, P, worktree, PR_STATE) {
+  const prs = (PR_STATE && PR_STATE.prs) || [];
+  await agent(cleanupAndWatchCIPrompt(id, prs), {
+    ...P,
+    label: `${id} phase7-cleanup-ci`,
+    // Default workflow subagent (no agentType) — a generic gh IO worker.
+  });
 }
 
-// Phase 8 — wrapup / merge with gh re-verification + TERMINAL return. (OWNER: TASK-059)
-// TODO(TASK-059): single-repo REQs self-merge → {terminal:'merged'}; cross-repo
-// REQs stop → {terminal:'pr-ready'}. EVERY merged/pr-ready claim re-verified via
-// `gh pr view --json state,mergedAt` (BR-6). A merge conflict RETURNS
-// blocked(id,'merge-conflict'). Return conforms to the TERMINAL schema.
-async function wrapupAndMerge(/* id, P, worktree, repos, PR_STATE */) {
-  // eslint-disable-next-line no-unused-vars
-  const _schema = TERMINAL; // documents the intended return contract for TASK-059
-  throw new Error('Phase 8 (wrapup / merge) not yet implemented — TASK-059');
+// Phase 8 — wrapup / merge with gh re-verification + TERMINAL return. (ADR-7,
+// ADR-12, BR-6)
+//
+// Topology (mirrors the legacy pipeline-runner Phase-8 rule, but executed by the
+// SCRIPT via leaves, not a monolithic agent):
+//   - SINGLE-REPO REQ (exactly one touched repo): YOU own the merge. A merge
+//     agent self-merges from the parent path; the script then RE-VERIFIES the
+//     true state with `gh pr view` and only on a verified MERGED returns
+//     {state:'merged'}. A real merge conflict → blocked(id,'merge-conflict').
+//   - CROSS-REPO REQ (>1 touched repo): STOP at pr-ready — the cross-REQ merge
+//     barrier (ADR-12, top-level) sequences these merges. Return {state:'pr-ready'}.
+//
+// EVERY merged/pr-ready claim is re-verified via `gh pr view --json state,mergedAt`
+// before it is returned (claim ≠ truth, BR-6). `repos[*].merged` is written to
+// state by the merge agent immediately after each successful merge (resumable,
+// no double-merge — AC-7). Returns a value conforming to the TERMINAL schema.
+async function wrapupAndMerge(id, P, worktree, repos, PR_STATE) {
+  const prs = (PR_STATE && PR_STATE.prs) || [];
+  const touched = repos || [];
+
+  // CROSS-REPO REQ: do NOT self-merge — the top-level ADR-12 barrier sequences
+  // these. Still re-verify the PRs are real/open before claiming pr-ready (BR-6).
+  if (touched.length > 1) {
+    const verifiedPrs = await verifyPrStates(id, P, prs);
+    return { state: 'pr-ready', id, prs: stripVerifyMarkers(verifiedPrs) };
+  }
+
+  // SINGLE-REPO REQ: this engine owns the merge. With no touched repo there is
+  // nothing to merge — treat as a non-user-answerable failure (mirrors Phase 0's
+  // no-worktree failure; never a silent success).
+  const repo = touched[0];
+  if (!repo) {
+    return failed(id, 'phase8-no-repo', 'Phase 8 found no touched repo to merge.');
+  }
+  const pr = prs.find((p) => p.repo === repo.repo) || prs[0];
+  if (!pr) {
+    return failed(id, 'phase8-no-pr', 'Phase 8 found no PR to merge for the touched repo.');
+  }
+
+  // Dispatch the self-merge IO agent (parent-path merge + immediate state write).
+  const mergeResult = await agent(mergePrompt(id, repo, pr), {
+    ...P,
+    label: `${id} phase8-merge`,
+    schema: MERGE_RESULT_SCHEMA,
+    // Default workflow subagent (no agentType) — a generic git/gh/state IO worker.
+  });
+
+  // A real merge conflict is a user-answerable halt — RETURN blocked, never throw.
+  if (mergeResult && mergeResult.mergeConflict === true) {
+    return blocked(id, 'merge-conflict', {
+      reason: 'merge conflict — the PR could not be merged cleanly',
+      detail: mergeResult.detail || '',
+    });
+  }
+
+  // CLAIM ≠ TRUTH: ignore the agent's `merged` self-claim; re-verify the true
+  // state with `gh pr view` in a SEPARATE read-only leaf and accept `merged`
+  // ONLY when the ground truth says so (BR-6).
+  const verifiedPrs = await verifyPrStates(id, P, prs);
+  if (allMerged(verifiedPrs)) {
+    return { state: 'merged', id, prs: stripVerifyMarkers(verifiedPrs) };
+  }
+
+  // The agent may have CLAIMED merged, but the gh re-verification disagrees — the
+  // false claim is caught and corrected here (AC-5). Surface it as a halt so the
+  // user can investigate rather than silently reporting a non-merge as merged.
+  return blocked(id, 'merge-unverified', {
+    reason: 'merge claim could not be verified via gh pr view (state != MERGED)',
+    detail: `verified: ${JSON.stringify(verifiedPrs)}`,
+  });
+}
+
+// verifyPrStates — the "claim ≠ truth" gh re-verification, run as ONE read-only
+// IO leaf (the script has no shell). Returns the PRS-shaped array (repo+url
+// [+number]) the TERMINAL value carries, sourced from the ground-truth
+// `gh pr view` read — NOT from any merge agent's self-claim. (BR-6, ADR-7)
+async function verifyPrStates(id, P, prs) {
+  if (!prs || prs.length === 0) return [];
+  const verified = await agent(verifyMergedPrompt(id, prs), {
+    ...P,
+    label: `${id} phase8-verify`,
+    schema: PR_VERIFY_SCHEMA,
+    // Default workflow subagent (no agentType) — a read-only gh IO worker.
+  });
+  const rows = (verified && verified.prs) || [];
+  // Stash the ground-truth state on each row so allMerged() can read it; the
+  // TERMINAL `prs` shape keeps only repo/url/number, so map back to that here.
+  return rows.map((row) => {
+    const orig = prs.find((p) => p.url === row.url) || {};
+    const out = { repo: row.repo, url: row.url, _state: row.state };
+    if (typeof orig.number === 'number') out.number = orig.number;
+    return out;
+  });
+}
+
+// allMerged — pure JS: true only when EVERY verified PR row reports the gh
+// ground-truth state 'MERGED'. The accepted proof of merge (BR-6). The internal
+// `_state` marker is stripped before the rows go into the TERMINAL value (see
+// stripVerifyMarkers). Empty input is NOT merged (nothing was confirmed).
+function allMerged(verifiedPrs) {
+  if (!verifiedPrs || verifiedPrs.length === 0) return false;
+  return verifiedPrs.every((p) => p._state === 'MERGED');
+}
+
+// stripVerifyMarkers — pure JS: project each row down to the closed PRS/TERMINAL
+// shape (repo, url, number only), dropping the internal `_state` marker so the
+// rows validate against additionalProperties:false. Used just before a TERMINAL
+// value is returned to the orchestrator. (ADR-7)
+function stripVerifyMarkers(prs) {
+  return (prs || []).map((p) => {
+    const out = { repo: p.repo, url: p.url };
+    if (typeof p.number === 'number') out.number = p.number;
+    return out;
+  });
+}
+
+// ===========================================================================
+// Cross-REQ merge sequencing (ADR-12) — the post-pipeline barrier.
+//
+// Single-repo REQs already self-merged in Phase 8 (`state:'merged'`); they pass
+// through here untouched. Cross-repo REQs stopped at `state:'pr-ready'`. This
+// barrier merges those now, with one rule: REQs that share a touched sibling repo
+// merge SERIALLY (a shared repo can take only one merge at a time without a
+// rebase race), while REQs touching disjoint repo sets merge in PARALLEL. We
+// group the pr-ready REQs into connected components over the "shares a repo"
+// relation, run each component's REQs serially, and run the components
+// concurrently via parallel(). (ADR-12, OQ-3 resolution; OQ-4 concurrency stays
+// on the built-in cap + budget + max-5)
+// ===========================================================================
+async function sequenceCrossRepoMerges(results, todo) {
+  const all = results || [];
+
+  // touchedRepos per REQ id, from the Preflight eligibility records (the script's
+  // own trusted data — not an agent claim).
+  const reposById = {};
+  for (const r of todo || []) reposById[r.id] = r.touchedRepos || [];
+
+  // The REQs to sequence: only those still at `pr-ready`. Everything else
+  // (merged / blocked / failed) is terminal already and passes through verbatim.
+  const pending = all.filter((t) => t && t.state === 'pr-ready');
+  if (pending.length === 0) return all;
+
+  // Connected components over "shares a touched repo". groupCrossRepoReqs is pure
+  // JS (union-find style) — deterministic, no Date.now/Math.random. Each group is
+  // a list of REQ ids that must merge serially relative to one another.
+  const groups = groupCrossRepoReqs(pending.map((t) => t.id), reposById);
+
+  // Merge each group's REQs serially; run the groups concurrently. A failed thunk
+  // yields null (parallel() contract) — we fall back to the pre-barrier terminal
+  // so a sequencing hiccup never erases a REQ's result.
+  const mergedByGroup = await parallel(
+    groups.map((groupIds) => async () => {
+      const out = [];
+      for (const reqId of groupIds) {
+        const term = pending.find((t) => t.id === reqId);
+        out.push(await mergeCrossRepoReq(reqId, term));
+      }
+      return out;
+    }),
+  );
+
+  // Flatten the per-group results and index the post-merge terminals by id.
+  const updatedById = {};
+  for (const group of mergedByGroup) {
+    if (!group) continue; // a dropped group thunk — keep the originals below
+    for (const term of group) updatedById[term.id] = term;
+  }
+
+  // Stitch the updated terminals back over the original results, preserving order
+  // and leaving non-pr-ready REQs untouched.
+  return all.map((t) => (t && updatedById[t.id]) ? updatedById[t.id] : t);
+}
+
+// mergeCrossRepoReq — merge ONE cross-repo REQ at the barrier: dispatch the merge
+// IO agent (merges every touched-repo PR, writes repos[*].merged), then RE-VERIFY
+// the true state with `gh pr view` and only on a verified all-MERGED upgrade the
+// terminal to `state:'merged'`. A real merge conflict → blocked(merge-conflict);
+// an unverifiable claim → blocked(merge-unverified) (claim ≠ truth, BR-6). On any
+// agent drop the REQ keeps its `pr-ready` terminal (no false `merged`).
+async function mergeCrossRepoReq(id, term) {
+  const P = { phase: id };
+  const prs = (term && term.prs) || [];
+  if (prs.length === 0) return term;
+
+  const mergeResult = await agent(crossRepoMergePrompt(id, prs), {
+    ...P,
+    label: `${id} merge-barrier`,
+    schema: MERGE_RESULT_SCHEMA,
+    // Default workflow subagent (no agentType) — a git/gh/state IO worker.
+  });
+
+  if (mergeResult && mergeResult.mergeConflict === true) {
+    return blocked(id, 'merge-conflict', {
+      reason: 'merge conflict during cross-REQ merge sequencing',
+      detail: mergeResult.detail || '',
+    });
+  }
+
+  // claim ≠ truth — re-verify before upgrading pr-ready → merged (BR-6).
+  const verifiedPrs = await verifyPrStates(id, P, prs);
+  if (allMerged(verifiedPrs)) {
+    return { state: 'merged', id, prs: stripVerifyMarkers(verifiedPrs) };
+  }
+  return blocked(id, 'merge-unverified', {
+    reason: 'cross-REQ merge claim could not be verified via gh pr view',
+    detail: `verified: ${JSON.stringify(verifiedPrs)}`,
+  });
+}
+
+// crossRepoMergePrompt — instruct the barrier merge agent to merge every PR of a
+// cross-repo REQ (in mergeOrder), from each repo's parent path, writing
+// repos[*].merged after each. Mirrors the single-repo mergePrompt but for the
+// multi-repo case the orchestrator (not Phase 8) owns. The script re-verifies via
+// gh afterward — the claim here is not accepted on its own. (ADR-12, BR-6)
+function crossRepoMergePrompt(id, prs) {
+  const prList = (prs || []).map((p) => `${p.repo}: ${p.url}`).join('; ');
+  return [
+    `Cross-REQ merge for ${id}: the merge barrier has reached this REQ, so merge`,
+    'its PR(s) now. This REQ touches MORE THAN ONE repo; merge each touched-repo',
+    'PR into its integration branch.',
+    '',
+    `PRs to merge (repo: url): ${prList || '(none)'}.`,
+    '',
+    'For EACH PR, in a sensible order (dependency/mergeOrder if one is recorded):',
+    '  1. Confirm OPEN + MERGEABLE + CI green',
+    '     (`gh pr view <url> --json state,mergeStateStatus`). On a real MERGE',
+    '     CONFLICT, STOP and report mergeConflict=true — do not force.',
+    '  2. Merge from the repo\'s PARENT path (not the worktree — git refuses to',
+    '     delete a branch checked out by a worktree):',
+    '     `gh pr merge <url> --squash --delete-branch`.',
+    '  3. Immediately set pipeline-state.json.repos[<repo>].merged = true.',
+    '',
+    'Report mergeConflict (true ONLY on a real conflict) and merged (true if every',
+    'PR merge command ran without error). The script re-verifies each merge with',
+    '`gh pr view` — your claim is not accepted on its own.',
+  ].join('\n');
+}
+
+// groupCrossRepoReqs — pure JS union-find: partition REQ ids into connected
+// components over the "shares ≥1 touched repo" relation. Two REQs land in the
+// same group iff there is a chain of REQs each sharing a repo with the next.
+// Deterministic (no Date.now/Math.random): ids are processed in input order, and
+// each group preserves that order. Returns id[][]. (ADR-12)
+function groupCrossRepoReqs(ids, reposById) {
+  const parent = {};
+  const find = (x) => {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]]; // path halving
+      x = parent[x];
+    }
+    return x;
+  };
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+
+  for (const id of ids) parent[id] = id;
+
+  // Union any two REQs that share at least one touched repo.
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      if (sharesRepo(reposById[ids[i]] || [], reposById[ids[j]] || [])) {
+        union(ids[i], ids[j]);
+      }
+    }
+  }
+
+  // Collect components, preserving the input order of ids within each group and
+  // ordering the groups by their first member's position (determinism).
+  const groupsByRoot = new Map();
+  for (const id of ids) {
+    const root = find(id);
+    if (!groupsByRoot.has(root)) groupsByRoot.set(root, []);
+    groupsByRoot.get(root).push(id);
+  }
+  return Array.from(groupsByRoot.values());
+}
+
+// sharesRepo — pure JS: true iff the two repo lists intersect. (groupCrossRepoReqs helper)
+function sharesRepo(a, b) {
+  const set = new Set(a);
+  for (const r of b) if (set.has(r)) return true;
+  return false;
 }
