@@ -76,9 +76,20 @@ fall back to the global toolkit via the skills symlink.
 Why the local copy? Claude Code's sandbox blocks `Read` from paths outside the
 current working directory. When the engine runs inside a git worktree (e.g.
 `.worktrees/REQ-xxx/`), `~/.claude/skills/workflows/*` is unreadable by
-subagents and any mid-skill `Read`. `/init` therefore vendors `workflows/` into
-the consumer's `.adlc/workflows/` (alongside `templates/` and `partials/`) so
-the engine works identically in a main checkout and in a worktree.
+subagents and any mid-skill `Read`. `/init` therefore vendors the **runtime
+files only** — `adlc-sprint.workflow.js` and this `README.md` — into the
+consumer's `.adlc/workflows/` (alongside `templates/` and `partials/`) so the
+engine works identically in a main checkout and in a worktree.
+
+**`tests/` is NOT vendored — by design.** The `tests/` directory holds
+toolkit-internal `node:test` unit tests (CommonJS `require('node:test')`) for the
+inlined pure helpers; they have no purpose in a consumer repo. Worse, shipping a
+`*.test.js` under `.adlc/` is a Jest landmine: in any `"type":"module"` repo, the
+default Jest `testMatch` discovers `.adlc/workflows/tests/helpers.test.js`, runs
+it as ESM, and fails it with `ReferenceError: require is not defined` — reddening
+`npm test` and any CI gate. So `/init` copies `*.workflow.js` + `README.md`
+explicitly and never `tests/` (and `rm -rf`s a stale `tests/` from an older
+`/init`). `/template-drift` flags the stale directory if it lingers.
 
 The prefer-local-then-global order means a consumer project that has not re-run
 `/init` since `workflows/` shipped still resolves the module from the global

@@ -59,10 +59,9 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
     task-template.md
   partials/              # Copies of ~/.claude/skills/partials/*.sh — shared shell snippets sourced by SKILL.md files
     ethos-include.sh
-  workflows/             # Copies of ~/.claude/skills/workflows/* — Dynamic Workflow scripts used by the workflow engine
+  workflows/             # Copies of ~/.claude/skills/workflows/ RUNTIME files only — Dynamic Workflow scripts used by the workflow engine
     adlc-sprint.workflow.js   # ONE self-contained file: meta first, schemas + pure helpers inlined behind // ==== BEGIN/END PURE ==== (runtime has no require)
-    tests/               # _load-pure.js (vm loader) + node:test unit tests for the inlined pure helpers
-    README.md
+    README.md            # NOTE: workflows/tests/ is intentionally NOT copied — those are toolkit-internal node:test files (CommonJS require) that break Jest in "type":"module" consumer repos (see Step 6)
 ```
 
 **Why the local copies of ETHOS.md, templates, partials, and workflows?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `~/.claude/skills/ETHOS.md`, `~/.claude/skills/templates/*.md`, `~/.claude/skills/partials/*.sh`, and `~/.claude/skills/workflows/*` become unreadable by subagents and any tool that uses `Read` mid-skill. Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
@@ -166,8 +165,24 @@ chmod +x .adlc/partials/*.sh
 # inlined, since the runtime has no require). Resolved via the two-level fallback
 # (.adlc/workflows/... -> ~/.claude/skills/workflows/...) so the engine works
 # inside git worktrees where Read is sandboxed to the worktree root.
+#
+# Copy ONLY the runtime files: the workflow script(s) and the top-level README.
+# Do NOT copy workflows/tests/ — those are toolkit-internal `node:test` unit
+# tests for the inlined PURE helpers (CommonJS `require('node:test')`). They have
+# no purpose in a consumer repo, and shipping a `*.test.js` under .adlc/ is a
+# trap: in any "type":"module" repo running Jest, the DEFAULT testMatch
+# (**/?(*.)+(spec|test).[jt]s?(x)) discovers .adlc/workflows/tests/helpers.test.js,
+# runs it as ESM, and fails it with "ReferenceError: require is not defined" —
+# reddening `npm test` and any CI gate that runs it. The engine is ONE
+# self-contained file (no require/import/fs), so globbing *.workflow.js captures
+# everything the runtime ever resolves.
 mkdir -p .adlc/workflows
-cp -R ~/.claude/skills/workflows/. .adlc/workflows/
+cp ~/.claude/skills/workflows/*.workflow.js .adlc/workflows/
+cp ~/.claude/skills/workflows/README.md .adlc/workflows/
+# Idempotent cleanup: remove a stale tests/ dir left by an OLDER /init that did
+# `cp -R` of the whole workflows tree. Heals already-initialized repos on re-run;
+# safe no-op when absent. (Belt-and-suspenders to the explicit-file copy above.)
+rm -rf .adlc/workflows/tests
 
 # Clean up Finder-style duplicates if present. Matches:
 #   - .md files: "requirement-template 2.md"
@@ -176,9 +191,18 @@ cp -R ~/.claude/skills/workflows/. .adlc/workflows/
 # The `-depth` flag processes directory contents before the directory itself,
 # so `rm -rf` on a "* 2" dir doesn't fail due to prior deletions.
 find .adlc -depth \( -name "* 2" -o -name "* 2.*" \) -exec rm -rf {} + 2>/dev/null
+
+# Advisory (Jest repos): the copy above ships NO test files under .adlc/, so the
+# default Jest testMatch stays green with no config change. Only a repo with a
+# custom BROAD testMatch (e.g. "**/*.js") would pick up .adlc/ — those repos
+# should add "<rootDir>/.adlc/" to testPathIgnorePatterns. Purely informational;
+# this does not edit package.json or any jest config.
+if grep -q '"jest"' package.json 2>/dev/null || find . -maxdepth 1 -name 'jest.config.*' 2>/dev/null | grep -q .; then
+  echo "ADVISORY (Jest detected): .adlc/ contains no test files by design — default 'npm test' is unaffected. If you use a custom broad testMatch, add \"<rootDir>/.adlc/\" to testPathIgnorePatterns."
+fi
 ```
 
-If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, `.adlc/partials/*.sh`, or `.adlc/workflows/*`, confirm before overwriting. Use `/template-drift` to surface what differs. Typical drift (stale copies) should be overwritten silently.
+If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, `.adlc/partials/*.sh`, or `.adlc/workflows/adlc-sprint.workflow.js`, confirm before overwriting. Use `/template-drift` to surface what differs (it also flags a stale `.adlc/workflows/tests/` left by an older `/init` — the Jest landmine fixed above). Typical drift (stale copies) should be overwritten silently.
 
 ### Step 7: Scaffold Retrieval Taxonomy
 
