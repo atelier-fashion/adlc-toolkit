@@ -240,6 +240,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    ```bash
    git -C <repo-path> worktree remove <repos[<id>].worktree>
    ```
+10. **Advisory in-flight manifest (non-blocking, REQ-482).** Reusing the `git fetch origin` from step 4 (set `MANIFEST_SKIP_FETCH=1` — do not fetch again), invoke `/manifest` with this REQ id (so it is marked as self) and display the in-flight table plus any coarse `component`/`domain` overlap involving REQ-xxx. This surfaces other sessions' work across the shared remote before you start, so you can coordinate or sequence rather than collide at merge. It is **purely advisory**: it MUST NOT block, halt, reorder, or gate the pipeline; it is NOT one of the three legitimate halt points; and a manifest-build failure here is ignored with a one-line note and the pipeline continues (BR-7). The worktree-collision gate (step 4b) is unchanged.
 
 **Preflight verified** — when you invoke subskills in later phases, they may skip their own prerequisite checks (already validated here) AND they may skip re-reading `architecture.md` / `conventions.md` / `project-overview.md` (already in context). Treat the Step 0 loads as authoritative for the rest of the pipeline.
 
