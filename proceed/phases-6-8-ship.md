@@ -22,7 +22,7 @@ merge sequencing, and terminal-state contract live here.
 1. For each touched repo:
    - Inside that repo's worktree, ensure all changes are committed and push the feature branch: `git -C <worktree> push -u origin feat/REQ-xxx-short-description`
 2. Set the requirement status to `complete` in its frontmatter (primary repo only).
-3. Create a PR **in each touched repo** using `gh pr create` (invoke via `gh -R <owner/repo>` or by running `gh` from inside each worktree). In cross-repo mode, create the PR for the primary repo **last** so the primary PR body can link to all sibling PRs.
+3. **Flip each touched repo's draft PR (opened at Step 0, step 8a) to ready** with `gh pr ready <prNumber>` (read `prNumber`/`prUrl` from `pipeline-state.json`) — do **NOT** create a new PR (REQ-483 BR-2). Then set its full body with `gh pr edit <prNumber> --body-file <tmp>` using the template below, which **preserves the `adlc-footprint` block** `/architect` published into the draft (replace only the human-readable sections, keep the fenced footprint block intact). In cross-repo mode, ready the primary repo's PR **last** so its body can link to all sibling PRs.
    - **Title (per repo)**: Short description referencing the REQ, tagged with the repo id when cross-repo (e.g., `feat(api): new endpoint [REQ-023]`).
    - **Body (per repo)**:
      ```

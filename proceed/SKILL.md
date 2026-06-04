@@ -238,6 +238,12 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - `.adlc/specs/REQ-xxx-*/requirement.md`
    - `.adlc/config.yml` (if present)
 8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, integrationBranch: <integration-branch>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. `integrationBranch` is the value resolved in step 4 — Phase 6 (PR base) and Phase 8 (merge target) MUST read it from state, never re-derive or assume `main`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
+8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR, so this REQ's intent — and, after `/architect`, its footprint — is visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
+   ```bash
+   git -C <worktree> push -u origin <branch-name>
+   gh -R <owner/repo> pr create --draft --base <integration-branch> --head <branch-name> --title "[WIP] REQ-xxx: <short title>" --body "Draft opened at Step 0 by /proceed; body filled in at Phase 6."
+   ```
+   Then record `repos[<id>].prUrl`, `prNumber`, and `prCreatedAt` (from `gh pr view <n> --json number,url,createdAt`) into `pipeline-state.json`. The base is `<integration-branch>` from step 4 — never hardcode `main` (LESSON-036). **Resume-safe**: if `repos[<id>].prNumber` is already set, reuse it — never open a second PR. In subagent mode (`/sprint` pipeline-runner) this still runs per REQ. The PR is `--draft` (not review-ready); Phase 6 flips it to ready.
 9. When the pipeline completes (all PRs merged in Phase 8), clean up every worktree using the absolute path recorded in state — read `repos[<id>].worktree` for each touched repo and pass that value to `git worktree remove`. Do NOT use the relative `.worktrees/REQ-xxx` form here — the contract requires the recorded absolute path:
    ```bash
    git -C <repo-path> worktree remove <repos[<id>].worktree>
