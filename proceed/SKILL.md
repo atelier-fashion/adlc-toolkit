@@ -292,6 +292,8 @@ End-of-phase log: "Architecture and tasks validated."
 <!-- companion: proceed/phase-4-implementation.md -->
 **Gate**: `currentPhase` must be `4`. After completion: append `4`, set `currentPhase=5`.
 
+**Precise overlap gate (REQ-483, early / best-effort).** Before implementing, source `partials/trial-merge.sh` (two-level fallback) and run `adlc_trial_merge "<worktree>" origin/<integrationBranch>`. A real conflict with an in-flight REQ ranked **ahead** in `/manifest`'s verdict → return the `blocked` terminal now, rather than sinking implementation effort into a branch that will have to rebase (BR-9). This is best-effort (an overlapping branch may not have code yet); the **authoritative** gate is Phase 8 pre-merge. A footprint overlap that trial-merges clean does NOT block (BR-7).
+
 Execute the task graph across all touched-repo worktrees. Each task runs in
 `repos[<task.repo>].worktree`. Track per-task progress in `phase4.currentTask`
 / `completedTasks` / `failedTasks` so a mid-phase compression resumes exactly.

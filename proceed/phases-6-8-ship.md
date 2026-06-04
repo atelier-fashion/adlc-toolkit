@@ -103,6 +103,8 @@ Do all the steps below **for every touched repo's PR**:
 
 A vague "Pipeline complete" claim without one of these tags is a protocol violation. When dispatched by `/sprint`, the orchestrator will reject untagged claims and treat them as `blocked`.
 
+**Pre-merge trial-merge gate (REQ-483, BR-9/BR-16 — authoritative).** Before merging, source `partials/trial-merge.sh` and run `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. A **real conflict** (with work merged ahead per `/manifest`'s deterministic order) → do NOT merge: return the `blocked` terminal, populate `pipeline-state.json.blockers` with `{blockedBy, conflictFiles, unblockCondition}` ("resume after <blocker> merges, then rebase"). This is legitimate halt #3 (merge conflict). A clean trial-merge proceeds to the merge below. A footprint overlap alone never blocks — only a real textual conflict does (resolution is rebase, not a "merge anyway" — ethos #6).
+
 **Topology-driven merge actor**:
 - **Single-repo REQ** (one touched repo): the pipeline owns the merge in this phase. Run `gh pr merge <prUrl> --squash --delete-branch` from the parent repo path (`repos[<id>].path`), NOT from the worktree. Terminal claim is `merged`.
 - **Cross-repo REQ** (multiple touched repos): use the cross-repo merge sequencing block below. Terminal claim is `merged` after all repos land, or `pr-ready` if dispatched by an orchestrator that owns merge sequencing.

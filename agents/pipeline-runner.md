@@ -74,7 +74,7 @@ After running all checklists, fix Critical and Major issues inline. Commit fixes
 
 The merge actor depends on REQ topology, decided from `pipeline-state.json.repos`:
 
-- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** Run `gh pr merge <prUrl> --squash --delete-branch` from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. Your terminal claim is `merged`.
+- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): source `partials/trial-merge.sh` and run `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`; a **real conflict** → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers`. On a clean result, run `gh pr merge <prUrl> --squash --delete-branch` from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. Your terminal claim is `merged`.
 
 - **Cross-repo REQ** (more than one touched repo): **STOP after Phase 7.** Do NOT attempt to merge — the orchestrator sequences merges per `mergeOrder`. Your terminal claim is `pr-ready`.
 
