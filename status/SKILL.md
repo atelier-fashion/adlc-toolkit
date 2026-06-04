@@ -8,11 +8,11 @@ argument-hint: Optional filter (e.g., REQ-xxx, "in-progress", "bugs")
 
 You are generating a status report of all ADLC work in the current project.
 
-> **See also `/manifest`** — `/status` reads this **local** checkout; `/manifest` derives in-flight work across **all sessions** from the remote (open PRs + pushed `feat/REQ-*` branches), with an advisory overlap report. Use `/manifest` to see what other people are working on before you start.
-
 ## Ethos
 
 !`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
+
+> **See also `/manifest`** — `/status` reads this **local** checkout; `/manifest` derives in-flight work across **all sessions** from the remote (open PRs + pushed `feat/REQ-*` branches), with an advisory overlap report. Use `/manifest` to see what other people are working on before you start.
 
 ## Context
 
