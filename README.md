@@ -20,6 +20,7 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | `/wrapup` | Close out a feature — commit, merge, deploy, update artifacts |
 | `/bugfix` | Streamlined bug fix workflow |
 | `/status` | Show current state of all ADLC work |
+| `/manifest` | Remote-derived view of all in-flight ADLC work — open PRs + pushed `feat/REQ-*` branches, with advisory component/domain overlap |
 | `/analyze` | Codebase health audit |
 | `/optimize` | API cost & performance scanner |
 | `/template-drift` | Detect drift between a project's local `.adlc/templates/` and the canonical toolkit templates |

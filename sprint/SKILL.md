@@ -130,6 +130,8 @@ Report a pre-flight checklist:
 
 Remove ineligible REQs. If no REQs remain, stop.
 
+**In-Flight (cross-session) manifest (advisory, REQ-482).** Before confirming the lineup, build the cross-session manifest **once for the whole batch** (not per REQ — BR-14) and display it as a separate "In-Flight (cross-session)" section, so you can see other sessions' work on the shared remote and any coarse overlaps. Step 2 already ran `git fetch origin`, so invoke `/manifest` prefixing the same shell call with the hand-off vars `MANIFEST_SELF="REQ-a REQ-b …" MANIFEST_SKIP_FETCH=1` — `MANIFEST_SELF` lists **all** the batch's REQ ids (space-separated) so every batch member is marked self, and `MANIFEST_SKIP_FETCH=1` avoids a redundant fetch. Render the in-flight table plus any coarse `component`/`domain` overlaps among in-flight REQs. This is **advisory only** — it does NOT change eligibility, ordering, or scheduling, and a manifest-build failure is ignored (BR-7, BR-8, BR-9). It is separate from, and does not alter, the worktree-collision eligibility check above.
+
 **Max concurrent pipelines**: 5. If more than 5 are eligible, prioritize by:
 1. REQs explicitly listed in arguments (first priority)
 2. REQs with `status: approved` over `status: draft`

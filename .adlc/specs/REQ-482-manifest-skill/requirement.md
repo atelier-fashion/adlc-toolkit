@@ -1,7 +1,7 @@
 ---
 id: REQ-482
 title: "/manifest skill — remote-derived view of in-flight ADLC work + advisory preflight overlap"
-status: draft
+status: complete
 deployable: true
 created: 2026-06-04
 updated: 2026-06-04

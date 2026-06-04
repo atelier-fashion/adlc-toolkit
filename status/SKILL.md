@@ -12,6 +12,8 @@ You are generating a status report of all ADLC work in the current project.
 
 !`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
 
+> **See also `/manifest`** — `/status` reads this **local** checkout; `/manifest` derives in-flight work across **all sessions** from the remote (open PRs + pushed `feat/REQ-*` branches), with an advisory overlap report. Use `/manifest` to see what other people are working on before you start.
+
 ## Context
 
 - Specs directory: !`ls .adlc/specs/ 2>/dev/null || echo "No specs found"`
