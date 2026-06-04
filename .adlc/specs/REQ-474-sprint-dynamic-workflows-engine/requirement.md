@@ -1,10 +1,10 @@
 ---
 id: REQ-474
 title: "Re-platform /sprint orchestration onto Claude Code Dynamic Workflows"
-status: approved
+status: complete
 deployable: true
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-06-04
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["claude-code", "dynamic-workflows", "javascript", "markdown", "bash"]
