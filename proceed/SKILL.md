@@ -292,7 +292,7 @@ End-of-phase log: "Architecture and tasks validated."
 <!-- companion: proceed/phase-4-implementation.md -->
 **Gate**: `currentPhase` must be `4`. After completion: append `4`, set `currentPhase=5`.
 
-**Precise overlap gate (REQ-483, early / best-effort).** Before implementing, source `partials/trial-merge.sh` (two-level fallback) and run `adlc_trial_merge "<worktree>" origin/<integrationBranch>`. A real conflict with an in-flight REQ ranked **ahead** in `/manifest`'s verdict → return the `blocked` terminal now, rather than sinking implementation effort into a branch that will have to rebase (BR-9). This is best-effort (an overlapping branch may not have code yet); the **authoritative** gate is Phase 8 pre-merge. A footprint overlap that trial-merges clean does NOT block (BR-7).
+**Precise overlap gate (REQ-483, early / best-effort).** Before implementing, `git -C <worktree> fetch origin <integrationBranch>` (refresh the base — the Step-0 fetch is stale by now), then source `partials/trial-merge.sh` (two-level fallback) and run `adlc_trial_merge "<worktree>" origin/<integrationBranch>`. On **rc=1** (real conflict) with an in-flight REQ ranked **ahead** in `/manifest`'s verdict → return the `blocked` terminal now, rather than sinking implementation effort into a branch that must rebase (BR-9). **rc=0** (clean — including a footprint overlap that merges clean) does NOT block (BR-7); **rc=2/3** (precondition / unfetched ref) is a setup error, not a conflict — surface it, never as `blocked`. This early gate is best-effort (an overlapping branch may not have code yet); the **authoritative** gate is Phase 8 pre-merge. If the Step-0 `/manifest` verdict isn't in context (post-compression), re-run `/manifest` with `MANIFEST_SKIP_FETCH=1` first — a stale/absent verdict must not block.
 
 Execute the task graph across all touched-repo worktrees. Each task runs in
 `repos[<task.repo>].worktree`. Track per-task progress in `phase4.currentTask`
@@ -451,15 +451,17 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
 <!-- companion: proceed/phases-6-8-ship.md -->
 **Gate**: `currentPhase` must be `6`. After completion: append `6`, set `currentPhase=7`.
 
-Push each touched repo's feature branch and open one PR per repo via
-`gh pr create --base <integrationBranch>` — read `integrationBranch` from
-`pipeline-state.json` (set in Phase 0 step 4); do **NOT** let `gh` default the
-base to the repo's default branch (`main`). Opening against `main` in a
-two-branch repo triggers a `verify-head-ref` failure and forces a
-rebase + retarget (LESSON-036). Cross-repo: create primary's PR last and
-back-fill sibling bodies with the full URL list. Mark requirement `complete`
-in primary frontmatter. Persist each PR URL to `repos[<id>].prUrl`. Report
-URLs grouped by repo in `mergeOrder` sequence.
+Push each touched repo's accumulated commits, then **flip the draft PR opened at Step 0
+(step 8a) to ready** with `gh pr ready <prNumber>` (read `prNumber`/`prUrl` from
+`pipeline-state.json`) — do **NOT** create a new PR (REQ-483). **Fallback (LESSON-004):**
+if `repos[<id>].prNumber` is absent (a pipeline started before draft-PR-early), create
+it now with `gh pr create --base <integrationBranch>` (read `integrationBranch` from
+state; never default to `main` — LESSON-036). Set the full body via `gh pr edit`,
+**preserving the `adlc-footprint` block** (read the current body, keep that fenced block,
+replace only the human sections), and drop the `[WIP]` title prefix via `gh pr edit --title`.
+Cross-repo: ready primary's PR last and back-fill sibling bodies. Mark requirement
+`complete` in primary frontmatter; `prUrl` is already in state from Step 0. Report URLs
+grouped by repo in `mergeOrder` sequence. Full detail in companion.
 
 ---
 

@@ -9,7 +9,7 @@ adlc-toolkit/
 ├── <skill>/SKILL.md            # One directory per skill (spec/, architect/, proceed/, etc.)
 ├── agents/<agent>.md           # Specialized subagent definitions
 ├── templates/*.md              # Canonical templates (copied into consumer projects by /init)
-├── partials/                   # Shared snippets (ethos macro, kimi gate) sourced by SKILL.md files
+├── partials/                   # Shared snippets (ethos macro, kimi gate, trial-merge) sourced by SKILL.md files
 ├── workflows/                  # Deterministic Dynamic Workflow scripts + schemas (copied into consumer projects by /init)
 └── .adlc/                      # Minimal self-tracking for toolkit-internal REQs
     ├── context/                # This directory — project-overview, architecture, conventions
