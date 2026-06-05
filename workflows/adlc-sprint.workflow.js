@@ -275,7 +275,11 @@ const TERMINAL = {
     reason: { type: 'string' },
     // Halt-specific payload. Closed shape (additionalProperties:false) with the
     // known halt sub-fields — e.g. the reflector-question halt carries
-    // `questions[]`. (System Model: events halt:reflector-question / halt:*)
+    // `questions[]`; a REQ-485 self-healing rebase halt carries the BlockHold
+    // payload (`conflictFiles`, `holdState`, `rebaseAttempts`, `resolvedBlocker`)
+    // so the orchestrator can surface a precise manual-rebase advisory and a later
+    // pass can read the prior attempt count. (System Model: events
+    // halt:reflector-question / halt:* ; REQ-485 ADR-6/ADR-7/BR-4/BR-10)
     detail: {
       type: 'object',
       additionalProperties: false,
@@ -283,6 +287,14 @@ const TERMINAL = {
         questions: { type: 'array', items: { type: 'string' } },
         reason: { type: 'string' },
         detail: { type: 'string' },
+        // REQ-485 self-healing rebase-halt payload (BlockHold fields).
+        conflictFiles: { type: 'array', items: { type: 'string' } },
+        holdState: {
+          type: 'string',
+          enum: ['held', 'rebasing', 'resumed', 're-halted', 'needs-manual-rebase'],
+        },
+        rebaseAttempts: { type: 'number' },
+        resolvedBlocker: { type: 'string' },
       },
     },
   },

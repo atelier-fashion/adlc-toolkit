@@ -49,6 +49,7 @@ const {
   stripVerifyMarkers,
   sharesRepo,
   terminalValue,
+  TERMINAL,
 } = helpers;
 
 // ===========================================================================
@@ -463,6 +464,42 @@ test('terminalValue: omits null/undefined reason and detail (closed-schema safe)
   assert.deepEqual(terminalValue('failed', 'REQ-9', 'r', ''), {
     state: 'failed', id: 'REQ-9', reason: 'r', detail: { detail: '' },
   });
+});
+
+// REQ-485 self-healing rebase-halt payload. The post-merge unblock pass returns a
+// blocked() halt whose detail carries BlockHold fields (conflictFiles, holdState,
+// rebaseAttempts, resolvedBlocker). Those keys MUST be declared in the closed
+// (additionalProperties:false) TERMINAL.detail schema, or the halt would be
+// rejected by any consumer that validates a returned terminal against TERMINAL.
+// This pins the schema↔payload contract WITHOUT ajv (the harness has none): every
+// key the rebase-halt payload uses must be a declared TERMINAL.detail property.
+test('blocked: REQ-485 rebase-halt payload validates against the closed TERMINAL.detail schema', () => {
+  const t = blocked('REQ-485', 'needs-manual-rebase', {
+    reason: 'auto-rebase conflicted; manual rebase needed',
+    conflictFiles: ['sprint/SKILL.md'],
+    holdState: 'needs-manual-rebase',
+    rebaseAttempts: 1,
+    resolvedBlocker: 'REQ-483',
+  });
+  assert.deepEqual(t, {
+    state: 'blocked',
+    id: 'REQ-485',
+    reason: 'needs-manual-rebase',
+    detail: {
+      reason: 'auto-rebase conflicted; manual rebase needed',
+      conflictFiles: ['sprint/SKILL.md'],
+      holdState: 'needs-manual-rebase',
+      rebaseAttempts: 1,
+      resolvedBlocker: 'REQ-483',
+    },
+  });
+  // additionalProperties:false → every detail key must be a declared property.
+  const declared = Object.keys(TERMINAL.properties.detail.properties);
+  for (const k of Object.keys(t.detail)) {
+    assert.ok(declared.includes(k), `TERMINAL.detail must declare "${k}" (additionalProperties:false)`);
+  }
+  // holdState is a closed enum — the rebase-halt value must be a member.
+  assert.ok(TERMINAL.properties.detail.properties.holdState.enum.includes('needs-manual-rebase'));
 });
 
 // ===========================================================================
