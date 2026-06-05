@@ -1,7 +1,7 @@
 ---
 id: TASK-075
 title: "Rewrite architect footprint-publish: derive per-repo from tasks, iterate all PRs, move after task creation"
-status: draft
+status: complete
 parent: REQ-484
 created: 2026-06-05
 updated: 2026-06-05
