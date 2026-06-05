@@ -126,27 +126,35 @@ fi
 specdir=$(dirname "$state")   # THIS REQ's spec dir — task glob is scoped here, not all specs.
 tick=$(printf '\140\140\140')
 tab=$(printf '\t')
-# Primary repo id (tasks with no repo: attribute here). Multi-line aware: inside the "repos"
-# object, the repo-id whose block contains `"primary": true` is the primary (POSIX awk only).
+# Primary repo id (tasks with no repo: attribute here). The parse targets the pretty-printed
+# pipeline-state.json that /proceed writes (one JSON field per line; each repo object spans
+# multiple lines). It also tolerates one-repo-object-per-line layouts. A repo-id opening
+# (`"<id>": {`) sets the current repo; "primary"/"prNumber" bind to it (matched on the same line
+# too, so a repo whose object opens and closes on its own line still resolves). POSIX awk only —
+# no 3-arg match(), no perl dependency.
 primary=$(awk '
-  /"repos"[[:space:]]*:/ { inrepos=1; next }
-  inrepos && /^[[:space:]]*"[A-Za-z0-9_.-]+"[[:space:]]*:[[:space:]]*\{/ {
-    s=$0; sub(/^[[:space:]]*"/,"",s); sub(/".*/,"",s); cur=s; next
+  /"repos"[[:space:]]*:/ { inrepos=1 }
+  inrepos && /"[A-Za-z0-9_.-]+"[[:space:]]*:[[:space:]]*\{/ {
+    # take the key immediately before `: {` (the LAST quoted token before the brace), so a
+    # compact line like `{ "req":"R", "repos": { "solo": {` still yields `solo`, not `req`.
+    s=$0; sub(/[[:space:]]*:[[:space:]]*\{.*/,"",s); sub(/"$/,"",s); sub(/.*"/,"",s)
+    if (s!="repos" && s!="") cur=s
   }
   inrepos && cur!="" && /"primary"[[:space:]]*:[[:space:]]*true/ { print cur; exit }
 ' "$state" 2>/dev/null)
 # Touched repo ids that have a prNumber, one TSV line per repo: "<repo-id><TAB><prNumber>".
-# Parse per-repo so each prNumber stays bound to its owning repo id (NOT head -1).
-# POSIX awk only (no 3-arg match / no perl dependency): inside the "repos" object, the latest
-# `"<id>": {` line names the current repo; the next `"prNumber": N` belongs to it.
+# Each prNumber stays bound to its owning repo id (NOT head -1). Same dual-format awk.
 repos_prs=$(awk -v TAB="$tab" '
-  /"repos"[[:space:]]*:/ { inrepos=1; next }
-  inrepos && /^[[:space:]]*"[A-Za-z0-9_.-]+"[[:space:]]*:[[:space:]]*\{/ {
-    s=$0; sub(/^[[:space:]]*"/,"",s); sub(/".*/,"",s); cur=s; next
+  /"repos"[[:space:]]*:/ { inrepos=1 }
+  inrepos && /"[A-Za-z0-9_.-]+"[[:space:]]*:[[:space:]]*\{/ {
+    # take the key immediately before `: {` (the LAST quoted token before the brace), so a
+    # compact line like `{ "req":"R", "repos": { "solo": {` still yields `solo`, not `req`.
+    s=$0; sub(/[[:space:]]*:[[:space:]]*\{.*/,"",s); sub(/"$/,"",s); sub(/.*"/,"",s)
+    if (s!="repos" && s!="") cur=s
   }
   inrepos && cur!="" && /"prNumber"[[:space:]]*:[[:space:]]*[0-9]+/ {
     n=$0; sub(/.*"prNumber"[[:space:]]*:[[:space:]]*/,"",n); sub(/[^0-9].*/,"",n);
-    if (n!="") print cur TAB n
+    if (n!="") { print cur TAB n; cur="" }
   }
 ' "$state" 2>/dev/null)
 [ -n "$repos_prs" ] || { echo "architect: no draft PR (no prNumber in state) — skipping footprint publish"; exit 0; }
