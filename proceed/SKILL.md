@@ -238,6 +238,12 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - `.adlc/specs/REQ-xxx-*/requirement.md`
    - `.adlc/config.yml` (if present)
 8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, integrationBranch: <integration-branch>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. `integrationBranch` is the value resolved in step 4 — Phase 6 (PR base) and Phase 8 (merge target) MUST read it from state, never re-derive or assume `main`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
+8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR, so this REQ's intent — and, after `/architect`, its footprint — is visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
+   ```bash
+   git -C <worktree> push -u origin <branch-name>
+   gh -R <owner/repo> pr create --draft --base <integration-branch> --head <branch-name> --title "[WIP] REQ-xxx: <short title>" --body "Draft opened at Step 0 by /proceed; body filled in at Phase 6."
+   ```
+   Then record `repos[<id>].prUrl`, `prNumber`, and `prCreatedAt` (from `gh pr view <n> --json number,url,createdAt`) into `pipeline-state.json`. The base is `<integration-branch>` from step 4 — never hardcode `main` (LESSON-036). **Resume-safe**: if `repos[<id>].prNumber` is already set, reuse it — never open a second PR. In subagent mode (`/sprint` pipeline-runner) this still runs per REQ. The PR is `--draft` (not review-ready); Phase 6 flips it to ready.
 9. When the pipeline completes (all PRs merged in Phase 8), clean up every worktree using the absolute path recorded in state — read `repos[<id>].worktree` for each touched repo and pass that value to `git worktree remove`. Do NOT use the relative `.worktrees/REQ-xxx` form here — the contract requires the recorded absolute path:
    ```bash
    git -C <repo-path> worktree remove <repos[<id>].worktree>
@@ -285,6 +291,8 @@ End-of-phase log: "Architecture and tasks validated."
 ### Phase 4: Implement
 <!-- companion: proceed/phase-4-implementation.md -->
 **Gate**: `currentPhase` must be `4`. After completion: append `4`, set `currentPhase=5`.
+
+**Precise overlap gate (REQ-483, early / best-effort).** Before implementing, `git -C <worktree> fetch origin <integrationBranch>` (refresh the base — the Step-0 fetch is stale by now), then source `partials/trial-merge.sh` (two-level fallback) and run `adlc_trial_merge "<worktree>" origin/<integrationBranch>`. On **rc=1** (real conflict) with an in-flight REQ ranked **ahead** in `/manifest`'s verdict → return the `blocked` terminal now, rather than sinking implementation effort into a branch that must rebase (BR-9). **rc=0** (clean — including a footprint overlap that merges clean) does NOT block (BR-7); **rc=2/3** (precondition / unfetched ref) is a setup error, not a conflict — surface it, never as `blocked`. This early gate is best-effort (an overlapping branch may not have code yet); the **authoritative** gate is Phase 8 pre-merge. If the Step-0 `/manifest` verdict isn't in context (post-compression), re-run `/manifest` with `MANIFEST_SKIP_FETCH=1` first — a stale/absent verdict must not block.
 
 Execute the task graph across all touched-repo worktrees. Each task runs in
 `repos[<task.repo>].worktree`. Track per-task progress in `phase4.currentTask`
@@ -443,15 +451,17 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
 <!-- companion: proceed/phases-6-8-ship.md -->
 **Gate**: `currentPhase` must be `6`. After completion: append `6`, set `currentPhase=7`.
 
-Push each touched repo's feature branch and open one PR per repo via
-`gh pr create --base <integrationBranch>` — read `integrationBranch` from
-`pipeline-state.json` (set in Phase 0 step 4); do **NOT** let `gh` default the
-base to the repo's default branch (`main`). Opening against `main` in a
-two-branch repo triggers a `verify-head-ref` failure and forces a
-rebase + retarget (LESSON-036). Cross-repo: create primary's PR last and
-back-fill sibling bodies with the full URL list. Mark requirement `complete`
-in primary frontmatter. Persist each PR URL to `repos[<id>].prUrl`. Report
-URLs grouped by repo in `mergeOrder` sequence.
+Push each touched repo's accumulated commits, then **flip the draft PR opened at Step 0
+(step 8a) to ready** with `gh pr ready <prNumber>` (read `prNumber`/`prUrl` from
+`pipeline-state.json`) — do **NOT** create a new PR (REQ-483). **Fallback (LESSON-004):**
+if `repos[<id>].prNumber` is absent (a pipeline started before draft-PR-early), create
+it now with `gh pr create --base <integrationBranch>` (read `integrationBranch` from
+state; never default to `main` — LESSON-036). Set the full body via `gh pr edit`,
+**preserving the `adlc-footprint` block** (read the current body, keep that fenced block,
+replace only the human sections), and drop the `[WIP]` title prefix via `gh pr edit --title`.
+Cross-repo: ready primary's PR last and back-fill sibling bodies. Mark requirement
+`complete` in primary frontmatter; `prUrl` is already in state from Step 0. Report URLs
+grouped by repo in `mergeOrder` sequence. Full detail in companion.
 
 ---
 

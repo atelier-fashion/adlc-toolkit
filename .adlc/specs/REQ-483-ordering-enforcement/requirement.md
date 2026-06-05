@@ -1,7 +1,7 @@
 ---
 id: REQ-483
 title: "Hard ordering enforcement for concurrent ADLC REQs — draft-PR-early, file footprint, deterministic serialize/halt"
-status: draft
+status: complete
 deployable: true
 created: 2026-06-04
 updated: 2026-06-04
