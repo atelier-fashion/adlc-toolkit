@@ -12,7 +12,7 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | `/spec` | Write requirement specs from feature requests |
 | `/architect` | Design architecture and break requirements into tasks |
 | `/validate` | Validate any ADLC phase output before advancing |
-| `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup |
+| `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup. Opens a draft PR early and trial-merge-gates the merge to enforce ordering (REQ-483) |
 | `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback |
 | `/reflect` | Post-implementation self-review before formal review |
 | `/review` | Multi-agent code review (correctness, quality, architecture, tests, security) |
@@ -20,7 +20,7 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | `/wrapup` | Close out a feature — commit, merge, deploy, update artifacts |
 | `/bugfix` | Streamlined bug fix workflow |
 | `/status` | Show current state of all ADLC work |
-| `/manifest` | Remote-derived view of all in-flight ADLC work — open PRs + pushed `feat/REQ-*` branches, with advisory component/domain overlap |
+| `/manifest` | Remote-derived view of all in-flight ADLC work — open PRs + pushed `feat/REQ-*` branches, with advisory component/domain + file-footprint overlap and a deterministic merge order (REQ-483) |
 | `/analyze` | Codebase health audit |
 | `/optimize` | API cost & performance scanner |
 | `/template-drift` | Detect drift between a project's local `.adlc/templates/` and the canonical toolkit templates |

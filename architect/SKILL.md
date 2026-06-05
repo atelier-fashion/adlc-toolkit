@@ -45,6 +45,22 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
    - **integration-explorer** agent — provide the affected areas to identify extension points, tests, and integration surfaces
 
 2. Read the key files identified by agents
+3. **Publish the file footprint to the draft PR (REQ-483, BR-4).** Under `/proceed`, a draft PR already exists (Step 0). Capture the affected-file list from the `architecture-mapper` output (the first column of its "Files to Modify" + "Files to Create" tables) and publish it into the PR body as a single fenced `adlc-footprint` block — one `<repo-id>:<path-or-glob>` per line (the schema `/manifest` parses; see `.adlc/specs/REQ-483-*/architecture.md`). Idempotent (replace any prior block); skip with a one-line note if there is no draft PR (standalone `/architect`):
+   ```sh
+   prnum=$(sed -n 's/.*"prNumber"[^0-9]*\([0-9][0-9]*\).*/\1/p' .adlc/specs/REQ-xxx-*/pipeline-state.json | head -1)
+   if [ -n "$prnum" ]; then
+     tick=$(printf '\140\140\140')
+     tmp=$(mktemp "${TMPDIR:-/tmp}/footprint.XXXXXX") || exit 0
+     trap 'rm -f "$tmp"' EXIT
+     if base=$(gh pr view "$prnum" --json body -q .body 2>/dev/null) && [ -n "$base" ]; then
+       base=$(printf '%s\n' "$base" | sed "/^${tick}adlc-footprint/,/^${tick}/d")
+       safe=$(printf '%s\n' "$FOOTPRINT_LINES" | grep -vE '\.\.' | grep -E '^[A-Za-z0-9_.-]*:?[A-Za-z0-9_./*-]+$')
+       { printf '%s\n\n%sadlc-footprint\n' "$base" "$tick"; printf '%s\n' "$safe"; printf '%s\n' "$tick"; } > "$tmp"
+       gh pr edit "$prnum" --body-file "$tmp"
+     fi
+   fi
+   ```
+   `$FOOTPRINT_LINES` holds the captured `<repo-id>:<path>` lines. Other sessions read this block via `gh pr view --json body` (consumed by `/manifest`'s ordering verdict).
 
 ### Step 3: Design Architecture (if needed)
 1. If the requirement involves new architectural decisions, create `.adlc/specs/REQ-xxx-*/architecture.md`

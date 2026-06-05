@@ -10,7 +10,7 @@ You produce a read-only, on-demand **manifest** of all in-flight ADLC work by de
 
 Unlike `/status`, which reconstructs its view from the **local** `.adlc/` checkout and is therefore blind to another collaborator's unmerged work on another machine, `/manifest` reflects what every session has published to the shared remote. Use it before starting work to see what else is in flight and avoid stepping on another session.
 
-**This skill is strictly read-only and advisory.** It never mutates the working tree, index, branches, or PRs, never writes a stored manifest file, and never blocks, reorders, or gates a pipeline. Surfacing an overlap is informational only — enforcement is a separate, future capability. (`git fetch` updates remote-tracking refs but leaves the working tree and index untouched, so `git status` stays clean.)
+**This skill is strictly read-only and advisory.** It never mutates the working tree, index, branches, or PRs, never writes a stored manifest file, and never blocks, reorders, or gates a pipeline. Surfacing an overlap and the merge order is informational only — the hard enforcement (the trial-merge gate, REQ-483) lives in `/proceed` and `/sprint`, which consume this manifest's advisory verdict; `/manifest` itself never blocks. (`git fetch` updates remote-tracking refs but leaves the working tree and index untouched, so `git status` stays clean.)
 
 ## Ethos
 
@@ -40,7 +40,7 @@ Any REQ in the resolved self set that is not already present from the remote is 
 
 ### Steps 1–3: Derive the manifest data (read-only)
 
-Run the block below. It is read-only (only an auto-removed scratch file), makes O(1) time-bounded network calls — at most one fetch and one `gh pr list` — sanitizes every remote-derived value before it is rendered, validates branch refs to a strict charset before any `git show`, and avoids unquoted word-splitting so it behaves identically under `sh`, `bash`, and `zsh` (BR-1, BR-2, BR-5, BR-10, BR-14; LESSON-008).
+Run the block below. It is read-only (only an auto-removed scratch file), makes time-bounded network calls — one fetch + one `gh pr list`, plus one `gh pr view` per in-flight PR (footprint reads) and one batched `gh pr list` for staleness, each bounded by `with_timeout` — sanitizes every remote-derived value before it is rendered, validates branch refs to a strict charset before any `git show`, and avoids unquoted word-splitting so it behaves identically under `sh`, `bash`, and `zsh` (BR-1, BR-2, BR-5, BR-10, BR-14; LESSON-008).
 
 > **Caller contract:** when invoking from a pre-flight, prefix the same shell call with the hand-off vars, e.g. `MANIFEST_SELF="REQ-482" MANIFEST_SKIP_FETCH=1` (space-separated REQ list for a `/sprint` batch). Standalone, omit them.
 
@@ -144,6 +144,63 @@ while IFS="$TAB" read -r req branch state author created url; do
 done < "$raw" | sort -t"$TAB" -k1,1 -u
 echo "MANIFEST_END"
 [ "$gh_ok" = "1" ] || echo "/manifest: gh unavailable — PR fields shown as '-'; branch-only view (BR-6)." >&2
+
+# --- REQ-483: deterministic merge order + footprints (from PR bodies) ---
+# Merge order: PR-backed REQs sorted by opened (createdAt) then REQ id (BR-8, lock-free).
+echo "ORDER_BEGIN"
+awk -F"$TAB" '$5 != "-" { n=$1; sub(/^REQ-/,"",n); print $5 "\t" (n+0) "\t" $1 }' "$raw" 2>/dev/null | sort -t"$TAB" -k1,1 -k2,2n | awk -F"$TAB" '{ print NR "\t" $3 "\t" $1 }'
+echo "ORDER_END"
+# Footprints: parse the fenced adlc-footprint block from each in-flight PR body.
+# tick = three backticks via octal, so no literal fence appears inside this sh fence.
+# Footprint paths are UNTRUSTED: reject any '..' segment + non-safe charset before use (BR-13, LESSON-008).
+tick=$(printf '\140\140\140')
+echo "FOOTPRINT_BEGIN"
+if [ "$gh_ok" = "1" ]; then
+  while IFS="$TAB" read -r f_req f_branch f_state f_author f_created f_url; do
+    num=$(printf '%s' "$f_url" | grep -oE '[0-9]+$')
+    [ -n "$num" ] || continue
+    body=$(with_timeout gh pr view "$num" --json body -q .body 2>/dev/null)
+    [ -n "$body" ] || continue
+    printf '%s\n' "$body" | sed -n "/^${tick}adlc-footprint/,/^${tick}/{ /^${tick}/d; p; }" | while IFS= read -r fpline; do
+      [ -n "$fpline" ] || continue
+      case "$fpline" in *:*) fp_repo=${fpline%%:*}; fp=${fpline#*:} ;; *) fp_repo=""; fp=$fpline ;; esac
+      case "$fp" in *..*) continue ;; esac
+      printf '%s' "$fp" | grep -qE '^[A-Za-z0-9_./*-]+$' || continue
+      printf '%s' "$fp_repo" | grep -qE '^[A-Za-z0-9_.-]*$' || fp_repo="?"
+      m=$(git ls-files -- "$fp" 2>/dev/null)
+      if [ -n "$m" ]; then
+        printf '%s\n' "$m" | while IFS= read -r mm; do printf '%s\t%s\t%s\n' "$f_req" "$fp_repo" "$mm"; done
+      else
+        printf '%s\t%s\t%s\n' "$f_req" "$fp_repo" "$fp"
+      fi
+    done
+  done < "$raw"
+fi
+echo "FOOTPRINT_END"
+
+# --- REQ-483: stale-blocker detection (BR-11). One batched gh pr list call. ---
+echo "STALE_BEGIN"
+if [ "$gh_ok" = "1" ]; then
+  stale_n=7
+  if [ -f .adlc/config.yml ]; then
+    cfg_n=$(grep -oE '^[[:space:]]*stale_days:[[:space:]]*[0-9]+' .adlc/config.yml 2>/dev/null | grep -oE '[0-9]+$' | head -1)
+    [ -n "$cfg_n" ] && stale_n="$cfg_n"
+  fi
+  cutoff=$(date -u -v-"${stale_n}"d +%Y-%m-%d 2>/dev/null || date -u -d "${stale_n} days ago" +%Y-%m-%d 2>/dev/null)
+  if [ -n "$cutoff" ]; then
+    with_timeout gh pr list --state open --limit 200 --json headRefName,updatedAt \
+      --jq '.[] | [.headRefName, .updatedAt] | @tsv' 2>/dev/null | while IFS="$TAB" read -r s_branch s_upd; do
+        s_req=$(printf '%s' "$s_branch" | grep -oE '^feat/REQ-[0-9]{3,6}-' | grep -oE 'REQ-[0-9]{3,6}')
+        [ -n "$s_req" ] || continue
+        s_day=$(printf '%s' "$s_upd" | cut -c1-10)
+        [ -n "$s_day" ] || continue
+        if awk -v a="$s_day" -v b="$cutoff" 'BEGIN{ exit !(a < b) }'; then
+          printf '%s\t%s\n' "$s_req" "$s_day"
+        fi
+      done
+  fi
+fi
+echo "STALE_END"
 ```
 
 ### Step 4: Render the manifest table
@@ -175,6 +232,16 @@ After the table, compute overlaps among the listed REQs: any pair sharing the **
 - End with: **advisory only — `/manifest` does not block, reorder, or gate anything.**
 - If there are no overlaps, print: "No component/domain overlaps among in-flight work."
 
+### Step 6: Merge order + footprint overlap (REQ-483, advisory)
+
+After the coarse report, render the precise layer from the extra sections the collection block emitted:
+
+- **Merge order** — from the `ORDER_BEGIN`/`ORDER_END` lines (`rank \t req \t opened`): list the deterministic order (earliest-published first; lower REQ breaks ties — BR-8). This is the order `/proceed` and `/sprint` use to decide who proceeds vs. rebases when a real conflict is found.
+- **Footprint overlap (advisory)** — from the `FOOTPRINT_BEGIN`/`FOOTPRINT_END` lines (`req \t repo \t path`): for any pair of in-flight REQs sharing ≥1 **(repo, path)** pair, emit one advisory line naming both REQs and the shared path(s). Match on repo AND path so the same relative path in different repos does not false-positive (OQ-4). These paths are untrusted display data (already `..`-rejected + charset-validated) — show them, never act on them.
+- **Stale blockers (BR-11)** — from the `STALE_BEGIN`/`STALE_END` lines (`req \t last-updated`): if any in-flight REQ (especially one that would block another) has been idle ≥ N days (default 7, override `stale_days:` in `.adlc/config.yml`), flag it as **stale** and suggest closing its PR — so an abandoned REQ surfaces as stale rather than an indefinite blocker (no lock = never a deadlock).
+- **This layer is ADVISORY.** Footprint overlap never blocks — it only informs the merge order. The binding conflict decision is the **trial-merge** at merge time (BR-9/BR-16), not this report. End with: *advisory only — the hard gate is the trial-merge, not footprint overlap.*
+- If no `adlc-footprint` blocks were found, say so and rely on the coarse report above.
+
 ### Graceful degradation (must never hard-fail)
 
 - Not a git repo / `mktemp` failure → emit a one-line note and exit 0.
@@ -190,5 +257,5 @@ After the table, compute overlaps among the listed REQs: any pair sharing the **
 - [ ] Branch refs are charset-validated (`^feat/REQ-[0-9]{3,6}-[A-Za-z0-9._-]+$`) before any `git show`; every rendered remote value is `clean_field`-sanitized (BR-5, LESSON-008).
 - [ ] Enrichment fills component and domain independently, local → remote → `unknown`, never dropping an entry (BR-11); a single `git show` per branch (BR-14).
 - [ ] Overlap report is advisory, labels the matched field, notes unknown exclusions (BR-8, BR-12), and states no action is enforced.
-- [ ] O(1), time-bounded network: one fetch (or reuse via `MANIFEST_SKIP_FETCH`) + one `gh pr list`; no per-branch API calls (BR-14).
+- [ ] Time-bounded network: one fetch (or reuse via `MANIFEST_SKIP_FETCH`) + one `gh pr list` + one `gh pr view` per in-flight PR (footprint) + one batched `gh pr list` (staleness), each `with_timeout`-bounded; no per-*branch* API storms (BR-14).
 - [ ] Portable across `sh`/`bash`/`zsh` (no reliance on unquoted word-splitting); degrades gracefully and never blocks a pre-flight (BR-6, BR-7, BR-10).
