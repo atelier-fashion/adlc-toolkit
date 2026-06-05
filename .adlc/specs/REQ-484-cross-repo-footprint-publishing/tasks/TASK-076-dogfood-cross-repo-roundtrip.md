@@ -1,7 +1,7 @@
 ---
 id: TASK-076
 title: "Dogfood the cross-repo footprint round-trip by EXECUTION (publish to 2 repos, /manifest reads back)"
-status: draft
+status: complete
 parent: REQ-484
 created: 2026-06-05
 updated: 2026-06-05
