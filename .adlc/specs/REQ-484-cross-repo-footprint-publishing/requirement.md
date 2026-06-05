@@ -1,7 +1,7 @@
 ---
 id: REQ-484
 title: "Cross-repo footprint publishing — per-repo attribution from tasks, published to each touched repo's draft PR"
-status: approved
+status: complete
 deployable: true
 created: 2026-06-05
 updated: 2026-06-05

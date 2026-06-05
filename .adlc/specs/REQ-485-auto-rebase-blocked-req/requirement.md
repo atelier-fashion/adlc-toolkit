@@ -1,7 +1,7 @@
 ---
 id: REQ-485
 title: "Auto-rebase and resume a blocked REQ after its blocker merges (/sprint self-healing serialization)"
-status: approved
+status: complete
 deployable: true
 created: 2026-06-05
 updated: 2026-06-05
