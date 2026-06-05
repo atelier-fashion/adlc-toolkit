@@ -74,7 +74,7 @@ After running all checklists, fix Critical and Major issues inline. Commit fixes
 
 The merge actor depends on REQ topology, decided from `pipeline-state.json.repos`:
 
-- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers`; **rc=2/3** → `failed` (setup error); **rc=0** → run `gh pr merge <prUrl> --squash --delete-branch` from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. Your terminal claim is `merged`.
+- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `gh pr merge <prUrl> --squash --delete-branch` from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`.
 
 - **Cross-repo REQ** (more than one touched repo): **STOP after Phase 7.** Do NOT attempt to merge — the orchestrator sequences merges per `mergeOrder`. Your terminal claim is `pr-ready`.
 
@@ -106,9 +106,22 @@ Format your report's first line as: `Terminal state: <tag>` followed by the stan
 **Before declaring `blocked` for a missing/absent artifact** (spec not found, "no REQ directory", expected file absent), you MUST first `git fetch origin` and re-check against `origin/<integration-branch>` (the integration branch resolved in `/proceed` Phase 0 step 4 — `staging` in two-branch repos, else `main`). A stale local ref produces a false "no spec exists" negative (LESSON-036 — this exact false-block cost an orchestrator recovery cycle in the REQ-442/443/444 sprint). Only after a fresh fetch confirms the artifact is genuinely absent on the integration branch may you proceed to the blocked steps below.
 
 If you encounter a blocker that genuinely requires human input:
-1. Update `pipeline-state.json` with blocker details (`blockers` array)
+1. Update `pipeline-state.json` with blocker details (`blockers` array — schema below)
 2. Stop gracefully
 3. Emit terminal claim `blocked`. Do NOT attempt to merge regardless of topology when blocked.
+
+**Once you have reported `blocked` and exited, you do NOT self-resume (REQ-485 BR-8).** A merge-blocked REQ (one held by a Phase-8 trial-merge conflict against an ahead REQ) is resumed by the **`/sprint` orchestrator**, not by a relaunched copy of you: after the orchestrator merges your blocker within the run, it auto-rebases your worktree and re-drives the pipeline (workflow engine via `resumeFromRunId` + an orchestrator `blocker-cleared` signal; legacy engine by re-dispatching a fresh pipeline-runner from your recorded `currentPhase`). Solo `/proceed` (not under `/sprint`) stays manual-resume — the human is present (BR-1).
+
+**`blockers[*]` entry schema** (populated on a trial-merge / rebase conflict; consumed by the orchestrator's unblock pass — REQ-483 + REQ-485):
+
+| Field | Meaning |
+|---|---|
+| `blockedBy` | the REQ this one waits on (the ahead REQ in the trial-merge conflict). After a materialized rebase conflict whose blocker already merged, this becomes a `manual`/`self` sentinel (the dependency is no longer "wait for a merge" but "needs manual rebase" — REQ-485 OQ-6). |
+| `conflictFiles` | the conflicting paths reported by the trial-merge (rc=1) / rebase. |
+| `unblockCondition` | human-readable, e.g. "resume after <blocker> merges, then rebase". |
+| `holdState` | `held` \| `rebasing` \| `resumed` \| `re-halted` \| `needs-manual-rebase` (REQ-485 BlockHold.state). `resumed` clears the entry (BR-11). |
+| `rebaseAttempts` | conflicting-rebase attempt count, capped at the retry bound (default 1, config `auto_rebase_max_attempts`); at the bound the orchestrator marks `needs-manual-rebase` and stops auto-retrying (REQ-485 BR-10). |
+| `resolvedBlocker` | the now-merged blocker id, preserved for human context after a post-merge materialized conflict (REQ-485 OQ-6). |
 
 ## Input
 

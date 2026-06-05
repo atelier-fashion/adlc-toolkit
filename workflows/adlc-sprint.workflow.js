@@ -275,7 +275,11 @@ const TERMINAL = {
     reason: { type: 'string' },
     // Halt-specific payload. Closed shape (additionalProperties:false) with the
     // known halt sub-fields — e.g. the reflector-question halt carries
-    // `questions[]`. (System Model: events halt:reflector-question / halt:*)
+    // `questions[]`; a REQ-485 self-healing rebase halt carries the BlockHold
+    // payload (`conflictFiles`, `holdState`, `rebaseAttempts`, `resolvedBlocker`)
+    // so the orchestrator can surface a precise manual-rebase advisory and a later
+    // pass can read the prior attempt count. (System Model: events
+    // halt:reflector-question / halt:* ; REQ-485 ADR-6/ADR-7/BR-4/BR-10)
     detail: {
       type: 'object',
       additionalProperties: false,
@@ -283,6 +287,14 @@ const TERMINAL = {
         questions: { type: 'array', items: { type: 'string' } },
         reason: { type: 'string' },
         detail: { type: 'string' },
+        // REQ-485 self-healing rebase-halt payload (BlockHold fields).
+        conflictFiles: { type: 'array', items: { type: 'string' } },
+        holdState: {
+          type: 'string',
+          enum: ['held', 'rebasing', 'resumed', 're-halted', 'needs-manual-rebase'],
+        },
+        rebaseAttempts: { type: 'number' },
+        resolvedBlocker: { type: 'string' },
       },
     },
   },
@@ -707,6 +719,11 @@ if (typeof module !== 'undefined') module.exports = {
 // ---------------------------------------------------------------------------
 const MAX_CONCURRENT_REQS = 5; // applied AFTER eligibility (BR-12)
 const MAX_GATE_ITERATIONS = 3; // ≤3 validate→fix loop per gate (BR-4)
+// REQ-485 BR-10 / OQ-3: max conflicting-rebase attempts per held REQ before it is
+// marked needs-manual-rebase and the auto-retry stops. Default 1; a consumer repo
+// may override via .adlc/config.yml `auto_rebase_max_attempts` (the unblock-pass
+// find-leaf reads that config and reports each held REQ's prior rebaseAttempts).
+const AUTO_REBASE_MAX_ATTEMPTS = 1;
 
 // ELIGIBILITY_SCHEMA — the Preflight agent's structured return. Declared here,
 // ABOVE the top-level Preflight block, because the module body runs top-to-
@@ -799,6 +816,53 @@ const COMPLETED_TASKS_SCHEMA = {
   },
 };
 
+// HELD_REQS_SCHEMA / REBASE_RESULT_SCHEMA — the REQ-485 self-healing unblock pass
+// IO leaves. Same TDZ rule as the schemas above (declared before the top-level
+// await). Pure literals; additionalProperties:false.
+//
+// HELD_REQS_SCHEMA: a read-only scan of the OTHER REQs' pipeline-state.json for a
+// STILL-PRESENT blockers entry (the BR-11 idempotency anchor — a cleared entry
+// means already-resumed, never re-processed). Each record carries the held REQ's
+// own worktree path + resumePhase + the blocker it waits on, so the script can
+// rebase + resume it without re-deriving anything (BR-2, BR-5, BR-6).
+const HELD_REQS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['held'],
+  properties: {
+    held: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'blockedBy', 'worktree'],
+        properties: {
+          id: { type: 'string' },           // the held REQ id
+          blockedBy: { type: 'string' },    // the REQ it waits on (live merge dep)
+          worktree: { type: 'string' },     // its own repos[<id>].worktree (BR-5)
+          resumePhase: { type: 'number' },  // its recorded currentPhase (BR-3)
+          rebaseAttempts: { type: 'number' }, // prior conflicting-rebase count (BR-10)
+        },
+      },
+    },
+  },
+};
+
+// REBASE_RESULT_SCHEMA: the per-held-REQ rebase IO leaf's outcome. `clean` true ⇒
+// resume from resumePhase (BR-3); false ⇒ the leaf already ran `rebase --abort`
+// (non-mutating restore, BR-4) and reports the materialized conflict files. The
+// leaf NEVER auto-resolves/forces (ethos #6).
+const REBASE_RESULT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['clean'],
+  properties: {
+    clean: { type: 'boolean' },
+    conflictFiles: { type: 'array', items: { type: 'string' } },
+    detail: { type: 'string' },
+  },
+};
+
 // ===========================================================================
 // Top-level orchestration: Preflight → per-REQ pipeline.
 // ===========================================================================
@@ -810,6 +874,16 @@ const COMPLETED_TASKS_SCHEMA = {
 //                            Phase-0 agent re-resolves; never hardcode 'main').
 //   args.answers           — map<reqId,string>; {} on first run, carries user
 //                            replies to halts on resume (ADR-6 / BR-5).
+//   args.blockerCleared    — map<reqId,blockerId>; {} on first run. The ORCHESTRATOR
+//                            (not a user) sets this when it merges a held REQ's
+//                            blocker within the run: the post-merge unblock pass
+//                            rebases the held REQ's worktree and relaunches THIS
+//                            script via resumeFromRunId with the cleared signal,
+//                            so the held REQ resumes from its recorded phase and
+//                            re-runs the now-passing trial-merge gate. Distinct
+//                            from a user answer (REQ-485 BR-8). Like args.answers
+//                            it is read ONLY in runReq for the held REQ, keeping
+//                            every other REQ byte-identical (cache replay).
 
 phase('Preflight — eligibility + max-5 bound');
 
@@ -869,7 +943,20 @@ const results = await pipeline(todo, (r) => runReq(r.id));
 // results array so the returned terminals reflect the post-barrier state.
 const sequenced = await sequenceCrossRepoMerges(results, todo);
 
-return { results: sequenced };
+// Self-healing serialization (REQ-485). After the merge barrier, some REQs may
+// have merged that OTHER REQs were held behind (a Phase-8 trial-merge conflict
+// against an ahead REQ → {state:'blocked', reason:'merge-conflict'|'trial-merge'}).
+// Run the post-merge unblock pass: for each held REQ whose blocker is now MERGED,
+// rebase ONLY its own worktree and — on a clean rebase — resume it (re-run its
+// now-passing Phase-8 gate + merge). A conflicting rebase aborts non-mutatingly
+// and re-halts (BR-4), retry-bounded (BR-10). Held REQs on one blocker resume in
+// deterministic order, one at a time (BR-6). With nothing newly merged this is a
+// no-op (deterministic + idempotent — BR-6). A blocker that ended `failed` also
+// releases REQs held SOLELY on it (OQ-5 / ADR-8). The pass mutates only each held
+// REQ's own worktree (BR-5) via leaf agents (the script owns control flow only).
+const healed = await unblockHeldReqs(sequenced, todo);
+
+return { results: healed };
 
 // ===========================================================================
 // runReq(id) — the per-REQ chain. Phases 0–3 land here (TASK-057), Phase 4–5 in
@@ -895,6 +982,15 @@ async function runReq(id) {
   // `args.answers` anywhere outside this function or the cache divergence stops
   // being surgical. (ADR-6, BR-5, AC-3)
   const ans = args.answers?.[id];
+
+  // The orchestrator's "blocker-cleared" signal for THIS REQ (REQ-485 BR-8),
+  // threaded in on resume by the post-merge unblock pass via resumeFromRunId.
+  // `undefined` on a first run (and for every REQ that was not held on a
+  // just-merged blocker), so reading it here is cache-neutral. When set, it names
+  // the blocker that merged; it is injected ONLY into the Phase-8 wrapup/merge
+  // path (the held REQ's now-passing trial-merge gate re-runs and merges), the
+  // same surgical-divergence discipline as `ans`. Read it HERE and nowhere else.
+  const blockerCleared = args.blockerCleared?.[id];
 
   // -------------------------------------------------------------------------
   // Phase 0 — worktree + state. ONE agent does all the git/state I/O: it
@@ -997,7 +1093,10 @@ async function runReq(id) {
   if (verifyResult !== true) return verifyResult;    // reflector-question halt
   const PR_STATE = await openPRs(id, P, repos);       // Phase 6 — open PR(s)
   await cleanupAndWatchCI(id, P, PR_STATE);           // Phase 7 — sanity + CI
-  const term = await wrapupAndMerge(id, P, repos, PR_STATE); // Phase 8
+  // Phase 8. `blockerCleared` (REQ-485 BR-8) is forwarded so a resumed held REQ
+  // skips straight to re-running its now-passing trial-merge gate + merge; on a
+  // first run it is undefined and Phase 8 behaves byte-identically (cache replay).
+  const term = await wrapupAndMerge(id, P, repos, PR_STATE, blockerCleared); // Phase 8
 
   return term; // a TERMINAL value (merged | pr-ready | blocked | failed)
 }
@@ -1412,7 +1511,19 @@ function cleanupAndWatchCIPrompt(id, prs) {
 // sets pipeline-state.json.repos[<repo>].merged = true immediately (resumable,
 // no double-merge). The CRITICAL re-verification gate (gh pr view) is enforced by
 // the SCRIPT in a SEPARATE leaf (see verifyMergedPrompt) — claim ≠ truth (BR-6).
-function mergePrompt(id, repo, pr) {
+function mergePrompt(id, repo, pr, blockerCleared) {
+  // REQ-485 BR-11: on a blocker-cleared resume, the same write that sets
+  // merged=true must also clear this REQ's blockers entry. Omitted (empty) on a
+  // first run so the prompt is byte-identical and the journal cache replays.
+  const clearStep = blockerCleared
+    ? [
+        `  4. This is a RESUME of a REQ that was held behind ${blockerCleared}`,
+        '     (now merged). In the SAME state write as step 3, CLEAR this REQ\'s',
+        '     pipeline-state.json.blockers entry (set its holdState to "resumed",',
+        '     then remove the entry) — REQ-485 BR-11. Setting merged=true and',
+        '     clearing blockers are distinct writes; do BOTH.',
+      ]
+    : [];
   return [
     `Phase 8 merge for ${id}: this is a SINGLE-REPO REQ, so YOU own the merge.`,
     `Merge PR ${pr.url} (repo ${repo.repo}) into origin/${repo.integrationBranch || '<integrationBranch-unresolved>'}.`,
@@ -1426,6 +1537,7 @@ function mergePrompt(id, repo, pr) {
     '     the worktree, because git refuses to delete a branch checked out by a',
     `     worktree: \`gh pr merge ${pr.url} --squash --delete-branch\`.`,
     '  3. Immediately set pipeline-state.json.repos[<repo>].merged = true.',
+    ...clearStep,
     '',
     'Report mergeConflict (true ONLY on a real merge conflict) and merged (true if',
     'you ran the merge command without error). The script independently re-verifies',
@@ -1834,9 +1946,17 @@ async function cleanupAndWatchCI(id, P, PR_STATE) {
 // before it is returned (claim ≠ truth, BR-6). `repos[*].merged` is written to
 // state by the merge agent immediately after each successful merge (resumable,
 // no double-merge — AC-7). Returns a value conforming to the TERMINAL schema.
-async function wrapupAndMerge(id, P, repos, PR_STATE) {
+async function wrapupAndMerge(id, P, repos, PR_STATE, blockerCleared) {
   const prs = (PR_STATE && PR_STATE.prs) || [];
   const touched = repos || [];
+  // REQ-485 BR-11: when this Phase-8 is the resume of a previously-held REQ
+  // (blockerCleared is set), the single-repo merge agent below must, on a
+  // successful merge, clear this REQ's pipeline-state.json.blockers entry in the
+  // SAME write that sets repos[<id>].merged = true — so a later blocker-merged
+  // event does not re-process an already-merged REQ. `mergePrompt` is told to do
+  // the clear when `blockerCleared` is set; on a first run it is undefined and the
+  // prompt is byte-identical (cache replay). The clear is the idempotency anchor
+  // for the unblock pass (which considers only REQs with a live blockers entry).
 
   // CROSS-REPO REQ: do NOT self-merge — the top-level ADR-12 barrier sequences
   // these. Still re-verify the PRs are real/open before claiming pr-ready (BR-6).
@@ -1858,7 +1978,8 @@ async function wrapupAndMerge(id, P, repos, PR_STATE) {
   }
 
   // Dispatch the self-merge IO agent (parent-path merge + immediate state write).
-  const mergeResult = await agent(mergePrompt(id, repo, pr), {
+  // On a blocker-cleared resume the prompt also instructs the BR-11 blockers clear.
+  const mergeResult = await agent(mergePrompt(id, repo, pr, blockerCleared), {
     ...P,
     label: `${id} phase8-merge`,
     schema: MERGE_RESULT_SCHEMA,
@@ -2034,6 +2155,174 @@ function crossRepoMergePrompt(id, prs) {
     'Report mergeConflict (true ONLY on a real conflict) and merged (true if every',
     'PR merge command ran without error). The script re-verifies each merge with',
     '`gh pr view` — your claim is not accepted on its own.',
+  ].join('\n');
+}
+
+// ===========================================================================
+// Self-healing serialization (REQ-485) — the post-merge unblock pass.
+//
+// After the merge barrier, some REQs may have merged that OTHER REQs were held
+// behind (a Phase-8 trial-merge conflict against an ahead REQ — REQ-483). This
+// pass auto-rebases each held REQ onto the refreshed integration branch and, on a
+// clean rebase, resumes it (re-runs its now-passing Phase-8 gate + merge). A
+// conflicting rebase aborts non-mutatingly and re-halts (BR-4); the retry bound
+// caps auto-retries (BR-10). The pass mutates ONLY each held REQ's own worktree
+// (BR-5), via leaf agents (the script owns control flow only). With nothing newly
+// merged it is a no-op (BR-6 idempotency). v1 is WITHIN-RUN only (BR-9): the set
+// of "now-merged blocker ids" comes from THIS run's results, never a cross-session
+// poll. A blocker that ended `failed` also releases REQs held SOLELY on it
+// (OQ-5 / ADR-8) — its dead PR will never fire a merge event otherwise.
+// ===========================================================================
+async function unblockHeldReqs(results, todo) {
+  const all = results || [];
+
+  // The set of blocker ids whose constraint has dissolved THIS run: any REQ that
+  // merged, plus (OQ-5) any REQ that ended `failed`/abandoned — both mean "no
+  // future merge of this blocker will fire, so stop holding behind it". (BR-9:
+  // within-run only — derived from results, not a cross-session watch.)
+  const clearedBlockers = new Set(
+    all.filter((t) => t && (t.state === 'merged' || t.state === 'failed')).map((t) => t.id),
+  );
+  if (clearedBlockers.size === 0) return all; // nothing merged/failed → no-op (BR-6)
+
+  // Find the held REQs via ONE read-only IO leaf (the script has no fs). It scans
+  // every OTHER REQ's pipeline-state.json for a STILL-PRESENT blockers entry whose
+  // blockedBy is in clearedBlockers (the BR-11 anchor: a cleared entry is skipped).
+  // It returns each held REQ's own worktree + resumePhase + prior rebaseAttempts.
+  const heldScan = await agent(findHeldPrompt(Array.from(clearedBlockers), todo), {
+    phase: 'unblock',
+    label: 'unblock-scan',
+    schema: HELD_REQS_SCHEMA,
+    // Default workflow subagent — read-only state scan, no agentType.
+  });
+  let held = (heldScan && heldScan.held) || [];
+  if (held.length === 0) return all; // no live holds on the cleared blockers (BR-6)
+
+  // Deterministic order (BR-6): the scan returns earliest-published-first; enforce
+  // a stable lower-REQ tiebreak here in pure JS so two held REQs never race.
+  held = held.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  // Process held REQs ONE AT A TIME (serialized — BR-6): the held REQs may
+  // themselves overlap, so a clean rebase + resume of one can change the base the
+  // next one rebases onto. NO parallel() here — that is the load-bearing safety.
+  const updatedById = {};
+  for (const h of held) {
+    const term = await unblockOneReq(h);
+    if (term) updatedById[h.id] = term;
+  }
+
+  // Stitch the updated terminals back over the original results (order preserved).
+  return all.map((t) => (t && updatedById[t.id]) ? updatedById[t.id] : t);
+}
+
+// unblockOneReq — rebase + resume ONE held REQ. Rebase via an IO leaf in its OWN
+// worktree (BR-5); clean → resume from its recorded phase by calling runReq with
+// the blocker-cleared signal threaded through args (the early phases replay from
+// the journal cache, only Phase-8 diverges to re-run the now-passing gate + merge,
+// BR-3/BR-8); conflict → the leaf already aborted (non-mutating, BR-4), so re-halt
+// blocked with the materialized files, marking needs-manual-rebase once the retry
+// bound is hit (BR-10). NEVER auto-resolve (ethos #6).
+async function unblockOneReq(h) {
+  const P = { phase: h.id };
+  const attempts = typeof h.rebaseAttempts === 'number' ? h.rebaseAttempts : 0;
+
+  const rebase = await agent(rebasePrompt(h), {
+    ...P,
+    label: `${h.id} unblock-rebase`,
+    schema: REBASE_RESULT_SCHEMA,
+    // Default workflow subagent — git rebase/abort IO worker in the held worktree.
+  });
+
+  if (rebase && rebase.clean === true) {
+    // Clean rebase → resume from the recorded phase. Thread the blocker-cleared
+    // signal so ONLY this REQ's Phase-8 diverges from the cache (BR-3/BR-8). On a
+    // resume that reaches merge the merge leaf also clears blockers (BR-11).
+    args.blockerCleared = args.blockerCleared || {};
+    args.blockerCleared[h.id] = h.blockedBy;
+    return await runReq(h.id);
+  }
+
+  // Conflicting rebase: the leaf already ran `rebase --abort` (worktree restored).
+  // Increment attempts; at/over the bound, stop auto-retrying and mark
+  // needs-manual-rebase (BR-10 / OQ-6) — else re-halt held for a later pass.
+  const nextAttempts = attempts + 1;
+  const conflictFiles = (rebase && rebase.conflictFiles) || [];
+  if (nextAttempts >= AUTO_REBASE_MAX_ATTEMPTS) {
+    return blocked(h.id, 'needs-manual-rebase', {
+      reason: `auto-rebase conflicted ${nextAttempts}x (bound ${AUTO_REBASE_MAX_ATTEMPTS}); manual rebase needed`,
+      conflictFiles,
+      resolvedBlocker: h.blockedBy,
+      holdState: 'needs-manual-rebase',
+      rebaseAttempts: nextAttempts,
+    });
+  }
+  return blocked(h.id, 'merge-conflict', {
+    reason: `rebase onto refreshed base conflicted after ${h.blockedBy} merged; resolve and resume`,
+    conflictFiles,
+    holdState: 'held',
+    rebaseAttempts: nextAttempts,
+  });
+}
+
+// findHeldPrompt — the read-only scan leaf. Reports REQs with a STILL-PRESENT
+// blockers entry blocked on a now-cleared blocker (BR-11 anchor). Degrade-safe:
+// a held REQ whose worktree is gone or whose currentPhase is unrecorded is
+// reported with a note and the script skips it (it cannot be auto-resumed) — never
+// an error (BR-7). The retry bound is read from .adlc/config.yml here.
+function findHeldPrompt(clearedBlockers, todo) {
+  const ids = (todo || []).map((r) => r.id).join(', ');
+  return [
+    'Self-healing unblock scan (REQ-485). Some REQs just merged or failed within',
+    'this /sprint run; find every OTHER REQ that was HELD behind one of them and is',
+    'now eligible to auto-rebase + resume.',
+    '',
+    `Blockers whose constraint dissolved this run (merged or failed): ${clearedBlockers.join(', ') || '(none)'}.`,
+    `Candidate REQ ids in this run: ${ids || '(none)'}.`,
+    '',
+    'For EACH candidate REQ, read its pipeline-state.json and report it ONLY if:',
+    '  - it has a STILL-PRESENT blockers entry (a cleared/absent entry means it',
+    '    already resumed+merged — skip it; this is the BR-11 idempotency anchor),',
+    '    AND',
+    '  - that entry\'s blockedBy is one of the dissolved blockers above (for a',
+    '    `failed` blocker, include the REQ ONLY if that is its SOLE live blocker —',
+    '    OQ-5/ADR-8; a REQ with other live blockers stays held).',
+    '',
+    'For each reported held REQ return: id, blockedBy, worktree (its OWN',
+    'repos[<id>].worktree — never another REQ\'s), resumePhase (its currentPhase),',
+    'and rebaseAttempts (its blockers.rebaseAttempts, or 0).',
+    '',
+    'DEGRADE-SAFE (BR-7): if a held REQ\'s worktree is gone or its currentPhase is',
+    'unrecorded, DO NOT include it (it cannot be auto-resumed) — note it in detail',
+    'so the orchestrator surfaces a "manual resume needed" advisory. Never error.',
+    '',
+    'Also read .adlc/config.yml `auto_rebase_max_attempts` if present (default 1) so',
+    'the caller can apply the retry bound. Return ONLY the schema object; do NOT',
+    'rebase, merge, or modify anything in this read-only scan.',
+  ].join('\n');
+}
+
+// rebasePrompt — the per-held-REQ rebase IO leaf. Operates ONLY in the held REQ's
+// own worktree (BR-5); fetches the integration branch (fresh tip — LESSON-036),
+// rebases, and on conflict ALWAYS `git rebase --abort` (non-mutating restore,
+// BR-4) before reporting. NEVER auto-resolves / forces (ethos #6).
+function rebasePrompt(h) {
+  return [
+    `Auto-rebase the held REQ ${h.id} after its blocker ${h.blockedBy} merged`,
+    '(REQ-485 self-healing serialization). Operate ONLY in this REQ\'s OWN worktree;',
+    'do NOT touch the blocker\'s branch/PR or any other REQ\'s worktree (BR-5).',
+    '',
+    `Worktree: ${h.worktree}`,
+    '',
+    'Steps (use `git -C <worktree>` form, quote every path):',
+    `  1. git -C "${h.worktree}" fetch origin <integrationBranch>   # fresh tip (LESSON-036)`,
+    `  2. git -C "${h.worktree}" rebase origin/<integrationBranch>`,
+    '  3a. SUCCESS → report clean=true (no conflictFiles).',
+    `  3b. CONFLICT → git -C "${h.worktree}" rebase --abort  (restore the worktree,`,
+    '      non-mutating — BR-4), then report clean=false with conflictFiles = the',
+    '      paths that conflicted. NEVER resolve, -X force, or "merge anyway".',
+    '',
+    'Resolve <integrationBranch> from the worktree\'s repo (two-branch → staging,',
+    'else main; NEVER hardcode main — LESSON-036). Return ONLY the schema object.',
   ].join('\n');
 }
 
