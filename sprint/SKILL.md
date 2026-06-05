@@ -225,6 +225,28 @@ The sequential flow when the orchestrator is the merge actor (cross-repo, or sin
 2. Pull main: `git checkout main && git pull`
 3. Move on — other pipelines keep running in the background
 
+**Post-merge unblock pass (REQ-485 — self-healing serialization).** REQ-483 holds a REQ with a `blocked` terminal when its pre-merge trial-merge conflicts (rc=1) against an ahead REQ. Today that held REQ is surfaced for a human to rebase + resume. For an unattended `/sprint` batch, **immediately after the orchestrator confirms REQ-A merged** (the merge above landed AND `repos[A].merged = true` was written), run an unblock pass so the batch self-heals — in place of parking the held REQ for a human:
+
+1. **Find held REQs (BR-2, BR-11 anchor).** Scan every other in-flight REQ's `pipeline-state.json` for a *still-present* `blockers` entry with `blockedBy == A`. Consider ONLY REQs whose `blockers` entry exists — a cleared entry means already-resumed-and-merged, so it is never re-processed (the BR-6 idempotency anchor). With nothing newly merged, this scan finds nothing and the pass is a no-op (deterministic + idempotent).
+2. **Order + serialize (BR-6).** If more than one REQ is held on A, order them by REQ-483's deterministic rule (earliest-published PR first, lower REQ tiebreak) and process them **one at a time** — the held REQs may themselves overlap, so resuming two concurrently would re-introduce the merge race REQ-483 eliminated.
+3. **Degrade-safe pre-check (BR-7).** For each held REQ, read its worktree path from its own `pipeline-state.json.repos[<id>].worktree` and its `currentPhase`. If the worktree has been torn down OR `currentPhase` is unrecorded, **skip with a one-line advisory** `manual resume needed for REQ-x (worktree gone / phase unrecorded)` — never an error or a batch crash.
+4. **Rebase ONLY the held REQ's own worktree (BR-2, BR-5).** Fetch and rebase in the held REQ's worktree — mutate nothing else (never REQ-A's branch/PR, never a third REQ's worktree):
+   ```sh
+   # held=<held REQ id>, hw=<its repos[<id>].worktree>, ib=<integrationBranch>
+   git -C "$hw" fetch origin "$ib" >/dev/null 2>&1
+   if git -C "$hw" rebase "origin/$ib" >/dev/null 2>&1; then
+     echo "rebase-clean: $held"          # → step 5 (auto-resume)
+   else
+     git -C "$hw" rebase --abort >/dev/null 2>&1 || :   # non-mutating restore
+     echo "rebase-conflict: $held"       # → step 6 (re-halt)
+   fi
+   ```
+   (Write any list-iteration over held REQs split-free — `printf '%s\n' "$held_ids" | while read -r held`, every path quoted — so it behaves identically under the executor shell, LESSON-329.)
+5. **Clean rebase → auto-resume (BR-3).** Re-dispatch a fresh `pipeline-runner` for the held REQ exactly as in Step 3, using its existing worktree (its `pipeline-state.json` already records `currentPhase`, so the runner resumes from there). The runner re-runs the now-passing Phase-8 trial-merge gate and proceeds to merge; on that merge it sets `repos[<id>].merged = true` AND clears its `blockers` entry (BR-11). Treat this re-dispatched runner like any other Step 3 pipeline (verify its terminal claim per Step 4). **Legacy-engine degrade (OQ-1 default / BR-7):** the common halt is the Phase-8 pre-merge gate, and a fresh runner from `currentPhase` resumes it cleanly — so the common case auto-resolves. If a held REQ halted mid-phase in a way the legacy engine cannot cleanly re-dispatch from, degrade to the surface-to-human advisory rather than forcing a resume.
+6. **Conflicting rebase → re-halt, never auto-resolve (BR-4, BR-10).** The `rebase --abort` already restored the worktree. Increment the held REQ's `blockers.rebaseAttempts`. If it is **below** the retry bound (default 1, overridable via `.adlc/config.yml` key `auto_rebase_max_attempts`; missing → 1), re-halt with `holdState: "held"` carrying the NOW-materialized conflict files and surface a human-resolution prompt. If it is **at/above** the bound, mark `holdState: "needs-manual-rebase"`, set `resolvedBlocker: A`, switch `blockedBy` to a `manual`/`self` sentinel (so this scan never re-picks it up — REQ-485 OQ-6), and surface for manual handling. Never auto-resolve, `-X` force, or "merge anyway" (ethos #6). BR-10 counts attempts **per blocker-merged event**.
+
+**Blocker-failed release (REQ-485 OQ-5 / ADR-8).** A blocker can also end **`failed`/abandoned** within the run — its PR will never merge, so no merge event fires the pass above and a REQ held *solely* on it would sit `blocked` to batch-end. When a REQ-A terminal is `failed`, for every held REQ whose ONLY live `blockedBy` is A (no other live blocker), treat the dead blocker as cleared and run the SAME rebase+resume path (steps 3–6 above) — its ordering constraint has dissolved. A REQ with *other* live blockers stays held. This is the in-run analogue of REQ-483's stale-PR safety. (Place this check where Step 4.6 / the merge loop observes a REQ's terminal state.)
+
 **Batch mode (only when N ≥ 3)**: when the sprint has 3 or more pipelines AND the orchestrator has strong prior knowledge that their diffs overlap (same files, same modules), switch to batching:
 1. Wait for all pipelines to reach merge-ready state (Phase 7 complete, blocked, or stopped)
 2. Sort merge-ready pipelines by:
