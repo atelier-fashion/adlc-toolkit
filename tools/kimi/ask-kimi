@@ -45,13 +45,25 @@ def _parse_args(argv=None):
 def main(argv=None):
     args = _parse_args(argv)
 
+    # Skip unreadable paths with a warning instead of aborting the whole batch:
+    # a single stale/missing path in a multi-file --paths set (e.g. one moved
+    # knowledge doc among the top-15 a /spec or /analyze step delegates) must not
+    # nullify the readable remainder. Only fail when NOTHING is readable — packing
+    # an empty corpus would waste an API call. The consuming skills already
+    # reconcile any expected-but-missing doc and read it directly, so a skipped
+    # path is recovered downstream rather than silently lost (BUG-080).
+    readable = []
     for p in args.paths:
-        if not os.path.isfile(p) or not os.access(p, os.R_OK):
-            sys.exit(f"not a readable file: {p}")
+        if os.path.isfile(p) and os.access(p, os.R_OK):
+            readable.append(p)
+        else:
+            sys.stderr.write(f"ask-kimi: skipping unreadable path: {p}\n")
+    if not readable:
+        sys.exit("no readable files among --paths")
 
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": f"<corpus>\n{_common.pack_corpus(args.paths)}\n</corpus>"},
+        {"role": "user", "content": f"<corpus>\n{_common.pack_corpus(readable)}\n</corpus>"},
         {"role": "user", "content": args.question},
     ]
 
