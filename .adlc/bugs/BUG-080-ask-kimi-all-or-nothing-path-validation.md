@@ -1,7 +1,7 @@
 ---
 id: BUG-080
 title: "ask-kimi aborts the whole batch when any one --paths entry is unreadable"
-status: open
+status: resolved
 severity: medium
 created: 2026-06-06
 updated: 2026-06-06
@@ -121,3 +121,12 @@ Verification (live API + suite):
   files remain.
 - `tools/kimi/tests/test_cli_warn.py` — 3 tests: skip-and-continue, skip
   warning not suppressed by `--no-warn`, all-unreadable fail-loud guard.
+
+## Deployment
+
+- N/A — `adlc-toolkit` is a symlink-install repo (no Cloud Run / no `gcp:`
+  config, no iOS). The change went live for every session the instant
+  PR #73 squash-merged to `main` (commit `e51ae6f`). The `~/bin/ask-kimi`
+  wrapper execs the repo file directly, so no reinstall is needed.
+- Knowledge captured:
+  `LESSON-334-kimi-api-error-label-hides-local-path-failures.md`.
