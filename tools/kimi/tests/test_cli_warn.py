@@ -16,6 +16,8 @@ ASK_KIMI = os.path.join(TOOLS, "ask-kimi")
 KIMI_WRITE = os.path.join(TOOLS, "kimi-write")
 
 _NOTICE_SUBSTR = "kimi: sending file contents to Moonshot"
+_SKIP_SUBSTR = "ask-kimi: skipping unreadable path:"
+_NO_READABLE_SUBSTR = "no readable files among --paths"
 
 
 def _env_without_key(home_override=None, **extra):
@@ -76,6 +78,58 @@ def test_ask_kimi_dry_run_does_not_emit_notice(tmp_path):
     r = _run([ASK_KIMI, "--paths", str(src), "--question", "q", "--dry-run"], env=_env_without_key(home_override=tmp_path))
     assert _NOTICE_SUBSTR not in r.stderr
     assert r.returncode == 0  # dry-run exits cleanly without needing a key
+
+
+# --- ask-kimi: unreadable-path handling (BUG-080) ---
+
+def test_ask_kimi_skips_unreadable_path_and_continues(tmp_path):
+    """A missing path among readable ones is skipped (warned), not fatal.
+
+    The notice fires AFTER path validation and BEFORE get_client(), so its
+    presence proves execution continued past validation with the readable
+    remainder rather than aborting on the missing path.
+    """
+    good = tmp_path / "good.txt"
+    good.write_text("hello\n")
+    missing = tmp_path / "nope.txt"  # never created
+    r = _run(
+        [ASK_KIMI, "--paths", str(good), str(missing), "--question", "q"],
+        env=_env_without_key(home_override=tmp_path),
+    )
+    assert _SKIP_SUBSTR in r.stderr
+    assert str(missing) in r.stderr
+    assert _NOTICE_SUBSTR in r.stderr  # reached the notice => did not abort on the bad path
+    assert r.returncode != 0  # missing key still exits non-zero, after proceeding
+
+
+def test_ask_kimi_skip_warning_not_suppressed_by_no_warn(tmp_path):
+    """--no-warn silences only the exfiltration notice, not the skip diagnostic.
+
+    The skip warning is operational signal (a doc was dropped), not a privacy
+    notice — suppressing it would re-hide the very thing BUG-080 surfaces.
+    """
+    good = tmp_path / "good.txt"
+    good.write_text("hello\n")
+    missing = tmp_path / "nope.txt"
+    r = _run(
+        [ASK_KIMI, "--paths", str(good), str(missing), "--question", "q", "--no-warn"],
+        env=_env_without_key(home_override=tmp_path),
+    )
+    assert _NOTICE_SUBSTR not in r.stderr  # exfil notice suppressed
+    assert _SKIP_SUBSTR in r.stderr        # skip diagnostic still printed
+
+
+def test_ask_kimi_all_unreadable_fails_loud_without_notice(tmp_path):
+    """When NO path is readable, exit non-zero before packing/sending anything."""
+    miss1 = tmp_path / "a.txt"  # never created
+    miss2 = tmp_path / "b.txt"  # never created
+    r = _run(
+        [ASK_KIMI, "--paths", str(miss1), str(miss2), "--question", "q"],
+        env=_env_without_key(home_override=tmp_path),
+    )
+    assert _NO_READABLE_SUBSTR in r.stderr
+    assert _NOTICE_SUBSTR not in r.stderr  # aborted before get_client()/notice
+    assert r.returncode != 0
 
 
 # --- kimi-write ---
