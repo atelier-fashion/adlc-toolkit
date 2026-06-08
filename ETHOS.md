@@ -39,3 +39,9 @@ Skill steps are a protocol, not a guideline. Execute every step literally — in
 When you hit a failure, fix the root cause — don't bypass it. Skipping hooks (`--no-verify`), swallowing exceptions, commenting out a flaky test, or working around a bug instead of fixing it are all forms of borrowing against future work at high interest. The cost compounds: every workaround is a landmine for the next REQ. If a fix is genuinely out of scope, file it explicitly (TODO with a tracking link, follow-up task) rather than letting it disappear.
 
 **Applies when**: A test fails, a hook blocks a commit, a build error is "weird", an exception fires unexpectedly, a flaky behavior tempts you to retry-and-move-on.
+
+## 7. Skeptical by Default
+
+A clean-looking change is a hypothesis, not a proof. Review adversarially: assume there's a bug and go find it, read the actual code rather than the commit message or the author's confidence (including your own), and try to break the change before you bless it. "I couldn't find a problem" is not the same claim as "there is no problem" — say which one you mean. Skepticism cuts both ways: be as suspicious of your own findings as of the code, because a false positive costs trust as fast as a miss — try to refute a finding before you raise it, and raise the ones that survive.
+
+**Applies when**: Reviewing any change (AI-generated or human), self-reviewing before handoff, validating a phase gate, judging whether a passing test or a green diff is actually evidence of correctness.
