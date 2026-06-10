@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SKILL.md corruption linter — five orthogonal checks (REQ-425, REQ-433, REQ-436).
+"""SKILL.md corruption linter — six orthogonal checks (REQ-425, REQ-433, REQ-436).
 
 Run from the repo root:
 
@@ -7,7 +7,7 @@ Run from the repo root:
 
 Exit code: 0 on clean, otherwise min(num_findings, 255).
 
-The five checks (each a pure ``(text, rel) -> list[Finding]`` except
+The six checks (each a pure ``(text, rel) -> list[Finding]`` except
 ``find_skill_files``, the one structural exception):
 
 1. ``check_sentinels``   — exact forbidden substrings from ``sentinels.txt``.
@@ -29,7 +29,15 @@ The five checks (each a pure ``(text, rel) -> list[Finding]`` except
    ``bash`` builds support ``local``; conventions.md's POSIX-only mandate
    targets ``sh``/``shell``, so flagging ``bash`` would be a false positive in
    legitimately-``bash`` blocks. Catches the Defect-2 class going forward.
-5. ``check_cross_fence_fn`` — a shell function defined in one fenced block but
+5. ``check_arg_templating`` — a bare ``$<digit>`` anywhere in a SKILL.md.
+   The Skill tool substitutes ``$ARGUMENTS`` and ``$0``–``$9`` across the
+   whole SKILL.md body *before* any fenced script reaches a shell, so a bare
+   positional — shell ``$1`` or awk ``$0``/``$5`` — is silently replaced with
+   (or emptied by) the invocation's arguments. Observed live in `/manifest`:
+   ``index($0,k)`` became ``index(MANIFEST_SELF=REQ-508,k)`` and an ORDER awk
+   lost its fields. Templating-safe spellings the substitution regex does not
+   match: ``${1}`` for shell positionals, ``$(0)``/``$(1)`` for awk fields.
+6. ``check_cross_fence_fn`` — a shell function defined in one fenced block but
    invoked only from a *different* fenced block in the same SKILL.md. SKILL.md
    fenced blocks do not share shell state across steps, so such a function is
    undefined at its call site (the Defect-1 silent-telemetry-loss class). This
@@ -87,6 +95,12 @@ FENCE_CLOSE_RE = re.compile(r"^\s*```\s*$")
 # (e.g. `mylocal`, `local_var=`) — `\S` after the space ensures a declared
 # name follows. Only applied to sh/shell fences (bash is exempt — see docstring).
 POSIX_LOCAL_RE = re.compile(r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*local\s+\S")
+
+# A bare $<digit> — Skill argument templating substitutes $0–$9 (and
+# $ARGUMENTS) across the whole SKILL.md body, clobbering shell positionals and
+# awk fields alike. ${1} and $(1) contain no `$<digit>` substring and are the
+# safe spellings; (?<!\$) exempts `$$1` (PID followed by a digit).
+ARG_TEMPLATING_RE = re.compile(r"(?<!\$)\$[0-9]")
 
 # REQ-436 ADR-7: a shell function definition `name() {` at statement position.
 FN_DEF_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{")
@@ -354,6 +368,31 @@ def check_posix_fence(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def check_arg_templating(text: str, rel: str) -> list[Finding]:
+    """Flag a bare ``$<digit>`` anywhere in a SKILL.md.
+
+    Skill argument templating substitutes ``$ARGUMENTS`` and ``$0``–``$9``
+    across the WHOLE SKILL.md body before any fenced script reaches a shell,
+    so this scans every line — not just fences (inline code spans and prose
+    are templated too). A bare positional therefore never survives to
+    execution: shell ``$1`` and awk ``$0``/``$5`` get replaced with (or
+    emptied by) the invocation's arguments. Use ``${1}`` for shell
+    positionals and ``$(0)``/``$(1)`` for awk fields — neither contains a
+    ``$<digit>`` substring, so both survive templating verbatim.
+    """
+    findings: list[Finding] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if ARG_TEMPLATING_RE.search(line):
+            findings.append(
+                Finding(
+                    rel, lineno, "arg-templating",
+                    "bare $<digit> is clobbered by Skill argument templating "
+                    "— use ${N} for shell positionals, $(N) for awk fields",
+                )
+            )
+    return findings
+
+
 def check_cross_fence_fn(text: str, rel: str) -> list[Finding]:
     """REQ-436 ADR-7: flag a shell function DEFINED in one fenced block but
     INVOKED only from a DIFFERENT fenced block in the same SKILL.md. SKILL.md
@@ -462,6 +501,7 @@ def run(root: Path) -> list[Finding]:
         findings.extend(check_balance(text, rel))
         findings.extend(check_canonical(text, rel, partials_blob))
         findings.extend(check_posix_fence(text, rel))
+        findings.extend(check_arg_templating(text, rel))
         findings.extend(check_cross_fence_fn(text, rel))
     return findings
 

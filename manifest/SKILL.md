@@ -61,8 +61,11 @@ with_timeout() {
   elif command -v gtimeout >/dev/null 2>&1; then gtimeout 20 "$@"
   else "$@"; fi
 }
-emit_field() { awk -v k="$1" 'index($0,k)==1{sub(/^[^:]*:[[:space:]]*/,"");gsub(/[\047"\r]/,"");sub(/[[:space:]]+$/,"");print;exit}'; }
-clean_field() { printf '%s' "$1" | tr -c 'A-Za-z0-9 ._/:-' ' ' | cut -c1-60; }
+# NOTE: bare $<digit> (shell positionals AND awk fields) is clobbered by Skill
+# argument templating before this block ever reaches a shell — always write the
+# brace/paren forms ${1} (shell) and $(1)/$(0) (awk) inside this file.
+emit_field() { awk -v k="${1}" 'index($(0),k)==1{sub(/^[^:]*:[[:space:]]*/,"");gsub(/[\047"\r]/,"");sub(/[[:space:]]+$/,"");print;exit}'; }
+clean_field() { printf '%s' "${1}" | tr -c 'A-Za-z0-9 ._/:-' ' ' | cut -c1-60; }
 
 TAB=$(printf '\t')
 raw=$(mktemp "${TMPDIR:-/tmp}/manifest.XXXXXX") || { echo "/manifest: mktemp failed — skipping manifest" >&2; exit 0; }
@@ -123,7 +126,9 @@ echo "MANIFEST_BEGIN self=${self_disp:-none} gh=${gh_ok}"
 while IFS="$TAB" read -r req branch state author created url; do
   comp=""
   dom=""
-  loc=$(ls .adlc/specs/"$req"-*/requirement.md 2>/dev/null | head -1)
+  # find, not an ls glob: zsh errors on unmatched globs ("no matches found") instead of
+  # passing the pattern through, so a glob here breaks sh/bash/zsh parity (BR-10).
+  loc=$(find .adlc/specs -type f -path "*/${req}-*/requirement.md" 2>/dev/null | sort | head -1)
   if [ -n "$loc" ]; then
     comp=$(emit_field "component:" < "$loc")
     dom=$(emit_field "domain:" < "$loc")
@@ -148,7 +153,7 @@ echo "MANIFEST_END"
 # --- REQ-483: deterministic merge order + footprints (from PR bodies) ---
 # Merge order: PR-backed REQs sorted by opened (createdAt) then REQ id (BR-8, lock-free).
 echo "ORDER_BEGIN"
-awk -F"$TAB" '$5 != "-" { n=$1; sub(/^REQ-/,"",n); print $5 "\t" (n+0) "\t" $1 }' "$raw" 2>/dev/null | sort -t"$TAB" -k1,1 -k2,2n | awk -F"$TAB" '{ print NR "\t" $3 "\t" $1 }'
+awk -F"$TAB" '$(5) != "-" { n=$(1); sub(/^REQ-/,"",n); print $(5) "\t" (n+0) "\t" $(1) }' "$raw" 2>/dev/null | sort -t"$TAB" -k1,1 -k2,2n | awk -F"$TAB" '{ print NR "\t" $(3) "\t" $(1) }'
 echo "ORDER_END"
 # Footprints: parse the fenced adlc-footprint block from each in-flight PR body.
 # tick = three backticks via octal, so no literal fence appears inside this sh fence.

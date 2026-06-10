@@ -56,7 +56,17 @@ a general markdown linter and NOT a general shell linter.
    legitimately-`bash` blocks. The reported line is the absolute line of the
    offending body line (not the fence-open), so `/analyze` Step 1.9's
    `<file>:<line>:` parser stays accurate.
-5. **Cross-fence function (`cross-fence-fn`)** — a shell function *defined*
+5. **Argument templating (`arg-templating`)** — a bare `$<digit>` anywhere in
+   a SKILL.md (prose, inline code, or fence) is a finding. The Skill tool
+   substitutes `$ARGUMENTS` and `$0`–`$9` across the whole SKILL.md body
+   *before* any fenced script reaches a shell, so a bare positional — shell
+   `$1` or awk `$0`/`$5` — is silently replaced with (or emptied by) the
+   invocation's arguments (observed live: `/manifest`'s `index($0,k)` became
+   `index(MANIFEST_SELF=REQ-508,k)`). The templating-safe spellings are
+   `${1}` for shell positionals and `$(0)`/`$(1)` for awk fields — neither
+   contains a `$<digit>` substring, and both are valid shell/awk. `$$1`
+   (PID followed by a digit) is exempt. See LESSON-335.
+6. **Cross-fence function (`cross-fence-fn`)** — a shell function *defined*
    inside one fenced block but *invoked* only from a *different* fenced block
    in the same SKILL.md is a finding. SKILL.md fenced blocks do not share
    shell state across steps, so the function is undefined at that call site

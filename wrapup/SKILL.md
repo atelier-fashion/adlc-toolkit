@@ -63,7 +63,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 10. **Capture cleanup state BEFORE leaving the branch**. You must record three things while you are still on the feature branch in the feature worktree, because the subsequent `git checkout main` may only work in the main worktree and you will lose the ability to look these up afterwards:
     - Branch name: `BRANCH=$(git -C <worktree> branch --show-current)`
     - Current working-tree path: `WT_PATH=<worktree>`
-    - Main worktree path: `MAIN_WT=$(git -C <worktree> worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p; exit}')`
+    - Main worktree path: `MAIN_WT=$(git -C <worktree> worktree list --porcelain | awk '/^worktree /{p=$(2)} /^branch refs\/heads\/main$/{print p; exit}')`
 11. Move to the main worktree and update it: `git -C "$MAIN_WT" checkout main && git -C "$MAIN_WT" pull`
 12. **Clean up local branch and worktree** (run from `$MAIN_WT`):
     - If `"$WT_PATH"` differs from `"$MAIN_WT"` (i.e., the work happened in a separate worktree), remove it: `git -C "$MAIN_WT" worktree remove "$WT_PATH"`. This handles BOTH the `/proceed` pattern (`.worktrees/REQ-xxx`) and the Claude Code harness pattern (`.claude/worktrees/<slug>`) without hardcoding either path.
@@ -172,9 +172,11 @@ esac
            case "$BASENAME" in
                *..*) ;;  # reject — drop silently
                *) if printf '%s' "$BASENAME" | grep -qE '^-[A-Za-z0-9_.-]+$' && [ -d "$ENC_DIR" ]; then
+                      # ls dir | grep, not ls glob: zsh errors on unmatched globs ("no
+                      # matches found") instead of passing the pattern through.
                       while IFS= read -r f; do
-                          [ -n "$f" ] && CANDIDATES+=("$f")
-                      done < <(ls -t "$ENC_DIR"/*.jsonl 2>/dev/null)
+                          [ -n "$f" ] && CANDIDATES+=("$ENC_DIR/$f")
+                      done < <(ls -t "$ENC_DIR" 2>/dev/null | grep '\.jsonl$')
                   fi ;;
            esac
            # Terminate after processing $HOME — BR-6: never walk above (would otherwise scan
@@ -207,7 +209,9 @@ esac
        # Architecture note: this is newest-within-the-first-candidate-directory, not globally
        # newest across all ancestor dirs — accepted approximation per REQ-423 architecture.
        if [ -z "$JSONL" ]; then
-           JSONL="${CANDIDATES[0]}"
+           # Slice form, not [0]: zsh arrays are 1-indexed, so ${CANDIDATES[0]} is
+           # silently empty there; ${CANDIDATES[@]:0:1} is first-element in bash AND zsh.
+           JSONL="${CANDIDATES[@]:0:1}"
            if [ -n "$REQ_ID" ]; then
                echo "/wrapup: session JSONL — $REQ_ID not mentioned in any candidate; using newest $(basename "$JSONL") as fallback" >&2
            else
