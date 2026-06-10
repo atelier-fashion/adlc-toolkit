@@ -264,12 +264,12 @@ CUTOFF=$(date -d '90 days ago' +%Y-%m-%d 2>/dev/null || date -v-90d +%Y-%m-%d)
 # Local stale branches
 git for-each-ref --sort=committerdate refs/heads/ \
   --format='%(committerdate:short) %(refname:short) %(authorname)' \
-  | awk -v c="$CUTOFF" '$1 < c'
+  | awk -v c="$CUTOFF" '$(1) < c'
 
 # Remote stale branches (origin)
 git for-each-ref --sort=committerdate refs/remotes/origin/ \
   --format='%(committerdate:short) %(refname:short) %(authorname)' \
-  | awk -v c="$CUTOFF" '$1 < c && $2 !~ /HEAD/'
+  | awk -v c="$CUTOFF" '$(1) < c && $(2) !~ /HEAD/'
 
 # Branches already merged into the default branch (safe to delete)
 DEFAULT=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || echo main)
@@ -281,7 +281,7 @@ git branch -r --merged "origin/$DEFAULT" | grep -vE "origin/(HEAD|$DEFAULT|maste
 ```bash
 # Hash every tracked file and group by identical content (POSIX: cksum)
 git ls-files -z | tr '\0' '\n' | xargs cksum 2>/dev/null \
-  | sort | awk '{k=$1 OFS $2; $1=""; $2=""; sub(/^  /,""); map[k]=map[k] ORS $0; count[k]++} END {for (k in count) if (count[k]>1) print "== "k" =="map[k]}'
+  | sort | awk '{k=$(1) OFS $(2); $(1)=""; $(2)=""; sub(/^  /,""); map[k]=map[k] ORS $(0); count[k]++} END {for (k in count) if (count[k]>1) print "== "k" =="map[k]}'
 ```
 
 **Unreferenced files (candidates — require judgment before acting):**

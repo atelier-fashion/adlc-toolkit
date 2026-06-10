@@ -117,11 +117,13 @@ zero attributable files is skipped with a note — never publish an empty block 
 ```sh
 # Scope to THIS REQ's spec dir. $REQ is the REQ id (e.g. REQ-484) the skill is operating on;
 # fall back to the lone pipeline-state.json if $REQ is unset (resolve to its spec dir either way).
+# find, not ls globs: zsh errors on unmatched globs ("no matches found") instead of
+# passing the pattern through, so a glob here breaks sh/bash/zsh parity.
 state=""
 if [ -n "$REQ" ]; then
-  state=$(ls .adlc/specs/"$REQ"-*/pipeline-state.json 2>/dev/null | head -1)
+  state=$(find .adlc/specs -type f -path "*/${REQ}-*/pipeline-state.json" 2>/dev/null | sort | head -1)
 fi
-[ -n "$state" ] || state=$(ls .adlc/specs/REQ-*/pipeline-state.json 2>/dev/null | head -1)
+[ -n "$state" ] || state=$(find .adlc/specs -type f -path "*/REQ-*/pipeline-state.json" 2>/dev/null | sort | head -1)
 [ -n "$state" ] || { echo "architect: no pipeline-state.json — standalone run, skipping footprint publish"; exit 0; }
 specdir=$(dirname "$state")   # THIS REQ's spec dir — task glob is scoped here, not all specs.
 tick=$(printf '\140\140\140')
@@ -137,7 +139,7 @@ primary=$(awk '
   inrepos && /"[A-Za-z0-9_.-]+"[[:space:]]*:[[:space:]]*\{/ {
     # take the key immediately before `: {` (the LAST quoted token before the brace), so a
     # compact line like `{ "req":"R", "repos": { "solo": {` still yields `solo`, not `req`.
-    s=$0; sub(/[[:space:]]*:[[:space:]]*\{.*/,"",s); sub(/"$/,"",s); sub(/.*"/,"",s)
+    s=$(0); sub(/[[:space:]]*:[[:space:]]*\{.*/,"",s); sub(/"$/,"",s); sub(/.*"/,"",s)
     if (s!="repos" && s!="") cur=s
   }
   inrepos && cur!="" && /"primary"[[:space:]]*:[[:space:]]*true/ { print cur; exit }
@@ -149,11 +151,11 @@ repos_prs=$(awk -v TAB="$tab" '
   inrepos && /"[A-Za-z0-9_.-]+"[[:space:]]*:[[:space:]]*\{/ {
     # take the key immediately before `: {` (the LAST quoted token before the brace), so a
     # compact line like `{ "req":"R", "repos": { "solo": {` still yields `solo`, not `req`.
-    s=$0; sub(/[[:space:]]*:[[:space:]]*\{.*/,"",s); sub(/"$/,"",s); sub(/.*"/,"",s)
+    s=$(0); sub(/[[:space:]]*:[[:space:]]*\{.*/,"",s); sub(/"$/,"",s); sub(/.*"/,"",s)
     if (s!="repos" && s!="") cur=s
   }
   inrepos && cur!="" && /"prNumber"[[:space:]]*:[[:space:]]*[0-9]+/ {
-    n=$0; sub(/.*"prNumber"[[:space:]]*:[[:space:]]*/,"",n); sub(/[^0-9].*/,"",n);
+    n=$(0); sub(/.*"prNumber"[[:space:]]*:[[:space:]]*/,"",n); sub(/[^0-9].*/,"",n);
     if (n!="") { print cur TAB n; cur="" }
   }
 ' "$state" 2>/dev/null)
@@ -164,7 +166,10 @@ printf '%s\n' "$repos_prs" | while IFS="$tab" read -r repo prnum; do
   # Collect this repo's task-attributed file paths (first backtick token of each bullet under
   # "## Files to Create/Modify"); a task with no repo: attributes to $primary.
   lines=""
-  for tf in "$specdir"/tasks/TASK-*.md; do
+  # while-read over find, not a for-glob: zsh errors on unmatched globs ("no matches
+  # found") instead of passing the pattern through. Heredoc (not a pipe) so $lines
+  # accumulated in the loop survives it.
+  while IFS= read -r tf; do
     [ -f "$tf" ] || continue
     trepo=$(sed -nE 's/^repo:[[:space:]]*([A-Za-z0-9_.-]+).*/\1/p' "$tf" | head -1)
     [ -n "$trepo" ] || trepo="$primary"
@@ -172,7 +177,9 @@ printf '%s\n' "$repos_prs" | while IFS="$tab" read -r repo prnum; do
     paths=$(awk '/^## Files to Create\/Modify/{f=1;next} /^## /{f=0} f && /^- /{print}' "$tf" \
       | sed -nE 's/^- *`([^`]+)`.*/\1/p')
     [ -n "$paths" ] && lines=$(printf '%s\n%s\n' "$lines" "$paths")
-  done
+  done <<TASKS_EOF
+$(find "$specdir"/tasks -name 'TASK-*.md' 2>/dev/null | sort)
+TASKS_EOF
   # Repo-qualify, sanitize (reject .. then charset-validate), dedupe.
   safe=$(printf '%s\n' "$lines" | sed '/^$/d' \
     | while IFS= read -r p; do printf '%s:%s\n' "$repo" "$p"; done \

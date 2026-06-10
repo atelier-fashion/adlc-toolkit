@@ -330,6 +330,39 @@ def test_posix_fence_flags_sh_and_shell_not_bash(tmp_path):
     ), (posix_lines, bash_line)
 
 
+def test_arg_templating_flags_bare_positionals(tmp_path):
+    """A bare `$<digit>` — shell positional or awk field, in a fence OR in
+    prose — is flagged with an `arg-templating` finding on its line. The
+    templating-safe spellings `${1}` / `$(0)` and the `$$1` PID form are
+    never flagged.
+    """
+    root = _stage(tmp_path, "arg-templating")
+    result = _run(root)
+    assert result.returncode > 0, result.stdout
+    at_lines = [
+        ln for ln in result.stdout.splitlines() if " arg-templating:" in ln
+    ]
+    prose_line = _line_of("arg-templating", "Prose mention of a positional")
+    unsafe_line = _line_of("arg-templating", 'emit() { awk -v k="$1"')
+    safe_line = _line_of("arg-templating", 'safe() { awk -v k="${1}"')
+    pid_line = _line_of("arg-templating", "pid-then-digit")
+    # Exactly the prose line and the unsafe fence line are flagged.
+    assert len(at_lines) == 2, result.stdout
+    assert any(
+        f"arg-templating/SKILL.md:{prose_line}: arg-templating:" in ln
+        for ln in at_lines
+    ), (at_lines, prose_line)
+    assert any(
+        f"arg-templating/SKILL.md:{unsafe_line}: arg-templating:" in ln
+        for ln in at_lines
+    ), (at_lines, unsafe_line)
+    for exempt in (safe_line, pid_line):
+        assert not any(
+            f":{exempt}: arg-templating:" in ln for ln in at_lines
+        ), (at_lines, exempt)
+    assert all("clobbered by Skill argument templating" in ln for ln in at_lines)
+
+
 def test_cross_fence_fn_flagged(tmp_path):
     """REQ-436 ADR-7: `myfn` defined in fence A but invoked only from fence B
     (a different fenced block) → one `cross-fence-fn` finding naming `myfn`,
