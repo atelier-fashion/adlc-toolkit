@@ -28,8 +28,14 @@ def _parse_args(argv=None):
         prog="adlc-read",
         description="Ask the configured delegate a question about one or more files.",
     )
-    parser.add_argument("--paths", nargs="+", required=True, help="files to read")
-    parser.add_argument("--question", required=True, help="question to answer")
+    parser.add_argument(
+        "--print-enabled",
+        action="store_true",
+        help="print 1 if delegation is opted-in (BR-11), else 0, and exit; "
+             "no files or question required, no network call",
+    )
+    parser.add_argument("--paths", nargs="+", help="files to read")
+    parser.add_argument("--question", help="question to answer")
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--model", default=None, help="override the resolved model")
     parser.add_argument("--base-url", default=None, help="override the resolved base URL")
@@ -48,6 +54,20 @@ def _parse_args(argv=None):
 
 def main(argv=None):
     args = _parse_args(argv)
+
+    # --print-enabled: a non-network probe used by the delegate gate partial to
+    # resolve the config-file opt-in signal (BR-11) without parsing YAML in
+    # shell. Prints "1"/"0" and exits 0; never errors so the gate can rely on it.
+    if args.print_enabled:
+        try:
+            print("1" if _common.delegation_enabled() else "0")
+        except SystemExit:
+            # A malformed config (e.g. key-in-config) means "not safely enabled".
+            print("0")
+        return 0
+
+    if not args.paths or not args.question:
+        sys.exit("--paths and --question are required (unless --print-enabled)")
 
     # Skip unreadable paths with a warning instead of aborting the whole batch:
     # a single stale/missing path in a multi-file --paths set (e.g. one moved
