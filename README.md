@@ -16,6 +16,7 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback |
 | `/reflect` | Post-implementation self-review before formal review |
 | `/review` | Multi-agent code review (correctness, quality, architecture, tests, security) |
+| `/adversary` | Adversarial review of any artifact (spec, plan, diff/PR, README, or prose claim) — assumes it is wrong and tries to prove it, then reports only findings that survive self-refutation. Read-only; hunts omissions, not just bugs in what was written |
 | `/canary` | Canary deployment with smoke tests — deploy zero-traffic revision and promote on success |
 | `/wrapup` | Close out a feature — commit, merge, deploy, update artifacts |
 | `/bugfix` | Streamlined bug fix workflow |
