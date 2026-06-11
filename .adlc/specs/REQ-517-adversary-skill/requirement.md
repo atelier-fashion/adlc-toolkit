@@ -1,7 +1,7 @@
 ---
 id: REQ-517
 title: "/adversary Skill — Adversarial Review of Any Artifact"
-status: approved
+status: complete
 deployable: false
 created: 2026-06-11
 updated: 2026-06-11
