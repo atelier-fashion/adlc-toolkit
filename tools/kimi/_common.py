@@ -355,6 +355,18 @@ def _strip_fences(text):
     return text
 
 
+def warn_suppressed():
+    """True if the privacy notice is suppressed via env.
+
+    Honors the new ``ADLC_DELEGATE_NO_WARN`` and the legacy ``KIMI_NO_WARN``
+    (alias). The per-call ``--no-warn`` flag is checked by the CLIs directly.
+    """
+    return (
+        os.environ.get("ADLC_DELEGATE_NO_WARN") == "1"
+        or os.environ.get("KIMI_NO_WARN") == "1"
+    )
+
+
 def emit_exfil_notice(stream=None, provider=None):
     """Write the one-line exfiltration warning to ``stream`` (default stderr).
 
