@@ -34,7 +34,7 @@ honest on every machine.
 
 ```bash
 adlc doctor                              # run every check
-adlc doctor --checks gh-auth,delegate-gate   # run only the named checks
+adlc doctor --checks forge,delegate-gate     # run only the named checks
 ```
 
 Each failing check prints a **copy-pasteable** remediation — a literal command or
@@ -50,7 +50,7 @@ and re-run doctor; it should turn green.
 | `toolkit-clean` | clone is on a branch and not dirty | `git -C <root> checkout main` / `git status` | — |
 | `path-shims` | `adlc` is on PATH and `adlc --version` runs | `./install.sh --repair`, restart shell | — |
 | `gh-present` | `gh` (GitHub CLI) is on PATH | per-OS install line (`brew install gh`, …) | — |
-| `gh-auth` | `gh auth status` exits 0 | `gh auth login` | `gh` not installed |
+| `forge` | resolved forge provider's backend CLI present + auth valid + read-only API probe (github: `gh auth status`; azure-devops: `az account show` or PAT env var). **Supersedes the former `gh-auth` check** (REQ-520). | provider-specific (`gh auth login`; `az login` / set the PAT env var; or install `az`) | repo has no git remote |
 | `git-identity` | `user.name` and `user.email` set | `git config --global user.email …` | — |
 | `delegate-gate` | delegation enabled and reachable | (see below) | delegation not opted in (default) |
 | `counters` | each `~/.claude/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
@@ -147,9 +147,9 @@ to diverge. The CLI is dogfooded under both `bash -c` and `zsh -c`.
 
 `adlc doctor --checks id1,id2` runs only the named checks (an unknown id is a
 hard error listing the valid ids — never a silent no-op). This is the
-**skill pre-flight primitive**: a skill that needs to know "is `gh` authed?" or
-"is delegation reachable?" before dispatching work calls
-`adlc doctor --checks gh-auth` (or `delegate-gate`) and reads the exit code,
+**skill pre-flight primitive**: a skill that needs to know "is the forge backend
+authed?" or "is delegation reachable?" before dispatching work calls
+`adlc doctor --checks forge` (or `delegate-gate`) and reads the exit code,
 rather than maintaining its own probe shell.
 
 ### Sibling-skill audit (BR-8)
@@ -159,8 +159,23 @@ duplicated environment-probe shell that should converge on doctor. Finding: thos
 skills currently express their preflight expectations in **prose**, not as
 concrete duplicated executable probe code, so there is **no duplicated probe
 shell to delete** in this REQ. The `--checks` contract is now available for them
-to converge on going forward (e.g. a future REQ replacing a prose "ensure gh is
-authed" step with `adlc doctor --checks gh-auth`).
+to converge on going forward (e.g. a future REQ replacing a prose "ensure the
+forge backend is authed" step with `adlc doctor --checks forge`).
+
+## `forge_config.py` (REQ-520)
+
+A pure-standard-library helper module (not a subcommand) that backs the forge
+adapter (`partials/forge.sh`) and the `forge` doctor check. It reads the `forge:`
+block of the shared ADLC config (a minimal flat-YAML reader mirroring
+`tools/kimi/_common.parse_delegate_config`), resolves the provider with precedence
+per-project `.adlc/config.yml` > machine config > `auto` (origin-URL detection,
+fail-loud on an unrecognized host), and refuses a key-shaped `forge.auth` value
+(BR-6). CLI surface used by the partial and the check:
+
+```bash
+python3 tools/adlc/forge_config.py resolve-provider [<repo-dir>]   # prints github|azure-devops
+python3 tools/adlc/forge_config.py validate-auth <value>           # exit 2 if key-shaped
+```
 
 ## Running the tests
 
