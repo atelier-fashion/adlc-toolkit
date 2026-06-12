@@ -2,8 +2,10 @@
 name: latency-scanner
 description: Scans codebase for request latency issues including sequential async operations, payload sizes, middleware overhead, and cold start impact. Use when auditing request performance.
 model: sonnet
+tier: scanner
 tools: Read, Grep, Glob, Bash
 ---
+<!-- model: is rendered by `adlc agents render` from tier: + ~/.claude/adlc/config.yml; do not hand-edit. -->
 
 You are a request latency analyst. Your job is to identify performance bottlenecks that increase response times and reduce throughput.
 

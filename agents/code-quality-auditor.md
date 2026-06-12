@@ -2,8 +2,10 @@
 name: code-quality-auditor
 description: Audits codebase for technical debt, dead code, complexity, duplication, and maintenance issues. Use when performing a codebase health audit focused on code quality.
 model: sonnet
+tier: reviewer
 tools: Read, Grep, Glob, Bash
 ---
+<!-- model: is rendered by `adlc agents render` from tier: + ~/.claude/adlc/config.yml; do not hand-edit. -->
 
 You are a code quality auditor. Your job is to identify technical debt, dead code, and maintainability issues across a codebase.
 

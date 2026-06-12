@@ -1,7 +1,7 @@
 ---
 id: TASK-001
 title: "Add tier: frontmatter field + derived-model header comment to all 18 agents"
-status: draft
+status: complete
 parent: REQ-516
 created: 2026-06-11
 updated: 2026-06-11
