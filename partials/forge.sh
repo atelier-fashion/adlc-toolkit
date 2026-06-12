@@ -137,7 +137,7 @@ _adlc_forge_err() {
 _adlc_forge_classify() {
   adlc_fc_raw=$1
   case "$adlc_fc_raw" in
-    *"not logged"*|*"auth status"*|*"authentication"*|*"Unauthorized"*|*"TF400813"*|*"PAT"*"not set"*|*"auth-missing"*)
+    *"not logged"*|*"auth status"*|*"authentication"*|*"Unauthorized"*|*"TF400813"*|*"PAT"*"not set"*|*"auth-missing"*|*"az login"*|*"gh auth login"*|*"Please run"*"login"*|*"credentials"*)
       echo "auth-missing" ;;
     *"not found"*|*"Not Found"*|*"could not resolve"*|*"no pull request"*|*"TF401174"*)
       echo "pr-not-found" ;;
