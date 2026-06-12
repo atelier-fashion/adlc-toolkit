@@ -197,45 +197,19 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 9. **Cold-start path**: if every corpus is empty, or all candidates filter out to zero, skip retrieval and record this explicitly when Step 3 writes the `## Retrieved Context` section. Proceed to authoring without retrieved bodies.
 
 ### Step 2: Determine the Next REQ ID
-1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs)
-2. Read the number, use it as the REQ ID, and **immediately** write the incremented value back — using a POSIX `mkdir`-based lock to prevent concurrent collisions (works on macOS and Linux; `flock` is not available by default on macOS):
+1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs) — but the counter is now a **cache, not the authority**: the remote is the source of truth (REQ-518). Allocation derives the remote high-water, takes `max(remote, local)`, allocates `max + 1`, and fast-forwards the local counter — all inside the existing `mkdir` lock with its symlink/TOCTOU guards intact.
+2. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — one parameterized helper replaces the three near-identical inline blocks; the lock block + its REQ-416/LESSON-014 rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
    ```bash
-   REQ_NUM=$(
-     LOCK=~/.claude/.global-next-req.lock.d
-     COUNTER=~/.claude/.global-next-req
-     if [ -L "$LOCK" ]; then
-       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
-       exit 1
-     fi
-     for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-     # Hard-fail if we never acquired the lock (50 retries × 0.1s = ~5s budget).
-     # Without this guard, a contended lock would silently fall through to the
-     # critical section unguarded — defeating mutual exclusion (REQ-416 verify C1).
-     [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate REQ id" >&2; exit 1; }
-     # Counter read inside lock — fail hard if the file disappears mid-critical-section
-     # rather than silently treating empty-as-zero and resetting the global counter (REQ-416 verify M2).
-     NUM=$(cat "$COUNTER" 2>/dev/null) || { echo "ERROR: counter $COUNTER unreadable inside lock — aborting" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-     [ -n "$NUM" ] || { echo "ERROR: counter $COUNTER is empty — aborting (would reset to 1)" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-     echo $((NUM + 1)) > "$COUNTER"
-     # rmdir is guarded by the same symlink check (residual TOCTOU window between
-     # check and rmdir is accepted risk per ADR-4 — see LESSON-014).
-     if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
-     echo $NUM
-   )
-   # `exit 1` inside the $(...) subshell terminates only the subshell — REQ_NUM
+   . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+   REQ_NUM=$(adlc_alloc_id req)
+   # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — REQ_NUM
    # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
    [ -n "$REQ_NUM" ] || { echo "ERROR: failed to allocate REQ number — aborting before writing malformed spec" >&2; exit 1; }
+   # If ADLC_ALLOC_DEGRADED=1 was set (remote unreachable), the helper already warned on
+   # stderr — record "id allocated without remote verification — verify before PR" in the
+   # spec's Assumptions section (BR-3). Never block spec-writing on network availability.
    ```
-3. If `~/.claude/.global-next-req` does not exist, create it by scanning all `.adlc/specs/` directories under the user's repos root for the highest `REQ-xxx` number, use the next one, and write the number after that. The scan root is `$ADLC_REPOS_ROOT` if set, otherwise the parent directory of the current repo (which catches the common "all repos under one folder" layout). Use `grep -oE` + `sed` (BSD-compatible) instead of `grep -oP` (GNU-only):
-   ```bash
-   SCAN_ROOT="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel)/.." && pwd)}"
-   HIGHEST=$(find "$SCAN_ROOT" -path '*/.adlc/specs/REQ-*' -type d 2>/dev/null \
-     | grep -oE 'REQ-[0-9]+' | sed 's/REQ-//' | sort -n | tail -1)
-   REQ_NUM=$(( ${HIGHEST:-0} + 1 ))
-   echo $((REQ_NUM + 1)) > ~/.claude/.global-next-req
-   ```
-   If the scan finds nothing (genuinely first REQ across all repos), `HIGHEST` is empty — REQ_NUM defaults to 1.
-4. The `mkdir` lock ensures that concurrent `/sprint` sessions don't read the same counter value. `mkdir` is atomic on all POSIX filesystems — if another process holds the lock, the retry loop waits up to ~5 seconds.
+   `adlc_alloc_id req` handles the absent-counter bootstrap scan internally (highest `REQ-xxx` under `$ADLC_REPOS_ROOT`, BSD-safe), the `mkdir` lock that serializes concurrent `/sprint` sessions, and the remote high-water max. Single-machine behavior is unchanged: when the remote has no higher allocation, the same id is produced as before (BR-7).
 
 ### Step 3: Create the Requirement Spec
 1. Create directory: `.adlc/specs/REQ-xxx-feature-slug/`

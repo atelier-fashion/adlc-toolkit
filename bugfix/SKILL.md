@@ -31,44 +31,27 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 
 ### Phase 1: Report
 1. If given a bug description (not a BUG ID), create a bug report:
-   - Determine the next BUG ID using the **global** atomic counter file `~/.claude/.global-next-bug` (shared across all repos for unique IDs, mirroring the REQ counter — see LESSON-004). Read the number, use it, and immediately write the incremented value back — using a POSIX `mkdir`-based lock to prevent concurrent collisions (works on macOS and Linux; `flock` is not available by default on macOS):
+   - Determine the next BUG ID using the **global** atomic counter file `~/.claude/.global-next-bug` (shared across all repos for unique IDs, mirroring the REQ counter — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the existing `mkdir` lock. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its REQ-416/LESSON-014 rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
      ```bash
-     BUG_NUM=$(
-       LOCK=~/.claude/.global-next-bug.lock.d
-       COUNTER=~/.claude/.global-next-bug
-       if [ -L "$LOCK" ]; then
-         echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
-         exit 1
-       fi
-       for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-       # Hard-fail if we never acquired the lock (50 retries × 0.1s = ~5s budget).
-       # Without this guard, a contended lock would silently fall through to the
-       # critical section unguarded — defeating mutual exclusion (REQ-416 verify C1).
-       [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate BUG id" >&2; exit 1; }
-       # Counter read inside lock — fail hard if the file disappears mid-critical-section
-       # rather than silently treating empty-as-zero and resetting the global counter (REQ-416 verify M2).
-       NUM=$(cat "$COUNTER" 2>/dev/null) || { echo "ERROR: counter $COUNTER unreadable inside lock — aborting" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-       [ -n "$NUM" ] || { echo "ERROR: counter $COUNTER is empty — aborting (would reset to 1)" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-       echo $((NUM + 1)) > "$COUNTER"
-       # rmdir is guarded by the same symlink check (residual TOCTOU window between
-       # check and rmdir is accepted risk per ADR-4 — see LESSON-014).
-       if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
-       echo $NUM
-     )
-     # `exit 1` inside the $(...) subshell terminates only the subshell — BUG_NUM
+     . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+     BUG_NUM=$(adlc_alloc_id bug)
+     # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — BUG_NUM
      # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
      [ -n "$BUG_NUM" ] || { echo "ERROR: failed to allocate BUG number — aborting before writing malformed bug report" >&2; exit 1; }
+     # If ADLC_ALLOC_DEGRADED=1 (remote unreachable), the helper warned on stderr — note
+     # "id allocated without remote verification — verify before PR" (BR-3). Never block.
      ```
-     If `~/.claude/.global-next-bug` doesn't exist, create it by scanning all `.adlc/bugs/` directories under the user's repos root for the highest `BUG-xxx` number, use the next one, and write the number after that. The scan root is `$ADLC_REPOS_ROOT` if set, otherwise the parent directory of the current repo:
-     ```bash
-     SCAN_ROOT="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel)/.." && pwd)}"
-     HIGHEST=$(find "$SCAN_ROOT" -path '*/.adlc/bugs/BUG-*' -type f 2>/dev/null \
-       | grep -oE 'BUG-[0-9]+' | sed 's/BUG-//' | sort -n | tail -1)
-     BUG_NUM=$(( ${HIGHEST:-0} + 1 ))
-     echo $((BUG_NUM + 1)) > ~/.claude/.global-next-bug
-     ```
-     If the scan finds nothing (genuinely first BUG across all repos), `HIGHEST` is empty — `BUG_NUM` defaults to 1. Bug reports are `.md` files so the scan uses `-type f`; the analogous REQ-counter scan in `/spec` uses `-type d` because REQ specs are directories (deliberate, do not "correct" to `-type d`).
+     `adlc_alloc_id bug` handles the absent-counter bootstrap scan internally (highest `BUG-xxx` under `$ADLC_REPOS_ROOT`; bug reports are `.md` files so the scan uses `-type f`), the `mkdir` lock that serializes concurrent sessions, and the remote high-water max. Single-machine behavior is unchanged when the remote has no higher allocation (BR-7).
      Note: the legacy per-repo `.adlc/.next-bug` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
+   - **Pre-push recheck (BR-4, BR-8).** Before the bug file is committed on a branch for push, re-verify `BUG-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
+     ```bash
+     . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+     BUG_ID=$(printf 'BUG-%03d' "$BUG_NUM")
+     if ! adlc_recheck_id bug "$BUG_ID"; then
+       echo "Halting: $BUG_ID collides on the remote — renumber before pushing (see message above)." >&2
+       exit 1
+     fi
+     ```
    - Create `.adlc/bugs/BUG-xxx-slug.md` (always in the current repo — this becomes the "primary" for the bug) using the template from `.adlc/templates/bug-template.md`
    - Fill in: description, reproduction steps (if known), expected vs actual behavior, environment
    - Set status to `open`, severity based on impact
@@ -201,43 +184,25 @@ Evaluate honestly: did this bug reveal something a future implementer should kno
 - A check that would have caught this earlier?
 - An assumption from a prior REQ that turned out false?
 
-If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the **global** atomic counter `~/.claude/.global-next-lesson` (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014). The lock path `~/.claude/.global-next-lesson.lock.d` is shared with `/wrapup` so a concurrent `/bugfix` and `/wrapup` mutually exclude and cannot double-allocate the same LESSON id:
+If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the **global** atomic counter `~/.claude/.global-next-lesson` (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock (`~/.claude/.global-next-lesson.lock.d`, shared with `/wrapup` so concurrent `/bugfix` and `/wrapup` runs mutually exclude). Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its LESSON-014 symlink pre-check live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
 ```bash
-LESSON_NUM=$(
-  LOCK=~/.claude/.global-next-lesson.lock.d
-  COUNTER=~/.claude/.global-next-lesson
-  if [ -L "$LOCK" ]; then
-    echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
-    exit 1
-  fi
-  for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-  # Hard-fail if we never acquired the lock (50 retries × 0.1s = ~5s budget).
-  # Without this guard, a contended lock would silently fall through to the
-  # critical section unguarded — defeating mutual exclusion (REQ-416 verify C1).
-  [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate LESSON id" >&2; exit 1; }
-  # Counter read inside lock — fail hard if the file disappears mid-critical-section
-  # rather than silently treating empty-as-zero and resetting the global counter (REQ-416 verify M2).
-  NUM=$(cat "$COUNTER" 2>/dev/null) || { echo "ERROR: counter $COUNTER unreadable inside lock — aborting" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-  [ -n "$NUM" ] || { echo "ERROR: counter $COUNTER is empty — aborting (would reset to 1)" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-  echo $((NUM + 1)) > "$COUNTER"
-  # rmdir is guarded by the same symlink check (residual TOCTOU window between
-  # check and rmdir is accepted risk per ADR-4 — see LESSON-014).
-  if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
-  echo $NUM
-)
-# `exit 1` inside the $(...) subshell terminates only the subshell — LESSON_NUM
+. .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+LESSON_NUM=$(adlc_alloc_id lesson)
+# `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — LESSON_NUM
 # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
 [ -n "$LESSON_NUM" ] || { echo "ERROR: failed to allocate LESSON number — aborting before writing malformed lesson" >&2; exit 1; }
 ```
-If `~/.claude/.global-next-lesson` doesn't exist, create it by scanning all `.adlc/knowledge/lessons/` directories under the user's repos root for the highest `LESSON-xxx` number, use the next one, and write the number after that. The scan root is `$ADLC_REPOS_ROOT` if set, otherwise the parent directory of the current repo:
+`adlc_alloc_id lesson` handles the absent-counter bootstrap scan internally (highest `LESSON-xxx` under `$ADLC_REPOS_ROOT`; lessons are `.md` files so the scan uses `-type f`), the shared `mkdir` lock, and the remote high-water max. Single-machine behavior is unchanged when the remote has no higher allocation (BR-7). Note: the legacy per-repo `.adlc/.next-lesson` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
+
+**Pre-push recheck (BR-4, BR-8).** Before the lesson file is committed on a branch for push, re-verify `LESSON-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
 ```bash
-SCAN_ROOT="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel)/.." && pwd)}"
-HIGHEST=$(find "$SCAN_ROOT" -path '*/.adlc/knowledge/lessons/LESSON-*' -type f 2>/dev/null \
-  | grep -oE 'LESSON-[0-9]+' | sed 's/LESSON-//' | sort -n | tail -1)
-LESSON_NUM=$(( ${HIGHEST:-0} + 1 ))
-echo $((LESSON_NUM + 1)) > ~/.claude/.global-next-lesson
+. .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+LESSON_ID=$(printf 'LESSON-%03d' "$LESSON_NUM")
+if ! adlc_recheck_id lesson "$LESSON_ID"; then
+  echo "Halting: $LESSON_ID collides on the remote — renumber before pushing (see message above)." >&2
+  exit 1
+fi
 ```
-Lessons are `.md` files so the scan uses `-type f` (the `/spec` REQ-counter scan uses `-type d` because specs are directories — a deliberate sibling-substitution, do not "correct" to `-type d`). Use the counter ONLY thereafter — never re-scan after it exists. Note: the legacy per-repo `.adlc/.next-lesson` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
 
 Use the lesson template (`.adlc/templates/lesson-template.md`, fall back to `~/.claude/skills/templates/lesson-template.md`). Filename format is `LESSON-xxx-slug.md` only — no date prefixes, no bare-numeric prefixes. Include `domain`, `component`, and `tags` so future runs of `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance.
 
