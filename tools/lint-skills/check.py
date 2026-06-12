@@ -54,6 +54,15 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    linter itself). Conservative: only names that are both *defined* with the
    ``() {`` form and *invoked* at statement position within fences are
    considered; prose mentions outside fences are ignored.
+7. ``check_forge_direct_gh`` — a direct ``gh pr <op>`` call inside a shell
+   fence (REQ-520 BR-1). PR-lifecycle ops must route through
+   ``partials/forge.sh`` (the ``adlc_forge_*`` functions), never ``gh pr``
+   directly, so switching a project between GitHub and Azure DevOps stays a
+   config change. The op list matches the adapter's surface exactly
+   (create/ready/edit/view/list/merge/comment); ``gh pr diff`` and
+   ``gh pr checks`` are exempt — a local read-only diff convenience and
+   CI-status polling, the latter explicitly out of scope. Only shell fences
+   are scanned, so prose / lesson mentions of ``gh pr`` are never flagged.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
 deferred follow-up; LESSON-019 #2): the ``SKIP_DIR_PARTS`` membership test is
