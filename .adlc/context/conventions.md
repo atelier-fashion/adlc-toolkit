@@ -68,6 +68,33 @@ stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4
 one-line-per-invocation rule. Per-skill stderr messages and fallback bodies stay inline at
 the call site; only the predicate is shared.
 
+## Forge adapter (provider-agnostic PR operations)
+
+Skills that touch the pull-request lifecycle MUST route every PR operation through
+the forge adapter (`partials/forge.sh`), never by shelling out to `gh pr` directly.
+This makes a project portable between GitHub and Azure DevOps as a config change.
+Source the sourceable partial and call the op **in the same fenced block** (the
+cross-fence rule above):
+
+```sh
+. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
+```
+
+The op set is `adlc_forge_pr_{create,ready,edit,view,list,merge,comment}`. The
+GitHub backend (`gh`) is byte-compatible with the previous direct calls; the Azure
+DevOps backend uses `az repos`. Provider resolution is per-project `.adlc/config.yml`
+`forge.provider` > machine config > `auto` (origin-URL detection; unrecognized host
+fails loud). Results/errors are normalized to one vocabulary (`state ∈
+{OPEN,MERGED,CLOSED}`; error classes `auth-missing` | `pr-not-found` |
+`merge-blocked-by-policy` | `feature-unsupported` | `network`, with raw backend stderr
+preserved beneath the class). `forge.auth` stores a credential **source name** only
+(`gh`/`az`/an env-var NAME holding a PAT) — never a key value (a key-shaped value is
+refused). Two ops stay direct on purpose: `gh pr diff` (local read-only convenience)
+and `gh pr checks` (CI-status polling, out of scope). The `tools/lint-skills`
+`forge-direct-gh` check rejects any new direct `gh pr <op>` in a SKILL.md shell fence.
+Full contract: `partials/forge.md`.
+
 ## Context loading pattern
 
 Skills load context via `!bash` macros under a `## Context` section. Use the same fallback chain: prefer consumer-project `.adlc/...`, fall back to `~/.claude/skills/...`. Example:

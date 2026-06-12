@@ -115,6 +115,12 @@ no tasks attributing files, falls back to the architecture-mapper paths attribut
 zero attributable files is skipped with a note — never publish an empty block silently.
 
 ```sh
+# Forge adapter (REQ-520 BR-1): footprint publish reads/writes the PR body via
+# pr_view/pr_edit, never direct gh. Sourced in THIS fence (shell state does not
+# cross fences). GitHub backend forwards args verbatim, so the body read/write is
+# byte-identical (BR-3).
+. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+
 # Scope to THIS REQ's spec dir. $REQ is the REQ id (e.g. REQ-484) the skill is operating on;
 # fall back to the lone pipeline-state.json if $REQ is unset (resolve to its spec dir either way).
 # find, not ls globs: zsh errors on unmatched globs ("no matches found") instead of
@@ -198,10 +204,10 @@ TASKS_EOF
     continue
   fi
   tmp=$(mktemp "${TMPDIR:-/tmp}/footprint.XXXXXX") || continue
-  if base=$(gh pr view "$prnum" --json body -q .body 2>/dev/null); then
+  if base=$(adlc_forge_pr_view "$prnum" --json body -q .body 2>/dev/null); then
     base=$(printf '%s\n' "$base" | sed "/^${tick}adlc-footprint/,/^${tick}/d")
     { printf '%s\n\n%sadlc-footprint\n' "$base" "$tick"; printf '%s\n' "$safe"; printf '%s\n' "$tick"; } > "$tmp"
-    gh pr edit "$prnum" --body-file "$tmp" >/dev/null 2>&1 && echo "architect: published footprint for repo=$repo to PR #$prnum"
+    adlc_forge_pr_edit "$prnum" --body-file "$tmp" >/dev/null 2>&1 && echo "architect: published footprint for repo=$repo to PR #$prnum"
   fi
   rm -f "$tmp"
 done
@@ -209,7 +215,7 @@ done
 
 `$MAPPER_PATHS` holds the architecture-mapper affected-file list (bare paths, no repo column)
 captured during Step 2 — used only for the BR-4 primary-repo fallback when a task carries no file
-list. Other sessions read each block via `gh pr view --json body` (consumed by `/manifest`'s
+list. Other sessions read each block via `adlc_forge_pr_view --json body` (consumed by `/manifest`'s
 ordering verdict). The block is split-free (newline iteration, no unquoted word-splitting) so it
 behaves identically under `sh` and `zsh` (LESSON-329), and uses `mktemp` + cleanup per PR.
 

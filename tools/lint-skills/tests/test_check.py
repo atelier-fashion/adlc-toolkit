@@ -391,6 +391,36 @@ def test_arg_templating_flags_bare_positionals(tmp_path):
     assert all("clobbered by Skill argument templating" in ln for ln in at_lines)
 
 
+def test_forge_direct_gh_flagged(tmp_path):
+    """REQ-520 BR-1: a direct `gh pr merge` inside a shell fence → one
+    `forge-direct-gh` finding naming the op, on the fence line (not the prose
+    mention). The prose `gh pr merge` outside the fence is NOT flagged.
+    """
+    root = _stage(tmp_path, "forge-direct-gh")
+    result = _run(root)
+    assert result.returncode > 0, result.stdout
+    fd_lines = [
+        ln for ln in result.stdout.splitlines() if " forge-direct-gh:" in ln
+    ]
+    assert len(fd_lines) == 1, result.stdout
+    fence_line = _line_of("forge-direct-gh", 'gh pr merge "$prUrl"')
+    assert f"forge-direct-gh/SKILL.md:{fence_line}: forge-direct-gh:" in fd_lines[0]
+    assert "merge" in fd_lines[0]
+    assert "partials/forge.sh" in fd_lines[0]
+
+
+def test_forge_adapter_ok_is_clean(tmp_path):
+    """REQ-520 BR-1: adapter calls + the exempt `gh pr diff`/`gh pr checks`
+    produce no `forge-direct-gh` finding.
+    """
+    root = _stage(tmp_path, "forge-adapter-ok")
+    result = _run(root)
+    fd_lines = [
+        ln for ln in result.stdout.splitlines() if " forge-direct-gh:" in ln
+    ]
+    assert fd_lines == [], result.stdout
+
+
 def test_cross_fence_fn_flagged(tmp_path):
     """REQ-436 ADR-7: `myfn` defined in fence A but invoked only from fence B
     (a different fenced block) → one `cross-fence-fn` finding naming `myfn`,

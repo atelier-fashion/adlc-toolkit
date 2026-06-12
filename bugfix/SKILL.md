@@ -99,7 +99,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 For each touched repo (just the current repo in single-repo mode; each entry in `touched_repos:` in cross-repo mode):
 
 1. Push the fix branch: `git -C <worktree> push -u origin fix/bug-xxx-slug`
-2. Create the PR with `gh pr create` (run from inside the worktree, or use `gh -R <owner/repo>`). In cross-repo mode, create the **primary** repo's PR **last** so its body can link every sibling.
+2. Create the PR with `adlc_forge_pr_create` (source `partials/forge.sh` in the same fence; run from inside the worktree, or pass `-R <owner/repo>`). All PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1). In cross-repo mode, create the **primary** repo's PR **last** so its body can link every sibling.
    - **Title**: `fix(BUG-xxx): short description` — when cross-repo, scope to the repo (e.g., `fix(api): null deref in user serializer [BUG-042]`).
    - **Body**:
      ```
@@ -119,7 +119,7 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
 
      ## Related PRs (cross-repo)
      [Omit in single-repo mode. Otherwise list each sibling PR URL — back-fill
-      sibling bodies via `gh pr edit` once every URL is known.]
+      sibling bodies via `adlc_forge_pr_edit` once every URL is known.]
 
      ## Test Plan
      - [ ] Unit/integration tests pass locally
@@ -127,7 +127,7 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
      - [ ] Staging deploy succeeded (verified in Phase 6)
      - [ ] Production deploy succeeded (verified in Phase 6)
      ```
-3. After all sibling PRs exist, edit each one (`gh pr edit <prUrl> --body ...`) to fill in the Related PRs section.
+3. After all sibling PRs exist, edit each one (`adlc_forge_pr_edit <prUrl> --body ...`) to fill in the Related PRs section.
 4. Wait for CI to pass on every PR: `gh pr checks <prUrl>`. If CI fails, diagnose and re-push — never bypass with `--no-verify` or admin-merge.
 5. Report all PR URLs to the user, grouped by repo.
 
@@ -136,8 +136,8 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
 This is the equivalent of `/proceed`'s Phase 8 / `/wrapup` steps, condensed for bugs.
 
 **Step 1 — Merge each PR.**
-1. Verify the PR is mergeable: `gh pr view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE`. If main has advanced, rebase the fix branch onto `origin/main`, force-push with lease, and wait for CI to re-pass.
-2. Merge with squash + branch delete: `gh pr merge <prUrl> --squash --delete-branch`. In cross-repo mode, walk `touched_repos:` order (or `merge_order:` from `.adlc/config.yml` if not specified on the bug).
+1. Verify the PR is mergeable: `adlc_forge_pr_view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE` (on GitHub; ADO normalizes via `pr_view`). If main has advanced, rebase the fix branch onto `origin/main`, force-push with lease, and wait for CI to re-pass.
+2. Merge with squash + branch delete: `adlc_forge_pr_merge <prUrl> --squash --delete-branch`. In cross-repo mode, walk `touched_repos:` order (or `merge_order:` from `.adlc/config.yml` if not specified on the bug).
 
 **Step 2 — Confirm deploys** (this is the staging-first gate when the project has one — same model as features).
 

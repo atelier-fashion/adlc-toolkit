@@ -126,6 +126,18 @@ FN_DEF_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{")
 # avoid false positives on prose that merely mentions the name.
 FN_CALL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\b")
 
+# REQ-520 BR-1: a direct `gh pr <op>` call inside a shell fence. PR-lifecycle ops
+# MUST go through partials/forge.sh (adlc_forge_*), never `gh pr` directly. The
+# ops covered are exactly the adapter's: create/ready/edit/view/list/merge/comment.
+# `gh pr diff` and `gh pr checks` are EXEMPT — diff is a local read-only convenience
+# and CI-status polling is explicitly out of scope (REQ-520 Out of Scope). The guard
+# is written against the POST-migration shape (LESSON-019: presence guards rot when
+# the indirection moves) and only scans shell fences so prose/lesson mentions of
+# `gh pr` are never flagged.
+FORGE_DIRECT_GH_RE = re.compile(
+    r"\bgh\s+pr\s+(create|ready|edit|view|list|merge|comment)\b"
+)
+
 
 class Finding(NamedTuple):
     file: str
@@ -477,6 +489,34 @@ def check_cross_fence_fn(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def check_forge_direct_gh(text: str, rel: str) -> list[Finding]:
+    """REQ-520 BR-1: flag a direct ``gh pr <op>`` call inside a shell fence.
+
+    PR-lifecycle ops must go through ``partials/forge.sh`` (the ``adlc_forge_*``
+    functions), never ``gh pr`` directly, so switching a project between GitHub
+    and Azure DevOps is a config change. ``gh pr diff`` and ``gh pr checks`` are
+    EXEMPT (a local read-only diff convenience and CI-status polling, the latter
+    explicitly out of scope). Only shell fences are scanned, so prose / lesson
+    mentions of ``gh pr`` are never flagged. The op list matches the adapter's
+    surface exactly — written against the post-migration shape (LESSON-019).
+    """
+    findings: list[Finding] = []
+    for _lang, _idx, _start, body in _iter_fences(text):
+        for lineno, line in body:
+            if FORGE_DIRECT_GH_RE.search(line):
+                op = FORGE_DIRECT_GH_RE.search(line).group(1)
+                findings.append(
+                    Finding(
+                        rel, lineno, "forge-direct-gh",
+                        f"direct 'gh pr {op}' in a shell fence — route PR ops "
+                        "through partials/forge.sh (adlc_forge_pr_%s); only "
+                        "'gh pr diff'/'gh pr checks' may be called directly"
+                        % op,
+                    )
+                )
+    return findings
+
+
 def _safe_label(skill_path: Path, root: Path) -> str:
     """Non-leaking finding label for ``skill_path``.
 
@@ -564,6 +604,7 @@ def run(root: Path) -> list[Finding]:
         findings.extend(check_posix_fence(text, rel))
         findings.extend(check_arg_templating(text, rel))
         findings.extend(check_cross_fence_fn(text, rel))
+        findings.extend(check_forge_direct_gh(text, rel))
     # Per-root (not per-SKILL.md): agent model: drift vs the config render (BR-5).
     findings.extend(check_agent_model_drift(root))
     return findings

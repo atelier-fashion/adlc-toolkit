@@ -23,7 +23,7 @@ You operate inside an isolated worktree for the entire run. The path is set once
 1. **State is the sole source of truth post-Step-0.** Step 0 reads the launch prompt **once** to populate state. Every phase after Step 0 MUST read the worktree path exclusively from `pipeline-state.json.repos[<id>].worktree`. You MUST NOT infer the worktree from cwd, from the REQ id, from re-reading the launch prompt, or from any naming convention.
 2. **Re-confirm the active worktree at the start of every phase after Step 0.** Read `pipeline-state.json` first thing; do not assume cwd, paths, or context from a prior phase carry over. Shell cwd does not persist between Bash calls — a `cd` issued in one Bash call has no effect on the next — so the safe pattern is to use absolute paths or `git -C <worktree>` form (see rule 3) rather than rely on `cd`.
 3. **Every Bash call MUST use absolute paths or `git -C <worktree>` form.** You MUST NOT rely on inherited cwd. Relative paths are a protocol violation.
-4. **You MUST NOT write to the parent repo's working tree.** The single sanctioned exception is the Phase 8 single-repo `gh pr merge`, which runs from `repos[<id>].path` because git refuses to delete a branch checked out by a worktree. See "Worktree gotchas" under Phase 8 for the operational detail — do not generalize that exception to any other command.
+4. **You MUST NOT write to the parent repo's working tree.** The single sanctioned exception is the Phase 8 single-repo PR merge (`adlc_forge_pr_merge`, GitHub backend → `gh pr merge`), which runs from `repos[<id>].path` because git refuses to delete a branch checked out by a worktree. See "Worktree gotchas" under Phase 8 for the operational detail — do not generalize that exception to any other command.
 
 ## Pipeline Phases
 
@@ -76,7 +76,7 @@ After running all checklists, fix Critical and Major issues inline. Commit fixes
 
 The merge actor depends on REQ topology, decided from `pipeline-state.json.repos`:
 
-- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `gh pr merge <prUrl> --squash --delete-branch` from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`.
+- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (source `partials/forge.sh` in the same fence; forge-neutral per REQ-520) from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`.
 
 - **Cross-repo REQ** (more than one touched repo): **STOP after Phase 7.** Do NOT attempt to merge — the orchestrator sequences merges per `mergeOrder`. Your terminal claim is `pr-ready`.
 
@@ -86,9 +86,9 @@ If the orchestrator's dispatch prompt explicitly overrides the topology rule (e.
 
 When merging from inside a pipeline-runner subagent:
 
-1. **Merge from parent repo, not worktree.** `gh pr merge --delete-branch` invoked from the worktree fails because git refuses to delete a branch that's currently checked out (the worktree owns it). Always `cd` to `repos[<id>].path` before invoking. Use absolute paths since shell state does not persist between Bash calls.
+1. **Merge from parent repo, not worktree.** `adlc_forge_pr_merge --delete-branch` (GitHub backend → `gh pr merge --delete-branch`) invoked from the worktree fails because git refuses to delete a branch that's currently checked out (the worktree owns it). Always `cd` to `repos[<id>].path` before invoking. Use absolute paths since shell state does not persist between Bash calls.
 2. **Worktree cleanup after remote merge.** If `git branch -D <branch>` fails locally after the remote PR is merged, the worktree still owns the branch. Run `git worktree remove --force <worktree-path>` first, then `git branch -D <branch>`. The remote PR being `MERGED` is the canonical signal of success — local cleanup failure is recoverable and does not block the terminal `merged` claim.
-3. **State write is mandatory.** Immediately after a successful `gh pr merge`, set `repos[<id>].merged = true` in `pipeline-state.json` so a mid-Phase-8 interruption can resume without double-merging.
+3. **State write is mandatory.** Immediately after a successful `adlc_forge_pr_merge`, set `repos[<id>].merged = true` in `pipeline-state.json` so a mid-Phase-8 interruption can resume without double-merging.
 
 ## Terminal state contract
 
@@ -96,7 +96,7 @@ Your final report MUST lead with **exactly one** terminal-state tag from the tab
 
 | Tag | Required preconditions | Orchestrator response |
 |---|---|---|
-| `merged` | All touched-repo PRs are `MERGED` (verifiable via `gh pr view --json state,mergedAt`). `repos[<id>].merged == true` for every touched repo in pipeline-state. | Orchestrator verifies, then moves on. |
+| `merged` | All touched-repo PRs are `MERGED` (verifiable via `adlc_forge_pr_view <prUrl> --fields state,mergedAt`, or `gh pr view --json state,mergedAt` on GitHub). `repos[<id>].merged == true` for every touched repo in pipeline-state. | Orchestrator verifies, then moves on. |
 | `pr-ready` | All touched-repo PRs are `OPEN`, `MERGEABLE`, with all required CI green. | Orchestrator merges per `mergeOrder`. |
 | `blocked` | Blocker requires human input. `pipeline-state.json.blockers` populated with details. PR may be in any state. | Orchestrator surfaces to user, halts that REQ. |
 | `failed` | Pipeline failed past automatic recovery. Failure details in `pipeline-state.json.notes`. | Orchestrator surfaces to user, halts that REQ. |

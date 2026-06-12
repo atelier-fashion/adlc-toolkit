@@ -67,6 +67,13 @@ with_timeout() {
 emit_field() { awk -v k="${1}" 'index($(0),k)==1{sub(/^[^:]*:[[:space:]]*/,"");gsub(/[\047"\r]/,"");sub(/[[:space:]]+$/,"");print;exit}'; }
 clean_field() { printf '%s' "${1}" | tr -c 'A-Za-z0-9 ._/:-' ' ' | cut -c1-60; }
 
+# Forge adapter: open-PR derivation routes through pr_list/pr_view (REQ-520 BR-8)
+# instead of direct gh. Sourced in THIS fence (shell state does not cross fences).
+# The GitHub backend forwards args verbatim, so the existing --json/--jq pipelines
+# below stay byte-identical (BR-3); the branch-only ls-remote fallback (Step 2b)
+# is pure git and unchanged (BR-8).
+. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+
 TAB=$(printf '\t')
 raw=$(mktemp "${TMPDIR:-/tmp}/manifest.XXXXXX") || { echo "/manifest: mktemp failed — skipping manifest" >&2; exit 0; }
 trap 'rm -f "$raw"' EXIT
@@ -90,7 +97,7 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then gh_ok=1
 # Step 2a — open PRs (one batched, bounded call; includes drafts). grep both extracts AND
 # validates the REQ id (BR-5); non-matching branches are ignored (BR-4).
 if [ "$gh_ok" = "1" ]; then
-  with_timeout gh pr list --state open --limit 200 \
+  with_timeout adlc_forge_pr_list --state open --limit 200 \
     --json headRefName,author,isDraft,createdAt,url \
     --jq '.[] | [.headRefName, (.author.login // "unknown"), (if .isDraft then "draft" else "ready" end), .createdAt, .url] | @tsv' \
     2>/dev/null | while IFS="$TAB" read -r branch author state created url; do
@@ -164,7 +171,7 @@ if [ "$gh_ok" = "1" ]; then
   while IFS="$TAB" read -r f_req f_branch f_state f_author f_created f_url; do
     num=$(printf '%s' "$f_url" | grep -oE '[0-9]+$')
     [ -n "$num" ] || continue
-    body=$(with_timeout gh pr view "$num" --json body -q .body 2>/dev/null)
+    body=$(with_timeout adlc_forge_pr_view "$num" --json body -q .body 2>/dev/null)
     [ -n "$body" ] || continue
     printf '%s\n' "$body" | sed -n "/^${tick}adlc-footprint/,/^${tick}/{ /^${tick}/d; p; }" | while IFS= read -r fpline; do
       [ -n "$fpline" ] || continue
@@ -183,7 +190,7 @@ if [ "$gh_ok" = "1" ]; then
 fi
 echo "FOOTPRINT_END"
 
-# --- REQ-483: stale-blocker detection (BR-11). One batched gh pr list call. ---
+# --- REQ-483: stale-blocker detection (BR-11). One batched pr_list call. ---
 echo "STALE_BEGIN"
 if [ "$gh_ok" = "1" ]; then
   stale_n=7
@@ -193,7 +200,7 @@ if [ "$gh_ok" = "1" ]; then
   fi
   cutoff=$(date -u -v-"${stale_n}"d +%Y-%m-%d 2>/dev/null || date -u -d "${stale_n} days ago" +%Y-%m-%d 2>/dev/null)
   if [ -n "$cutoff" ]; then
-    with_timeout gh pr list --state open --limit 200 --json headRefName,updatedAt \
+    with_timeout adlc_forge_pr_list --state open --limit 200 --json headRefName,updatedAt \
       --jq '.[] | [.headRefName, .updatedAt] | @tsv' 2>/dev/null | while IFS="$TAB" read -r s_branch s_upd; do
         s_req=$(printf '%s' "$s_branch" | grep -oE '^feat/REQ-[0-9]{3,6}-' | grep -oE 'REQ-[0-9]{3,6}')
         [ -n "$s_req" ] || continue
