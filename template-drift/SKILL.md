@@ -1,12 +1,30 @@
 ---
 name: template-drift
-description: Detect drift between this project's `.adlc/templates/` copies and the canonical templates in `~/.claude/skills/templates/`, and between `.adlc/partials/*.sh` and `~/.claude/skills/partials/*.sh`. Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template or partial updates have landed in this project yet. Reports a per-file diff summary, flags intentional customizations from accidental staleness for templates, and reports any partial drift as `stale` (partials are shared executable code — no customization classification). Also flags stale `node:test`/`*.test.js` files left under `.adlc/workflows/` by an older `/init` (a Jest landmine in `"type":"module"` repos).
+description: Detect drift across ALL the sync surfaces `/init` vendors into a project — `.adlc/templates/*.md`, `.adlc/partials/*.sh`, `.adlc/ETHOS.md`, and the workflow runtime (`.adlc/workflows/adlc-sprint.workflow.js` + `README.md`) — against the canonical copies in `~/.claude/skills/`. Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template, partial, ETHOS, or workflow-engine updates have landed in this project yet. Reports a per-file diff summary, flags intentional customizations from accidental staleness for templates and ETHOS (template-posture), and reports partial and workflow-runtime drift as `stale` (shared executable code — no customization classification). For ETHOS, always names any canonical principle missing from the project copy. Also flags stale `node:test`/`*.test.js` files left under `.adlc/workflows/` by an older `/init` (a Jest landmine in `"type":"module"` repos).
 argument-hint: Optional template name (e.g., "requirement-template") to scope the check to a single file
 ---
 
 # /template-drift — Template Drift Detector
 
-You are checking whether the project's local `.adlc/templates/` copies still match the canonical templates in the adlc-toolkit. Templates are copied per-repo (not symlinked like skills/agents), so they drift over time. Some drift is **intentional** (project-specific customization); some is **accidental** (toolkit updated and the project never pulled the change). This skill surfaces both and helps you decide what to reconcile.
+You are checking whether the project's local copies of every **vendored sync surface** still match the canonical versions in the adlc-toolkit. These surfaces are copied per-repo (not symlinked like skills/agents), so they drift over time. Some drift is **intentional** (project-specific customization); some is **accidental** (toolkit updated and the project never pulled the change). This skill surfaces both and helps you decide what to reconcile.
+
+## Vendored sync surfaces
+
+<!-- sync-surfaces: template-drift -->
+`/template-drift` checks drift on **all five** of these surfaces. The first four are physically copied
+into the project by `/init` (see `init/SKILL.md`'s matching `<!-- sync-surfaces: init -->` list); the
+fifth is a `/template-drift`-only check for a drift *symptom* `/init` deliberately does NOT copy.
+
+- `templates` — `.adlc/templates/*.md` vs `~/.claude/skills/templates/*.md` (Step 2, template-posture)
+- `partials` — `.adlc/partials/*.sh` vs `~/.claude/skills/partials/*.sh` (Step 3, partials-posture)
+- `ethos` — `.adlc/ETHOS.md` vs `~/.claude/skills/ETHOS.md` (Step 3c, template-posture + missing-principle)
+- `workflow-runtime` — `.adlc/workflows/adlc-sprint.workflow.js` + `README.md` vs `~/.claude/skills/workflows/` (Step 3d, partials-posture)
+- `workflow-test-landmine` — stale `*.test.js`/`*.spec.js` under `.adlc/` from an older `/init` (Step 3b, always stale; template-drift-only)
+<!-- /sync-surfaces -->
+
+**Cross-reference invariant (BR-4):** every surface `/init` copies MUST have a matching check here.
+Adding a new vendored surface to `/init` without adding a check here is a silent gap — the toolkit's
+`tools/lint-skills` `sync-surface-parity` check fails the build when the two lists disagree.
 
 ## Ethos
 
@@ -14,8 +32,12 @@ You are checking whether the project's local `.adlc/templates/` copies still mat
 
 ## Context
 
+This skill checks five vendored sync surfaces (see "Vendored sync surfaces" below): templates, partials, ethos, workflow-runtime, and the workflow-test landmine.
+
 - Project templates dir: !`ls .adlc/templates/ 2>/dev/null || echo "No .adlc/templates/ directory — run /init first"`
 - Toolkit templates dir: !`ls ~/.claude/skills/templates/ 2>/dev/null || echo "Toolkit templates not found at ~/.claude/skills/templates/"`
+- Project ETHOS: !`test -f .adlc/ETHOS.md && echo "present" || echo "absent — run /init"`
+- Project workflow runtime: !`ls .adlc/workflows/*.workflow.js 2>/dev/null || echo "no .adlc/workflows/ runtime — run /init"`
 - Current directory: !`pwd`
 
 ## Input
@@ -81,9 +103,50 @@ find .adlc -type f \( -name '*.test.js' -o -name '*.spec.js' \) 2>/dev/null
 
 Classification is always **stale** — there is no "intentional customization" path here (same posture as partials in Step 3: this is toolkit-internal code a consumer should never carry). Each hit is reported in Step 5 and offered for removal in Step 6. If there are no hits, report `.adlc/` workflow test files as `clean` (one line) and move on.
 
+### Step 3c: Detect ETHOS Drift (the injected constitution)
+
+A fourth sync surface is `.adlc/ETHOS.md` — the principles `/init` copies from `~/.claude/skills/ETHOS.md` and that **every skill injects at invocation time** via `ethos-include.sh`. This surface is the most consequential to keep in sync: `ethos-include.sh` resolves the **project copy first**, so a stale `.adlc/ETHOS.md` silently runs an outdated constitution in every skill invocation — and the toolkit has shipped new principles more than once (principle #6 "If It's Broken, Fix It" and #7 "Skeptical by Default" were added after the original five). Drift here is therefore reported **prominently**, near the top of the report.
+
+**Classification follows the *template* posture** (intentional customization vs accidental staleness): a project may legitimately tailor its constitution (e.g. add a project-specific principle), so a diff is not automatically `stale`. Read both full versions and judge per the Step 4 signals, treating an added project-specific principle as intentional and a structurally-older copy as accidental.
+
+**Mandatory missing-principle sub-check (the dangerous case, reported loudly regardless of classification):** enumerate the canonical principle headings present upstream and flag any that are **absent** from the project copy. Principle headings are the `## <n>. <title>` lines:
+
+```sh
+# Canonical principles present upstream:
+grep -E '^## [0-9]+\. ' ~/.claude/skills/ETHOS.md
+# Project's principles:
+grep -E '^## [0-9]+\. ' .adlc/ETHOS.md
+# A canonical heading absent from the project copy is a MISSING PRINCIPLE —
+# the consumer is silently running an outdated constitution. Report it loudly,
+# naming each missing principle by its heading text, even if the file is
+# otherwise classified "intentional".
+```
+
+Heading-level comparison (not line-level body text) keeps this robust to legitimate body rewording while still catching a wholesale-missing principle. If `.adlc/ETHOS.md` is absent entirely, report `ethos` as `missing` and recommend `/init`. If identical, report `ethos` as `clean` (one line).
+
+### Step 3d: Detect Workflow-Runtime Drift (the sprint engine)
+
+A fifth sync surface is the workflow **runtime** itself — `.adlc/workflows/adlc-sprint.workflow.js` and its vendored `.adlc/workflows/README.md`. This is **distinct from Step 3b**: Step 3b only finds stale *test* files an old `/init` left behind; Step 3d diffs the *runtime file content* against canonical. A consumer's copy is frozen at init time while the toolkit's sprint engine keeps evolving, so a stale runtime silently runs an outdated orchestrator.
+
+**Classification follows the *partials* posture**: this is shared executable code, not customizable content. Every diff is reported as **`stale`** with a loud warning and no customization track — a consumer-modified sprint engine is exactly the silent-divergence threat the partials rationale (Step 3) already names. Use exit-code-only comparison (the only remediation is "copy from toolkit"); show the full diff only if the user asks for `--verbose`:
+
+```sh
+for wf in adlc-sprint.workflow.js README.md; do
+  if [ ! -f ".adlc/workflows/$wf" ]; then
+    echo "$wf: missing (toolkit has it, project does not — run /init)"
+  elif diff -q ".adlc/workflows/$wf" ~/.claude/skills/workflows/"$wf" >/dev/null 2>&1; then
+    echo "$wf: synced"
+  else
+    echo "$wf: stale (workflow runtime diverged from toolkit — copy from toolkit)"
+  fi
+done
+```
+
+If `.adlc/workflows/` does not exist at all, report `workflow-runtime` as `missing` and recommend `/init`. If both files are identical, report `workflow-runtime` as `clean` (one line).
+
 ### Step 4: Classify Template Drift as Intentional vs Accidental
 
-(This step applies to templates only — partials have no customization classification, per Step 3.)
+(This step applies to the two **template-posture** surfaces — templates and `ethos` (Step 3c). Partials and `workflow-runtime` have no customization classification, per Step 3 / Step 3d. For `ethos`, apply these same intentional-vs-accidental signals to the *body*, but remember the missing-principle sub-check in Step 3c fires loudly regardless of how the file is classified here.)
 
 
 For each drifted template, **read both full versions** (not just the diff) and make a judgment call. The goal is to separate:
@@ -104,13 +167,18 @@ When in doubt, classify as "needs human review" — do not silently reconcile.
 
 ### Step 5: Produce the Drift Report
 
-Emit a summary table, then per-file detail. The report covers BOTH surfaces (templates and partials) — templates classify drift as intentional/accidental; partials classify drift only as `synced`/`stale`/`missing`.
+Emit a summary table, then per-file detail. The report covers **all five surfaces** (templates, partials, ethos, workflow-runtime, workflow-test-landmine). Templates and ethos classify drift as intentional/accidental (template-posture); partials and workflow-runtime classify drift only as `synced`/`stale`/`missing` (partials-posture); the workflow-test landmine is always `stale`. **Every surface gets a line even when clean** — a checked-and-clean surface is reported `clean`, never silently omitted (Ethos #5).
 
 ```
 ## Template Drift Report — [date]
 
 Project: <repo name>
 Toolkit ref: <`git -C "$(readlink ~/.claude/skills)" rev-parse --short HEAD`>
+
+ETHOS (.adlc/ETHOS.md): DRIFTED — 1 MISSING PRINCIPLE: `## 7. Skeptical by Default` is in the
+toolkit constitution but absent from this project's copy. Every skill is running an outdated
+constitution. Classification: Accidental (structurally older — no project-specific principles added).
+(Reported first because the runtime prefers the project copy — Step 3c.) (Show `clean` when identical.)
 
 | Template | Status | Drift | Classification |
 |---|---|---|---|
@@ -120,7 +188,7 @@ Toolkit ref: <`git -C "$(readlink ~/.claude/skills)" rev-parse --short HEAD`>
 | assumption-template.md | Missing locally | — | Upstream added — needs copy |
 | lesson-template.md | Drifted | +6 / -0 | Accidental (upstream added filename lock comment) |
 
-Overall: 3 drifted, 1 missing locally, 1 identical.
+Templates overall: 3 drifted, 1 missing locally, 1 identical.
 Intentional: 1. Accidental: 2. Missing: 1.
 
 | Partial | Status |
@@ -130,6 +198,8 @@ Intentional: 1. Accidental: 2. Missing: 1.
 | spec-gate.sh | missing |
 
 Partials overall: 1 stale, 1 synced, 1 missing. (No customization classification — every partial drift is `stale` by design; see Step 3 rationale.)
+
+Workflow runtime (.adlc/workflows/): 1 stale — `adlc-sprint.workflow.js` diverged from the toolkit sprint engine (copy from toolkit); `README.md` synced. (No customization classification — partials-posture, every diff `stale`; see Step 3d. Show `clean` when both files identical.)
 
 Workflow test files (.adlc/workflows/): 1 stale — `.adlc/workflows/tests/` (Jest landmine: `*.test.js` under .adlc/ breaks `npm test` in "type":"module" repos; remove). (Show `clean` when none found.)
 ```
@@ -163,7 +233,7 @@ Action: safe to sync from toolkit. Propose a one-line change: copy `~/.claude/sk
 
 ### Step 6: Offer Reconciliation Actions
 
-For each **accidental** template drift, each **missing locally** template, **every** `stale` or `missing` partial (no customization escape hatch for partials — see Step 3), and **every** stale workflow test file from Step 3b, offer the user a specific action they can take. Format as a numbered list so the user can approve selectively:
+Offer the user a specific action for each reconcilable item, across **all five surfaces**: each **accidental** template drift, each **missing locally** template; each **accidental** or **missing-principle** ETHOS drift; **every** `stale` or `missing` partial (no customization escape hatch — see Step 3); **every** `stale` or `missing` workflow-runtime file (no customization escape hatch — see Step 3d); and **every** stale workflow test file from Step 3b. Format as a numbered list so the user can approve selectively:
 
 ```
 ## Proposed Actions
@@ -177,28 +247,38 @@ For each **accidental** template drift, each **missing locally** template, **eve
 3. **assumption-template.md**: Copy from toolkit to project (upstream added, not yet in project).
    Command: `cp ~/.claude/skills/templates/assumption-template.md .adlc/templates/assumption-template.md`
 
-4. **ethos-include.sh** (partial, stale): Copy from toolkit to project. Partials have no customization classification — any drift is reported as `stale` (see Step 3 rationale).
+4. **.adlc/ETHOS.md** (ethos, accidental — missing principle #7): Copy from toolkit to project. **Before
+   proposing the write, show the full principle-level diff** so the user sees exactly which principles
+   change (BR-5). Only after the user has seen the diff and approves, copy.
+   Diff first: `diff -u .adlc/ETHOS.md ~/.claude/skills/ETHOS.md`
+   Command (on approval): `cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md`
+
+5. **ethos-include.sh** (partial, stale): Copy from toolkit to project. Partials have no customization classification — any drift is reported as `stale` (see Step 3 rationale).
    Command: `cp ~/.claude/skills/partials/ethos-include.sh .adlc/partials/ethos-include.sh`
 
-5. **spec-gate.sh** (partial, missing): Copy from toolkit to project.
+6. **spec-gate.sh** (partial, missing): Copy from toolkit to project.
    Command: `mkdir -p .adlc/partials && cp ~/.claude/skills/partials/spec-gate.sh .adlc/partials/spec-gate.sh`
 
-6. **.adlc/workflows/tests/** (stale workflow tests, Jest landmine): Remove. These are toolkit-internal `node:test` files that break `npm test` in `"type":"module"` repos; the runtime never needs them. Re-running `/init` also removes them.
+7. **adlc-sprint.workflow.js** (workflow-runtime, stale): Copy from toolkit to project. The sprint engine diverged from the toolkit; partials-posture — any drift is `stale` (see Step 3d).
+   Command: `cp ~/.claude/skills/workflows/adlc-sprint.workflow.js .adlc/workflows/adlc-sprint.workflow.js`
+
+8. **.adlc/workflows/tests/** (stale workflow tests, Jest landmine): Remove. These are toolkit-internal `node:test` files that break `npm test` in `"type":"module"` repos; the runtime never needs them. Re-running `/init` also removes them.
    Command: `rm -rf .adlc/workflows/tests`
 
 Reply with action numbers to apply (e.g. "1 2 3" or "all"), or "skip" to take no action.
 ```
 
-**Do not apply any changes without explicit user approval.** Writing to `.adlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. Writing to `.adlc/partials/` affects gate logic and the ETHOS preamble injected into every skill — also deliberate. If the user approves, apply only the numbered actions they listed and re-run Step 2 (templates) and Step 3 (partials) for those files to confirm drift is now zero.
+**Do not apply any changes without explicit user approval.** Writing to `.adlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. Writing to `.adlc/ETHOS.md` changes the constitution injected into **every** skill invocation — show the principle-level diff first (BR-5) and never overwrite an intentionally-customized constitution without explicit consent. Writing to `.adlc/partials/` affects gate logic and the ETHOS preamble injected into every skill; writing to `.adlc/workflows/` changes the sprint orchestrator — all deliberate. If the user approves, apply only the numbered actions they listed and re-run the relevant detection step (Step 2 templates, Step 3 partials, Step 3c ethos, Step 3d workflow-runtime) for those files to confirm drift is now zero.
 
-For **intentional** template drift, do not propose reconciliation — just note it in the report so the user is aware. Partials have no "intentional" path: every partial drift is offered for reconciliation.
+For **intentional** template or ETHOS drift, do not propose reconciliation — just note it in the report so the user is aware. The **missing-principle** ETHOS case is always offered for reconciliation even when the rest of the file looks intentional, because a missing canonical principle is never a legitimate customization. Partials and workflow-runtime have no "intentional" path: every diff is offered for reconciliation.
 
 ### Step 7: Recommend Follow-Up
 
 At the end of the report:
-- If all drift is intentional and reconciled: "All templates are in sync or intentionally customized. No action needed."
-- If drift remains after user-approved actions: list what's still drifted and suggest running `/template-drift` again after a toolkit update.
-- If intentional customizations were found: remind the user to update their project CLAUDE.md or a project-local NOTES file so future toolkit-template updates don't accidentally overwrite them during a merge.
+- If all five surfaces are in sync or intentionally customized: "All vendored surfaces (templates, partials, ethos, workflow runtime, workflow tests) are in sync or intentionally customized. No action needed."
+- If drift remains after user-approved actions: list what's still drifted (by surface) and suggest running `/template-drift` again after a toolkit update.
+- If intentional customizations were found (templates or ethos): remind the user to update their project CLAUDE.md or a project-local NOTES file so future toolkit updates don't accidentally overwrite them during a merge.
+- If a **missing ETHOS principle** was found and NOT reconciled: warn explicitly that every skill is running an outdated constitution until it is copied.
 
 ## What This Skill Does NOT Do
 
@@ -211,6 +291,6 @@ At the end of the report:
 
 - Use `diff -u` for readable unified diffs. Fall back to `git diff --no-index` if preferred.
 - `wc -l` on the diff output is a decent proxy for drift size, but prefer counting `^+` and `^-` lines excluding the `+++`/`---` headers.
-- When running under `/status`, this skill should produce a one-line summary only (e.g. "Templates: 2 drifted, 1 missing. Partials: 1 stale, 0 missing. Workflow tests: 1 stale (Jest landmine).") rather than the full report. Detect that case by checking whether `$ARGUMENTS` contains `--brief`. Omit the "Workflow tests" clause when none are found.
+- When running under `/status`, this skill should produce a one-line summary only that still names **all five surfaces** (e.g. "Templates: 2 drifted, 1 missing. Partials: 1 stale, 0 missing. ETHOS: drifted (1 missing principle). Workflow runtime: 1 stale. Workflow tests: 1 stale (Jest landmine)."). A clean surface is shown as `clean` rather than dropped (BR-3 — never silently omit a surface). Detect this mode by checking whether `$ARGUMENTS` contains `--brief`. The "Workflow tests" clause may be omitted only when no landmine files are found; the other four surfaces are always reported (clean or drifted).
 - Partial comparison uses `diff -q` (quiet, exit-code-only) rather than `diff -u` because per-file unified diffs are not actionable for partials — the only remediation is "copy from toolkit". Show the diff only if the user asks for `--verbose`.
 - Do not invoke `/template-drift` recursively against the adlc-toolkit's own `.adlc/` (would always report drift against itself by construction).

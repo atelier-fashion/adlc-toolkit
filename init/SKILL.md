@@ -204,6 +204,26 @@ fi
 
 If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, `.adlc/partials/*.sh`, or `.adlc/workflows/adlc-sprint.workflow.js`, confirm before overwriting. Use `/template-drift` to surface what differs (it also flags a stale `.adlc/workflows/tests/` left by an older `/init` — the Jest landmine fixed above). Typical drift (stale copies) should be overwritten silently.
 
+#### Vendored sync surfaces (drift-detection contract with `/template-drift`)
+
+The four surfaces this step copies are the project's **vendored sync surfaces** — copied once at
+init time, never auto-updated afterward. `/template-drift` is the tool that detects when a toolkit
+update to any of them has not yet landed in this project. The two lists MUST stay in agreement:
+**every surface added here must get a matching check in `/template-drift`** (see its
+`<!-- sync-surfaces: template-drift -->` list). The toolkit's `tools/lint-skills`
+`sync-surface-parity` check fails the build if they diverge.
+
+<!-- sync-surfaces: init -->
+- `ethos` — `cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md`
+- `templates` — `cp ~/.claude/skills/templates/*.md .adlc/templates/`
+- `partials` — `cp ~/.claude/skills/partials/*.sh .adlc/partials/`
+- `workflow-runtime` — `cp ~/.claude/skills/workflows/*.workflow.js` + `README.md` → `.adlc/workflows/`
+<!-- /sync-surfaces -->
+
+(Note: `/template-drift` checks one additional surface — `workflow-test-landmine`, a stale
+`*.test.js` an *older* `/init` left under `.adlc/`. That is a drift *symptom* this step deliberately
+does NOT copy, so it has no entry here; the parity check accounts for that asymmetry.)
+
 ### Step 7: Scaffold Retrieval Taxonomy
 
 Copy the canonical taxonomy template to `.adlc/context/taxonomy.md` so authors of new REQs, bugs, and lessons have a reference vocabulary for retrieval tags.

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""SKILL.md corruption linter — six orthogonal checks (REQ-425, REQ-433, REQ-436).
+"""SKILL.md corruption linter — seven per-file checks + two per-root checks
+(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525).
 
 Run from the repo root:
 
@@ -7,7 +8,13 @@ Run from the repo root:
 
 Exit code: 0 on clean, otherwise min(num_findings, 255).
 
-The six checks (each a pure ``(text, rel) -> list[Finding]`` except
+Two checks run once per scan root rather than per SKILL.md:
+``check_agent_model_drift`` (REQ-516 — on-disk ``model:`` vs the config render)
+and ``check_sync_surface_parity`` (REQ-525 AC4 — ``/init``'s vendored-surface
+copy list vs ``/template-drift``'s checked-surface list must agree). Both
+degrade to zero findings (never a crash) when run outside the toolkit checkout.
+
+The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
 ``find_skill_files``, the one structural exception):
 
 1. ``check_sentinels``   — exact forbidden substrings from ``sentinels.txt``.
@@ -137,6 +144,38 @@ FN_CALL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\b")
 FORGE_DIRECT_GH_RE = re.compile(
     r"\bgh\s+pr\s+(create|ready|edit|view|list|merge|comment)\b"
 )
+
+# REQ-525 (AC4 / BR-4): the canonical five-surface vocabulary (the SyncSurface
+# enum). Single source of truth that both the parity check below and its tests
+# reference. The first four are physically vendored into a consumer project by
+# `/init`; `workflow-test-landmine` is a `/template-drift`-only check for a drift
+# symptom `/init` deliberately does NOT copy (so it may appear in template-drift's
+# checked list with no matching `/init` copy entry — see check_sync_surface_parity).
+SYNC_SURFACES = frozenset(
+    {"templates", "partials", "ethos", "workflow-runtime", "workflow-test-landmine"}
+)
+# The four surfaces `/init` actually copies (every one MUST have a template-drift
+# check). `workflow-test-landmine` is intentionally excluded — it is not copied.
+INIT_COPIED_SURFACES = frozenset(
+    {"templates", "partials", "ethos", "workflow-runtime"}
+)
+
+# A surface-list marker block: `<!-- sync-surfaces: <which> -->` ... `<!-- /sync-surfaces -->`.
+# Inside the block, each surface is the first backtick-quoted token on a `- ` bullet,
+# e.g. "- `ethos` — ...". Anchored to a stable marker (LESSON-019: a guard anchored to
+# a stable marker does not rot when surrounding prose moves), parsed deterministically
+# (LESSON-012: structural enforcement over prose-scanning).
+#
+# The open/close markers are anchored to START OF LINE (`^\s*`, no leading backtick):
+# the REAL block markers sit at column 0, while a cross-reference PROSE mention is
+# wrapped in backticks mid-sentence (e.g. "see the `<!-- sync-surfaces: init -->` list").
+# Requiring line-start prevents a prose mention from being mistaken for the block opener
+# — without the anchor, `.search()` would match the earlier prose line and parse the
+# wrong (or empty) block. ``$`` is NOT anchored so trailing prose after the marker on
+# the same line (there is none today) would still match the real marker, not break it.
+SYNC_SURFACE_OPEN_RE = re.compile(r"^\s*<!--\s*sync-surfaces:\s*([A-Za-z0-9_-]+)\s*-->")
+SYNC_SURFACE_CLOSE_RE = re.compile(r"^\s*<!--\s*/sync-surfaces\s*-->")
+SYNC_SURFACE_ITEM_RE = re.compile(r"^\s*-\s+`([A-Za-z0-9_-]+)`")
 
 
 class Finding(NamedTuple):
@@ -575,6 +614,116 @@ def check_agent_model_drift(root: Path) -> list[Finding]:
     return findings
 
 
+def parse_sync_surface_block(text: str, which: str) -> set[str] | None:
+    """Return the set of surface names in the ``<!-- sync-surfaces: <which> -->`` block.
+
+    Returns ``None`` (not an empty set) when the named block is absent, so the
+    caller can distinguish "marker not present → degrade silently" from "marker
+    present but empty → a real, reportable mismatch". Parsing is deterministic:
+    the opening marker must name ``which``; every ``- `name``` bullet inside the
+    block (up to ``<!-- /sync-surfaces -->`` or EOF) contributes its first
+    backtick-quoted token. No prose-scanning (LESSON-012); anchored to a stable
+    marker so the guard does not rot when surrounding text moves (LESSON-019).
+    """
+    lines = text.splitlines()
+    i = 0
+    n = len(lines)
+    while i < n:
+        m = SYNC_SURFACE_OPEN_RE.search(lines[i])
+        if m and m.group(1) == which:
+            surfaces: set[str] = set()
+            i += 1
+            while i < n and not SYNC_SURFACE_CLOSE_RE.search(lines[i]):
+                im = SYNC_SURFACE_ITEM_RE.match(lines[i])
+                if im:
+                    surfaces.add(im.group(1))
+                i += 1
+            return surfaces
+        i += 1
+    return None
+
+
+def check_sync_surface_parity(root: Path) -> list[Finding]:
+    """REQ-525 AC4/BR-4: `/init`'s copy list and `/template-drift`'s checked list must agree.
+
+    Per-root check (mirrors ``check_agent_model_drift``): parse the
+    ``<!-- sync-surfaces: init -->`` block from ``init/SKILL.md`` and the
+    ``<!-- sync-surfaces: template-drift -->`` block from ``template-drift/SKILL.md``
+    and report when they disagree. Degrades gracefully — a missing SKILL.md or a
+    missing marker block yields zero findings, never a crash or a false red (the
+    same posture as ``check_agent_model_drift`` when its engine is absent), so the
+    check is inert outside the toolkit checkout.
+
+    Parity rules:
+      1. Every name in either block must be a known ``SYNC_SURFACES`` member
+         (an unknown surface name is a typo or an un-enumerated surface — flag it).
+      2. Every surface ``/init`` copies (its block ∩ ``INIT_COPIED_SURFACES``) MUST
+         appear in ``/template-drift``'s checked list — the core "init added a
+         surface, template-drift forgot to check it" gap.
+      3. The asymmetry is one-directional: ``/template-drift`` MAY list
+         ``workflow-test-landmine`` (and only that) without an ``/init`` entry,
+         because it is a drift symptom ``/init`` deliberately does not copy. Any
+         OTHER template-drift-only surface that ``/init`` is expected to copy
+         (i.e. a member of ``INIT_COPIED_SURFACES``) missing from ``/init``'s block
+         is also a divergence.
+    """
+    init_path = root / "init" / "SKILL.md"
+    td_path = root / "template-drift" / "SKILL.md"
+    if not init_path.is_file() or not td_path.is_file():
+        return []  # not the toolkit checkout — skip.
+    try:
+        init_text = init_path.read_text(encoding="utf-8", errors="replace")
+        td_text = td_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    init_surfaces = parse_sync_surface_block(init_text, "init")
+    td_surfaces = parse_sync_surface_block(td_text, "template-drift")
+    # Marker block absent in either file → degrade silently (graceful, no false red).
+    if init_surfaces is None or td_surfaces is None:
+        return []
+
+    findings: list[Finding] = []
+
+    # Rule 1: unknown surface names in either block.
+    for label, surfaces in (("init", init_surfaces), ("template-drift", td_surfaces)):
+        for name in sorted(surfaces - SYNC_SURFACES):
+            findings.append(
+                Finding(
+                    f"{label}/SKILL.md", 1, "sync-surface-parity",
+                    f"unknown sync surface '{name}' in the {label} sync-surfaces "
+                    f"block — not a member of SYNC_SURFACES {sorted(SYNC_SURFACES)}",
+                )
+            )
+
+    # Rule 2: every init-copied surface must be checked by /template-drift.
+    for name in sorted((init_surfaces & INIT_COPIED_SURFACES) - td_surfaces):
+        findings.append(
+            Finding(
+                "template-drift/SKILL.md", 1, "sync-surface-parity",
+                f"surface '{name}' is vendored by /init but has no matching check "
+                "in /template-drift's sync-surfaces list — add a check or the drift "
+                "is silent (BR-4)",
+            )
+        )
+
+    # Rule 3: an init-copied surface that /init claims but isn't in INIT_COPIED_SURFACES
+    # is impossible by construction; the asymmetry we DO allow is template-drift listing
+    # `workflow-test-landmine` with no init entry. Flag any OTHER td-only surface that is
+    # an expected init-copied surface yet missing from /init's block.
+    td_only = td_surfaces - init_surfaces
+    for name in sorted(td_only & INIT_COPIED_SURFACES):
+        findings.append(
+            Finding(
+                "init/SKILL.md", 1, "sync-surface-parity",
+                f"surface '{name}' is checked by /template-drift and is an init-copied "
+                "surface, but is missing from /init's sync-surfaces list — lists diverge "
+                "(BR-4)",
+            )
+        )
+
+    return findings
+
+
 def run(root: Path) -> list[Finding]:
     sentinels = load_sentinels(SENTINELS_FILE)
     # REQ-436 ADR-4: read the sourced telemetry partials ONCE per run (never
@@ -607,6 +756,8 @@ def run(root: Path) -> list[Finding]:
         findings.extend(check_forge_direct_gh(text, rel))
     # Per-root (not per-SKILL.md): agent model: drift vs the config render (BR-5).
     findings.extend(check_agent_model_drift(root))
+    # Per-root (REQ-525 AC4): /init copy list vs /template-drift checked list parity.
+    findings.extend(check_sync_surface_parity(root))
     return findings
 
 
