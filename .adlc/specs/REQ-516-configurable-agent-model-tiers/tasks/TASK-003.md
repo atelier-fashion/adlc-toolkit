@@ -1,7 +1,7 @@
 ---
 id: TASK-003
 title: "Register `adlc agents render` additively in the umbrella CLI"
-status: draft
+status: complete
 parent: REQ-516
 created: 2026-06-11
 updated: 2026-06-11
