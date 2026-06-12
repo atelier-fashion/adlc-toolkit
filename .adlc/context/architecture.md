@@ -50,6 +50,9 @@ Templates at `templates/*.md` are the canonical shape for each artifact type:
 - `bug-template.md` — bug reports (id, title, status, severity, dates; Description, Reproduction, Root Cause, Resolution)
 - `lesson-template.md` — lessons learned (id, title, domain, component, tags, req, created)
 - `assumption-template.md` — validated-assumption knowledge entries
+- `taxonomy-template.md` — tag/taxonomy reference used by the retrieval tagging
+
+The `templates/` directory is authoritative for the full set (it also carries the non-`.md` `config-template.yml` and `claude-settings-template.json`); the list above describes the per-artifact `*.md` templates and may lag the directory — prefer `ls templates/` when an exact roster matters.
 
 Templates are copied into consumer projects by `/init` (into `.adlc/templates/`). Consumer projects may customize their local copies; `/template-drift` detects divergence from the canonical set.
 
