@@ -24,6 +24,12 @@
 # NEVER blocks on network (BR-3): an unreachable remote can only fail to FIND a
 # collision, never invent one from absence of data.
 #
+# REQ-523: the degraded condition is now read from adlc_remote_high's stdout (its
+# second token), not the old parent-env ADLC_ALLOC_DEGRADED flag (which died in the
+# $(...) subshell — the M1 dead-code bug). The exact-id artifact probe routes through
+# the shared adlc_remote_artifact_nums helper so ADO + gh-absent artifacts are seen
+# (BR-6 — one derivation surface, no recheck-only copy).
+#
 # Portable across sh/bash/zsh (BR-6): prefixed globals, no `\b` in grep -E, no bare
 # $<digit>, no [0] indexing, no `status=` var.
 
@@ -72,25 +78,34 @@ adlc_recheck_id() {
   adlc_rc_num=$(printf '%s' "$adlc_rc_id" | sed -E "s/^$adlc_rc_prefix-//")
   adlc_rc_num=$(adlc_id_dec "$adlc_rc_num")
 
-  # adlc_remote_high re-derives the remote footprint (branches + merged artifact dirs).
-  # If the remote high-water is >= our number, SOMETHING at-or-above this id exists on
-  # the remote. That alone is not proof THIS exact id is taken — but combined with the
-  # exact-id branch/dir probe below it is. We do BOTH: the cheap high-water short-circuit
-  # plus an exact-id presence probe so we don't false-halt merely because a HIGHER id
-  # was allocated elsewhere.
-  ADLC_ALLOC_DEGRADED=""
-  adlc_rc_high=$(adlc_remote_high "$adlc_rc_kind")
-  # Loud-fail guard (BUG-116): empty/non-numeric means an internal derivation error
-  # (distinct from the unreachable-remote DEGRADED path, which prints 0 and warns).
+  # adlc_remote_high re-derives the remote footprint (branches + merged artifact dirs)
+  # and prints "<high_water> <degraded>" (REQ-523 BR-2). If the remote high-water is >=
+  # our number, SOMETHING at-or-above this id exists on the remote. That alone is not
+  # proof THIS exact id is taken — but combined with the exact-id branch/dir probe below
+  # it is. We do BOTH: the cheap high-water short-circuit plus an exact-id presence probe
+  # so we don't false-halt merely because a HIGHER id was allocated elsewhere.
+  #
+  # The degraded bit now arrives on stdout (token 2), NOT via the old parent-env
+  # ADLC_ALLOC_DEGRADED write — that write died in the $(...) subshell and made this
+  # degraded branch dead code (REQ-523 M1 / LESSON-015). Split the two tokens.
+  adlc_rc_rh=$(adlc_remote_high "$adlc_rc_kind")
+  adlc_rc_high=${adlc_rc_rh%% *}
+  adlc_rc_degraded=${adlc_rc_rh##* }
+  # Loud-fail guard (BUG-116): the high-water token must be numeric. Validate only the
+  # first token (the output now carries a trailing space + degraded bit).
   case "$adlc_rc_high" in
     ''|*[!0-9]*)
-      echo "ERROR: adlc_remote_high returned non-numeric '$adlc_rc_high' during recheck of $adlc_rc_id — aborting (BUG-116)" >&2
+      echo "ERROR: adlc_remote_high returned non-numeric high-water '$adlc_rc_high' during recheck of $adlc_rc_id — aborting (BUG-116)" >&2
       return 2 ;;
   esac
   adlc_rc_high=$(adlc_id_dec "$adlc_rc_high")
 
-  if [ -n "$ADLC_ALLOC_DEGRADED" ]; then
-    echo "WARNING: remote unreachable during recheck of $adlc_rc_id — proceeding WITHOUT remote verification (BR-3)." >&2
+  # Degraded short-circuit MUST run BEFORE the exact-id walk so a degraded derivation
+  # never produces a renumber suggestion computed from a possibly-zero high-water
+  # (REQ-523 BR-2 — the M1 dead-code bug). A degraded scan can only fail to FIND a
+  # collision, never invent one; proceed WITHOUT remote verification.
+  if [ "$adlc_rc_degraded" = "1" ]; then
+    echo "WARNING: remote derivation DEGRADED during recheck of $adlc_rc_id — proceeding WITHOUT remote verification (BR-2/BR-3)." >&2
     return 0
   fi
 
@@ -130,27 +145,19 @@ adlc_recheck_id() {
       fi
     fi
 
-    # Merged artifact dir/file probe via gh api (when available). Artifact dirs/files
-    # carry the UPPERCASE prefix (REQ-/BUG-/LESSON-).
-    if command -v gh >/dev/null 2>&1; then
-      adlc_rc_url=$(git -C "$adlc_rc_repo" remote get-url origin 2>/dev/null)
-      adlc_rc_owner=$(printf '%s' "$adlc_rc_url" \
-        | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')
-      if printf '%s' "$adlc_rc_owner" | grep -qE '^[^/]+/[^/]+$'; then
-        case "$adlc_rc_kind" in
-          req)    adlc_rc_path=".adlc/specs" ;;
-          bug)    adlc_rc_path=".adlc/bugs" ;;
-          lesson) adlc_rc_path=".adlc/knowledge/lessons" ;;
-        esac
-        adlc_rc_names=$(gh api "repos/$adlc_rc_owner/contents/$adlc_rc_path" --jq '.[].name' 2>/dev/null)
-        # Per-line sed normalization, not a read/adlc_id_dec loop (BUG-116 — see above).
-        adlc_rc_art_nums=$(printf '%s\n' "$adlc_rc_names" \
-          | grep -oE "$adlc_rc_prefix-[0-9]+" | sed -E "s/^$adlc_rc_prefix-//" \
-          | sed -E 's/^0+([0-9])/\1/')
-        if printf '%s\n' "$adlc_rc_art_nums" | grep -qx "$adlc_rc_num"; then
-          adlc_rc_hit="$adlc_rc_repo (merged artifact)"
-          break
-        fi
+    # Merged artifact dir/file probe via the SHARED forge-aware scan (REQ-523 BR-6):
+    # gh fast-path -> git-transport fallback -> ADO parity, the SAME surface
+    # adlc_remote_high uses. No recheck-only gh-api copy. The helper prints the
+    # space-joined artifact numbers on line 1 and a scan-ran bit on line 2; re-split the
+    # numbers onto newlines and normalize to decimal before the exact-match probe.
+    adlc_rc_art=$(adlc_remote_artifact_nums "$adlc_rc_repo" "$adlc_rc_kind" "$adlc_rc_prefix")
+    adlc_rc_art_ran=$(printf '%s\n' "$adlc_rc_art" | sed -n '2p')
+    if [ "$adlc_rc_art_ran" = "1" ]; then
+      adlc_rc_art_nums=$(printf '%s\n' "$adlc_rc_art" | sed -n '1p' | tr ' ' '\n' \
+        | sed -E '/^$/d' | sed -E 's/^0+([0-9])/\1/')
+      if printf '%s\n' "$adlc_rc_art_nums" | grep -qx "$adlc_rc_num"; then
+        adlc_rc_hit="$adlc_rc_repo (merged artifact)"
+        break
       fi
     fi
   done
