@@ -18,6 +18,7 @@
 #   adlc_id_kind_lockdir <kind>   -> prints the mkdir-lock dir path for the kind
 #   adlc_id_kind_prefix  <kind>   -> prints the id prefix (REQ|BUG|LESSON)
 #   adlc_id_kind_scan    <kind>   -> prints "<find-path-glob> <find-type>" for bootstrap
+#   adlc_id_list_max     <list>   -> max of a newline-separated number list (zsh-safe)
 #   adlc_remote_high     <kind>   -> prints the remote high-water number (0 if none/unreachable)
 #   adlc_alloc_id        <kind>   -> prints max(local,remote)+1; fast-forwards the counter
 #
@@ -27,7 +28,11 @@
 # Allocation NEVER blocks on network availability.
 #
 # Portable across sh/bash/zsh (BR-6): prefixed globals (no `local`), no `\b` in grep -E,
-# no bare $<digit>, no [0] indexing, no `status=` variable. Modeled on trial-merge.sh.
+# no bare $<digit>, no [0] indexing, no `status=` variable, and NO `for x in $var`
+# iteration over newline-separated lists — zsh does not word-split unquoted parameter
+# expansions (SH_WORD_SPLIT off by default), so the whole list arrives as one word
+# (BUG-116). Reduce lists via printf '%s\n' pipelines instead (LESSON-329). Modeled on
+# trial-merge.sh.
 
 # --- numeric normalizer -------------------------------------------------------------
 # Strip leading zeros so a value is treated as DECIMAL, not octal: in sh/bash/zsh
@@ -35,6 +40,22 @@
 # lone 0 as 0; empty input -> 0.
 adlc_id_dec() {
   printf '%s' "${1:-0}" | sed -E 's/^0+([0-9])/\1/' | sed -E 's/^$/0/'
+}
+
+# --- newline-safe list max ------------------------------------------------------------
+# Max of a newline-separated number list, portable to zsh: never `for x in $var`
+# (BUG-116 — zsh passes the whole list as one word and the integer test explodes).
+# Each line is decimal-normalized (octal trap) before the sort. Empty input -> 0.
+# A non-numeric line fails LOUD (ERROR on stderr, prints nothing, rc 2) instead of
+# spamming per-candidate `[: integer expression expected` and degrading silently.
+adlc_id_list_max() {
+  adlc_lm_in=$(printf '%s\n' "${1:-}" | sed -E '/^[[:space:]]*$/d')
+  if [ -z "$adlc_lm_in" ]; then echo 0; return 0; fi
+  if printf '%s\n' "$adlc_lm_in" | grep -qvE '^[0-9]+$'; then
+    echo "ERROR: adlc_id_list_max: non-numeric candidate in id list — refusing integer compare (BUG-116)" >&2
+    return 2
+  fi
+  printf '%s\n' "$adlc_lm_in" | sed -E 's/^0+([0-9])/\1/' | sort -n | tail -1
 }
 
 # --- kind mappers (one table; three kinds; BR-8 one namespace per kind) -------------
@@ -109,6 +130,10 @@ adlc_remote_high() {
 
   # Enumerate participating repos: git checkouts directly under the root that have an
   # `origin` remote. One level deep is the common "all repos under one folder" layout.
+  # zsh aborts the whole enclosing eval on a no-match glob (NOMATCH); sh/bash leave the
+  # pattern literal and the .git check skips it. Make zsh behave like nullglob, scoped
+  # to this function (BUG-116 — an empty root must degrade loudly, not abort silently).
+  if [ -n "${ZSH_VERSION:-}" ]; then setopt localoptions nullglob 2>/dev/null; fi
   for adlc_rh_repo in "$adlc_rh_root"/*; do
     [ -d "$adlc_rh_repo/.git" ] || [ -f "$adlc_rh_repo/.git" ] || continue
     adlc_rh_url=$(git -C "$adlc_rh_repo" remote get-url origin 2>/dev/null) || continue
@@ -123,14 +148,12 @@ adlc_remote_high() {
         continue
       fi
       # Extract NNN from refs/heads/<branch_re>-...; grep -oE then strip the prefix.
+      # Reduce via adlc_id_list_max — NOT `for x in $nums` (zsh word-split, BUG-116).
       adlc_rh_nums=$(printf '%s\n' "$adlc_rh_refs" \
         | grep -oE "$adlc_rh_branch_re" \
         | grep -oE '[0-9][0-9]*' )
-      for adlc_rh_n in $adlc_rh_nums; do
-        # strip any accidental leading zeros for the arithmetic compare (octal trap).
-        adlc_rh_n=$(adlc_id_dec "$adlc_rh_n")
-        [ "$adlc_rh_n" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_n
-      done
+      adlc_rh_cand=$(adlc_id_list_max "$adlc_rh_nums") || return 2
+      [ "$adlc_rh_cand" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_cand
     fi
 
     # --- merged artifact dirs/files reachable from the default branch ---------------
@@ -154,10 +177,8 @@ adlc_remote_high() {
           | grep -oE '[0-9][0-9]*')
       fi
     fi
-    for adlc_rh_n in $adlc_rh_artifact_nums; do
-      adlc_rh_n=$(adlc_id_dec "$adlc_rh_n")
-      [ "$adlc_rh_n" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_n
-    done
+    adlc_rh_cand=$(adlc_id_list_max "$adlc_rh_artifact_nums") || return 2
+    [ "$adlc_rh_cand" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_cand
   done
 
   if [ -n "$adlc_rh_unreachable" ]; then
@@ -204,6 +225,15 @@ adlc_alloc_id() {
   # Remote high-water is derived OUTSIDE the lock — it makes network calls that must
   # not hold the mkdir lock for seconds; the lock only guards the local read/write.
   adlc_ai_remote=$(adlc_remote_high "$adlc_ai_kind")
+  # Loud-fail guard (BUG-116): adlc_remote_high always prints a number on success
+  # (0 when unreachable — that DEGRADED path stays non-blocking per BR-3). Empty or
+  # non-numeric output means an internal derivation error — abort rather than
+  # silently allocating from the local counter alone.
+  case "$adlc_ai_remote" in
+    ''|*[!0-9]*)
+      echo "ERROR: adlc_remote_high returned non-numeric '$adlc_ai_remote' for kind '$adlc_ai_kind' — aborting allocation (BUG-116)" >&2
+      return 1 ;;
+  esac
 
   adlc_ai_num=$(
     LOCK="$adlc_ai_lock"
