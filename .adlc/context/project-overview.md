@@ -4,7 +4,7 @@
 
 The ADLC Toolkit is a library of **skills, agents, and templates** that enable spec-driven development with Claude Code. It is the source of `/spec`, `/architect`, `/proceed`, `/review`, `/bugfix`, and other skills that consumer projects use to run their own Agentic Development Life Cycle (ADLC) pipelines.
 
-This repo is itself a consumer of the toolkit only in the narrow sense that its own feature work is tracked in `.adlc/specs/` — but it does NOT have the full consumer scaffold. No `.adlc/knowledge/lessons/`, `.adlc/bugs/`, or `.adlc/templates/` directory inside this repo (those live in consumer projects after `/init`). The toolkit's canonical `templates/` directory at the repo root is what `/init` copies into consumer projects.
+This repo dogfoods the toolkit on its own feature work: REQs in `.adlc/specs/`, lessons in `.adlc/knowledge/lessons/`, and bugs in `.adlc/bugs/`. It does not carry the full consumer scaffold — there is no `.adlc/templates/` directory inside this repo, because the canonical `templates/` directory at the repo *root* is the source `/init` copies into consumer projects (a vendored `.adlc/templates/` copy here would just shadow it). Knowledge and bug tracking, by contrast, ARE present and active.
 
 ## Who uses it
 
@@ -22,25 +22,23 @@ Symlink-based live install. One canonical git clone on disk, symlinked at `~/.cl
 | Skills | `<skill-name>/SKILL.md` | Markdown files invoked by Claude Code as slash commands |
 | Agents | `agents/<agent-name>.md` | Specialized subagent definitions with tool restrictions and model selection |
 | Templates | `templates/*.md` | Canonical templates for requirements, bugs, lessons, tasks, assumptions |
-| Ethos | `ETHOS.md` | Five principles injected into every skill — the non-negotiable constitution |
+| Ethos | `ETHOS.md` | The ETHOS principles injected into every skill — the non-negotiable constitution |
 | Docs | `README.md` | Install instructions and skill catalog |
 
 ## Relationship to consumer projects
 
 `/init` is the bridge: when a consumer project runs `/init`, it creates `.adlc/context/`, `.adlc/specs/`, `.adlc/bugs/`, `.adlc/knowledge/`, and `.adlc/templates/` in that project, copying from the toolkit's `templates/` directory. After `/init`, the consumer project uses skills that read from **its** `.adlc/` structure — not the toolkit's.
 
-The toolkit's own `.adlc/` (containing only `specs/` and `context/`) is minimal by design. The toolkit doesn't track lessons or bugs for itself yet; that may change if the toolkit's internal work grows.
+The toolkit's own `.adlc/` is intentionally lean but no longer minimal: it tracks `specs/`, `context/`, `knowledge/lessons/`, and `bugs/` for the toolkit's own work. It deliberately omits a vendored `templates/` copy (the root `templates/` is authoritative). The toolkit dogfoods its own lesson- and bug-capture process the same way a consumer project does.
 
 ## Current scope
 
-As of 2026-04-19, the toolkit tracks its own feature work starting with REQ-258 (unified tag-based retrieval for `/spec`). Prior toolkit changes were tracked only in git history and PR descriptions. REQ-258 onward, the toolkit dogfoods its own spec-driven process at a minimal level.
+The toolkit dogfoods its own spec-driven process: feature work is tracked in `.adlc/specs/` (starting with REQ-258, unified tag-based retrieval for `/spec`), lessons in `.adlc/knowledge/lessons/`, and bugs in `.adlc/bugs/`. Toolkit changes before REQ-258 live only in git history and PR descriptions. The current epoch is **5.x ("Works anywhere")** — see `VERSION` and `CHANGELOG.md`, which are authoritative for what has shipped; this overview deliberately does not re-enumerate the changelog (enumerations rot — LESSON-019).
 
-## REQ-numbering policy (cross-project global counter)
+## REQ-numbering policy (remote-derived, collision-safe)
 
-As of REQ-380 (2026-05-04), this repo and atelier-fashion share a **global** REQ counter. Future REQ allocations from adlc-toolkit MUST take the next slot above the global high-water (currently anchored by atelier-fashion's REQ-380), not above adlc-toolkit's local high-water of REQ-263.
+Numbering is **remote-derived** as of REQ-518: a new id is `max(local-cache, remote-high-water) + 1`, computed by the shared `partials/id-alloc.sh` (allocation) and rechecked at push/PR time by `partials/id-recheck.sh`. The remote is the source of truth; the per-machine `~/.claude/.global-next-req` counter is a fast-forwarded *cache*, not the authority. This makes ids collision-safe across multiple users and machines, not just across repos on one machine. The same pattern allocates BUG ids (`~/.claude/.global-next-bug`) and LESSON ids (`~/.claude/.global-next-lesson`).
 
-Rationale: a single REQ id should resolve to one work item across every repo on the machine, so cross-repo references (links, lessons, branch names, PR titles) are unambiguous. The global counter is maintained at `~/.claude/.global-next-req` and is the source of truth for every repo on the machine — adlc-toolkit, atelier-fashion, and any future participant all read from and increment the same file.
+Rationale: a single id should resolve to one work item across every repo and every contributor, so cross-repo references (links, lessons, branch names, PR titles) are unambiguous. Deriving the high-water from the remote rather than trusting a local counter is what makes that hold when several people allocate concurrently.
 
-Existing toolkit specs (REQ-258, REQ-262, REQ-263) keep their numbers — the policy applies to new allocations only. The intentional gap from REQ-264 through REQ-379 is the price of fast-forwarding to the global counter.
-
-Paired doc on the consumer side: atelier-fashion's `CLAUDE.md` "Cross-Project Considerations" section (shipped in atelier-fashion REQ-379, PR #774, merged 2026-05-04).
+*Historical note:* the global counter began (REQ-380, 2026-05-04) as a per-machine file shared between adlc-toolkit and atelier-fashion, fast-forwarded past adlc-toolkit's then-local high-water of REQ-263 (leaving the intentional REQ-264..379 gap). REQ-518 generalized that machine-local counter into the remote-derived scheme above. Existing toolkit specs (REQ-258, REQ-262, REQ-263) keep their original numbers.

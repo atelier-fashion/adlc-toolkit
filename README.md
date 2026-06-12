@@ -33,6 +33,9 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 - `bug-template.md` — Bug report template
 - `assumption-template.md` — Validated-assumption knowledge entry
 - `lesson-template.md` — Lesson-learned knowledge entry
+- `taxonomy-template.md` — Tag/taxonomy reference for retrieval tagging
+
+See [`templates/`](templates/) for the authoritative set (also includes the non-`.md` `config-template.yml` and `claude-settings-template.json`).
 
 ### Presets
 
