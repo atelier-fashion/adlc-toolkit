@@ -93,7 +93,7 @@ so no flag file remains after a normal run (REQ-522 AC-3).
 |--------------|------------------------------------------------------------------|
 | `skill`      | the `$1` argument                                                |
 | `step`       | the `$2` argument                                                |
-| `req`        | `$REQ_NUM` if the caller set it, else `unknown`                  |
+| `req`        | `$REQ_NUM` (spec/proceed) or `$REQ_ID` (wrapup) if set, else `unknown` |
 | `gate_result`| resolved `pass` / `fail` per the resolution above                |
 | `mode`       | resolved `fallback` / `ghost-skip` / `delegated`                 |
 | `reason`     | resolved reason string                                           |

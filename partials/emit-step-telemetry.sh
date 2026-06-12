@@ -92,7 +92,10 @@ _adlc_emit_step_telemetry() {
         _aest_mode="fallback"; _aest_reason="api-error"; _aest_gate_result="pass"
     fi
 
-    "$DELEGATE_TOOLS"/emit-telemetry.sh "$_aest_skill" "$_aest_step" "${REQ_NUM:-unknown}" "$_aest_gate_result" "$_aest_mode" "$_aest_reason" "$_aest_duration_ms"
+    # REQ id from whichever var the calling skill uses (spec/proceed: REQ_NUM;
+    # wrapup: REQ_ID), else "unknown".
+    _aest_req="${REQ_NUM:-${REQ_ID:-unknown}}"
+    "$DELEGATE_TOOLS"/emit-telemetry.sh "$_aest_skill" "$_aest_step" "$_aest_req" "$_aest_gate_result" "$_aest_mode" "$_aest_reason" "$_aest_duration_ms"
     # Canonical clear-point for the resolver: remove the flag AND its sidecar so
     # no flag file remains after a normal run (REQ-522 AC-3).
     "$DELEGATE_TOOLS"/skill-flag.sh clear "$flag"
