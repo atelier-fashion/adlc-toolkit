@@ -44,7 +44,10 @@ Deterministic Dynamic-Workflow scripts + the JSON-Schema literals they validate 
 
 ### Tools
 
-Standalone command-line utilities (not skills, installed via their own `install.sh`). See [`tools/kimi/`](tools/kimi/README.md) — Kimi K2.5 delegation CLIs (`ask-kimi`, `kimi-write`, `extract-chat`) for offloading token-heavy I/O from Claude Code sessions.
+Standalone command-line utilities (not skills). See:
+
+- [`tools/adlc/`](tools/adlc/README.md) — the `adlc` umbrella CLI. Its first subcommand, `adlc doctor`, is a read-only health check that diagnoses every install dependency and prints a copy-pasteable fix for each failure. Installed by the root [`install.sh`](#setup).
+- [`tools/kimi/`](tools/kimi/README.md) — provider-agnostic delegation CLIs (`adlc-read`, `adlc-write`, `extract-chat`; legacy `ask-kimi`/`kimi-write` shims) for offloading token-heavy I/O. **Off by default** — opt in via `./install.sh --with-delegation`.
 
 ## How it works
 
@@ -57,43 +60,33 @@ Skills read `.adlc/config.yml` at runtime to resolve project-specific things (GC
 
 ## Setup
 
-The toolkit uses a **symlink-based live install**: one canonical git clone on disk, exposed to Claude Code at `~/.claude/skills/` via an absolute-path symlink. There is no separate "installed" copy and no sync step — edits you commit to the clone are instantly visible to every Claude Code session on the machine.
-
-### 1. Clone this repo
-
-Pick any directory you keep code in. The toolkit doesn't care where it lives, as long as the symlink in step 2 uses an absolute path.
+Two commands:
 
 ```bash
-cd ~/code  # or wherever you keep repos — anywhere works
-# Replace <owner> with the canonical upstream's GitHub owner (or your fork's)
+# Replace <owner> with the canonical upstream's GitHub owner (or your fork's).
 git clone https://github.com/<owner>/adlc-toolkit.git
+cd adlc-toolkit && ./install.sh
 ```
 
-### 2. Symlink to Claude Code's skills and agents directories
+`install.sh` is idempotent and repair-capable: it symlinks `~/.claude/skills` and `~/.claude/agents` to this clone, puts the `adlc` CLI on your PATH, scaffolds `~/.claude/adlc/config.yml` (delegation **off** by default), and finishes by running `adlc doctor`. Run it again any time — a healthy machine reports zero actions; a broken one is repaired. Moved the clone? `./install.sh --repair` re-stamps everything to the new location.
+
+**Did it work?** `adlc doctor` is the answer to every "is my environment set up right?" question. It checks each dependency end-to-end (symlinks, PATH, `gh` auth, git identity, counters, delegation state, …) and prints an exact, copy-pasteable fix for anything that fails. See [`tools/adlc/README.md`](tools/adlc/README.md) for the full check list.
 
 ```bash
-# Back up any existing directories (rename is safe and reversible)
-[ -e ~/.claude/skills ] && mv ~/.claude/skills ~/.claude/skills.bak
-[ -e ~/.claude/agents ] && mv ~/.claude/agents ~/.claude/agents.bak
-
-# Create symlinks — use ABSOLUTE paths so they resolve from any cwd.
-# Replace the source path with wherever you cloned the toolkit.
-TOOLKIT="$PWD/adlc-toolkit"
-ln -s "$TOOLKIT" "$HOME/.claude/skills"
-ln -s "$TOOLKIT/agents" "$HOME/.claude/agents"
+adlc doctor                          # full health check
+adlc doctor --checks gh-auth         # just one check (skills use this as a pre-flight)
 ```
 
-Verify:
+Other install options:
 
 ```bash
-readlink ~/.claude/skills   # → absolute path to your adlc-toolkit clone
-readlink ~/.claude/agents   # → absolute path to .../adlc-toolkit/agents
-ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
+./install.sh --dry-run           # print the action plan, change nothing
+./install.sh --with-delegation   # also install the (opt-in) delegation CLIs
 ```
 
-Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably.
+The toolkit uses a **symlink-based live install**: one canonical git clone on disk, exposed to Claude Code at `~/.claude/skills/` via an absolute-path symlink. There is no separate "installed" copy and no sync step — edits you commit to the clone are instantly visible to every Claude Code session on the machine. (For the manual steps `install.sh` performs under the hood, see [Manual install](#manual-install-under-the-hood) below.)
 
-### 3. Initialize a project
+### Initialize a project
 
 In any code repo:
 
@@ -104,7 +97,7 @@ claude
 
 This bootstraps the `.adlc/` directory with project-specific context, specs, and copies of the templates.
 
-### 4. Configure for your stack
+### Configure for your stack
 
 Pick a preset that matches your stack and copy it to `.adlc/config.yml`:
 
@@ -121,6 +114,32 @@ cp ~/.claude/skills/templates/config-template.yml .adlc/config.yml
 ```
 
 Single-repo projects without a backend can leave the file absent — every skill falls back to legacy single-repo behavior in that case.
+
+### Manual install (under the hood)
+
+`./install.sh` is the supported path; this section documents what it does so you can reproduce it by hand or debug a failure. (`adlc doctor` checks each of these.)
+
+```bash
+# 1. Back up any existing directories (rename is safe and reversible)
+[ -e ~/.claude/skills ] && mv ~/.claude/skills ~/.claude/skills.bak
+[ -e ~/.claude/agents ] && mv ~/.claude/agents ~/.claude/agents.bak
+
+# 2. Symlink to Claude Code's skills and agents directories.
+#    Use ABSOLUTE paths so they resolve from any cwd.
+TOOLKIT="$PWD"                       # run from the toolkit clone root
+ln -sfn "$TOOLKIT" "$HOME/.claude/skills"
+ln -sfn "$TOOLKIT/agents" "$HOME/.claude/agents"
+
+# 3. Put the adlc CLI on your PATH (install.sh writes a shim in ~/bin).
+#    Either add ~/bin to PATH, or run the CLI directly:
+python3 "$TOOLKIT/tools/adlc/adlc.py" doctor
+
+# 4. Verify
+readlink ~/.claude/skills            # → absolute path to your adlc-toolkit clone
+ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
+```
+
+Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably. Delegation (the `tools/kimi/` CLIs) is a separate opt-in — `./install.sh --with-delegation` or run `tools/kimi/install.sh` directly.
 
 ## Workflow
 
