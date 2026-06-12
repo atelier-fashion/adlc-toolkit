@@ -1,7 +1,7 @@
 ---
 id: BUG-116
 title: "adlc_remote_high silently degrades under zsh — unquoted for-loop word-split breaks candidate-id iteration"
-status: open
+status: resolved
 severity: high
 created: 2026-06-11
 updated: 2026-06-11
@@ -104,3 +104,11 @@ REQ-001). Matrix: 178 PASS / 0 FAIL.
 - `partials/id-alloc.sh` — `adlc_id_list_max` helper; zsh-safe reduction in `adlc_remote_high` (both loops); nullglob guard; loud non-numeric guard in `adlc_alloc_id`; BR-6 header rule updated
 - `partials/id-recheck.sh` — per-line sed normalization (concatenation fix); nullglob guard; loud non-numeric guard on `adlc_remote_high` output
 - `partials/tests/id-alloc.test.sh` — multi-branch fixture helper + 6 new regression cases (14 new assertions)
+
+## Deployment
+
+Merged to main via PR #88 (squash, 36eb6ab) on 2026-06-11. Toolkit deploys via the
+symlink install — main checkout pulled to 36eb6ab, so `~/.claude/skills/partials/`
+serves the fix immediately. Live-verified post-merge: `adlc_alloc_id lesson` under
+the zsh executor (the exact incident invocation) allocated LESSON-399 cleanly —
+no integer-test spam, no degradation warning. No Cloud Run / iOS targets (n/a).
