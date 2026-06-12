@@ -126,21 +126,28 @@ def _looks_like_key(value):
     """True if ``value`` looks like an actual key rather than an env-var NAME.
 
     BR-3: the config stores ``api_key_env`` — the *name* of an env var — never a
-    key. A value that fails the env-var-name shape, or that matches a known
-    key family, or that is a long mixed-class token, is treated as a key.
+    key. A value that matches a known key family, that is a long mixed-class
+    token without an underscore (the key signature — real env var names use
+    SCREAMING_SNAKE_CASE), or that simply isn't a valid env-var name, is treated
+    as a key.
     """
     if not value:
         return False
+    # Known key families (sk-…, AKIA…, ghp_…, Bearer …).
     if _KEYISH_RE.search(value):
         return True
-    if _ENV_VAR_NAME_RE.match(value):
-        return False
-    # Not a valid env-var name and not obviously prose: a long mixed-class run
-    # (letters + digits, >=32 chars, no spaces) is almost certainly a key.
-    if len(value) >= 32 and " " not in value \
+    # A long alphanumeric run with NO underscore that mixes letters and digits
+    # is almost certainly a key, even though it happens to be a syntactically
+    # valid env-var name. Real key-VAR names use underscores (MY_API_KEY), so an
+    # underscore-free 24+ char letters+digits blob is the key itself. Check this
+    # BEFORE accepting on env-var-name shape.
+    if len(value) >= 24 and "_" not in value and " " not in value \
             and re.search(r"[A-Za-z]", value) and re.search(r"[0-9]", value):
         return True
-    # Any value that simply isn't a valid env-var name is rejected too — the
+    # Otherwise a syntactically valid env-var name is accepted as a NAME.
+    if _ENV_VAR_NAME_RE.match(value):
+        return False
+    # Anything else (spaces, punctuation, not a valid name) is rejected — the
     # field is contractually a NAME.
     return True
 

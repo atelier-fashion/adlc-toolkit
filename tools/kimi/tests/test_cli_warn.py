@@ -1,10 +1,11 @@
-"""Suppression coverage for --no-warn / KIMI_NO_WARN in ask-kimi and kimi-write.
+"""Suppression coverage for --no-warn / ADLC_DELEGATE_NO_WARN in adlc-read and
+adlc-write (provider-neutral CLIs; REQ-515).
 
-These tests deliberately run with ``MOONSHOT_API_KEY`` unset and a real input
+These tests deliberately run with the provider key unset and a real input
 file. The notice fires BEFORE ``get_client()``, so we observe whether the
 notice appears on stderr before the missing-key SystemExit kills the process.
-All three suppression states (no flag/env, --no-warn flag, KIMI_NO_WARN=1) are
-exercised without ever touching the live API.
+All three suppression states (no flag/env, --no-warn flag, ADLC_DELEGATE_NO_WARN=1
+/ legacy KIMI_NO_WARN=1) are exercised without ever touching the live API.
 """
 import os
 import subprocess
@@ -12,11 +13,11 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
-ASK_KIMI = os.path.join(TOOLS, "ask-kimi")
-KIMI_WRITE = os.path.join(TOOLS, "kimi-write")
+ASK_KIMI = os.path.join(TOOLS, "adlc-read")
+KIMI_WRITE = os.path.join(TOOLS, "adlc-write")
 
-_NOTICE_SUBSTR = "kimi: sending file contents to Moonshot"
-_SKIP_SUBSTR = "ask-kimi: skipping unreadable path:"
+_NOTICE_SUBSTR = "delegate: sending file contents to the configured endpoint"
+_SKIP_SUBSTR = "adlc-read: skipping unreadable path:"
 _NO_READABLE_SUBSTR = "no readable files among --paths"
 
 
@@ -29,7 +30,10 @@ def _env_without_key(home_override=None, **extra):
     containing the key) to suppress the fallback as well.
     """
     env = {k: v for k, v in os.environ.items() if k != "MOONSHOT_API_KEY"}
-    env.pop("KIMI_NO_WARN", None)
+    for v in ("KIMI_NO_WARN", "ADLC_DELEGATE_NO_WARN", "KIMI_API_KEY",
+              "ADLC_DELEGATE_API_KEY_ENV", "ADLC_DELEGATE_BASE_URL",
+              "ADLC_DELEGATE_MODEL", "ADLC_CONFIG"):
+        env.pop(v, None)
     if home_override is not None:
         env["HOME"] = str(home_override)
     env.update(extra)

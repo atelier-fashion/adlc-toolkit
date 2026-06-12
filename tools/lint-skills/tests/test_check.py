@@ -140,6 +140,34 @@ def test_kimi_gate_happy_path_is_clean(tmp_path):
     assert result.stdout.strip() == "", result.stdout
 
 
+def test_delegate_gate_new_spelling_is_clean(tmp_path):
+    """REQ-515 ADR-9 dual-literal rule: a SKILL.md using the NEW provider-neutral
+    spellings (delegate-gate.sh / delegate-tools-path.sh / $DELEGATE_TOOLS /
+    ADLC_DISABLE_DELEGATE) must pass with zero canonical findings, exactly like
+    the legacy kimi-* spelling."""
+    root = _stage(tmp_path, "delegate-gate-ok")
+    result = _run(root)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "canonical-helper" not in result.stdout, result.stdout
+    assert result.stdout.strip() == "", result.stdout
+
+
+def test_new_disable_anchor_triggers_canonical_check(tmp_path):
+    """A SKILL.md that mentions ADLC_DISABLE_DELEGATE but wires up NO canonical
+    helpers must still be flagged (the anchor fires on the new spelling too —
+    BR-4 / ADR-9; don't let the guard go vacuous behind the rename)."""
+    sub = tmp_path / "naked-new-anchor"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(
+        "# Mentions the new disable anchor but wires up no gate.\n\n"
+        "Set `ADLC_DISABLE_DELEGATE=1` to opt out.\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    # All five canonical literals are missing → five canonical-helper findings.
+    assert result.stdout.count("canonical-helper") == 5, result.stdout
+
+
 def test_missing_only_resolver_source_reports_one(tmp_path):
     """REQ-433 guard: a skill that kept the `"$KIMI_TOOLS"/…` invocation but
     lost the kimi-tools-path resolver-source line must raise exactly ONE

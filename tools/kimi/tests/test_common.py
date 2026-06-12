@@ -63,14 +63,17 @@ def test_emit_exfil_notice_writes_to_stream():
     buf = io.StringIO()
     _common.emit_exfil_notice(stream=buf)
     out = buf.getvalue()
-    assert "Moonshot" in out
+    # Provider-neutral notice (REQ-515): names the resolved model + the delegate,
+    # not "Moonshot" hardcoded, and mentions the suppression mechanisms.
+    assert "delegate" in out
     assert "--no-warn" in out
-    assert "KIMI_NO_WARN" in out
+    assert "ADLC_DELEGATE_NO_WARN" in out
     assert "MOONSHOT_API_KEY" not in out
     assert out.endswith("\n")
 
 
-# --- REQ-422: rc-fallback when MOONSHOT_API_KEY is not in env ---
+# --- REQ-422 / REQ-515: rc-fallback for the default key var when not in env ---
+# _read_key_from_rc now takes the var NAME (REQ-515 provider-agnostic resolver).
 
 def test_read_key_from_rc_finds_canonical_form(monkeypatch, tmp_path):
     """Canonical `export VAR="..."` form is extracted from ~/.zshrc."""
@@ -80,7 +83,7 @@ def test_read_key_from_rc_finds_canonical_form(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(home))
-    assert _common._read_key_from_rc() == "sk-from-zshrc-xyz"
+    assert _common._read_key_from_rc("MOONSHOT_API_KEY") == "sk-from-zshrc-xyz"
 
 
 def test_read_key_from_rc_falls_back_to_bash_profile(monkeypatch, tmp_path):
@@ -91,7 +94,7 @@ def test_read_key_from_rc_falls_back_to_bash_profile(monkeypatch, tmp_path):
         'export MOONSHOT_API_KEY="sk-from-bash-profile"\n', encoding="utf-8"
     )
     monkeypatch.setenv("HOME", str(home))
-    assert _common._read_key_from_rc() == "sk-from-bash-profile"
+    assert _common._read_key_from_rc("MOONSHOT_API_KEY") == "sk-from-bash-profile"
 
 
 def test_read_key_from_rc_returns_empty_when_no_rc_has_key(monkeypatch, tmp_path):
@@ -99,7 +102,7 @@ def test_read_key_from_rc_returns_empty_when_no_rc_has_key(monkeypatch, tmp_path
     home = tmp_path
     (home / ".zshrc").write_text("# nothing\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
-    assert _common._read_key_from_rc() == ""
+    assert _common._read_key_from_rc("MOONSHOT_API_KEY") == ""
 
 
 def test_read_key_from_rc_ignores_indented_export(monkeypatch, tmp_path):
@@ -110,7 +113,7 @@ def test_read_key_from_rc_ignores_indented_export(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(home))
-    assert _common._read_key_from_rc() == ""
+    assert _common._read_key_from_rc("MOONSHOT_API_KEY") == ""
 
 
 def test_get_client_uses_env_when_set(monkeypatch, tmp_path):
