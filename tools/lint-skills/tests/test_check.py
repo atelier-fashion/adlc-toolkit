@@ -121,31 +121,24 @@ def test_missing_canonical_reports_per_rule(tmp_path):
     result = _run(root)
     assert result.returncode >= 5, result.stdout
     # All five canonical literals should be reported as separate findings
+    # (REQ-522 flag-file-derived shape).
     assert result.stdout.count("canonical-helper") == 5
-    assert "start_s=$(date -u +%s)" in result.stdout
-    assert "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))" in result.stdout
-    assert '"$KIMI_TOOLS"/emit-telemetry.sh ' in result.stdout
-    assert ". .adlc/partials/kimi-gate.sh 2>/dev/null" in result.stdout
-    assert ". .adlc/partials/kimi-tools-path.sh 2>/dev/null" in result.stdout
-
-
-def test_kimi_gate_happy_path_is_clean(tmp_path):
-    root = _stage(tmp_path, "kimi-gate-ok")
-    result = _run(root)
-    assert result.returncode == 0, result.stdout + result.stderr
-    # Not just rc 0 — assert the fixture produces NO findings at all, so a
-    # future regression that emits warnings while keeping exit 0 is caught
-    # (mirrors test_clean_fixture_is_clean's stricter assertion surface).
-    assert "canonical-helper" not in result.stdout, result.stdout
-    assert result.stdout.strip() == "", result.stdout
+    assert 'skill-flag.sh mark "$flag" start_s ' in result.stdout
+    assert "_adlc_emit_step_telemetry " in result.stdout
+    assert '"$DELEGATE_TOOLS"/emit-telemetry.sh ' in result.stdout
+    assert ". .adlc/partials/delegate-gate.sh 2>/dev/null" in result.stdout
+    assert ". .adlc/partials/delegate-tools-path.sh 2>/dev/null" in result.stdout
 
 
 def test_delegate_gate_new_spelling_is_clean(tmp_path):
-    """REQ-515 ADR-9 dual-literal rule: a SKILL.md using the NEW provider-neutral
-    spellings (delegate-gate.sh / delegate-tools-path.sh / $DELEGATE_TOOLS /
-    ADLC_DISABLE_DELEGATE) must pass with zero canonical findings, exactly like
-    the legacy kimi-* spelling."""
+    """REQ-522: a SKILL.md using the de-branded flag-file telemetry shape
+    (delegate-gate.sh / delegate-tools-path.sh / $DELEGATE_TOOLS /
+    skill-flag.sh mark start_s / the shared resolver call) must pass with zero
+    canonical findings. The emit-telemetry literal lives in the sourced
+    emit-step-telemetry.sh partial, so stage that partial to exercise the
+    partial-aware canonical rule."""
     root = _stage(tmp_path, "delegate-gate-ok")
+    _stage_partial(root)
     result = _run(root)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "canonical-helper" not in result.stdout, result.stdout
@@ -154,8 +147,8 @@ def test_delegate_gate_new_spelling_is_clean(tmp_path):
 
 def test_new_disable_anchor_triggers_canonical_check(tmp_path):
     """A SKILL.md that mentions ADLC_DISABLE_DELEGATE but wires up NO canonical
-    helpers must still be flagged (the anchor fires on the new spelling too —
-    BR-4 / ADR-9; don't let the guard go vacuous behind the rename)."""
+    helpers must still be flagged (don't let the guard go vacuous behind the
+    de-brand rename)."""
     sub = tmp_path / "naked-new-anchor"
     sub.mkdir()
     (sub / "SKILL.md").write_text(
@@ -169,17 +162,17 @@ def test_new_disable_anchor_triggers_canonical_check(tmp_path):
 
 
 def test_missing_only_resolver_source_reports_one(tmp_path):
-    """REQ-433 guard: a skill that kept the `"$KIMI_TOOLS"/…` invocation but
-    lost the kimi-tools-path resolver-source line must raise exactly ONE
-    canonical-helper finding naming that literal — proves the linter enforces
-    each literal independently, not as an all-or-nothing group."""
+    """REQ-433 guard (de-branded): a skill that kept the `"$DELEGATE_TOOLS"/…`
+    invocation but lost the delegate-tools-path resolver-source line must raise
+    exactly ONE canonical-helper finding naming that literal — proves the linter
+    enforces each literal independently, not as an all-or-nothing group."""
     root = _stage(tmp_path, "missing-resolver-source")
     result = _run(root)
     assert result.returncode >= 1, result.stdout
     # Exactly one finding, and it is the missing resolver-source literal (the
     # count==1 already proves the other four present literals were NOT flagged).
     assert result.stdout.count("canonical-helper") == 1, result.stdout
-    assert ". .adlc/partials/kimi-tools-path.sh 2>/dev/null" in result.stdout
+    assert ". .adlc/partials/delegate-tools-path.sh 2>/dev/null" in result.stdout
 
 
 def test_mixed_clean_and_corrupt_scans_both(tmp_path):
@@ -255,15 +248,16 @@ def test_exit_code_capped_at_255(tmp_path):
 
 @pytest.mark.parametrize("layout", ["partials", ".adlc/partials"])
 def test_canonical_satisfied_via_partial(tmp_path, layout):
-    """REQ-436 ADR-4: the post-REQ-436 `analyze` shape is clean.
+    """REQ-436 ADR-4 (REQ-522 shape): a skill keeping the gate/tools-path/start_s
+    /resolver-call literals inline but the emit-telemetry literal in the partial
+    is clean.
 
-    `canonical-via-partial-skill` mentions `ADLC_DISABLE_KIMI` and keeps
-    L1/L4/L5 inline but NOT L2/L3 (they moved into
-    `partials/emit-step-telemetry.sh`). With the real telemetry partial staged
-    under the scan root — in EITHER resolution layout `load_partials_blob`
-    supports — `check_canonical` must find L2/L3 in the partial blob and emit
-    ZERO `canonical-helper` findings. Asserts the indirection-following guard
-    on the genuine post-change input (LESSON-019 #3), both layouts.
+    `canonical-via-partial-skill` mentions `ADLC_DISABLE_DELEGATE` and keeps four
+    literals inline but NOT the `"$DELEGATE_TOOLS"/emit-telemetry.sh` literal (it
+    lives in `partials/emit-step-telemetry.sh`). With the real telemetry partial
+    staged under the scan root — in EITHER resolution layout `load_partials_blob`
+    supports — `check_canonical` must find the relocated literal in the partial
+    blob and emit ZERO `canonical-helper` findings (LESSON-019 #3), both layouts.
     """
     root = _stage(tmp_path, "canonical-via-partial-skill")
     _stage_partial(root, layout=layout)
@@ -275,27 +269,25 @@ def test_canonical_satisfied_via_partial(tmp_path, layout):
 
 def test_canonical_via_partial_negative_without_partial(tmp_path):
     """The negative half of ADR-4: the SAME SKILL.md staged WITHOUT any
-    telemetry partial yields EXACTLY the two missing-canonical findings (L2 and
-    L3). This proves the partial is genuinely what satisfies them — ADR-4 is
-    load-bearing, not vacuously green (without it the post-REQ-436 shape would
-    self-inflict a regression of REQ-428's AC-3).
+    telemetry partial yields EXACTLY the one missing-canonical finding (the
+    relocated emit-telemetry literal). Proves the partial is genuinely what
+    satisfies it — ADR-4 is load-bearing, not vacuously green.
     """
     root = _stage(tmp_path, "canonical-via-partial-skill")
     result = _run(root)
-    assert result.returncode == 2, result.stdout
-    assert result.stdout.count("canonical-helper") == 2, result.stdout
-    # The two absent literals are exactly L2 and L3 (the relocated ones); the
-    # inline L1/L4/L5 must NOT be flagged (count==2 already implies that).
-    assert "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))" in result.stdout
-    assert '"$KIMI_TOOLS"/emit-telemetry.sh ' in result.stdout
-    assert "start_s=$(date -u +%s)" not in result.stdout
-    assert ". .adlc/partials/kimi-gate.sh 2>/dev/null" not in result.stdout
-    assert ". .adlc/partials/kimi-tools-path.sh 2>/dev/null" not in result.stdout
+    assert result.returncode == 1, result.stdout
+    assert result.stdout.count("canonical-helper") == 1, result.stdout
+    # The one absent literal is the relocated emit-telemetry exec; the inline
+    # four must NOT be flagged (count==1 already implies that).
+    assert '"$DELEGATE_TOOLS"/emit-telemetry.sh ' in result.stdout
+    assert 'skill-flag.sh mark "$flag" start_s ' not in result.stdout
+    assert ". .adlc/partials/delegate-gate.sh 2>/dev/null" not in result.stdout
+    assert ". .adlc/partials/delegate-tools-path.sh 2>/dev/null" not in result.stdout
 
 
 def test_canonical_partial_does_not_rescue_skill_that_does_not_source_it(tmp_path):
     """REQ-436 Phase-5 security hardening: a SKILL.md that mentions
-    ADLC_DISABLE_KIMI but sources NO telemetry partial must NOT be rescued by
+    ADLC_DISABLE_DELEGATE but sources NO telemetry partial must NOT be rescued by
     an unrelated `partials/emit-step-telemetry.sh` elsewhere in the repo.
     Otherwise the partial-aware canonical rule (ADR-4) re-rots into vacuity —
     the exact LESSON-019 #1 failure ADR-4 exists to prevent.
@@ -305,24 +297,27 @@ def test_canonical_partial_does_not_rescue_skill_that_does_not_source_it(tmp_pat
     (sub / "SKILL.md").write_text(
         "# no-source\n\n"
         "```sh\n"
-        ". .adlc/partials/kimi-gate.sh 2>/dev/null || "
-        ". ~/.claude/skills/partials/kimi-gate.sh\n"
-        ". .adlc/partials/kimi-tools-path.sh 2>/dev/null || "
-        ". ~/.claude/skills/partials/kimi-tools-path.sh\n"
-        "start_s=$(date -u +%s)\n"
-        "# anchor: ADLC_DISABLE_KIMI gate-case comment\n"
+        ". .adlc/partials/delegate-gate.sh 2>/dev/null || "
+        ". ~/.claude/skills/partials/delegate-gate.sh\n"
+        ". .adlc/partials/delegate-tools-path.sh 2>/dev/null || "
+        ". ~/.claude/skills/partials/delegate-tools-path.sh\n"
+        'flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)\n'
+        '"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"\n'
+        "_adlc_emit_step_telemetry some-skill Some-Step\n"
+        "# anchor: ADLC_DISABLE_DELEGATE gate-case comment\n"
         "```\n"
     )
-    # A telemetry partial DOES exist in the repo (it supplies L2/L3) — but this
-    # SKILL.md never sources it, so the guard must still flag the missing L2/L3.
+    # A telemetry partial DOES exist in the repo (it supplies the emit-telemetry
+    # literal) — but this SKILL.md never sources it (no
+    # `partials/emit-step-telemetry.sh` marker in its text), so the guard must
+    # still flag the missing emit-telemetry literal.
     _stage_partial(tmp_path, layout="partials")
     result = _run(tmp_path)
-    assert result.returncode >= 2, result.stdout
-    assert result.stdout.count("canonical-helper") == 2, result.stdout
-    assert "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))" in result.stdout
-    assert '"$KIMI_TOOLS"/emit-telemetry.sh ' in result.stdout
-    # The inline L1/L4/L5 are present, so they are NOT flagged (count==2 implies it).
-    assert "start_s=$(date -u +%s)" not in result.stdout
+    assert result.returncode >= 1, result.stdout
+    assert result.stdout.count("canonical-helper") == 1, result.stdout
+    assert '"$DELEGATE_TOOLS"/emit-telemetry.sh ' in result.stdout
+    # The inline four are present, so they are NOT flagged (count==1 implies it).
+    assert 'skill-flag.sh mark "$flag" start_s ' not in result.stdout
 
 
 def test_posix_fence_flags_sh_and_shell_not_bash(tmp_path):
@@ -468,6 +463,42 @@ def test_cross_fence_fn_same_fence_control_is_clean(tmp_path):
     )
     result = _run(tmp_path)
     assert "cross-fence-fn" not in result.stdout, result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_cross_fence_var_flagged(tmp_path):
+    """REQ-522 BR-5: a non-exported variable assigned in one fenced block and
+    read in a DIFFERENT fenced block → one `cross-fence-var` finding naming the
+    variable, reported on the READ line. An exported var crossing fences is NOT
+    flagged."""
+    root = _stage(tmp_path, "cross-fence-var")
+    result = _run(root)
+    cf_lines = [
+        ln for ln in result.stdout.splitlines() if " cross-fence-var:" in ln
+    ]
+    # Exactly one cross-fence-var finding, and it names `captured` (not `shared`).
+    assert len(cf_lines) == 1, result.stdout
+    assert "'captured'" in cf_lines[0], cf_lines[0]
+    assert "shared" not in result.stdout, result.stdout
+    read_line = _line_of("cross-fence-var", 'echo "step two sees captured=$captured"')
+    assert f"cross-fence-var/SKILL.md:{read_line}: cross-fence-var:" in cf_lines[0]
+
+
+def test_cross_fence_var_same_fence_control_is_clean(tmp_path):
+    """A var assigned AND read within the SAME fenced block is legitimate (shell
+    state is shared within one block) and must NOT produce a cross-fence-var
+    finding."""
+    sub = tmp_path / "samefencevar"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(
+        "# Same-fence assign-and-read — legitimate\n\n"
+        "```sh\n"
+        "x=$(date -u +%s)\n"
+        'echo "x=$x"\n'
+        "```\n"
+    )
+    result = _run(tmp_path)
+    assert "cross-fence-var" not in result.stdout, result.stdout
     assert result.returncode == 0, result.stdout + result.stderr
 
 

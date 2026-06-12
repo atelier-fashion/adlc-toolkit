@@ -13,26 +13,24 @@ a general markdown linter and NOT a general shell linter.
    ` ```shell ` fenced block, the linter counts `$(` vs `)` and `$((` vs
    `))`. Imbalance is a finding. Outside-fence text is ignored (skill prose
    may legitimately use unbalanced examples).
-3. **Canonical-helper presence** — any SKILL.md that contains a delegation-gate
-   disable anchor — either `ADLC_DISABLE_KIMI` OR the provider-neutral
-   `ADLC_DISABLE_DELEGATE` (REQ-515 BR-4 / ADR-9) — must also contain five
-   canonical literals. Each logical literal is satisfied by **either** the legacy
-   `kimi-*` spelling **or** the new `delegate-*` spelling (the dual-literal rule),
-   listed in the same order as `CANONICAL_LITERALS` in `check.py`:
-   - `start_s=$(date -u +%s)`
-   - `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`
-   - `"$KIMI_TOOLS"/emit-telemetry.sh ` **or** `"$DELEGATE_TOOLS"/emit-telemetry.sh `
-     (note the trailing space — it proves an invocation, not a path substring)
-   - `. .adlc/partials/kimi-gate.sh …` **or** `. .adlc/partials/delegate-gate.sh …`
-     (the gate-source line that wires the delegation gate; required so corruption
-     that strips it while leaving a disable anchor is caught)
-   - `. .adlc/partials/kimi-tools-path.sh …` **or** `. .adlc/partials/delegate-tools-path.sh …`
-     (the resolver-source line that sets `$KIMI_TOOLS` / `$DELEGATE_TOOLS`;
-     required so corruption that strips it while leaving the invocation is caught)
+3. **Canonical-helper presence** — any SKILL.md that contains the delegation-gate
+   disable anchor `ADLC_DISABLE_DELEGATE` (REQ-522 de-branded the surface; the
+   legacy `ADLC_DISABLE_KIMI` anchor is retired) must also contain five canonical
+   literals, listed in the same order as `CANONICAL_LITERALS` in `check.py`:
+   - `skill-flag.sh mark "$flag" start_s ` (the start-time capture marked to the
+     flag-file sidecar — REQ-522 ADR-3)
+   - `_adlc_emit_step_telemetry ` (the shared resolver call in the SKILL.md
+     resolution fence)
+   - `"$DELEGATE_TOOLS"/emit-telemetry.sh ` (the emit exec; note the trailing
+     space — it proves an invocation, not a path substring. Lives in the partial.)
+   - `. .adlc/partials/delegate-gate.sh …` (the gate-source line that wires the
+     delegation gate; required so corruption that strips it while leaving a
+     disable anchor is caught)
+   - `. .adlc/partials/delegate-tools-path.sh …` (the resolver-source line that
+     sets `$DELEGATE_TOOLS`; required so corruption that strips it while leaving
+     the invocation is caught)
 
-   Each missing literal (none of its accepted spellings present) is a separate
-   finding. Both spellings are valid because `kimi-gate.sh` / `kimi-tools-path.sh`
-   are back-compat aliases of the canonical `delegate-*` partials (REQ-515 ADR-5).
+   Each missing literal is a separate finding.
 
    **Canonical follows the indirection (REQ-436 ADR-4).** A literal is
    satisfied if it appears in the SKILL.md text **or** in the text of a
@@ -81,6 +79,20 @@ a general markdown linter and NOT a general shell linter.
    prose mentions outside fences are ignored, and a define-and-use within the
    *same* fence is legitimate (never flagged). The finding is anchored at the
    definition line and names an invocation line.
+7. **Cross-fence variable (`cross-fence-var`)** — a non-exported variable
+   *assigned* in one fenced block but *read* in a *different* fenced block of
+   the same SKILL.md is a finding (REQ-522 BR-5). SKILL.md fenced blocks do not
+   share shell state across steps, so the read sees an empty value — the exact
+   inert-telemetry class REQ-522 fixed (the per-step telemetry state was set in
+   one fence and read in the resolution fence, so every run recorded
+   `mode=fallback`). The fix is to persist the value via the flag-file sidecar
+   (`skill-flag.sh mark`/`read`) or re-derive it in the consuming fence.
+   Conservative against false positives: a name is only considered if it is both
+   *assigned* (`NAME=`) and *read* (`$NAME`/`${NAME}`) within fences; an
+   `export`ed name is EXEMPT (it legitimately crosses via the environment); an
+   assign-and-read within the SAME fence is legitimate. The sanctioned carriers
+   `$flag` (the telemetry flag-path) and the id-allocation `*_NUM` counters
+   (allocate-then-recheck flow, REQ-518 domain) are exempt by name.
 
 ## Usage
 
@@ -109,10 +121,10 @@ linter picks up the new sentinel on its next run — no code changes needed.
 pytest tools/lint-skills/tests/ -q
 ```
 
-Or run together with the kimi suite:
+Or run together with the delegation suite:
 
 ```sh
-pytest tools/kimi/tests/ tools/lint-skills/tests/ -q
+pytest tools/delegate/tests/ tools/lint-skills/tests/ -q
 ```
 
 ## Constraints
