@@ -27,6 +27,27 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ---
 
+## [4.10.0] — 2026-06-12
+
+The **portability drop** — six REQs making the toolkit configurable for adopters
+beyond the original machine, model, and forge:
+
+- **REQ-515** Provider-agnostic delegation: `adlc-read`/`adlc-write` (Kimi names kept
+  as shims), config-file provider resolution with strict precedence, delegation
+  **disabled by default** on fresh installs, key-in-config refusal (#80).
+- **REQ-517** New **`/adversary` skill** + dedicated `adversary` agent (18th):
+  adversarial review of any artifact with mandatory self-refutation (#79).
+- **REQ-519** **One-command `install.sh`** + **`adlc` umbrella CLI** with `doctor`
+  (12 environment checks, copy-pasteable remediations, pure stdlib) (#82).
+- **REQ-516** Configurable **agent model tiers**: `tier:` classes on all 18 agents,
+  `adlc agents render` from config, drift detection in lint-skills (#83).
+- **REQ-518** **Collision-safe ID allocation** across users/machines: remote-derived
+  high-water via shared `id-alloc`/`id-recheck` partials, `adlc renumber` (#84).
+- **REQ-520** **Forge adapter**: all PR operations behind `partials/forge.sh` with
+  GitHub (`gh`), Azure DevOps (`az repos`), and mock backends — GitHub↔ADO is a
+  one-line `forge:` config change or pure auto-detect (#85).
+- Knowledge capture: LESSON-390 through LESSON-398 from the sprint's runner reports.
+
 ## [4.9.0] — 2026-06-08
 
 - Added an **MIT `LICENSE`** (#64).
