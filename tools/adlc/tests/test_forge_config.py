@@ -1,5 +1,6 @@
 """Tests for tools/adlc/forge_config.py (REQ-520 BR-2, BR-6)."""
 
+import os
 import subprocess
 
 import pytest
@@ -131,19 +132,27 @@ def test_auto_falls_through_to_url(tmp_path):
 
 # --- CLI entrypoint --------------------------------------------------------
 
-def test_cli_resolve_provider(tmp_path, repo_root):
-    script = f"{repo_root}/tools/adlc/forge_config.py"
-    out = subprocess.run(
-        ["python3", script, "resolve-provider", repo_root],
-        capture_output=True, text=True,
+def test_cli_resolve_provider(tmp_path):
+    # Synthetic repo with a github origin — the toolkit checkout's own origin
+    # varies by clone location (e.g. an ADO mirror), so never assert on it.
+    repo = tmp_path / "r"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "add", "origin",
+         "https://github.com/o/r.git"], check=True,
     )
-    # The toolkit's own origin is github.
+    env = dict(os.environ, ADLC_CONFIG=str(tmp_path / "no-machine-config.yml"))
+    out = subprocess.run(
+        ["python3", fc.__file__, "resolve-provider", str(repo)],
+        capture_output=True, text=True, env=env,
+    )
     assert out.returncode == 0
     assert out.stdout.strip() == "github"
 
 
-def test_cli_validate_auth_rejects_key(repo_root):
-    script = f"{repo_root}/tools/adlc/forge_config.py"
+def test_cli_validate_auth_rejects_key():
+    script = fc.__file__
     out = subprocess.run(
         ["python3", script, "validate-auth", "ghp_" + "a" * 36],
         capture_output=True, text=True,
