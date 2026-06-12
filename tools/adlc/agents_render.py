@@ -55,9 +55,13 @@ _CLASSES = ("reviewer", "scanner", "explorer", "implementer", "orchestrator")
 _ALIASES = ("opus", "sonnet", "haiku", "inherit")
 
 # Full-model-id escape hatch (BR-7): a lowercase token containing both a digit
-# and a hyphen, e.g. ``claude-opus-4-8``. Conservative on purpose; anything that
-# is not an alias and not this shape fails loud.
+# AND a hyphen, e.g. ``claude-opus-4-8``. Conservative on purpose; anything that
+# is not an alias and not this shape fails loud. The digit requirement (enforced
+# in ``_value_ok``, not the regex) is what makes a typo'd alias like
+# ``claude-opus`` or ``sonet-fast`` fail loud instead of silently passing
+# through as a "model id".
 _FULL_ID_RE = re.compile(r"^[a-z][a-z0-9.]*(-[a-z0-9.]+)+$")
+_HAS_DIGIT_RE = re.compile(r"[0-9]")
 
 # Header comment marking model: as derived (BR-1). Kept in sync with TASK-001.
 _HEADER_COMMENT = (
@@ -152,7 +156,11 @@ def parse_agents_config(path=None):
 # Validation (BR-7 — fail loud, no silent fall-through)
 # --------------------------------------------------------------------------
 def _value_ok(value):
-    return value in _ALIASES or bool(_FULL_ID_RE.match(value))
+    if value in _ALIASES:
+        return True
+    # Full-model-id escape hatch: must look like an id (hyphenated) AND carry a
+    # version digit — so a bare typo'd alias (claude-opus, sonet-fast) fails loud.
+    return bool(_FULL_ID_RE.match(value)) and bool(_HAS_DIGIT_RE.search(value))
 
 
 def validate_config(config):

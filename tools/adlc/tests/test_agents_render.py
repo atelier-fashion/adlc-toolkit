@@ -147,6 +147,16 @@ def test_full_model_id_escape_hatch_accepted(tmp_path):
     assert agents_render.resolve_model("reflector", cfg) == "claude-opus-4-8"
 
 
+def test_escape_hatch_requires_a_digit_else_fails_loud(tmp_path):
+    # A hyphenated-but-digitless token (a plausible typo of a real id) must
+    # fail loud, NOT pass through as a "model id" (BR-7, no silent fall-through).
+    for bad in ("claude-opus", "sonet-fast", "foo-bar"):
+        cfg = agents_render.parse_agents_config(
+            _cfg(tmp_path, f"agents:\n  overrides:\n    reflector: {bad}\n"))
+        with pytest.raises(agents_render.ConfigError):
+            agents_render.validate_config(cfg)
+
+
 # --- AC-5: drift detection -------------------------------------------------
 def test_check_drift_flags_handedit(tmp_path):
     root = _fake_root(tmp_path, _REAL)
