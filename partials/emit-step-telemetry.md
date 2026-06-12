@@ -2,7 +2,7 @@
 
 This partial factors `_adlc_emit_step_telemetry` — the resolve-the-mode-then-
 emit-one-telemetry-record block that `/analyze` runs at the close of its
-Step 1.5 (pre-read) and Step 1.6 (candidate pre-pass) Kimi-delegation points.
+Step 1.5 (pre-read) and Step 1.6 (candidate pre-pass) the delegate-delegation points.
 It was introduced inline by REQ-428 to dedupe those two emit blocks; REQ-436
 relocated it here (ADR-1) because a function defined in one SKILL.md fenced
 block is undefined at a call site in a *different* fenced block — SKILL.md
@@ -48,8 +48,8 @@ must have established them in the same shell before calling:
 | variable                 | meaning                                                              |
 |--------------------------|----------------------------------------------------------------------|
 | `start_s`                | epoch seconds (`date -u +%s`) captured *before* the gate check       |
-| `ASK_KIMI_INVOKED`       | empty string iff `ask-kimi` was never invoked this step              |
-| `KIMI_EXIT`              | `ask-kimi`'s exit status (`0` == clean) when it was invoked          |
+| `ASK_KIMI_INVOKED`       | empty string iff `adlc-read` was never invoked this step              |
+| `KIMI_EXIT`              | `adlc-read`'s exit status (`0` == clean) when it was invoked          |
 | `flag`                   | skill-invocation flag id returned by `skill-flag.sh create`          |
 | `ADLC_KIMI_GATE_REASON`  | reason string exported by `partials/kimi-gate.sh` (see `kimi-gate.md`)|
 
@@ -63,14 +63,14 @@ with a fixed four-way decision over the caller-env, in this exact order:
 
 1. **`ASK_KIMI_INVOKED` empty** → `mode=fallback`,
    `reason=$ADLC_KIMI_GATE_REASON`, `gate_result=fail` (gate denied or never
-   ran; ask-kimi never invoked).
+   ran; adlc-read never invoked).
 2. else **flag still present** (`skill-flag.sh check` succeeds) →
    `mode=ghost-skip`, `reason=gate-passed-no-call`, `gate_result=pass`
    (gate passed but the delegated call was skipped — REQ-424 ghost-skip).
 3. else **`KIMI_EXIT` == 0** → `mode=delegated`, `reason=ok`,
    `gate_result=pass` (delegated path ran cleanly).
 4. else → `mode=fallback`, `reason=api-error`, `gate_result=pass`
-   (delegated path was attempted but `ask-kimi` failed).
+   (delegated path was attempted but `adlc-read` failed).
 
 The number and ordering of `"$KIMI_TOOLS"/skill-flag.sh clear "$flag"` calls
 across these branches plus the unconditional trailing clear are part of the

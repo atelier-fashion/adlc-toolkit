@@ -14,8 +14,8 @@
 # Caller-environment contract — the function reads, and does NOT define:
 #   $1                     step label, e.g. "Step-1.5" / "Step-1.6"
 #   $start_s               epoch seconds captured before the gate check
-#   $ASK_KIMI_INVOKED       "" iff ask-kimi was never invoked this step
-#   $KIMI_EXIT             ask-kimi's exit status (0 == clean)
+#   $ASK_KIMI_INVOKED       "" iff the delegate was never invoked this step
+#   $KIMI_EXIT             the delegate's exit status (0 == clean)
 #   $flag                  skill-invocation flag id from skill-flag.sh create
 #   $ADLC_KIMI_GATE_REASON exported by partials/kimi-gate.sh
 # It uses $KIMI_TOOLS, resolved/exported by the kimi-tools-path source below

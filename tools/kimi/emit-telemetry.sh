@@ -35,7 +35,7 @@ duration_ms=$7
 # Ghost-skip unmasking (REQ-424 follow-up). Across every Kimi-delegating skill
 # (spec/proceed/wrapup/analyze) the shared resolution contract emits exactly ONE
 # sanctioned (gate=pass, mode=fallback) record: reason="api-error", meaning
-# ask-kimi was really invoked and the API rejected the call. ANY other reason in
+# the delegate was really invoked and the API rejected the call. ANY other reason in
 # that combination means the call was never attempted — a ghost-skip wearing a
 # fallback label (e.g. an agent reading docs directly and hand-writing
 # reason="manual-retrieval"). Coerce it to ghost-skip so the skip is visible in

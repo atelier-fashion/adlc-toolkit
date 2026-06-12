@@ -37,21 +37,36 @@ Every skill begins with:
 
 The partial itself emits the canonical fallback chain (consumer-project ETHOS.md first, then toolkit-root, then graceful "No ethos found" message). The two-level fallback at the call site (project `partials/` first, then global `~/.claude/skills/partials/`) ensures the macro still works in consumer projects that haven't re-run `/init` after the toolkit shipped the partial. Never hardcode the ethos body inside a skill — always source the partial.
 
-## Kimi delegation pattern
+## Delegation pattern (provider-agnostic)
 
-Skills that delegate bulk reads or drafting to `ask-kimi` MUST source the shared gate predicate rather than inlining `command -v ask-kimi >/dev/null 2>&1 && [ "${ADLC_DISABLE_KIMI:-0}" != "1" ]`:
+Skills that delegate bulk reads or drafting to the configured delegate (`adlc-read` /
+`adlc-write`; legacy names `ask-kimi` / `kimi-write` still work as shims) MUST source
+the shared gate predicate rather than inlining `command -v adlc-read >/dev/null 2>&1 && …`.
+The canonical predicate lives in `partials/delegate-gate.sh`; the legacy
+`partials/kimi-gate.sh` is a back-compat alias defining `adlc_kimi_gate_check()` with the
+IDENTICAL 0/1/2 contract, so the established source-line keeps working unchanged
+(REQ-515 ADR-5):
 
 ```sh
 . .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
 adlc_kimi_gate_check; gate=$?
 case $gate in
   0) ;;  # delegated
-  1) ;;  # disabled via ADLC_DISABLE_KIMI=1
-  2) ;;  # unavailable (ask-kimi not on PATH)
+  1) ;;  # disabled (ADLC_DISABLE_DELEGATE/ADLC_DISABLE_KIMI=1, or not opted-in — BR-11)
+  2) ;;  # unavailable (adlc-read not on PATH)
 esac
 ```
 
-See `partials/kimi-gate.md` for the full protocol — return-code contract, the canonical stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4 one-line-per-invocation rule. Per-skill stderr messages and fallback bodies stay inline at the call site; only the predicate is shared.
+New skills MAY source `delegate-gate.sh` and call `adlc_delegate_gate_check` directly
+(reason exported as `ADLC_DELEGATE_GATE_REASON`); existing skills keep the `kimi-gate.sh`
+line. Delegation is **opt-in** (off by default on fresh installs) — enabled by
+`delegate.enabled: true` in `~/.claude/adlc/config.yml`, `ADLC_DELEGATE_ENABLED=1`, or an
+already-set legacy `KIMI_API_KEY`/`MOONSHOT_API_KEY` (REQ-515 BR-11).
+
+See `partials/kimi-gate.md` for the full protocol — return-code contract, the canonical
+stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4
+one-line-per-invocation rule. Per-skill stderr messages and fallback bodies stay inline at
+the call site; only the predicate is shared.
 
 ## Context loading pattern
 

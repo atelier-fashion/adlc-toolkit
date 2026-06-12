@@ -186,7 +186,7 @@ const FINDINGS = {
   },
 };
 
-// CANDIDATES — returned by the per-repo `kimi-pre-pass` agent (target design).
+// CANDIDATES — returned by the per-repo `delegate-pre-pass` agent (target design).
 // `invoked` drives the `candidates ⇒ invoked` ghost-skip assertion; the script
 // validates each candidate's `path` against the TRUSTED `changedFiles` and
 // slices candidates per reviewer dimension. `candidates[].dimension` is one of
@@ -204,7 +204,7 @@ const CANDIDATES = {
     candidates: {
       type: 'array',
       items: {
-        // UNTRUSTED — sourced from Kimi stdout; validated in deterministic JS.
+        // UNTRUSTED — sourced from the delegate stdout; validated in deterministic JS.
         type: 'object',
         additionalProperties: false,
         required: ['dimension', 'path', 'description'],
@@ -488,9 +488,9 @@ function cmp(a, b) {
 
 // ===========================================================================
 // validateCitations(candidates, changedFiles) — PURE JS, the LESSON-008
-// security boundary for the Kimi pre-pass. (ADR-8, BR-9, BR-10)
+// security boundary for the delegate pre-pass. (ADR-8, BR-9, BR-10)
 //
-// The `kimi-pre-pass` agent transcribes Kimi's UNTRUSTED stdout into candidate
+// The `delegate-pre-pass` agent transcribes the delegate's UNTRUSTED stdout into candidate
 // objects verbatim; this function is the script-side gate that decides which of
 // them are safe to forward to the reviewers. It NEVER trusts a candidate's
 // `path` — that string came from a model, so it could be a traversal (`..`), an
@@ -900,7 +900,7 @@ const ELIGIBILITY = await agent(
     schema: ELIGIBILITY_SCHEMA,
     // Inline-prompted DEFAULT workflow subagent (no agentType) — `agentType` is
     // reserved for true specialists (the explore trio, the 6 reviewers,
-    // task-implementer, kimi-pre-pass). 'pipeline-runner' is the legacy
+    // task-implementer, delegate-pre-pass). 'pipeline-runner' is the legacy
     // "run a whole /proceed" doer and would misbehave as a generic IO worker;
     // Preflight is read-only eligibility scoring, so use a default subagent
     // (full tools) driven entirely by the inline prompt. (ethos #6)
@@ -1351,29 +1351,29 @@ function manifestPrompt(id, repos) {
   ].join('\n');
 }
 
-// prePassPrompt — dispatch ONE `kimi-pre-pass` leaf for a single touched repo
+// prePassPrompt — dispatch ONE `delegate-pre-pass` leaf for a single touched repo
 // (the citation-scoping boundary, BR-9). The agent does the gate + worktree diff
-// + redaction + ask-kimi I/O and returns the CANDIDATES schema object; the SCRIPT
+// + redaction + adlc-read I/O and returns the CANDIDATES schema object; the SCRIPT
 // validates the (untrusted) candidates via validateCitations afterward. The agent
 // never throws — on any gate/key/api miss it returns invoked-aware degraded data
 // (empty candidates), so the panel falls back to candidate-less review. (ADR-8)
 function prePassPrompt(id, repo, worktree, base) {
   return [
-    `Kimi pre-pass for ${id}, repo ${repo}, worktree ${worktree}.`,
+    `Delegate pre-pass for ${id}, repo ${repo}, worktree ${worktree}.`,
     `Inputs: repo="${repo}"; worktree (absolute)="${worktree}"; REQ="${id}";`,
     `base (resolved integration branch ref)="${base}".`,
     '',
     'Run your full protocol: source the helpers up front, gate (and explicitly',
-    'require MOONSHOT_API_KEY), diff this worktree vs the base, redact, ask Kimi',
-    'for advisory candidates across the 5 reviewer dimensions, parse stdout',
-    'VERBATIM, and emit telemetry. Return ONLY the CANDIDATES schema object. On',
-    'ANY miss (gate fail, key absent, ask-kimi non-zero) return the degraded',
-    'object with invoked set correctly and candidates: []. Never throw.',
+    'require that a delegate key resolves), diff this worktree vs the base, redact,',
+    'ask the delegate for advisory candidates across the 5 reviewer dimensions,',
+    'parse stdout VERBATIM, and emit telemetry. Return ONLY the CANDIDATES schema',
+    'object. On ANY miss (gate fail, key absent, adlc-read non-zero) return the',
+    'degraded object with invoked set correctly and candidates: []. Never throw.',
   ].join('\n');
 }
 
 // reviewPrompt — build one panel member's review prompt. `candidates` is the
-// VALIDATED per-dimension advisory slice from the Kimi pre-pass (already run
+// VALIDATED per-dimension advisory slice from the delegate pre-pass (already run
 // through validateCitations: `..` rejected, path ∈ changedFiles, description
 // sanitized). It is passed ONLY for the 5 reviewer dimensions — the reflector is
 // always called with `candidates` empty/absent (BR-9). Advisory means advisory:
@@ -1638,7 +1638,7 @@ async function implement(id, P, worktree, tasks) {
 
 // orderByTier() — inlined in the PURE block above (pure; unit-tested via node:test). (REQ-474, ADR-10)
 
-// Phase 5 — Kimi pre-pass (per repo) → parallel review panel → deterministic
+// Phase 5 — delegate pre-pass (per repo) → parallel review panel → deterministic
 // consolidation. (ADR-7, ADR-8, BR-7, BR-9, BR-10)
 //
 // Per touched repo the panel fans out: the reflector + the 5 reviewers run
@@ -1649,8 +1649,8 @@ async function implement(id, P, worktree, tasks) {
 // reflector `userFacing` finding is a user-answerable halt → RETURN blocked
 // (never throw, ADR-6).
 //
-// BEFORE the panel, one `kimi-pre-pass` leaf runs PER TOUCHED REPO (the citation
-// -scoping boundary): it does gate + diff + redaction + ask-kimi I/O and returns
+// BEFORE the panel, one `delegate-pre-pass` leaf runs PER TOUCHED REPO (the citation
+// -scoping boundary): it does gate + diff + redaction + adlc-read I/O and returns
 // CANDIDATES. The SCRIPT then validates those (untrusted) candidates against the
 // TRUSTED changedFiles via validateCitations (rejects `..`, off-diff paths, bad
 // charsets; sanitizes descriptions) and asserts `candidates.length > 0 ⇒ invoked`
@@ -1689,7 +1689,7 @@ async function verify(id, P, worktree, repos, ans) {
     // prose context, not as a strict contract. (kept schema-validated, ADR-7)
   });
 
-  // Kimi pre-pass per touched repo → VALIDATED advisory candidates, bucketed by
+  // Delegate pre-pass per touched repo → VALIDATED advisory candidates, bucketed by
   // reviewer dimension. This is the ONLY consumer of CANDIDATES; the per-repo map
   // `advisoryByRepo[repo][dimension] = candidate[]` is consulted when each
   // reviewer prompt is built (reflector excluded). Degrades to {} per repo when
@@ -1837,21 +1837,21 @@ async function verify(id, P, worktree, repos, ans) {
 }
 
 // ===========================================================================
-// runPrePass(id, P, worktree, repos) — dispatch the Kimi pre-pass per touched
+// runPrePass(id, P, worktree, repos) — dispatch the delegate pre-pass per touched
 // repo, validate the (untrusted) candidates in JS, enforce the ghost-skip
 // assertion, and return a per-repo map of VALIDATED candidates bucketed by
 // reviewer dimension. (ADR-8, BR-9, BR-10, LESSON-008, LESSON-012)
 //
-// One `kimi-pre-pass` leaf per repo is the citation-scoping boundary: its
+// One `delegate-pre-pass` leaf per repo is the citation-scoping boundary: its
 // `changedFiles` is the TRUSTED diff of THAT repo's worktree, and a candidate is
 // only forwarded if its path is in that repo's changedFiles. The agent never
 // throws — on a gate/key/api miss it returns invoked-aware degraded data (empty
 // candidates), so a miss degrades the repo to candidate-less review.
 //
 // Per repo:
-//   1. agent('kimi-pre-pass', schema: CANDIDATES) — gate + diff + ask-kimi I/O.
+//   1. agent('delegate-pre-pass', schema: CANDIDATES) — gate + diff + adlc-read I/O.
 //   2. GHOST-SKIP ASSERTION: candidates.length > 0 ⇒ invoked. A violation means
-//      the agent claimed candidates without actually invoking ask-kimi (a ghost
+//      the agent claimed candidates without actually invoking adlc-read (a ghost
 //      -skip wearing a result); DROP every candidate and log it. The script-side
 //      schema assertion replaces the legacy skill-flag dance (LESSON-012).
 //   3. validateCitations(candidates, changedFiles) — the LESSON-008 boundary.
@@ -1870,7 +1870,7 @@ async function runPrePass(id, P, worktree, repos) {
       ...P,
       label: `${id} phase5-prepass-${r.repo}`,
       schema: CANDIDATES,
-      agentType: 'kimi-pre-pass',
+      agentType: 'delegate-pre-pass',
     });
 
     if (!CAND) { advisoryByRepo[r.repo] = {}; continue; }
