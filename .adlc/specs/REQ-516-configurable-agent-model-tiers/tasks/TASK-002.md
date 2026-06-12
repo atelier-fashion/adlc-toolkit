@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: "agents_render.py — config reader, resolver, validator, atomic renderer, check_drift"
-status: draft
+status: complete
 parent: REQ-516
 created: 2026-06-11
 updated: 2026-06-11
