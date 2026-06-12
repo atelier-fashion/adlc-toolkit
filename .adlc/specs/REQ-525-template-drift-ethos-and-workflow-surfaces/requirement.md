@@ -1,7 +1,7 @@
 ---
 id: REQ-525
 title: "/template-drift covers all vendored sync surfaces: ETHOS.md and the workflow runtime"
-status: draft
+status: complete
 deployable: false
 created: 2026-06-12
 updated: 2026-06-12
