@@ -58,9 +58,12 @@ def main(argv=None):
     # --print-enabled: a non-network probe used by the delegate gate partial to
     # resolve the config-file opt-in signal (BR-11) without parsing YAML in
     # shell. Prints "1"/"0" and exits 0; never errors so the gate can rely on it.
+    # Runs the FULL resolve_provider() so a config that is opted-in but invalid
+    # (e.g. a key value in api_key_env — BR-3) reports "0", not "1": the gate must
+    # not green-light a config that would fail loudly on the first real call.
     if args.print_enabled:
         try:
-            print("1" if _common.delegation_enabled() else "0")
+            print("1" if _common.resolve_provider().enabled else "0")
         except SystemExit:
             # A malformed config (e.g. key-in-config) means "not safely enabled".
             print("0")

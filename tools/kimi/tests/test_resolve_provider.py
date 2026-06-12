@@ -134,3 +134,38 @@ def test_env_base_model_alone_is_not_opt_in(clean_env, monkeypatch):
 def test_delegate_enabled_env_opts_in(clean_env, monkeypatch):
     monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
     assert _common.resolve_provider().enabled is True
+
+
+# --- --print-enabled gate probe (used by delegate-gate.sh) ------------------
+
+def _print_enabled(env_overrides, tmp_home):
+    """Invoke `adlc-read --print-enabled` in a clean subprocess env."""
+    import subprocess
+    env = {"HOME": str(tmp_home), "PATH": os.environ.get("PATH", "")}
+    env.update(env_overrides)
+    adlc_read = os.path.join(os.path.dirname(HERE), "adlc-read")
+    r = subprocess.run([sys.executable, adlc_read, "--print-enabled"],
+                       capture_output=True, text=True, env=env)
+    return r
+
+
+def test_print_enabled_reports_zero_for_key_in_config(clean_env):
+    """BR-3 x BR-11: a config opted-in (enabled:true) but with a KEY value in
+    api_key_env must report 0 — the gate must not green-light a config that would
+    fail loudly on the first real call."""
+    cfg = _write_config(clean_env, 'delegate:\n  enabled: true\n  api_key_env: "sk-abcdefghijklmnop0123456789"\n')
+    r = _print_enabled({"ADLC_CONFIG": cfg}, clean_env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == "0", r.stdout + r.stderr
+
+
+def test_print_enabled_reports_one_for_valid_opt_in(clean_env):
+    r = _print_enabled({"ADLC_DELEGATE_ENABLED": "1"}, clean_env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == "1", r.stdout + r.stderr
+
+
+def test_print_enabled_reports_zero_fresh_install(clean_env):
+    r = _print_enabled({}, clean_env)
+    assert r.returncode == 0
+    assert r.stdout.strip() == "0", r.stdout + r.stderr
