@@ -27,7 +27,7 @@
 # call site sources this in its own short-lived block shell, so namespace
 # leakage is a non-issue (REQ-436 ADR-3).
 
-. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
+. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
 _adlc_emit_step_telemetry() {
     # $1 = step label (e.g. "Step-1.5" or "Step-1.6")
     # Reads caller's $start_s, $ASK_KIMI_INVOKED, $KIMI_EXIT, $flag, $ADLC_KIMI_GATE_REASON.

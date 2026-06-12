@@ -1,16 +1,16 @@
 #!/bin/sh
 # Shared provider-agnostic delegation gate predicate (REQ-515 BR-4/BR-11).
-# Generalizes the former kimi-gate.sh (REQ-416 ADR-2). kimi-gate.sh is now a
-# thin source-through wrapper around this file (REQ-515 ADR-5).
+# This is the canonical predicate (REQ-522 retired the legacy kimi-gate.sh
+# back-compat alias).
 #
 # Sourceable POSIX shell function. Each call site reads $? IMMEDIATELY into a
-# local variable (gate=$?) before any other command, because $? is clobbered
-# by every subsequent command. See partials/kimi-gate.md for the full protocol.
+# variable (gate=$?) before any other command, because $? is clobbered by every
+# subsequent command. See partials/delegate-gate.md for the full protocol.
 #
 # Return-code contract (UNCHANGED 0/1/2 shape so existing callers' case
 # statements keep working):
 #   0 — delegated:    adlc-read on PATH AND not disabled AND opt-in satisfied
-#   1 — disabled:     ADLC_DISABLE_DELEGATE=1 / ADLC_DISABLE_KIMI=1 (alias),
+#   1 — disabled:     ADLC_DISABLE_DELEGATE=1,
 #                     OR opt-in NOT satisfied (BR-11 fresh-install posture)
 #   2 — unavailable:  adlc-read is not on PATH
 #
@@ -25,16 +25,17 @@
 #
 # Opt-in (BR-11) is satisfied by ANY of:
 #   * ADLC_DELEGATE_ENABLED=1 in the environment, OR
-#   * a legacy key set in env (KIMI_API_KEY / MOONSHOT_API_KEY) — continuity, OR
+#   * a legacy key set in env (KIMI_API_KEY / MOONSHOT_API_KEY) — key continuity
+#     is provider-preset data, not branding (REQ-522 BR-1/BR-3), OR
 #   * delegate.enabled: true in the config file (resolved in Python; the gate
 #     shells out to the resolver ONLY when no env opt-in is present AND a config
 #     file exists, so the common paths stay pure-shell and fast).
 #
 # No `set -eu` here — return codes ARE the contract.
 
-# Defensive default (mirrors kimi-gate.sh): a caller that reads the reason
-# without invoking the function gets "unset", making telemetry visibly wrong
-# instead of silently empty.
+# Defensive default: a caller that reads the reason without invoking the
+# function gets "unset", making telemetry visibly wrong instead of silently
+# empty.
 export ADLC_DELEGATE_GATE_REASON="unset"
 
 # --- opt-in helper (BR-11) -------------------------------------------------
@@ -72,7 +73,7 @@ adlc_delegate_gate_check() {
     export ADLC_DELEGATE_GATE_REASON="no-binary"
     return 2
   fi
-  if [ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ] || [ "${ADLC_DISABLE_KIMI:-0}" = "1" ]; then
+  if [ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ]; then
     export ADLC_DELEGATE_GATE_REASON="disabled-via-env"
     return 1
   fi
