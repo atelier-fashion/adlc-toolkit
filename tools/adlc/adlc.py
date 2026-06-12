@@ -7,7 +7,7 @@ dispatch logic (REQ-519 BR-11). ``doctor`` is the first subcommand; ``renumber``
 (REQ-518) and the tier render (REQ-516) are the designated next homes.
 
 This module is **pure standard library** on purpose: ``adlc doctor`` must run on
-a machine that has never opted into delegation, so it cannot depend on the kimi
+a machine that has never opted into delegation, so it cannot depend on the delegate
 delegation venv or any third-party package (REQ-519 ADR-1). Subcommand modules
 are imported lazily inside their handler so an import problem in one subcommand
 never breaks ``adlc --version`` or the usage listing.

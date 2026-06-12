@@ -1,4 +1,4 @@
-"""Offline tests for tools/kimi/_common.py."""
+"""Offline tests for tools/delegate/_common.py."""
 
 import io
 import os

@@ -10,7 +10,7 @@ assignments (BR-3) — zero behavior change.
 Pure standard library on purpose (REQ-519 ADR-1): ``adlc agents render`` must run
 on a machine that never opted into the delegation venv, so it cannot import the
 delegation package or any third-party dependency. The flat config reader mirrors
-``tools/kimi/_common.py:parse_delegate_config`` (REQ-515 ADR-3) rather than
+``tools/delegate/_common.py:parse_delegate_config`` (REQ-515 ADR-3) rather than
 pulling in PyYAML.
 
 The render and the drift check (``check_drift``) share one resolution + parse

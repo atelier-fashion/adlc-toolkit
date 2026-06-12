@@ -8,7 +8,7 @@ remediation — a literal command or exact file edit, never "see docs" (BR-5).
 The ``delegate-gate`` check **reuses REQ-515's shipped surface** rather than
 reinventing config resolution (REQ-519 ADR-4): it sources
 ``partials/delegate-gate.sh`` for the 0/1/2 gate verdict and reads
-``tools/kimi/_common.parse_delegate_config`` (via a subprocess probe) to
+``tools/delegate/_common.parse_delegate_config`` (via a subprocess probe) to
 distinguish "not opted in" (SKIP) from "config says enabled but the binary is
 missing" (FAIL — misconfigured).
 
@@ -350,11 +350,12 @@ def _gate_verdict(profile: Profile):
 def _config_enabled(profile: Profile):
     """True iff delegate.enabled is true in the REQ-515 config.
 
-    Reuses tools/kimi/_common.parse_delegate_config via a subprocess probe so
-    adlc keeps no hard import dependency on the kimi module (it may be absent on
-    a skills-only checkout). Returns False on any failure (treated as not-opted-in).
+    Reuses tools/delegate/_common.parse_delegate_config via a subprocess probe so
+    adlc keeps no hard import dependency on the delegate module (it may be absent
+    on a skills-only checkout). Returns False on any failure (treated as
+    not-opted-in). (REQ-522 renamed tools/kimi -> tools/delegate.)
     """
-    common_dir = os.path.join(profile.repo_root, "tools", "kimi")
+    common_dir = os.path.join(profile.repo_root, "tools", "delegate")
     if not os.path.isfile(os.path.join(common_dir, "_common.py")):
         return False
     code = (
@@ -440,7 +441,8 @@ def check_launchctl(profile: Profile):
     rc, _reason = _gate_verdict(profile)
     if rc != 0:
         return Result.SKIP, "delegation not active — launchctl setenv not required", ""
-    label = "com.adlc-toolkit.kimi-setenv"
+    # REQ-522 renamed the LaunchAgent label; the installer migrates the old one.
+    label = "com.adlc-toolkit.delegate-setenv"
     listed = subprocess.run(
         ["launchctl", "list", label], capture_output=True, text=True,
     )

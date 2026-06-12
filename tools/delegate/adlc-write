@@ -4,8 +4,7 @@
 Generates a complete file from a spec string plus an optional reference file and
 writes it to a target path, for Claude to review. Refuses to clobber an existing
 target without --force, and never creates parent directories. The provider is
-resolved by ``_common.resolve_provider``. ``kimi-write`` is a back-compat shim
-for this command.
+resolved by ``_common.resolve_provider``.
 """
 
 import argparse

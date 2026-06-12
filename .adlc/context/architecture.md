@@ -9,7 +9,7 @@ adlc-toolkit/
 ├── <skill>/SKILL.md            # One directory per skill (spec/, architect/, proceed/, etc.)
 ├── agents/<agent>.md           # Specialized subagent definitions
 ├── templates/*.md              # Canonical templates (copied into consumer projects by /init)
-├── partials/                   # Shared snippets (ethos macro, kimi gate, trial-merge) sourced by SKILL.md files
+├── partials/                   # Shared snippets (ethos macro, delegate gate, trial-merge) sourced by SKILL.md files
 ├── workflows/                  # Deterministic Dynamic Workflow scripts + schemas (copied into consumer projects by /init)
 └── .adlc/                      # Minimal self-tracking for toolkit-internal REQs
     ├── context/                # This directory — project-overview, architecture, conventions
@@ -60,7 +60,7 @@ Templates are copied into consumer projects by `/init` (into `.adlc/templates/`)
 
 Partials at `partials/*.sh` are small POSIX shell snippets sourced by multiple SKILL.md files via Claude Code's `!`...`` macro syntax. Each partial emits a context block to stdout (e.g., `ethos-include.sh` emits the project ETHOS.md content with the consumer-project-first fallback). Skills invoke a partial with a two-level fallback — `!`sh .adlc/partials/<name>.sh 2>/dev/null || sh ~/.claude/skills/partials/<name>.sh`` — so the pattern works whether or not `/init` has copied the partials into the consumer repo. The `/init` skill copies `partials/` into `.adlc/partials/` alongside `templates/`. Keep partials trivially auditable: one snippet per file, no aggregator (`lib.sh`) until there are more than five.
 
-A sourceable partial is also the **only** sanctioned mechanism for sharing a shell *function* across steps, because SKILL.md fenced blocks do not share shell state across steps — each may be an independent shell invocation, so a function defined in one fenced block is undefined in another (the silent telemetry-loss class — REQ-436, REQ-428). A shared function (e.g. `_adlc_emit_step_telemetry` in `partials/emit-step-telemetry.sh`, alongside the `kimi-gate.sh` precedent) must be re-sourced at *each* call site in the same fenced block as its invocation. This invariant is enforced structurally rather than by prose (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but called from a different fenced block. See conventions.md "Bash in skills" for the call-site rule.
+A sourceable partial is also the **only** sanctioned mechanism for sharing a shell *function* across steps, because SKILL.md fenced blocks do not share shell state across steps — each may be an independent shell invocation, so a function defined in one fenced block is undefined in another (the silent telemetry-loss class — REQ-436, REQ-428). A shared function (e.g. `_adlc_emit_step_telemetry` in `partials/emit-step-telemetry.sh`, alongside the `delegate-gate.sh` precedent) must be re-sourced at *each* call site in the same fenced block as its invocation. This invariant is enforced structurally rather than by prose (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but called from a different fenced block. See conventions.md "Bash in skills" for the call-site rule.
 
 ## ADLC pipeline shape (consumer-project view)
 
@@ -88,13 +88,13 @@ PR cleanup + CI
 
 Each phase has a validation gate. Failed validation loops up to 3 times before pausing for human input.
 
-`proceed/SKILL.md` keeps Step 0, the Pipeline State Tracking gate protocol, and Phase 5 (Verify, with the Kimi pre-pass gate) inline, but extracts the thinner phases to companion files referenced via `<!-- companion: <path> -->` markers in SKILL.md:
+`proceed/SKILL.md` keeps Step 0, the Pipeline State Tracking gate protocol, and Phase 5 (Verify, with the delegate pre-pass gate) inline, but extracts the thinner phases to companion files referenced via `<!-- companion: <path> -->` markers in SKILL.md:
 
 - `proceed/phases-1-3-validation.md` — Phases 1–3 (spec validation, architect, architecture/tasks validation)
 - `proceed/phase-4-implementation.md` — Phase 4 (implement)
 - `proceed/phases-6-8-ship.md` — Phases 6–8 (PR creation, cleanup/CI, wrapup/merge)
 
-The companion marker is documentation-only — Claude Code does not auto-load referenced files. SKILL.md's inline summary is sufficient to execute each extracted phase; the companion holds the full step list for maintainers and for in-depth reference. Phase 5 is intentionally not extracted (ADR-3 of REQ-416) because the Kimi pre-pass gate-handoff is load-bearing.
+The companion marker is documentation-only — Claude Code does not auto-load referenced files. SKILL.md's inline summary is sufficient to execute each extracted phase; the companion holds the full step list for maintainers and for in-depth reference. Phase 5 is intentionally not extracted (ADR-3 of REQ-416) because the delegate pre-pass gate-handoff is load-bearing.
 
 ## Workflow engine
 

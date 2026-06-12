@@ -37,11 +37,11 @@ a general markdown linter and NOT a general shell linter.
    sourced telemetry partial resolved under the scan root — checked in this
    order: `<root>/partials/*.sh`, then `<root>/.adlc/partials/*.sh`
    (toolkit-self / dogfooding layout vs. consumer-project layout). REQ-436
-   relocated the `_adlc_emit_step_telemetry` helper body — and with it the
-   `duration_ms=…` and `"$KIMI_TOOLS"/emit-telemetry.sh ` literals — out of
-   `analyze/SKILL.md` into `partials/emit-step-telemetry.sh`. Without this
-   rule the linter would falsely flag `analyze/SKILL.md` as missing those two
-   literals: a literal-presence guard rots when the thing it guards moves
+   relocated the `_adlc_emit_step_telemetry` helper body — and REQ-522 moved
+   the `"$DELEGATE_TOOLS"/emit-telemetry.sh ` literal — into
+   `partials/emit-step-telemetry.sh`. Without this rule the linter would falsely
+   flag `analyze/SKILL.md` as missing that literal: a literal-presence guard
+   rots when the thing it guards moves
    behind indirection (LESSON-019 #1), so the guard was generalized in the
    same change. The match is still plain text-substring (no shell parsing);
    the partials are read once per run, not per SKILL.md. A partial whose real

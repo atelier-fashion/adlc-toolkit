@@ -1,4 +1,4 @@
-"""Test fixtures for tools/adlc — mirrors tools/kimi/tests/conftest.py.
+"""Test fixtures for tools/adlc — mirrors tools/delegate/tests/conftest.py.
 
 Inserts the parent dir (tools/adlc) onto sys.path so `import adlc`,
 `import doctor`, `import checks` resolve regardless of cwd.
