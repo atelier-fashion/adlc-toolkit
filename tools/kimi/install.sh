@@ -1,5 +1,5 @@
 #!/bin/sh
-# Idempotent installer for the Kimi delegation CLIs.
+# Idempotent installer for the provider-agnostic delegation CLIs.
 # POSIX sh only — no bashisms, no GNU-specific flags.
 set -eu
 
@@ -22,8 +22,8 @@ if [ -n "$COMMON_DIR" ] && [ -d "$COMMON_DIR" ]; then
 else
     REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 fi
-# Sanity check — the resolved REPO_ROOT must contain tools/kimi/ask-kimi.
-if [ ! -f "$REPO_ROOT/tools/kimi/ask-kimi" ]; then
+# Sanity check — the resolved REPO_ROOT must contain tools/kimi/adlc-read.
+if [ ! -f "$REPO_ROOT/tools/kimi/adlc-read" ]; then
     echo "ERROR: could not resolve canonical repo root (tried $REPO_ROOT). Re-run install.sh from the repo's tools/kimi/ directory." >&2
     exit 1
 fi
@@ -46,7 +46,11 @@ case "$(basename "$LOGIN_SHELL")" in
     *)     RC="" ;;
 esac
 
-CLIS="ask-kimi kimi-write extract-chat"
+# Provider-neutral CLIs (REQ-515 BR-1). The legacy ask-kimi / kimi-write names
+# are installed too, as wrappers that exec the new commands, so existing muscle
+# memory and any external scripts keep working.
+CLIS="adlc-read adlc-write extract-chat"
+LEGACY_SHIMS="ask-kimi kimi-write"
 
 # --- CLAUDE.md routing block: pre-validate before any side effects ------
 # REQ-426 verify caught: the original placement of this block ran AFTER venv
@@ -115,6 +119,30 @@ exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/kimi/$name" "\$@"
 EOF
     chmod +x "$wrapper"
     echo "Wrote wrapper $wrapper (-> $REPO_ROOT/tools/kimi/$name)"
+done
+
+# Legacy back-compat shims (REQ-515 BR-1): ask-kimi -> adlc-read,
+# kimi-write -> adlc-write. The ~/bin legacy shim runs the NEW command's source
+# directly through the venv python (so the openai dependency resolves), mapping
+# the old name to its new counterpart. This keeps the venv on the execution path
+# — invoking the on-disk /bin/sh shim instead would re-enter via the python
+# shebang and miss the venv. Forward all args and the exit code verbatim.
+legacy_target() {
+    case "$1" in
+        ask-kimi)   echo "adlc-read" ;;
+        kimi-write) echo "adlc-write" ;;
+        *)          echo "$1" ;;
+    esac
+}
+for name in $LEGACY_SHIMS; do
+    target=$(legacy_target "$name")
+    wrapper="$BIN_DIR/$name"
+    cat > "$wrapper" <<EOF
+#!/bin/sh
+exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/kimi/$target" "\$@"
+EOF
+    chmod +x "$wrapper"
+    echo "Wrote legacy shim $wrapper (-> $REPO_ROOT/tools/kimi/$target)"
 done
 
 # --- PATH entry in shell rc (marker-guarded) ----------------------------
@@ -227,10 +255,13 @@ fi
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 mkdir -p "$HOME/.claude"
 
+# The marker is kept as `kimi-delegation:start` for back-compat: existing
+# installs already have a block with this marker, so changing it would
+# double-append. The block CONTENT is provider-neutral (REQ-515 BR-7).
 if [ -f "$CLAUDE_MD" ] && grep -q 'kimi-delegation:start' "$CLAUDE_MD"; then
-    echo "Kimi routing block already present in $CLAUDE_MD"
+    echo "Delegation routing block already present in $CLAUDE_MD"
 else
-    echo "Appending Kimi routing block to $CLAUDE_MD"
+    echo "Appending delegation routing block to $CLAUDE_MD"
     {
         echo ""
         printf '%s\n' "$ROUTING_CONTENT"
@@ -260,7 +291,10 @@ allow = perms.get("allow")
 if not isinstance(allow, list):
     allow = []
     perms["allow"] = allow
-for entry in ("Bash(ask-kimi:*)", "Bash(kimi-write:*)", "Bash(extract-chat:*)"):
+for entry in (
+    "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)",
+    "Bash(ask-kimi:*)", "Bash(kimi-write:*)",  # legacy shims (BR-1)
+):
     if entry not in allow:
         allow.append(entry)
 tmp = path + ".tmp"
@@ -270,16 +304,16 @@ with open(tmp, "w", encoding="utf-8") as f:
 os.replace(tmp, path)
 PYEOF
     then
-        echo "Merged Kimi allowlist entries into $SETTINGS"
+        echo "Merged delegation allowlist entries into $SETTINGS"
     else
         echo "WARNING: could not update $SETTINGS — add these to its permissions.allow manually:"
-        echo '  "Bash(ask-kimi:*)", "Bash(kimi-write:*)", "Bash(extract-chat:*)"'
+        echo '  "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)", "Bash(ask-kimi:*)", "Bash(kimi-write:*)"'
     fi
 else
     echo ""
     echo "Note: $SETTINGS does not exist — not creating it."
     echo "Add these to its permissions.allow list manually:"
-    echo '  "Bash(ask-kimi:*)", "Bash(kimi-write:*)", "Bash(extract-chat:*)"'
+    echo '  "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)", "Bash(ask-kimi:*)", "Bash(kimi-write:*)"'
 fi
 
 # --- next steps ---------------------------------------------------------
