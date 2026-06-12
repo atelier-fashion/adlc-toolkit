@@ -80,6 +80,13 @@ adlc_recheck_id() {
   # was allocated elsewhere.
   ADLC_ALLOC_DEGRADED=""
   adlc_rc_high=$(adlc_remote_high "$adlc_rc_kind")
+  # Loud-fail guard (BUG-116): empty/non-numeric means an internal derivation error
+  # (distinct from the unreachable-remote DEGRADED path, which prints 0 and warns).
+  case "$adlc_rc_high" in
+    ''|*[!0-9]*)
+      echo "ERROR: adlc_remote_high returned non-numeric '$adlc_rc_high' during recheck of $adlc_rc_id — aborting (BUG-116)" >&2
+      return 2 ;;
+  esac
   adlc_rc_high=$(adlc_id_dec "$adlc_rc_high")
 
   if [ -n "$ADLC_ALLOC_DEGRADED" ]; then
@@ -101,6 +108,8 @@ adlc_recheck_id() {
   esac
 
   adlc_rc_hit=""
+  # zsh NOMATCH guard — same rationale as adlc_remote_high (BUG-116).
+  if [ -n "${ZSH_VERSION:-}" ]; then setopt localoptions nullglob 2>/dev/null; fi
   for adlc_rc_repo in "$adlc_rc_root"/*; do
     [ -d "$adlc_rc_repo/.git" ] || [ -f "$adlc_rc_repo/.git" ] || continue
     git -C "$adlc_rc_repo" remote get-url origin >/dev/null 2>&1 || continue
@@ -109,9 +118,12 @@ adlc_recheck_id() {
       adlc_rc_refs=$(git -C "$adlc_rc_repo" ls-remote --heads origin 2>/dev/null) || continue
       # Extract every branch number, normalize to decimal, exact-match against our num.
       # `grep -qx` on the normalized list avoids fragile subshell-exit tricks (zsh-safe).
+      # Normalize with a per-line sed, NOT `while read; do adlc_id_dec; done` —
+      # adlc_id_dec prints no trailing newline, so multiple candidates concatenated
+      # into one bogus number and real collisions went undetected (BUG-116).
       adlc_rc_branch_nums=$(printf '%s\n' "$adlc_rc_refs" \
         | grep -oE "$adlc_rc_branch_grep" | grep -oE '[0-9][0-9]*' \
-        | while IFS= read -r adlc_rc_seen; do adlc_id_dec "$adlc_rc_seen"; done)
+        | sed -E 's/^0+([0-9])/\1/')
       if printf '%s\n' "$adlc_rc_branch_nums" | grep -qx "$adlc_rc_num"; then
         adlc_rc_hit="$adlc_rc_repo (pushed branch)"
         break
@@ -131,9 +143,10 @@ adlc_recheck_id() {
           lesson) adlc_rc_path=".adlc/knowledge/lessons" ;;
         esac
         adlc_rc_names=$(gh api "repos/$adlc_rc_owner/contents/$adlc_rc_path" --jq '.[].name' 2>/dev/null)
+        # Per-line sed normalization, not a read/adlc_id_dec loop (BUG-116 — see above).
         adlc_rc_art_nums=$(printf '%s\n' "$adlc_rc_names" \
           | grep -oE "$adlc_rc_prefix-[0-9]+" | sed -E "s/^$adlc_rc_prefix-//" \
-          | while IFS= read -r adlc_rc_seen; do adlc_id_dec "$adlc_rc_seen"; done)
+          | sed -E 's/^0+([0-9])/\1/')
         if printf '%s\n' "$adlc_rc_art_nums" | grep -qx "$adlc_rc_num"; then
           adlc_rc_hit="$adlc_rc_repo (merged artifact)"
           break
