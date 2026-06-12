@@ -1,6 +1,0 @@
-#!/bin/sh
-# Back-compat shim (REQ-515 BR-1): `kimi-write` is the legacy name for `adlc-write`.
-# Forwards all arguments and the exit code verbatim. New code should call
-# `adlc-write` directly; this shim preserves existing muscle memory and any
-# external scripts that still invoke `kimi-write`.
-exec "$(dirname "$0")/adlc-write" "$@"

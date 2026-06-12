@@ -22,14 +22,16 @@ if [ -n "$COMMON_DIR" ] && [ -d "$COMMON_DIR" ]; then
 else
     REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 fi
-# Sanity check — the resolved REPO_ROOT must contain tools/kimi/adlc-read.
-if [ ! -f "$REPO_ROOT/tools/kimi/adlc-read" ]; then
-    echo "ERROR: could not resolve canonical repo root (tried $REPO_ROOT). Re-run install.sh from the repo's tools/kimi/ directory." >&2
+# Sanity check — the resolved REPO_ROOT must contain tools/delegate/adlc-read.
+if [ ! -f "$REPO_ROOT/tools/delegate/adlc-read" ]; then
+    echo "ERROR: could not resolve canonical repo root (tried $REPO_ROOT). Re-run install.sh from the repo's tools/delegate/ directory." >&2
     exit 1
 fi
-VENV_DIR="$HOME/.claude/kimi-venv"
+VENV_DIR="$HOME/.claude/delegate-venv"
+# Legacy venv name (REQ-522 rename) — removed on upgrade so it does not linger.
+LEGACY_VENV_DIR="$HOME/.claude/kimi-venv"
 BIN_DIR="$HOME/bin"
-PATH_MARKER="# added by adlc-toolkit kimi install.sh"
+PATH_MARKER="# added by adlc-toolkit delegate install.sh"
 
 # Determine the user's persistent login shell — fall back to $SHELL.
 # `dscl` is macOS-only; guard with command -v so the script works on Linux too.
@@ -46,10 +48,10 @@ case "$(basename "$LOGIN_SHELL")" in
     *)     RC="" ;;
 esac
 
-# Provider-neutral CLIs (REQ-515 BR-1). The legacy ask-kimi / kimi-write names
-# are installed too, as wrappers that exec the new commands, so existing muscle
-# memory and any external scripts keep working.
+# Provider-neutral CLIs (REQ-515 BR-1; REQ-522 BR-3 removed the legacy
+# ask-kimi / kimi-write shims — use adlc-read / adlc-write).
 CLIS="adlc-read adlc-write extract-chat"
+# Legacy shim names removed on upgrade so stale wrappers do not shadow PATH.
 LEGACY_SHIMS="ask-kimi kimi-write"
 
 # --- CLAUDE.md routing block: pre-validate before any side effects ------
@@ -64,8 +66,8 @@ LEGACY_SHIMS="ask-kimi kimi-write"
 # reviewers as TWO file changes side-by-side, which is exactly the gate we
 # want a human to consciously approve. This pin is review-discipline, not
 # crypto.
-ROUTING_TXT="$REPO_ROOT/tools/kimi/claude-md-routing.txt"
-ROUTING_SHA="$REPO_ROOT/tools/kimi/claude-md-routing.txt.sha256"
+ROUTING_TXT="$REPO_ROOT/tools/delegate/claude-md-routing.txt"
+ROUTING_SHA="$REPO_ROOT/tools/delegate/claude-md-routing.txt.sha256"
 
 if [ ! -f "$ROUTING_TXT" ] || [ ! -f "$ROUTING_SHA" ]; then
     echo "ERROR: canonical routing files missing — expected:" >&2
@@ -94,7 +96,7 @@ if [ "$ACTUAL_HASH" != "$PINNED_HASH" ]; then
     echo "ERROR: claude-md-routing.txt hash mismatch — aborting before ANY install side effects" >&2
     echo "  Pinned:   $PINNED_HASH" >&2
     echo "  Computed: $ACTUAL_HASH" >&2
-    echo "  If this change is intentional, update tools/kimi/claude-md-routing.txt.sha256 in the same commit." >&2
+    echo "  If this change is intentional, update tools/delegate/claude-md-routing.txt.sha256 in the same commit." >&2
     exit 1
 fi
 
@@ -105,7 +107,13 @@ if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
 fi
 echo "Installing pinned dependencies from requirements.txt into venv"
-"$VENV_DIR/bin/pip" install -r "$REPO_ROOT/tools/kimi/requirements.txt"
+"$VENV_DIR/bin/pip" install -r "$REPO_ROOT/tools/delegate/requirements.txt"
+
+# Remove the legacy Kimi-named venv on upgrade (REQ-522) so it does not linger.
+if [ -d "$LEGACY_VENV_DIR" ] && [ "$LEGACY_VENV_DIR" != "$VENV_DIR" ]; then
+    echo "Removing legacy venv at $LEGACY_VENV_DIR"
+    rm -rf "$LEGACY_VENV_DIR"
+fi
 
 # --- ~/bin wrappers (regenerated each run) ------------------------------
 # Note: wrappers are path-stamped to this repo's location ($REPO_ROOT).
@@ -115,34 +123,21 @@ for name in $CLIS; do
     wrapper="$BIN_DIR/$name"
     cat > "$wrapper" <<EOF
 #!/bin/sh
-exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/kimi/$name" "\$@"
+exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/delegate/$name" "\$@"
 EOF
     chmod +x "$wrapper"
-    echo "Wrote wrapper $wrapper (-> $REPO_ROOT/tools/kimi/$name)"
+    echo "Wrote wrapper $wrapper (-> $REPO_ROOT/tools/delegate/$name)"
 done
 
-# Legacy back-compat shims (REQ-515 BR-1): ask-kimi -> adlc-read,
-# kimi-write -> adlc-write. The ~/bin legacy shim runs the NEW command's source
-# directly through the venv python (so the openai dependency resolves), mapping
-# the old name to its new counterpart. This keeps the venv on the execution path
-# — invoking the on-disk /bin/sh shim instead would re-enter via the python
-# shebang and miss the venv. Forward all args and the exit code verbatim.
-legacy_target() {
-    case "$1" in
-        ask-kimi)   echo "adlc-read" ;;
-        kimi-write) echo "adlc-write" ;;
-        *)          echo "$1" ;;
-    esac
-}
+# Remove the legacy back-compat shims on upgrade (REQ-522 BR-3): ask-kimi /
+# kimi-write are retired in favor of adlc-read / adlc-write. Delete any stale
+# ~/bin wrappers a previous install wrote so they do not shadow PATH.
 for name in $LEGACY_SHIMS; do
-    target=$(legacy_target "$name")
     wrapper="$BIN_DIR/$name"
-    cat > "$wrapper" <<EOF
-#!/bin/sh
-exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/kimi/$target" "\$@"
-EOF
-    chmod +x "$wrapper"
-    echo "Wrote legacy shim $wrapper (-> $REPO_ROOT/tools/kimi/$target)"
+    if [ -e "$wrapper" ]; then
+        rm -f "$wrapper"
+        echo "Removed legacy shim $wrapper (use adlc-read / adlc-write)"
+    fi
 done
 
 # --- PATH entry in shell rc (marker-guarded) ----------------------------
@@ -190,11 +185,24 @@ fi
 # GUI-launched Claude Code to see the key). A compromised user-space process
 # already has access to ~/.zshrc anyway.
 if command -v launchctl >/dev/null 2>&1; then
-    AGENT_LABEL="com.adlc-toolkit.kimi-setenv"
+    AGENT_LABEL="com.adlc-toolkit.delegate-setenv"
     AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
-    AGENT_HELPER="$HOME/.claude/kimi-launchctl-setenv.sh"
-    HELPER_SRC="$REPO_ROOT/tools/kimi/kimi-launchctl-setenv.sh.in"
-    PLIST_SRC="$REPO_ROOT/tools/kimi/com.adlc-toolkit.kimi-setenv.plist.in"
+    AGENT_HELPER="$HOME/.claude/delegate-launchctl-setenv.sh"
+    HELPER_SRC="$REPO_ROOT/tools/delegate/delegate-launchctl-setenv.sh.in"
+    PLIST_SRC="$REPO_ROOT/tools/delegate/com.adlc-toolkit.delegate-setenv.plist.in"
+
+    # REQ-522 BR-8 migration: a prior install left a Kimi-labeled LaunchAgent.
+    # Unload and remove it BEFORE loading the renamed agent so the two do not
+    # both run (validate-before-mutate, LESSON-017). Idempotent on a fresh box.
+    LEGACY_AGENT_LABEL="com.adlc-toolkit.kimi-setenv"
+    LEGACY_AGENT_PLIST="$HOME/Library/LaunchAgents/$LEGACY_AGENT_LABEL.plist"
+    LEGACY_AGENT_HELPER="$HOME/.claude/kimi-launchctl-setenv.sh"
+    if [ -e "$LEGACY_AGENT_PLIST" ]; then
+        launchctl bootout "gui/$(id -u)" "$LEGACY_AGENT_PLIST" 2>/dev/null || true
+        launchctl unload "$LEGACY_AGENT_PLIST" 2>/dev/null || true
+        rm -f "$LEGACY_AGENT_PLIST" "$LEGACY_AGENT_HELPER"
+        echo "Migrated: removed legacy LaunchAgent $LEGACY_AGENT_LABEL"
+    fi
 
     mkdir -p "$HOME/Library/LaunchAgents"
     mkdir -p "$HOME/Library/Logs"
@@ -255,10 +263,13 @@ fi
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 mkdir -p "$HOME/.claude"
 
-# The marker is kept as `kimi-delegation:start` for back-compat: existing
-# installs already have a block with this marker, so changing it would
-# double-append. The block CONTENT is provider-neutral (REQ-515 BR-7).
-if [ -f "$CLAUDE_MD" ] && grep -q 'kimi-delegation:start' "$CLAUDE_MD"; then
+# Idempotency anchor: the new block uses `delegate-routing:start` (REQ-522).
+# An existing consumer install may still carry the legacy `kimi-delegation:start`
+# marker — recognize BOTH so an upgrade does not double-append (ADR-6). The
+# legacy marker is a recognized INPUT string only; the freshly written block
+# always uses the de-branded marker. The block CONTENT is provider-neutral.
+if [ -f "$CLAUDE_MD" ] && \
+   { grep -q 'delegate-routing:start' "$CLAUDE_MD" || grep -q 'kimi-delegation:start' "$CLAUDE_MD"; }; then
     echo "Delegation routing block already present in $CLAUDE_MD"
 else
     echo "Appending delegation routing block to $CLAUDE_MD"
@@ -293,10 +304,14 @@ if not isinstance(allow, list):
     perms["allow"] = allow
 for entry in (
     "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)",
-    "Bash(ask-kimi:*)", "Bash(kimi-write:*)",  # legacy shims (BR-1)
 ):
     if entry not in allow:
         allow.append(entry)
+# REQ-522 BR-3: prune the retired legacy-shim allow entries if a prior install
+# added them, so the allowlist matches the installed command set.
+for stale in ("Bash(ask-kimi:*)", "Bash(kimi-write:*)"):
+    if stale in allow:
+        allow.remove(stale)
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
@@ -307,13 +322,13 @@ PYEOF
         echo "Merged delegation allowlist entries into $SETTINGS"
     else
         echo "WARNING: could not update $SETTINGS — add these to its permissions.allow manually:"
-        echo '  "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)", "Bash(ask-kimi:*)", "Bash(kimi-write:*)"'
+        echo '  "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)"'
     fi
 else
     echo ""
     echo "Note: $SETTINGS does not exist — not creating it."
     echo "Add these to its permissions.allow list manually:"
-    echo '  "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)", "Bash(ask-kimi:*)", "Bash(kimi-write:*)"'
+    echo '  "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)"'
 fi
 
 # --- next steps ---------------------------------------------------------

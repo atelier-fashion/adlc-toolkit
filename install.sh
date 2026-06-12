@@ -41,7 +41,7 @@ DRY=0
 [ "$MODE" = "dry-run" ] && DRY=1
 
 # --- REPO_ROOT (canonical repo, not a worktree) ----------------------------
-# Mirror tools/kimi/install.sh: --git-common-dir returns the canonical .git even
+# Mirror tools/delegate/install.sh: --git-common-dir returns the canonical .git even
 # when run from a worktree, so symlinks point at the real checkout (BR-3).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMMON_DIR="$(git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null || true)"
@@ -201,12 +201,12 @@ note "delegation:"
 if [ "$WITH_DELEGATION" -eq 1 ]; then
     note "  Data-governance notice: delegation sends file contents to a third-party"
     note "  model provider. Only enable it for repositories whose contents you are"
-    note "  permitted to share. See tools/kimi/README.md."
+    note "  permitted to share. See tools/delegate/README.md."
     if [ "$DRY" -eq 1 ]; then
-        plan "run tools/kimi/install.sh (delegation opt-in)"
+        plan "run tools/delegate/install.sh (delegation opt-in)"
     else
-        note "  running tools/kimi/install.sh ..."
-        bash "$REPO_ROOT/tools/kimi/install.sh"
+        note "  running tools/delegate/install.sh ..."
+        bash "$REPO_ROOT/tools/delegate/install.sh"
         acted "installed delegation tools"
     fi
 else
