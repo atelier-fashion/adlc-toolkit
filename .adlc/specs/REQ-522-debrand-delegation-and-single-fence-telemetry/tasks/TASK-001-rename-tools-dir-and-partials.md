@@ -1,7 +1,7 @@
 ---
 id: TASK-001
 title: "Rename tools/kimi → tools/delegate and rewire path/gate partials"
-status: draft
+status: complete
 parent: REQ-522
 created: 2026-06-12
 updated: 2026-06-12

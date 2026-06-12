@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: "Single-fence-safe telemetry: skill-flag.sh KV store + flag-derived emit-step-telemetry"
-status: draft
+status: complete
 parent: REQ-522
 created: 2026-06-12
 updated: 2026-06-12

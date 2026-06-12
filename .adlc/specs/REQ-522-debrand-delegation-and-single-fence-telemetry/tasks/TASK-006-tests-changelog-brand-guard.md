@@ -1,7 +1,7 @@
 ---
 id: TASK-006
 title: "Rename/update delegation tests, add BR-1 brand-creep guard, CHANGELOG + context docs"
-status: draft
+status: complete
 parent: REQ-522
 created: 2026-06-12
 updated: 2026-06-12

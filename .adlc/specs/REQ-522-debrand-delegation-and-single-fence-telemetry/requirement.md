@@ -1,7 +1,7 @@
 ---
 id: REQ-522
 title: "De-brand the delegation surface (no Kimi naming) and make skill telemetry single-fence-safe"
-status: approved
+status: complete
 deployable: false
 created: 2026-06-12
 updated: 2026-06-12

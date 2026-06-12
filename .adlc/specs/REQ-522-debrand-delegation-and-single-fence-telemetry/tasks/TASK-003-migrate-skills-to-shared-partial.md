@@ -1,7 +1,7 @@
 ---
 id: TASK-003
 title: "Migrate spec/proceed/wrapup/analyze SKILL.md to shared telemetry partial + de-brand prose"
-status: draft
+status: complete
 parent: REQ-522
 created: 2026-06-12
 updated: 2026-06-12

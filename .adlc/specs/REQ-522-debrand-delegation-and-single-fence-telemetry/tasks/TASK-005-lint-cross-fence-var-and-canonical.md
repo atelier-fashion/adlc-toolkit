@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: "lint-skills: cross-fence-variable check + de-branded canonical anchors + fixtures"
-status: draft
+status: complete
 parent: REQ-522
 created: 2026-06-12
 updated: 2026-06-12

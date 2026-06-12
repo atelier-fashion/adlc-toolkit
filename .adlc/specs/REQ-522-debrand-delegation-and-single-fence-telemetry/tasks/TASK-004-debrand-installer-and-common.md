@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: "De-brand installer, remove CLI shims, migrate LaunchAgent, drop legacy non-key env reads"
-status: draft
+status: complete
 parent: REQ-522
 created: 2026-06-12
 updated: 2026-06-12
