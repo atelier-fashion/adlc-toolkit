@@ -155,6 +155,45 @@ contains "gh view normalizes MERGED" "state=MERGED" \
 PATH=$OLDPATH; export PATH
 unset ADLC_FORGE_PROVIDER_OVERRIDE
 
+# ===========================================================================
+# 8. ADO merge arg-translation (REQ-523 BR-9): gh-shaped flags -> az equivalents
+# ===========================================================================
+# A recording `az` shim asserts the exact argv. The caller passes the gh-shaped
+# `<ref> --squash --delete-branch`; the ADO branch must translate to
+# `--squash true` / `--delete-source-branch true` and never forward the bare
+# gh flags to `az`.
+AZSHIM="$SBX/azbin"; mkdir -p "$AZSHIM"
+cat > "$AZSHIM/az" <<'AZSHIM_EOF'
+#!/bin/sh
+echo "$*" >> "$AZ_RECORD"
+exit 0
+AZSHIM_EOF
+chmod +x "$AZSHIM/az"
+AZ_RECORD="$SBX/azrec.txt"; export AZ_RECORD; : > "$AZ_RECORD"
+OLDPATH2=$PATH; PATH="$AZSHIM:$PATH"; export PATH
+export ADLC_FORGE_PROVIDER_OVERRIDE=azure-devops
+out=$(adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); rc=$?
+AZREC=$(cat "$AZ_RECORD")
+check "ado merge rc 0" "0" "$rc"
+contains "ado merge normalizes MERGED" "state=MERGED" "$out"
+contains "ado merge passes the ref as --id 9" "--id 9" "$AZREC"
+contains "ado merge sets --status completed" "--status completed" "$AZREC"
+contains "ado merge translates --squash -> --squash true" "--squash true" "$AZREC"
+contains "ado merge translates --delete-branch -> --delete-source-branch true" "--delete-source-branch true" "$AZREC"
+# Negative: no gh-shaped flag leaks to az.
+case "$AZREC" in
+  *"--delete-branch"*) fail "ado merge must NOT forward bare --delete-branch to az (got: $AZREC)" ;;
+  *) pass "ado merge forwards no bare --delete-branch to az" ;;
+esac
+# `--squash true` is fine; assert there is no DANGLING bare --squash (i.e. --squash
+# immediately followed by another flag or end-of-line rather than `true`).
+case "$AZREC" in
+  *"--squash true"*) pass "ado merge --squash carries its true value" ;;
+  *) fail "ado merge --squash missing its value (got: $AZREC)" ;;
+esac
+PATH=$OLDPATH2; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE AZ_RECORD
+
 rm -rf "$SBX"
 
 echo ""
