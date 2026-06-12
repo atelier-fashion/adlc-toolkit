@@ -1,7 +1,7 @@
 ---
 id: TASK-006
 title: "Migrate PR-lifecycle call sites in skills + sprint workflow to the adapter (BR-1, BR-3)"
-status: draft
+status: complete
 parent: REQ-520
 created: 2026-06-11
 updated: 2026-06-11

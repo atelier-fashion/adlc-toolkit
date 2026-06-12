@@ -1,7 +1,7 @@
 ---
 id: TASK-007
 title: "Document the forge adapter — context, conventions, config schema, README"
-status: draft
+status: complete
 parent: REQ-520
 created: 2026-06-11
 updated: 2026-06-11

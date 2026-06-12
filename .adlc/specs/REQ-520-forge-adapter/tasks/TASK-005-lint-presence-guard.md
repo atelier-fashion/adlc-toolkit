@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: "lint-skills presence guard — reject new direct gh pr in skills (BR-1)"
-status: draft
+status: complete
 parent: REQ-520
 created: 2026-06-11
 updated: 2026-06-11

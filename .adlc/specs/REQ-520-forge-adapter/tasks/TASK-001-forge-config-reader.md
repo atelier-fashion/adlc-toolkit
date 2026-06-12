@@ -1,7 +1,7 @@
 ---
 id: TASK-001
 title: "Forge config reader + provider resolution (tools/adlc/forge_config.py)"
-status: draft
+status: complete
 parent: REQ-520
 created: 2026-06-11
 updated: 2026-06-11

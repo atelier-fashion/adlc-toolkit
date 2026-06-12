@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: "adlc doctor forge check — extends REGISTRY, supersedes gh-auth (BR-7)"
-status: draft
+status: complete
 parent: REQ-520
 created: 2026-06-11
 updated: 2026-06-11
