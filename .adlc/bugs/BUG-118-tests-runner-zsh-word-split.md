@@ -1,7 +1,7 @@
 ---
 id: BUG-118
 title: "partials/tests/run.sh breaks under zsh: TESTS string not word-split, every harness fails"
-status: open
+status: resolved
 severity: high
 created: 2026-06-12
 updated: 2026-06-12
@@ -79,3 +79,8 @@ propagates exit 1 through the re-exec layer.
 - `partials/tests/run.sh` — harness list moved to positional params (no
   word-splitting); outer pass re-execs run.sh under bash and zsh so the
   runner's own zsh invocation is exercised on every run
+
+## Deployment
+
+- Merged via PR #97 (squash) on 2026-06-12. No deploy targets — adlc-toolkit
+  is a symlink-install skills repo (no Cloud Run / iOS surfaces).
