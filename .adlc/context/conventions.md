@@ -141,7 +141,7 @@ Skills that span multiple phases (`/proceed`) write a `pipeline-state.json` next
 ## What NOT to do
 
 - **Don't create new skill directories casually**: each new skill is a commitment to maintain. Prefer extending an existing skill unless the new responsibility is genuinely orthogonal.
-- **Don't bypass ethos**: the five principles (especially #4 Verify, Don't Trust and #5 Process Is Not Optional) exist because shortcuts silently fail. If you're tempted to skip a validation gate or add a `--no-verify` flag, surface the tension to the user instead.
+- **Don't bypass ethos**: the ETHOS principles (especially #4 Verify, Don't Trust and #5 Process Is Not Optional) exist because shortcuts silently fail. If you're tempted to skip a validation gate or add a `--no-verify` flag, surface the tension to the user instead.
 - **Don't duplicate context loading logic**: if the same bash macro appears in three or more skills, extract it to `partials/<name>.sh` and source it from each call site (see the Ethos injection pattern above).
 - **Don't hardcode project-specific paths**: skills must work for any consumer project, not just atelier-fashion.
 - **Don't edit `templates/` without considering downstream**: consumer projects that ran `/init` got a copy of the templates. Template changes propagate via `/template-drift` detection, not auto-update.

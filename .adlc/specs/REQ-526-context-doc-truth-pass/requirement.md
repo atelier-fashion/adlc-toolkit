@@ -1,7 +1,7 @@
 ---
 id: REQ-526
 title: "Context-doc truth pass: seven principles, /map disposition, and stale-claim sweep"
-status: draft
+status: complete
 deployable: false
 created: 2026-06-12
 updated: 2026-06-12
