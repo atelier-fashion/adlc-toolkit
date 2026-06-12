@@ -274,7 +274,9 @@ def check_counters(profile: Profile):
                 with open(path, encoding="utf-8") as fh:
                     raw = fh.read().strip()
             except OSError as exc:
-                problems.append(f"{name} unreadable ({exc})")
+                # Use strerror, not str(exc): OSError.__str__ embeds the absolute
+                # filename, which leaks into the report/CI logs (LESSON-021).
+                problems.append(f"{name} unreadable ({exc.strerror or 'I/O error'})")
                 fixes.append(f"ls -l '{path}'")
                 continue
             if not raw.isdigit():
