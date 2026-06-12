@@ -17,17 +17,20 @@ tag pointing at the last commit of its release; pure-bookkeeping commits (ID cou
 "mark complete") are folded into their feature's release. `#N` references are GitHub
 PRs (`atelier-fashion/adlc-toolkit`).
 
-**The four epochs:**
+**The five epochs:**
 
 1. **1.x — SDLC toolkit** — the original SDLC skill pipeline.
 2. **2.x — ADLC** — rebrand SDLC → ADLC; tag-based retrieval and cross-repo support.
 3. **3.x — Portable toolkit** — genericized for external use via a config seam + presets.
+5. **5.x — Works anywhere** — provider-agnostic delegation, one-command install +
+   `adlc doctor`, configurable agent tiers, collision-safe multi-user ids, and the
+   GitHub/Azure DevOps forge adapter: the toolkit stops assuming its author's machine.
 4. **4.x — Kimi delegation** — Kimi K2.5 token-offload tooling, delegation telemetry,
    and the Dynamic-Workflows / multi-human-coordination era.
 
 ---
 
-## [4.10.0] — 2026-06-12
+## [5.0.0] — 2026-06-12
 
 The **portability drop** — six REQs making the toolkit configurable for adopters
 beyond the original machine, model, and forge:
