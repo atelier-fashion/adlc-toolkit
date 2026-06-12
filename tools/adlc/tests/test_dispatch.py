@@ -49,6 +49,6 @@ def test_doctor_subcommand_dispatches(monkeypatch):
 
     import doctor
     monkeypatch.setattr(doctor, "main", fake_main)
-    rc = adlc.main(["doctor", "--checks", "gh-auth"])
+    rc = adlc.main(["doctor", "--checks", "forge"])
     assert rc == 0
-    assert called["argv"] == ["--checks", "gh-auth"]
+    assert called["argv"] == ["--checks", "forge"]

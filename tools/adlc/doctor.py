@@ -200,7 +200,7 @@ def main(argv=None) -> int:
         "--checks",
         metavar="id1,id2",
         help="run only the named checks (comma-separated). The skill pre-flight "
-             "contract: e.g. --checks gh-auth,delegate-gate",
+             "contract: e.g. --checks forge,delegate-gate",
     )
     args = parser.parse_args(argv)
 

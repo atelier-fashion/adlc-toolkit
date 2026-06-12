@@ -33,6 +33,12 @@ behavior. Examples:
 
 - `kimi-gate.sh` — defines `adlc_kimi_gate_check` returning 0/1/2. Companion
   `kimi-gate.md` documents the return-code registry.
+- `forge.sh` — the forge-neutral PR-operation adapter (REQ-520). Defines
+  `adlc_forge_pr_{create,ready,edit,view,list,merge,comment}` plus
+  `adlc_forge_provider` (GitHub/Azure DevOps, `auto` origin-URL detection). The
+  single home of `gh`/`az` PR commands; skills never call `gh pr` ops directly
+  (lint-enforced). Companion `forge.md` documents the op contract, the normalized
+  result/error vocabulary, and the ADO REST-via-PAT fallback.
 - `emit-step-telemetry.sh` — defines `_adlc_emit_step_telemetry` (the
   `/analyze` per-step telemetry resolve-and-emit). Companion
   `emit-step-telemetry.md` documents the caller-env contract and the

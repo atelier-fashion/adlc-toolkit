@@ -145,6 +145,9 @@ def check_gh_present(profile: Profile):
 
 
 def check_gh_auth(profile: Profile):
+    # Retained as a helper reused by check_forge on the github branch (REQ-520
+    # ADR-4). It is NO LONGER in REGISTRY — the `forge` check is the single
+    # forge-auth mechanism and folds this probe in for provider github.
     if not shutil.which("gh"):
         return Result.SKIP, "gh not installed (see gh-present)", ""
     status = subprocess.run(
@@ -153,6 +156,144 @@ def check_gh_auth(profile: Profile):
     if status.returncode == 0:
         return Result.PASS, "gh is authenticated", ""
     return Result.FAIL, "gh is not authenticated", "gh auth login"
+
+
+# --- forge adapter (REQ-520 BR-7) — supersedes the standalone gh-auth check --
+
+def _forge_provider_verdict(profile: Profile):
+    """Resolve the forge provider by sourcing partials/forge.sh under bash.
+
+    Returns (provider, detail) on success, or (None, reason) when resolution
+    failed. ``no-remote`` is a distinguished reason -> the check SKIPs (BR-7).
+    Mirrors ``_gate_verdict``'s source-a-partial-under-bash pattern.
+    """
+    partial = _partial_path(profile, "forge.sh")
+    if not os.path.isfile(partial):
+        return None, "forge-partial-missing"
+    # Resolve against the current working dir (the repo doctor was invoked in),
+    # not the toolkit root — provider is a property of the consumer repo's remote.
+    # No temp-file redirect: subprocess capture_output collects stderr into
+    # proc.stderr, so there is no predictable-path junk file / TOCTOU foothold
+    # (LESSON-008). The function's fail-loud message lands in proc.stderr if needed.
+    script = (
+        f". '{partial}'; "
+        "adlc_forge_provider \"$PWD\"; rc=$?; "
+        'printf "%s\\n" "$rc"'
+    )
+    proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    out = proc.stdout.splitlines()
+    # The script prints the provider (from adlc_forge_provider) then the rc line.
+    # Parse defensively: provider is the recognized non-rc line.
+    provider = ""
+    for line in out:
+        s = line.strip()
+        if s in ("github", "azure-devops"):
+            provider = s
+    if provider:
+        return provider, "resolved"
+    # No remote at all is the documented SKIP case.
+    if not _has_remote(profile):
+        return None, "no-remote"
+    return None, "unresolved"
+
+
+def _has_remote(profile: Profile) -> bool:
+    out = subprocess.run(
+        ["git", "remote"], capture_output=True, text=True,
+    )
+    return out.returncode == 0 and bool(out.stdout.strip())
+
+
+def check_forge(profile: Profile):
+    """Resolved provider, backend CLI present, auth valid, read-only probe (BR-7).
+
+    SKIP-with-reason when the repo has no remote. Supersedes the standalone
+    gh-auth check: for provider github it performs the gh auth probe; for
+    azure-devops it checks `az`/PAT.
+    """
+    if not _has_remote(profile):
+        return Result.SKIP, "no git remote — forge provider not applicable", ""
+
+    provider, reason = _forge_provider_verdict(profile)
+    if provider is None:
+        if reason == "no-remote":
+            return Result.SKIP, "no git remote — forge provider not applicable", ""
+        if reason == "forge-partial-missing":
+            return (
+                Result.FAIL,
+                "partials/forge.sh not found — forge adapter is not installed",
+                "re-run /init to vendor partials, or check the toolkit checkout",
+            )
+        # Unrecognized host / unresolved: fail loud (BR-2) with config remediation.
+        return (
+            Result.FAIL,
+            "could not resolve a forge provider (unrecognized origin host?)",
+            "set forge.provider in .adlc/config.yml to one of: github, azure-devops",
+        )
+
+    if provider == "github":
+        if not shutil.which("gh"):
+            install = ("brew install gh" if profile.os == "Darwin"
+                       else "see https://github.com/cli/cli#installation")
+            return Result.FAIL, "forge=github but gh (GitHub CLI) is not on PATH", install
+        # Fold in the gh auth probe (the superseded gh-auth check).
+        auth = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+        if auth.returncode != 0:
+            return Result.FAIL, "forge=github: gh is not authenticated", "gh auth login"
+        return Result.PASS, "forge=github: gh present and authenticated", ""
+
+    if provider == "azure-devops":
+        if not shutil.which("az"):
+            return (
+                Result.FAIL,
+                "forge=azure-devops but az (Azure CLI) is not on PATH",
+                "brew install azure-cli && az extension add --name azure-devops"
+                if profile.os == "Darwin"
+                else "install the Azure CLI + azure-devops extension "
+                     "(https://learn.microsoft.com/cli/azure/install-azure-cli)",
+            )
+        # Either an az login session OR a PAT env var named in config satisfies auth.
+        acct = subprocess.run(["az", "account", "show"], capture_output=True, text=True)
+        pat_var, pat_set = _forge_pat_status(profile)
+        if acct.returncode == 0 or pat_set:
+            how = "az login session" if acct.returncode == 0 else f"PAT env var {pat_var}"
+            return Result.PASS, f"forge=azure-devops: authenticated via {how}", ""
+        remediation = "az login"
+        if pat_var:
+            remediation = f"az login   # or set the PAT env var {pat_var}"
+        return (
+            Result.FAIL,
+            "forge=azure-devops: no az login session and PAT env var not set",
+            remediation,
+        )
+
+    return Result.FAIL, f"unknown forge provider '{provider}'", \
+        "set forge.provider to github or azure-devops in .adlc/config.yml"
+
+
+def _forge_pat_status(profile: Profile):
+    """Return (pat_var_name, is_set). Reads forge.auth from config (a var NAME).
+
+    Reuses tools/adlc/forge_config.parse_forge_config via subprocess probe so
+    checks keeps no hard import of the forge module at registry-build time.
+    """
+    reader = os.path.join(profile.repo_root, "tools", "adlc", "forge_config.py")
+    if not os.path.isfile(reader):
+        return "", False
+    cfg_proj = os.path.join(os.getcwd(), ".adlc", "config.yml")
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import forge_config as fc; "
+        "d = fc.parse_forge_config(sys.argv[2]); print(d.get('auth', ''))"
+    )
+    out = subprocess.run(
+        ["python3", "-c", code, os.path.dirname(reader), cfg_proj],
+        capture_output=True, text=True,
+    )
+    auth = out.stdout.strip() if out.returncode == 0 else ""
+    # 'gh'/'az' are CLI-login sources, not PAT var names.
+    if not auth or auth in ("gh", "az"):
+        return "", False
+    return auth, bool(os.environ.get(auth))
 
 
 # --- git identity ----------------------------------------------------------
@@ -346,7 +487,9 @@ REGISTRY = [
     Check("toolkit-clean", check_toolkit_clean),
     Check("path-shims", check_path_shims),
     Check("gh-present", check_gh_present),
-    Check("gh-auth", check_gh_auth),
+    # `forge` supersedes the standalone gh-auth check (REQ-520 ADR-4): it folds the
+    # gh auth probe in for provider github and handles azure-devops auth too.
+    Check("forge", check_forge),
     Check("git-identity", check_git_identity),
     Check("delegate-gate", check_delegate_gate),
     Check("counters", check_counters),
