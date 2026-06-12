@@ -1,7 +1,7 @@
 ---
 id: REQ-523
 title: "ID allocation remote-derivation integrity: independent sources, working degradation signal, forge-aware artifact scan"
-status: draft
+status: complete
 deployable: false
 created: 2026-06-12
 updated: 2026-06-12
