@@ -4,7 +4,7 @@
 
 ```
 adlc-toolkit/
-├── ETHOS.md                    # 5 principles — injected into every skill
+├── ETHOS.md                    # the ETHOS principles — injected into every skill
 ├── README.md                   # Install + skill catalog
 ├── <skill>/SKILL.md            # One directory per skill (spec/, architect/, proceed/, etc.)
 ├── agents/<agent>.md           # Specialized subagent definitions
@@ -22,7 +22,7 @@ Every skill is a single markdown file at `<skill-name>/SKILL.md` with this shape
 
 1. **Frontmatter**: `name`, `description`, optional `argument-hint`
 2. **Title + one-line framing** — what the skill does
-3. **Ethos injection**: `!`cat .adlc/ETHOS.md ...` bash macro that inlines the five principles at invocation time (consumer-project path preferred, toolkit-root path as fallback)
+3. **Ethos injection**: `!`cat .adlc/ETHOS.md ...` bash macro that inlines the ETHOS principles at invocation time (consumer-project path preferred, toolkit-root path as fallback)
 4. **Context loading**: explicit `!bash` commands to read project-overview, architecture, conventions, relevant knowledge
 5. **Input**: how the skill reads `$ARGUMENTS`
 6. **Prerequisites**: blocking checks (e.g., "verify `.adlc/context/project-overview.md` exists")

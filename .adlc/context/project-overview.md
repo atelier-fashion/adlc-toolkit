@@ -22,7 +22,7 @@ Symlink-based live install. One canonical git clone on disk, symlinked at `~/.cl
 | Skills | `<skill-name>/SKILL.md` | Markdown files invoked by Claude Code as slash commands |
 | Agents | `agents/<agent-name>.md` | Specialized subagent definitions with tool restrictions and model selection |
 | Templates | `templates/*.md` | Canonical templates for requirements, bugs, lessons, tasks, assumptions |
-| Ethos | `ETHOS.md` | Five principles injected into every skill — the non-negotiable constitution |
+| Ethos | `ETHOS.md` | The ETHOS principles injected into every skill — the non-negotiable constitution |
 | Docs | `README.md` | Install instructions and skill catalog |
 
 ## Relationship to consumer projects
