@@ -8,7 +8,7 @@ Every skill and agent is a markdown file. No TypeScript, no Python, no package.j
 - **No test runner**: "tests" are dogfooding — invoke the skill on a real REQ and see if it produces the expected artifacts
 - **Linting is minimal**: markdown formatting, frontmatter validity, and bash syntax in `!`...`` macros. Nothing else.
 
-**Exception — `tools/`:** the `tools/` directory may contain real executable code (e.g. `tools/kimi/`, a set of Python delegation CLIs with its own `install.sh`). It is exempt from the markdown-only rule and from the symlink-install model — those tools are installed by running their `install.sh`, not via the skills symlink. Each `tools/<name>/` subdirectory carries its own README.
+**Exception — `tools/`:** the `tools/` directory may contain real executable code (e.g. `tools/delegate/`, a set of Python delegation CLIs with its own `install.sh`). It is exempt from the markdown-only rule and from the symlink-install model — those tools are installed by running their `install.sh`, not via the skills symlink. Each `tools/<name>/` subdirectory carries its own README.
 
 ## File and directory naming
 
@@ -40,31 +40,34 @@ The partial itself emits the canonical fallback chain (consumer-project ETHOS.md
 ## Delegation pattern (provider-agnostic)
 
 Skills that delegate bulk reads or drafting to the configured delegate (`adlc-read` /
-`adlc-write`; legacy names `ask-kimi` / `kimi-write` still work as shims) MUST source
-the shared gate predicate rather than inlining `command -v adlc-read >/dev/null 2>&1 && …`.
-The canonical predicate lives in `partials/delegate-gate.sh`; the legacy
-`partials/kimi-gate.sh` is a back-compat alias defining `adlc_kimi_gate_check()` with the
-IDENTICAL 0/1/2 contract, so the established source-line keeps working unchanged
-(REQ-515 ADR-5):
+`adlc-write`) MUST source the shared gate predicate rather than inlining
+`command -v adlc-read >/dev/null 2>&1 && …`. The canonical predicate lives in
+`partials/delegate-gate.sh` and defines `adlc_delegate_gate_check()` with a 0/1/2 contract
+(REQ-522 retired the legacy `kimi-gate.sh` back-compat alias):
 
 ```sh
-. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
-adlc_kimi_gate_check; gate=$?
+. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+adlc_delegate_gate_check; gate=$?
 case $gate in
   0) ;;  # delegated
-  1) ;;  # disabled (ADLC_DISABLE_DELEGATE/ADLC_DISABLE_KIMI=1, or not opted-in — BR-11)
+  1) ;;  # disabled (ADLC_DISABLE_DELEGATE=1, or not opted-in — BR-11)
   2) ;;  # unavailable (adlc-read not on PATH)
 esac
 ```
 
-New skills MAY source `delegate-gate.sh` and call `adlc_delegate_gate_check` directly
-(reason exported as `ADLC_DELEGATE_GATE_REASON`); existing skills keep the `kimi-gate.sh`
-line. Delegation is **opt-in** (off by default on fresh installs) — enabled by
-`delegate.enabled: true` in `~/.claude/adlc/config.yml`, `ADLC_DELEGATE_ENABLED=1`, or an
-already-set legacy `KIMI_API_KEY`/`MOONSHOT_API_KEY` (REQ-515 BR-11).
+The reason is exported as `ADLC_DELEGATE_GATE_REASON`. Delegation is **opt-in** (off by
+default on fresh installs) — enabled by `delegate.enabled: true` in
+`~/.claude/adlc/config.yml`, `ADLC_DELEGATE_ENABLED=1`, or an already-set legacy
+`KIMI_API_KEY`/`MOONSHOT_API_KEY` (key continuity, data — REQ-515 BR-11).
 
-See `partials/kimi-gate.md` for the full protocol — return-code contract, the canonical
-stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4
+Per-step telemetry state crosses the create → gate → invoke → resolve fenced blocks via
+the **flag-file sidecar** (`partials/delegate-tools-path.sh`'s `skill-flag.sh mark`/`read`),
+never via shell variables, because fenced blocks do not share shell state (REQ-522 BR-4).
+The shared resolver `_adlc_emit_step_telemetry <skill> <step>` in
+`partials/emit-step-telemetry.sh` reads those marks back and emits one telemetry record.
+
+See `partials/delegate-gate.md` for the full protocol — return-code contract, the
+canonical stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4
 one-line-per-invocation rule. Per-skill stderr messages and fallback bodies stay inline at
 the call site; only the predicate is shared.
 
@@ -119,7 +122,7 @@ Every skill that depends on the `.adlc/` scaffold must have a `## Prerequisites`
 - Quote file paths with spaces: `"$path"`
 - Avoid `cd` — prefer absolute paths so commands work from any working directory
 
-**Fenced blocks do not share shell state across steps.** Each ```sh fenced block in a SKILL.md may be an independent shell invocation — shell functions and non-exported variables defined in one fenced block are NOT visible in another (the Claude Code Bash-tool contract: "the working directory persists between commands, but shell state does not"). Therefore a shared shell **function** MUST be sourced from a `partials/*.sh` at *each* call site, in the **same fenced block as the invocation**, and MUST NEVER be defined in one fenced block and invoked from another (the silent-`command not found` telemetry-loss class — REQ-436, REQ-424). The canonical pattern is `partials/kimi-gate.sh` and `partials/emit-step-telemetry.sh`: a function-exporting partial sourced with the two-level fallback immediately before it is called. This is enforced structurally, not by prose/honor-system (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but invoked from a different fenced block in the same SKILL.md.
+**Fenced blocks do not share shell state across steps.** Each ```sh fenced block in a SKILL.md may be an independent shell invocation — shell functions and non-exported variables defined in one fenced block are NOT visible in another (the Claude Code Bash-tool contract: "the working directory persists between commands, but shell state does not"). Therefore a shared shell **function** MUST be sourced from a `partials/*.sh` at *each* call site, in the **same fenced block as the invocation**, and MUST NEVER be defined in one fenced block and invoked from another (the silent-`command not found` telemetry-loss class — REQ-436, REQ-424). The canonical pattern is `partials/delegate-gate.sh` and `partials/emit-step-telemetry.sh`: a function-exporting partial sourced with the two-level fallback immediately before it is called. This is enforced structurally, not by prose/honor-system (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but invoked from a different fenced block in the same SKILL.md.
 
 ## Agent dispatch patterns
 

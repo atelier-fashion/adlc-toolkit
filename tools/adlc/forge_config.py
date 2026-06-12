@@ -2,7 +2,7 @@
 """Forge config reader + provider resolution (REQ-520 BR-2/BR-6).
 
 A thin reader for the ``forge:`` block of the shared ADLC config, mirroring
-``tools/kimi/_common.parse_delegate_config`` (flat ``key: value``, NO PyYAML —
+``tools/delegate/_common.parse_delegate_config`` (flat ``key: value``, NO PyYAML —
 REQ-515 ADR-3). Resolves the active forge provider with precedence:
 
     per-project .adlc/config.yml  >  machine ~/.claude/adlc/config.yml  >  auto
@@ -21,7 +21,7 @@ A key-shaped ``auth`` value is refused via :func:`looks_like_key` (ported from
 ``_common._looks_like_key``) — never a key value in config.
 
 Pure standard library; importable without the delegation venv. Deliberately keeps
-NO import dependency on the kimi module (adlc must work on a skills-only checkout),
+NO import dependency on the delegate module (adlc must work on a skills-only checkout),
 so the two small helpers are ported rather than imported — the same boundary
 discipline ``checks._config_enabled`` uses via a subprocess probe.
 """

@@ -1,28 +1,29 @@
-# Fixture: post-REQ-436 analyze shape — helper body moved into a partial.
+# Fixture: post-REQ-522 skill shape — emit-telemetry literal lives in a partial.
 
-This SKILL.md mentions `ADLC_DISABLE_KIMI`, so `check_canonical` fires. It
-keeps canonical literals **L1 / L4 / L5 inline** (the before-gate +
-gate-source lines REQ-436 ADR-2 left byte-untouched) but **deliberately omits
-L2 / L3** — the `duration_ms` arithmetic and the `emit-telemetry.sh`
-invocation moved into `partials/emit-step-telemetry.sh` (REQ-436 ADR-1/ADR-4).
+This SKILL.md mentions `ADLC_DISABLE_DELEGATE`, so `check_canonical` fires. It
+keeps the gate-source, tools-path-source, start_s-mark, and resolver-call
+literals **inline**, but **deliberately omits** the `"$DELEGATE_TOOLS"/emit-telemetry.sh`
+literal — that one lives in `partials/emit-step-telemetry.sh` (REQ-436 ADR-1/ADR-4,
+preserved by REQ-522's flag-file restructure).
 
-With a sibling telemetry partial supplying L2/L3 → **zero** `canonical-helper`
-findings (post-REQ-436 shape is clean). Without that partial → exactly the
-**two** missing-canonical findings for L2 and L3 (proves the partial is what
-satisfies them — ADR-4 is genuinely load-bearing, not vacuous).
+With a sibling telemetry partial supplying that literal → **zero** `canonical-helper`
+findings (post-restructure shape is clean). Without that partial → exactly **one**
+missing-canonical finding for the emit-telemetry literal (proves the partial is what
+satisfies it — ADR-4 is genuinely load-bearing, not vacuous).
 
 ```sh
-. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
-. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
-adlc_kimi_gate_check; gate=$?
+. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)
+"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"
+adlc_delegate_gate_check; gate=$?
 case $gate in
   0) ;;  # delegated
-  1) ;;  # disabled via ADLC_DISABLE_KIMI=1
+  1) ;;  # disabled via ADLC_DISABLE_DELEGATE=1
   2) ;;  # unavailable
 esac
-start_s=$(date -u +%s)
 . .adlc/partials/emit-step-telemetry.sh 2>/dev/null || . ~/.claude/skills/partials/emit-step-telemetry.sh
-_adlc_emit_step_telemetry Step-1.5
+_adlc_emit_step_telemetry some-skill Some-Step
 ```
 
-L2/L3 intentionally absent from this text — they live in the partial.
+The emit-telemetry literal is intentionally absent from this text — it lives in the partial.

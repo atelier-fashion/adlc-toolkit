@@ -1,4 +1,4 @@
-<!-- kimi-delegation:start -->
+<!-- delegate-routing:start -->
 ## Delegation Tools (token saving)
 
 You have CLIs for offloading token-heavy I/O to a configured *delegate* model —
@@ -31,17 +31,14 @@ Then review the generated file and edit only what needs fixing. Add `--force`
 to overwrite an existing target. Pass `--no-warn` (or export
 `ADLC_DELEGATE_NO_WARN=1`) to suppress the privacy notice.
 
-(The legacy `ask-kimi` / `kimi-write` names still work as shims for the two
-commands above.)
-
 ### Configuration
 
 The delegate provider is three values: a base URL, a model name, and the *name*
 of an env var holding the API key. Resolution precedence (highest first): CLI
 flags (`--model`, `--base-url`) > `ADLC_DELEGATE_*` env vars > config file
 (`~/.claude/adlc/config.yml`, override with `ADLC_CONFIG`) > legacy
-`KIMI_MODEL`/`MOONSHOT_API_KEY` env > shipped defaults. The config file stores
-`api_key_env` (a variable NAME), never a key value.
+`MOONSHOT_API_KEY`/`KIMI_API_KEY` key-env continuity > shipped defaults. The
+config file stores `api_key_env` (a variable NAME), never a key value.
 
 ### Privacy and data governance
 
@@ -50,9 +47,8 @@ flags (`--model`, `--base-url`) > `ADLC_DELEGATE_*` env vars > config file
   responsibility — confirm your company's data-handling policy before enabling.
 - Delegation is **disabled by default**. It is enabled only by `enabled: true`
   in the config file, `ADLC_DELEGATE_ENABLED=1` in the environment, or an
-  already-set legacy `KIMI_API_KEY`/`MOONSHOT_API_KEY` (continuity for existing
-  installs). `ADLC_DISABLE_DELEGATE=1` (or legacy `ADLC_DISABLE_KIMI=1`) forces
-  it off.
+  already-set legacy `KIMI_API_KEY`/`MOONSHOT_API_KEY` (key continuity for
+  existing installs). `ADLC_DISABLE_DELEGATE=1` forces it off.
 - Only the **basename** of each path is embedded in the corpus block — full
   local paths stay on your machine.
 - Every run prints a one-line `delegate: ...` notice on stderr; silence it with
@@ -82,4 +78,4 @@ Do **not** route to the delegate for:
 - Anything that requires exact line numbers for editing.
 
 **Claude = thinking. The delegate = I/O.**
-<!-- kimi-delegation:end -->
+<!-- delegate-routing:end -->

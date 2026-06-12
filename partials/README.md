@@ -31,8 +31,8 @@ equivalent of `source`) into the calling skill's bash block. The function is
 then called and its return code or exported variables drive the skill's
 behavior. Examples:
 
-- `kimi-gate.sh` — defines `adlc_kimi_gate_check` returning 0/1/2. Companion
-  `kimi-gate.md` documents the return-code registry.
+- `delegate-gate.sh` — defines `adlc_delegate_gate_check` returning 0/1/2.
+  Companion `delegate-gate.md` documents the return-code registry.
 - `forge.sh` — the forge-neutral PR-operation adapter (REQ-520). Defines
   `adlc_forge_pr_{create,ready,edit,view,list,merge,comment}` plus
   `adlc_forge_provider` (GitHub/Azure DevOps, `auto` origin-URL detection). The
@@ -45,10 +45,10 @@ behavior. Examples:
   call-site protocol: the source line and the `_adlc_emit_step_telemetry`
   call MUST live in the **same fenced block** (SKILL.md fenced blocks do not
   share shell state across steps), which is non-obvious enough to need the
-  `.md` (the `kimi-gate.md` precedent). It **self-sources**
-  `kimi-tools-path.sh`, so call sites do NOT separately source the
-  `$KIMI_TOOLS` resolver — sourcing this one partial both resolves
-  `$KIMI_TOOLS` and defines the function.
+  `.md` (the `delegate-gate.md` precedent). It **self-sources**
+  `delegate-tools-path.sh`, so call sites do NOT separately source the
+  `$DELEGATE_TOOLS` resolver — sourcing this one partial both resolves
+  `$DELEGATE_TOOLS` and defines the function.
 - `id-alloc.sh` — collision-safe id allocation with the **remote** as source of
   truth (REQ-518). Defines `adlc_alloc_id <kind>` (prints `max(local,remote)+1`
   and fast-forwards the local counter — which is a cache, not an authority),
@@ -85,8 +85,8 @@ contract that callers must honor (a return-code registry, an exported-variable
 schema, an emit-format spec, or any "must do this when calling me" rule). Pure
 text-emitting partials like `ethos-include.sh` don't need one — `cat ETHOS.md`
 is its own contract. Function-exporting partials almost always need one,
-because the call-site protocol is non-obvious. `kimi-gate.md` is the canonical
-example.
+because the call-site protocol is non-obvious. `delegate-gate.md` is the
+canonical example.
 
 ## Adding a new partial
 

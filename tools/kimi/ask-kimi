@@ -1,6 +1,0 @@
-#!/bin/sh
-# Back-compat shim (REQ-515 BR-1): `ask-kimi` is the legacy name for `adlc-read`.
-# Forwards all arguments and the exit code verbatim. New code should call
-# `adlc-read` directly; this shim preserves existing muscle memory and any
-# external scripts that still invoke `ask-kimi`.
-exec "$(dirname "$0")/adlc-read" "$@"

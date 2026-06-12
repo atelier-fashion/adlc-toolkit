@@ -50,7 +50,7 @@ Deterministic Dynamic-Workflow scripts + the JSON-Schema literals they validate 
 Standalone command-line utilities (not skills). See:
 
 - [`tools/adlc/`](tools/adlc/README.md) — the `adlc` umbrella CLI. Its first subcommand, `adlc doctor`, is a read-only health check that diagnoses every install dependency and prints a copy-pasteable fix for each failure. Installed by the root [`install.sh`](#setup).
-- [`tools/kimi/`](tools/kimi/README.md) — provider-agnostic delegation CLIs (`adlc-read`, `adlc-write`, `extract-chat`; legacy `ask-kimi`/`kimi-write` shims) for offloading token-heavy I/O. **Off by default** — opt in via `./install.sh --with-delegation`.
+- [`tools/delegate/`](tools/delegate/README.md) — provider-agnostic delegation CLIs (`adlc-read`, `adlc-write`, `extract-chat`) for offloading token-heavy I/O. **Off by default** — opt in via `./install.sh --with-delegation`.
 
 ## How it works
 
@@ -142,7 +142,7 @@ readlink ~/.claude/skills            # → absolute path to your adlc-toolkit cl
 ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
 ```
 
-Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably. Delegation (the `tools/kimi/` CLIs) is a separate opt-in — `./install.sh --with-delegation` or run `tools/kimi/install.sh` directly.
+Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably. Delegation (the `tools/delegate/` CLIs) is a separate opt-in — `./install.sh --with-delegation` or run `tools/delegate/install.sh` directly.
 
 ## Workflow
 

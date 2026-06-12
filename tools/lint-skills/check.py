@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""SKILL.md corruption linter — seven per-file checks + two per-root checks
-(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525).
+"""SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
+(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522).
 
 Run from the repo root:
 
@@ -19,18 +19,19 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
 
 1. ``check_sentinels``   — exact forbidden substrings from ``sentinels.txt``.
 2. ``check_balance``     — ``$(``/``)`` and ``$((``/``))`` imbalance per fence.
-3. ``check_canonical``   — the Kimi-delegation canonical literals must be
-   present whenever a SKILL.md mentions ``ADLC_DISABLE_KIMI``. **Canonical
+3. ``check_canonical``   — the delegation canonical literals must be
+   present whenever a SKILL.md mentions ``ADLC_DISABLE_DELEGATE``. **Canonical
    follows the indirection (REQ-436 ADR-4):** a literal is satisfied if it is
    in the SKILL.md text *or* in the text of a sourced telemetry partial
    resolved under the scan root (``<root>/partials/*.sh`` then
    ``<root>/.adlc/partials/*.sh``). REQ-436 relocated the
-   ``_adlc_emit_step_telemetry`` helper body — and with it canonical literals
-   L2/L3 — out of ``analyze/SKILL.md`` into ``partials/emit-step-telemetry.sh``;
-   a literal-presence guard rots when the thing it guards moves behind
-   indirection (LESSON-019 #1), so the guard is generalized in the same change
-   rather than hard-coding the one partial. Substring match only — no shell
-   parsing (LESSON-016: keep the linter deliberately simple).
+   ``_adlc_emit_step_telemetry`` helper body out of ``analyze/SKILL.md`` into
+   ``partials/emit-step-telemetry.sh``; REQ-522 restructured the per-step state
+   to be flag-file-derived (so the canonical literals track the
+   ``mark "$flag" start_s`` / resolver-call / emit-exec shape). A
+   literal-presence guard rots when the thing it guards moves behind indirection
+   (LESSON-019 #1), so the guard is generalized rather than hard-coding the one
+   partial. Substring match only — no shell parsing (LESSON-016).
 4. ``check_posix_fence`` — ``local`` declarations inside a ``sh``/``shell``
    fence. **``bash`` fences are exempt by design (REQ-436 ADR-6):** many
    ``bash`` builds support ``local``; conventions.md's POSIX-only mandate
@@ -76,26 +77,33 @@ SENTINELS_FILE = SCRIPT_DIR / "sentinels.txt"
 
 SKIP_DIR_PARTS = {".git", ".worktrees", "node_modules"}
 
-# REQ-515 BR-4 / ADR-9: the gate was generalized from "kimi" to "delegate" with
-# back-compat aliases. The canonical check fires when EITHER disable anchor
-# appears, and each logical canonical literal is satisfied by ANY of its
-# acceptable spellings (legacy kimi-* OR new delegate-*). Both the wrapper and
-# the canonical spelling are valid — a skill on either keeps passing.
-KIMI_GATE_ANCHORS = ("ADLC_DISABLE_KIMI", "ADLC_DISABLE_DELEGATE")
+# REQ-522: the delegation surface is fully de-branded — the legacy kimi-*
+# spellings are retired, so the canonical check keys on the delegate-* names
+# only. The check fires when the (sole) disable anchor appears; each logical
+# canonical literal is satisfied if its spelling is present in the SKILL.md text
+# OR in a sourced telemetry partial (the partial-aware rescue, ADR-4).
+#
+# REQ-522 ADR-3 restructured telemetry to be flag-file-derived: the per-step
+# state (start_s, invoked, exit) is now `skill-flag.sh mark`ed to a sidecar and
+# read back in the resolver, instead of the old caller-shell `start_s=...` /
+# `duration_ms=$((...))` literals. The canonical literals track that new shape:
+# the start-time mark, the shared resolver call, the emit-telemetry exec, and
+# the two delegate-* source lines.
+DELEGATE_GATE_ANCHORS = ("ADLC_DISABLE_DELEGATE",)
 # Each entry is a tuple of acceptable spellings for one logical literal;
 # satisfied if ANY spelling is present (in the SKILL.md text or a sourced
 # telemetry partial). Single-spelling literals are 1-tuples.
 CANONICAL_LITERALS = (
-    ("start_s=$(date -u +%s)",),
-    ("duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))",),
-    # $KIMI_TOOLS and $DELEGATE_TOOLS both resolve the telemetry-exec dir.
-    ('"$KIMI_TOOLS"/emit-telemetry.sh ', '"$DELEGATE_TOOLS"/emit-telemetry.sh '),
+    # Start-time capture: marked to the flag sidecar (REQ-522 ADR-3).
+    ('skill-flag.sh mark "$flag" start_s ',),
+    # The shared resolver call (lives in the SKILL.md resolution fence).
+    ("_adlc_emit_step_telemetry ",),
+    # The emit-telemetry exec (lives in the emit-step-telemetry.sh partial).
+    ('"$DELEGATE_TOOLS"/emit-telemetry.sh ',),
     (
-        ". .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh",
         ". .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh",
     ),
     (
-        ". .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh",
         ". .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh",
     ),
 )
@@ -123,6 +131,26 @@ POSIX_LOCAL_RE = re.compile(r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*local\s+\S")
 # awk fields alike. ${1} and $(1) contain no `$<digit>` substring and are the
 # safe spellings; (?<!\$) exempts `$$1` (PID followed by a digit).
 ARG_TEMPLATING_RE = re.compile(r"(?<!\$)\$[0-9]")
+
+# REQ-522 BR-5: a shell variable ASSIGNED in one fenced block and READ in a
+# DIFFERENT fenced block of the same SKILL.md. SKILL.md fenced blocks do not
+# share shell state across steps, so the read sees an empty value — the exact
+# inert-telemetry class REQ-522 fixed (every run recorded mode=fallback because
+# start_s/invoked/exit were set in one fence and read in another). Mirrors
+# check_cross_fence_fn's structure (LESSON-012: structural enforcement).
+#
+# Assignment at statement position: NAME=... after line-start or ;/&&/||/then/do/{.
+# (?<![A-Za-z0-9_]) before NAME so we don't match a tail of a longer token.
+VAR_ASSIGN_RE = re.compile(
+    r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*([A-Za-z_][A-Za-z0-9_]*)="
+)
+# An `export NAME` (with or without `=`) — an exported var legitimately crosses
+# fences via the process environment, so it is EXEMPT from the cross-fence check.
+VAR_EXPORT_RE = re.compile(
+    r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*export\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
+# A read of a variable: $NAME or ${NAME}. The name is captured.
+VAR_READ_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
 
 # REQ-436 ADR-7: a shell function definition `name() {` at statement position.
 FN_DEF_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{")
@@ -356,8 +384,8 @@ def load_partials_blob(root: Path) -> str:
 
 
 def check_canonical(text: str, rel: str, partials_blob: str = "") -> list[Finding]:
-    # REQ-515 ADR-9: fire when EITHER disable anchor appears.
-    if not any(anchor in text for anchor in KIMI_GATE_ANCHORS):
+    # REQ-522: fire when the (sole, de-branded) disable anchor appears.
+    if not any(anchor in text for anchor in DELEGATE_GATE_ANCHORS):
         return []
     # REQ-436 Phase-5 hardening: the partial may only satisfy a literal for a
     # SKILL.md that actually sources the telemetry partial. A SKILL.md that
@@ -367,9 +395,9 @@ def check_canonical(text: str, rel: str, partials_blob: str = "") -> list[Findin
     sources_partial = TELEMETRY_PARTIAL_MARKER in text
     findings: list[Finding] = []
     for spellings in CANONICAL_LITERALS:
-        # REQ-436 ADR-4 + REQ-515 ADR-9: a logical literal is satisfied if ANY of
-        # its acceptable spellings (legacy or new) is present in the SKILL.md text
-        # OR — when this SKILL.md sources the telemetry partial — in that partial.
+        # REQ-436 ADR-4: a logical literal is satisfied if ANY of its acceptable
+        # spellings is present in the SKILL.md text OR — when this SKILL.md
+        # sources the telemetry partial — in that partial.
         satisfied = any(
             sp in text or (sources_partial and sp in partials_blob)
             for sp in spellings
@@ -525,6 +553,95 @@ def check_cross_fence_fn(text: str, rel: str) -> list[Finding]:
                 "a sourced partial",
             )
         )
+    return findings
+
+
+def check_cross_fence_var(text: str, rel: str) -> list[Finding]:
+    """REQ-522 BR-5: flag a non-exported variable ASSIGNED in one fenced block
+    but READ in a DIFFERENT fenced block of the same SKILL.md. SKILL.md fenced
+    blocks do not share shell state across steps, so the read sees an empty
+    value — the inert-telemetry class REQ-522 fixed (start_s/invoked/exit set in
+    one fence, read in the resolution fence).
+
+    Conservative against false positives:
+      * A name is only considered if it is both *assigned* (``NAME=``) and *read*
+        (``$NAME`` / ``${NAME}``) within fences.
+      * Names that are ``export``ed anywhere in any fence are EXEMPT — an exported
+        var legitimately crosses fences via the process environment.
+      * An assign-and-read within the SAME fence is legitimate (shell state is
+        shared *within* a single fenced block) and never flagged. Only a read in
+        a fence with NO assignment of that name, where the name is assigned in
+        some *other* fence, is a finding.
+      * ``$1``-style positionals and ``$flag`` (the sanctioned literal carrier in
+        the telemetry blocks — it is threaded through, not re-derived) are not
+        special-cased here; ``$flag`` is exempt only if it is never assigned in a
+        fence (it is produced by ``skill-flag.sh create`` command substitution,
+        which this assignment regex does match — so a skill that assigns
+        ``flag=$(...)`` in one fence and reads ``$flag`` in another WOULD be
+        flagged). The telemetry skills avoid this by re-stating the create in the
+        same fence is NOT required — see note below.
+
+    Note on ``$flag``: the single-fence-safe telemetry design threads the flag
+    PATH across fences, which is exactly a cross-fence variable. That is the one
+    sanctioned exception (the path is an opaque literal, not shared shell state
+    that must be live). It is exempted by name so the legitimate pattern passes.
+
+    Id-allocation carriers (``BUG_NUM`` / ``LESSON_NUM`` / ``REQ_NUM``) are also
+    exempted: the allocate-then-recheck flow in ``bugfix``/``wrapup``/``spec``
+    deliberately allocates in one fence and rechecks in a later one. That flow is
+    the id-allocation domain (REQ-518), out of REQ-522's telemetry scope; flagging
+    it here would force unrelated edits that collide with REQ-518. The exemption
+    is by name and intentionally narrow.
+    """
+    SANCTIONED = {
+        "flag",        # the telemetry flag-path carrier (REQ-522 ADR-3)
+        "BUG_NUM",     # id-allocation carriers — allocate-then-recheck flow,
+        "LESSON_NUM",  # REQ-518 domain, out of REQ-522 telemetry scope.
+        "REQ_NUM",
+    }
+    fences = list(_iter_fences(text))
+
+    # exported names (exempt everywhere)
+    exported: set[str] = set()
+    # name -> set of fence indices where assigned
+    assigned: dict[str, set[int]] = {}
+    # name -> list of (fence_index, lineno) where read
+    read_at: dict[str, list[tuple[int, int]]] = {}
+
+    for _lang, idx, _start, body in fences:
+        for lineno, line in body:
+            for em in VAR_EXPORT_RE.finditer(line):
+                exported.add(em.group(1))
+            for am in VAR_ASSIGN_RE.finditer(line):
+                assigned.setdefault(am.group(1), set()).add(idx)
+            for rm in VAR_READ_RE.finditer(line):
+                name = rm.group(1)
+                read_at.setdefault(name, []).append((idx, lineno))
+
+    findings: list[Finding] = []
+    for name, reads in read_at.items():
+        if name in exported or name in SANCTIONED:
+            continue
+        assign_fences = assigned.get(name)
+        if not assign_fences:
+            continue  # read but never assigned in a fence (env/positional) — skip
+        for r_idx, r_lineno in reads:
+            if r_idx in assign_fences:
+                continue  # assigned in the same fence — legitimate
+            # read in a fence that does NOT assign it, but it IS assigned in
+            # another fence — cross-fence state that will be empty at read time.
+            a_idx = sorted(assign_fences)[0]
+            findings.append(
+                Finding(
+                    rel, r_lineno, "cross-fence-var",
+                    f"'{name}' assigned in fenced block #{a_idx} but read at "
+                    f"line {r_lineno} in a different fenced block (#{r_idx}) — "
+                    "SKILL.md fenced blocks do not share shell state; persist it "
+                    "via the flag-file sidecar (skill-flag.sh mark/read) or "
+                    "re-derive it in the same fence",
+                )
+            )
+            break  # one finding per name is enough
     return findings
 
 
@@ -753,6 +870,7 @@ def run(root: Path) -> list[Finding]:
         findings.extend(check_posix_fence(text, rel))
         findings.extend(check_arg_templating(text, rel))
         findings.extend(check_cross_fence_fn(text, rel))
+        findings.extend(check_cross_fence_var(text, rel))
         findings.extend(check_forge_direct_gh(text, rel))
     # Per-root (not per-SKILL.md): agent model: drift vs the config render (BR-5).
     findings.extend(check_agent_model_drift(root))
