@@ -172,9 +172,12 @@ def _forge_provider_verdict(profile: Profile):
         return None, "forge-partial-missing"
     # Resolve against the current working dir (the repo doctor was invoked in),
     # not the toolkit root — provider is a property of the consumer repo's remote.
+    # No temp-file redirect: subprocess capture_output collects stderr into
+    # proc.stderr, so there is no predictable-path junk file / TOCTOU foothold
+    # (LESSON-008). The function's fail-loud message lands in proc.stderr if needed.
     script = (
         f". '{partial}'; "
-        "adlc_forge_provider \"$PWD\" 2>/tmp/forge_doctor_err; rc=$?; "
+        "adlc_forge_provider \"$PWD\"; rc=$?; "
         'printf "%s\\n" "$rc"'
     )
     proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
