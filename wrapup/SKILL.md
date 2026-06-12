@@ -51,15 +51,15 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
    - Create a commit with message: `feat(REQ-xxx): <summary of changes>`
    - Include `Co-Authored-By: Claude <noreply@anthropic.com>`
 4. Push the branch to remote with `git -C <worktree> push -u origin <branch>`
-5. If no PR exists for this branch, create one using `gh pr create` (from inside the worktree, or with `gh -R <owner/repo>`) with a summary of what shipped
+5. If no PR exists for this branch, create one using `adlc_forge_pr_create` (source `partials/forge.sh` in the same fence; from inside the worktree, or with `-R <owner/repo>`) with a summary of what shipped — PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1)
 6. If CI checks exist, monitor the pipeline with `gh run watch` and report the result
 7. **Rebase onto current main before merging** — in a sprint or long-running pipeline, upstream `main` may have advanced since the branch was cut. Run `git -C <worktree> fetch origin main` and check whether the branch is behind: `git -C <worktree> merge-base --is-ancestor origin/main HEAD`. If that command fails (exit 1), the branch is behind main and must be updated:
    - `git -C <worktree> rebase origin/main`
    - If there are conflicts, STOP and surface them to the user — do not try to resolve semantic conflicts blindly
    - On clean rebase, force-push with lease: `git -C <worktree> push --force-with-lease`
    - Re-run `gh pr checks <prUrl>` and wait for CI to re-pass before merging
-8. Verify PR status is mergeable: `gh pr view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE` and a clean merge state. If not, stop and surface the reason.
-9. Merge the PR using `gh pr merge <prUrl> --squash --delete-branch`. In cross-repo mode, update `pipeline-state.json` — set `repos[<id>].merged = true`.
+8. Verify PR status is mergeable: `adlc_forge_pr_view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE` and a clean merge state (on GitHub; ADO normalizes via `pr_view`). If not, stop and surface the reason.
+9. Merge the PR using `adlc_forge_pr_merge <prUrl> --squash --delete-branch`. In cross-repo mode, update `pipeline-state.json` — set `repos[<id>].merged = true`.
 10. **Capture cleanup state BEFORE leaving the branch**. You must record three things while you are still on the feature branch in the feature worktree, because the subsequent `git checkout main` may only work in the main worktree and you will lose the ability to look these up afterwards:
     - Branch name: `BRANCH=$(git -C <worktree> branch --show-current)`
     - Current working-tree path: `WT_PATH=<worktree>`

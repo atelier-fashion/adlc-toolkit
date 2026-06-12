@@ -263,22 +263,46 @@ adlc_forge_pr_edit() {
   esac
 }
 
-# adlc_forge_pr_view <number|url> --fields f1,f2,...
-# Normalizes state to {OPEN,MERGED,CLOSED}. Emits requested fields as key=value.
+# adlc_forge_pr_view <number|url> --fields f1,f2,...   (normalized mode)
+#                    | <number|url> --json … [-q …] [-R …]   (raw passthrough)
+#
+# Two modes, by flag shape:
+#   * --fields f1,f2,…  -> normalized: emits requested fields as key=value with
+#     state coerced to {OPEN,MERGED,CLOSED} (the cross-backend contract).
+#   * gh-native --json/-q/--jq/-R (no --fields) -> raw passthrough: the GitHub
+#     backend forwards the WHOLE argv verbatim to `gh pr view`, so callers that
+#     need the raw body string (e.g. footprint reads) stay byte-identical (BR-3).
+#     ADO has no raw-gh shape; it always normalizes via `az repos pr show`.
 adlc_forge_pr_view() {
   [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_view; return $?; }
   adlc_fv_ref=""
-  adlc_fv_fields="state,url,number"
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --fields) shift; adlc_fv_fields=$1 ;;
-      *) [ -z "$adlc_fv_ref" ] && adlc_fv_ref=$1 ;;
+  adlc_fv_fields=""
+  adlc_fv_raw_mode=0
+  for adlc_fv_a in "$@"; do
+    case "$adlc_fv_a" in
+      --json|-q|--jq|-R|--repo) adlc_fv_raw_mode=1 ;;
     esac
-    shift
   done
+  # Locate --fields (normalized mode) and the ref positional without consuming
+  # the gh-native flags (which raw mode forwards verbatim).
+  adlc_fv_prev=""
+  for adlc_fv_a in "$@"; do
+    if [ "$adlc_fv_prev" = "--fields" ]; then adlc_fv_fields=$adlc_fv_a; fi
+    case "$adlc_fv_a" in
+      --*|-*) : ;;
+      *) [ -z "$adlc_fv_ref" ] && [ "$adlc_fv_prev" != "--fields" ] && adlc_fv_ref=$adlc_fv_a ;;
+    esac
+    adlc_fv_prev=$adlc_fv_a
+  done
+  [ -n "$adlc_fv_fields" ] && adlc_fv_raw_mode=0
+  [ -n "$adlc_fv_fields" ] || adlc_fv_fields="state,url,number"
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)
+      if [ "$adlc_fv_raw_mode" = "1" ]; then
+        # Byte-compatible raw passthrough: exactly `gh pr view <args…>`.
+        _adlc_forge_run -- gh pr view "$@"; return $?
+      fi
       adlc_fv_raw=$(_adlc_forge_run -- gh pr view "$adlc_fv_ref" --json "$adlc_fv_fields"); adlc_fv_rc=$?
       [ "$adlc_fv_rc" -ne 0 ] && { printf '%s\n' "$adlc_fv_raw"; return "$adlc_fv_rc"; }
       # GitHub states already match {OPEN,MERGED,CLOSED}; emit normalized k=v.

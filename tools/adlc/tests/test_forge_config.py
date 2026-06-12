@@ -142,13 +142,12 @@ def test_cli_resolve_provider(tmp_path, repo_root):
     assert out.stdout.strip() == "github"
 
 
-def test_cli_validate_auth_rejects_key():
+def test_cli_validate_auth_rejects_key(repo_root):
+    script = f"{repo_root}/tools/adlc/forge_config.py"
     out = subprocess.run(
-        ["python3", "-c",
-         "import sys, forge_config; sys.exit(forge_config.main"
-         "(['validate-auth', 'ghp_" + "a" * 36 + "']))"],
+        ["python3", script, "validate-auth", "ghp_" + "a" * 36],
         capture_output=True, text=True,
-        cwd=None,
     )
-    # main returns 2 on a key-shaped value.
+    # main returns 2 on a key-shaped value, with an actionable stderr message.
     assert out.returncode == 2
+    assert "SOURCE name" in out.stderr or "never a key" in out.stderr

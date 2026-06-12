@@ -178,7 +178,7 @@ Background `pipeline-runner` agents send an automatic notification when they fin
 2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.adlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
 
    **Verify the agent's terminal-state claim before accepting it.** A pipeline-runner's final report MUST lead with one of `{merged, pr-ready, blocked, failed}` (see `~/.claude/agents/pipeline-runner.md` Terminal state contract). The orchestrator MUST NOT trust the claim at face value:
-   - For `merged` and `pr-ready` claims: run `gh pr view <prUrl> --json state,mergedAt` against every touched-repo PR before updating the dashboard.
+   - For `merged` and `pr-ready` claims: run `adlc_forge_pr_view <prUrl> --json state,mergedAt` (source `partials/forge.sh` in the same fence; forge-neutral per REQ-520) against every touched-repo PR before updating the dashboard.
      - If the agent claimed `merged` but the PR is `OPEN`: treat the claim as `pr-ready` and merge the PR per Step 5.
      - If the agent claimed `pr-ready` but the PR is `MERGED`: just move on (agent was conservative, no harm done).
      - If the PR is `CLOSED` (not merged) or in any other unexpected state: surface as a blocker.
@@ -215,7 +215,7 @@ Completed: 0/3 | Blocked: 0 | Running: 3
 
 **Default policy: merge as each pipeline completes.** When a pipeline finishes Phase 7 and is marked merge-ready, merge it immediately — don't wait for the batch. Faster feedback, less idle time, and the rebase cost on subsequent pipelines is paid as they reach merge-ready anyway (each one runs its own `/wrapup` Step 2 rebase-onto-main guard, so main drift is handled automatically).
 
-**Ordering enforcement (REQ-483).** When `/manifest`'s verdict (Step 2 pre-flight) shows footprint overlaps in the batch, merge the overlapping REQs in its **deterministic order** (earliest-published first, lower REQ tiebreak — BR-8) instead of as-they-complete, and gate **each** merge: `git -C <worktree> fetch origin <integrationBranch>` (refresh the tip), source `partials/trial-merge.sh`, then `adlc_trial_merge "<worktree>" origin/<integrationBranch>` before `gh pr merge`. **rc=1** → hold that REQ (`blocked`, surfaced for rebase); **rc=0** → merge; **rc=2/3** → `failed` (setup error, not a conflict). For overlapping **single-repo** REQs (whose pipeline-runners would otherwise self-merge as they complete), the orchestrator MUST hold the later-ranked one until the earlier merges — do not let both self-merge, or both could pass a stale-tip gate and collide at merge. Non-overlapping REQs still merge as they complete (parallel-by-default). Serializes **merges**, never implementation; computed in orchestrator code, not delegated (BR-10).
+**Ordering enforcement (REQ-483).** When `/manifest`'s verdict (Step 2 pre-flight) shows footprint overlaps in the batch, merge the overlapping REQs in its **deterministic order** (earliest-published first, lower REQ tiebreak — BR-8) instead of as-they-complete, and gate **each** merge: `git -C <worktree> fetch origin <integrationBranch>` (refresh the tip), source `partials/trial-merge.sh`, then `adlc_trial_merge "<worktree>" origin/<integrationBranch>` before `adlc_forge_pr_merge`. **rc=1** → hold that REQ (`blocked`, surfaced for rebase); **rc=0** → merge; **rc=2/3** → `failed` (setup error, not a conflict). For overlapping **single-repo** REQs (whose pipeline-runners would otherwise self-merge as they complete), the orchestrator MUST hold the later-ranked one until the earlier merges — do not let both self-merge, or both could pass a stale-tip gate and collide at merge. Non-overlapping REQs still merge as they complete (parallel-by-default). Serializes **merges**, never implementation; computed in orchestrator code, not delegated (BR-10).
 
 **Who actually performs the merge depends on REQ topology** (see `~/.claude/agents/pipeline-runner.md` Phase 8):
 
@@ -223,7 +223,7 @@ Completed: 0/3 | Blocked: 0 | Running: 3
 - **Cross-repo REQ** (multiple touched repos): the pipeline-runner stops at Phase 7 and reports `pr-ready`. The orchestrator owns merge sequencing and walks the per-REQ `mergeOrder` itself.
 
 The sequential flow when the orchestrator is the merge actor (cross-repo, or single-repo fallback after a failed agent merge):
-1. Merge the PR: `gh pr merge --squash --delete-branch`
+1. Merge the PR: `adlc_forge_pr_merge --squash --delete-branch` (source `partials/forge.sh` in the same fence)
 2. Pull main: `git checkout main && git pull`
 3. Move on — other pipelines keep running in the background
 
