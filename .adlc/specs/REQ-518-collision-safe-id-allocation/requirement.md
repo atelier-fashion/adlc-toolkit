@@ -1,7 +1,7 @@
 ---
 id: REQ-518
 title: "Collision-Safe ID Allocation Across Users and Machines"
-status: approved
+status: complete
 deployable: false
 created: 2026-06-11
 updated: 2026-06-11

@@ -274,43 +274,25 @@ esac
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work
 - Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
-- **Allocate the next ID atomically via the global `~/.claude/.global-next-lesson` counter** (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004; directory scans also race against concurrent `/sprint` pipelines — LESSON-110), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014). The lock path `~/.claude/.global-next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude:
+- **Allocate the next ID atomically via the global `~/.claude/.global-next-lesson` counter** (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004; directory scans also race against concurrent `/sprint` pipelines — LESSON-110). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock with its LESSON-014 symlink pre-check. The lock path `~/.claude/.global-next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
   ```bash
-  LESSON_NUM=$(
-    LOCK=~/.claude/.global-next-lesson.lock.d
-    COUNTER=~/.claude/.global-next-lesson
-    if [ -L "$LOCK" ]; then
-      echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
-      exit 1
-    fi
-    for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-    # Hard-fail if we never acquired the lock (50 retries × 0.1s = ~5s budget).
-    # Without this guard, a contended lock would silently fall through to the
-    # critical section unguarded — defeating mutual exclusion (REQ-416 verify C1).
-    [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate LESSON id" >&2; exit 1; }
-    # Counter read inside lock — fail hard if the file disappears mid-critical-section
-    # rather than silently treating empty-as-zero and resetting the global counter (REQ-416 verify M2).
-    NUM=$(cat "$COUNTER" 2>/dev/null) || { echo "ERROR: counter $COUNTER unreadable inside lock — aborting" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-    [ -n "$NUM" ] || { echo "ERROR: counter $COUNTER is empty — aborting (would reset to 1)" >&2; rmdir "$LOCK" 2>/dev/null; exit 1; }
-    echo $((NUM + 1)) > "$COUNTER"
-    # rmdir is guarded by the same symlink check (residual TOCTOU window between
-    # check and rmdir is accepted risk per ADR-4 — see LESSON-014).
-    if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
-    echo $NUM
-  )
-  # `exit 1` inside the $(...) subshell terminates only the subshell — LESSON_NUM
+  . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+  LESSON_NUM=$(adlc_alloc_id lesson)
+  # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — LESSON_NUM
   # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
   [ -n "$LESSON_NUM" ] || { echo "ERROR: failed to allocate LESSON number — aborting before writing malformed lesson" >&2; exit 1; }
   ```
-  If `~/.claude/.global-next-lesson` doesn't exist, create it by scanning all `.adlc/knowledge/lessons/` directories under the user's repos root for the highest `LESSON-xxx` number, use the next one, and write the number after that. The scan root is `$ADLC_REPOS_ROOT` if set, otherwise the parent directory of the current repo:
+  `adlc_alloc_id lesson` handles the absent-counter bootstrap scan internally (highest `LESSON-xxx` under `$ADLC_REPOS_ROOT`; lessons are `.md` files so the scan uses `-type f`), the shared `mkdir` lock, and the remote high-water max. Single-machine behavior is unchanged when the remote has no higher allocation (BR-7). Note: the legacy per-repo `.adlc/.next-lesson` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
+
+  **Pre-push recheck (BR-4, BR-8).** Before the lesson file is committed on a branch for push, re-verify `LESSON-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
   ```bash
-  SCAN_ROOT="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel)/.." && pwd)}"
-  HIGHEST=$(find "$SCAN_ROOT" -path '*/.adlc/knowledge/lessons/LESSON-*' -type f 2>/dev/null \
-    | grep -oE 'LESSON-[0-9]+' | sed 's/LESSON-//' | sort -n | tail -1)
-  LESSON_NUM=$(( ${HIGHEST:-0} + 1 ))
-  echo $((LESSON_NUM + 1)) > ~/.claude/.global-next-lesson
+  . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+  LESSON_ID=$(printf 'LESSON-%03d' "$LESSON_NUM")
+  if ! adlc_recheck_id lesson "$LESSON_ID"; then
+    echo "Halting: $LESSON_ID collides on the remote — renumber before pushing (see message above)." >&2
+    exit 1
+  fi
   ```
-  Lessons are `.md` files so the scan uses `-type f` (the `/spec` REQ-counter scan uses `-type d` because specs are directories — a deliberate sibling-substitution, do not "correct" to `-type d`). Use the counter ONLY thereafter — never re-scan after it exists. Note: the legacy per-repo `.adlc/.next-lesson` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
 - **Legacy files**: older projects may still have date-prefixed or bare-numeric lessons from before this convention was locked. Do not rename them in a wrapup PR — migration is a separate, dedicated operation. When scanning for the next ID, only count files matching `LESSON-*.md`; treat the legacy files as read-only history.
 - Include `domain`, `component`, and `tags` so that `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance. The `component` field should be more specific than `domain` (e.g., `domain: API`, `component: API/auth` or `domain: iOS`, `component: iOS/SwiftUI`)
 
