@@ -66,6 +66,13 @@ def _cmd_agents(argv):
     return agents_render.main(argv)
 
 
+def _cmd_renumber(argv):
+    """Lazy-import the renumber subcommand and delegate to its main() (REQ-518)."""
+    import renumber  # noqa: E402  (lazy so --version works even if renumber breaks)
+
+    return renumber.main(argv)
+
+
 # Data-driven subcommand registry. Adding a command = appending one entry;
 # dispatch below never changes. Each handler takes the remaining argv (the
 # args AFTER the subcommand name) and returns an int exit code.
@@ -77,6 +84,10 @@ SUBCOMMANDS = {
     "agents": {
         "handler": _cmd_agents,
         "help": "render agents/*.md model: from tier classes + config (render [--check])",
+    },
+    "renumber": {
+        "handler": _cmd_renumber,
+        "help": "rename an artifact id repo-wide, collision-safe (dry-run by default)",
     },
 }
 
