@@ -1,7 +1,7 @@
 ---
 id: REQ-515
 title: "Provider-Agnostic Delegation Layer — de-Kimi the Tooling"
-status: approved
+status: complete
 deployable: false
 created: 2026-06-11
 updated: 2026-06-11
