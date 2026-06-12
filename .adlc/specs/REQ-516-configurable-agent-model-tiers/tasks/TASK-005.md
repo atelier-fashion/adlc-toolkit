@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: "Tests for render + drift, and README documentation"
-status: draft
+status: complete
 parent: REQ-516
 created: 2026-06-11
 updated: 2026-06-11
