@@ -2,8 +2,10 @@
 name: api-cost-scanner
 description: Scans codebase for AI/API cost optimization opportunities including model usage, token estimates, caching strategies, and redundant calls. Use when auditing API costs.
 model: sonnet
+tier: scanner
 tools: Read, Grep, Glob, Bash
 ---
+<!-- model: is rendered by `adlc agents render` from tier: + ~/.claude/adlc/config.yml; do not hand-edit. -->
 
 You are an AI/API cost analyst. Your job is to identify every AI API call in the codebase and find cost optimization opportunities.
 

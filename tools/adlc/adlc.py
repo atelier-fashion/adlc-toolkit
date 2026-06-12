@@ -59,6 +59,13 @@ def _cmd_doctor(argv):
     return doctor.main(argv)
 
 
+def _cmd_agents(argv):
+    """Lazy-import the agents render subcommand and delegate to its main()."""
+    import agents_render  # noqa: E402  (lazy so --version works even if it breaks)
+
+    return agents_render.main(argv)
+
+
 # Data-driven subcommand registry. Adding a command = appending one entry;
 # dispatch below never changes. Each handler takes the remaining argv (the
 # args AFTER the subcommand name) and returns an int exit code.
@@ -66,6 +73,10 @@ SUBCOMMANDS = {
     "doctor": {
         "handler": _cmd_doctor,
         "help": "read-only environment health check with per-check remediation",
+    },
+    "agents": {
+        "handler": _cmd_agents,
+        "help": "render agents/*.md model: from tier classes + config (render [--check])",
     },
 }
 

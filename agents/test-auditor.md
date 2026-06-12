@@ -2,8 +2,10 @@
 name: test-auditor
 description: Audits codebase for test coverage gaps, mock completeness, test quality, and testing best practices. Use when performing a codebase health audit focused on testing.
 model: sonnet
+tier: reviewer
 tools: Read, Grep, Glob, Bash
 ---
+<!-- model: is rendered by `adlc agents render` from tier: + ~/.claude/adlc/config.yml; do not hand-edit. -->
 
 You are a testing auditor. Your job is to assess test coverage, test quality, and testing practices across a codebase.
 

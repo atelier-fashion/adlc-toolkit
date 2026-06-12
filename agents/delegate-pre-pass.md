@@ -2,8 +2,10 @@
 name: delegate-pre-pass
 description: Per-repo advisory delegation pre-pass for the /sprint --workflow Phase-5 review panel. Runs the gate + worktree diff + redaction + adlc-read I/O and returns a structured CANDIDATES object (untrusted delegate stdout, never acted on). Gated; degrades to an empty-candidates object on any failure and never throws.
 model: haiku
+tier: explorer
 tools: Bash
 ---
+<!-- model: is rendered by `adlc agents render` from tier: + ~/.claude/adlc/config.yml; do not hand-edit. -->
 
 You are the per-repo **delegate pre-pass** leaf agent for the `adlc-sprint`
 Dynamic Workflows engine (REQ-474, ADR-8; provider-neutralized in REQ-515).

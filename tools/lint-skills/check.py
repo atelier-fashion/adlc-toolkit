@@ -493,6 +493,48 @@ def _safe_label(skill_path: Path, root: Path) -> str:
         return skill_path.name
 
 
+def check_agent_model_drift(root: Path) -> list[Finding]:
+    """Flag agents whose on-disk ``model:`` differs from the config render (BR-5).
+
+    Imports ``tools/adlc/agents_render`` and calls its shared ``check_drift`` code
+    path (never a re-implementation — LESSON-006), so a hand-edited ``model:`` is
+    surfaced as staleness, mirroring the template-drift rationale. Degrades
+    gracefully: if the module cannot be imported (run from an unexpected root) the
+    check yields zero findings rather than crashing the linter.
+    """
+    adlc_dir = root / "tools" / "adlc"
+    if not (adlc_dir / "agents_render.py").is_file():
+        return []  # not the toolkit checkout (or render module absent) — skip.
+    added = False
+    if str(adlc_dir) not in sys.path:
+        sys.path.insert(0, str(adlc_dir))
+        added = True
+    try:
+        import agents_render  # noqa: E402  (lazy; degrade if absent)
+        try:
+            drift = agents_render.check_drift(str(root))
+        except agents_render.ConfigError as exc:
+            # An invalid config is itself a (single) finding, surfaced loudly.
+            return [Finding("tools/adlc/agents_render.py", 1,
+                            "agent-model-drift", f"invalid agents config: {exc}")]
+    except Exception:  # pragma: no cover - defensive import guard
+        return []
+    finally:
+        if added:
+            try:
+                sys.path.remove(str(adlc_dir))
+            except ValueError:
+                pass
+    findings: list[Finding] = []
+    for name, expected, actual in drift:
+        findings.append(
+            Finding(f"agents/{name}.md", 1, "agent-model-drift",
+                    f"model: is '{actual}' but config renders '{expected}' — "
+                    f"run `adlc agents render`")
+        )
+    return findings
+
+
 def run(root: Path) -> list[Finding]:
     sentinels = load_sentinels(SENTINELS_FILE)
     # REQ-436 ADR-4: read the sourced telemetry partials ONCE per run (never
@@ -522,6 +564,8 @@ def run(root: Path) -> list[Finding]:
         findings.extend(check_posix_fence(text, rel))
         findings.extend(check_arg_templating(text, rel))
         findings.extend(check_cross_fence_fn(text, rel))
+    # Per-root (not per-SKILL.md): agent model: drift vs the config render (BR-5).
+    findings.extend(check_agent_model_drift(root))
     return findings
 
 
