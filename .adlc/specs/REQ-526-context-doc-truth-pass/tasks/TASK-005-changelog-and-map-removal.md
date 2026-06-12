@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: "Reorder CHANGELOG epoch list and remove /map from the distribution with a tombstone"
-status: draft
+status: complete
 parent: REQ-526
 created: 2026-06-12
 updated: 2026-06-12

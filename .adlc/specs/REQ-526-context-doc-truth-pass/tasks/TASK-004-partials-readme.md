@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: "Document id-alloc/id-recheck partials and drop the stale drift-detection claim"
-status: draft
+status: complete
 parent: REQ-526
 created: 2026-06-12
 updated: 2026-06-12

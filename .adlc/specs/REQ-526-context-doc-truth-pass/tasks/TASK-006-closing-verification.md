@@ -1,7 +1,7 @@
 ---
 id: TASK-006
 title: "Closing verification sweep — grep the edited docs for the corrected claims"
-status: draft
+status: complete
 parent: REQ-526
 created: 2026-06-12
 updated: 2026-06-12

@@ -1,7 +1,7 @@
 ---
 id: TASK-003
 title: "Complete template enumerations in README.md and architecture.md"
-status: draft
+status: complete
 parent: REQ-526
 created: 2026-06-12
 updated: 2026-06-12

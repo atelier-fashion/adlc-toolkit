@@ -1,7 +1,7 @@
 ---
 id: TASK-001
 title: "Correct every 'five principles' claim to not hardcode the count"
-status: draft
+status: complete
 parent: REQ-526
 created: 2026-06-12
 updated: 2026-06-12

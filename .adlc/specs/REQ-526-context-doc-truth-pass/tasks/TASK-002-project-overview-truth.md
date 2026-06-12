@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: "Rewrite project-overview.md to describe the current tree truthfully"
-status: draft
+status: complete
 parent: REQ-526
 created: 2026-06-12
 updated: 2026-06-12
