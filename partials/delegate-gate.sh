@@ -1,7 +1,7 @@
 #!/bin/sh
 # Shared provider-agnostic delegation gate predicate (REQ-515 BR-4/BR-11).
-# This is the canonical predicate (REQ-522 retired the legacy kimi-gate.sh
-# back-compat alias).
+# This is the canonical (and only) gate predicate (REQ-522 retired the legacy
+# back-compat alias partial).
 #
 # Sourceable POSIX shell function. Each call site reads $? IMMEDIATELY into a
 # variable (gate=$?) before any other command, because $? is clobbered by every
