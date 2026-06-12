@@ -1,7 +1,7 @@
 ---
 id: REQ-524
 title: "adlc renumber: id-boundary-safe rewrites (no prefix-id collateral damage)"
-status: draft
+status: complete
 deployable: false
 created: 2026-06-12
 updated: 2026-06-12

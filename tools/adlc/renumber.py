@@ -62,6 +62,45 @@ def _validate_id(artifact_id):
     return bool(KIND_PATTERNS[kind].match(artifact_id))
 
 
+# --- id-boundary matching (REQ-524) -------------------------------------------------
+#
+# The single pattern authority. Every content match, file selection, and filename
+# rewrite MUST go through these two helpers so selection and rewrite cannot drift
+# (REQ-524 BR-2). The boundary is DIGIT-based, not word-based: an id matches only
+# when not preceded by an alphanumeric and not followed by a digit. This blocks the
+# sibling-prefix corruption (`REQ-120` must never match inside `REQ-1200`, REQ-524
+# adversarial M2) while still rewriting slugs (`REQ-120-demo`), frontmatter
+# (`id: REQ-120`), punctuation (`REQ-120.`, `REQ-120)`), and end-of-line refs. A
+# word boundary (`\b`) would not distinguish `REQ-120` from `REQ-1200` (no \b between
+# the two trailing digits) and would mis-handle the `-slug` suffix — see architecture
+# ADR-1.
+
+
+def _id_boundary_re(artifact_id):
+    """Compiled ``re`` matching artifact_id only at an id boundary (REQ-524 BR-1).
+
+    ``(?<![A-Za-z0-9])`` — not preceded by an alphanumeric (start-of-string is fine).
+    ``(?!\\d)`` — not followed by a digit. ``re.escape`` neutralizes the ``-`` and any
+    regex-meta (defense-in-depth; ids are strict-validated upstream). This is the
+    authoritative arbiter for every rewrite and the per-file match count.
+    """
+    return re.compile(r"(?<![A-Za-z0-9])" + re.escape(artifact_id) + r"(?!\d)")
+
+
+def _id_boundary_ere(artifact_id):
+    """git-grep ERE string with the SAME boundary semantics (REQ-524 BR-2).
+
+    git grep's ERE engine has no lookaround, so selection uses an enclosing-group
+    ERE that may *over*-select but never under-selects; the authoritative
+    ``_id_boundary_re`` re-applied per file in ``_rewrite_file`` produces the real
+    match count and drops any zero-match over-selection. Both helpers derive from
+    one escaped id so they cannot drift. ``[^A-Za-z0-9]`` mirrors the lookbehind;
+    ``[^0-9]`` mirrors the digit-lookahead; ``^``/``$`` cover the string edges.
+    """
+    esc = re.escape(artifact_id)
+    return r"(^|[^A-Za-z0-9])" + esc + r"([^0-9]|$)"
+
+
 def _repo_root():
     """Repo root of the artifact being renumbered — resolved from the CALLER's cwd,
     not the script location. ``adlc renumber`` operates on whatever repo the user is
@@ -167,25 +206,41 @@ def _locate_old(root, old_id):
 
 
 def _renamed_path(old_path, old_id, new_id):
-    """Compute the new path by swapping the id token in the basename."""
+    """Compute the new path by swapping the id token in the basename (boundary-anchored).
+
+    Uses the shared id-boundary pattern (REQ-524 BR-1) rather than a bare
+    ``str.replace`` so a basename like ``REQ-1200-demo`` is never mangled when
+    renumbering ``REQ-120``. The basename here is already located by
+    ``_locate_old`` (boundary-safe), so this is belt-and-suspenders, but it keeps
+    the invariant uniform across every rewrite site.
+    """
     parent = os.path.dirname(old_path)
     base = os.path.basename(old_path)
-    new_base = base.replace(old_id, new_id, 1)
+    new_base, _n = _id_boundary_re(old_id).subn(new_id, base, count=1)
     return os.path.join(parent, new_base)
 
 
 def _grep_references(root, old_id):
-    """Files under root that contain old_id, excluding .git. Uses git grep when
-    possible (respects .gitignore, fast); falls back to a manual walk."""
+    """Files under root that contain old_id at an id boundary, excluding .git.
+
+    Selection is boundary-anchored (REQ-524 BR-2): a file containing only
+    ``REQ-1200`` is NOT selected when renumbering ``REQ-120``. Uses ``git grep -lE``
+    with the shared boundary ERE when possible (respects .gitignore, fast); falls
+    back to a manual walk using the authoritative ``_id_boundary_re``. git grep's
+    ERE may over-select on rare edges (no lookaround); the per-file ``subn`` in
+    ``_rewrite_file`` arbitrates and drops any zero-match over-selection.
+    """
+    ere = _id_boundary_ere(old_id)
     try:
         out = subprocess.run(
-            ["git", "-C", root, "grep", "-l", "--", old_id],
+            ["git", "-C", root, "grep", "-lE", "--", ere],
             capture_output=True, text=True, check=False,
         )
         if out.returncode in (0, 1):  # 1 = no matches, not an error
             return [os.path.join(root, p) for p in out.stdout.splitlines() if p]
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
+    pat = _id_boundary_re(old_id)
     matches = []
     for dirpath, dirnames, filenames in os.walk(root):
         if ".git" in dirnames:
@@ -194,28 +249,35 @@ def _grep_references(root, old_id):
             full = os.path.join(dirpath, fn)
             try:
                 with open(full, encoding="utf-8") as fh:
-                    if old_id in fh.read():
+                    if pat.search(fh.read()):
                         matches.append(full)
             except (OSError, UnicodeDecodeError):
                 continue
     return matches
 
 
-def _rewrite_file(path, old_id, new_id, apply_change):
-    """Replace old_id -> new_id in a file. Returns a unified diff (str) of the
-    change. When apply_change is True, writes atomically (temp + os.replace)."""
+def _rewrite_file(path, old_id, new_id, apply_change, root=None):
+    """Replace old_id -> new_id in a file at id boundaries. Returns ``(diff, count)``.
+
+    ``count`` is the number of boundary-anchored matches (REQ-524 BR-3) — 0 means
+    nothing to do (e.g. a git-grep over-selection of a ``REQ-1200``-only file when
+    renumbering ``REQ-120``). The unified-diff headers use the **repo-relative**
+    path (REQ-524 BR-5, LESSON-021) so no absolute path leaks into stdout/CI logs.
+    When apply_change is True and count > 0, writes atomically (temp + os.replace).
+    """
     try:
         with open(path, encoding="utf-8") as fh:
             original = fh.read()
     except (OSError, UnicodeDecodeError):
-        return ""
-    updated = original.replace(old_id, new_id)
-    if updated == original:
-        return ""
+        return "", 0
+    updated, count = _id_boundary_re(old_id).subn(new_id, original)
+    if count == 0 or updated == original:
+        return "", 0
+    label = os.path.relpath(path, root) if root else os.path.basename(path)
     diff = "".join(difflib.unified_diff(
         original.splitlines(keepends=True),
         updated.splitlines(keepends=True),
-        fromfile=path, tofile=path,
+        fromfile=label, tofile=label,
     ))
     if apply_change:
         d = os.path.dirname(path)
@@ -228,19 +290,36 @@ def _rewrite_file(path, old_id, new_id, apply_change):
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise
-    return diff
+    return diff, count
 
 
 def plan(root, old_id, new_id):
-    """Build the rename plan: (old_path, new_path, is_dir, ref_files). ref_files
-    excludes the artifact path itself (renamed separately)."""
+    """Build the rename plan: old_path, new_path, is_dir, and ref_files paired with
+    their boundary match counts.
+
+    ``refs`` is a list of ``(path, count)`` where count is the number of
+    boundary-anchored matches in that file (REQ-524 BR-3). Files that the selection
+    over-selected but contain zero real (boundary) matches — e.g. a ``REQ-1200``-only
+    file when renumbering ``REQ-120`` — have count 0 and are dropped here, so they
+    never appear in the dry-run plan (REQ-524 BR-2). The artifact's own path is
+    excluded (its content is rewritten after the path rename)."""
     old_path, is_dir = _locate_old(root, old_id)
     if old_path is None:
         return None
     new_path = _renamed_path(old_path, old_id, new_id)
-    refs = _grep_references(root, old_id)
-    # The artifact's own content is rewritten after the path rename; keep separate.
-    refs = [r for r in refs if not r.startswith(old_path)]
+    pat = _id_boundary_re(old_id)
+    refs = []
+    for r in _grep_references(root, old_id):
+        # The artifact's own content is rewritten after the path rename; keep separate.
+        if r.startswith(old_path):
+            continue
+        try:
+            with open(r, encoding="utf-8") as fh:
+                count = len(pat.findall(fh.read()))
+        except (OSError, UnicodeDecodeError):
+            count = 0
+        if count > 0:  # drop git-grep over-selection (boundary-zero files)
+            refs.append((r, count))
     return {"old_path": old_path, "new_path": new_path, "is_dir": is_dir, "refs": refs}
 
 
@@ -311,12 +390,14 @@ def main(argv=None):
     apply_change = args.yes
 
     # 4. Dry-run diff (always shown). Path rename + frontmatter/reference rewrites.
+    #    All paths are repo-relative — no absolute path in output (BR-5, LESSON-021).
     print(f"renumber {old_id} -> {new_id}")
-    print(f"  rename: {p['old_path']}")
-    print(f"      -> {p['new_path']}")
+    print(f"  rename: {os.path.relpath(p['old_path'], root)}")
+    print(f"      -> {os.path.relpath(p['new_path'], root)}")
     print(f"  references to rewrite: {len(p['refs'])} file(s)")
-    for r in p["refs"]:
-        print(f"    - {r}")
+    for r, count in p["refs"]:
+        rel = os.path.relpath(r, root)
+        print(f"    - {rel} ({count} match{'es' if count != 1 else ''})")
     cmds = _branch_commands(old_id, new_id)
     if cmds:
         print("  branch (run manually if a feature branch exists):")
@@ -334,12 +415,12 @@ def main(argv=None):
     if p["is_dir"]:
         for dirpath, _dirs, files in os.walk(p["new_path"]):
             for fn in files:
-                _rewrite_file(os.path.join(dirpath, fn), old_id, new_id, True)
+                _rewrite_file(os.path.join(dirpath, fn), old_id, new_id, True, root)
     else:
-        _rewrite_file(p["new_path"], old_id, new_id, True)
+        _rewrite_file(p["new_path"], old_id, new_id, True, root)
     # Rewrite external references.
-    for r in p["refs"]:
-        _rewrite_file(r, old_id, new_id, True)
+    for r, _count in p["refs"]:
+        _rewrite_file(r, old_id, new_id, True, root)
 
     print(f"\nApplied. {old_id} is now {new_id}.")
     return 0
