@@ -22,11 +22,47 @@ PRs (`atelier-fashion/adlc-toolkit`).
 1. **1.x — SDLC toolkit** — the original SDLC skill pipeline.
 2. **2.x — ADLC** — rebrand SDLC → ADLC; tag-based retrieval and cross-repo support.
 3. **3.x — Portable toolkit** — genericized for external use via a config seam + presets.
+4. **4.x — Kimi delegation** — Kimi K2.5 token-offload tooling, delegation telemetry,
+   and the Dynamic-Workflows / multi-human-coordination era.
 5. **5.x — Works anywhere** — provider-agnostic delegation, one-command install +
    `adlc doctor`, configurable agent tiers, collision-safe multi-user ids, and the
    GitHub/Azure DevOps forge adapter: the toolkit stops assuming its author's machine.
-4. **4.x — Kimi delegation** — Kimi K2.5 token-offload tooling, delegation telemetry,
-   and the Dynamic-Workflows / multi-human-coordination era.
+
+---
+
+## [Unreleased]
+
+### Removed
+
+- **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the
+  `atelier-map` Obsidian vault and was hardcoded to the `atelier-map` repo and the
+  Atelier sibling repos under `~/Documents/GitHub` — a project-specific skill that
+  has no meaning for any other adopter and violated the "skills must work for any
+  consumer project" rule in a stack-agnostic distribution. It was undisclosed in the
+  README catalog and reached `~/.claude/skills/` only because `install.sh` symlinks
+  the whole repo root.
+
+  **Migration / tombstone:** `/map`'s functionality is not deleted, only un-distributed.
+  Relocate it to the atelier project's own skill directory (or a personal
+  `~/.claude/skills/` entry outside this repo). The full `map/SKILL.md` body is
+  recoverable from git history at the REQ-526 removal commit. No consumer project
+  references `/map` by name in its own automation, so the removal is non-breaking for
+  the distribution.
+
+### Fixed (context-doc truth pass, REQ-526)
+
+- Corrected every "five principles" claim in `architecture.md`, `conventions.md`, and
+  `project-overview.md` — ETHOS.md has seven principles; rephrased to a count-free
+  "the ETHOS principles".
+- Rewrote `project-overview.md` to describe the current tree truthfully (the toolkit
+  tracks its own lessons and bugs; numbering is remote-derived per REQ-518; the 4.x
+  and 5.0 epochs exist).
+- Reordered this changelog's epoch summary list to read 1→5 in source order (the `4.x`
+  and `5.x` bullets had been transposed).
+- Completed the template enumerations in `README.md` and `architecture.md`
+  (`taxonomy-template.md` was missing) and documented the `id-alloc.sh`/`id-recheck.sh`
+  partials in `partials/README.md`, dropping its stale "partial drift detection not yet
+  implemented" claim.
 
 ---
 
