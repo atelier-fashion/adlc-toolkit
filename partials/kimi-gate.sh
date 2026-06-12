@@ -1,39 +1,55 @@
 #!/bin/sh
-# Shared Kimi delegation gate predicate (REQ-416 BR-3, ADR-2).
+# Back-compat alias (REQ-515 ADR-5) for delegate-gate.sh.
 #
-# Sourceable POSIX shell function. Each call site reads $? IMMEDIATELY into a
-# local variable (gate=$?) before any other command, because $? is clobbered
-# by every subsequent command. See partials/kimi-gate.md for the full protocol.
+# The canonical, provider-agnostic predicate is partials/delegate-gate.sh
+# (adlc_delegate_gate_check + ADLC_DELEGATE_GATE_REASON). This file preserves the
+# legacy surface so every existing SKILL.md source-line
+#   . .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+# keeps working byte-identically: it defines adlc_kimi_gate_check() with the
+# IDENTICAL 0/1/2 contract and the legacy ADLC_KIMI_GATE_REASON values
+# (ok / disabled-via-env / no-binary).
 #
-# Return-code contract:
-#   0 — delegated:    ask-kimi is on PATH AND ADLC_DISABLE_KIMI is not "1"
-#   1 — disabled:     ADLC_DISABLE_KIMI=1 explicitly opts out
-#   2 — unavailable:  ask-kimi is not on PATH
+# The predicate logic is INLINED here rather than sourced from delegate-gate.sh
+# because a partial sourced by absolute path cannot reliably locate a sibling
+# ($0 is the caller's path when sourced). Both files implement the same checks;
+# keep them in sync. The BR-11 "not-opted-in" condition maps onto the legacy
+# "disabled-via-env" reason so existing callers' disabled branch (which runs the
+# fallback) fires correctly on a fresh, un-opted-in install.
 #
-# Reason-string contract (REQ-426 BR-2, ADR-2):
-#   The function ALSO exports ADLC_KIMI_GATE_REASON on every code path, so
-#   callers can emit telemetry without re-interrogating the environment.
-#   Canonical values (paired with the return code):
-#     return 0 → ADLC_KIMI_GATE_REASON="ok"
-#     return 1 → ADLC_KIMI_GATE_REASON="disabled-via-env"
-#     return 2 → ADLC_KIMI_GATE_REASON="no-binary"
-#   `export` is intentional — a child `ask-kimi` invocation may read it.
+# Return-code contract (UNCHANGED from the historical kimi-gate.sh):
+#   0 — delegated   1 — disabled   2 — unavailable
 #
 # No `set -eu` here — return codes ARE the contract.
 
-# Defensive default: a caller that reads $ADLC_KIMI_GATE_REASON without first
-# invoking adlc_kimi_gate_check (e.g., a partial sourced but the function
-# never called) gets "unset" rather than empty — making telemetry visibly
-# wrong instead of silently empty (REQ-426 verify H2). Callers that DO invoke
-# the function will overwrite this with one of the canonical values below.
+# Defensive default mirrors the historical kimi-gate.sh contract.
 export ADLC_KIMI_GATE_REASON="unset"
 
+# Opt-in (BR-11): pure-shell fast paths first; config probe last (only when a
+# config file is present). Echoes "1" if opted in, "" otherwise.
+_adlc_kimi_opted_in() {
+  if [ "${ADLC_DELEGATE_ENABLED:-}" = "1" ]; then echo 1; return 0; fi
+  if [ -n "${MOONSHOT_API_KEY:-}" ] || [ -n "${KIMI_API_KEY:-}" ]; then echo 1; return 0; fi
+  _cfg="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
+  if [ -n "$_cfg" ] && [ -f "$_cfg" ] && command -v adlc-read >/dev/null 2>&1; then
+    if [ "$(adlc-read --print-enabled 2>/dev/null)" = "1" ]; then echo 1; return 0; fi
+  fi
+  echo ""
+}
+
 adlc_kimi_gate_check() {
-  if ! command -v ask-kimi >/dev/null 2>&1; then
+  # Probe adlc-read (the canonical CLI); the legacy ask-kimi shim also lands on
+  # PATH and resolves, but adlc-read is the contractual probe.
+  if ! command -v adlc-read >/dev/null 2>&1; then
     export ADLC_KIMI_GATE_REASON="no-binary"
     return 2
   fi
-  if [ "${ADLC_DISABLE_KIMI:-0}" = "1" ]; then
+  if [ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ] || [ "${ADLC_DISABLE_KIMI:-0}" = "1" ]; then
+    export ADLC_KIMI_GATE_REASON="disabled-via-env"
+    return 1
+  fi
+  if [ -z "$(_adlc_kimi_opted_in)" ]; then
+    # BR-11 fresh-install posture: surfaced as the legacy disabled reason so the
+    # caller's existing disabled branch runs the fallback.
     export ADLC_KIMI_GATE_REASON="disabled-via-env"
     return 1
   fi

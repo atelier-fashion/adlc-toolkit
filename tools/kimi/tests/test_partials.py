@@ -94,48 +94,78 @@ _GATE_PROBE = (
 )
 
 
-def _stub_ask_kimi_on_path(tmp_path):
-    """Drop a no-op `ask-kimi` stub into a tmp bin dir and return a PATH
-    that prepends it. Removes dependency on the host having ask-kimi
-    installed — the gate predicate only inspects `command -v`, so a
-    no-op script is sufficient (REQ-426 verify H1)."""
+def _stub_adlc_read_on_path(tmp_path):
+    """Drop a no-op `adlc-read` stub into a tmp bin dir and return a PATH
+    that prepends it. The new gate (REQ-515) probes `command -v adlc-read`,
+    so a no-op script is sufficient. The stub also handles `--print-enabled`
+    (prints 0 by default; tests that need config opt-in are separate) so the
+    gate's config-probe branch does not error."""
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    stub = bindir / "ask-kimi"
-    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub = bindir / "adlc-read"
+    stub.write_text('#!/bin/sh\n[ "$1" = "--print-enabled" ] && { echo 0; exit 0; }\nexit 0\n')
     stub.chmod(0o755)
     return f"{bindir}:/usr/bin:/bin"
 
 
 def test_kimi_gate_available(tmp_path, partials_dir):
-    """Gate returns 0 / REASON=ok when ask-kimi is on PATH.
+    """Gate returns 0 / REASON=ok when adlc-read is on PATH AND opted in.
 
-    Self-contained: stubs a no-op ask-kimi in tmp_path so the test runs
-    without depending on the host having ask-kimi installed.
+    REQ-515 adds the BR-11 opt-in requirement, so availability alone is no
+    longer enough — ADLC_DELEGATE_ENABLED=1 (or a legacy key) is required.
+    Self-contained: stubs a no-op adlc-read in tmp_path.
     """
-    path = _stub_ask_kimi_on_path(tmp_path)
-    env = {"PATH": path, "HOME": str(tmp_path)}
+    path = _stub_adlc_read_on_path(tmp_path)
+    env = {"PATH": path, "HOME": str(tmp_path), "ADLC_DELEGATE_ENABLED": "1"}
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
     assert "RC=0" in r.stdout, r.stdout + r.stderr
     assert "REASON=ok" in r.stdout, r.stdout
 
 
-def test_kimi_gate_disabled(tmp_path, partials_dir):
-    """ADLC_DISABLE_KIMI=1 → return 1, REASON=disabled-via-env.
+def test_kimi_gate_available_via_legacy_key(tmp_path, partials_dir):
+    """Continuity: a legacy MOONSHOT_API_KEY in env opts in (return 0)."""
+    path = _stub_adlc_read_on_path(tmp_path)
+    env = {"PATH": path, "HOME": str(tmp_path), "MOONSHOT_API_KEY": "sk-x"}
+    r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
+    assert "RC=0" in r.stdout, r.stdout + r.stderr
+    assert "REASON=ok" in r.stdout, r.stdout
 
-    Self-contained: uses a tmp ask-kimi stub so PATH-availability is
-    guaranteed and only the env-var opt-out is the variable.
-    """
-    path = _stub_ask_kimi_on_path(tmp_path)
-    env = {"PATH": path, "HOME": str(tmp_path), "ADLC_DISABLE_KIMI": "1"}
+
+def test_kimi_gate_not_opted_in(tmp_path, partials_dir):
+    """BR-11 fresh-install posture: available but no opt-in → return 1,
+    surfaced as the legacy REASON=disabled-via-env (so callers' disabled
+    branch runs the fallback)."""
+    path = _stub_adlc_read_on_path(tmp_path)
+    env = {"PATH": path, "HOME": str(tmp_path)}  # no opt-in signal
+    r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
+    assert "RC=1" in r.stdout, r.stdout + r.stderr
+    assert "REASON=disabled-via-env" in r.stdout, r.stdout
+
+
+def test_kimi_gate_disabled(tmp_path, partials_dir):
+    """ADLC_DISABLE_KIMI=1 → return 1, REASON=disabled-via-env (even when
+    otherwise opted in)."""
+    path = _stub_adlc_read_on_path(tmp_path)
+    env = {"PATH": path, "HOME": str(tmp_path),
+           "ADLC_DELEGATE_ENABLED": "1", "ADLC_DISABLE_KIMI": "1"}
+    r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
+    assert "RC=1" in r.stdout, r.stdout + r.stderr
+    assert "REASON=disabled-via-env" in r.stdout, r.stdout
+
+
+def test_kimi_gate_disabled_via_new_flag(tmp_path, partials_dir):
+    """ADLC_DISABLE_DELEGATE=1 (new flag) also disables → return 1."""
+    path = _stub_adlc_read_on_path(tmp_path)
+    env = {"PATH": path, "HOME": str(tmp_path),
+           "ADLC_DELEGATE_ENABLED": "1", "ADLC_DISABLE_DELEGATE": "1"}
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
     assert "RC=1" in r.stdout, r.stdout + r.stderr
     assert "REASON=disabled-via-env" in r.stdout, r.stdout
 
 
 def test_kimi_gate_unavailable(tmp_path, partials_dir):
-    """ask-kimi absent from PATH → return 2, REASON=no-binary."""
-    # Restrict PATH to system dirs that don't contain ask-kimi.
+    """adlc-read absent from PATH → return 2, REASON=no-binary."""
+    # Restrict PATH to system dirs that don't contain adlc-read.
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
     assert "RC=2" in r.stdout, r.stdout + r.stderr

@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""adlc-write — ask the configured delegate to generate a file from a spec.
+
+Generates a complete file from a spec string plus an optional reference file and
+writes it to a target path, for Claude to review. Refuses to clobber an existing
+target without --force, and never creates parent directories. The provider is
+resolved by ``_common.resolve_provider``. ``kimi-write`` is a back-compat shim
+for this command.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import _common  # noqa: E402
+
+_SYSTEM_PROMPT = (
+    "You generate complete, idiomatic files matching the given conventions. "
+    "Output ONLY the file contents — no markdown code fences, no commentary."
+)
+
+
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="adlc-write",
+        description="Generate a file from a spec with the configured delegate.",
+    )
+    parser.add_argument("--spec", required=True, help="description of what to generate")
+    parser.add_argument("--context", default=None, help="reference file for patterns/conventions")
+    parser.add_argument("--target", required=True, help="output file path")
+    parser.add_argument("--force", action="store_true", help="allow overwriting an existing --target")
+    parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument("--model", default=None, help="override the resolved model")
+    parser.add_argument("--base-url", default=None, help="override the resolved base URL")
+    parser.add_argument(
+        "--no-warn",
+        action="store_true",
+        help="suppress the data-exfiltration notice",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    if os.path.exists(args.target) and not args.force:
+        sys.exit(f"target already exists (use --force to overwrite): {args.target}")
+
+    parent = os.path.dirname(os.path.abspath(args.target))
+    if not os.path.isdir(parent):
+        sys.exit(f"parent directory does not exist: {parent}")
+
+    reference_block = None
+    if args.context is not None:
+        if not os.path.isfile(args.context) or not os.access(args.context, os.R_OK):
+            sys.exit(f"not a readable file: {args.context}")
+        with open(args.context, "r", encoding="utf-8") as fh:
+            content = fh.read()
+        # Only the basename leaves the local machine. Full path stays in local
+        # SystemExit error messages for actionability (privacy posture, LESSON-007).
+        reference_block = f"<reference path='{os.path.basename(args.context)}'>\n{content}\n</reference>"
+
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    if reference_block is not None:
+        messages.append({"role": "user", "content": reference_block})
+    messages.append({"role": "user", "content": args.spec})
+
+    # Resolve the provider once (validates key-in-config refusal before any
+    # network touch). Notice fires after all local guards (clobber, missing
+    # parent dir, unreadable context) but BEFORE get_client(), so the user always
+    # sees the privacy notice for any run that has reached the would-call-the-API
+    # stage.
+    provider = _common.resolve_provider(args_model=args.model, args_base_url=args.base_url)
+    if not args.no_warn and not _common.warn_suppressed():
+        _common.emit_exfil_notice(provider=provider)
+    client = _common.get_client(provider)
+    result = _common._strip_fences(_common.complete(client, provider.model, messages, args.max_tokens))
+
+    with open(args.target, "w", encoding="utf-8") as fh:
+        fh.write(result)
+
+    print(f"wrote: {args.target}")
+    print("Review this generated file before using it — delegate output is not vetted.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

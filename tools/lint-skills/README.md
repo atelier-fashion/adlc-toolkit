@@ -13,23 +13,26 @@ a general markdown linter and NOT a general shell linter.
    ` ```shell ` fenced block, the linter counts `$(` vs `)` and `$((` vs
    `))`. Imbalance is a finding. Outside-fence text is ignored (skill prose
    may legitimately use unbalanced examples).
-3. **Canonical-helper presence** — any SKILL.md that contains
-   `ADLC_DISABLE_KIMI` (i.e., has a Kimi delegation gate) must also contain
-   five exact literals (listed in the same order as `CANONICAL_LITERALS` in
-   `check.py`):
+3. **Canonical-helper presence** — any SKILL.md that contains a delegation-gate
+   disable anchor — either `ADLC_DISABLE_KIMI` OR the provider-neutral
+   `ADLC_DISABLE_DELEGATE` (REQ-515 BR-4 / ADR-9) — must also contain five
+   canonical literals. Each logical literal is satisfied by **either** the legacy
+   `kimi-*` spelling **or** the new `delegate-*` spelling (the dual-literal rule),
+   listed in the same order as `CANONICAL_LITERALS` in `check.py`:
    - `start_s=$(date -u +%s)`
    - `duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))`
-   - `"$KIMI_TOOLS"/emit-telemetry.sh ` (note the trailing space — it proves
-     an invocation, not a path substring)
-   - `. .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh`
-     (the gate-source line that wires the Kimi delegation gate; required so
-     corruption that strips it while leaving `ADLC_DISABLE_KIMI` references is
-     caught)
-   - `. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh`
-     (the resolver-source line that sets `$KIMI_TOOLS`; required so corruption
-     that strips it while leaving the `"$KIMI_TOOLS"/…` invocation is caught)
+   - `"$KIMI_TOOLS"/emit-telemetry.sh ` **or** `"$DELEGATE_TOOLS"/emit-telemetry.sh `
+     (note the trailing space — it proves an invocation, not a path substring)
+   - `. .adlc/partials/kimi-gate.sh …` **or** `. .adlc/partials/delegate-gate.sh …`
+     (the gate-source line that wires the delegation gate; required so corruption
+     that strips it while leaving a disable anchor is caught)
+   - `. .adlc/partials/kimi-tools-path.sh …` **or** `. .adlc/partials/delegate-tools-path.sh …`
+     (the resolver-source line that sets `$KIMI_TOOLS` / `$DELEGATE_TOOLS`;
+     required so corruption that strips it while leaving the invocation is caught)
 
-   Each missing literal is a separate finding.
+   Each missing literal (none of its accepted spellings present) is a separate
+   finding. Both spellings are valid because `kimi-gate.sh` / `kimi-tools-path.sh`
+   are back-compat aliases of the canonical `delegate-*` partials (REQ-515 ADR-5).
 
    **Canonical follows the indirection (REQ-436 ADR-4).** A literal is
    satisfied if it appears in the SKILL.md text **or** in the text of a

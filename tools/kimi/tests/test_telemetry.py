@@ -234,3 +234,27 @@ def test_emit_preserves_gate_fail_fallback(tmp_path):
     obj = json.loads(log_path.read_text().splitlines()[0])
     assert obj["mode"] == "fallback"
     assert obj["reason"] == "no-binary"
+
+
+def test_check_delegation_processes_pre_and_post_rename_records(tmp_path):
+    """REQ-515 BR-5 / AC: telemetry records emitted before AND after the
+    provider-neutral rename are processable by the SAME check-delegation.sh.
+
+    The schema is unchanged (REQ-515 ADR-7); the only naming-internal difference
+    is the per-skill label. A 'pre-change' record (legacy kimi-pre-pass label) and
+    a 'post-change' record (an adlc-read-driven skill label) both parse and count.
+    check-delegation.sh discovers skills dynamically, so each lands in its own row.
+    """
+    env = _env_with_log(tmp_path)
+    # pre-rename style record: the agent's telemetry label was 'kimi-pre-pass'
+    _run([EMIT, "kimi-pre-pass", "Phase-5-prepass", "REQ-440", "pass", "delegated", "ok", "900"], env=env)
+    # post-rename style record from a neutralized skill step
+    _run([EMIT, "proceed-phase-5", "Phase-5-Verify", "REQ-515", "pass", "delegated", "ok", "950"], env=env)
+    r = _run([CHECK], env=env)
+    lines = r.stdout.strip().splitlines()
+    assert lines[0] == "skill\tdelegated\tfallback\tghost_skip\ttotal"
+    # both records parsed and counted (one delegated each); order = first-seen.
+    body = {ln.split("\t")[0]: ln for ln in lines[1:-1]}
+    assert "kimi-pre-pass" in body and body["kimi-pre-pass"].endswith("1\t0\t0\t1")
+    assert "proceed-phase-5" in body and body["proceed-phase-5"].endswith("1\t0\t0\t1")
+    assert lines[-1] == "TOTAL\t2\t0\t0\t2"

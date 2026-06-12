@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""adlc-read — pack files into a corpus and ask the configured delegate a question.
+
+Files go before the question in the request so an OpenAI-compatible prefix cache
+can be reused across multiple questions on the same corpus. The provider
+(endpoint / model / key var) is resolved by ``_common.resolve_provider`` — see
+that module for the precedence cascade. ``ask-kimi`` is a back-compat shim for
+this command.
+"""
+
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import _common  # noqa: E402
+
+_SYSTEM_PROMPT = (
+    "You are a precise code analyst. Answer the question using only the provided "
+    "files. Reply with a concise, structured summary (short sections / bullets) — "
+    "do not dump file contents verbatim."
+)
+
+
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="adlc-read",
+        description="Ask the configured delegate a question about one or more files.",
+    )
+    parser.add_argument(
+        "--print-enabled",
+        action="store_true",
+        help="print 1 if delegation is opted-in (BR-11), else 0, and exit; "
+             "no files or question required, no network call",
+    )
+    parser.add_argument("--paths", nargs="+", help="files to read")
+    parser.add_argument("--question", help="question to answer")
+    parser.add_argument("--max-tokens", type=int, default=8192)
+    parser.add_argument("--model", default=None, help="override the resolved model")
+    parser.add_argument("--base-url", default=None, help="override the resolved base URL")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print message structure and exit without calling the API",
+    )
+    parser.add_argument(
+        "--no-warn",
+        action="store_true",
+        help="suppress the data-exfiltration notice",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+
+    # --print-enabled: a non-network probe used by the delegate gate partial to
+    # resolve the config-file opt-in signal (BR-11) without parsing YAML in
+    # shell. Prints "1"/"0" and exits 0; never errors so the gate can rely on it.
+    # Runs the FULL resolve_provider() so a config that is opted-in but invalid
+    # (e.g. a key value in api_key_env — BR-3) reports "0", not "1": the gate must
+    # not green-light a config that would fail loudly on the first real call.
+    if args.print_enabled:
+        try:
+            print("1" if _common.resolve_provider().enabled else "0")
+        except SystemExit:
+            # A malformed config (e.g. key-in-config) means "not safely enabled".
+            print("0")
+        return 0
+
+    if not args.paths or not args.question:
+        sys.exit("--paths and --question are required (unless --print-enabled)")
+
+    # Skip unreadable paths with a warning instead of aborting the whole batch:
+    # a single stale/missing path in a multi-file --paths set (e.g. one moved
+    # knowledge doc among the top-15 a /spec or /analyze step delegates) must not
+    # nullify the readable remainder. Only fail when NOTHING is readable — packing
+    # an empty corpus would waste an API call. The consuming skills already
+    # reconcile any expected-but-missing doc and read it directly, so a skipped
+    # path is recovered downstream rather than silently lost (BUG-080).
+    readable = []
+    for p in args.paths:
+        if os.path.isfile(p) and os.access(p, os.R_OK):
+            readable.append(p)
+        else:
+            sys.stderr.write(f"adlc-read: skipping unreadable path: {p}\n")
+    if not readable:
+        sys.exit("no readable files among --paths")
+
+    messages = [
+        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "user", "content": f"<corpus>\n{_common.pack_corpus(readable)}\n</corpus>"},
+        {"role": "user", "content": args.question},
+    ]
+
+    if args.dry_run:
+        for m in messages:
+            print(f"{m['role']}: {len(m['content'])} chars")
+        return 0
+
+    # Resolve the provider once (validates key-in-config refusal before any
+    # network touch). Notice fires after the dry-run gate and after path
+    # validation, but BEFORE get_client() so the user always sees the privacy
+    # notice for any real run — even one that will fail later due to a missing
+    # key or auth error.
+    provider = _common.resolve_provider(args_model=args.model, args_base_url=args.base_url)
+    if not args.no_warn and not _common.warn_suppressed():
+        _common.emit_exfil_notice(provider=provider)
+    client = _common.get_client(provider)
+    print(_common.complete(client, provider.model, messages, args.max_tokens))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

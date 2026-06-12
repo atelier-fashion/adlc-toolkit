@@ -69,13 +69,28 @@ SENTINELS_FILE = SCRIPT_DIR / "sentinels.txt"
 
 SKIP_DIR_PARTS = {".git", ".worktrees", "node_modules"}
 
-KIMI_GATE_ANCHOR = "ADLC_DISABLE_KIMI"
+# REQ-515 BR-4 / ADR-9: the gate was generalized from "kimi" to "delegate" with
+# back-compat aliases. The canonical check fires when EITHER disable anchor
+# appears, and each logical canonical literal is satisfied by ANY of its
+# acceptable spellings (legacy kimi-* OR new delegate-*). Both the wrapper and
+# the canonical spelling are valid — a skill on either keeps passing.
+KIMI_GATE_ANCHORS = ("ADLC_DISABLE_KIMI", "ADLC_DISABLE_DELEGATE")
+# Each entry is a tuple of acceptable spellings for one logical literal;
+# satisfied if ANY spelling is present (in the SKILL.md text or a sourced
+# telemetry partial). Single-spelling literals are 1-tuples.
 CANONICAL_LITERALS = (
-    "start_s=$(date -u +%s)",
-    "duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))",
-    '"$KIMI_TOOLS"/emit-telemetry.sh ',
-    ". .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh",
-    ". .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh",
+    ("start_s=$(date -u +%s)",),
+    ("duration_ms=$(( ($(date -u +%s) - $start_s) * 1000 ))",),
+    # $KIMI_TOOLS and $DELEGATE_TOOLS both resolve the telemetry-exec dir.
+    ('"$KIMI_TOOLS"/emit-telemetry.sh ', '"$DELEGATE_TOOLS"/emit-telemetry.sh '),
+    (
+        ". .adlc/partials/kimi-gate.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh",
+        ". .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh",
+    ),
+    (
+        ". .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh",
+        ". .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh",
+    ),
 )
 
 # REQ-436 Phase-5 security hardening: the partial-aware canonical rule (ADR-4)
@@ -290,24 +305,28 @@ def load_partials_blob(root: Path) -> str:
 
 
 def check_canonical(text: str, rel: str, partials_blob: str = "") -> list[Finding]:
-    if KIMI_GATE_ANCHOR not in text:
+    # REQ-515 ADR-9: fire when EITHER disable anchor appears.
+    if not any(anchor in text for anchor in KIMI_GATE_ANCHORS):
         return []
     # REQ-436 Phase-5 hardening: the partial may only satisfy a literal for a
     # SKILL.md that actually sources the telemetry partial. A SKILL.md that
-    # mentions ADLC_DISABLE_KIMI but wires up no telemetry partial is a genuine
+    # mentions a disable anchor but wires up no telemetry partial is a genuine
     # misconfiguration and must still be flagged (LESSON-019 #1 — don't let the
     # guard re-rot into vacuity behind the indirection it was taught to follow).
     sources_partial = TELEMETRY_PARTIAL_MARKER in text
     findings: list[Finding] = []
-    for literal in CANONICAL_LITERALS:
-        # REQ-436 ADR-4: canonical follows the indirection — a literal absent
-        # from the SKILL.md text is still satisfied if it lives in a sourced
-        # telemetry partial, but ONLY when this SKILL.md sources that partial.
-        in_partial = sources_partial and literal in partials_blob
-        if literal not in text and not in_partial:
+    for spellings in CANONICAL_LITERALS:
+        # REQ-436 ADR-4 + REQ-515 ADR-9: a logical literal is satisfied if ANY of
+        # its acceptable spellings (legacy or new) is present in the SKILL.md text
+        # OR — when this SKILL.md sources the telemetry partial — in that partial.
+        satisfied = any(
+            sp in text or (sources_partial and sp in partials_blob)
+            for sp in spellings
+        )
+        if not satisfied:
             findings.append(
                 Finding(rel, 1, "canonical-helper",
-                        f"missing required literal: {literal!r}")
+                        f"missing required literal (any of): {spellings!r}")
             )
     return findings
 
