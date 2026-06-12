@@ -19,13 +19,25 @@
 #   adlc_id_kind_prefix  <kind>   -> prints the id prefix (REQ|BUG|LESSON)
 #   adlc_id_kind_scan    <kind>   -> prints "<find-path-glob> <find-type>" for bootstrap
 #   adlc_id_list_max     <list>   -> max of a newline-separated number list (zsh-safe)
-#   adlc_remote_high     <kind>   -> prints the remote high-water number (0 if none/unreachable)
+#   adlc_remote_artifact_nums <repo> <kind> <prefix>  -> prints "<nums>\n<ran>" where
+#                                   <ran>=1 iff a forge-aware artifact scan actually ran
+#   adlc_remote_high     <kind>   -> prints "<high_water> <degraded>" (BR-2)
 #   adlc_alloc_id        <kind>   -> prints max(local,remote)+1; fast-forwards the counter
 #
-# Degradation (BR-3): if any configured remote is unreachable, adlc_remote_high prints
-# 0, emits a warning on stderr, and sets ADLC_ALLOC_DEGRADED=1 in the CALLER's env so
-# the skill can record "id allocated without remote verification — verify before PR".
-# Allocation NEVER blocks on network availability.
+# Degradation signalling (REQ-523 BR-2): adlc_remote_high prints TWO space-separated
+# tokens on stdout — "<high_water> <degraded>" — because both callers invoke it through
+# command substitution ($(...)), a subshell whose variable writes can NEVER reach the
+# parent (LESSON-015). The old "sets ADLC_ALLOC_DEGRADED=1 in the CALLER's env" contract
+# was structurally broken (the write died with the subshell); it is removed. The degraded
+# bit is 1 whenever ANY source that should have run for the requested kind could not run
+# or failed: ls-remote failure, gh absent AND git-transport fallback failed, gh api
+# failure with no fallback, an Azure DevOps scan that could not run, a non-GitHub/non-ADO
+# forge with no usable scan, or no participating remote at all. A warning is also emitted
+# to stderr. The branch scan and the artifact scan are INDEPENDENT derivation sources
+# (BR-1): a failure of one never skips the other for the same repo. For kind=lesson
+# (branch-less), the artifact scan is the ONLY source, so its absence is ALWAYS degraded
+# with a warning — never a silent 0 (BR-3). Allocation NEVER blocks on network
+# availability — a degraded derivation still allocates from local state.
 #
 # Portable across sh/bash/zsh (BR-6): prefixed globals (no `local`), no `\b` in grep -E,
 # no bare $<digit>, no [0] indexing, no `status=` variable, and NO `for x in $var`
@@ -99,15 +111,119 @@ adlc_id_kind_scan() {
   esac
 }
 
-# --- remote high-water derivation (BR-2) --------------------------------------------
+# --- forge-aware artifact-path mapper -----------------------------------------------
+# Prints the in-repo path that holds the merged artifacts for a kind.
+adlc_id_kind_artifact_path() {
+  case "$1" in
+    req)    echo ".adlc/specs" ;;
+    bug)    echo ".adlc/bugs" ;;
+    lesson) echo ".adlc/knowledge/lessons" ;;
+    *) echo "adlc_id_kind_artifact_path: unknown kind '$1'" >&2; return 2 ;;
+  esac
+}
+
+# --- forge host classifier (REQ-523 M4/BR-5) ----------------------------------------
+# Classify an origin URL into a forge family, mirroring forge.sh adlc_forge_provider's
+# host-detection shape so the artifact scan resolves the SAME way the real PR ops do
+# (LESSON-392). Prints: github | azure-devops | other.
+adlc_forge_host_class() {
+  case "$1" in
+    *github.com[:/]*)                                  echo "github" ;;
+    *dev.azure.com[:/]*|*.visualstudio.com[:/]*|*.visualstudio.com:*) echo "azure-devops" ;;
+    *)                                                 echo "other" ;;
+  esac
+}
+
+# --- git-transport merged-artifact scan (REQ-523 BR-4/BR-5) -------------------------
+# Forge-AGNOSTIC merged-artifact listing read straight from the REMOTE's default branch
+# over git transport alone — works for gh-absent GitHub AND Azure DevOps (both speak
+# git), never touching the local working tree. Resolve the default-branch tip via
+# ls-remote, shallow-fetch that exact object if it is not already local (a stale clone
+# may lack the newest tip), then ls-tree the artifact directory. Prints the artifact
+# numbers (may be empty); rc 0 iff the scan actually ran (ls-tree succeeded), rc 1 if it
+# could not run (transport failure). Never prints non-numeric noise.
+adlc_remote_git_artifact_nums() {
+  adlc_ga_repo=$1; adlc_ga_kind=$2; adlc_ga_prefix=$3
+  adlc_ga_path=$(adlc_id_kind_artifact_path "$adlc_ga_kind") || return 1
+  adlc_ga_tip=$(git -C "$adlc_ga_repo" ls-remote origin HEAD 2>/dev/null | awk '{print $1; exit}')
+  [ -n "$adlc_ga_tip" ] || return 1
+  # ls-tree fails if the tip object isn't local yet; shallow-fetch it and retry once.
+  adlc_ga_tree=$(git -C "$adlc_ga_repo" ls-tree --name-only "$adlc_ga_tip" "$adlc_ga_path/" 2>/dev/null)
+  if [ $? -ne 0 ]; then
+    git -C "$adlc_ga_repo" fetch --depth=1 -q origin "$adlc_ga_tip" 2>/dev/null || return 1
+    adlc_ga_tree=$(git -C "$adlc_ga_repo" ls-tree --name-only "$adlc_ga_tip" "$adlc_ga_path/" 2>/dev/null) || return 1
+  fi
+  printf '%s\n' "$adlc_ga_tree" \
+    | grep -oE "$adlc_ga_prefix-[0-9][0-9]*" \
+    | grep -oE '[0-9][0-9]*'
+  return 0
+}
+
+# --- shared forge-aware artifact scan (REQ-523 BR-4/BR-5/BR-6) -----------------------
+# The SINGLE artifact-derivation surface used by BOTH adlc_remote_high and
+# adlc_recheck_id (BR-6 — no recheck-only copy). For a repo + kind, derive the merged
+# artifact id numbers and report whether a scan actually ran.
+# Prints two lines:
+#   line 1: the newline-joined artifact numbers, joined by spaces (may be empty)
+#   line 2: "1" if a scan ran (result is authoritative), "0" if no scan could run
+# GitHub: try the cheap `gh api contents` read first; on gh-absent OR gh failure, fall
+# through to the forge-agnostic git-transport scan. Azure DevOps + any other git host:
+# the git-transport scan directly (BR-5 parity). The only "no scan ran" outcomes are an
+# unrecognized host with no usable scan, or git-transport failure with no gh path.
+adlc_remote_artifact_nums() {
+  adlc_an_repo=$1; adlc_an_kind=$2; adlc_an_prefix=$3
+  adlc_an_url=$(git -C "$adlc_an_repo" remote get-url origin 2>/dev/null)
+  adlc_an_host=$(adlc_forge_host_class "$adlc_an_url")
+  adlc_an_nums=""
+  adlc_an_ran=0
+
+  if [ "$adlc_an_host" = "github" ]; then
+    # Fast path: gh api contents on owner/repo parsed from the URL.
+    adlc_an_owner=$(printf '%s' "$adlc_an_url" \
+      | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')
+    if command -v gh >/dev/null 2>&1 && printf '%s' "$adlc_an_owner" | grep -qE '^[^/]+/[^/]+$'; then
+      adlc_an_apath=$(adlc_id_kind_artifact_path "$adlc_an_kind") || return 1
+      adlc_an_listing=$(gh api "repos/$adlc_an_owner/contents/$adlc_an_apath" --jq '.[].name' 2>/dev/null)
+      if [ $? -eq 0 ] && [ -n "$adlc_an_listing" ]; then
+        adlc_an_nums=$(printf '%s\n' "$adlc_an_listing" \
+          | grep -oE "$adlc_an_prefix-[0-9][0-9]*" | grep -oE '[0-9][0-9]*')
+        adlc_an_ran=1
+      fi
+    fi
+    # gh absent / gh failed / empty listing -> git-transport fallback (BR-4).
+    if [ "$adlc_an_ran" -eq 0 ]; then
+      adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix")
+      [ $? -eq 0 ] && adlc_an_ran=1
+    fi
+  elif [ "$adlc_an_host" = "azure-devops" ]; then
+    # ADO parity (BR-5): git transport speaks to ADO too. Full scan, not degraded.
+    adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix")
+    [ $? -eq 0 ] && adlc_an_ran=1
+  else
+    # Unrecognized host: try a generic git-transport scan (it may still be a git
+    # remote); if even that fails, the scan did not run (caller flags degraded).
+    adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix")
+    [ $? -eq 0 ] && adlc_an_ran=1
+  fi
+
+  # Collapse the numbers to a single space-joined line so the two-line contract holds
+  # even when the list is multi-element (BUG-116 — never word-split downstream).
+  printf '%s\n%s\n' "$(printf '%s\n' "$adlc_an_nums" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')" "$adlc_an_ran"
+}
+
+# --- remote high-water derivation (REQ-523 BR-1/BR-2/BR-3/BR-4/BR-5) -----------------
 # Reads the REMOTE, not local clones' state — stale local checkouts must not LOWER the
-# result. Reuses the /manifest derive-don't-store surface (ADR-2): pushed
-# feat/REQ-* / fix/bug-* branch names + merged artifact dirs reachable from default
-# branches across the participating repos. Participating repos = checkouts under
-# $ADLC_REPOS_ROOT (default: parent of the current repo) that have a remote.
+# result. Derive-don't-store surface (ADR-2): pushed feat/REQ-* / fix/bug-* branch names
+# (req/bug) PLUS merged artifact dirs/files on the default branch, across participating
+# repos = checkouts under $ADLC_REPOS_ROOT (default: parent of the current repo) that
+# have a remote.
 #
-# Prints the max number found (0 if none). On an unreachable remote, prints 0, warns,
-# and sets ADLC_ALLOC_DEGRADED=1.
+# The branch scan and the artifact scan are INDEPENDENT sources (BR-1): a failed
+# ls-remote no longer skips the artifact scan for the same repo. Prints
+# "<high_water> <degraded>" on stdout (BR-2): the degraded bit (1/0) survives command
+# substitution, unlike the old parent-env ADLC_ALLOC_DEGRADED write. For kind=lesson the
+# artifact scan is the ONLY source, so a repo where it could not run is ALWAYS degraded
+# (BR-3).
 adlc_remote_high() {
   adlc_rh_kind=$1
   adlc_rh_prefix=$(adlc_id_kind_prefix "$adlc_rh_kind") || return 2
@@ -126,6 +242,7 @@ adlc_remote_high() {
 
   adlc_rh_max=0
   adlc_rh_saw_remote=0
+  adlc_rh_degraded=0
   adlc_rh_unreachable=""
 
   # Enumerate participating repos: git checkouts directly under the root that have an
@@ -140,58 +257,55 @@ adlc_remote_high() {
     [ -n "$adlc_rh_url" ] || continue
     adlc_rh_saw_remote=1
 
-    # --- pushed branch names (req/bug) via ls-remote on the REMOTE -------------------
+    # --- SOURCE 1: pushed branch names (req/bug) via ls-remote on the REMOTE ---------
+    # A failure here is recorded as degraded but does NOT skip SOURCE 2 (BR-1 — the two
+    # sources are independent; git transport (SSH) and gh (HTTPS+token) fail apart).
     if [ -n "$adlc_rh_branch_re" ]; then
       adlc_rh_refs=$(git -C "$adlc_rh_repo" ls-remote --heads origin 2>/dev/null)
       if [ $? -ne 0 ]; then
         adlc_rh_unreachable="$adlc_rh_unreachable $adlc_rh_url"
-        continue
+        adlc_rh_degraded=1
+        # fall through — do NOT continue (BR-1).
+      else
+        # Extract NNN from refs/heads/<branch_re>-...; grep -oE then strip the prefix.
+        # Reduce via adlc_id_list_max — NOT `for x in $nums` (zsh word-split, BUG-116).
+        adlc_rh_nums=$(printf '%s\n' "$adlc_rh_refs" \
+          | grep -oE "$adlc_rh_branch_re" \
+          | grep -oE '[0-9][0-9]*' )
+        adlc_rh_cand=$(adlc_id_list_max "$adlc_rh_nums") || return 2
+        [ "$adlc_rh_cand" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_cand
       fi
-      # Extract NNN from refs/heads/<branch_re>-...; grep -oE then strip the prefix.
-      # Reduce via adlc_id_list_max — NOT `for x in $nums` (zsh word-split, BUG-116).
-      adlc_rh_nums=$(printf '%s\n' "$adlc_rh_refs" \
-        | grep -oE "$adlc_rh_branch_re" \
-        | grep -oE '[0-9][0-9]*' )
-      adlc_rh_cand=$(adlc_id_list_max "$adlc_rh_nums") || return 2
-      [ "$adlc_rh_cand" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_cand
     fi
 
-    # --- merged artifact dirs/files reachable from the default branch ---------------
-    # Prefer gh api (cheap tree read) when available; degrade to ls-remote ref scan of
-    # the default branch tip via ls-tree. Either way we read the REMOTE's default
-    # branch, never the local working tree.
-    adlc_rh_owner=$(printf '%s' "$adlc_rh_url" \
-      | sed -E 's#^git@github.com:##; s#^https://github.com/##; s#\.git$##')
-    adlc_rh_artifact_nums=""
-    if command -v gh >/dev/null 2>&1 && printf '%s' "$adlc_rh_owner" | grep -qE '^[^/]+/[^/]+$'; then
-      case "$adlc_rh_kind" in
-        req)    adlc_rh_path=".adlc/specs" ;;
-        bug)    adlc_rh_path=".adlc/bugs" ;;
-        lesson) adlc_rh_path=".adlc/knowledge/lessons" ;;
-      esac
-      adlc_rh_listing=$(gh api "repos/$adlc_rh_owner/contents/$adlc_rh_path" \
-        --jq '.[].name' 2>/dev/null)
-      if [ -n "$adlc_rh_listing" ]; then
-        adlc_rh_artifact_nums=$(printf '%s\n' "$adlc_rh_listing" \
-          | grep -oE "$adlc_rh_prefix-[0-9][0-9]*" \
-          | grep -oE '[0-9][0-9]*')
-      fi
+    # --- SOURCE 2: merged artifact dirs/files via the shared forge-aware scan --------
+    # gh fast-path -> git-transport fallback (BR-4) -> ADO parity (BR-5). The helper
+    # reports whether a scan actually ran; if not, this repo is degraded for the
+    # requested kind. For lessons this is the ONLY source (BR-3).
+    adlc_rh_art=$(adlc_remote_artifact_nums "$adlc_rh_repo" "$adlc_rh_kind" "$adlc_rh_prefix")
+    # Line 1 = space-joined artifact numbers; line 2 = scan-ran bit. Re-split the
+    # numbers onto newlines for adlc_id_list_max (which rejects a space-joined line).
+    adlc_rh_art_nums=$(printf '%s\n' "$adlc_rh_art" | sed -n '1p' | tr ' ' '\n')
+    adlc_rh_art_ran=$(printf '%s\n' "$adlc_rh_art" | sed -n '2p')
+    if [ "$adlc_rh_art_ran" = "1" ]; then
+      adlc_rh_cand=$(adlc_id_list_max "$adlc_rh_art_nums") || return 2
+      [ "$adlc_rh_cand" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_cand
+    else
+      adlc_rh_host=$(adlc_forge_host_class "$adlc_rh_url")
+      echo "WARNING: merged-artifact scan could not run for $adlc_rh_prefix in '$adlc_rh_repo' (forge=$adlc_rh_host, url=$adlc_rh_url) — derivation degraded (BR-5)." >&2
+      adlc_rh_degraded=1
     fi
-    adlc_rh_cand=$(adlc_id_list_max "$adlc_rh_artifact_nums") || return 2
-    [ "$adlc_rh_cand" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_cand
   done
 
   if [ -n "$adlc_rh_unreachable" ]; then
-    echo "WARNING: remote(s) unreachable during $adlc_rh_prefix high-water derivation:$adlc_rh_unreachable" >&2
-    echo "  -> id allocated without full remote verification — verify before PR (BR-3)." >&2
-    ADLC_ALLOC_DEGRADED=1
+    echo "WARNING: remote(s) unreachable during $adlc_rh_prefix branch high-water derivation:$adlc_rh_unreachable" >&2
+    echo "  -> id allocated without full remote verification — verify before PR (BR-2)." >&2
   fi
   if [ "$adlc_rh_saw_remote" -eq 0 ]; then
     echo "WARNING: no participating repo with an origin remote found under '$adlc_rh_root' — local-only allocation (BR-3)." >&2
-    ADLC_ALLOC_DEGRADED=1
+    adlc_rh_degraded=1
   fi
 
-  echo "$adlc_rh_max"
+  printf '%s %s\n' "$adlc_rh_max" "$adlc_rh_degraded"
 }
 
 # --- bootstrap scan (counter absent) ------------------------------------------------
@@ -224,16 +338,28 @@ adlc_alloc_id() {
 
   # Remote high-water is derived OUTSIDE the lock — it makes network calls that must
   # not hold the mkdir lock for seconds; the lock only guards the local read/write.
-  adlc_ai_remote=$(adlc_remote_high "$adlc_ai_kind")
-  # Loud-fail guard (BUG-116): adlc_remote_high always prints a number on success
-  # (0 when unreachable — that DEGRADED path stays non-blocking per BR-3). Empty or
-  # non-numeric output means an internal derivation error — abort rather than
-  # silently allocating from the local counter alone.
+  # adlc_remote_high prints "<high_water> <degraded>" (REQ-523 BR-2). Split the two
+  # tokens; the high-water drives allocation, the degraded bit is surfaced to the caller.
+  adlc_ai_rh=$(adlc_remote_high "$adlc_ai_kind")
+  adlc_ai_remote=${adlc_ai_rh%% *}
+  adlc_ai_degraded=${adlc_ai_rh##* }
+  # Loud-fail guard (BUG-116): the high-water token is always a number on success (0 when
+  # degraded — that path stays non-blocking per BR-2/BR-3). Empty or non-numeric means an
+  # internal derivation error — abort rather than silently allocating from local alone.
   case "$adlc_ai_remote" in
     ''|*[!0-9]*)
-      echo "ERROR: adlc_remote_high returned non-numeric '$adlc_ai_remote' for kind '$adlc_ai_kind' — aborting allocation (BUG-116)" >&2
+      echo "ERROR: adlc_remote_high returned non-numeric high-water '$adlc_ai_remote' for kind '$adlc_ai_kind' — aborting allocation (BUG-116)" >&2
       return 1 ;;
   esac
+  # On a degraded derivation, warn on stderr (the warning detail already came from
+  # adlc_remote_high; this is the allocation-level summary). We do NOT set a parent-env
+  # flag here: adlc_alloc_id is itself invoked via $(...) in the sanctioned usage, so any
+  # variable write would die in the subshell — the SAME class of bug REQ-523 repairs
+  # (LESSON-015). The degraded bit is carried by the stdout token already consumed; a
+  # skill that needs it must read it from adlc_remote_high directly, not from a flag.
+  if [ "$adlc_ai_degraded" = "1" ]; then
+    echo "WARNING: $adlc_ai_kind id derived from a DEGRADED remote scan — verify before PR (REQ-523 BR-2)." >&2
+  fi
 
   adlc_ai_num=$(
     LOCK="$adlc_ai_lock"

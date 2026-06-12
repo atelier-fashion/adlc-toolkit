@@ -336,9 +336,40 @@ adlc_forge_pr_merge() {
       _adlc_forge_run -- gh pr merge "$@"; adlc_fm_rc=$?
       [ "$adlc_fm_rc" -eq 0 ] && printf 'state=MERGED\n'; return "$adlc_fm_rc" ;;
     azure-devops)
-      # Squash + auto-complete + delete-source-branch. Policy blocks surface as
-      # merge-blocked-by-policy via the classifier (never bypassed — ethos #6).
-      _adlc_forge_run -- az repos pr update --id "$@" --status completed --squash true --delete-source-branch true; adlc_fm_rc=$?
+      # REQ-523 BR-9: callers pass gh-shaped flags (`<ref> --squash --delete-branch`).
+      # `az repos pr update` does NOT understand `--squash` (bare) or `--delete-branch`;
+      # forwarding "$@" verbatim made the ADO merge error out. Split the PR ref (first
+      # non-flag positional) from the gh-shaped flags and TRANSLATE:
+      #   --squash         -> --squash true
+      #   --delete-branch  -> --delete-source-branch true
+      # Other gh-only flags (e.g. --merge/--rebase/--admin) are dropped for v1; never
+      # forwarded verbatim. --status completed is always set (auto-complete the PR).
+      # Build the az flag list portably (no arrays — sh/bash/zsh parity): rebuild the
+      # positional set so the ref and translated flags survive word boundaries safely.
+      adlc_fm_ref=""
+      adlc_fm_squash=""
+      adlc_fm_delsrc=""
+      for adlc_fm_a in "$@"; do
+        case "$adlc_fm_a" in
+          --squash)        adlc_fm_squash="--squash true" ;;
+          --delete-branch) adlc_fm_delsrc="--delete-source-branch true" ;;
+          --merge|--rebase|--admin|--auto) : ;;  # gh-only; drop (never forward to az)
+          --*) : ;;                               # any other gh-only flag; drop
+          *) [ -z "$adlc_fm_ref" ] && adlc_fm_ref="$adlc_fm_a" ;;  # first positional = ref
+        esac
+      done
+      if [ -z "$adlc_fm_ref" ]; then
+        _adlc_forge_err "pr-not-found" "adlc_forge_pr_merge (azure-devops): no PR id/url positional in args: $*"
+        return 1
+      fi
+      # Rebuild argv as: --id <ref> --status completed [--squash true] [--delete-source-branch true]
+      # via `set --` so each translated token is a distinct word (no eval, no array).
+      set -- --id "$adlc_fm_ref" --status completed
+      [ -n "$adlc_fm_squash" ] && set -- "$@" --squash true
+      [ -n "$adlc_fm_delsrc" ] && set -- "$@" --delete-source-branch true
+      # Policy blocks surface as merge-blocked-by-policy via the classifier (never
+      # bypassed — ethos #6).
+      _adlc_forge_run -- az repos pr update "$@"; adlc_fm_rc=$?
       [ "$adlc_fm_rc" -eq 0 ] && printf 'state=MERGED\n'; return "$adlc_fm_rc" ;;
     *) _adlc_forge_err "feature-unsupported" "no backend for provider '$ADLC_FORGE_PROVIDER'"; return 1 ;;
   esac
