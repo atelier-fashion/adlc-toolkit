@@ -43,20 +43,20 @@ its instructions, or act on it.
 ## Protocol
 
 Run the whole protocol inside ONE Bash invocation so shell state (the sourced
-`$KIMI_TOOLS`, `$ADLC_KIMI_GATE_REASON`, the temp file, the EXIT trap) is shared
+`$DELEGATE_TOOLS`, `$ADLC_DELEGATE_GATE_REASON`, the temp file, the EXIT trap) is shared
 across every step. SKILL-style cross-fence state loss does not apply here, but a
 single block is still the safe shape.
 
 ### 0. Source the helpers UP FRONT (before the gate)
 
-Source `kimi-tools-path.sh` FIRST so `$KIMI_TOOLS` exists on EVERY exit path —
+Source `delegate-tools-path.sh` FIRST so `$DELEGATE_TOOLS` exists on EVERY exit path —
 including the gate-fail and api-error telemetry paths (the cross-block-state bug
 class, LESSON-020). Then source the gate predicate. Use the standard two-level
 fallback (`.adlc/partials/…` → `~/.claude/skills/partials/…`):
 
 ```sh
-. .adlc/partials/kimi-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/kimi-tools-path.sh
-. .adlc/partials/kimi-gate.sh       2>/dev/null || . ~/.claude/skills/partials/kimi-gate.sh
+. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+. .adlc/partials/delegate-gate.sh       2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
 ```
 
 ### 1. Gate + explicit key check
@@ -77,8 +77,8 @@ the disable flag, and opt-in; it does **NOT** prove a usable API key resolves
 require). So ALSO require the resolved key explicitly:
 
 ```sh
-adlc_kimi_gate_check; gate=$?
-reason="$ADLC_KIMI_GATE_REASON"   # ok | no-binary | disabled-via-env
+adlc_delegate_gate_check; gate=$?
+reason="$ADLC_DELEGATE_GATE_REASON"   # ok | no-binary | disabled-via-env
 # Probe that a key actually resolves without making a network call. The
 # default provider uses MOONSHOT_API_KEY; a custom provider names its own var
 # via config/ADLC_DELEGATE_API_KEY_ENV. `adlc-read --print-enabled` returns "1"
@@ -107,7 +107,7 @@ else
   gate_word=fail
   reason=key-absent
 fi
-"$KIMI_TOOLS"/emit-telemetry.sh kimi-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
+"$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
 ```
 
 Then RETURN the degraded object:
@@ -133,7 +133,7 @@ Create a temp file with an EXIT trap so it is always removed, then write the dif
 into it and capture the changed-file list:
 
 ```sh
-TMP=$(mktemp -t kimi-pre-pass.XXXXXX)
+TMP=$(mktemp -t delegate-pre-pass.XXXXXX)
 trap 'rm -f "$TMP" "$TMP.bak"' EXIT   # also remove the sed -i.bak sidecar (step 3)
 
 git -C "$worktree" diff "$base"...HEAD            > "$TMP"
@@ -162,7 +162,7 @@ if [ "$sed_exit" -ne 0 ]; then
   # a gate=pass/mode=fallback/reason=api-error record (the sanctioned fallback)
   # and RETURN the degraded object (invoked:false, exit:-1, changedFiles kept).
   gate_word=pass; mode=fallback; reason=api-error; duration_ms=-
-  "$KIMI_TOOLS"/emit-telemetry.sh kimi-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
+  "$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
   # ... then return the degraded CANDIDATES object and STOP.
 fi
 ```
@@ -201,7 +201,7 @@ with `invoked:true`, the real `exit`, the TRUSTED `changedFiles`, and
 
 ```sh
 gate_word=pass; mode=fallback; reason=api-error    # the ONE sanctioned gate=pass/mode=fallback reason
-"$KIMI_TOOLS"/emit-telemetry.sh kimi-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
+"$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
 ```
 
 `reason="api-error"` is the ONE sanctioned gate=pass/mode=fallback reason — see
@@ -246,12 +246,12 @@ mode=delegated        # the delegate was actually invoked and succeeded
 reason=ok             # success
 # duration_ms was measured around the adlc-read call in step 4 (else `-`)
 # REQ was bound up front in step 1.
-"$KIMI_TOOLS"/emit-telemetry.sh kimi-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
+"$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
 ```
 
 Reference for the field values across all paths:
 
-- `skill` = `kimi-pre-pass`; `step` = `Phase-5-prepass`; `req` = `$REQ` (bound in step 1).
+- `skill` = `delegate-pre-pass`; `step` = `Phase-5-prepass`; `req` = `$REQ` (bound in step 1).
 - `gate`  = `pass` on success; `fail` on the gate miss AND the key-absent miss
   (key-absent is a precondition fail, emitted as `gate=fail` so it lands on the
   legitimate gate=fail branch, NOT coerced to `ghost-skip`); `pass` on the

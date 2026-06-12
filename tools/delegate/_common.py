@@ -9,7 +9,7 @@ ordered cascade (REQ-515 ADR-2):
     1. CLI flags (--model, --base-url)            (per-field)
     2. ADLC_DELEGATE_* environment variables
     3. config file (~/.claude/adlc/config.yml)    (delegate: block)
-    4. legacy env vars (KIMI_MODEL, MOONSHOT_API_KEY/KIMI_API_KEY)
+    4. legacy key-env continuity (MOONSHOT_API_KEY/KIMI_API_KEY) — key data only
     5. shipped defaults (today's Moonshot/Kimi values)
 
 A machine with today's setup (MOONSHOT_API_KEY in env, no config file) resolves
@@ -225,12 +225,13 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
         or _DEFAULT_BASE_URL
     )
 
-    # model: flag > ADLC_DELEGATE_MODEL > config > legacy KIMI_MODEL > default.
+    # model: flag > ADLC_DELEGATE_MODEL > config > default.
+    # (REQ-522 ADR-5: the legacy KIMI_MODEL read is dropped — it was a branded
+    # non-key env var, not key-continuity data. Use ADLC_DELEGATE_MODEL.)
     model = (
         args_model
         or os.environ.get("ADLC_DELEGATE_MODEL")
         or cfg.get("model")
-        or os.environ.get("KIMI_MODEL")
         or _DEFAULT_MODEL
     )
 
@@ -241,8 +242,6 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
         source = "env"
     elif cfg:
         source = "config"
-    elif os.environ.get("KIMI_MODEL"):
-        source = "legacy-env"
     else:
         source = "defaults"
 
@@ -365,20 +364,18 @@ def _strip_fences(text):
 def warn_suppressed():
     """True if the privacy notice is suppressed via env.
 
-    Honors the new ``ADLC_DELEGATE_NO_WARN`` and the legacy ``KIMI_NO_WARN``
-    (alias). The per-call ``--no-warn`` flag is checked by the CLIs directly.
+    Honors ``ADLC_DELEGATE_NO_WARN``. The per-call ``--no-warn`` flag is checked
+    by the CLIs directly. (REQ-522 ADR-5 dropped the legacy ``KIMI_NO_WARN``
+    alias — a branded non-key env var, not key-continuity data.)
     """
-    return (
-        os.environ.get("ADLC_DELEGATE_NO_WARN") == "1"
-        or os.environ.get("KIMI_NO_WARN") == "1"
-    )
+    return os.environ.get("ADLC_DELEGATE_NO_WARN") == "1"
 
 
 def emit_exfil_notice(stream=None, provider=None):
     """Write the one-line exfiltration warning to ``stream`` (default stderr).
 
     The text names the resolved model and the two suppression mechanisms
-    (``--no-warn`` flag, ``ADLC_DELEGATE_NO_WARN``/``KIMI_NO_WARN`` env vars).
+    (``--no-warn`` flag, ``ADLC_DELEGATE_NO_WARN`` env var).
     The API key value/var name is never interpolated.
     """
     if stream is None:

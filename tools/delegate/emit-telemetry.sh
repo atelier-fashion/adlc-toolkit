@@ -32,7 +32,7 @@ mode=$5
 reason=$6
 duration_ms=$7
 
-# Ghost-skip unmasking (REQ-424 follow-up). Across every Kimi-delegating skill
+# Ghost-skip unmasking (REQ-424 follow-up). Across every delegating skill
 # (spec/proceed/wrapup/analyze) the shared resolution contract emits exactly ONE
 # sanctioned (gate=pass, mode=fallback) record: reason="api-error", meaning
 # the delegate was really invoked and the API rejected the call. ANY other reason in
@@ -90,7 +90,7 @@ s_repo=$(sanitize "$repo")
 line=$(printf '{"timestamp":"%s","skill":"%s","step":"%s","req":"%s","gate":"%s","mode":"%s","reason":"%s","duration_ms":"%s","repo":"%s"}' \
     "$timestamp" "$s_skill" "$s_step" "$s_req" "$s_gate" "$s_mode" "$s_reason" "$s_duration" "$s_repo")
 
-# NOTE: invoke as a subprocess only (e.g. `tools/kimi/emit-telemetry.sh ...`).
+# NOTE: invoke as a subprocess only (e.g. `tools/delegate/emit-telemetry.sh ...`).
 # Never `source` this file — the umask narrowing below would persist in the
 # caller's shell. All current call sites (SKILL.md prose, install.sh, tests)
 # already exec it as a subprocess.

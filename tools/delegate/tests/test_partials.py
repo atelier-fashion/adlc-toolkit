@@ -84,13 +84,13 @@ def test_ethos_no_source(tmp_path, partials_dir):
 
 
 # ---------------------------------------------------------------------------
-# kimi-gate.sh
+# delegate-gate.sh
 # ---------------------------------------------------------------------------
 
 _GATE_PROBE = (
-    ". {partials}/kimi-gate.sh; "
-    'adlc_kimi_gate_check; rc=$?; '
-    'echo "RC=$rc"; echo "REASON=$ADLC_KIMI_GATE_REASON"'
+    ". {partials}/delegate-gate.sh; "
+    'adlc_delegate_gate_check; rc=$?; '
+    'echo "RC=$rc"; echo "REASON=$ADLC_DELEGATE_GATE_REASON"'
 )
 
 
@@ -108,7 +108,7 @@ def _stub_adlc_read_on_path(tmp_path):
     return f"{bindir}:/usr/bin:/bin"
 
 
-def test_kimi_gate_available(tmp_path, partials_dir):
+def test_delegate_gate_available(tmp_path, partials_dir):
     """Gate returns 0 / REASON=ok when adlc-read is on PATH AND opted in.
 
     REQ-515 adds the BR-11 opt-in requirement, so availability alone is no
@@ -122,7 +122,7 @@ def test_kimi_gate_available(tmp_path, partials_dir):
     assert "REASON=ok" in r.stdout, r.stdout
 
 
-def test_kimi_gate_available_via_legacy_key(tmp_path, partials_dir):
+def test_delegate_gate_available_via_legacy_key(tmp_path, partials_dir):
     """Continuity: a legacy MOONSHOT_API_KEY in env opts in (return 0)."""
     path = _stub_adlc_read_on_path(tmp_path)
     env = {"PATH": path, "HOME": str(tmp_path), "MOONSHOT_API_KEY": "sk-x"}
@@ -131,30 +131,31 @@ def test_kimi_gate_available_via_legacy_key(tmp_path, partials_dir):
     assert "REASON=ok" in r.stdout, r.stdout
 
 
-def test_kimi_gate_not_opted_in(tmp_path, partials_dir):
+def test_delegate_gate_not_opted_in(tmp_path, partials_dir):
     """BR-11 fresh-install posture: available but no opt-in → return 1,
-    surfaced as the legacy REASON=disabled-via-env (so callers' disabled
-    branch runs the fallback)."""
+    REASON=not-opted-in (the canonical de-branded gate reason; REQ-522 retired
+    the legacy disabled-via-env alias for this case)."""
     path = _stub_adlc_read_on_path(tmp_path)
     env = {"PATH": path, "HOME": str(tmp_path)}  # no opt-in signal
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
     assert "RC=1" in r.stdout, r.stdout + r.stderr
-    assert "REASON=disabled-via-env" in r.stdout, r.stdout
+    assert "REASON=not-opted-in" in r.stdout, r.stdout
 
 
-def test_kimi_gate_disabled(tmp_path, partials_dir):
-    """ADLC_DISABLE_KIMI=1 → return 1, REASON=disabled-via-env (even when
-    otherwise opted in)."""
+def test_legacy_disable_kimi_flag_is_ignored(tmp_path, partials_dir):
+    """REQ-522 BR-3: ADLC_DISABLE_KIMI is no longer an accepted disable flag —
+    only ADLC_DISABLE_DELEGATE disables. An opted-in run with the legacy flag set
+    must still gate OPEN (RC=0)."""
     path = _stub_adlc_read_on_path(tmp_path)
     env = {"PATH": path, "HOME": str(tmp_path),
            "ADLC_DELEGATE_ENABLED": "1", "ADLC_DISABLE_KIMI": "1"}
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
-    assert "RC=1" in r.stdout, r.stdout + r.stderr
-    assert "REASON=disabled-via-env" in r.stdout, r.stdout
+    assert "RC=0" in r.stdout, r.stdout + r.stderr
+    assert "REASON=ok" in r.stdout, r.stdout
 
 
-def test_kimi_gate_disabled_via_new_flag(tmp_path, partials_dir):
-    """ADLC_DISABLE_DELEGATE=1 (new flag) also disables → return 1."""
+def test_delegate_gate_disabled_via_flag(tmp_path, partials_dir):
+    """ADLC_DISABLE_DELEGATE=1 disables → return 1, REASON=disabled-via-env."""
     path = _stub_adlc_read_on_path(tmp_path)
     env = {"PATH": path, "HOME": str(tmp_path),
            "ADLC_DELEGATE_ENABLED": "1", "ADLC_DISABLE_DELEGATE": "1"}
@@ -163,7 +164,7 @@ def test_kimi_gate_disabled_via_new_flag(tmp_path, partials_dir):
     assert "REASON=disabled-via-env" in r.stdout, r.stdout
 
 
-def test_kimi_gate_unavailable(tmp_path, partials_dir):
+def test_delegate_gate_unavailable(tmp_path, partials_dir):
     """adlc-read absent from PATH → return 2, REASON=no-binary."""
     # Restrict PATH to system dirs that don't contain adlc-read.
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}

@@ -12,4 +12,4 @@ total=$(( 1 + 2 ))
 echo $total
 ```
 
-No Kimi gate here, so canonical-helper does not apply.
+No delegate gate here, so canonical-helper does not apply.

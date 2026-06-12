@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run by ~/Library/LaunchAgents/com.adlc-toolkit.kimi-setenv.plist at every user login.
+# Run by ~/Library/LaunchAgents/com.adlc-toolkit.delegate-setenv.plist at every user login.
 # Pulls MOONSHOT_API_KEY from the user's shell rc and seeds the launchctl session env
 # so GUI-launched apps (Claude Code from Spotlight, etc.) inherit the var.
 #
@@ -13,11 +13,11 @@
 set -u
 
 LOG_DIR="$HOME/Library/Logs"
-LOG="$LOG_DIR/kimi-launchctl-setenv.log"
+LOG="$LOG_DIR/delegate-launchctl-setenv.log"
 mkdir -p "$LOG_DIR"
 # Ensure the log file is owner-only readable (defense in depth — umask should already do this)
 umask 077
-echo "[$(date '+%Y-%m-%dT%H:%M:%S')] kimi-launchctl-setenv starting" >> "$LOG"
+echo "[$(date '+%Y-%m-%dT%H:%M:%S')] delegate-launchctl-setenv starting" >> "$LOG"
 
 KEY=""
 for rc in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do

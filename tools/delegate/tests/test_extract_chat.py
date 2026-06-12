@@ -1,4 +1,4 @@
-"""Hermetic CLI tests for tools/kimi/extract-chat."""
+"""Hermetic CLI tests for tools/delegate/extract-chat."""
 import json
 import os
 import subprocess

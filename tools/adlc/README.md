@@ -54,7 +54,7 @@ and re-run doctor; it should turn green.
 | `git-identity` | `user.name` and `user.email` set | `git config --global user.email …` | — |
 | `delegate-gate` | delegation enabled and reachable | (see below) | delegation not opted in (default) |
 | `counters` | each `~/.claude/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
-| `launchctl` | (macOS) kimi setenv LaunchAgent loaded *when delegation is on* | `launchctl bootstrap gui/$(id -u) <plist>` | Linux (macOS-only); delegation off |
+| `launchctl` | (macOS) delegate setenv LaunchAgent loaded *when delegation is on* | `launchctl bootstrap gui/$(id -u) <plist>` | Linux (macOS-only); delegation off |
 | `template-version` | project `.adlc/` scaffold present | run `/template-drift` to compare | run outside a consumer project |
 | `claude-code` | (report-only) `claude` on PATH | never fails the verdict | `claude` not detected |
 
@@ -66,8 +66,8 @@ shipped REQ-515 surface:
 - It sources [`partials/delegate-gate.sh`](../../partials/delegate-gate.sh) for
   the 0/1/2 gate verdict and reads `ADLC_DELEGATE_GATE_REASON`.
 - It reads delegation config via
-  [`tools/kimi/_common.parse_delegate_config`](../kimi/_common.py) (through a
-  subprocess probe, so `adlc` keeps no hard import dependency on the kimi
+  [`tools/delegate/_common.parse_delegate_config`](../delegate/_common.py) (through a
+  subprocess probe, so `adlc` keeps no hard import dependency on the delegate
   module).
 
 Mapping:
@@ -167,7 +167,7 @@ forge backend is authed" step with `adlc doctor --checks forge`).
 A pure-standard-library helper module (not a subcommand) that backs the forge
 adapter (`partials/forge.sh`) and the `forge` doctor check. It reads the `forge:`
 block of the shared ADLC config (a minimal flat-YAML reader mirroring
-`tools/kimi/_common.parse_delegate_config`), resolves the provider with precedence
+`tools/delegate/_common.parse_delegate_config`), resolves the provider with precedence
 per-project `.adlc/config.yml` > machine config > `auto` (origin-URL detection,
 fail-loud on an unrecognized host), and refuses a key-shaped `forge.auth` value
 (BR-6). CLI surface used by the partial and the check:

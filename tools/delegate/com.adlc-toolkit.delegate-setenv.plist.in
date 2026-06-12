@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.adlc-toolkit.kimi-setenv</string>
+    <string>com.adlc-toolkit.delegate-setenv</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
-        <string>__HOME__/.claude/kimi-launchctl-setenv.sh</string>
+        <string>__HOME__/.claude/delegate-launchctl-setenv.sh</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

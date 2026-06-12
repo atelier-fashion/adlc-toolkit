@@ -1,4 +1,4 @@
-"""Tests for the POSIX shell telemetry helpers under tools/kimi/.
+"""Tests for the POSIX shell telemetry helpers under tools/delegate/.
 
 All tests redirect $ADLC_TELEMETRY_LOG into tmp_path so they never touch the
 real on-disk log under ~/Library/Logs/.
@@ -14,10 +14,10 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-KIMI_DIR = REPO_ROOT / "tools" / "kimi"
-EMIT = str(KIMI_DIR / "emit-telemetry.sh")
-FLAG = str(KIMI_DIR / "skill-flag.sh")
-CHECK = str(KIMI_DIR / "check-delegation.sh")
+DELEGATE_DIR = REPO_ROOT / "tools" / "delegate"
+EMIT = str(DELEGATE_DIR / "emit-telemetry.sh")
+FLAG = str(DELEGATE_DIR / "skill-flag.sh")
+CHECK = str(DELEGATE_DIR / "check-delegation.sh")
 
 
 def _run(cmd, env=None, check=True):
@@ -209,7 +209,7 @@ def test_emit_unmasks_disguised_fallback_as_ghost_skip(tmp_path):
 
 
 def test_emit_preserves_legit_api_error_fallback(tmp_path):
-    """reason=api-error is the ONE sanctioned gate=pass fallback (ask-kimi was
+    """reason=api-error is the ONE sanctioned gate=pass fallback (adlc-read was
     really invoked and the API rejected it) — it must NOT be coerced."""
     env = _env_with_log(tmp_path)
     log_path = Path(env["ADLC_TELEMETRY_LOG"])

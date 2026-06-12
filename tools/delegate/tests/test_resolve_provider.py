@@ -64,13 +64,16 @@ def test_precedence_flag_beats_env_beats_config(clean_env, monkeypatch):
     assert _common.resolve_provider(args_model="flag-model").model == "flag-model"
 
 
-def test_legacy_kimi_model_below_config(clean_env, monkeypatch):
+def test_legacy_kimi_model_env_is_no_longer_read(clean_env, monkeypatch):
+    """REQ-522 ADR-5: the legacy KIMI_MODEL env read is dropped — it was a
+    branded non-key env var, not key continuity. Setting it must have NO effect;
+    the shipped default model wins (use ADLC_DELEGATE_MODEL instead)."""
     monkeypatch.setenv("KIMI_MODEL", "legacy-model")
-    assert _common.resolve_provider().model == "legacy-model"
-    cfg = _write_config(clean_env, "delegate:\n  model: cfg-model\n")
-    monkeypatch.setenv("ADLC_CONFIG", cfg)
-    # config outranks legacy KIMI_MODEL
-    assert _common.resolve_provider().model == "cfg-model"
+    # KIMI_MODEL is ignored → falls through to the shipped default.
+    assert _common.resolve_provider().model == _common._DEFAULT_MODEL
+    # ADLC_DELEGATE_MODEL is the supported override.
+    monkeypatch.setenv("ADLC_DELEGATE_MODEL", "env-model")
+    assert _common.resolve_provider().model == "env-model"
 
 
 def test_base_url_and_api_key_env_from_config(clean_env, monkeypatch):

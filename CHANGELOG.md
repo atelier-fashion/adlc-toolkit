@@ -66,6 +66,49 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ---
 
+## [5.1.0] — 2026-06-12
+
+The **de-brand drop** — completes REQ-515's genericization so a fresh adopter installs
+nothing Kimi-named, and fixes the inert delegation telemetry:
+
+- **REQ-522** De-brand the delegation surface + single-fence-safe telemetry:
+  - `tools/kimi/` → `tools/delegate/`; the legacy `kimi-gate.sh` / `kimi-tools-path.sh`
+    source-through partials are deleted (callers use the canonical `delegate-*`);
+    `KIMI_TOOLS` → `DELEGATE_TOOLS`.
+  - The `ask-kimi` / `kimi-write` CLI shims are **removed** — use `adlc-read` /
+    `adlc-write`. `ADLC_DISABLE_KIMI` is no longer an accepted flag (only
+    `ADLC_DISABLE_DELEGATE`). Legacy `KIMI_MODEL` / `KIMI_NO_WARN` env reads dropped
+    (use `ADLC_DELEGATE_MODEL` / `ADLC_DELEGATE_NO_WARN`). The `KIMI_API_KEY` /
+    `MOONSHOT_API_KEY` **key** env vars remain (continuity, data).
+  - The launchd LaunchAgent is renamed (`com.adlc-toolkit.kimi-setenv` →
+    `…delegate-setenv`); the installer **migrates** an existing Kimi agent (unload old,
+    load new) and removes the legacy venv/shims on upgrade.
+  - **Telemetry fix (adversarial finding C1, critical):** the per-step delegation
+    telemetry in `spec`/`proceed`/`wrapup`/`analyze` set shell state in one fenced block
+    and read it in another, so every run recorded `mode=fallback, gate=fail` and the
+    ghost-skip detector was unreachable. State is now persisted to the flag-file sidecar
+    (`skill-flag.sh mark`/`read`) and resolved by the shared `_adlc_emit_step_telemetry`;
+    `delegated` and `ghost-skip` are now correctly emitted. Telemetry schema is unchanged
+    — old log lines still parse in `check-delegation.sh`.
+  - `lint-skills` gains a `cross-fence-var` check (a non-exported var assigned in one
+    fence and read in another) and a `grep -ri kimi` brand-creep guard test.
+
+  **Migration table** (old → new):
+
+  | Old | New |
+  |-----|-----|
+  | `tools/kimi/` | `tools/delegate/` |
+  | `partials/kimi-gate.sh` | `partials/delegate-gate.sh` |
+  | `partials/kimi-tools-path.sh` | `partials/delegate-tools-path.sh` |
+  | `$KIMI_TOOLS` | `$DELEGATE_TOOLS` |
+  | `ask-kimi` / `kimi-write` | removed — use `adlc-read` / `adlc-write` |
+  | `ADLC_DISABLE_KIMI` | `ADLC_DISABLE_DELEGATE` |
+  | `KIMI_MODEL` | `ADLC_DELEGATE_MODEL` |
+  | `KIMI_NO_WARN` | `ADLC_DELEGATE_NO_WARN` |
+  | `com.adlc-toolkit.kimi-setenv` | `com.adlc-toolkit.delegate-setenv` |
+  | `~/.claude/kimi-venv` | `~/.claude/delegate-venv` |
+  | `KIMI_API_KEY` / `MOONSHOT_API_KEY` | unchanged (key continuity, data) |
+
 ## [5.0.0] — 2026-06-12
 
 The **portability drop** — six REQs making the toolkit configurable for adopters

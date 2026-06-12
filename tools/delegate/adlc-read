@@ -4,8 +4,7 @@
 Files go before the question in the request so an OpenAI-compatible prefix cache
 can be reused across multiple questions on the same corpus. The provider
 (endpoint / model / key var) is resolved by ``_common.resolve_provider`` — see
-that module for the precedence cascade. ``ask-kimi`` is a back-compat shim for
-this command.
+that module for the precedence cascade.
 """
 
 import argparse
