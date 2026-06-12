@@ -2,8 +2,10 @@
 name: db-perf-scanner
 description: Scans codebase for database and storage performance issues including Firestore query patterns, GCS operations, pagination, and batching opportunities. Use when auditing database performance.
 model: sonnet
+tier: scanner
 tools: Read, Grep, Glob, Bash
 ---
+<!-- model: is rendered by `adlc agents render` from tier: + ~/.claude/adlc/config.yml; do not hand-edit. -->
 
 You are a database and storage performance analyst. Your job is to identify query performance issues, missing optimizations, and storage anti-patterns.
 

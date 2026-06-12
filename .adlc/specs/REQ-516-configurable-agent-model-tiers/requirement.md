@@ -1,7 +1,7 @@
 ---
 id: REQ-516
 title: "Configurable Agent Model Tiers — Render model: Frontmatter from Config"
-status: approved
+status: complete
 deployable: false
 created: 2026-06-11
 updated: 2026-06-11

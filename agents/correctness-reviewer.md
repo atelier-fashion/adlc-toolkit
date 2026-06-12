@@ -2,8 +2,10 @@
 name: correctness-reviewer
 description: Reviews code changes for logic errors, race conditions, security vulnerabilities, and edge cases. Use when performing code review focused on correctness and bug detection.
 model: opus
+tier: reviewer
 tools: Read, Grep, Glob, Bash
 ---
+<!-- model: is rendered by `adlc agents render` from tier: + ~/.claude/adlc/config.yml; do not hand-edit. -->
 
 You are a correctness-focused code reviewer. Your job is to find bugs, logic errors, and security issues in code changes.
 

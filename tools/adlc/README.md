@@ -20,9 +20,10 @@ adlc --version
 | Command | Purpose |
 |---------|---------|
 | `doctor` | Read-only environment health check (below). |
+| `agents render` | Render `agents/*.md` `model:` frontmatter from tier classes + config (below). |
 
-(`renumber` — REQ-518 — and the tier render — REQ-516 — are the designated next
-homes; they slot into the same `SUBCOMMANDS` table.)
+(`renumber` — REQ-518 — is the next designated home; it slots into the same
+`SUBCOMMANDS` table.)
 
 ## `adlc doctor`
 
@@ -77,6 +78,70 @@ Mapping:
 | 1 (`not-opted-in` / `disabled-via-env`) | opt-in off | **SKIP** (reason shown) |
 | 2 (`no-binary`) + config `enabled: false`/absent | not installed, not requested | **SKIP** |
 | 2 (`no-binary`) + config `enabled: true` | **misconfigured** | **FAIL** → `./install.sh --with-delegation`, or set `delegate.enabled: false` |
+
+## `adlc agents render` (REQ-516)
+
+Every agent in [`agents/`](../../agents) declares a stable **tier class** in its
+frontmatter (`tier:`); the `model:` line is **rendered output**, not hand-edited
+(each agent carries a `<!-- ... do not hand-edit -->` comment saying so). This
+command stamps the resolved `model:` into each agent file so an adopter can
+re-tier every agent from one config block instead of editing 18 files (whose
+edits a toolkit pull would clobber).
+
+```bash
+adlc agents render            # stamp model: into every agents/*.md from config
+adlc agents render --check    # report drift only; write nothing (non-zero exit on drift)
+adlc agents render --config /path/to/config.yml   # use a specific config file
+```
+
+With **no config**, rendering reproduces today's exact per-agent assignments —
+**zero behavior change** for existing installs. The render is idempotent (a second
+run produces an empty `git diff`) and atomic per file (temp-write + rename); it
+rewrites only the `model:` line and never reflows other frontmatter or body.
+
+### The `agents:` config block
+
+Lives in the shared `~/.claude/adlc/config.yml` (the same file REQ-515 uses for
+its `delegate:` block — the two coexist). Two optional sub-maps:
+
+```yaml
+agents:
+  classes:
+    reviewer: sonnet        # move every reviewer-class agent to sonnet
+    scanner: haiku
+    # explorer / implementer / orchestrator omitted -> shipped defaults
+  overrides:
+    correctness-reviewer: opus    # per-agent override beats the class mapping
+    pipeline-runner: inherit      # drop the model: line -> inherit session model
+```
+
+**Resolution precedence (highest wins):** per-agent `overrides` > class `classes`
+mapping > the shipped per-agent default. The value `inherit` removes the `model:`
+line entirely so the agent inherits the session model. The five tier classes are
+`reviewer`, `scanner`, `explorer`, `implementer`, `orchestrator`.
+
+### Allowed values & fail-loud validation
+
+Allowed aliases: `opus`, `sonnet`, `haiku`, `inherit`. Escape hatch: a full model
+id (lowercase with a hyphen and a digit, e.g. `claude-opus-4-8`) is passed through
+verbatim. **Anything else fails loud** — `adlc agents render` exits non-zero with a
+message naming the bad key, the bad value, and the allowed set; no silent
+fall-through to a default. Validation runs over the whole config before any file is
+written, so an invalid config never half-renders.
+
+### Drift detection
+
+`adlc agents render --check` (read-only) reports any agent whose on-disk `model:`
+differs from what the current config would render, exiting non-zero if any drift
+exists. The toolkit's `tools/lint-skills` linter calls the **same** `check_drift`
+code path, so a hand-edited `model:` is surfaced as staleness in normal linting —
+mirroring the `/template-drift` rationale.
+
+### Linux/macOS parity
+
+The engine is pure Python (`os.replace` for atomic writes, no shell), so it behaves
+identically under Ubuntu bash and macOS zsh — there is no shell-portability surface
+to diverge. The CLI is dogfooded under both `bash -c` and `zsh -c`.
 
 ## The `--checks` pre-flight contract (BR-8)
 
