@@ -133,6 +133,9 @@ adlc_recheck_id() {
       adlc_rc_refs=$(git -C "$adlc_rc_repo" ls-remote --heads origin 2>/dev/null) || continue
       # Extract every branch number, normalize to decimal, exact-match against our num.
       # `grep -qx` on the normalized list avoids fragile subshell-exit tricks (zsh-safe).
+      # Prefix-sibling safe (REQ-524): the greedy -oE extraction pulls the FULL digit
+      # run (feat/REQ-1200 -> 1200), and -qx is whole-line equality — rechecking
+      # REQ-120 can never hit REQ-1200, and vice versa.
       # Normalize with a per-line sed, NOT `while read; do adlc_id_dec; done` —
       # adlc_id_dec prints no trailing newline, so multiple candidates concatenated
       # into one bogus number and real collisions went undetected (BUG-116).

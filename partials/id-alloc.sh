@@ -45,6 +45,14 @@
 # expansions (SH_WORD_SPLIT off by default), so the whole list arrives as one word
 # (BUG-116). Reduce lists via printf '%s\n' pipelines instead (LESSON-329). Modeled on
 # trial-merge.sh.
+#
+# Prefix-sibling safety (REQ-524 audit): every id match in this file is either a
+# maximal-munch EXTRACTION (`grep -oE '<PREFIX>-[0-9][0-9]*'` — ERE `*` is greedy, so
+# scanning for REQ-120 against `REQ-1200-slug` extracts the full `1200`, never a
+# truncated `120`) reduced by numeric max, or an exact-equality compare on the
+# extracted number (`grep -qx` in id-recheck.sh). There is NO substring/`grep <id>`
+# membership test keyed on a bare id, so REQ-120 vs REQ-1200 cannot cross-match
+# (cf. renumber.py's _id_boundary_re/_id_boundary_ere; LESSON-016 substring buckets).
 
 # --- numeric normalizer -------------------------------------------------------------
 # Strip leading zeros so a value is treated as DECIMAL, not octal: in sh/bash/zsh
