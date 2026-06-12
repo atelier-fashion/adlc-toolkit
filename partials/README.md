@@ -49,6 +49,25 @@ behavior. Examples:
   `kimi-tools-path.sh`, so call sites do NOT separately source the
   `$KIMI_TOOLS` resolver — sourcing this one partial both resolves
   `$KIMI_TOOLS` and defines the function.
+- `id-alloc.sh` — collision-safe id allocation with the **remote** as source of
+  truth (REQ-518). Defines `adlc_alloc_id <kind>` (prints `max(local,remote)+1`
+  and fast-forwards the local counter — which is a cache, not an authority),
+  `adlc_remote_high <kind>` (the remote high-water, 0 if none/unreachable), and
+  the kind mappers `adlc_id_kind_{counter,lockdir,prefix,scan}` /
+  `adlc_id_list_max`. One helper parameterized by `kind` (req|bug|lesson)
+  replaces the near-identical inline blocks in `/spec`, `/bugfix`, `/wrapup`.
+  Allocation runs inside the existing `mkdir`-lock with its symlink/TOCTOU
+  guards intact. The contract (same-fenced-block source-then-call, the
+  subshell-`exit` guard) lives in the partial's header comment rather than a
+  separate `.md`.
+- `id-recheck.sh` — pre-push / PR-time id collision recheck (REQ-518 BR-4/BR-8).
+  Defines `adlc_recheck_id <kind> <ID>` returning 0 (no collision on any
+  reachable remote, OR degraded-unreachable — never invents a collision from
+  absence of data), 1 (collision — prints the exact `adlc renumber` halt to
+  stderr), or 2 (usage error). It is a separate partial from `id-alloc.sh` so
+  recheck call sites don't load the full allocation machinery, but it sources
+  `id-alloc.sh` for the kind mappers + `adlc_remote_high` (one derivation
+  surface). Never blocks on the network. Contract in the header comment.
 
 Skills invoke a model-2 partial like:
 
@@ -78,5 +97,10 @@ example.
 - Update `/init` if the partial needs to be copied into consumer projects'
   `.adlc/partials/` (the existing `partials/*.sh` copy step covers that).
 - Update `/template-drift` if the partial is one consumer projects might
-  customize and you want drift detection (TODO: as of REQ-416, drift detection
-  for `partials/` is a known follow-up — not yet implemented).
+  customize and you want drift detection. Partial drift detection IS
+  implemented: `/template-drift` Step 3 ("Detect Partial Drift") diffs each
+  `~/.claude/skills/partials/*.sh` against the consumer's `.adlc/partials/`
+  copy and classifies it `synced` / `stale` / `missing` (no
+  intentional-customization escape hatch — any partial drift is reported as
+  `stale` by design, since a modified gate/ethos partial is the threat model
+  the check exists to catch).
