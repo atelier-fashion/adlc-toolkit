@@ -165,8 +165,16 @@ INIT_COPIED_SURFACES = frozenset(
 # e.g. "- `ethos` — ...". Anchored to a stable marker (LESSON-019: a guard anchored to
 # a stable marker does not rot when surrounding prose moves), parsed deterministically
 # (LESSON-012: structural enforcement over prose-scanning).
-SYNC_SURFACE_OPEN_RE = re.compile(r"<!--\s*sync-surfaces:\s*([A-Za-z0-9_-]+)\s*-->")
-SYNC_SURFACE_CLOSE_RE = re.compile(r"<!--\s*/sync-surfaces\s*-->")
+#
+# The open/close markers are anchored to START OF LINE (`^\s*`, no leading backtick):
+# the REAL block markers sit at column 0, while a cross-reference PROSE mention is
+# wrapped in backticks mid-sentence (e.g. "see the `<!-- sync-surfaces: init -->` list").
+# Requiring line-start prevents a prose mention from being mistaken for the block opener
+# — without the anchor, `.search()` would match the earlier prose line and parse the
+# wrong (or empty) block. ``$`` is NOT anchored so trailing prose after the marker on
+# the same line (there is none today) would still match the real marker, not break it.
+SYNC_SURFACE_OPEN_RE = re.compile(r"^\s*<!--\s*sync-surfaces:\s*([A-Za-z0-9_-]+)\s*-->")
+SYNC_SURFACE_CLOSE_RE = re.compile(r"^\s*<!--\s*/sync-surfaces\s*-->")
 SYNC_SURFACE_ITEM_RE = re.compile(r"^\s*-\s+`([A-Za-z0-9_-]+)`")
 
 

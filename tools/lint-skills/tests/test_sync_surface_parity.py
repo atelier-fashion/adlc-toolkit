@@ -72,6 +72,24 @@ def test_parse_empty_block_is_empty_set_not_none():
     assert check.parse_sync_surface_block(text, "init") == set()
 
 
+def test_parse_ignores_backticked_prose_mention_before_real_block():
+    # A cross-reference PROSE mention of the SAME block's marker (inside backticks,
+    # mid-sentence) must NOT be mistaken for the real block opener. The real block
+    # starts at column 0; the prose mention is indented inside a backtick. Without
+    # the start-of-line anchor the parser would latch onto the prose line and return
+    # an empty/wrong set. This guards that regression (the real markers in the shipped
+    # SKILL.md files cross-reference each other's markers in prose).
+    text = (
+        "See the `<!-- sync-surfaces: init -->` list for the copy targets.\n"
+        "\n"
+        "<!-- sync-surfaces: init -->\n"
+        "- `ethos` — copy\n"
+        "- `templates` — copy\n"
+        "<!-- /sync-surfaces -->\n"
+    )
+    assert check.parse_sync_surface_block(text, "init") == {"ethos", "templates"}
+
+
 # ---------------------------------------------------------------------------
 # check_sync_surface_parity behavior
 # ---------------------------------------------------------------------------
