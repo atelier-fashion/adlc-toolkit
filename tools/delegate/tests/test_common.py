@@ -118,6 +118,7 @@ def test_read_key_from_rc_ignores_indented_export(monkeypatch, tmp_path):
 
 def test_get_client_uses_env_when_set(monkeypatch, tmp_path):
     """Env var takes precedence over rc-fallback."""
+    pytest.importorskip("openai")  # needs the delegate venv (tools/delegate/install.sh)
     home = tmp_path
     (home / ".zshrc").write_text(
         'export MOONSHOT_API_KEY="sk-from-rc"\n', encoding="utf-8"
@@ -130,6 +131,7 @@ def test_get_client_uses_env_when_set(monkeypatch, tmp_path):
 
 def test_get_client_falls_back_to_rc_when_env_missing(monkeypatch, tmp_path):
     """When env var is absent, rc-fallback supplies the key (REQ-422 fix)."""
+    pytest.importorskip("openai")  # needs the delegate venv (tools/delegate/install.sh)
     home = tmp_path
     (home / ".zshrc").write_text(
         'export MOONSHOT_API_KEY="sk-rc-fallback"\n', encoding="utf-8"
