@@ -74,7 +74,7 @@ cd adlc-toolkit && ./install.sh
 
 ```bash
 adlc doctor                          # full health check
-adlc doctor --checks gh-auth         # just one check (skills use this as a pre-flight)
+adlc doctor --checks forge           # just one check (skills use this as a pre-flight)
 ```
 
 Other install options:
