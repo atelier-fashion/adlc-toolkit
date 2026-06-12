@@ -1,7 +1,7 @@
 ---
 id: REQ-519
 title: "One-Command Installer and `adlc doctor` Health Check"
-status: approved
+status: complete
 deployable: false
 created: 2026-06-11
 updated: 2026-06-11
