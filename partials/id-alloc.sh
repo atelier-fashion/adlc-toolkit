@@ -85,15 +85,24 @@ adlc_id_kind_prefix() {
     req)    echo "REQ" ;;
     bug)    echo "BUG" ;;
     lesson) echo "LESSON" ;;
-    *) echo "adlc_id_kind_prefix: unknown kind '$1' (want req|bug|lesson)" >&2; return 2 ;;
+    assume) echo "ASSUME" ;;
+    *) echo "adlc_id_kind_prefix: unknown kind '$1' (want req|bug|lesson|assume)" >&2; return 2 ;;
   esac
 }
 
+# The counter path. req/bug/lesson are machine-global (one file under ~/.claude);
+# `assume` is PER-REPO (BR-12): the reservation makes the per-project namespace
+# collision-safe across clones without globalizing it. The per-repo counter/lock live
+# under the allocating repo's .adlc/, resolved from the current git worktree.
 adlc_id_kind_counter() {
   case "$1" in
     req)    echo "$HOME/.claude/.global-next-req" ;;
     bug)    echo "$HOME/.claude/.global-next-bug" ;;
     lesson) echo "$HOME/.claude/.global-next-lesson" ;;
+    assume)
+      adlc_ic_top=$(git rev-parse --show-toplevel 2>/dev/null)
+      [ -n "$adlc_ic_top" ] || { echo "adlc_id_kind_counter: assume requires a git repo (git rev-parse --show-toplevel failed)" >&2; return 2; }
+      echo "$adlc_ic_top/.adlc/.next-assume" ;;
     *) echo "adlc_id_kind_counter: unknown kind '$1'" >&2; return 2 ;;
   esac
 }
@@ -103,18 +112,23 @@ adlc_id_kind_lockdir() {
     req)    echo "$HOME/.claude/.global-next-req.lock.d" ;;
     bug)    echo "$HOME/.claude/.global-next-bug.lock.d" ;;
     lesson) echo "$HOME/.claude/.global-next-lesson.lock.d" ;;
+    assume)
+      adlc_il_top=$(git rev-parse --show-toplevel 2>/dev/null)
+      [ -n "$adlc_il_top" ] || { echo "adlc_id_kind_lockdir: assume requires a git repo (git rev-parse --show-toplevel failed)" >&2; return 2; }
+      echo "$adlc_il_top/.adlc/.next-assume.lock.d" ;;
     *) echo "adlc_id_kind_lockdir: unknown kind '$1'" >&2; return 2 ;;
   esac
 }
 
 # Prints "<find -path glob> <find -type flag>" for the bootstrap scan. REQ specs are
-# directories (-type d); bugs and lessons are .md files (-type f) — deliberate, do not
-# "correct" (see /bugfix SKILL.md note).
+# directories (-type d); bugs, lessons, and assumptions are .md files (-type f) —
+# deliberate, do not "correct" (see /bugfix SKILL.md note).
 adlc_id_kind_scan() {
   case "$1" in
     req)    echo "*/.adlc/specs/REQ-* d" ;;
     bug)    echo "*/.adlc/bugs/BUG-* f" ;;
     lesson) echo "*/.adlc/knowledge/lessons/LESSON-* f" ;;
+    assume) echo "*/.adlc/knowledge/assumptions/ASSUME-* f" ;;
     *) echo "adlc_id_kind_scan: unknown kind '$1'" >&2; return 2 ;;
   esac
 }
@@ -126,6 +140,7 @@ adlc_id_kind_artifact_path() {
     req)    echo ".adlc/specs" ;;
     bug)    echo ".adlc/bugs" ;;
     lesson) echo ".adlc/knowledge/lessons" ;;
+    assume) echo ".adlc/knowledge/assumptions" ;;
     *) echo "adlc_id_kind_artifact_path: unknown kind '$1'" >&2; return 2 ;;
   esac
 }
@@ -219,6 +234,76 @@ adlc_remote_artifact_nums() {
   printf '%s\n%s\n' "$(printf '%s\n' "$adlc_an_nums" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')" "$adlc_an_ran"
 }
 
+# --- reservation nonce (REQ-546 BR-2 distinct payload) ------------------------------
+# A per-attempt nonce so two allocators computing the SAME candidate build DIFFERENT
+# commit objects. Two identical objects pushed to the same new ref both "succeed" (the
+# second is an up-to-date no-op — verified) and would silently defeat first-wins race
+# detection. urandom hex when available, ALWAYS salted with wall-clock + pid so the
+# payload is distinct even without /dev/urandom.
+adlc_reservation_nonce() {
+  adlc_rn_hex=""
+  if [ -r /dev/urandom ] && command -v od >/dev/null 2>&1; then
+    adlc_rn_hex=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
+  fi
+  printf '%s-%s-%s' "$(date +%s 2>/dev/null)" "$$" "${adlc_rn_hex:-0}"
+}
+
+# --- atomic reservation push (REQ-546 BR-1/BR-2/BR-5/BR-6) ---------------------------
+# Reserve <num> for <kind> on <repo>'s origin by creating the ref
+# refs/adlc/ids/<kind>/<num> pointing at a DISTINCT commit object. Git ref-creation over
+# push is first-wins: the loser of a concurrent race is rejected (non-fast-forward),
+# because each allocator pushes an unrelated root commit. Returns:
+#   0 = won (ref created) ; 1 = race lost (retry next number, BR-5) ;
+#   2 = degraded (offline / no auth / server policy forbids the namespace — BR-4).
+# Pure git transport, no gh/az (BR-6). Push output is captured (2>&1 into a var) so it
+# never leaks to the allocator's stdout (which carries the allocated number).
+#
+# Classification is EMPIRICALLY grounded (see architecture.md): a won push exits 0; a
+# race-lost push exits 1 with `! [rejected] ... (non-fast-forward)`; a server-policy
+# decline exits 1 with `! [remote rejected] ... (pre-receive hook declined)` (which does
+# NOT contain the literal `[rejected]`, so the two are distinguishable); transport/auth
+# failures exit 128. Order matters: match `[remote rejected]` FIRST (-> degrade), then a
+# plain `[rejected]` (-> race), else degrade. A pre-receive decline MUST degrade (BR-4),
+# never spin the retry loop.
+adlc_reserve_id() {
+  adlc_ri_repo=$1; adlc_ri_kind=$2; adlc_ri_num=$3
+  # The empty tree is a well-known object present in every repo; commit-tree stamps the
+  # allocator identity (git config user.name/email) and author time natively (BR-2).
+  adlc_ri_tree=$(git -C "$adlc_ri_repo" hash-object -t tree /dev/null 2>/dev/null)
+  [ -n "$adlc_ri_tree" ] || adlc_ri_tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  adlc_ri_msg="adlc-id-reservation kind=$adlc_ri_kind num=$adlc_ri_num nonce=$(adlc_reservation_nonce)"
+  adlc_ri_obj=$(printf '%s\n' "$adlc_ri_msg" | git -C "$adlc_ri_repo" commit-tree "$adlc_ri_tree" 2>/dev/null)
+  # Could not even build the object (e.g. git identity unset) -> degraded, non-blocking.
+  [ -n "$adlc_ri_obj" ] || return 2
+  # Brace-form refspec is MANDATORY: bare `$obj:refs` triggers zsh's `:r` word modifier
+  # and silently corrupts the refspec (LESSON-335 class — verified during REQ-546 design).
+  adlc_ri_out=$(git -C "$adlc_ri_repo" push origin "${adlc_ri_obj}:refs/adlc/ids/${adlc_ri_kind}/${adlc_ri_num}" 2>&1)
+  if [ $? -eq 0 ]; then return 0; fi
+  case "$adlc_ri_out" in
+    *"[remote rejected]"*|*"pre-receive hook declined"*|*"protected branch"*|*"denied"*) return 2 ;;
+  esac
+  case "$adlc_ri_out" in
+    *"[rejected]"*) return 1 ;;
+  esac
+  return 2
+}
+
+# --- reservation namespace scan (REQ-546 BR-3) --------------------------------------
+# List the reservation refs for <kind> on <repo>'s origin and print their trailing
+# numbers. Maximal-munch extraction on the final path segment is prefix-sibling safe:
+# refs/adlc/ids/req/120 and .../1200 are distinct refs, so reserving 120 never matches
+# 1200. rc 0 iff the ls-remote ran (empty output with rc 0 = no reservations yet, NOT a
+# failure — ls-remote only errors on transport failure); rc 1 on transport failure. The
+# `*` is inside double quotes so the shell never globs it; git fnmatch-matches it.
+adlc_remote_reservation_nums() {
+  adlc_rr_repo=$1; adlc_rr_kind=$2
+  adlc_rr_refs=$(git -C "$adlc_rr_repo" ls-remote origin "refs/adlc/ids/$adlc_rr_kind/*" 2>/dev/null) || return 1
+  printf '%s\n' "$adlc_rr_refs" \
+    | grep -oE "refs/adlc/ids/$adlc_rr_kind/[0-9][0-9]*" \
+    | grep -oE '[0-9][0-9]*'
+  return 0
+}
+
 # --- remote high-water derivation (REQ-523 BR-1/BR-2/BR-3/BR-4/BR-5) -----------------
 # Reads the REMOTE, not local clones' state — stale local checkouts must not LOWER the
 # result. Derive-don't-store surface (ADR-2): pushed feat/REQ-* / fix/bug-* branch names
@@ -236,30 +321,44 @@ adlc_remote_high() {
   adlc_rh_kind=$1
   adlc_rh_prefix=$(adlc_id_kind_prefix "$adlc_rh_kind") || return 2
 
-  # Branch pattern per kind: REQ -> feat/REQ-NNN-, BUG -> fix/bug-NNN- (lesson has no
-  # branch of its own; it rides a feat/fix branch, so its remote footprint is the
-  # merged lessons dir, scanned below).
+  # Branch pattern per kind: REQ -> feat/REQ-NNN-, BUG -> fix/bug-NNN- (lesson and assume
+  # have no branch of their own; a lesson rides a feat/fix branch and an assumption rides
+  # a wrapup branch, so their remote footprint is the merged artifact dir + the
+  # reservation namespace, scanned below).
   case "$adlc_rh_kind" in
     req)    adlc_rh_branch_re='feat/REQ-[0-9][0-9]*' ;;
     bug)    adlc_rh_branch_re='fix/bug-[0-9][0-9]*' ;;
     lesson) adlc_rh_branch_re='' ;;
+    assume) adlc_rh_branch_re='' ;;
   esac
-
-  adlc_rh_root="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel 2>/dev/null)/.." 2>/dev/null && pwd)}"
-  [ -n "$adlc_rh_root" ] || adlc_rh_root="."
 
   adlc_rh_max=0
   adlc_rh_saw_remote=0
   adlc_rh_degraded=0
   adlc_rh_unreachable=""
 
-  # Enumerate participating repos: git checkouts directly under the root that have an
-  # `origin` remote. One level deep is the common "all repos under one folder" layout.
-  # zsh aborts the whole enclosing eval on a no-match glob (NOMATCH); sh/bash leave the
-  # pattern literal and the .git check skips it. Make zsh behave like nullglob, scoped
-  # to this function (BUG-116 — an empty root must degrade loudly, not abort silently).
-  if [ -n "${ZSH_VERSION:-}" ]; then setopt localoptions nullglob 2>/dev/null; fi
-  for adlc_rh_repo in "$adlc_rh_root"/*; do
+  # Build the participating-repo set as POSITIONAL PARAMETERS so the loop iterates with
+  # `for x in "$@"` — never `for x in $var` (zsh does not word-split unquoted expansions,
+  # BUG-116). Scope is kind-dependent: `assume` is per-repo (BR-12) — only the current
+  # repo's origin, never siblings. req/bug/lesson scan every checkout under
+  # $ADLC_REPOS_ROOT (default: parent of the current repo), the machine-global namespace
+  # scope (BR-11 — the scan root defines the namespace, LESSON-313).
+  if [ "$adlc_rh_kind" = assume ]; then
+    adlc_rh_top=$(git rev-parse --show-toplevel 2>/dev/null)
+    adlc_rh_root="${adlc_rh_top:-.}"
+    if [ -n "$adlc_rh_top" ]; then set -- "$adlc_rh_top"; else set --; fi
+  else
+    adlc_rh_root="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel 2>/dev/null)/.." 2>/dev/null && pwd)}"
+    [ -n "$adlc_rh_root" ] || adlc_rh_root="."
+    # zsh aborts the whole enclosing eval on a no-match glob (NOMATCH); sh/bash leave the
+    # pattern literal and the .git check skips it. Make zsh behave like nullglob, scoped
+    # to this function (BUG-116 — an empty root must degrade loudly, not abort silently).
+    if [ -n "${ZSH_VERSION:-}" ]; then setopt localoptions nullglob 2>/dev/null; fi
+    set --
+    for adlc_rh_g in "$adlc_rh_root"/*; do set -- "$@" "$adlc_rh_g"; done
+  fi
+
+  for adlc_rh_repo in "$@"; do
     [ -d "$adlc_rh_repo/.git" ] || [ -f "$adlc_rh_repo/.git" ] || continue
     adlc_rh_url=$(git -C "$adlc_rh_repo" remote get-url origin 2>/dev/null) || continue
     [ -n "$adlc_rh_url" ] || continue
@@ -302,6 +401,20 @@ adlc_remote_high() {
       echo "WARNING: merged-artifact scan could not run for $adlc_rh_prefix in '$adlc_rh_repo' (forge=$adlc_rh_host, url=$adlc_rh_url) — derivation degraded (BR-5)." >&2
       adlc_rh_degraded=1
     fi
+
+    # --- SOURCE 3: reservation namespace via ls-remote (REQ-546 BR-3) ---------------
+    # A first-class INDEPENDENT source (REQ-523 BR-1 parity): a reservation pushed
+    # seconds ago on another machine — with no branch and no merge — raises the
+    # high-water here immediately. A transport failure of this ls-remote means the
+    # same remote is unreachable (already flagged degraded by SOURCE 1/2 above), so it
+    # degrades quietly rather than emitting a duplicate warning.
+    adlc_rh_res=$(adlc_remote_reservation_nums "$adlc_rh_repo" "$adlc_rh_kind")
+    if [ $? -eq 0 ]; then
+      adlc_rh_cand=$(adlc_id_list_max "$adlc_rh_res") || return 2
+      [ "$adlc_rh_cand" -gt "$adlc_rh_max" ] && adlc_rh_max=$adlc_rh_cand
+    else
+      adlc_rh_degraded=1
+    fi
   done
 
   if [ -n "$adlc_rh_unreachable" ]; then
@@ -326,8 +439,15 @@ adlc_local_scan_high() {
   # split "<glob> <type>"
   adlc_ls_glob=${adlc_ls_scan% *}
   adlc_ls_type=${adlc_ls_scan##* }
-  adlc_ls_root="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel 2>/dev/null)/.." 2>/dev/null && pwd)}"
-  [ -n "$adlc_ls_root" ] || adlc_ls_root="."
+  # assume is per-repo (BR-12): bootstrap-seed from the CURRENT repo only, never
+  # siblings. The global kinds seed from the machine-global $ADLC_REPOS_ROOT scan.
+  if [ "$adlc_ls_kind" = assume ]; then
+    adlc_ls_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    [ -n "$adlc_ls_root" ] || adlc_ls_root="."
+  else
+    adlc_ls_root="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel 2>/dev/null)/.." 2>/dev/null && pwd)}"
+    [ -n "$adlc_ls_root" ] || adlc_ls_root="."
+  fi
   adlc_ls_high=$(find "$adlc_ls_root" -path "$adlc_ls_glob" -type "$adlc_ls_type" 2>/dev/null \
     | grep -oE "$adlc_ls_prefix-[0-9]+" | sed "s/$adlc_ls_prefix-//" | sort -n | tail -1)
   # Normalize to decimal — `$(( 042 + 1 ))` is 35 in sh/bash because a leading 0 means
@@ -369,11 +489,18 @@ adlc_alloc_id() {
     echo "WARNING: $adlc_ai_kind id derived from a DEGRADED remote scan — verify before PR (REQ-523 BR-2)." >&2
   fi
 
+  # The reservation (REQ-546 BR-1) targets the origin of the repo the allocation runs in
+  # (BR-11/BR-12) — the current git worktree. Resolved OUTSIDE the lock; empty means we
+  # are not in a git repo, so allocation proceeds unreserved (degraded, non-blocking).
+  adlc_ai_reserve_repo=$(git rev-parse --show-toplevel 2>/dev/null)
+
   adlc_ai_num=$(
     LOCK="$adlc_ai_lock"
     COUNTER="$adlc_ai_counter"
     REMOTE_HIGH="$adlc_ai_remote"
     KIND="$adlc_ai_kind"
+    RESERVE_REPO="$adlc_ai_reserve_repo"
+    MAXTRIES="${ADLC_RESERVE_MAX_TRIES:-10}"
     if [ -L "$LOCK" ]; then
       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
       exit 1
@@ -405,7 +532,41 @@ adlc_alloc_id() {
     [ "$REMOTE_HIGH" -gt "$HIGH" ] && HIGH=$REMOTE_HIGH
     ALLOC=$(( HIGH + 1 ))
 
-    # Fast-forward the local counter to one past the allocated id.
+    # --- atomic reservation retry loop (REQ-546 BR-1/BR-5) --------------------------
+    # Reserve ALLOC on the remote BEFORE returning it. First-wins: a lost race (another
+    # machine reserved this number first) retries with the next candidate; a degraded
+    # push (offline / no auth / server policy forbids the namespace) proceeds unreserved
+    # and non-blocking (BR-4). The push executes INSIDE the lock (ADR-1): it is ONE
+    # round-trip and this fully serializes same-machine allocation through the
+    # reservation, so only cross-machine races reach the retry. A race is NOT degradation
+    # (BR-5) — exhausting the bounded retries (default 10) fails loud rather than
+    # returning a possibly-colliding number.
+    RESERVED=0
+    TRIES=0
+    if [ -n "$RESERVE_REPO" ]; then
+      while [ "$TRIES" -lt "$MAXTRIES" ]; do
+        adlc_reserve_id "$RESERVE_REPO" "$KIND" "$ALLOC"
+        RRC=$?
+        if [ "$RRC" -eq 0 ]; then RESERVED=1; break; fi
+        if [ "$RRC" -eq 1 ]; then
+          echo "note: $KIND id $ALLOC reserved by a concurrent allocator — retrying next number (BR-5)." >&2
+          ALLOC=$(( ALLOC + 1 )); TRIES=$(( TRIES + 1 )); continue
+        fi
+        break   # RRC=2 -> degraded reservation, non-blocking (BR-4)
+      done
+      if [ "$RESERVED" -eq 0 ] && [ "$TRIES" -ge "$MAXTRIES" ]; then
+        echo "ERROR: exhausted $MAXTRIES reservation retries for $KIND — too many concurrent allocators racing (BR-5)" >&2
+        if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
+        exit 1
+      fi
+      if [ "$RESERVED" -eq 0 ]; then
+        echo "WARNING: $KIND id $ALLOC allocated WITHOUT remote reservation (push degraded: offline / no auth / namespace forbidden) — verify before PR (BR-4)." >&2
+      fi
+    else
+      echo "WARNING: no git origin to reserve $KIND id $ALLOC against — allocated without remote reservation (BR-4)." >&2
+    fi
+
+    # Fast-forward the local counter to one past the (possibly retried) allocated id.
     echo $(( ALLOC + 1 )) > "$COUNTER"
 
     # rmdir is guarded by the same symlink check (residual TOCTOU window between
