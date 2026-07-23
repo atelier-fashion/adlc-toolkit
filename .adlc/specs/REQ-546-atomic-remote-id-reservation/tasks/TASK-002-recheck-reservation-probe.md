@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: "Reservation exact-id probe in id-recheck.sh"
-status: draft
+status: complete
 parent: REQ-546
 created: 2026-07-23
 updated: 2026-07-23

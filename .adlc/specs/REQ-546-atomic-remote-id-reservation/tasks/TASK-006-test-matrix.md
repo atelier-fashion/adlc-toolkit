@@ -1,7 +1,7 @@
 ---
 id: TASK-006
 title: "Reservation test matrix (shell AC cases + doctor + renumber)"
-status: draft
+status: complete
 parent: REQ-546
 created: 2026-07-23
 updated: 2026-07-23
