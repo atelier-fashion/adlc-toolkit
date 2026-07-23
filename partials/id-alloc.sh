@@ -165,8 +165,24 @@ adlc_forge_host_class() {
 # may lack the newest tip), then ls-tree the artifact directory. Prints the artifact
 # numbers (may be empty); rc 0 iff the scan actually ran (ls-tree succeeded), rc 1 if it
 # could not run (transport failure). Never prints non-numeric noise.
+# --- artifact-listing filter (BUG-145) -----------------------------------------------
+# Reads raw artifact-listing lines on stdin (gh basenames OR ls-tree paths) and emits
+# either the extracted numbers (mode=nums, the historical behavior) or the full entry
+# BASENAMES (mode=names — used by the recheck's own-artifact self-identification,
+# which must compare full names because a number alone cannot distinguish the current
+# work item's own merged artifact from a colleague's duplicate at the same number).
+adlc_id_artifact_filter() {
+  adlc_af_prefix=$1; adlc_af_mode=${2:-nums}
+  if [ "$adlc_af_mode" = "names" ]; then
+    awk -F/ '{print $NF}' | grep -E "^$adlc_af_prefix-[0-9]"
+  else
+    grep -oE "$adlc_af_prefix-[0-9][0-9]*" | grep -oE '[0-9][0-9]*'
+  fi
+  return 0
+}
+
 adlc_remote_git_artifact_nums() {
-  adlc_ga_repo=$1; adlc_ga_kind=$2; adlc_ga_prefix=$3
+  adlc_ga_repo=$1; adlc_ga_kind=$2; adlc_ga_prefix=$3; adlc_ga_mode=${4:-nums}
   adlc_ga_path=$(adlc_id_kind_artifact_path "$adlc_ga_kind") || return 1
   adlc_ga_tip=$(git -C "$adlc_ga_repo" ls-remote origin HEAD 2>/dev/null | awk '{print $1; exit}')
   [ -n "$adlc_ga_tip" ] || return 1
@@ -176,9 +192,7 @@ adlc_remote_git_artifact_nums() {
     git -C "$adlc_ga_repo" fetch --depth=1 -q origin "$adlc_ga_tip" 2>/dev/null || return 1
     adlc_ga_tree=$(git -C "$adlc_ga_repo" ls-tree --name-only "$adlc_ga_tip" "$adlc_ga_path/" 2>/dev/null) || return 1
   fi
-  printf '%s\n' "$adlc_ga_tree" \
-    | grep -oE "$adlc_ga_prefix-[0-9][0-9]*" \
-    | grep -oE '[0-9][0-9]*'
+  printf '%s\n' "$adlc_ga_tree" | adlc_id_artifact_filter "$adlc_ga_prefix" "$adlc_ga_mode"
   return 0
 }
 
@@ -194,7 +208,7 @@ adlc_remote_git_artifact_nums() {
 # the git-transport scan directly (BR-5 parity). The only "no scan ran" outcomes are an
 # unrecognized host with no usable scan, or git-transport failure with no gh path.
 adlc_remote_artifact_nums() {
-  adlc_an_repo=$1; adlc_an_kind=$2; adlc_an_prefix=$3
+  adlc_an_repo=$1; adlc_an_kind=$2; adlc_an_prefix=$3; adlc_an_mode=${4:-nums}
   adlc_an_url=$(git -C "$adlc_an_repo" remote get-url origin 2>/dev/null)
   adlc_an_host=$(adlc_forge_host_class "$adlc_an_url")
   adlc_an_nums=""
@@ -209,23 +223,23 @@ adlc_remote_artifact_nums() {
       adlc_an_listing=$(gh api "repos/$adlc_an_owner/contents/$adlc_an_apath" --jq '.[].name' 2>/dev/null)
       if [ $? -eq 0 ] && [ -n "$adlc_an_listing" ]; then
         adlc_an_nums=$(printf '%s\n' "$adlc_an_listing" \
-          | grep -oE "$adlc_an_prefix-[0-9][0-9]*" | grep -oE '[0-9][0-9]*')
+          | adlc_id_artifact_filter "$adlc_an_prefix" "$adlc_an_mode")
         adlc_an_ran=1
       fi
     fi
     # gh absent / gh failed / empty listing -> git-transport fallback (BR-4).
     if [ "$adlc_an_ran" -eq 0 ]; then
-      adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix")
+      adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix" "$adlc_an_mode")
       [ $? -eq 0 ] && adlc_an_ran=1
     fi
   elif [ "$adlc_an_host" = "azure-devops" ]; then
     # ADO parity (BR-5): git transport speaks to ADO too. Full scan, not degraded.
-    adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix")
+    adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix" "$adlc_an_mode")
     [ $? -eq 0 ] && adlc_an_ran=1
   else
     # Unrecognized host: try a generic git-transport scan (it may still be a git
     # remote); if even that fails, the scan did not run (caller flags degraded).
-    adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix")
+    adlc_an_nums=$(adlc_remote_git_artifact_nums "$adlc_an_repo" "$adlc_an_kind" "$adlc_an_prefix" "$adlc_an_mode")
     [ $? -eq 0 ] && adlc_an_ran=1
   fi
 
@@ -246,6 +260,29 @@ adlc_reservation_nonce() {
     adlc_rn_hex=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
   fi
   printf '%s-%s-%s' "$(date +%s 2>/dev/null)" "$$" "${adlc_rn_hex:-0}"
+}
+
+# --- own-reservation ledger (BUG-145) ------------------------------------------------
+# Records the reservation objects THIS machine pushed, so the recheck can recognize the
+# allocator's own reservation ref as self instead of reporting it as a collision
+# (LESSON-435 — a number-keyed probe cannot self-identify; the ledger supplies the
+# missing identity as the exact object SHA this machine pushed, which is precise per
+# allocation EVENT — the same user on a second machine correctly does NOT match).
+# One line per won push: `<kind> <num> <sha>`. The ledger is advisory
+# self-identification data, NEVER an authority: a missing ledger or missing entry
+# safely degrades to the collision behavior. Symlink refusal mirrors the counter
+# files (LESSON-014); the append runs inside the allocation lock on the alloc path.
+adlc_id_own_ledger() { echo "$HOME/.claude/.adlc-own-reservations"; }
+
+adlc_record_own_reservation() {
+  adlc_ro_ledger=$(adlc_id_own_ledger)
+  if [ -L "$adlc_ro_ledger" ]; then
+    echo "WARNING: $adlc_ro_ledger is a symlink — refusing to record own reservation (TOCTOU risk, LESSON-014)." >&2
+    return 1
+  fi
+  # Best-effort append: a failed record only costs a future false-collision (safe
+  # direction), never the allocation itself.
+  printf '%s %s %s\n' "$1" "$2" "$3" >> "$adlc_ro_ledger" 2>/dev/null || :
 }
 
 # --- atomic reservation push (REQ-546 BR-1/BR-2/BR-5/BR-6) ---------------------------
@@ -281,7 +318,14 @@ adlc_reserve_id() {
   # so a credential prompt would HANG allocation while holding the lock. Failing fast on a
   # missing credential degrades (non-blocking) per BR-4 — never block on push permission.
   adlc_ri_out=$(GIT_TERMINAL_PROMPT=0 git -C "$adlc_ri_repo" push origin "${adlc_ri_obj}:refs/adlc/ids/${adlc_ri_kind}/${adlc_ri_num}" 2>&1)
-  if [ $? -eq 0 ]; then return 0; fi
+  adlc_ri_rc=$?
+  if [ "$adlc_ri_rc" -eq 0 ]; then
+    # Won: record the pushed object SHA so the recheck can self-identify this
+    # reservation later (BUG-145) — without the ledger entry, the recheck would
+    # report the allocator's own ref as a collision (the renumber treadmill).
+    adlc_record_own_reservation "$adlc_ri_kind" "$adlc_ri_num" "$adlc_ri_obj"
+    return 0
+  fi
   case "$adlc_ri_out" in
     *"[remote rejected]"*|*"pre-receive hook declined"*|*"protected branch"*|*"denied"*) return 2 ;;
   esac

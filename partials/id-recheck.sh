@@ -15,7 +15,19 @@
 # the recheck call sites don't load the full allocation machinery (ADR-3), but it sources
 # id-alloc.sh for the kind mappers + adlc_remote_high so there is one derivation surface.
 #
-# Contract — adlc_recheck_id <kind> <ID>:   (kind = req|bug|lesson; ID = REQ-518 etc.)
+# Self-identification (BUG-145 — LESSON-435): number-keyed probes cannot tell "taken
+# by someone else" from "taken by this work item / this machine". Two self signals:
+#   - Own reservation: adlc_alloc_id records every won push to the own-reservation
+#     ledger (`<kind> <num> <sha>`, adlc_id_own_ledger). A reservation hit whose ref
+#     SHA whole-line-matches the ledger is self -> not a collision. No ledger entry
+#     -> collision (safe default).
+#   - Own merged artifact: pass the caller's own full artifact name as the OPTIONAL
+#     3rd arg (spec dir basename for req; file basename otherwise). A same-number
+#     artifact hit whose full name equals it is self; a different name still halts.
+#     REQUIRED for callers whose artifact merges before the recheck (the /proceed
+#     req call site — specs merge before implementation); pre-merge callers omit it.
+#
+# Contract — adlc_recheck_id <kind> <ID> [own-artifact-name]:   (kind = req|bug|lesson|assume; ID = REQ-518 etc.)
 #   return 0 -> <ID> is NOT present on any reachable remote (safe to proceed), OR the
 #               remote was unreachable (degraded: cannot find a collision; warns, BR-3).
 #   return 1 -> COLLISION: <ID> is already on the remote. A halt message naming the exact
@@ -51,9 +63,16 @@ fi
 adlc_recheck_id() {
   adlc_rc_kind=$1
   adlc_rc_id=$2
+  # Optional third arg (BUG-145): the caller's OWN full artifact name (spec dir
+  # basename for req, file basename for bug/lesson/assume). A merged-artifact hit
+  # whose full name equals this value is the current work item's own footprint —
+  # self, not a collision. Callers whose artifact can already be merged at recheck
+  # time (the /proceed req call site: specs merge BEFORE implementation) MUST pass
+  # it; pre-merge callers (bug/lesson pre-push) may omit it.
+  adlc_rc_own=$3
 
   if [ -z "$adlc_rc_kind" ] || [ -z "$adlc_rc_id" ]; then
-    echo "adlc_recheck_id: usage: adlc_recheck_id <kind> <ID>" >&2
+    echo "adlc_recheck_id: usage: adlc_recheck_id <kind> <ID> [own-artifact-name]" >&2
     return 2
   fi
 
@@ -159,8 +178,36 @@ adlc_recheck_id() {
       adlc_rc_art_nums=$(printf '%s\n' "$adlc_rc_art" | sed -n '1p' | tr ' ' '\n' \
         | sed -E '/^$/d' | sed -E 's/^0+([0-9])/\1/')
       if printf '%s\n' "$adlc_rc_art_nums" | grep -qx "$adlc_rc_num"; then
-        adlc_rc_hit="$adlc_rc_repo (merged artifact)"
-        break
+        # Number hit. With an own-artifact name supplied (BUG-145), compare FULL
+        # names: re-list in names mode, keep entries whose extracted number equals
+        # ours, and treat the hit as self ONLY if every such entry is exactly the
+        # caller's own name. Any same-number entry with a different name is a real
+        # collision. No own-name -> historical behavior (hit).
+        adlc_rc_self_art=0
+        if [ -n "$adlc_rc_own" ]; then
+          adlc_rc_art_names=$(adlc_remote_artifact_nums "$adlc_rc_repo" "$adlc_rc_kind" "$adlc_rc_prefix" names \
+            | sed -n '1p' | tr ' ' '\n' | sed -E '/^[[:space:]]*$/d')
+          # awk does the number-equality filter (decimal-normalized) so the whole
+          # walk stays split-free under zsh (LESSON-329 / BUG-116).
+          adlc_rc_same_num=$(printf '%s\n' "$adlc_rc_art_names" \
+            | awk -v pfx="$adlc_rc_prefix" -v want="$adlc_rc_num" '
+                { if (match($0, pfx "-[0-9]+")) {
+                    n = substr($0, RSTART + length(pfx) + 1, RLENGTH - length(pfx) - 1)
+                    sub(/^0+/, "", n); if (n == "") n = "0"
+                    if (n + 0 == want + 0) print $0
+                } }')
+          if [ -n "$adlc_rc_same_num" ]; then
+            adlc_rc_foreign=$(printf '%s\n' "$adlc_rc_same_num" | grep -vxF "$adlc_rc_own")
+            if [ -z "$adlc_rc_foreign" ]; then
+              adlc_rc_self_art=1
+              echo "id recheck: merged artifact for $adlc_rc_id in '$adlc_rc_repo' is this work item's own '$adlc_rc_own' — self, not a collision (BUG-145)." >&2
+            fi
+          fi
+        fi
+        if [ "$adlc_rc_self_art" -eq 0 ]; then
+          adlc_rc_hit="$adlc_rc_repo (merged artifact)"
+          break
+        fi
       fi
     fi
 
@@ -170,10 +217,25 @@ adlc_recheck_id() {
     # path is inherently prefix-sibling safe — 120 and 1200 are distinct refs). The
     # reservation high-water is already folded into adlc_remote_high above, so the
     # renumber suggestion computed from it is correct.
-    if GIT_TERMINAL_PROMPT=0 git -C "$adlc_rc_repo" ls-remote origin "refs/adlc/ids/$adlc_rc_kind/$adlc_rc_num" 2>/dev/null \
-         | grep -q .; then
-      adlc_rc_hit="$adlc_rc_repo (reservation ref)"
-      break
+    adlc_rc_res=$(GIT_TERMINAL_PROMPT=0 git -C "$adlc_rc_repo" ls-remote origin "refs/adlc/ids/$adlc_rc_kind/$adlc_rc_num" 2>/dev/null)
+    if [ -n "$adlc_rc_res" ]; then
+      # Reservation exists. Self-identify against the own-reservation ledger
+      # (BUG-145): adlc_alloc_id records `<kind> <num> <sha>` for every reservation
+      # THIS machine pushed. An exact whole-line match on kind+num+the remote ref's
+      # object SHA means this is the allocator's own reservation — the id is ours,
+      # not a collision. SHA equality is precise per allocation EVENT (a colleague's
+      # reservation, or even this user's from another machine, has a different
+      # object). Missing/symlinked ledger or no matching line -> collision
+      # (historical behavior — the safe direction).
+      adlc_rc_res_sha=$(printf '%s\n' "$adlc_rc_res" | awk '{print $1; exit}')
+      adlc_rc_ledger=$(adlc_id_own_ledger)
+      if [ -f "$adlc_rc_ledger" ] && [ ! -L "$adlc_rc_ledger" ] \
+           && grep -qxF "$adlc_rc_kind $adlc_rc_num $adlc_rc_res_sha" "$adlc_rc_ledger" 2>/dev/null; then
+        echo "id recheck: reservation refs/adlc/ids/$adlc_rc_kind/$adlc_rc_num in '$adlc_rc_repo' was pushed by THIS machine's allocator — self, not a collision (BUG-145)." >&2
+      else
+        adlc_rc_hit="$adlc_rc_repo (reservation ref)"
+        break
+      fi
     fi
   done
 
