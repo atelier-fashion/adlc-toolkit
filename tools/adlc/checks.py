@@ -296,6 +296,102 @@ def _forge_pat_status(profile: Profile):
     return auth, bool(os.environ.get(auth))
 
 
+# --- reservation namespace pushability (REQ-546 BR-13) ---------------------
+
+def _classify_git_failure(stderr: str) -> str:
+    """Name the failing layer from a git push/ls-remote stderr (BR-13).
+
+    Ordered most-specific first. Auth and server-policy declines are distinct
+    failure modes a machine operator must fix differently; transport is the
+    catch-all connectivity bucket.
+    """
+    s = (stderr or "").lower()
+    if ("authentication failed" in s or "permission denied" in s or "403" in s
+            or "could not read username" in s or "invalid username or password" in s):
+        return "auth"
+    if ("pre-receive hook declined" in s or "[remote rejected]" in s
+            or "protected branch" in s or "denied" in s):
+        return "server policy"
+    if ("could not read from remote" in s or "does not appear to be a git repository" in s
+            or "could not resolve host" in s or "unable to access" in s
+            or "connection" in s or "timed out" in s or "network" in s):
+        return "transport"
+    return "unknown"
+
+
+def check_reservations(profile: Profile):
+    """Reservation ref namespace is readable AND writable on origin (BR-13).
+
+    A machine that silently cannot push reservations allocates permanently
+    degraded — the one remaining duplicate source REQ-546 leaves open by design —
+    so doctor catches it. Probes: (1) ls-remote the namespace (read + transport +
+    read-auth); (2) push an EPHEMERAL probe ref that is actually pushed and deleted
+    (`refs/adlc/ids/_probe/<nonce>` — `_probe` is not a real kind, so it reserves
+    nothing; the delete is the ONE sanctioned deletion). A `git push --dry-run` is
+    NOT a substitute — it never exercises server-side pre-receive policy, exactly the
+    layer this check exists to catch. Pure subprocess, no dependency on the mechanism
+    it diagnoses (LESSON-395). SKIP-with-reason on a remote-less repo.
+    """
+    if not _has_remote(profile):
+        return Result.SKIP, "no git remote — reservation namespace not applicable", ""
+
+    # GIT_TERMINAL_PROMPT=0 so an auth-required remote fails fast (reported as a layer)
+    # instead of hanging the whole doctor run on a credential prompt.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    # 1. Readability (also exercises transport + read auth).
+    read = subprocess.run(
+        ["git", "ls-remote", "origin", "refs/adlc/ids/*"],
+        capture_output=True, text=True, env=env,
+    )
+    if read.returncode != 0:
+        layer = _classify_git_failure(read.stderr)
+        return (
+            Result.FAIL,
+            f"reservation namespace not readable ({layer})",
+            "verify `git ls-remote origin` works — reservations live under refs/adlc/ids/*",
+        )
+
+    # 2. Writability via a real ephemeral probe ref. Probe object: a tiny throwaway
+    #    commit over the empty tree (git commit-tree needs a configured identity — if
+    #    unset, SKIP and defer to the git-identity check rather than false-passing).
+    tree = subprocess.run(
+        ["git", "hash-object", "-w", "-t", "tree", os.devnull],
+        capture_output=True, text=True,
+    ).stdout.strip() or "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    ct = subprocess.run(
+        ["git", "commit-tree", tree],
+        input="adlc-doctor-reservation-probe\n", capture_output=True, text=True,
+    )
+    obj = ct.stdout.strip()
+    if not obj:
+        return (
+            Result.SKIP,
+            "cannot build a probe object (git identity unset — see git-identity check)",
+            "",
+        )
+
+    proberef = "refs/adlc/ids/_probe/" + os.urandom(8).hex()
+    push = subprocess.run(
+        ["git", "push", "origin", f"{obj}:{proberef}"],
+        capture_output=True, text=True, env=env,
+    )
+    if push.returncode != 0:
+        layer = _classify_git_failure(push.stderr)
+        return (
+            Result.FAIL,
+            f"reservation namespace not writable ({layer})",
+            "grant push access to refs/adlc/ids/* on origin — otherwise id allocation "
+            "runs permanently degraded (ids get verified late by the REQ-545 recheck)",
+        )
+    # Cleanup: delete the probe ref (the ONE sanctioned deletion — it reserves nothing).
+    subprocess.run(
+        ["git", "push", "origin", "--delete", proberef],
+        capture_output=True, text=True, env=env,
+    )
+    return Result.PASS, "reservation namespace readable and writable on origin", ""
+
+
 # --- git identity ----------------------------------------------------------
 
 def check_git_identity(profile: Profile):
@@ -492,6 +588,7 @@ REGISTRY = [
     # `forge` supersedes the standalone gh-auth check (REQ-520 ADR-4): it folds the
     # gh auth probe in for provider github and handles azure-devops auth too.
     Check("forge", check_forge),
+    Check("reservations", check_reservations),
     Check("git-identity", check_git_identity),
     Check("delegate-gate", check_delegate_gate),
     Check("counters", check_counters),

@@ -175,6 +175,42 @@ def remote_collision(new_id):
     return proc.returncode == 1
 
 
+def reserve_new_id(new_id):
+    """Reserve new_id on the remote via id-alloc.sh's adlc_reserve_id (REQ-546 BR-8).
+
+    `adlc renumber` mints a NEW id, so it must reserve it through the SAME mechanism
+    as allocation before mutating — otherwise the renumbered id is invisible to every
+    other machine until the branch is pushed, re-opening the very window REQ-546
+    closes. The old id's reservation is deliberately left in place (the old number
+    stays burned). One authority: shell out to id-alloc.sh, mirroring how
+    remote_collision shells out to id-recheck.sh.
+
+    Returns 'won' | 'lost' | 'degraded' | 'unavailable':
+      won         -> ref created, safe to proceed
+      lost        -> the id was reserved by another allocator between the recheck and
+                     now — caller must abort rather than rename into a collision
+      degraded    -> push could not run (offline / no auth / namespace forbidden);
+                     non-blocking (parity with the degraded posture elsewhere)
+      unavailable -> the id-alloc.sh helper is not resolvable — proceed unreserved
+    """
+    partial = _find_partial("id-alloc.sh")
+    if partial is None:
+        return "unavailable"
+    kind = KIND_RECHECK[_kind_of(new_id)]
+    # Decimal number, no leading zeros — matches the reservation ref namespace.
+    num = str(int(new_id.split("-", 1)[1]))
+    # adlc_reserve_id <repo> <kind> <num>; source then call in one sh -c (one authority).
+    script = '. "$1"; adlc_reserve_id "$2" "$3" "$4"'
+    try:
+        proc = subprocess.run(
+            ["sh", "-c", script, "sh", partial, _repo_root(), kind, num],
+            capture_output=True, text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unavailable"
+    return {0: "won", 1: "lost", 2: "degraded"}.get(proc.returncode, "degraded")
+
+
 def _artifact_path(root, artifact_id):
     """Absolute path to the artifact dir (REQ) or the dir holding its file."""
     kind = _kind_of(artifact_id)
@@ -407,6 +443,23 @@ def main(argv=None):
     if not apply_change:
         print("\nDRY RUN — re-run with --yes to apply.")
         return 0
+
+    # 4b. Reserve the new id on the remote BEFORE mutating (BR-8). This closes the same
+    #     allocation-to-visibility window for renumbered ids that REQ-546 closes for
+    #     freshly allocated ones. The old id's reservation is left in place.
+    outcome = reserve_new_id(new_id)
+    if outcome == "lost":
+        sys.stderr.write(
+            f"adlc renumber: refusing — new id '{new_id}' was reserved by another "
+            "allocator between the recheck and now. Re-run to pick the next free id.\n"
+        )
+        return 1
+    if outcome == "degraded":
+        sys.stderr.write(
+            f"adlc renumber: WARNING — could not reserve '{new_id}' on the remote "
+            "(offline / no auth / namespace forbidden). Proceeding; verify before push.\n"
+        )
+    # 'won' and 'unavailable' both proceed (unavailable = id-alloc.sh not resolvable).
 
     # 5. Apply atomically. Rename the path first, then rewrite the moved artifact's
     #    own content and every external reference.

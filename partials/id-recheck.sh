@@ -163,6 +163,18 @@ adlc_recheck_id() {
         break
       fi
     fi
+
+    # Reservation-ref probe (REQ-546 BR-3): a just-reserved id has NO branch and NO
+    # merged artifact — only the reservation ref. Probe the EXACT ref path
+    # refs/adlc/ids/<kind>/<num>; ls-remote returns it only if it exists (exact ref
+    # path is inherently prefix-sibling safe — 120 and 1200 are distinct refs). The
+    # reservation high-water is already folded into adlc_remote_high above, so the
+    # renumber suggestion computed from it is correct.
+    if GIT_TERMINAL_PROMPT=0 git -C "$adlc_rc_repo" ls-remote origin "refs/adlc/ids/$adlc_rc_kind/$adlc_rc_num" 2>/dev/null \
+         | grep -q .; then
+      adlc_rc_hit="$adlc_rc_repo (reservation ref)"
+      break
+    fi
   done
 
   if [ -n "$adlc_rc_hit" ]; then
