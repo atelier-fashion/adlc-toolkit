@@ -195,6 +195,33 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    Do NOT `git checkout <integration-branch>` in `<repo-path>` — it may be checked out in another worktree and fail. The worktree (step 5) is created directly from `origin/<integration-branch>`. Feature branches and the Phase 6 PR base MUST use `<integration-branch>`, never a hardcoded `main`.
 
    **Step 4 advisory — in-flight manifest (non-blocking, REQ-482).** With `origin` now fetched and **before** the worktree is created, surface what else is in flight across sessions so you can spot overlaps before starting. **In subagent mode (`/sprint` pipeline-runner): SKIP this** — `/sprint` already built the manifest once for the batch in its pre-flight. Otherwise invoke `/manifest`, prefixing the same shell call with the hand-off vars so it reuses this fetch and marks the current REQ as self: `MANIFEST_SELF="REQ-xxx" MANIFEST_SKIP_FETCH=1` (substitute the concrete REQ id). Display the in-flight table and any coarse `component`/`domain` overlap involving the current REQ. This is **purely advisory**: it MUST NOT block, halt, reorder, or gate the pipeline; it is NOT one of the three legitimate halt points; a manifest-build failure is ignored with a one-line note and the pipeline continues (BR-7, BR-8, BR-9). The worktree-collision gate (step 4b) is unchanged.
+
+   **Step 4 pre-push REQ-id recheck (REQ-545 — closes the REQ-518 BR-4 gap for the REQ kind).** With `origin` now fetched and **before** any worktree, branch, or push is created, re-verify this REQ's id against the remote. The id was allocated by `/spec`; between allocation and this branch push, a colleague on another machine may have pushed the same `feat/REQ-xxx` — catching it here is far cheaper than at PR/merge time. **Unlike the manifest advisory above, this runs identically in solo `/proceed` and in `/sprint` pipeline-runner subagent mode (BR-5) — do NOT skip it in subagent mode.** A collision halts with the partial's renumber instruction; this is classified alongside the worktree-collision gate (step 4b) — a **pre-flight precondition halt, NOT one of the three legitimate mid-pipeline halt points**. Source `partials/id-recheck.sh` (two-level fallback) and call `adlc_recheck_id` **in the same fenced block** (LESSON-329 — a function sourced in one fence is undefined in the next). See `partials/id-recheck.sh` for the exact-id probe + degraded short-circuit contract:
+   ```bash
+   # WHY (REQ-518 BR-4): re-verify an allocated id against the remote at every point it is
+   # about to become a remote footprint. `/proceed` creating feat/REQ-xxx is exactly such a
+   # point; this call site closes the gap left when REQ-518 TASK-004 wired only the /bugfix +
+   # /wrapup call sites. Derivation + renumber message live in partials/id-recheck.sh.
+   #
+   # BRANCH is the feat/REQ-xxx-<slug> this run will create — the SAME slug step 4b derives
+   # (no new slug logic). Self-exemption (BR-3): if the remote already carries this EXACT full
+   # branch name, the footprint is ours — a resume whose Step-8a draft push already ran, or a
+   # crashed prior session of this same work item (id+slug identity => same work item). Skip
+   # the recheck and reuse. A hit with the same id but a DIFFERENT slug, or a merged-artifact
+   # hit for another work item, is NOT exempted here and still halts below. <repo-path> is the
+   # primary repo path (item 4's `git -C <repo-path> fetch origin`).
+   BRANCH="feat/REQ-xxx-<slug>"
+   if [ -n "$(git -C <repo-path> ls-remote --heads origin "refs/heads/$BRANCH" 2>/dev/null)" ]; then
+     echo "id recheck: remote already carries this pipeline's own '$BRANCH' (resume / crash-recovery) — skipping self-collision halt (REQ-545 BR-3)." >&2
+   else
+     . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+     if ! adlc_recheck_id req "REQ-xxx"; then
+       echo "Halting: REQ-xxx already exists on the remote — renumber before creating the feat/REQ-xxx branch (see message above)." >&2
+       exit 1
+     fi
+   fi
+   ```
+   A degraded/unreachable remote is handled inside the partial (it warns `DEGRADED — proceeding WITHOUT remote verification` and returns success — BR-4); the recheck can only fail to FIND a collision, never invent one, so a degraded derivation never blocks.
 4a. **Parse the declared worktree path (primary repo only)** — scan the launch prompt for the dispatch-line contract. The format is normative in `REQ-263 architecture.md` ("The dispatch-line contract" section); do not change the regex or format here without updating that document.
    - Regex: `^WORKTREE PATH \(mandatory\): (.+)$` (entire line, capture group is the absolute path).
    - If multiple lines match the regex, use the **first** match and ignore the rest. (This makes parser behavior deterministic if a future change accidentally embeds free-text content that matches.)

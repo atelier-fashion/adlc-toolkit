@@ -1,7 +1,7 @@
 ---
 id: REQ-545
 title: "Wire the REQ id pre-push recheck into /proceed branch creation (close the REQ-518 BR-4 gap)"
-status: approved
+status: complete
 deployable: false
 created: 2026-07-23
 updated: 2026-07-23
