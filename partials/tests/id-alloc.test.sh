@@ -198,6 +198,16 @@ RC=0; ( cd "$ADLC_REPOS_ROOT/proj"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id
 check "recheck no-collision returns 0" "0" "$RC"
 cleanup
 
+# --- case: recheck prefix-sibling safety — remote feat/REQ-1200, recheck REQ-120 => rc 0
+# The exact-equality (grep -qx on the decimal-normalized full digit run) probe must NOT
+# treat REQ-120 as present merely because the sibling-prefix REQ-1200 is on the remote
+# (REQ-545 AC-7 / REQ-524 boundary safety). A substring/prefix match would false-halt here.
+new_sandbox
+make_remote_with_branch feat/REQ-1200-unrelated
+RC=0; ( cd "$ADLC_REPOS_ROOT/proj"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-120 2>/dev/null ) || RC=$?
+check "recheck prefix-sibling REQ-120 not hit by feat/REQ-1200 returns 0" "0" "$RC"
+cleanup
+
 # --- case: recheck multi-branch — renumber suggestion uses the REAL high-water -------
 # adlc_recheck_id inherits adlc_remote_high; under broken zsh iteration (BUG-116) the
 # high-water was 0 and a collision suggested "renumber ... REQ-001". With >=2 branches
