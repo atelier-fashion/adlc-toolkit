@@ -550,6 +550,61 @@ else
 fi
 cleanup
 
+# --- BUG-145: own reservation is self, not a collision -------------------------------
+# Machine A allocates (reservation pushed + ledger recorded), then A rechecks the SAME
+# id: must be rc=0 with the self note — never the renumber treadmill. Machine B (no
+# ledger entry) rechecking the same id must still see the collision (covered again
+# here alongside the dedicated case above).
+new_sandbox
+two_machines
+echo 700 > "$HA/.claude/.global-next-req"
+( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req >/dev/null 2>&1 )   # reserves req/700
+LEDG=$(cat "$HA/.claude/.adlc-own-reservations" 2>/dev/null)
+case "$LEDG" in "req 700 "*) pass "BUG-145: won reservation recorded to the own ledger";; *) fail "BUG-145 ledger record (got: '$LEDG')";; esac
+RC=0; MSG=$( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-700 2>&1 ) || RC=$?
+check "BUG-145: own reservation rechecks CLEAR (self)" "0" "$RC"
+case "$MSG" in *"self, not a collision"*) pass "BUG-145: self-reservation stderr note emitted";; *) fail "BUG-145 self note (got: $MSG)";; esac
+RC=0; ( HOME="$HB"; export HOME; ADLC_REPOS_ROOT="$ROOTB"; export ADLC_REPOS_ROOT
+  cd "$RB"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-700 >/dev/null 2>&1 ) || RC=$?
+check "BUG-145: other machine (no ledger entry) still collides" "1" "$RC"
+# Ledger wiped on A -> degrades to the safe collision direction.
+rm -f "$HA/.claude/.adlc-own-reservations"
+RC=0; ( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-700 >/dev/null 2>&1 ) || RC=$?
+check "BUG-145: wiped ledger degrades to collision (safe default)" "1" "$RC"
+cleanup
+
+# --- BUG-145: own merged artifact (same full name) is self; different name collides ---
+# The normal /proceed flow: the REQ's spec dir is ALREADY merged on the default branch
+# when the Step-4 recheck fires. With the own-name arg it must pass; a same-number dir
+# with a DIFFERENT slug (a colleague's duplicate) must still halt; omitting the arg
+# keeps the historical conservative halt.
+new_sandbox
+git init -q --bare "$SBX/art.git"
+ARTSEED="$SBX/artseed"; git clone -q "$SBX/art.git" "$ARTSEED" 2>/dev/null
+( cd "$ARTSEED" && git config user.email t@t && git config user.name t
+  mkdir -p .adlc/specs/REQ-777-own-slug && echo x > .adlc/specs/REQ-777-own-slug/requirement.md
+  git add -A && git commit -q -m seed && git push -q origin HEAD:main 2>/dev/null )
+ARTREPO="$ADLC_REPOS_ROOT/art"; git clone -q "$SBX/art.git" "$ARTREPO" 2>/dev/null
+( cd "$ARTREPO" && git config user.email t@t && git config user.name t )
+RC=0; MSG=$( cd "$ARTREPO"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-777 REQ-777-own-slug 2>&1 ) || RC=$?
+check "BUG-145: own merged spec dir (matching name) rechecks CLEAR" "0" "$RC"
+case "$MSG" in *"own 'REQ-777-own-slug'"*) pass "BUG-145: own-artifact stderr note emitted";; *) fail "BUG-145 own-artifact note (got: $MSG)";; esac
+RC=0; ( cd "$ARTREPO"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-777 REQ-777-different-slug >/dev/null 2>&1 ) || RC=$?
+check "BUG-145: same number, DIFFERENT name still collides" "1" "$RC"
+RC=0; ( cd "$ARTREPO"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-777 >/dev/null 2>&1 ) || RC=$?
+check "BUG-145: no own-name arg keeps the conservative halt" "1" "$RC"
+# Prefix-sibling safety of the name compare: a remote REQ-7770-* dir must NOT be
+# counted as a same-number entry when rechecking REQ-777 (maximal-munch extraction
+# in the awk filter) — if it were, the foreign name would wrongly re-halt self.
+( cd "$ARTSEED" && mkdir -p .adlc/specs/REQ-7770-other && echo y > .adlc/specs/REQ-7770-other/requirement.md
+  git add -A && git commit -q -m sib && git push -q origin HEAD:main 2>/dev/null )
+RC=0; ( cd "$ARTREPO"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-777 REQ-777-own-slug >/dev/null 2>&1 ) || RC=$?
+check "BUG-145: name compare is prefix-sibling safe (REQ-7770 not counted as 777)" "0" "$RC"
+cleanup
+
 # --- BR-6: the reservation mechanism is pure git transport (no gh/az) ----------------
 if grep -E 'refs/adlc/ids' "$PARTIALS/id-alloc.sh" | grep -qE '(^|[^a-z])gh |(^|[^a-z])az '; then
   fail "BR-6: gh/az appears on a reservation line in id-alloc.sh"
