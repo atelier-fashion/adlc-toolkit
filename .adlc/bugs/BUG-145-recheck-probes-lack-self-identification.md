@@ -1,7 +1,7 @@
 ---
 id: BUG-145
 title: "id-recheck probes cannot self-identify — own reservation refs and own merged spec dirs are reported as collisions"
-status: open
+status: resolved
 severity: high
 created: 2026-07-23
 updated: 2026-07-23
@@ -118,3 +118,11 @@ own-name → artifact-self then reservation-self → CLEAR.
   passes it (closes the merged-spec false halt for the normal flow)
 - `partials/tests/id-alloc.test.sh` — BUG-145 cases (self-reservation,
   other-machine, wiped ledger, own/foreign/no-arg artifact, prefix-sibling)
+
+## Deployment
+
+Merged to `main` via PR #105 (squash, 2026-07-23) — live immediately via the
+symlink install once the machine's main checkout fast-forwarded (`0332479`).
+No service deploys (markdown toolkit; no cloud-run/gcp config). Post-merge
+production dogfood: LESSON-440 allocated through the fixed live partials —
+reservation recorded to the ledger, recheck self-identified, CLEAR.
