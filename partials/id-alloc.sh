@@ -277,7 +277,10 @@ adlc_reserve_id() {
   [ -n "$adlc_ri_obj" ] || return 2
   # Brace-form refspec is MANDATORY: bare `$obj:refs` triggers zsh's `:r` word modifier
   # and silently corrupts the refspec (LESSON-335 class — verified during REQ-546 design).
-  adlc_ri_out=$(git -C "$adlc_ri_repo" push origin "${adlc_ri_obj}:refs/adlc/ids/${adlc_ri_kind}/${adlc_ri_num}" 2>&1)
+  # GIT_TERMINAL_PROMPT=0 is LOAD-BEARING: this push runs INSIDE the mkdir lock (ADR-1),
+  # so a credential prompt would HANG allocation while holding the lock. Failing fast on a
+  # missing credential degrades (non-blocking) per BR-4 — never block on push permission.
+  adlc_ri_out=$(GIT_TERMINAL_PROMPT=0 git -C "$adlc_ri_repo" push origin "${adlc_ri_obj}:refs/adlc/ids/${adlc_ri_kind}/${adlc_ri_num}" 2>&1)
   if [ $? -eq 0 ]; then return 0; fi
   case "$adlc_ri_out" in
     *"[remote rejected]"*|*"pre-receive hook declined"*|*"protected branch"*|*"denied"*) return 2 ;;
@@ -297,7 +300,9 @@ adlc_reserve_id() {
 # `*` is inside double quotes so the shell never globs it; git fnmatch-matches it.
 adlc_remote_reservation_nums() {
   adlc_rr_repo=$1; adlc_rr_kind=$2
-  adlc_rr_refs=$(git -C "$adlc_rr_repo" ls-remote origin "refs/adlc/ids/$adlc_rr_kind/*" 2>/dev/null) || return 1
+  # GIT_TERMINAL_PROMPT=0: an auth-required or unreachable remote must fail FAST (degraded)
+  # rather than hang on a credential prompt (BR-4 non-blocking posture).
+  adlc_rr_refs=$(GIT_TERMINAL_PROMPT=0 git -C "$adlc_rr_repo" ls-remote origin "refs/adlc/ids/$adlc_rr_kind/*" 2>/dev/null) || return 1
   printf '%s\n' "$adlc_rr_refs" \
     | grep -oE "refs/adlc/ids/$adlc_rr_kind/[0-9][0-9]*" \
     | grep -oE '[0-9][0-9]*'

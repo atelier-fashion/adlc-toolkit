@@ -335,10 +335,14 @@ def check_reservations(profile: Profile):
     if not _has_remote(profile):
         return Result.SKIP, "no git remote — reservation namespace not applicable", ""
 
+    # GIT_TERMINAL_PROMPT=0 so an auth-required remote fails fast (reported as a layer)
+    # instead of hanging the whole doctor run on a credential prompt.
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
     # 1. Readability (also exercises transport + read auth).
     read = subprocess.run(
         ["git", "ls-remote", "origin", "refs/adlc/ids/*"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
     if read.returncode != 0:
         layer = _classify_git_failure(read.stderr)
@@ -370,7 +374,7 @@ def check_reservations(profile: Profile):
     proberef = "refs/adlc/ids/_probe/" + os.urandom(8).hex()
     push = subprocess.run(
         ["git", "push", "origin", f"{obj}:{proberef}"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
     if push.returncode != 0:
         layer = _classify_git_failure(push.stderr)
@@ -383,7 +387,7 @@ def check_reservations(profile: Profile):
     # Cleanup: delete the probe ref (the ONE sanctioned deletion — it reserves nothing).
     subprocess.run(
         ["git", "push", "origin", "--delete", proberef],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=env,
     )
     return Result.PASS, "reservation namespace readable and writable on origin", ""
 
