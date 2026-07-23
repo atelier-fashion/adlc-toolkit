@@ -215,7 +215,13 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
      echo "id recheck: remote already carries this pipeline's own '$BRANCH' (resume / crash-recovery) — skipping self-collision halt (REQ-545 BR-3)." >&2
    else
      . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
-     if ! adlc_recheck_id req "REQ-xxx"; then
+     # OWN_SPEC_DIR is this REQ's own spec dir basename (REQ-xxx-<dirslug>) from the
+     # invoking repo — passed so the recheck recognizes the REQ's OWN merged spec as
+     # self (specs merge BEFORE /proceed in the normal flow; without this the
+     # merged-artifact probe false-halts on the work item itself — BUG-145). find,
+     # not a bare glob: zsh aborts on an unmatched glob (LESSON-335).
+     OWN_SPEC_DIR=$(find <repo-path>/.adlc/specs -maxdepth 1 -name 'REQ-xxx-*' -type d 2>/dev/null | head -1 | awk -F/ '{print $NF}')
+     if ! adlc_recheck_id req "REQ-xxx" "$OWN_SPEC_DIR"; then
        echo "Halting: REQ-xxx already exists on the remote — renumber before creating the feat/REQ-xxx branch (see message above)." >&2
        exit 1
      fi
