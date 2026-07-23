@@ -334,3 +334,66 @@ def test_renumber_subcommand_dispatches(monkeypatch):
     rc = adlc.main(["renumber", "REQ-600", "REQ-601"])
     assert rc == 0
     assert called["argv"] == ["REQ-600", "REQ-601"]
+
+
+# --- reserve-before-mutate (REQ-546 BR-8) -----------------------------------------
+
+def _add_bare_remote(tmp_path, repo, name="origin.git"):
+    """Give `repo` a writable local bare origin and push its main branch."""
+    bare = tmp_path / name
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True)
+    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=repo, check=True)
+    return bare
+
+
+def _ls_reservations(repo, kind):
+    out = subprocess.run(
+        ["git", "-C", str(repo), "ls-remote", "origin", f"refs/adlc/ids/{kind}/*"],
+        capture_output=True, text=True,
+    )
+    return out.stdout.strip()
+
+
+def test_reserve_new_id_won_pushes_ref(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    _add_bare_remote(tmp_path, repo)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    assert renumber.reserve_new_id("REQ-700") == "won"
+    assert "refs/adlc/ids/req/700" in _ls_reservations(repo, "req")
+
+
+def test_reserve_new_id_degraded_when_no_remote(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)  # no origin
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    # A push with no origin cannot run -> degraded (non-blocking), never 'won'.
+    assert renumber.reserve_new_id("REQ-700") in ("degraded", "unavailable")
+
+
+def test_apply_reserves_new_id_on_remote(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    _add_bare_remote(tmp_path, repo)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    # The new-id remote-collision recheck is orthogonal here — stub it False so the test
+    # exercises the reserve-before-mutate step, not the recheck.
+    monkeypatch.setattr(renumber, "remote_collision", lambda _id: False)
+    rc = renumber.main(["REQ-600", "REQ-700", "--yes"])
+    assert rc == 0
+    assert (repo / ".adlc" / "specs" / "REQ-700-demo").is_dir()
+    assert "refs/adlc/ids/req/700" in _ls_reservations(repo, "req")
+
+
+def test_apply_aborts_when_new_id_reserved_mid_flight(tmp_path, monkeypatch):
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(renumber, "remote_collision", lambda _id: False)
+    # Simulate the id being reserved by another allocator between recheck and reserve.
+    monkeypatch.setattr(renumber, "reserve_new_id", lambda _id: "lost")
+    rc = renumber.main(["REQ-600", "REQ-700", "--yes"])
+    assert rc == 1
+    # The rename must NOT have happened.
+    assert (repo / ".adlc" / "specs" / "REQ-600-demo").is_dir()
+    assert not (repo / ".adlc" / "specs" / "REQ-700-demo").exists()

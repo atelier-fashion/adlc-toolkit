@@ -250,3 +250,74 @@ def test_launchctl_skips_when_delegation_inactive(tmp_path, monkeypatch):
     monkeypatch.setattr(checks, "_gate_verdict", lambda p: (1, "not-opted-in"))
     result, _detail, _rem = checks.check_launchctl(_profile(tmp_path, os_name="Darwin"))
     assert result is Result.SKIP
+
+
+# --- reservations pushability check (REQ-546 BR-13) ------------------------
+
+def _git(cwd, *args):
+    return subprocess.run(["git", "-C", str(cwd), *args],
+                          capture_output=True, text=True)
+
+
+def _repo_with_remote(tmp_path, name, reject=False):
+    """A clone whose origin is a local bare remote. reject=True installs a
+    pre-receive hook that declines every push (server-policy failure)."""
+    bare = tmp_path / f"{name}.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    if reject:
+        hook = bare / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\necho 'namespace forbidden' >&2\nexit 1\n")
+        hook.chmod(0o755)
+    repo = tmp_path / name
+    subprocess.run(["git", "clone", "-q", str(bare), str(repo)], check=True)
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    if not reject:
+        _git(repo, "push", "-q", "origin", "HEAD:main")
+    return repo
+
+
+def test_reservations_pass_writable_remote(tmp_path, monkeypatch):
+    repo = _repo_with_remote(tmp_path, "good")
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    result, detail, _rem = checks.check_reservations(_profile(tmp_path))
+    assert result is Result.PASS, detail
+    # The ephemeral probe ref must be gone afterward (the one sanctioned deletion).
+    left = _git(repo, "ls-remote", "origin", "refs/adlc/ids/_probe/*").stdout.strip()
+    assert left == "", f"probe ref left behind: {left!r}"
+
+
+def test_reservations_fail_names_server_policy_layer(tmp_path, monkeypatch):
+    repo = _repo_with_remote(tmp_path, "ro", reject=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    result, detail, remediation = checks.check_reservations(_profile(tmp_path))
+    assert result is Result.FAIL
+    assert "server policy" in detail
+    assert remediation  # copy-pasteable remediation present (BR-5 of REQ-519)
+
+
+def test_reservations_skip_when_no_remote(tmp_path, monkeypatch):
+    repo = tmp_path / "norem"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    monkeypatch.chdir(repo)
+    result, detail, _rem = checks.check_reservations(_profile(tmp_path))
+    assert result is Result.SKIP
+    assert "no git remote" in detail
+
+
+def test_reservations_registered_after_forge():
+    names = [c.id for c in checks.REGISTRY]
+    assert "reservations" in names
+    assert names.index("reservations") == names.index("forge") + 1
+
+
+def test_classify_git_failure_layers():
+    assert checks._classify_git_failure("fatal: Authentication failed") == "auth"
+    assert checks._classify_git_failure("! [remote rejected] (pre-receive hook declined)") == "server policy"
+    assert checks._classify_git_failure("fatal: Could not read from remote repository") == "transport"
+    assert checks._classify_git_failure("something odd") == "unknown"

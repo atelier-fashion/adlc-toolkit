@@ -26,6 +26,18 @@ new_sandbox() {
   SBX=$(mktemp -d -t idalloc.XXXXXX)
   HOME="$SBX/home"; export HOME; mkdir -p "$HOME/.claude"
   ADLC_REPOS_ROOT="$SBX/repos"; export ADLC_REPOS_ROOT; mkdir -p "$ADLC_REPOS_ROOT"
+  # REQ-546: the allocator now PUSHES a reservation ref to the current repo's origin.
+  # GIT_TERMINAL_PROMPT=0 guarantees a push/ls-remote against an unreachable or
+  # auth-required remote fails FAST instead of hanging on a credential prompt.
+  GIT_TERMINAL_PROMPT=0; export GIT_TERMINAL_PROMPT
+  # An isolated cwd repo with a LOCAL bare origin, deliberately OUTSIDE $ADLC_REPOS_ROOT
+  # so it is not itself a participating repo. Cases that don't cd into a scenario repo run
+  # HERE, so their reservation pushes land on a throwaway local bare — NEVER the
+  # developer's real origin (which cwd would otherwise resolve to under run.sh).
+  CWDBARE="$SBX/cwd.git"; git init -q --bare "$CWDBARE"
+  CWDREPO="$SBX/cwd"; git clone -q "$CWDBARE" "$CWDREPO" 2>/dev/null
+  ( cd "$CWDREPO" && git config user.email t@t && git config user.name t \
+      && git commit -q --allow-empty -m init && git push -q origin HEAD:main 2>/dev/null )
 }
 make_remote_with_branch() { # make_remote_with_branch <branch> [<branch>...]
   BARE="$SBX/remote.git"; git init -q --bare "$BARE"
@@ -39,9 +51,10 @@ make_remote_with_branch() { # make_remote_with_branch <branch> [<branch>...]
 cleanup() { rm -rf "$SBX"; }
 
 # --- case: local-ahead — counter=500, no remote => allocate 500, counter -> 501 -----
+# Runs in $CWDREPO (local bare origin) so the reservation push stays offline-local.
 new_sandbox
 echo 500 > "$HOME/.claude/.global-next-req"
-N=$( . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+N=$( cd "$CWDREPO"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
 check "local-ahead allocates local value" "500" "$N"
 check "local-ahead fast-forwards counter" "501" "$(cat "$HOME/.claude/.global-next-req")"
 cleanup
@@ -49,7 +62,7 @@ cleanup
 # --- case: empty-counter refusal — counter file empty => no allocation --------------
 new_sandbox
 : > "$HOME/.claude/.global-next-req"
-N=$( . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+N=$( cd "$CWDREPO"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
 check "empty-counter refusal yields no id" "" "$N"
 cleanup
 
@@ -57,7 +70,7 @@ cleanup
 new_sandbox
 echo 100 > "$HOME/.claude/.global-next-req"
 ln -s /tmp "$HOME/.claude/.global-next-req.lock.d"
-N=$( . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+N=$( cd "$CWDREPO"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
 check "symlink-swap refusal yields no id" "" "$N"
 cleanup
 
@@ -78,10 +91,12 @@ check "remote-ahead allocates above remote branch" "601" "$N"
 cleanup
 
 # --- case: lock contention — two concurrent allocators get distinct ids -------------
+# Same $CWDREPO (shared local bare origin): the machine-local mkdir lock serializes the
+# two, and each reserves its distinct number on the shared bare.
 new_sandbox
 echo 200 > "$HOME/.claude/.global-next-req"
-( . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null ) > "$SBX/a" &
-( . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null ) > "$SBX/b" &
+( cd "$CWDREPO"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null ) > "$SBX/a" &
+( cd "$CWDREPO"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null ) > "$SBX/b" &
 wait
 A=$(cat "$SBX/a"); B=$(cat "$SBX/b")
 if [ -n "$A" ] && [ -n "$B" ] && [ "$A" != "$B" ]; then
@@ -358,6 +373,185 @@ case "$MSG" in
   *) pass "BR-2 recheck-degraded returns 0 with no zero-derived renumber" ;;
 esac
 cleanup
+
+# ====================================================================================
+# REQ-546 reservation cases (all fully offline: local bare remotes only)
+# ====================================================================================
+
+# Helper: a shared bare remote + two clones with INDEPENDENT ~/.claude homes and repo
+# roots, modelling two MACHINES that share one origin. The mkdir locks live under each
+# home's .claude, so the two race for real (a shared home would serialize them). Sets:
+# SHARED_BARE, RA/RB (repo A/B), HA/HB (home A/B), ROOTA/ROOTB (repos roots).
+two_machines() {
+  SHARED_BARE="$SBX/shared.git"; git init -q --bare "$SHARED_BARE"
+  HA="$SBX/homeA"; HB="$SBX/homeB"; mkdir -p "$HA/.claude" "$HB/.claude"
+  ROOTA="$SBX/reposA"; ROOTB="$SBX/reposB"; mkdir -p "$ROOTA" "$ROOTB"
+  RA="$ROOTA/proj"; RB="$ROOTB/proj"
+  git clone -q "$SHARED_BARE" "$RA" 2>/dev/null
+  ( cd "$RA" && git config user.email a@a && git config user.name a \
+      && git commit -q --allow-empty -m init && git push -q origin HEAD:main 2>/dev/null )
+  git clone -q "$SHARED_BARE" "$RB" 2>/dev/null
+  ( cd "$RB" && git config user.email b@b && git config user.name b )
+}
+
+# --- two-clone race: exactly one wins N, the other transparently gets N+1 (BR-1/2/5) -
+new_sandbox
+two_machines
+echo 100 > "$HA/.claude/.global-next-req"
+echo 100 > "$HB/.claude/.global-next-req"
+( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null ) > "$SBX/ra" &
+( HOME="$HB"; export HOME; ADLC_REPOS_ROOT="$ROOTB"; export ADLC_REPOS_ROOT
+  cd "$RB"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null ) > "$SBX/rb" &
+wait
+RAV=$(cat "$SBX/ra"); RBV=$(cat "$SBX/rb")
+if { [ "$RAV" = 100 ] && [ "$RBV" = 101 ]; } || { [ "$RAV" = 101 ] && [ "$RBV" = 100 ]; }; then
+  pass "two-clone race: one wins 100, the other transparently gets 101 ($RAV, $RBV)"
+else
+  fail "two-clone race distinct 100/101 (got '$RAV','$RBV')"
+fi
+RREFS=$(git ls-remote "$SHARED_BARE" 'refs/adlc/ids/req/*' | grep -oE 'req/[0-9]+' | sort | tr '\n' ' ')
+case "$RREFS" in
+  *req/100*) case "$RREFS" in *req/101*) pass "two-clone race: both reservation refs on remote ($RREFS)";; *) fail "missing req/101 ref (got: $RREFS)";; esac ;;
+  *) fail "missing req/100 ref (got: $RREFS)" ;;
+esac
+cleanup
+
+# --- same-object hazard: identical object pushed twice both 'succeed' (BR-2) ----------
+new_sandbox
+two_machines
+ET=$(git -C "$RA" hash-object -t tree /dev/null)
+OBJ=$(printf 'same-payload\n' | git -C "$RA" commit-tree "$ET")
+git -C "$RA" push origin "${OBJ}:refs/adlc/ids/req/900" >/dev/null 2>&1; R1=$?
+git -C "$RA" push origin "${OBJ}:refs/adlc/ids/req/900" >/dev/null 2>&1; R2=$?
+check "same-object hazard: first push of identical object succeeds" "0" "$R1"
+check "same-object hazard: SECOND identical-object push also 'succeeds' (no-op)" "0" "$R2"
+O1=$(printf 'a\n' | git -C "$RA" commit-tree "$ET"); O2=$(printf 'b\n' | git -C "$RA" commit-tree "$ET")
+if [ "$O1" != "$O2" ]; then pass "distinct payloads produce distinct objects (defeats the hazard)"; else fail "distinct payloads collided ($O1)"; fi
+N1=$( . "$PARTIALS/id-alloc.sh"; adlc_reservation_nonce )
+N2=$( . "$PARTIALS/id-alloc.sh"; adlc_reservation_nonce )
+if [ "$N1" != "$N2" ]; then pass "adlc_reservation_nonce is distinct per call"; else fail "nonce not distinct ($N1)"; fi
+cleanup
+
+# --- cross-machine visibility: reservation alone raises the other machine's high-water -
+new_sandbox
+two_machines
+echo 500 > "$HA/.claude/.global-next-req"
+NA=$( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+check "cross-machine: A allocates 500 (reservation pushed, no branch, no merge)" "500" "$NA"
+NB=$( HOME="$HB"; export HOME; ADLC_REPOS_ROOT="$ROOTB"; export ADLC_REPOS_ROOT
+  cd "$RB"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+if [ -n "$NB" ] && [ "$NB" -ge 501 ]; then
+  pass "cross-machine: B derives high-water >= 501 from the reservation namespace alone (got $NB)"
+else
+  fail "cross-machine visibility (got '$NB', want >= 501)"
+fi
+cleanup
+
+# --- recheck detects a reservation-only collision (BR-3) -----------------------------
+new_sandbox
+two_machines
+echo 700 > "$HA/.claude/.global-next-req"
+( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req >/dev/null 2>&1 )   # reserves req/700
+RC=0; MSG=$( HOME="$HB"; export HOME; ADLC_REPOS_ROOT="$ROOTB"; export ADLC_REPOS_ROOT
+  cd "$RB"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id req REQ-700 2>&1 ) || RC=$?
+check "recheck reservation-only collision returns 1" "1" "$RC"
+case "$MSG" in *"adlc renumber REQ-700"*) pass "recheck reservation-only prints renumber command";; *) fail "recheck reservation-only renumber cmd (got: $MSG)";; esac
+cleanup
+
+# --- degraded: network blackhole => allocation succeeds, warns, no reservation ref ---
+new_sandbox
+BH="$ADLC_REPOS_ROOT/bh"; mkdir -p "$BH"; ( cd "$BH" && git init -q && git remote add origin "$SBX/nope.git" )
+echo 300 > "$HOME/.claude/.global-next-req"
+N=$( cd "$BH"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>"$SBX/err" )
+ERR=$(cat "$SBX/err")
+check "blackhole: allocation still succeeds locally (BR-4)" "300" "$N"
+case "$ERR" in *"WITHOUT remote reservation"*) pass "blackhole: degraded-reservation warning emitted";; *) fail "blackhole degraded-reservation warning (got: $ERR)";; esac
+if [ ! -e "$SBX/nope.git" ]; then pass "blackhole: no reservation ref exists (remote never reached)"; else fail "blackhole: unexpected remote materialized"; fi
+cleanup
+
+# --- namespace-rejecting remote (pre-receive) => degrades loudly, no fail-loop (BR-4) -
+new_sandbox
+git init -q --bare "$SBX/ro.git"
+printf '#!/bin/sh\necho "reservation namespace forbidden by policy" >&2\nexit 1\n' > "$SBX/ro.git/hooks/pre-receive"
+chmod +x "$SBX/ro.git/hooks/pre-receive"
+RREPO="$ADLC_REPOS_ROOT/ro"; git clone -q "$SBX/ro.git" "$RREPO" 2>/dev/null
+( cd "$RREPO" && git config user.email t@t && git config user.name t )
+echo 400 > "$HOME/.claude/.global-next-req"
+N=$( cd "$RREPO"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>"$SBX/err" )
+ERR=$(cat "$SBX/err")
+check "policy-reject: allocation still succeeds (degraded, not fail-loud) (BR-4)" "400" "$N"
+case "$ERR" in *"WITHOUT remote reservation"*) pass "policy-reject: degrades loudly (BR-4)";; *) fail "policy-reject degraded warning (got: $ERR)";; esac
+case "$ERR" in *"exhausted"*) fail "policy-reject must NOT spin the retry loop (a decline is not a race, BR-4/BR-5)";; *) pass "policy-reject: a decline is not a race — no retry-loop exhaustion";; esac
+RREFS=$(git -C "$RREPO" ls-remote origin 'refs/adlc/ids/req/*' 2>/dev/null)
+check "policy-reject: no reservation ref created" "" "$RREFS"
+cleanup
+
+# --- ASSUME two-clone race + per-repo scope (a sibling's assume ns is not consulted) --
+new_sandbox
+two_machines
+# A real ADLC repo always has .adlc/ (the per-repo assume counter + lock live there).
+mkdir -p "$RA/.adlc" "$RB/.adlc"
+# A sibling repo UNDER machine A's repos root, carrying a HIGHER assume reservation. If
+# assume derivation wrongly scanned the root (like the global kinds), A would jump to
+# 1000 — it must NOT (BR-12 per-repo scope).
+git init -q --bare "$SBX/sib.git"
+SIB="$ROOTA/sibling"; git clone -q "$SBX/sib.git" "$SIB" 2>/dev/null
+( cd "$SIB" && git config user.email s@s && git config user.name s \
+    && git commit -q --allow-empty -m i && git push -q origin HEAD:main 2>/dev/null )
+SET=$(git -C "$SIB" hash-object -t tree /dev/null)
+SOBJ=$(printf 'sib\n' | git -C "$SIB" commit-tree "$SET")
+git -C "$SIB" push origin "${SOBJ}:refs/adlc/ids/assume/999" >/dev/null 2>&1
+( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id assume 2>/dev/null ) > "$SBX/aa" &
+( HOME="$HB"; export HOME; ADLC_REPOS_ROOT="$ROOTB"; export ADLC_REPOS_ROOT
+  cd "$RB"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id assume 2>/dev/null ) > "$SBX/ab" &
+wait
+AAV=$(cat "$SBX/aa"); ABV=$(cat "$SBX/ab")
+if { [ "$AAV" = 1 ] && [ "$ABV" = 2 ]; } || { [ "$AAV" = 2 ] && [ "$ABV" = 1 ]; }; then
+  pass "ASSUME two-clone race: one wins 1, the other gets 2 ($AAV, $ABV)"
+else
+  fail "ASSUME two-clone race 1/2 (got '$AAV','$ABV')"
+fi
+if [ -n "$AAV" ] && [ -n "$ABV" ] && [ "$AAV" -lt 999 ] && [ "$ABV" -lt 999 ]; then
+  pass "ASSUME per-repo scope: the sibling's assume/999 is never consulted (BR-12)"
+else
+  fail "ASSUME leaked the sibling namespace ($AAV, $ABV)"
+fi
+cleanup
+
+# --- ASSUME historical high-water: merged ASSUME-040 + stale counter=5 => >= 41 (BR-12)
+new_sandbox
+git init -q --bare "$SBX/ah.git"
+AHSEED="$SBX/ahseed"; git clone -q "$SBX/ah.git" "$AHSEED" 2>/dev/null
+( cd "$AHSEED" && git config user.email t@t && git config user.name t
+  mkdir -p .adlc/knowledge/assumptions && echo x > .adlc/knowledge/assumptions/ASSUME-040-foo.md
+  git add -A && git commit -q -m seed && git push -q origin HEAD:main 2>/dev/null )
+AHREPO="$ADLC_REPOS_ROOT/ah"; git clone -q "$SBX/ah.git" "$AHREPO" 2>/dev/null
+( cd "$AHREPO" && git config user.email t@t && git config user.name t )
+echo 5 > "$AHREPO/.adlc/.next-assume"
+N=$( cd "$AHREPO"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id assume 2>/dev/null )
+if [ -n "$N" ] && [ "$N" -ge 41 ]; then
+  pass "ASSUME historical high-water: merged ASSUME-040 raises to >= 41 despite stale counter=5 (got $N)"
+else
+  fail "ASSUME historical high-water (got '$N', want >= 41)"
+fi
+cleanup
+
+# --- BR-6: the reservation mechanism is pure git transport (no gh/az) ----------------
+if grep -E 'refs/adlc/ids' "$PARTIALS/id-alloc.sh" | grep -qE '(^|[^a-z])gh |(^|[^a-z])az '; then
+  fail "BR-6: gh/az appears on a reservation line in id-alloc.sh"
+else
+  pass "BR-6: no gh/az on any reservation line (pure git transport)"
+fi
+if grep -qE 'git .*push.*refs/adlc/ids' "$PARTIALS/id-alloc.sh" \
+   && grep -qE 'ls-remote.*refs/adlc/ids' "$PARTIALS/id-alloc.sh"; then
+  pass "BR-6: reservation uses git push + git ls-remote for the namespace"
+else
+  fail "BR-6: reservation git push/ls-remote for refs/adlc/ids missing"
+fi
 
 echo
 if [ "$FAILS" -eq 0 ]; then
