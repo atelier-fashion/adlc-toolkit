@@ -1,7 +1,7 @@
 ---
 id: REQ-546
 title: "Atomic remote id reservation at allocation time (close the allocation-to-visibility window)"
-status: approved
+status: complete
 deployable: false
 created: 2026-07-23
 updated: 2026-07-23

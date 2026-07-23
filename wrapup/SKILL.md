@@ -91,29 +91,14 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Review assumptions from the requirement spec
 - Log any that were validated, invalidated, or still unresolved to `.adlc/knowledge/assumptions/`
 - Use the assumption template (check `.adlc/templates/assumption-template.md` first, fall back to `~/.claude/skills/templates/assumption-template.md`)
-- Name files: `ASSUME-xxx-slug.md`. Determine the next ID using the atomic counter at `.adlc/.next-assume` (LESSON-110), wrapped in a POSIX `mkdir`-lock with a symlink pre-check (LESSON-014) so concurrent `/sprint` wrapups can't lose updates and a swapped-in symlink can't redirect the counter:
+- Name files: `ASSUME-xxx-slug.md`. Determine the next ID with the reservation-aware allocator `adlc_alloc_id assume` (REQ-546 BR-12): it atomically reserves the number on this repo's `origin` (`refs/adlc/ids/assume/<NNN>`) BEFORE returning it, so concurrent `/wrapup` runs across clones of one repo — or concurrent `/sprint` wrapups — cannot double-allocate an ASSUME id. The per-checkout `.adlc/.next-assume` counter is now a CACHE: `max(remote, local) + 1` supersedes the old "never re-scan after the counter exists" rule, and the mkdir-lock + symlink pre-check (LESSON-014, LESSON-110) now live inside `adlc_alloc_id`. Source the partial and call it in the SAME fenced block (fenced blocks don't share shell state):
   ```bash
-  ASSUME_NUM=$(
-    REPO_ROOT=$(git rev-parse --show-toplevel) || { echo "ERROR: not in a git worktree" >&2; exit 1; }
-    LOCK="$REPO_ROOT/.adlc/.next-assume.lock.d"
-    COUNTER="$REPO_ROOT/.adlc/.next-assume"
-    if [ -L "$LOCK" ]; then
-      echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
-      exit 1
-    fi
-    for _ in $(seq 50); do mkdir "$LOCK" 2>/dev/null && break; sleep 0.1; done
-    # Hard-fail if we never acquired the lock (REQ-416 verify C1).
-    [ -d "$LOCK" ] || { echo "ERROR: failed to acquire $LOCK after 50 retries — aborting to avoid duplicate ASSUME id" >&2; exit 1; }
-    NUM=$(cat "$COUNTER" 2>/dev/null || echo "1")
-    echo $((NUM + 1)) > "$COUNTER"
-    # rmdir guarded by symlink check; residual TOCTOU window accepted per ADR-4 / LESSON-014.
-    if [ ! -L "$LOCK" ]; then rmdir "$LOCK" 2>/dev/null; fi
-    echo $NUM
-  )
-  # `exit 1` inside the subshell terminates only the subshell — guard parent context.
+  . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+  ASSUME_NUM=$(adlc_alloc_id assume)
+  # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — guard parent.
   [ -n "$ASSUME_NUM" ] || { echo "ERROR: failed to allocate ASSUME number — aborting" >&2; exit 1; }
   ```
-  If `.adlc/.next-assume` doesn't exist, scan `.adlc/knowledge/assumptions/` for the highest existing `ASSUME-xxx-` file, use the next one, and write the value after that to the counter. Use the counter ONLY — never re-scan after the counter exists. The counter prevents collisions when concurrent `/sprint` pipelines wrap up at the same time.
+  The reservation is PER-REPO scoped (BR-12): the ref is pushed to and derived from ONLY this repo's `origin`, never sibling repos, keeping the per-project namespace while making it collision-safe across clones. Derivation mirrors the lesson kind — the merged `.adlc/knowledge/assumptions/` scan on the origin default branch PLUS the reservation namespace, no branch source — so historical ASSUME ids raise the high-water with no backfill and a stale clone cannot lower it. Degradation stays loud-not-blocking: an offline `/wrapup` still allocates (with a warning) from `max(local counter, local assumptions scan) + 1`, and the REQ-545 recheck remains the late tripwire.
 
 #### Lessons Learned
 
