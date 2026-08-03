@@ -107,6 +107,52 @@ adlc-write --spec "..." --context ref.py --target out.py --force   # overwrite a
 extract-chat ~/.claude/projects/<proj>/<session>.jsonl -o /tmp/chat.txt
 ```
 
+### Version & resolved provider (`--version`)
+
+All three CLIs accept `--version` (or `-V`). It is scanned out of the arguments
+*before* parsing, so it needs no other arguments (`adlc-write --version` works
+without `--spec`/`--target`), and it runs before every guard — no network call,
+no API key, no config file, and no `openai` SDK required.
+
+`adlc-read` and `adlc-write` also print the provider a **real call would
+resolve**, through the same resolver and the same precedence table as above — so
+it answers "which endpoint is this install actually talking to?" without reading
+the config file, the environment, and `_common.py` by hand. The API key **value**
+is never read or printed; only the *name* of the env var holding it:
+
+```bash
+$ adlc-read --version
+adlc-toolkit <version>
+base_url: https://api.groq.com/openai/v1
+model: llama-3.3-70b-versatile
+api_key_env: GROQ_API_KEY
+enabled: true
+```
+
+`extract-chat` has no provider config, so it prints the version line only:
+
+```bash
+$ extract-chat --version
+adlc-toolkit <version>
+```
+
+The output is a stable, machine-parseable contract (exit 0, stdout): the first
+line is always `adlc-toolkit <version>` — read from the repo `VERSION` file,
+resolved from the script's own location, so it reports the toolkit's version and
+not anything derived from the directory you ran it in — followed by exactly the
+`base_url`, `model`, `api_key_env`, and `enabled` (`true`/`false`) lines.
+
+If provider resolution fails — for example the config's `api_key_env` holds a
+key value instead of an env var name — `--version` never crashes with a
+traceback. It prints the version line plus a single diagnostic line in place of
+the config block, and still exits 0:
+
+```bash
+$ adlc-read --version
+adlc-toolkit <version>
+config_error: config 'delegate.api_key_env' must be the NAME of an environment variable (e.g. MY_PROVIDER_KEY), not a key value. ...
+```
+
 ## CLAUDE.md routing block
 
 `install.sh` appends the canonical routing block to `~/.claude/CLAUDE.md`, and

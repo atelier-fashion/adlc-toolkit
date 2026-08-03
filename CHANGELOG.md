@@ -32,6 +32,22 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+### Added
+
+- **`--version` / `-V` on the delegation CLIs (REQ-553).** `adlc-read`,
+  `adlc-write`, and `extract-chat` report the toolkit version, and the two
+  delegate-calling CLIs additionally print the *resolved* provider — `base_url`,
+  `model`, the `api_key_env` **name**, and `enabled` — through the same resolver
+  a real call uses, so "which endpoint is this install actually talking to?" is a
+  one-command answer instead of a config-file + environment + source read. The
+  API key **value** is never read or printed. The flag is scanned out of argv
+  before parsing (so it needs no other arguments — `adlc-write --version` works
+  without `--spec`/`--target`), makes no network call, and works with no key, no
+  config file, and no `openai` SDK installed; a config that fails to resolve
+  degrades to a single `config_error:` line and still exits 0. The output is a
+  stable `key: value` contract, so a future `adlc doctor` can consume it without
+  parsing prose. Documented in `tools/delegate/README.md`.
+
 ### Removed
 
 - **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the

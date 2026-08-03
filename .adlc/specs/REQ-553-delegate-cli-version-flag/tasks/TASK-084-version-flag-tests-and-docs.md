@@ -1,7 +1,7 @@
 ---
 id: TASK-084
 title: "Tests for --version (incl. clean-venv + foreign-cwd) and docs"
-status: draft
+status: complete
 parent: REQ-553
 created: 2026-08-03
 updated: 2026-08-03
