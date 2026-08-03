@@ -390,11 +390,13 @@ esac
    ```
 4. Invoke the delegate over the redacted diff. Mark `invoked=1` to the flag sidecar immediately before the call (REQ-424 telemetry), and mark the call's `exit` immediately after it returns — these marks are how the resolution block detects a real call vs a ghost-skip:
    ```bash
+   . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
    . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
-   adlc-read --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
+   "${ADLC_READ_BIN:-adlc-read}" --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
    ```
+   (The gate partial is re-sourced here because fenced blocks do not share shell state — it exports `ADLC_READ_BIN`, the resolved binary (PATH, or `$HOME/bin/adlc-read` in GUI-launched sessions whose PATH lacks `~/bin`).)
    **If `adlc-read` exits non-zero**, emit one combined stderr line and fall through to the fallback dispatch for this repo (BR-4: one line per invocation — this REPLACES the intent line for this repo; the success/announce line in step 1 is the only emit when delegation succeeds):
    ```
    /proceed Phase 5: adlc-read pre-pass failed for repo=<id> — reviewers running without candidates

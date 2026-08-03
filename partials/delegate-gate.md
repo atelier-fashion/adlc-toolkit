@@ -22,9 +22,9 @@ haven't re-run `/init` since the toolkit shipped the partial:
 
 `adlc_delegate_gate_check` returns:
 
-- **0 — delegated**: `adlc-read` is on PATH AND `ADLC_DISABLE_DELEGATE` is not `1` AND opt-in is satisfied. Run the delegated path.
+- **0 — delegated**: `adlc-read` resolves (on PATH, or executable at `$HOME/bin/adlc-read`) AND `ADLC_DISABLE_DELEGATE` is not `1` AND opt-in is satisfied. Run the delegated path.
 - **1 — disabled**: `ADLC_DISABLE_DELEGATE=1` is set, OR delegation is not opted in (fresh-install posture, BR-11). Run the fallback path and emit the **disabled-via-env** stderr line.
-- **2 — unavailable**: `adlc-read` is not on PATH. Run the fallback path and emit the **unavailable** stderr line.
+- **2 — unavailable**: `adlc-read` does not resolve (not on PATH and no executable at `$HOME/bin/adlc-read`). Run the fallback path and emit the **unavailable** stderr line.
 
 Read `$?` IMMEDIATELY into a variable — `$?` is clobbered by every
 subsequent command:
@@ -58,12 +58,32 @@ their return codes, are:
 | 0      | `ok`                        | delegated — adlc-read available, enabled |
 | 1      | `disabled-via-env`          | `ADLC_DISABLE_DELEGATE=1` opted out      |
 | 1      | `not-opted-in`              | no opt-in signal (fresh install, BR-11)  |
-| 2      | `no-binary`                 | `adlc-read` not on PATH                  |
+| 2      | `no-binary`                 | `adlc-read` not resolvable (PATH or `$HOME/bin`) |
 
 `export` is intentional (not just assignment) so the variable is visible
 to child processes the skill spawns — e.g., a future `adlc-read` invocation
 could read it for self-documentation. Adding a new gate condition (e.g.,
 a budget cap) means editing ONLY this file — no per-skill churn.
+
+## `ADLC_READ_BIN`: the resolved binary
+
+GUI-launched Claude Code sessions may run with a PATH that lacks `~/bin`
+(only `.zshrc` adds it), so `command -v adlc-read` alone would report
+`no-binary` on machines where `~/bin/adlc-read` is installed and working.
+Sourcing the partial (and every `adlc_delegate_gate_check` call) resolves and
+exports `ADLC_READ_BIN`:
+
+- `adlc-read` — the bare name, when it is on PATH (PATH wins);
+- `$HOME/bin/adlc-read` — the absolute path, when not on PATH but executable
+  there;
+- empty — neither (the gate returns 2 / `no-binary`).
+
+Delegated-invocation fences MUST source this partial in the same fenced
+block and invoke `"${ADLC_READ_BIN:-adlc-read}"` instead of bare
+`adlc-read` — fenced blocks do not share shell state, so the export from
+the gate-check fence does not reach the invocation fence. The `:-adlc-read`
+default keeps the invocation working in a consumer repo whose vendored
+`.adlc/partials/delegate-gate.sh` predates this variable.
 
 ## Canonical stderr emit pattern
 
