@@ -71,8 +71,10 @@ REQ="<the REQ id from the dispatch prompt>"   # e.g. REQ-474 — bind BEFORE the
 ```
 
 Call the gate predicate and read `$?` IMMEDIATELY (it is clobbered by the next
-command), then read the exported reason. The gate validates `adlc-read` on PATH,
-the disable flag, and opt-in; it does **NOT** prove a usable API key resolves
+command), then read the exported reason. The gate validates `adlc-read`
+resolvability (on PATH, or `$HOME/bin/adlc-read` — it exports the resolved
+command as `ADLC_READ_BIN`), the disable flag, and opt-in; it does **NOT**
+prove a usable API key resolves
 (the key may live in a custom `api_key_env` the gate's opt-in heuristic didn't
 require). So ALSO require the resolved key explicitly:
 
@@ -83,7 +85,7 @@ reason="$ADLC_DELEGATE_GATE_REASON"   # ok | no-binary | disabled-via-env
 # default provider uses MOONSHOT_API_KEY; a custom provider names its own var
 # via config/ADLC_DELEGATE_API_KEY_ENV. `adlc-read --print-enabled` returns "1"
 # only when delegation is opted-in AND resolvable, so it doubles as a key probe.
-key_ok=$(adlc-read --print-enabled 2>/dev/null || echo 0)
+key_ok=$("${ADLC_READ_BIN:-adlc-read}" --print-enabled 2>/dev/null || echo 0)
 ```
 
 **If `gate` ≠ 0 OR `key_ok` ≠ "1"**, do NOT call the delegate. Set the
@@ -177,7 +179,7 @@ elapsed time around the call so `duration_ms` is real on the success path:
 
 ```sh
 start_ms=$(date +%s%3N 2>/dev/null || echo "")
-adlc-read --no-warn --paths "$TMP" --question "<5-dimension request below>"; delegate_exit=$?
+"${ADLC_READ_BIN:-adlc-read}" --no-warn --paths "$TMP" --question "<5-dimension request below>"; delegate_exit=$?
 end_ms=$(date +%s%3N 2>/dev/null || echo "")
 if [ -n "$start_ms" ] && [ -n "$end_ms" ]; then duration_ms=$((end_ms - start_ms)); else duration_ms=-; fi
 ```

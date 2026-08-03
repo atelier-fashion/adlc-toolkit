@@ -171,3 +171,94 @@ def test_delegate_gate_unavailable(tmp_path, partials_dir):
     r = _run(_GATE_PROBE.format(partials=partials_dir), env, tmp_path)
     assert "RC=2" in r.stdout, r.stdout + r.stderr
     assert "REASON=no-binary" in r.stdout, r.stdout
+
+
+# ---------------------------------------------------------------------------
+# delegate-gate.sh — $HOME/bin fallback resolution (ADLC_READ_BIN)
+# ---------------------------------------------------------------------------
+# GUI-launched Claude Code sessions may run with a PATH that lacks ~/bin (only
+# .zshrc adds it). The gate must then fall back to an executable
+# $HOME/bin/adlc-read instead of returning 2/no-binary.
+
+_GATE_PROBE_BIN = (
+    ". {partials}/delegate-gate.sh; "
+    'adlc_delegate_gate_check; rc=$?; '
+    'echo "RC=$rc"; echo "REASON=$ADLC_DELEGATE_GATE_REASON"; '
+    'echo "READBIN=$ADLC_READ_BIN"'
+)
+
+
+def _stub_adlc_read_in_home_bin(home, enabled="0"):
+    """Drop an `adlc-read` stub into <home>/bin (NOT on PATH) and return its
+    path. Mirrors _stub_adlc_read_on_path, including the `--print-enabled`
+    handling (parameterized so the config-probe branch can be exercised)."""
+    bindir = home / "bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    stub = bindir / "adlc-read"
+    stub.write_text(
+        f'#!/bin/sh\n[ "$1" = "--print-enabled" ] && {{ echo {enabled}; exit 0; }}\nexit 0\n'
+    )
+    stub.chmod(0o755)
+    return stub
+
+
+def test_delegate_gate_home_bin_fallback(tmp_path, partials_dir):
+    """adlc-read off PATH but executable at $HOME/bin/adlc-read → the gate
+    resolves it (RC=0 when opted in) and exports the absolute path."""
+    stub = _stub_adlc_read_in_home_bin(tmp_path)
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+           "ADLC_DELEGATE_ENABLED": "1"}
+    r = _run(_GATE_PROBE_BIN.format(partials=partials_dir), env, tmp_path)
+    assert "RC=0" in r.stdout, r.stdout + r.stderr
+    assert "REASON=ok" in r.stdout, r.stdout
+    assert f"READBIN={stub}" in r.stdout, r.stdout
+
+
+def test_delegate_gate_home_bin_not_executable(tmp_path, partials_dir):
+    """A NON-executable $HOME/bin/adlc-read must NOT rescue the gate —
+    still RC=2 / no-binary, and ADLC_READ_BIN stays empty."""
+    stub = _stub_adlc_read_in_home_bin(tmp_path)
+    stub.chmod(0o644)
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+           "ADLC_DELEGATE_ENABLED": "1"}
+    r = _run(_GATE_PROBE_BIN.format(partials=partials_dir), env, tmp_path)
+    assert "RC=2" in r.stdout, r.stdout + r.stderr
+    assert "REASON=no-binary" in r.stdout, r.stdout
+    assert "READBIN=\n" in r.stdout, r.stdout
+
+
+def test_delegate_gate_path_wins_over_home_bin(tmp_path, partials_dir):
+    """When adlc-read is BOTH on PATH and at $HOME/bin, PATH wins and
+    ADLC_READ_BIN is the bare name (today's behavior, unchanged)."""
+    path = _stub_adlc_read_on_path(tmp_path)
+    _stub_adlc_read_in_home_bin(tmp_path)
+    env = {"PATH": path, "HOME": str(tmp_path), "ADLC_DELEGATE_ENABLED": "1"}
+    r = _run(_GATE_PROBE_BIN.format(partials=partials_dir), env, tmp_path)
+    assert "RC=0" in r.stdout, r.stdout + r.stderr
+    assert "READBIN=adlc-read" in r.stdout, r.stdout
+
+
+def test_delegate_gate_read_bin_resolved_at_source_time(tmp_path, partials_dir):
+    """Merely SOURCING the partial exports ADLC_READ_BIN — the delegated-
+    invocation fences re-source the gate without calling the gate function
+    (fenced blocks do not share shell state — REQ-522 BR-4)."""
+    stub = _stub_adlc_read_in_home_bin(tmp_path)
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    script = f'. {partials_dir}/delegate-gate.sh; echo "READBIN=$ADLC_READ_BIN"'
+    r = _run(script, env, tmp_path)
+    assert f"READBIN={stub}" in r.stdout, r.stdout + r.stderr
+
+
+def test_delegate_gate_config_probe_uses_resolved_bin(tmp_path, partials_dir):
+    """The config-file opt-in probe must invoke the RESOLVED binary: with no
+    env opt-in, a config file present, and a $HOME/bin-only stub whose
+    --print-enabled prints 1, the gate opens (RC=0). Before the ADLC_READ_BIN
+    fix this branch re-ran `command -v adlc-read` and could never fire off-PATH."""
+    _stub_adlc_read_in_home_bin(tmp_path, enabled="1")
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("enabled: true\n")
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+           "ADLC_CONFIG": str(cfg)}
+    r = _run(_GATE_PROBE_BIN.format(partials=partials_dir), env, tmp_path)
+    assert "RC=0" in r.stdout, r.stdout + r.stderr
+    assert "REASON=ok" in r.stdout, r.stdout
