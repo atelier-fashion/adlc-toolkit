@@ -65,13 +65,13 @@ _adlc_emit_step_telemetry() {
     _aest_exit=$("$DELEGATE_TOOLS"/skill-flag.sh read "$flag" exit 2>/dev/null || true)
     _aest_reason=$("$DELEGATE_TOOLS"/skill-flag.sh read "$flag" reason 2>/dev/null || true)
 
-    # Duration: only meaningful if start_s was marked. A missing start_s yields
-    # "-" rather than a garbage arithmetic result.
-    if [ -n "$_aest_start" ]; then
-        _aest_duration_ms=$(( ($(date -u +%s) - $_aest_start) * 1000 ))
-    else
-        _aest_duration_ms="-"
-    fi
+    # Duration: only meaningful if start_s was marked with a numeric epoch. An
+    # empty or non-numeric start_s yields "-" — an empty operand inside $(( ))
+    # is a fatal "bad math expression" in zsh, so validate before computing.
+    case "$_aest_start" in
+        ''|*[!0-9]*) _aest_duration_ms="-" ;;
+        *) _aest_duration_ms=$(( ($(date -u +%s) - $_aest_start) * 1000 )) ;;
+    esac
 
     if [ -z "$flag" ] || { [ ! -f "$flag.state" ] && [ ! -e "$flag" ]; }; then
         # Flag path was lost entirely (no sidecar, nothing marked).
