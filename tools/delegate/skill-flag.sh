@@ -37,8 +37,12 @@ cmd=$1
 
 case "$cmd" in
     create)
-        # Six X's required for both macOS and Linux mktemp compatibility.
-        path=$(mktemp -t adlc-skill-flag.XXXXXX)
+        # Full-path template, not `-t <name>`: BSD mktemp treats the -t
+        # argument as a literal prefix and never expands its X's (yielding
+        # paths like adlc-skill-flag.XXXXXX.<rand>), while GNU mktemp expands
+        # them. A ${TMPDIR}-anchored template with trailing X's behaves
+        # identically on both. Six X's required for GNU mktemp.
+        path=$(mktemp "${TMPDIR:-/tmp}/adlc-skill-flag.XXXXXX")
         printf '%s\n' "$path"
         ;;
     check)
