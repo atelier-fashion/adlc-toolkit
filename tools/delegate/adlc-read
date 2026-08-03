@@ -26,6 +26,9 @@ def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
         prog="adlc-read",
         description="Ask the configured delegate a question about one or more files.",
+        epilog="--version, -V: print the toolkit version and the resolved delegate "
+               "config (base_url, model, api_key_env NAME, enabled) and exit; "
+               "handled before parsing, so no other arguments are required.",
     )
     parser.add_argument(
         "--print-enabled",
@@ -51,7 +54,33 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def _wants_version(argv):
+    """True if ``--version``/``-V`` appears anywhere in the effective argv."""
+    effective = argv if argv is not None else sys.argv[1:]
+    return any(a in ("--version", "-V") for a in effective)
+
+
 def main(argv=None):
+    # --version/-V: scanned out of argv BEFORE argparse (ADR-1) and before every
+    # guard, so it works with no other arguments and never touches the network.
+    # Reports the toolkit version plus the config the REAL call would resolve —
+    # same resolver, not a re-implementation (BR-3, LESSON-392). The key VALUE is
+    # never read or printed; only the env-var NAME (BR-2).
+    if _wants_version(argv):
+        print(f"adlc-toolkit {_common.toolkit_version()}")
+        try:
+            provider = _common.resolve_provider()
+        except SystemExit as exc:
+            # A refused config (e.g. key-in-config, BR-3) degrades to one
+            # diagnostic line — never a traceback, still exit 0 (BR-6).
+            print(f"config_error: {' '.join(str(exc).split())}")
+            return 0
+        print(f"base_url: {provider.base_url}")
+        print(f"model: {provider.model}")
+        print(f"api_key_env: {provider.api_key_env}")
+        print(f"enabled: {'true' if provider.enabled else 'false'}")
+        return 0
+
     args = _parse_args(argv)
 
     # --print-enabled: a non-network probe used by the delegate gate partial to

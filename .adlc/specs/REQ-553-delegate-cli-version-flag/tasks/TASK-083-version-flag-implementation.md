@@ -1,7 +1,7 @@
 ---
 id: TASK-083
 title: "Implement --version across the three delegation CLIs + shared version helpers"
-status: draft
+status: complete
 parent: REQ-553
 created: 2026-08-03
 updated: 2026-08-03

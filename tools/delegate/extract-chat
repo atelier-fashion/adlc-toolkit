@@ -101,9 +101,29 @@ def _iter_turns(fh):
         yield role, text
 
 
+def _wants_version(argv):
+    """True if ``--version``/``-V`` appears anywhere in the effective argv."""
+    effective = argv if argv is not None else sys.argv[1:]
+    return any(a in ("--version", "-V") for a in effective)
+
+
 def main(argv=None):
+    # --version/-V: scanned out of argv BEFORE argparse (ADR-1), which would
+    # otherwise exit 2 on the missing required positional. `_common` is imported
+    # INSIDE this branch so extract-chat's module-load surface stays as it is —
+    # the local transform path pulls in nothing from the delegation layer
+    # (ADR-2). Version line only: this CLI has no delegate config.
+    if _wants_version(argv):
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import _common
+        print("adlc-toolkit %s" % _common.toolkit_version())
+        return 0
+
     parser = argparse.ArgumentParser(
-        description="Clean a Claude Code session JSONL transcript into readable text.")
+        description="Clean a Claude Code session JSONL transcript into readable text.",
+        epilog="--version, -V: print the toolkit version and exit; handled before "
+               "parsing, so no transcript path is required.")
     parser.add_argument("jsonl_path", help="path to the .jsonl session transcript")
     parser.add_argument("-o", "--output", metavar="PATH",
                         help="write output here instead of stdout")

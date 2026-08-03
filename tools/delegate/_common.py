@@ -15,14 +15,17 @@ ordered cascade (REQ-515 ADR-2):
 A machine with today's setup (MOONSHOT_API_KEY in env, no config file) resolves
 to the exact current defaults, so behavior is byte-identical.
 
-Dependency-light by design: only ``os``, ``re``, ``sys`` from the stdlib plus
-``openai``. ``openai`` is imported lazily inside ``get_client`` / ``complete`` so
-that the pre-API guard paths (privacy notice, --dry-run, clobber check, the
-key-in-config refusal) work even when the SDK isn't installed.
+Dependency-light by design: only ``os``, ``re``, ``subprocess``, ``sys`` from the
+stdlib plus ``openai`` (``subprocess`` only to locate the repo root for
+``toolkit_version``). ``openai`` is imported lazily inside ``get_client`` /
+``complete`` so that the pre-API guard paths (privacy notice, --dry-run, clobber
+check, the key-in-config refusal, ``--version``) work even when the SDK isn't
+installed.
 """
 
 import os
 import re
+import subprocess
 import sys
 
 # --- shipped defaults (today's exact Moonshot/Kimi values) ------------------
@@ -35,6 +38,41 @@ _DEFAULT_MODEL = "kimi-k2.5"
 # Legacy aliases retained for back-compat. MOONSHOT_API_KEY is the canonical
 # default key var; KIMI_API_KEY is accepted as an alias if present.
 _LEGACY_KEY_VARS = ("MOONSHOT_API_KEY", "KIMI_API_KEY")
+
+
+def _repo_root():
+    """Absolute path to the toolkit checkout root.
+
+    Prefers ``git rev-parse --show-toplevel`` from this module's own directory so
+    it resolves through the ~/bin wrapper indirection regardless of the caller's
+    cwd (LESSON-397: a toolkit asset resolves from the script location, never
+    from the caller's project); falls back to walking up from ``__file__``.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        out = subprocess.run(
+            ["git", "-C", here, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if out:
+            return out
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    # tools/delegate/_common.py -> tools/delegate -> tools -> <root>
+    return os.path.dirname(os.path.dirname(here))
+
+
+def toolkit_version():
+    """Read the toolkit ``VERSION`` file; ``"unknown"`` if it can't be read.
+
+    VERSION is the single source of truth — never hardcode the version here.
+    """
+    path = os.path.join(_repo_root(), "VERSION")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return "unknown"
 
 
 def _config_path():
