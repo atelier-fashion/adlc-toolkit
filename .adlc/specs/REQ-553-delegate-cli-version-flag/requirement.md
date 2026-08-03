@@ -1,7 +1,7 @@
 ---
 id: REQ-553
 title: "Add --version flag to the delegation CLIs (adlc-read, adlc-write, extract-chat)"
-status: approved
+status: complete
 deployable: true
 created: 2026-08-03
 updated: 2026-08-03
