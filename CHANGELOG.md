@@ -32,6 +32,46 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+### Added
+
+- **`--version` / `-V` on the delegation CLIs (REQ-553).** `adlc-read`,
+  `adlc-write`, and `extract-chat` report the toolkit version, and the two
+  delegate-calling CLIs additionally print the *resolved* provider — `base_url`,
+  `model`, the `api_key_env` **name**, and `enabled` — through the same resolver
+  a real call uses, so "which endpoint is this install actually talking to?" is a
+  one-command answer instead of a config-file + environment + source read. The
+  API key **value** is never read or printed. The flag is scanned out of argv
+  before parsing (so it needs no other arguments — `adlc-write --version` works
+  without `--spec`/`--target`), makes no network call, and works with no key, no
+  config file, and no `openai` SDK installed; a config that fails to resolve
+  degrades to a single `config_error:` line and still exits 0. The output is a
+  stable `key: value` contract, so a future `adlc doctor` can consume it without
+  parsing prose. Documented in `tools/delegate/README.md`.
+
+  **Hardened in the same REQ:** the resolved `api_key_env` is checked against an
+  `UPPER_SNAKE_CASE` allow-list (not just a key-family blocklist) at the end of
+  the cascade, so a key pasted into the higher-precedence
+  `ADLC_DELEGATE_API_KEY_ENV` override — or a vendor prefix the blocklist never
+  heard of — is refused instead of printed; `base_url` userinfo is redacted to
+  `***@host` on the print path only; the argv scan is value-aware, so `-V` in an
+  option's value position is no longer mistaken for a version request; the
+  repo root is validated as a real toolkit checkout, so a copy vendored inside
+  another git repo reports its own version rather than the host's; and only the
+  first line of `VERSION` is read, bounded, so it cannot forge extra output
+  lines. A follow-up audit round closed the residuals: the parsers now refuse
+  prefix abbreviations, so the pre-parse scan's exact-spelling option sets are
+  provably complete (`--sp "--version"` no longer hijacks the version path);
+  every value interpolated into the report is collapsed to one line with control
+  characters stripped, so a newline in a model name or `VERSION` file cannot
+  forge an `enabled:` line; the repo root is validated by *identity* rather than
+  marker-file existence, so an outer checkout containing a vendored inner copy
+  no longer wins; AWS access-key IDs (`AKIA`/`ASIA`/… ) are refused as
+  `api_key_env` despite being valid `UPPER_SNAKE_CASE`; URL redaction is
+  fail-closed, stripping userinfo syntactically before parsing so a malformed
+  URL can never print its password; and the privacy notice now names the
+  resolved endpoint host, so a hijacked `base_url` is visible at the moment file
+  contents leave the machine.
+
 ### Removed
 
 - **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the
