@@ -15,14 +15,25 @@ ordered cascade (REQ-515 ADR-2):
 A machine with today's setup (MOONSHOT_API_KEY in env, no config file) resolves
 to the exact current defaults, so behavior is byte-identical.
 
-Dependency-light by design: only ``os``, ``re``, ``sys`` from the stdlib plus
-``openai``. ``openai`` is imported lazily inside ``get_client`` / ``complete`` so
-that the pre-API guard paths (privacy notice, --dry-run, clobber check, the
-key-in-config refusal) work even when the SDK isn't installed.
+Dependency-light by design: only ``os``, ``re``, ``stat``, ``subprocess``,
+``sys`` from the stdlib plus ``openai`` (``subprocess`` only to locate the repo
+root for ``toolkit_version``; ``stat`` only to refuse a non-regular config file;
+``urllib.parse`` is imported inside the URL helpers, keeping the module-import
+surface small). ``openai`` is imported lazily inside ``get_client`` /
+``complete`` so that the pre-API guard paths (privacy notice, --dry-run, clobber
+check, the key-in-config refusal, ``--version``) work even when the SDK isn't
+installed.
+
+This module also hosts the toolkit-version / ``--version`` reporting helpers
+(``toolkit_version``, ``wants_version``, ``harvest_provider_flags``,
+``version_report_lines``) shared by all three CLIs — delegation-independent, so
+they work on the local-only ``extract-chat`` path too.
 """
 
 import os
 import re
+import stat
+import subprocess
 import sys
 
 # --- shipped defaults (today's exact Moonshot/Kimi values) ------------------
@@ -35,6 +46,69 @@ _DEFAULT_MODEL = "kimi-k2.5"
 # Legacy aliases retained for back-compat. MOONSHOT_API_KEY is the canonical
 # default key var; KIMI_API_KEY is accepted as an alias if present.
 _LEGACY_KEY_VARS = ("MOONSHOT_API_KEY", "KIMI_API_KEY")
+
+
+def _repo_root():
+    """Absolute path to the toolkit checkout root.
+
+    Prefers ``git rev-parse --show-toplevel`` from this module's own directory so
+    it resolves through the ~/bin wrapper indirection regardless of the caller's
+    cwd (LESSON-397: a toolkit asset resolves from the script location, never
+    from the caller's project). ``realpath`` first, so a symlinked install walks
+    from the real file's directory rather than the symlink's.
+
+    The git-derived root is only accepted when its ``tools/delegate/_common.py``
+    IS this very file — an identity check, not an existence check. Same
+    LESSON-397 class: when the toolkit is vendored INSIDE another git repo,
+    ``rev-parse`` reports the HOST repo's toplevel, and an unvalidated result
+    would silently read the host project's ``VERSION`` file. Mere existence is
+    not enough either, because an OUTER toolkit checkout that contains a
+    vendored INNER copy has the marker file at its own root and would otherwise
+    win — reporting the outer version for a run of the inner code. Falling back
+    to the walk-up in both cases reports the version of the copy being run.
+    """
+    here = os.path.dirname(os.path.realpath(__file__))
+    try:
+        out = subprocess.run(
+            ["git", "-C", here, "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True, timeout=2,
+        ).stdout.strip()
+        # ValueError covers UnicodeDecodeError from text=True when a path in the
+        # output is not valid UTF-8 — a traceback there would be a crash, not a
+        # version report.
+        if out and os.path.realpath(
+                os.path.join(out, "tools", "delegate", "_common.py")
+        ) == os.path.realpath(__file__):
+            return out
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    # tools/delegate/_common.py -> tools/delegate -> tools -> <root>
+    return os.path.dirname(os.path.dirname(here))
+
+
+# A version token is a version-ish word: digits, letters, and the separators a
+# semver / pre-release / build-metadata string uses. Bounded and charset-limited
+# so a VERSION file can never contribute a space, a colon, or a control byte to
+# the BR-9 report — the ingredients of a forged `key: value` line.
+_VERSION_TOKEN_RE = re.compile(r"^[0-9A-Za-z._+-]{1,64}\Z")
+
+
+def toolkit_version():
+    """Read the toolkit ``VERSION`` file; ``"unknown"`` if it can't be read.
+
+    VERSION is the single source of truth — never hardcode the version here.
+    Only the first line is read, bounded: a multi-line or oversized VERSION must
+    not be able to forge extra ``key: value`` lines in the BR-9 report. Anything
+    that is not a plausible version token (empty, spaced, punctuated, over 64
+    chars) reports ``"unknown"`` rather than being echoed into the report.
+    """
+    path = os.path.join(_repo_root(), "VERSION")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            first = fh.readline(128).strip()
+    except OSError:
+        return "unknown"
+    return first if _VERSION_TOKEN_RE.match(first) else "unknown"
 
 
 def _config_path():
@@ -67,12 +141,24 @@ def parse_delegate_config(path=None):
     else. Returns a dict with any of ``enabled``/``base_url``/``model``/
     ``api_key_env`` that were present (``enabled`` coerced to bool). An absent or
     unreadable file yields ``{}`` — a valid legacy/env-only configuration.
+
+    Only a REGULAR file is read. ``ADLC_CONFIG`` is caller-controlled, and
+    ``os.path.isfile``-style existence checks say nothing about the kind of
+    object: pointing it at a fifo would block ``open()`` forever (a ``--version``
+    that never returns), and a device node would stream unbounded input. The read
+    is bounded too — a config with three scalar fields has no business being
+    larger than 64 KiB, and the parser must not be a memory amplifier.
     """
     if path is None:
         path = _config_path()
     try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return {}
+    except OSError:
+        return {}
+    try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.read().splitlines()
+            lines = fh.read(65536).splitlines()
     except OSError:
         return {}
 
@@ -111,12 +197,25 @@ def parse_delegate_config(path=None):
     return out
 
 
-_ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# `\Z`, never `$`: Python's `$` also matches just before a trailing newline, so
+# `$'MY_KEY\n'` would pass an env-var-NAME check and then inject a blank line
+# into the BR-9 report. `\Z` is the true end of string.
+_ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
+# Allow-list for the RESOLVED api_key_env (BR-3). Deliberately narrower than
+# `_ENV_VAR_NAME_RE`: a key-env var name is SCREAMING_SNAKE_CASE by universal
+# convention, so anything else is presumed to be a key value that the key-family
+# blocklist happened not to recognize (gsk_…, hf_…, and every vendor prefix
+# invented after this file was written).
+_KEY_ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*\Z")
 # Key-shaped families the redaction chain already knows, plus a generic
 # high-entropy run (>=32 chars, mixed classes) — see REQ-515 ADR-4 / BR-3.
+# The AWS access-key-ID family needs every prefix, not just AKIA: an ID is 20
+# uppercase alphanumerics with no underscore, so it satisfies the
+# UPPER_SNAKE_CASE allow-list AND is too short for the 24-char underscore-free
+# heuristic — the blocklist is the only layer that can refuse it.
 _KEYISH_RE = re.compile(
     r"(sk-[A-Za-z0-9_-]{20,}"
-    r"|AKIA[A-Z0-9]{16}"
+    r"|(?:AKIA|ASIA|ABIA|ACCA|AIPA|ANPA|AROA)[A-Z0-9]{16}"
     r"|ghp_[A-Za-z0-9]{36,}"
     r"|Bearer\s+[A-Za-z0-9._-]{20,})"
 )
@@ -198,7 +297,9 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
     """Resolve the provider via the BR-2 precedence cascade.
 
     Highest precedence wins, per field. Raises ``SystemExit`` (BR-3) if the
-    config's ``api_key_env`` holds a key value rather than an env-var name.
+    config's ``api_key_env`` — or the value the whole cascade RESOLVES to,
+    including the ``ADLC_DELEGATE_API_KEY_ENV`` override — holds a key value
+    rather than an env-var name.
     """
     if cfg is None:
         cfg = parse_delegate_config()
@@ -216,6 +317,19 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
         or cfg_key_env
         or _DEFAULT_API_KEY_VAR
     )
+    # Validate what the cascade actually RESOLVED to, not just the config branch:
+    # `ADLC_DELEGATE_API_KEY_ENV` outranks the config and was previously
+    # unchecked, so a key pasted there reached `os.environ.get(<the key>)` and
+    # could be echoed back by any diagnostic that prints the NAME. The allow-list
+    # also catches vendor key prefixes the key-family blocklist doesn't know.
+    # The refusal message is a constant — the rejected value is NEVER
+    # interpolated, because the value is exactly what may be a live secret.
+    if _looks_like_key(api_key_env) or not _KEY_ENV_NAME_RE.match(api_key_env):
+        raise SystemExit(
+            "resolved 'api_key_env' must be an UPPER_SNAKE_CASE environment "
+            "variable NAME (e.g. MY_PROVIDER_KEY); never a key value — set it "
+            "via config api_key_env or ADLC_DELEGATE_API_KEY_ENV"
+        )
 
     # base_url: flag > ADLC_DELEGATE_BASE_URL > config > default.
     base_url = (
@@ -246,6 +360,222 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
         source = "defaults"
 
     return Provider(base_url, model, api_key_env, delegation_enabled(cfg), source)
+
+
+# --- `--version` reporting (shared by all three CLIs) ----------------------
+
+def wants_version(argv, value_flags=frozenset(), known_flags=None):
+    """True if ``--version``/``-V`` appears in argv in FLAG position.
+
+    ``argv`` may be ``None``, in which case ``sys.argv[1:]`` is scanned. The scan
+    is value-aware: a token that is the value of a preceding option in
+    ``value_flags`` is skipped, so ``--question -V`` asks a question *about* the
+    string ``-V`` instead of printing the version. Scanning stops at ``--``, and
+    an attached form (``--question=--version``) can never match because the
+    comparison is whole-token equality.
+
+    ``known_flags`` — every option spelling the CLI's parser declares — closes
+    the last gap. Without it the scan silently assumes any token it does not
+    recognize is harmless, so ``--sp "--version"`` (a prefix ABBREVIATION of
+    ``--spec`` back when the parsers allowed them) put ``--version`` in what the
+    scan read as flag position: the CLI printed the version, exited 0, and did
+    nothing the user asked for. Now an unrecognized option token makes the scan
+    decline, handing the argv to argparse so it can raise its own error. This is
+    only sound because the parsers set ``allow_abbrev=False``: the declared
+    spellings are then the ONLY accepted spellings, so a fixed set is provably
+    complete. Omitting ``known_flags`` keeps the older, weaker behavior.
+
+    Known limitation: an option with ``nargs='+'`` (``--paths``) consumes an
+    unbounded number of values, so only its first value is skipped. A
+    dash-prefixed token among the remaining values would still be seen in flag
+    position — but argparse rejects such an argv anyway ("expected one
+    argument" / "unrecognized arguments"), so the case is unreachable in any
+    invocation that could otherwise have succeeded.
+    """
+    effective = argv if argv is not None else sys.argv[1:]
+    skip_next = False
+    for token in effective:
+        if token == "--":
+            return False
+        if skip_next:
+            skip_next = False
+            continue
+        if token in ("--version", "-V"):
+            return True
+        if token in value_flags:
+            skip_next = True
+            continue
+        if known_flags is not None and len(token) > 1 and token.startswith("-"):
+            # Attached form: `--model=x` is the option `--model`.
+            if token.split("=", 1)[0] not in known_flags:
+                return False
+    return False
+
+
+def harvest_provider_flags(argv, value_flags=frozenset()):
+    """Extract ``--model`` / ``--base-url`` from a raw argv, pre-argparse.
+
+    The ``--version`` path prints the config a REAL call would resolve, and per
+    BR-3 that includes the per-invocation flag overrides — which argparse never
+    gets to see on this path (ADR-1). Both the separated (``--model x``) and
+    attached (``--model=x``) forms are recognized; the scan stops at ``--``.
+    Returns ``(model, base_url)``, each ``None`` when not supplied.
+
+    Value-aware in the same way as :func:`wants_version`, and given the SAME
+    ``value_flags`` set by every caller: without it, ``--question --model``
+    would harvest nothing but ``--question --model foo`` would harvest ``foo``
+    as the model, reporting a provider the real call would never use. An empty
+    value (``--model=``) counts as not-supplied, matching the ``or``-chain
+    fallthrough in :func:`resolve_provider`.
+    """
+    effective = argv if argv is not None else sys.argv[1:]
+    model = None
+    base_url = None
+    pending = None
+    skip_next = False
+    for token in effective:
+        if token == "--":
+            break
+        if skip_next:
+            skip_next = False
+            continue
+        if pending is not None:
+            if pending == "--model":
+                model = token or None
+            else:
+                base_url = token or None
+            pending = None
+            continue
+        # `--model`/`--base-url` are themselves members of `value_flags`, so they
+        # must be matched BEFORE the generic skip branch below.
+        if token in ("--model", "--base-url"):
+            pending = token
+        elif token.startswith("--model="):
+            model = token[len("--model="):] or None
+        elif token.startswith("--base-url="):
+            base_url = token[len("--base-url="):] or None
+        elif token in value_flags:
+            skip_next = True
+    return model, base_url
+
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _clean_report_value(v):
+    """Flatten ``v`` to a single line of printable text for the BR-9 report.
+
+    Every value in the report comes from argv, the environment, or a config
+    file — all caller-controlled — and the report's whole value as a contract is
+    that one line means one field. A newline in a model name would otherwise let
+    ``--model=$'fake\\nenabled: false'`` forge an ``enabled:`` line, and an ESC
+    byte would let it repaint the terminal. Whitespace (of every kind) collapses
+    to single spaces; anything still in the C0/C1-adjacent control range is
+    dropped outright.
+    """
+    return _CONTROL_CHARS_RE.sub("", " ".join(str(v).split()))
+
+
+# Syntactic userinfo prefix: an optional `scheme://` (or bare `//`), then any
+# run without `/`, `@`, or whitespace, then `@`. Deliberately looser than RFC
+# 3986 so it also matches the strings `urlsplit` REFUSES to parse — that is the
+# whole point (see `_redact_url_userinfo`). It over-matches at worst, which
+# redacts something harmless rather than printing something secret.
+_USERINFO_PREFIX_RE = re.compile(
+    r"^((?:[A-Za-z][A-Za-z0-9+.\-]*:)?//)?[^/@\s]+@"
+)
+
+# Returned instead of the input when the URL cannot be parsed at all. A constant:
+# it carries no caller state, so it cannot leak anything (LESSON-021).
+_UNREDACTABLE = "<unredactable>"
+
+
+def _redact_url_userinfo(url):
+    """Return ``url`` with any ``user:pass@`` userinfo replaced by ``***@``.
+
+    A base URL can legitimately carry credentials, and ``--version`` is the one
+    path that PRINTS it. Applied on the print path only — never to the value
+    handed to ``get_client``, which needs the credentials intact.
+
+    **Fail-closed.** The userinfo is stripped SYNTACTICALLY first, before
+    ``urlsplit`` is consulted, because ``urlsplit`` refuses some strings
+    outright — ``https://user:pw@[::1/v1`` (unterminated IPv6 literal) raises
+    ``ValueError``, and returning the input unchanged on that path printed the
+    password verbatim. The parser-based pass still runs afterwards for
+    well-formed URLs (it normalizes the netloc); if it raises even on the
+    already-stripped string, a constant is returned rather than any form of the
+    caller's value.
+    """
+    text = str(url)
+    stripped = _USERINFO_PREFIX_RE.sub(
+        lambda m: (m.group(1) or "") + "***@", text, count=1)
+    from urllib.parse import urlsplit, urlunsplit
+    try:
+        parts = urlsplit(stripped)
+        if parts.username is None and parts.password is None:
+            return stripped
+        host = parts.netloc.rsplit("@", 1)[1]
+        return urlunsplit(
+            (parts.scheme, "***@" + host, parts.path, parts.query, parts.fragment)
+        )
+    except ValueError:
+        return _UNREDACTABLE
+
+
+def _endpoint_host(base_url):
+    """Display-safe host of ``base_url`` — userinfo-redacted, single-line.
+
+    Redaction happens FIRST, so a credential-bearing base URL never reaches the
+    parser (or the output) intact. Falls back to the whole redacted string when
+    there is no netloc to extract (a scheme-less or unparseable value), which is
+    still safe by construction.
+    """
+    safe = _redact_url_userinfo(base_url)
+    from urllib.parse import urlsplit
+    try:
+        netloc = urlsplit(safe).netloc
+    except ValueError:
+        netloc = ""
+    return _clean_report_value(netloc or safe)
+
+
+def version_report_lines(args_model=None, args_base_url=None, include_config=True):
+    """The BR-9 ``--version`` output, as a list of lines.
+
+    This is the ONLY implementation of the BR-9 contract — the three CLIs differ
+    only in which ``value_flags`` they pass to :func:`wants_version` and whether
+    they ask for the config block, so the format cannot drift between them.
+
+    ``include_config=False`` yields the version line alone (``extract-chat`` has
+    no delegate config). Otherwise the config is produced by the same
+    :func:`resolve_provider` a real call uses (BR-3, LESSON-392); a refusal
+    degrades to one flattened ``config_error:`` line instead of a traceback
+    (BR-6). Those messages are path-free, value-free constants by construction
+    (LESSON-021) — nothing here re-introduces caller state into the output.
+
+    EVERY interpolated value goes through :func:`_clean_report_value`. The
+    version token, the model, and the key-var name are all caller-influenced
+    (VERSION file, argv, environment, config file), and "one line per field" is
+    the entire BR-9 contract: an un-flattened value could forge a field a
+    consumer would then trust. ``enabled`` is the one literal here, so it needs
+    no sanitizing — and is therefore also the one field that must never be
+    forgeable from any of the others.
+    """
+    lines = ["adlc-toolkit %s" % _clean_report_value(toolkit_version())]
+    if not include_config:
+        return lines
+    try:
+        provider = resolve_provider(
+            args_model=args_model, args_base_url=args_base_url)
+    except SystemExit as exc:
+        lines.append("config_error: %s" % _clean_report_value(exc))
+        return lines
+    lines.append("base_url: %s" % _clean_report_value(
+        _redact_url_userinfo(provider.base_url)))
+    lines.append("model: %s" % _clean_report_value(provider.model))
+    lines.append("api_key_env: %s" % _clean_report_value(provider.api_key_env))
+    lines.append("enabled: %s" % ("true" if provider.enabled else "false"))
+    return lines
 
 
 def _read_key_from_rc(var_name):
@@ -374,9 +704,16 @@ def warn_suppressed():
 def emit_exfil_notice(stream=None, provider=None):
     """Write the one-line exfiltration warning to ``stream`` (default stderr).
 
-    The text names the resolved model and the two suppression mechanisms
-    (``--no-warn`` flag, ``ADLC_DELEGATE_NO_WARN`` env var).
-    The API key value/var name is never interpolated.
+    The text names the resolved model, the resolved endpoint HOST, and the two
+    suppression mechanisms (``--no-warn`` flag, ``ADLC_DELEGATE_NO_WARN`` env
+    var). The API key value/var name is never interpolated.
+
+    The host is what makes this notice load-bearing rather than decorative: the
+    whole point is "your file contents are leaving this machine", and a base URL
+    hijacked through the environment or a config file changes WHERE they go
+    without changing anything else the user sees. Redacted and flattened for
+    display (``_endpoint_host``) so the notice cannot itself become a leak or a
+    forgery vector.
     """
     if stream is None:
         stream = sys.stderr
@@ -384,8 +721,9 @@ def emit_exfil_notice(stream=None, provider=None):
         provider = resolve_provider()
     stream.write(
         f"delegate: sending file contents to the configured endpoint "
-        f"({provider.model}). Pass --no-warn or set ADLC_DELEGATE_NO_WARN=1 "
-        "to silence.\n"
+        f"({_clean_report_value(provider.model)} at "
+        f"{_endpoint_host(provider.base_url)}). "
+        "Pass --no-warn or set ADLC_DELEGATE_NO_WARN=1 to silence.\n"
     )
 
 
