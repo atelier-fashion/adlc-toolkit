@@ -48,7 +48,7 @@ PRs (`atelier-fashion/adlc-toolkit`).
   stable `key: value` contract, so a future `adlc doctor` can consume it without
   parsing prose. Documented in `tools/delegate/README.md`.
 
-  Hardened in the same REQ: the resolved `api_key_env` is checked against an
+  **Hardened in the same REQ:** the resolved `api_key_env` is checked against an
   `UPPER_SNAKE_CASE` allow-list (not just a key-family blocklist) at the end of
   the cascade, so a key pasted into the higher-precedence
   `ADLC_DELEGATE_API_KEY_ENV` override — or a vendor prefix the blocklist never
@@ -58,7 +58,19 @@ PRs (`atelier-fashion/adlc-toolkit`).
   repo root is validated as a real toolkit checkout, so a copy vendored inside
   another git repo reports its own version rather than the host's; and only the
   first line of `VERSION` is read, bounded, so it cannot forge extra output
-  lines.
+  lines. A follow-up audit round closed the residuals: the parsers now refuse
+  prefix abbreviations, so the pre-parse scan's exact-spelling option sets are
+  provably complete (`--sp "--version"` no longer hijacks the version path);
+  every value interpolated into the report is collapsed to one line with control
+  characters stripped, so a newline in a model name or `VERSION` file cannot
+  forge an `enabled:` line; the repo root is validated by *identity* rather than
+  marker-file existence, so an outer checkout containing a vendored inner copy
+  no longer wins; AWS access-key IDs (`AKIA`/`ASIA`/… ) are refused as
+  `api_key_env` despite being valid `UPPER_SNAKE_CASE`; URL redaction is
+  fail-closed, stripping userinfo syntactically before parsing so a malformed
+  URL can never print its password; and the privacy notice now names the
+  resolved endpoint host, so a hijacked `base_url` is visible at the moment file
+  contents leave the machine.
 
 ### Removed
 

@@ -72,6 +72,29 @@ def test_emit_exfil_notice_writes_to_stream():
     assert out.endswith("\n")
 
 
+def test_emit_exfil_notice_names_the_endpoint_host(tmp_path):
+    """REQ-553: the notice names WHERE the contents are going, not just what
+    model is asked. A `base_url` hijacked via env or config otherwise changes the
+    destination with nothing in the notice to show it. Userinfo is redacted —
+    the notice must not become a new place credentials get printed.
+    """
+    buf = io.StringIO()
+    provider = _common.Provider(
+        base_url="https://svc:sekret123@gw.example/v1",
+        model="probe-model",
+        api_key_env="MY_PROVIDER_KEY",
+        enabled=True,
+        source="test",
+    )
+    _common.emit_exfil_notice(stream=buf, provider=provider)
+    out = buf.getvalue()
+    assert "gw.example" in out
+    assert "probe-model" in out
+    assert "sekret123" not in out
+    assert "MY_PROVIDER_KEY" not in out
+    assert out.count("\n") == 1  # still exactly one line
+
+
 # --- REQ-422 / REQ-515: rc-fallback for the default key var when not in env ---
 # _read_key_from_rc now takes the var NAME (REQ-515 provider-agnostic resolver).
 

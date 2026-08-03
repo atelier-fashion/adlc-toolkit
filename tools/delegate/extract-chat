@@ -101,6 +101,35 @@ def _iter_turns(fh):
         yield role, text
 
 
+def _build_parser():
+    parser = argparse.ArgumentParser(
+        # No prefix abbreviation. The pre-parse argv scan (`wants_version`)
+        # matches option names by EXACT spelling, and its exact-spelling set is
+        # only provably complete if argparse also refuses abbreviations: with
+        # them enabled, `--out "-V"` is a valid spelling of `--output` that no
+        # fixed set can enumerate, so the scan would see `-V` in flag position
+        # and print the version instead of writing the file.
+        allow_abbrev=False,
+        description="Clean a Claude Code session JSONL transcript into readable text.",
+        epilog="--version, -V: print the toolkit version and exit; handled before "
+               "parsing, so no transcript path is required.")
+    parser.add_argument("jsonl_path", help="path to the .jsonl session transcript")
+    parser.add_argument("-o", "--output", metavar="PATH",
+                        help="write output here instead of stdout")
+    return parser
+
+
+# Options whose VALUE could be the literal `--version`/`-V` (`-o -V` names an
+# output FILE), and every option spelling the parser declares. See
+# `_common.wants_version`: an option token outside `_KNOWN_FLAGS` is one
+# argparse will reject, so the scan declines rather than printing the version
+# for a command the user did not write. Complete by exact spelling only because
+# the parser sets `allow_abbrev=False`; kept honest by a test that derives the
+# same set from the parser itself.
+_VERSION_VALUE_FLAGS = frozenset({"-o", "--output"})
+_KNOWN_FLAGS = _VERSION_VALUE_FLAGS | frozenset({"-h", "--help"})
+
+
 def main(argv=None):
     # --version/-V: scanned out of argv BEFORE argparse (ADR-1), which would
     # otherwise exit 2 on the missing required positional. `_common` is imported
@@ -114,20 +143,17 @@ def main(argv=None):
     effective = argv if argv is not None else sys.argv[1:]
     if "--version" in effective or "-V" in effective:
         import os
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        # `realpath`, not `abspath`: resolve to the REAL file's directory (the
+        # ~/bin wrapper symlinks this CLI), matching `_common._repo_root`. With
+        # `abspath` a `_common.py` planted beside the symlink would shadow the
+        # toolkit's.
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
         import _common
-        if _common.wants_version(argv, frozenset({"-o", "--output"})):
+        if _common.wants_version(argv, _VERSION_VALUE_FLAGS, _KNOWN_FLAGS):
             print(_common.version_report_lines(include_config=False)[0])
             return 0
 
-    parser = argparse.ArgumentParser(
-        description="Clean a Claude Code session JSONL transcript into readable text.",
-        epilog="--version, -V: print the toolkit version and exit; handled before "
-               "parsing, so no transcript path is required.")
-    parser.add_argument("jsonl_path", help="path to the .jsonl session transcript")
-    parser.add_argument("-o", "--output", metavar="PATH",
-                        help="write output here instead of stdout")
-    args = parser.parse_args(argv)
+    args = _build_parser().parse_args(argv)
 
     try:
         fh = open(args.jsonl_path, "r", encoding="utf-8", errors="replace")

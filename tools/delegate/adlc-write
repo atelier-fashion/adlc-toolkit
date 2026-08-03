@@ -11,7 +11,11 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# `realpath`, not `abspath`: this must resolve to the directory of the REAL
+# file (the ~/bin wrapper symlinks these CLIs), matching `_common._repo_root`.
+# `abspath` would keep the symlink's own directory on the path, where a
+# `_common.py` planted next to the symlink would shadow the toolkit's.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 import _common  # noqa: E402
 
@@ -21,9 +25,16 @@ _SYSTEM_PROMPT = (
 )
 
 
-def _parse_args(argv=None):
+def _build_parser():
     parser = argparse.ArgumentParser(
         prog="adlc-write",
+        # No prefix abbreviation. The pre-parse argv scans (`wants_version`,
+        # `harvest_provider_flags`) match option names by EXACT spelling, and
+        # their exact-spelling sets are only provably complete if argparse also
+        # refuses abbreviations: with them enabled, `--sp "--version"` is a valid
+        # spelling of `--spec` that no fixed set can enumerate, so the scan sees
+        # `--version` in flag position and prints the version instead.
+        allow_abbrev=False,
         description="Generate a file from a spec with the configured delegate.",
         epilog="--version, -V: print the toolkit version and the resolved delegate "
                "config (base_url, model, api_key_env NAME, enabled) and exit; "
@@ -41,14 +52,36 @@ def _parse_args(argv=None):
         action="store_true",
         help="suppress the data-exfiltration notice",
     )
-    return parser.parse_args(argv)
+    return parser
+
+
+def _parse_args(argv=None):
+    return _build_parser().parse_args(argv)
 
 
 # Options whose VALUE could be the literal string `--version`/`-V` — a spec
-# string is free-form text, so `--spec "--version"` must generate a file, not
-# print the version. The pre-parse scan is told which tokens consume the next.
+# string is free-form text, so `--spec --version` must not print the version.
+# argparse rejects that separated form outright ("expected one argument": a
+# dash-prefixed token is never taken as a value), so the run it must not
+# short-circuit is argparse's own exit-2; only the attached `--spec=--version`
+# form parses and goes on to generate a file. Either way the pre-parse scan has
+# to know which tokens consume the token after them.
+# The SAME set goes to both pre-parse scans — `wants_version` and
+# `harvest_provider_flags` walk the same argv and must agree on where the
+# value positions are, or one of them reads a value as a flag.
+# Complete by exact spelling only because the parser sets `allow_abbrev=False`.
 _VERSION_VALUE_FLAGS = frozenset({
     "--spec", "--context", "--target", "--max-tokens", "--model", "--base-url",
+})
+
+# EVERY option spelling `_build_parser()` declares, `--version`/`-V` aside (they
+# never reach argparse). An option token outside this set means the argv is one
+# argparse will reject, so the pre-parse scan declines and lets it do that rather
+# than printing the version for a command the user did not write — the `--sp
+# "--version"` hijack. Kept honest by a test that derives the same set from the
+# parser itself.
+_KNOWN_FLAGS = _VERSION_VALUE_FLAGS | frozenset({
+    "-h", "--help", "--force", "--no-warn",
 })
 
 
@@ -61,8 +94,8 @@ def main(argv=None):
     # overrides. The key VALUE is never read or printed; only the env-var NAME
     # (BR-2). A refused config degrades to one `config_error:` line, exit 0
     # (BR-6) — see `_common.version_report_lines`, the sole BR-9 implementation.
-    if _common.wants_version(argv, _VERSION_VALUE_FLAGS):
-        m, b = _common.harvest_provider_flags(argv)
+    if _common.wants_version(argv, _VERSION_VALUE_FLAGS, _KNOWN_FLAGS):
+        m, b = _common.harvest_provider_flags(argv, _VERSION_VALUE_FLAGS)
         print("\n".join(_common.version_report_lines(args_model=m, args_base_url=b)))
         return 0
 
