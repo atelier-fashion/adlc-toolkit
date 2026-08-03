@@ -218,9 +218,12 @@ esac
    (Claude Code prefixes encoded project paths with `-` under `~/.claude/projects/`; the `sed` strips the leading `/` before substitution to avoid a `--` double-prefix. The walk terminates at `$HOME` per BR-6 — see REQ-423 architecture ADR-2.)
 2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when discovery emitted "no candidates found", `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
    ```bash
+   . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
    . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
    # Re-read the transcript path step 1 persisted to the sidecar (fenced blocks
-   # do not share shell state — REQ-522 BR-4).
+   # do not share shell state — REQ-522 BR-4). The gate partial is re-sourced
+   # for the same reason: it exports ADLC_READ_BIN, the resolved binary (PATH,
+   # or $HOME/bin/adlc-read in GUI-launched sessions whose PATH lacks ~/bin).
    JSONL=$("$DELEGATE_TOOLS"/skill-flag.sh read "$flag" jsonl)
    if [ -z "$JSONL" ]; then
        # No candidate JSONL — skip delegation entirely; fall through to Fallback drafting.
@@ -238,7 +241,7 @@ esac
            sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE" && rm -f "$TMPFILE.bak"
            # Delegate the draft. Mark invoked/exit around the call (REQ-424 telemetry).
            "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
-           adlc-read --no-warn --paths "$TMPFILE" --question "Propose a LESSON-<reqid> draft following the template at .adlc/templates/lesson-template.md (or ~/.claude/skills/templates/lesson-template.md if absent). 400 words max. Include frontmatter (id, title, component, domain, stack, concerns, tags, req, dates) and the four template sections."
+           "${ADLC_READ_BIN:-adlc-read}" --no-warn --paths "$TMPFILE" --question "Propose a LESSON-<reqid> draft following the template at .adlc/templates/lesson-template.md (or ~/.claude/skills/templates/lesson-template.md if absent). 400 words max. Include frontmatter (id, title, component, domain, stack, concerns, tags, req, dates) and the four template sections."
            "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
        fi
    fi

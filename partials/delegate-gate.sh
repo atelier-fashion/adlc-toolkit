@@ -9,10 +9,11 @@
 #
 # Return-code contract (UNCHANGED 0/1/2 shape so existing callers' case
 # statements keep working):
-#   0 — delegated:    adlc-read on PATH AND not disabled AND opt-in satisfied
+#   0 — delegated:    adlc-read resolvable AND not disabled AND opt-in satisfied
 #   1 — disabled:     ADLC_DISABLE_DELEGATE=1,
 #                     OR opt-in NOT satisfied (BR-11 fresh-install posture)
-#   2 — unavailable:  adlc-read is not on PATH
+#   2 — unavailable:  adlc-read is not resolvable (not on PATH and no
+#                     executable at $HOME/bin/adlc-read)
 #
 # Reason-string contract:
 #   The function exports ADLC_DELEGATE_GATE_REASON on every code path. Canonical
@@ -38,6 +39,33 @@
 # empty.
 export ADLC_DELEGATE_GATE_REASON="unset"
 
+# --- binary resolution ------------------------------------------------------
+# GUI-launched Claude Code sessions may run with a PATH that lacks ~/bin (only
+# .zshrc adds it), so `command -v adlc-read` alone reports "no-binary" on
+# machines where ~/bin/adlc-read is installed and working. Resolution order:
+#   1. `adlc-read` on PATH (echoed as the bare name — PATH wins)
+#   2. an executable at $HOME/bin/adlc-read (echoed as the absolute path)
+#   3. neither → empty string
+_adlc_resolve_read_bin() {
+  if command -v adlc-read >/dev/null 2>&1; then
+    echo "adlc-read"
+    return 0
+  fi
+  if [ -n "${HOME:-}" ] && [ -x "${HOME}/bin/adlc-read" ]; then
+    echo "${HOME}/bin/adlc-read"
+    return 0
+  fi
+  echo ""
+}
+
+# Resolve at source time so a fenced block that only sources this partial
+# (e.g. a delegated-invocation fence that never calls the gate function) still
+# gets $ADLC_READ_BIN. Call sites invoke "${ADLC_READ_BIN:-adlc-read}" — the
+# bare-name default keeps them working against a stale vendored copy of this
+# partial that predates the variable.
+ADLC_READ_BIN="$(_adlc_resolve_read_bin)"
+export ADLC_READ_BIN
+
 # --- opt-in helper (BR-11) -------------------------------------------------
 # Echoes "1" if delegation is opted in, "" otherwise. Pure-shell fast paths
 # first; config probe last (only when a config file is present).
@@ -57,9 +85,9 @@ _adlc_delegate_opted_in() {
   #    the no-config fast path never forks a subprocess.
   _cfg="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
   if [ -n "$_cfg" ] && [ -f "$_cfg" ]; then
-    if command -v adlc-read >/dev/null 2>&1; then
+    if [ -n "${ADLC_READ_BIN:-}" ]; then
       # `adlc-read --print-enabled` prints "1" / "0" and exits 0; never errors.
-      if [ "$(adlc-read --print-enabled 2>/dev/null)" = "1" ]; then
+      if [ "$("$ADLC_READ_BIN" --print-enabled 2>/dev/null)" = "1" ]; then
         echo 1
         return 0
       fi
@@ -69,7 +97,11 @@ _adlc_delegate_opted_in() {
 }
 
 adlc_delegate_gate_check() {
-  if ! command -v adlc-read >/dev/null 2>&1; then
+  # Re-resolve at call time — PATH may have changed since the partial was
+  # sourced, and a caller may invoke the gate long after sourcing.
+  ADLC_READ_BIN="$(_adlc_resolve_read_bin)"
+  export ADLC_READ_BIN
+  if [ -z "$ADLC_READ_BIN" ]; then
     export ADLC_DELEGATE_GATE_REASON="no-binary"
     return 2
   fi
