@@ -48,6 +48,18 @@ PRs (`atelier-fashion/adlc-toolkit`).
   stable `key: value` contract, so a future `adlc doctor` can consume it without
   parsing prose. Documented in `tools/delegate/README.md`.
 
+  Hardened in the same REQ: the resolved `api_key_env` is checked against an
+  `UPPER_SNAKE_CASE` allow-list (not just a key-family blocklist) at the end of
+  the cascade, so a key pasted into the higher-precedence
+  `ADLC_DELEGATE_API_KEY_ENV` override — or a vendor prefix the blocklist never
+  heard of — is refused instead of printed; `base_url` userinfo is redacted to
+  `***@host` on the print path only; the argv scan is value-aware, so `-V` in an
+  option's value position is no longer mistaken for a version request; the
+  repo root is validated as a real toolkit checkout, so a copy vendored inside
+  another git repo reports its own version rather than the host's; and only the
+  first line of `VERSION` is read, bounded, so it cannot forge extra output
+  lines.
+
 ### Removed
 
 - **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the

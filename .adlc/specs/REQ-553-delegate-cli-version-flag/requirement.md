@@ -57,7 +57,7 @@ _Not applicable — local CLI, no auth surface._
 - [ ] `adlc-read --version` output includes base URL, model, and `api_key_env` name matching what a real call would resolve (verified by a test that sets `ADLC_DELEGATE_MODEL`/`ADLC_DELEGATE_BASE_URL` overrides and asserts they appear).
 - [ ] With `MOONSHOT_API_KEY=sk-test-secret-value` set, the string `sk-test-secret-value` does not appear anywhere in `--version` output (positive assertion on the env-var NAME appearing, negative on the value).
 - [ ] In a venv without `openai` installed, all three `--version` invocations succeed (exit 0, no traceback). (informed by LESSON-022)
-- [ ] With a deliberately malformed config file, `--version` exits 0, prints the version, and prints a one-line resolution diagnostic. (informed by LESSON-395)
+- [ ] With a config file that `resolve_provider` REFUSES (key-shaped `api_key_env`), `--version` exits 0, prints the version, and prints a one-line `config_error:` diagnostic; with an unparseable config file it exits 0 and reports the shipped defaults (fail-soft, matching the real call's resolution). (informed by LESSON-395)
 - [ ] `tools/delegate/tests/` gains tests covering the above; `test_no_kimi_brand.py` still passes.
 - [ ] Invoked from a foreign project directory (not the toolkit repo), `--version` reports the toolkit's version, not anything derived from the caller's cwd. (informed by LESSON-397)
 - [ ] `adlc-read --version` output parses as `key: value` lines carrying exactly the BR-9 keys (a test splits each config line on the first `:` and asserts the expected key set).

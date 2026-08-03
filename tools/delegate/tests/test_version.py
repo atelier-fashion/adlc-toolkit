@@ -33,6 +33,7 @@ since neither alone is conclusive:
      a rotted guard, not coverage.
 """
 import os
+import shutil
 import subprocess
 import sys
 
@@ -341,3 +342,288 @@ def test_version_works_where_the_sdk_is_not_installed(cli, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.split("\n")[0] == VERSION_LINE
     assert "Traceback" not in r.stderr, r.stderr
+
+
+# --- BR-2/BR-3: precedence rank 1 (CLI flags) is reflected too --------------
+# The version path never reaches argparse (ADR-1), so the flags have to be
+# harvested from the raw argv or the report silently drops the highest-priority
+# tier of the documented cascade and reports a provider the real call would not
+# use — the LESSON-392 failure mode the whole feature exists to prevent.
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_model_flag_is_reflected_in_version_output(cli, tmp_path):
+    r = _run([cli, "--model", "probe-flag-model", "--version"],
+             env=_clean_env(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _config_lines(r.stdout)["model"] == "probe-flag-model", r.stdout
+
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_attached_flag_form_is_reflected_in_version_output(cli, tmp_path):
+    """`--base-url=VALUE` is as valid as `--base-url VALUE` to argparse, so the
+    pre-parse harvest has to understand both forms."""
+    r = _run([cli, "--base-url=https://flag.example/v1", "--version"],
+             env=_clean_env(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _config_lines(r.stdout)["base_url"] == "https://flag.example/v1", r.stdout
+
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_flag_outranks_env_in_version_output(cli, tmp_path):
+    """Rank 1 beats rank 2 in the report exactly as it does in a real call."""
+    r = _run([cli, "--model", "flag-model", "-V"],
+             env=_clean_env(tmp_path, ADLC_DELEGATE_MODEL="env-model"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _config_lines(r.stdout)["model"] == "flag-model", r.stdout
+
+
+# --- value smuggling: `-V` in VALUE position is not a version request -------
+# The scan runs before argparse, so an argv-wide membership test turns an
+# invocation argparse would reject into a silent exit-0 that prints the version
+# and does nothing the user asked for. The value-aware scan skips option values
+# so argparse gets to raise its own error.
+
+def test_question_value_is_not_read_as_a_version_request(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("hello\n", encoding="utf-8")
+    r = _run([ADLC_READ, "--dry-run", "--paths", str(corpus), "--question", "-V"],
+             env=_clean_env(tmp_path))
+    assert not r.stdout.startswith("adlc-toolkit"), r.stdout
+    assert VERSION_LINE not in r.stdout, r.stdout
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "expected one argument" in r.stderr, r.stderr
+
+
+def test_dry_run_survives_a_question_that_mentions_the_flag(tmp_path):
+    """The other half: skipping values must not suppress a real `--version`
+    elsewhere, nor break an ordinary run whose question names the flag."""
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("hello\n", encoding="utf-8")
+    r = _run([ADLC_READ, "--dry-run", "--paths", str(corpus),
+              "--question", "-V does what exactly?"], env=_clean_env(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not r.stdout.startswith("adlc-toolkit"), r.stdout
+    assert "system: " in r.stdout, r.stdout
+
+
+def test_spec_value_is_not_read_as_a_version_request(tmp_path):
+    r = _run([ADLC_WRITE, "--spec", "--version", "--target", str(tmp_path / "x")],
+             env=_clean_env(tmp_path))
+    assert not r.stdout.startswith("adlc-toolkit"), r.stdout
+    assert VERSION_LINE not in r.stdout, r.stdout
+
+
+def test_attached_spec_value_is_not_read_as_a_version_request(tmp_path):
+    """`--spec=--version` parses fine, so this one reaches the real path and
+    fails on the missing key (exit non-zero) — what it must NOT do is print the
+    version report."""
+    r = _run([ADLC_WRITE, "--spec=--version", "--target", str(tmp_path / "x")],
+             env=_clean_env(tmp_path))
+    assert VERSION_LINE not in r.stdout, r.stdout
+    assert not (tmp_path / "x").exists()
+
+
+def test_extract_chat_output_value_is_not_read_as_a_version_request(tmp_path):
+    """`-o -V` names an output file. The cheap membership pre-filter that gates
+    the lazy `_common` import would say yes here; `wants_version` is the
+    authority and falls through to normal parsing."""
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    r = _run([EXTRACT_CHAT, str(transcript), "-o", "-V"], env=_clean_env(tmp_path))
+    assert not r.stdout.startswith("adlc-toolkit"), r.stdout
+    assert VERSION_LINE not in r.stdout, r.stdout
+
+
+# --- BR-5 / LESSON-397: a vendored checkout reports ITS version -------------
+
+def test_vendored_checkout_reports_its_own_version(tmp_path):
+    """The toolkit copied inside another git repo: `git rev-parse` from the
+    module's directory reports the HOST repo's toplevel, whose VERSION file is
+    the wrong answer. The root is accepted only when it really is a toolkit
+    checkout, so the walk-up fallback wins here."""
+    outer = tmp_path / "outer"
+    vendored = outer / "vendor" / "tk" / "tools" / "delegate"
+    vendored.mkdir(parents=True)
+    try:
+        init = subprocess.run(["git", "init"], cwd=str(outer),
+                              capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        pytest.skip("git is not installed; the host-repo confusion needs a repo")
+    if init.returncode != 0:
+        pytest.skip(f"git init failed: {init.stderr}")
+
+    (outer / "VERSION").write_text("9.9.9-decoy\n", encoding="utf-8")
+    (outer / "vendor" / "tk" / "VERSION").write_text("1.2.3-vendored\n",
+                                                     encoding="utf-8")
+    for src in (os.path.join(TOOLS, "_common.py"), ADLC_READ):
+        shutil.copy(src, str(vendored))
+
+    r = _run([str(vendored / "adlc-read"), "--version"], env=_clean_env(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.split("\n")[0] == "adlc-toolkit 1.2.3-vendored", r.stdout
+    assert "9.9.9-decoy" not in r.stdout
+
+
+# --- BR-2: the RESOLVED api_key_env is validated, not just the config one ---
+
+_RAW_KEY_IN_ENV = "sk-live-RAWKEY0123456789abcdefgh"
+
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_key_pasted_into_the_env_override_is_refused(cli, tmp_path):
+    """`ADLC_DELEGATE_API_KEY_ENV` outranks the config, so validating only the
+    config branch leaves the highest-precedence source unchecked — and this
+    field is printed by name, so an unvalidated key there is a key on stdout."""
+    r = _version_run(cli, tmp_path, ADLC_DELEGATE_API_KEY_ENV=_RAW_KEY_IN_ENV)
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = r.stdout.rstrip("\n").split("\n")
+    assert lines[0] == VERSION_LINE
+    assert lines[1].startswith("config_error: "), r.stdout
+    assert _RAW_KEY_IN_ENV not in r.stdout + r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+
+
+@pytest.mark.parametrize("vendor_key", [
+    "gsk_abcdefghijklmnopqrstuvwxyz012345",   # Groq-style prefix
+    "hf_abcdefghijklmnopqrstuvwxyz012345",    # Hugging Face-style prefix
+])
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_vendor_prefixed_key_the_blocklist_misses_is_still_refused(
+        cli, vendor_key, tmp_path):
+    """These are syntactically valid env-var names and carry an underscore, so
+    the key-family blocklist and the underscore-free heuristic both pass them.
+    The UPPER_SNAKE_CASE allow-list on the resolved value is what catches them —
+    a blocklist can never enumerate every vendor prefix."""
+    _write_config(tmp_path, f'delegate:\n  api_key_env: "{vendor_key}"\n')
+    r = _version_run(cli, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "config_error: " in r.stdout, r.stdout
+    assert vendor_key not in r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_base_url_userinfo_is_redacted_on_the_print_path(cli, tmp_path):
+    """A base URL may legitimately carry `user:pass@`, and --version is the one
+    path that prints it. Redacted for display only — get_client still receives
+    the URL intact."""
+    r = _version_run(
+        cli, tmp_path,
+        ADLC_DELEGATE_BASE_URL="https://svc:sekret123@gw.example/v1",
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "***@gw.example" in r.stdout, r.stdout
+    assert "sekret123" not in r.stdout + r.stderr
+
+
+# --- BR-6: unparseable config is fail-SOFT, not a refusal ------------------
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_unparseable_config_reports_shipped_defaults(cli, tmp_path):
+    """`config_error:` is the REFUSAL path, not the "something was odd" path.
+    A config the minimal reader cannot make sense of yields no delegate keys at
+    all, so resolution falls through to the shipped defaults — which is exactly
+    what a real call would use, so reporting anything else would be a lie."""
+    cfg_dir = tmp_path / ".claude" / "adlc"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.yml").write_bytes(
+        b"\x00\xff\xfe\x01binary garbage\x00not: yaml: at all\n\x80\x81\n"
+    )
+    r = _version_run(cli, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "config_error:" not in r.stdout, r.stdout
+    cfg = _config_lines(r.stdout)
+    assert r.stdout.split("\n")[0] == VERSION_LINE
+    assert cfg["base_url"] == _common._DEFAULT_BASE_URL
+    assert cfg["model"] == _common._DEFAULT_MODEL
+    assert cfg["api_key_env"] == _common._DEFAULT_API_KEY_VAR
+
+
+# --- unit coverage for the shared helpers ----------------------------------
+# In-process (no subprocess): these exercise branches a spawned CLI cannot reach
+# on a healthy machine — a missing `git`, an absent or malformed VERSION file.
+
+_READ_VALUE_FLAGS = frozenset({
+    "--paths", "--question", "--max-tokens", "--model", "--base-url",
+})
+
+
+class TestRepoRootAndVersionUnit:
+
+    def test_repo_root_walks_up_when_git_is_unavailable(self, monkeypatch):
+        def _no_git(*args, **kwargs):
+            raise FileNotFoundError("git")
+        monkeypatch.setattr(_common.subprocess, "run", _no_git)
+        here = os.path.dirname(os.path.realpath(_common.__file__))
+        assert _common._repo_root() == os.path.dirname(os.path.dirname(here))
+
+    def test_version_is_unknown_when_the_file_is_missing(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(_common, "_repo_root", lambda: str(tmp_path))
+        assert _common.toolkit_version() == "unknown"
+
+    def test_version_is_unknown_when_the_file_is_empty(self, monkeypatch, tmp_path):
+        (tmp_path / "VERSION").write_text("", encoding="utf-8")
+        monkeypatch.setattr(_common, "_repo_root", lambda: str(tmp_path))
+        assert _common.toolkit_version() == "unknown"
+
+    def test_only_the_first_version_line_is_read(self, monkeypatch, tmp_path):
+        """A multi-line VERSION must not be able to forge extra BR-9 lines."""
+        (tmp_path / "VERSION").write_text("9.9.9\ninjected: line\n", encoding="utf-8")
+        monkeypatch.setattr(_common, "_repo_root", lambda: str(tmp_path))
+        assert _common.toolkit_version() == "9.9.9"
+
+
+class TestArgvHelpersUnit:
+
+    @pytest.mark.parametrize("argv,expected", [
+        ([], False),
+        (["--version"], True),
+        (["-V"], True),
+        (["--no-warn", "-V"], True),
+        (["--model", "m", "--version"], True),
+        (["--paths", "a.txt", "--version"], True),
+        (["--question", "-V"], False),                 # value position
+        (["--question", "--version"], False),          # value position
+        (["--question=--version"], False),             # attached form
+        (["--", "--version"], False),                  # after the separator
+        (["--dry-run", "--", "-V"], False),
+    ])
+    def test_wants_version_is_value_aware(self, argv, expected):
+        assert _common.wants_version(argv, _READ_VALUE_FLAGS) is expected
+
+    def test_wants_version_without_value_flags_still_finds_the_flag(self):
+        assert _common.wants_version(["-V"]) is True
+
+    @pytest.mark.parametrize("argv,expected", [
+        (["--version"], (None, None)),
+        (["--model", "m1", "--version"], ("m1", None)),
+        (["--model=m2", "-V"], ("m2", None)),
+        (["--base-url", "https://b/v1", "-V"], (None, "https://b/v1")),
+        (["--base-url=https://c/v1", "--model=m3"], ("m3", "https://c/v1")),
+        (["--", "--model", "m4"], (None, None)),
+    ])
+    def test_harvest_provider_flags(self, argv, expected):
+        assert _common.harvest_provider_flags(argv) == expected
+
+    @pytest.mark.parametrize("url,expected", [
+        ("https://api.example/v1", "https://api.example/v1"),
+        ("https://svc:sekret123@gw.example/v1", "https://***@gw.example/v1"),
+        ("https://svc@gw.example:8443/v1", "https://***@gw.example:8443/v1"),
+        ("not a url at all", "not a url at all"),
+        ("", ""),
+    ])
+    def test_redact_url_userinfo(self, url, expected):
+        assert _common._redact_url_userinfo(url) == expected
+
+
+class TestVersionReportLinesUnit:
+
+    def test_version_line_only_when_config_is_excluded(self):
+        lines = _common.version_report_lines(include_config=False)
+        assert lines == [VERSION_LINE]
+
+    def test_config_error_is_a_single_flattened_line(self, monkeypatch):
+        def _refuse(**kwargs):
+            raise SystemExit("refused\nacross\nlines")
+        monkeypatch.setattr(_common, "resolve_provider", _refuse)
+        lines = _common.version_report_lines()
+        assert lines == [VERSION_LINE, "config_error: refused across lines"]

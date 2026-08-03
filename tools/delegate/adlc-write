@@ -44,10 +44,12 @@ def _parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _wants_version(argv):
-    """True if ``--version``/``-V`` appears anywhere in the effective argv."""
-    effective = argv if argv is not None else sys.argv[1:]
-    return any(a in ("--version", "-V") for a in effective)
+# Options whose VALUE could be the literal string `--version`/`-V` — a spec
+# string is free-form text, so `--spec "--version"` must generate a file, not
+# print the version. The pre-parse scan is told which tokens consume the next.
+_VERSION_VALUE_FLAGS = frozenset({
+    "--spec", "--context", "--target", "--max-tokens", "--model", "--base-url",
+})
 
 
 def main(argv=None):
@@ -55,21 +57,13 @@ def main(argv=None):
     # since --spec/--target are required=True and argparse would exit 2 first
     # (ADR-1). Runs before every guard and never touches the network. Reports the
     # config the REAL call would resolve — same resolver, not a re-implementation
-    # (BR-3, LESSON-392). The key VALUE is never read or printed; only the
-    # env-var NAME (BR-2).
-    if _wants_version(argv):
-        print(f"adlc-toolkit {_common.toolkit_version()}")
-        try:
-            provider = _common.resolve_provider()
-        except SystemExit as exc:
-            # A refused config (e.g. key-in-config, BR-3) degrades to one
-            # diagnostic line — never a traceback, still exit 0 (BR-6).
-            print(f"config_error: {' '.join(str(exc).split())}")
-            return 0
-        print(f"base_url: {provider.base_url}")
-        print(f"model: {provider.model}")
-        print(f"api_key_env: {provider.api_key_env}")
-        print(f"enabled: {'true' if provider.enabled else 'false'}")
+    # (BR-3, LESSON-392), including this invocation's --model/--base-url
+    # overrides. The key VALUE is never read or printed; only the env-var NAME
+    # (BR-2). A refused config degrades to one `config_error:` line, exit 0
+    # (BR-6) — see `_common.version_report_lines`, the sole BR-9 implementation.
+    if _common.wants_version(argv, _VERSION_VALUE_FLAGS):
+        m, b = _common.harvest_provider_flags(argv)
+        print("\n".join(_common.version_report_lines(args_model=m, args_base_url=b)))
         return 0
 
     args = _parse_args(argv)

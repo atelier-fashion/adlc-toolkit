@@ -66,9 +66,11 @@ delegate:
   api_key_env: "GROQ_API_KEY"         # the NAME of an env var, never the key
 ```
 
-`api_key_env` must be the **name** of an environment variable. If a key-looking
-value is found there, the tools refuse with an actionable error before any
-network call.
+`api_key_env` must be the **name** of an environment variable, in
+`UPPER_SNAKE_CASE`. The value the whole cascade resolves to is validated —
+including an `ADLC_DELEGATE_API_KEY_ENV` override, which outranks the file — so
+a key pasted into either place is refused with an actionable error before any
+network call. The refusal never echoes the offending value.
 
 ## Setup
 
@@ -112,13 +114,18 @@ extract-chat ~/.claude/projects/<proj>/<session>.jsonl -o /tmp/chat.txt
 All three CLIs accept `--version` (or `-V`). It is scanned out of the arguments
 *before* parsing, so it needs no other arguments (`adlc-write --version` works
 without `--spec`/`--target`), and it runs before every guard — no network call,
-no API key, no config file, and no `openai` SDK required.
+no API key, no config file, and no `openai` SDK required. The scan is
+value-aware: it only matches `--version`/`-V` in *flag* position, so
+`adlc-read --question -V` asks about the string `-V` (and gets argparse's own
+error) rather than silently printing the version, and it stops at `--`.
 
 `adlc-read` and `adlc-write` also print the provider a **real call would
 resolve**, through the same resolver and the same precedence table as above — so
 it answers "which endpoint is this install actually talking to?" without reading
-the config file, the environment, and `_common.py` by hand. The API key **value**
-is never read or printed; only the *name* of the env var holding it:
+the config file, the environment, and `_common.py` by hand. That includes
+rank 1: `--model` / `--base-url` passed alongside `--version` are reflected in
+the output, in both the `--model VALUE` and `--model=VALUE` forms. The API key
+**value** is never read or printed; only the *name* of the env var holding it:
 
 ```bash
 $ adlc-read --version
@@ -137,21 +144,33 @@ adlc-toolkit <version>
 ```
 
 The output is a stable, machine-parseable contract (exit 0, stdout): the first
-line is always `adlc-toolkit <version>` — read from the repo `VERSION` file,
-resolved from the script's own location, so it reports the toolkit's version and
-not anything derived from the directory you ran it in — followed by exactly the
-`base_url`, `model`, `api_key_env`, and `enabled` (`true`/`false`) lines.
+line is always `adlc-toolkit <version>` — the first line of the repo `VERSION`
+file, resolved from the script's own location, so it reports the toolkit's
+version and not anything derived from the directory you ran it in (nor, when the
+toolkit is vendored inside another git repo, that host repo's version) —
+followed by exactly the `base_url`, `model`, `api_key_env`, and `enabled`
+(`true`/`false`) lines.
 
-If provider resolution fails — for example the config's `api_key_env` holds a
-key value instead of an env var name — `--version` never crashes with a
-traceback. It prints the version line plus a single diagnostic line in place of
-the config block, and still exits 0:
+If the printed `base_url` carries credentials (`https://user:pass@host/v1`), the
+userinfo is redacted to `***@host` **on the print path only** — the real call
+still receives the URL intact.
+
+If provider resolution is **refused** — the resolved `api_key_env` is a key
+value rather than an `UPPER_SNAKE_CASE` env var name, whether it came from the
+config file or from `ADLC_DELEGATE_API_KEY_ENV` — `--version` never crashes with
+a traceback. It prints the version line plus a single diagnostic line in place
+of the config block, and still exits 0. The refused value is never echoed back:
 
 ```bash
 $ adlc-read --version
 adlc-toolkit <version>
 config_error: config 'delegate.api_key_env' must be the NAME of an environment variable (e.g. MY_PROVIDER_KEY), not a key value. ...
 ```
+
+A config file that simply cannot be *parsed* is a different case: the minimal
+reader yields no `delegate:` keys, resolution falls through to the shipped
+defaults, and `--version` reports those with no `config_error:` line — matching
+what a real call would resolve. `config_error:` means refused, not "unreadable".
 
 ## CLAUDE.md routing block
 
