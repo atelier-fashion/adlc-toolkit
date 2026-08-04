@@ -156,6 +156,68 @@ PATH=$OLDPATH; export PATH
 unset ADLC_FORGE_PROVIDER_OVERRIDE
 
 # ===========================================================================
+# 7b. BUG-150: a merge that completed remotely is not reported as a failure
+#     just because gh's LOCAL post-merge cleanup tripped.
+# ===========================================================================
+# Shim reproducing the observed failure exactly: `gh pr merge` writes the local
+# git error and exits 1, while `gh pr view` reports the PR as MERGED.
+WSHIM="$SBX/wbin"; mkdir -p "$WSHIM"
+cat > "$WSHIM/gh" <<'WGHSHIM'
+#!/bin/sh
+case "$1 $2" in
+  "pr merge")
+    echo "failed to run git: fatal: 'main' is already used by worktree at '/x'" >&2
+    exit 1 ;;
+  "pr view") echo '{"state":"MERGED"}' ;;
+esac
+exit 0
+WGHSHIM
+chmod +x "$WSHIM/gh"
+OLDPATH3=$PATH; PATH="$WSHIM:$PATH"; export PATH
+export ADLC_FORGE_PROVIDER_OVERRIDE=github
+wout=$(adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); wrc=$?
+check "merge rc 0 when the PR is actually merged" "0" "$wrc"
+contains "merge reports MERGED" "state=MERGED" "$wout"
+contains "merge warns cleanup failed" "warn=" "$wout"
+contains "merge warns the branch survives" "NOT deleted" "$wout"
+case "$wout" in
+  *"error_class="*) fail "merge must not claim failure (got: $wout)" ;;
+  *) pass "merge emits no error_class when the PR merged" ;;
+esac
+# The diagnostics survive, demoted to a warning rather than dropped.
+contains "merge keeps the raw diagnostic" "already used by worktree" "$wout"
+
+# A merge that genuinely did NOT land still fails, with the error block intact.
+NSHIM="$SBX/nbin"; mkdir -p "$NSHIM"
+cat > "$NSHIM/gh" <<'NGHSHIM'
+#!/bin/sh
+case "$1 $2" in
+  "pr merge")
+    echo "Pull request is not mergeable: blocked by branch protection" >&2
+    exit 1 ;;
+  "pr view") echo '{"state":"OPEN"}' ;;
+esac
+exit 0
+NGHSHIM
+chmod +x "$NSHIM/gh"
+PATH="$NSHIM:$SBX/wbin:$PATH"; export PATH
+nout=$(adlc_forge_pr_merge 9 --squash 2>&1); nrc=$?
+check "unmerged PR still returns non-zero" "1" "$nrc"
+contains "unmerged PR keeps its error class" "error_class=merge-blocked-by-policy" "$nout"
+case "$nout" in
+  *"state=MERGED"*) fail "unmerged PR must not report MERGED (got: $nout)" ;;
+  *) pass "unmerged PR does not report MERGED" ;;
+esac
+PATH=$OLDPATH3; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE
+
+# A local git failure is classified as local-git, not network (BUG-150).
+check "classify local worktree collision" "local-git" \
+  "$(_adlc_forge_classify "failed to run git: fatal: 'main' is already used by worktree at '/x'")"
+check "classify still defaults to network" "network" \
+  "$(_adlc_forge_classify 'some transient socket hangup')"
+
+# ===========================================================================
 # 8. ADO merge arg-translation (REQ-523 BR-9): gh-shaped flags -> az equivalents
 # ===========================================================================
 # A recording `az` shim asserts the exact argv. The caller passes the gh-shaped
