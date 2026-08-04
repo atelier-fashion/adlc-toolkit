@@ -1,7 +1,7 @@
 ---
 id: BUG-150
 title: "adlc_forge_pr_merge reports a completed merge as a network failure"
-status: open
+status: resolved
 severity: high
 created: 2026-08-04
 updated: 2026-08-04
@@ -168,6 +168,30 @@ pass, and `shellcheck` reports no new findings on either file (3 and 4, both bas
   genuinely-unmerged, and the new classifier bucket
 - `.adlc/bugs/BUG-150-forge-merge-reports-success-as-failure.md` — this report
 
-Downstream: the vendored copy at `teton-code/.adlc/partials/forge.sh` is re-synced in a
-companion PR, and the installed copy at `~/.claude/skills/partials/forge.sh` needs
-`install.sh` to pick the fix up on this machine.
+## Deployment
+
+PR #113, squash-merged to `main` as `3519e18` (2026-08-04). No runtime deploy — this repo
+ships skill/partial source, not a service.
+
+**Confirmed working on a real merge.** The fixed adapter was used to merge
+`teton-code` PRs #36 and #37, both of which hit the exact triggering condition:
+
+```
+state=MERGED
+warn=merge completed remotely, but gh post-merge cleanup failed; the source branch is
+     likely NOT deleted — remove it with: git push origin --delete <branch>
+warn_class=local-git
+raw=failed to run git: fatal: 'main' is already used by worktree at '.../teton-code'
+```
+
+`rc=0`, both PRs confirmed `MERGED`. Before the fix that identical case produced `rc=1`
+and `error_class=network`. The warning was also correct in practice — the source branch
+had survived both times and needed an explicit `git push origin --delete`.
+
+### Downstream
+
+- `teton-code/.adlc/partials/forge.sh` re-synced in atelier-fashion/teton-code#37
+  (merged `51a5ded`), byte-identical to canonical.
+- `~/.claude/skills/partials/forge.sh` — the copy agent sessions actually load — still
+  needs `install.sh` to pick this up on each machine. Until then, sessions keep using the
+  old adapter and keep misreporting merges.
