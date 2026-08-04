@@ -145,6 +145,12 @@ _adlc_forge_classify() {
       echo "merge-blocked-by-policy" ;;
     *"unsupported"*|*"not supported"*|*"feature-unsupported"*)
       echo "feature-unsupported" ;;
+    *"failed to run git"*|*"already used by worktree"*|*"fatal: "*)
+      # BUG-150: a LOCAL git failure is not a network condition. It used to fall
+      # to the default and be reported as `network`, which reads as transient and
+      # invites a retry. Placed after the specific classes above so an auth or
+      # policy signature that happens to mention git still wins.
+      echo "local-git" ;;
     *)
       echo "network" ;;
   esac
@@ -333,8 +339,47 @@ adlc_forge_pr_merge() {
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)
-      _adlc_forge_run -- gh pr merge "$@"; adlc_fm_rc=$?
-      [ "$adlc_fm_rc" -eq 0 ] && printf 'state=MERGED\n'; return "$adlc_fm_rc" ;;
+      # BUG-150: `gh pr merge` does two independent things — the merge API call
+      # (remote) and a local tidy-up (switch off the merged branch, delete it).
+      # When only the LOCAL step fails, `gh` still exits non-zero. Returning that
+      # verbatim reported three completed merges as failures, classified
+      # `network` — the one class that invites a retry against an already-merged
+      # PR. The common trigger is not exotic: the default branch checked out in
+      # ANOTHER worktree, which is the normal state for any agent session working
+      # out of `.worktrees/` while the primary checkout sits on `main`.
+      #
+      # The exit code is a claim; the PR's state is the evidence. Capture the
+      # runner's normalized output rather than letting it stream, and on failure
+      # ask the forge what actually happened before believing it.
+      adlc_fm_out=$(_adlc_forge_run -- gh pr merge "$@"); adlc_fm_rc=$?
+      if [ "$adlc_fm_rc" -eq 0 ]; then
+        printf 'state=MERGED\n'
+        return 0
+      fi
+      # PR ref = first non-flag positional (same extraction the ADO arm does).
+      adlc_fm_ref=""
+      for adlc_fm_a in "$@"; do
+        case "$adlc_fm_a" in
+          --*) : ;;
+          *) [ -z "$adlc_fm_ref" ] && adlc_fm_ref="$adlc_fm_a" ;;
+        esac
+      done
+      if [ -n "$adlc_fm_ref" ] && gh pr view "$adlc_fm_ref" --json state 2>/dev/null \
+           | grep -q '"state":"MERGED"'; then
+        # Merged after all. Report success, but never silently: the caller has to
+        # know the local cleanup did not run, because `gh` aborts its cleanup
+        # sequence at the failed step and the REMOTE BRANCH SURVIVES. A caller
+        # that believed the merge failed would not clean it up either.
+        printf 'state=MERGED\n'
+        printf 'warn=merge completed remotely, but gh post-merge cleanup failed; the source branch is likely NOT deleted — remove it with: git push origin --delete <branch>\n'
+        # Demote the captured error block to warnings so the diagnostics survive
+        # without the output claiming failure.
+        [ -n "$adlc_fm_out" ] && printf '%s\n' "$adlc_fm_out" | sed 's/^error_class=/warn_class=/'
+        return 0
+      fi
+      # Genuinely not merged — re-emit the runner's error block unchanged.
+      [ -n "$adlc_fm_out" ] && printf '%s\n' "$adlc_fm_out"
+      return "$adlc_fm_rc" ;;
     azure-devops)
       # REQ-523 BR-9: callers pass gh-shaped flags (`<ref> --squash --delete-branch`).
       # `az repos pr update` does NOT understand `--squash` (bare) or `--delete-branch`;
