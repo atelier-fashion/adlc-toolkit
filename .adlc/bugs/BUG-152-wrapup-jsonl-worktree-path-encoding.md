@@ -1,7 +1,7 @@
 ---
 id: BUG-152
 title: "/wrapup session-JSONL discovery silently delegates the wrong transcript in harness worktrees"
-status: open
+status: resolved
 severity: high
 created: 2026-08-05
 updated: 2026-08-05
@@ -203,3 +203,24 @@ no partial does path encoding. Nothing to fix in parallel.
 - `wrapup/SKILL.md` — encoder, walk origin, exact-match/normalized-scan lookup, Phase-2
   refusal, and the surrounding prose + MANDATORY-paragraph correction
 - `.adlc/bugs/BUG-152-wrapup-jsonl-worktree-path-encoding.md` — this report
+- `.adlc/knowledge/lessons/LESSON-483-detected-miss-must-refuse-not-guess.md` — knowledge capture
+
+## Deployment
+
+PR #115, squash-merged to `main` as `5d3823e` (2026-08-05). No runtime deploy — this repo
+ships skill/partial source, not a service.
+
+The merge exercised the BUG-150 forge fix on its intended trigger and behaved correctly:
+`state=MERGED`, `rc=0`, with `warn_class=local-git` reporting that `main` was checked out in
+another worktree so the source branch had survived. The branch was then deleted explicitly,
+exactly as the warning instructed.
+
+### Downstream
+
+`~/.claude/skills` is a symlink to this repo's main checkout on this machine, so the fix is
+live for local sessions as soon as that checkout pulls `main`. Other machines pick it up via
+`install.sh`; until then their `/wrapup` keeps mis-selecting transcripts inside harness
+worktrees.
+
+Projects that vendored `wrapup/SKILL.md` under their own `.adlc/` carry the old encoder
+until re-synced — `/template-drift` will flag it.
