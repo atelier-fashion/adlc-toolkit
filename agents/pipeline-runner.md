@@ -76,11 +76,27 @@ After running all checklists, fix Critical and Major issues inline. Commit fixes
 
 The merge actor depends on REQ topology, decided from `pipeline-state.json.repos`:
 
-- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (source `partials/forge.sh` in the same fence; forge-neutral per REQ-520) from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`.
+- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (source `partials/forge.sh` in the same fence; forge-neutral per REQ-520) from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`. **The merge is not the end of the phase** — continue to the close-out below.
 
 - **Cross-repo REQ** (more than one touched repo): **STOP after Phase 7.** Do NOT attempt to merge — the orchestrator sequences merges per `mergeOrder`. Your terminal claim is `pr-ready`.
 
 If the orchestrator's dispatch prompt explicitly overrides the topology rule (e.g., "you own the merge for this single-repo REQ", or conversely "do not merge — orchestrator will handle"), follow the override and reflect it in your terminal claim.
+
+### Close-out (single-repo path, after a successful merge)
+
+Merging is only the first half of Phase 8. Once `merged` is true, run
+`/proceed`'s Step 8b: invoke `/wrapup` with the REQ ID, tear down the worktree
+via the absolute path in state, and write the **complete** terminal record —
+`completed:true`, `currentPhase:8`, `8` appended to `completedPhases`, a phase-8
+`phaseHistory` entry, and `repos[<id>].merged:true`. Claiming `merged` while the
+state file still reads `completed:false` is the defect BUG-193 records; it made
+12 of 36 state files in one project disagree with their own merged PRs.
+
+**When you claim `pr-ready`** (cross-repo, or an orchestrator override telling
+you not to merge): append to `pipeline-state.json.notes` that the orchestrator
+owns the merge *and* the Step 8b close-out. You are exiting with
+`completed:false` on purpose; say so in state so the record is not mistaken for
+an abandoned run.
 
 ### Worktree gotchas
 
@@ -88,7 +104,7 @@ When merging from inside a pipeline-runner subagent:
 
 1. **Merge from parent repo, not worktree.** `adlc_forge_pr_merge --delete-branch` (GitHub backend → `gh pr merge --delete-branch`) invoked from the worktree fails because git refuses to delete a branch that's currently checked out (the worktree owns it). Always `cd` to `repos[<id>].path` before invoking. Use absolute paths since shell state does not persist between Bash calls.
 2. **Worktree cleanup after remote merge.** If `git branch -D <branch>` fails locally after the remote PR is merged, the worktree still owns the branch. Run `git worktree remove --force <worktree-path>` first, then `git branch -D <branch>`. The remote PR being `MERGED` is the canonical signal of success — local cleanup failure is recoverable and does not block the terminal `merged` claim.
-3. **State write is mandatory.** Immediately after a successful `adlc_forge_pr_merge`, set `repos[<id>].merged = true` in `pipeline-state.json` so a mid-Phase-8 interruption can resume without double-merging.
+3. **State write is mandatory — and `merged` is not the whole of it.** Immediately after a successful `adlc_forge_pr_merge`, set `repos[<id>].merged = true` in `pipeline-state.json` so a mid-Phase-8 interruption can resume without double-merging. That flag is the *resume* anchor, not the terminal record: the close-out above still owes `completed`, `currentPhase`, `completedPhases`, and the phase-8 `phaseHistory` entry.
 
 ## Terminal state contract
 

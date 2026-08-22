@@ -508,9 +508,14 @@ one line per PR, then "All N PRs ready for merge".
 
 Merge in `mergeOrder`, run `/wrapup` from the primary (deploys + knowledge
 capture), tear down each touched-repo worktree via the absolute path in
-state, set `completed: true`. Terminal claim MUST be tagged exactly one of
+state, then write the terminal record: `completed:true`, `currentPhase:8`, `8`
+appended to `completedPhases`, a phase-8 `phaseHistory` entry, and
+`repos[<id>].merged:true`. **Topology decides who merges, not whether the
+close-out runs** — a single-repo REQ owes the same close-out as a cross-repo
+one (BUG-193). Terminal claim MUST be tagged exactly one of
 `{merged, pr-ready, blocked, failed}` — untagged claims are a protocol
-violation `/sprint` rejects. Merge conflicts are legitimate halt #3.
+violation `/sprint` rejects. On `pr-ready`, record in `notes` who owns the
+merge and the close-out. Merge conflicts are legitimate halt #3.
 
 ---
 

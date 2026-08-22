@@ -70,6 +70,25 @@ If any `pipeline-state.json` files exist with `"completed": false`, show:
 
 Phase names: 0=Worktree, 1=Validate Spec, 2=Architect, 3=Validate Tasks, 4=Implement, 5=Verify, 6=Create PR, 7=PR Cleanup, 7.5=Canary, 8=Wrapup
 
+**Separate the genuinely-active from the never-closed (BUG-193).** A
+`completed:false` state file is not proof of an active pipeline — a run that
+merged its PR but skipped the Phase 8 close-out leaves the same signature, and
+those files never self-correct. Before listing a REQ as active, test these
+offline invariants and report any that trip under a **Stale Pipeline State**
+heading instead, with the reconciliation as the recommended action:
+
+| Signature | Reading |
+|---|---|
+| `completed:false` but every touched repo has `merged:true` | merged; close-out skipped |
+| `completed:false`, `currentPhase:8`, `7 ∈ completedPhases` | reached the final phase and stopped — verify the PR, then close |
+| `completed:true` but `8 ∉ completedPhases`, or `currentPhase ≠ 8`, or a touched repo still `merged:false` | closed with a partial record |
+| the requirement's frontmatter says `status: complete` | the REQ is done; a `completed:false` state file contradicts it |
+
+Confirm against the forge before reconciling — `gh pr view <prNumber> --json
+state,mergedAt` — and write the real merge commit and timestamp into the
+phase-8 `phaseHistory` entry rather than a synthesized one. Never infer a merge
+from the requirement's status alone.
+
 #### Cross-Repo Activity (cross-repo mode only)
 If the cross-repo scan found REQs originating elsewhere that touch this repo, surface them separately so the user sees inbound cross-repo work without losing context on local REQs:
 
