@@ -78,7 +78,16 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 2. Set all task statuses to `complete`
 3. Update the `updated` date on all modified artifacts to today's date
 4. If any tasks were deferred or descoped, note them in the requirement file under a "Deferred" section
-5. If `pipeline-state.json` exists in the spec directory, update it: set `"completed": true` and add a final entry to `phaseHistory`
+5. If `pipeline-state.json` exists in the spec directory, write the **complete** terminal record — a partial write leaves a state file that contradicts the repo (BUG-193). All five:
+   - `"completed": true`
+   - `"currentPhase": 8`
+   - `8` appended to `completedPhases` (append; do not replace the array)
+   - a final `phaseHistory` entry for phase 8 naming the merge commit
+   - `repos[<id>].merged = true` for every touched repo whose PR is merged — verify against the forge (`adlc_forge_pr_view <prUrl> --fields state,mergedAt`) rather than assuming, since `/wrapup` may be running standalone after an out-of-band merge
+
+   Setting `completed:true` while leaving `completedPhases` at `[0..7]` or
+   `merged:false` is the failure this list exists to prevent. Re-read the file
+   after writing and confirm all five.
 
 ### Step 4: Capture Knowledge
 Evaluate whether any decisions, patterns, or lessons should be persisted:

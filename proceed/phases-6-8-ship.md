@@ -118,23 +118,50 @@ A vague "Pipeline complete" claim without one of these tags is a protocol violat
 
 **Clear-on-resolve (REQ-485 BR-11).** When this merge is the resume of a previously-held REQ (the orchestrator auto-rebased it cleanly after its blocker merged), the same write that sets `repos[<id>].merged = true` MUST also **clear this REQ's `blockers` entry** (transition `holdState` to `resumed`, then remove the entry). Setting `merged = true` and clearing `blockers` are distinct writes; historically only the former was done. The clear is the idempotency anchor for the unblock pass (it considers ONLY REQs whose `blockers` entry is still present), so a later blocker-merged event does not re-process an already-merged REQ.
 
-**Topology-driven merge actor**:
-- **Single-repo REQ** (one touched repo): the pipeline owns the merge in this phase. Run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (sourcing `partials/forge.sh` in the same fence) from the parent repo path (`repos[<id>].path`), NOT from the worktree. Terminal claim is `merged`.
-- **Cross-repo REQ** (multiple touched repos): use the cross-repo merge sequencing block below. Terminal claim is `merged` after all repos land, or `pr-ready` if dispatched by an orchestrator that owns merge sequencing.
+**Step 8a — Merge. Topology decides only *who merges*, never whether the
+close-out runs.** Both branches below converge on Step 8b, which is not
+optional for either.
 
-**Cross-repo merge sequencing**:
+- **Single-repo REQ** (one touched repo): the pipeline owns the merge in this phase. Run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (sourcing `partials/forge.sh` in the same fence) from the parent repo path (`repos[<id>].path`), NOT from the worktree. Set `repos[<id>].merged = true` in state immediately. Terminal claim is `merged`. **Then continue to Step 8b** — the merge is not the end of the phase.
+- **Cross-repo REQ** (multiple touched repos): walk `mergeOrder` from `pipeline-state.json`. For each repo id in order:
+  - Skip if `repos[<id>].merged == true` (already merged — recovering from an interrupted run).
+  - Merge that repo's PR (`adlc_forge_pr_merge <prUrl> --squash` or the project's configured merge strategy).
+  - Wait for the merge to land, then set `repos[<id>].merged = true` in state.
+  - If the next repo's PR was opened against `main` and depends on the just-merged changes being present, trigger a rebase/retarget before merging it. When siblings were developed in parallel worktrees against the same pre-REQ main, this is usually a no-op — but surface any auto-merge failure to the user as a conflict halt (legitimate halt #3).
 
-1. Walk `mergeOrder` from `pipeline-state.json`. For each repo id in order:
-   - Skip if `repos[<id>].merged == true` (already merged — recovering from an interrupted run).
-   - Merge that repo's PR (`adlc_forge_pr_merge <prUrl> --squash` or the project's configured merge strategy).
-   - Wait for the merge to land, then set `repos[<id>].merged = true` in state.
-   - If the next repo's PR was opened against `main` and depends on the just-merged changes being present, trigger a rebase/retarget before merging it. When siblings were developed in parallel worktrees against the same pre-REQ main, this is usually a no-op — but surface any auto-merge failure to the user as a conflict halt (legitimate halt #3).
-2. After all PRs are merged, run `/wrapup` with the REQ ID from the primary repo. In cross-repo mode, pass the list of touched repos so `/wrapup` can:
+  Terminal claim is `merged` after all repos land, or `pr-ready` if dispatched by an orchestrator that owns merge sequencing (see Step 8c).
+
+**Step 8b — Close out (runs in BOTH topologies).** Do not skip any of these
+because the REQ touched only one repo:
+
+1. Run `/wrapup` with the REQ ID from the primary repo. In cross-repo mode, also pass the list of touched repos so `/wrapup` can:
    - Update ADLC artifacts (spec, decisions, knowledge) in the primary
    - Trigger deploys for each deployable touched repo
    - Emit a ship summary spanning all repos
+2. **Write the terminal state record — before any worktree is torn down.**
+   `/wrapup` writes it (see `wrapup/SKILL.md` Step 3.5); verify it landed and
+   write any missing field yourself. Target the **primary repo's** copy at
+   `<repos[<primary>].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json` — never
+   the worktree's, which step 3 is about to delete. All five must hold:
+   - `"completed": true`
+   - `"currentPhase": 8`
+   - `8` appended to `completedPhases`
+   - a `phaseHistory` entry for phase 8 naming the merge commit
+   - `repos[<id>].merged == true` for every touched repo
+
+   A run that merged its PR but left `completed:false` has produced a state
+   file that contradicts the repo. Re-read the file after writing and confirm
+   the five fields rather than assuming the write landed.
 3. Remove the worktree in each touched repo using the absolute path from state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`. Do NOT use the relative `.worktrees/REQ-xxx` form here.
-4. Update `pipeline-state.json` with `"completed": true`.
-5. The pipeline is now complete.
+4. The pipeline is now complete.
+
+**Step 8c — When the terminal is `pr-ready`, name the reconciler.** A
+`pr-ready` claim means someone else merges: the `/sprint` orchestrator, or a
+human on a user-reserved merge. `completed:false` is correct at that moment and
+becomes wrong the instant the PR lands, so the run MUST record who closes it —
+append to `pipeline-state.json.notes`: `terminal pr-ready; <orchestrator |
+user> owns the merge and the Step 8b close-out`. Whoever performs that merge
+owns Step 8b in full. Without this the state file is stranded permanently:
+nothing else in the pipeline revisits a REQ once the run has exited.
 
 **End-of-phase log**: Emit the ship summary from wrapup including per-repo merge confirmations and deployment status. Pipeline complete.
