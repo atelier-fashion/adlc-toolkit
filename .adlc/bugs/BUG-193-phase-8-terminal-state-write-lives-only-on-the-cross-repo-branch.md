@@ -1,7 +1,7 @@
 ---
 id: BUG-193
 title: "Phase 8's terminal state write lives only on the cross-repo branch, so a single-repo pipeline never closes its own state file"
-status: open
+status: resolved
 severity: medium
 created: 2026-08-22
 updated: 2026-08-22
@@ -136,6 +136,14 @@ years of runs earlier.
 the project repo where pipelines actually run. Making doctor scan arbitrary
 project repos needs a repo-discovery mechanism it does not have. `/status`
 already runs in the right place.
+
+## Deployment
+
+Merged as `1e4c223` (PR #117). This repo has no CI and no Cloud Run / iOS
+deploy targets — the deploy surface is the live install, and
+`~/.claude/skills` and `~/.claude/agents` are symlinks into this checkout, so
+the fix is in effect on `main` with no copy step. Verified: the live paths
+resolve to the restructured Phase 8 and the new `/status` invariants.
 
 ## Files Changed
 
