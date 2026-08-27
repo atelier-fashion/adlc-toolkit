@@ -220,6 +220,14 @@ ordering verdict). The block is split-free (newline iteration, no unquoted word-
 behaves identically under `sh` and `zsh` (LESSON-329), and uses `mktemp` + cleanup per PR.
 
 ### Step 6: Update Requirement Status
+
+<!-- retrieval-status: lifecycle-write -->
+- `approved` — the post-architecture REQ status written by step 1 below
+<!-- /retrieval-status -->
+
+Declared for `tools/lint-skills`'s `retrieval-status-parity` check: any status
+this skill writes must remain retrievable by `/spec` Step 1.6 (BUG-194).
+
 1. Update the requirement's frontmatter status from `draft` to `approved`
 2. Update the `updated` date
 

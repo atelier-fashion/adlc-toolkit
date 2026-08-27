@@ -77,10 +77,61 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 
 1. **Enumerate candidate files** with three Grep passes (paths relative to project root):
    - `.adlc/knowledge/lessons/*.md` — no status filter, all lessons are candidates
-   - `.adlc/specs/*/requirement.md` — include only where frontmatter `status` is `approved`, `in-progress`, or `deployed`
-   - `.adlc/bugs/*.md` — include only where frontmatter `status` is `resolved`
+   - `.adlc/specs/*/requirement.md` — **exclusion filter (BUG-194)**: admit every spec EXCEPT those whose frontmatter `status` is one of `draft`, `superseded`, `cancelled`, `rejected`. A spec with a missing or unparseable `status` is **admitted** (it is dropped later by sub-step 2 only if the whole frontmatter block is malformed).
+   - `.adlc/bugs/*.md` — include only where frontmatter `status` is `resolved` or `closed`
+
+   The spec filter is an **exclusion list, not an allowlist**. This direction is
+   load-bearing, not stylistic: the terminal status every shipped REQ lands in is
+   `complete` (written by `/wrapup` Step 4.1 and `/proceed` Phase 6-8), and
+   consumer repos additionally carry the legacy synonyms `done`, `completed`, and
+   `deployed`. An allowlist has to enumerate all of those correctly or it silently
+   discards the corpus — which is exactly what BUG-194 was: the original
+   `approved` | `in-progress` | `deployed` allowlist admitted 0 of 42 toolkit
+   specs and 11 of 543 ecosystem-wide, because two of its three values are
+   vocabulary no toolkit skill has ever written. An exclusion list fails toward
+   recall: an unrecognized or newly-invented status is retrieved (cheap — one
+   extra scored candidate) rather than silently dropped (expensive — invisible
+   corpus loss).
+
+   Admitted (non-exhaustive, for orientation): `complete`, `deployed`, `done`,
+   `completed`, `approved`, `in-progress`, `in-review`.
+   Excluded, and why: `draft` (not yet validated — not prior art),
+   `superseded` / `cancelled` / `rejected` (withdrawn — citing them would
+   propagate decisions that were explicitly reversed).
+
+   The exclusion set below is the machine-readable source of truth for this
+   filter. `tools/lint-skills`'s `retrieval-status-parity` check reads it and
+   fails if any status the lifecycle skills *write* appears in it (BUG-194's
+   recurrence guard — LESSON-012: structural enforcement, not a prose promise).
+   Keep the block and the prose above in sync when changing either.
+
+<!-- retrieval-status: spec-exclude -->
+- `draft` — not yet validated; not prior art
+- `superseded` — replaced by a later REQ; citing it propagates a reversed decision
+- `cancelled` — abandoned before shipping
+- `rejected` — explicitly declined
+<!-- /retrieval-status -->
 
    If any directory is empty or missing, skip it and continue (cold-start path).
+
+1a. **Status-filter shrink diagnostic (BUG-194 — do not skip).** After the spec
+   pass, compare the number of `.adlc/specs/*/requirement.md` files that exist on
+   disk against the number that survived the exclusion filter. If the directory
+   held **one or more** spec files and **zero** survived, this is not a cold start
+   — it is a filter/vocabulary mismatch. Emit to stderr:
+
+   ```
+   /spec: WARNING — spec corpus has <N> requirement.md files but 0 passed the status filter (statuses seen: <comma-separated distinct values>). Retrieval is running on lessons+bugs only. This is a filter/vocabulary mismatch, not a cold start — see BUG-194.
+   ```
+
+   Then continue (this is a warning, never a halt). Carry the fact forward: the
+   `## Retrieved Context` section in Step 3 must say `Spec corpus suppressed by
+   status filter — see stderr warning (BUG-194)` rather than the plain
+   no-context line, so the degradation is visible in the artifact and not only in
+   the terminal. This diagnostic exists because the cold-start message in
+   sub-step 8 is otherwise byte-identical for "no specs exist" and "every spec
+   was filtered out" — the failure mode BUG-194 hid behind for four months
+   (LESSON-012: a silent path needs a structural signal, not a prose promise).
 
 2. **Read the frontmatter of every candidate** using Read with `limit: 30` (enough to cover full frontmatter block including any leading HTML comments, e.g., the lesson template's naming-convention comment). Parse these fields: `component`, `domain`, `stack`, `concerns`, `tags`, `updated`, `created`, `status`. If the frontmatter is malformed (missing `---` delimiters, unparseable YAML), skip that doc and continue — do not crash.
 
@@ -185,7 +236,7 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
      ... (etc.)
    ```
 
-9. **Cold-start path**: if every corpus is empty, or all candidates filter out to zero, skip retrieval and record this explicitly when Step 3 writes the `## Retrieved Context` section. Proceed to authoring without retrieved bodies.
+9. **Cold-start path**: if every corpus is empty, or all candidates filter out to zero, skip retrieval and record this explicitly when Step 3 writes the `## Retrieved Context` section. Proceed to authoring without retrieved bodies. **A true cold start requires the corpora to be empty or every candidate to lose on *score*.** If the spec corpus had files on disk and lost them all to the *status filter*, that is the BUG-194 mismatch, not a cold start — sub-step 1a's warning fires and Step 3 records the suppressed-corpus line instead of the cold-start line.
 
 ### Step 2: Determine the Next REQ ID
 1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs) — but the counter is now a **cache, not the authority**: the remote is the source of truth (REQ-518). Allocation derives the remote high-water, takes `max(remote, local)`, allocates `max + 1`, and fast-forwards the local counter — all inside the existing `mkdir` lock with its symlink/TOCTOU guards intact.
@@ -215,7 +266,7 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    - **Assumptions**: Things assumed to be true that could affect the design
    - **Open Questions**: Questions that need answers before implementation
    - **Out of Scope**: Items explicitly excluded to prevent scope creep
-   - **Retrieved Context** (NEW, always present): append a `## Retrieved Context` section at the end of the spec listing every retrieved source from the retrieval summary produced in Step 1.6 in the form `ID (corpus, score): title`. If no context was retrieved (cold-start path — either the corpus is empty or no documents scored above zero), write exactly: `No prior context retrieved — no tagged documents matched this area.`
+   - **Retrieved Context** (NEW, always present): append a `## Retrieved Context` section at the end of the spec listing every retrieved source from the retrieval summary produced in Step 1.6 in the form `ID (corpus, score): title`. If no context was retrieved (cold-start path — either the corpus is empty or no documents scored above zero), write exactly: `No prior context retrieved — no tagged documents matched this area.` If instead Step 1.6 sub-step 1a fired (spec files existed on disk but none survived the status filter), write exactly: `Spec corpus suppressed by status filter — see stderr warning (BUG-194).` and, when lessons or bugs still matched, list them beneath it. Never emit the cold-start line for a status-filter suppression — collapsing the two is the defect BUG-194 fixed.
 4. **Inline citations**: when a retrieved doc directly informed a Business Rule, Assumption, or Acceptance Criterion, add an inline citation in the form `(informed by BUG-012)` or `(informed by REQ-019, LESSON-034)` at the end of that line. Citations are required when the retrieved doc is load-bearing for the rule; optional when the doc was background reading only.
 
 ### Step 4: Present for Review

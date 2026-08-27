@@ -22,6 +22,14 @@ merge sequencing, and terminal-state contract live here.
 1. For each touched repo:
    - Inside that repo's worktree, ensure all changes are committed and push the feature branch: `git -C <worktree> push -u origin feat/REQ-xxx-short-description`
 2. Set the requirement status to `complete` in its frontmatter (primary repo only).
+
+   <!-- retrieval-status: lifecycle-write -->
+   - `complete` — the terminal REQ status written by this step
+   <!-- /retrieval-status -->
+
+   Declared for `tools/lint-skills`'s `retrieval-status-parity` check: any status
+   this phase writes must remain retrievable by `/spec` Step 1.6 (BUG-194).
+
 3. **Flip each touched repo's draft PR (opened at Step 0, step 8a) to ready** with `adlc_forge_pr_ready <prNumber>` (read `prNumber`/`prUrl` from `pipeline-state.json`) — do **NOT** create a new PR (REQ-483 BR-2). **Fallback (LESSON-004):** if `prNumber` is absent (a pipeline started before draft-PR-early), `adlc_forge_pr_create --base <integrationBranch>` instead (never default base to `main`). Then set the full body **preserving the `adlc-footprint` block** `/architect` published — read the current body, extract the fenced footprint block, and re-append it to the new body, and drop the Step-0 `[WIP]` title prefix:
    ```sh
    . .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
