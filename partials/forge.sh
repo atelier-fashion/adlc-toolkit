@@ -354,6 +354,12 @@ adlc_forge_pr_merge() {
       adlc_fm_out=$(_adlc_forge_run -- gh pr merge "$@"); adlc_fm_rc=$?
       if [ "$adlc_fm_rc" -eq 0 ]; then
         printf 'state=MERGED\n'
+        # BUG-195: emit `branch_deleted` on BOTH success paths whenever deletion was
+        # requested, so a caller can branch on one field instead of parsing prose.
+        # gh ran its full cleanup here, so the branch is gone.
+        for adlc_fm_a in "$@"; do
+          [ "$adlc_fm_a" = "--delete-branch" ] && { printf 'branch_deleted=1\n'; break; }
+        done
         return 0
       fi
       # PR ref = first non-flag positional (same extraction the ADO arm does).
@@ -371,7 +377,56 @@ adlc_forge_pr_merge() {
         # sequence at the failed step and the REMOTE BRANCH SURVIVES. A caller
         # that believed the merge failed would not clean it up either.
         printf 'state=MERGED\n'
-        printf 'warn=merge completed remotely, but gh post-merge cleanup failed; the source branch is likely NOT deleted — remove it with: git push origin --delete <branch>\n'
+        # BUG-195: BUG-150 stopped here and told the caller — in prose, on stderr —
+        # to run `git push origin --delete <branch>` itself. No caller ever did:
+        # every consumer is a skill branching on the normalized fields, and `warn=`
+        # is not one of them. `--delete-branch` is a request, so finish it here
+        # rather than emitting an imperative sentence into a machine-read channel.
+        # Only the REMOTE ref is ours to clean up; the local branch is the caller's
+        # own cleanup step (and may legitimately still be checked out).
+        adlc_fm_delreq=0
+        for adlc_fm_a in "$@"; do
+          [ "$adlc_fm_a" = "--delete-branch" ] && adlc_fm_delreq=1
+        done
+        adlc_fm_branch=""
+        adlc_fm_fork=""
+        if [ "$adlc_fm_delreq" -eq 1 ]; then
+          # One call for both facts. `isCrossRepository` guards the case that must
+          # never be auto-deleted: a PR from a fork, where the head branch belongs
+          # to someone else's repo.
+          adlc_fm_meta=$(gh pr view "$adlc_fm_ref" --json headRefName,isCrossRepository 2>/dev/null)
+          adlc_fm_branch=$(printf '%s' "$adlc_fm_meta" \
+            | sed -n 's/.*"headRefName":"\([^"]*\)".*/\1/p')
+          case "$adlc_fm_meta" in *'"isCrossRepository":true'*) adlc_fm_fork=1 ;; esac
+        fi
+        if [ "$adlc_fm_delreq" -eq 1 ] && [ -n "$adlc_fm_fork" ]; then
+          printf 'warn=merge completed remotely, but gh post-merge cleanup failed; the source branch is on a fork and was NOT deleted (never auto-deleted)\n'
+          printf 'branch_deleted=skipped-fork\n'
+        elif [ "$adlc_fm_delreq" -eq 1 ] && [ -n "$adlc_fm_branch" ]; then
+          # Idempotent by construction: a remote ref that is already gone is the
+          # state we wanted, not an error. `git push --delete` touches no local
+          # ref, so it is immune to the worktree collision that broke gh's cleanup.
+          adlc_fm_delerr=$(git -C "${ADLC_FORGE_REPO:-.}" push origin --delete \
+            "$adlc_fm_branch" 2>&1); adlc_fm_delrc=$?
+          if [ "$adlc_fm_delrc" -eq 0 ]; then
+            printf 'warn=merge completed remotely and gh post-merge cleanup failed; the adapter deleted the remote branch instead (local branch, if any, is the caller to clean up)\n'
+            printf 'branch_deleted=1\n'
+          else
+            case "$adlc_fm_delerr" in
+              *"remote ref does not exist"*|*"unable to delete"*"remote ref does not exist"*)
+                printf 'warn=merge completed remotely and gh post-merge cleanup failed; the remote branch was already gone\n'
+                printf 'branch_deleted=1\n' ;;
+              *)
+                printf 'warn=merge completed remotely, but gh post-merge cleanup failed AND the adapter could not delete the remote branch — remove it with: git push origin --delete %s\n' "$adlc_fm_branch"
+                printf 'branch_deleted=0\n'
+                printf '%s\n' "$adlc_fm_delerr" | sed 's/^/delete_raw=/' ;;
+            esac
+          fi
+        else
+          # Deletion was not requested, or the branch name could not be resolved.
+          printf 'warn=merge completed remotely, but gh post-merge cleanup failed; the source branch is likely NOT deleted — remove it with: git push origin --delete <branch>\n'
+          [ "$adlc_fm_delreq" -eq 1 ] && printf 'branch_deleted=0\n'
+        fi
         # Demote the captured error block to warnings so the diagnostics survive
         # without the output claiming failure.
         [ -n "$adlc_fm_out" ] && printf '%s\n' "$adlc_fm_out" | sed 's/^error_class=/warn_class=/'

@@ -60,6 +60,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
    - Re-run `gh pr checks <prUrl>` and wait for CI to re-pass before merging
 8. Verify PR status is mergeable: `adlc_forge_pr_view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE` and a clean merge state (on GitHub; ADO normalizes via `pr_view`). If not, stop and surface the reason.
 9. Merge the PR using `adlc_forge_pr_merge <prUrl> --squash --delete-branch`. In cross-repo mode, update `pipeline-state.json` — set `repos[<id>].merged = true`.
+   **Check `branch_deleted` in the output (BUG-195).** `gh`'s post-merge cleanup routinely aborts when the default branch is checked out in another worktree — the normal state for a pipeline session. The adapter completes the remote deletion itself and reports `branch_deleted=1` (or `skipped-fork`). If it reports `branch_deleted=0`, the remote branch survived: run the exact `git push origin --delete <branch>` the `warn=` line names before continuing. Branch on this field, never on the `warn=` prose.
 10. **Capture cleanup state BEFORE leaving the branch**. You must record three things while you are still on the feature branch in the feature worktree, because the subsequent `git checkout main` may only work in the main worktree and you will lose the ability to look these up afterwards:
     - Branch name: `BRANCH=$(git -C <worktree> branch --show-current)`
     - Current working-tree path: `WT_PATH=<worktree>`

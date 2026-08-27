@@ -187,6 +187,138 @@ esac
 # The diagnostics survive, demoted to a warning rather than dropped.
 contains "merge keeps the raw diagnostic" "already used by worktree" "$wout"
 
+# BUG-195: `--delete-branch` must be COMPLETED, not downgraded to advice.
+# The same shim, plus `pr view --json headRefName,isCrossRepository` and a
+# recording `git` so we can assert the remote delete actually fired.
+DSHIM="$SBX/dbin"; mkdir -p "$DSHIM"
+GITREC="$SBX/git-delete-rec"; export GITREC
+cat > "$DSHIM/gh" <<'DGHSHIM'
+#!/bin/sh
+case "$1 $2" in
+  "pr merge")
+    echo "failed to run git: fatal: 'main' is already used by worktree at '/x'" >&2
+    exit 1 ;;
+  "pr view")
+    case "$*" in
+      *headRefName*) echo '{"headRefName":"fix/bug-195-slug","isCrossRepository":false}' ;;
+      *) echo '{"state":"MERGED"}' ;;
+    esac ;;
+esac
+exit 0
+DGHSHIM
+chmod +x "$DSHIM/gh"
+cat > "$DSHIM/git" <<'DGITSHIM'
+#!/bin/sh
+echo "$*" >> "$GITREC"
+exit 0
+DGITSHIM
+chmod +x "$DSHIM/git"
+: > "$GITREC"
+OLDPATH4=$PATH; PATH="$DSHIM:$PATH"; export PATH
+export ADLC_FORGE_PROVIDER_OVERRIDE=github
+dout=$(adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); drc=$?
+check "delete-branch: rc still 0" "0" "$drc"
+contains "delete-branch: reports MERGED" "state=MERGED" "$dout"
+contains "delete-branch: reports branch_deleted=1" "branch_deleted=1" "$dout"
+contains "delete-branch: remote delete actually ran" "push origin --delete fix/bug-195-slug" "$(cat "$GITREC")"
+case "$dout" in
+  *"remove it with"*) fail "delete-branch: must not tell the caller to do it manually (got: $dout)" ;;
+  *) pass "delete-branch: no manual-remediation instruction when the adapter handled it" ;;
+esac
+# The underlying diagnostic still survives, demoted.
+contains "delete-branch: keeps the raw diagnostic" "already used by worktree" "$dout"
+
+# Idempotence: a remote ref that is already gone is the desired state, not an error.
+cat > "$DSHIM/git" <<'DGITSHIM2'
+#!/bin/sh
+echo "$*" >> "$GITREC"
+echo "error: unable to delete 'x': remote ref does not exist" >&2
+exit 1
+DGITSHIM2
+chmod +x "$DSHIM/git"
+: > "$GITREC"
+iout=$(adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); irc=$?
+check "delete-branch: already-gone ref rc 0" "0" "$irc"
+contains "delete-branch: already-gone counts as deleted" "branch_deleted=1" "$iout"
+
+# A genuine delete failure must report branch_deleted=0 AND name the exact command.
+cat > "$DSHIM/git" <<'DGITSHIM3'
+#!/bin/sh
+echo "$*" >> "$GITREC"
+echo "fatal: could not read from remote repository" >&2
+exit 1
+DGITSHIM3
+chmod +x "$DSHIM/git"
+: > "$GITREC"
+fout=$(adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); frc=$?
+check "delete-branch: unrecoverable delete still rc 0 (merge landed)" "0" "$frc"
+contains "delete-branch: reports branch_deleted=0" "branch_deleted=0" "$fout"
+contains "delete-branch: names the concrete branch, not a placeholder" "git push origin --delete fix/bug-195-slug" "$fout"
+contains "delete-branch: keeps the delete diagnostic" "delete_raw=" "$fout"
+case "$fout" in
+  *"<branch>"*) fail "delete-branch: must substitute the branch, not emit a placeholder (got: $fout)" ;;
+  *) pass "delete-branch: no unsubstituted <branch> placeholder" ;;
+esac
+
+# A fork PR head is never auto-deleted.
+cat > "$DSHIM/gh" <<'FGHSHIM'
+#!/bin/sh
+case "$1 $2" in
+  "pr merge")
+    echo "failed to run git: fatal: 'main' is already used by worktree at '/x'" >&2
+    exit 1 ;;
+  "pr view")
+    case "$*" in
+      *headRefName*) echo '{"headRefName":"contrib/patch","isCrossRepository":true}' ;;
+      *) echo '{"state":"MERGED"}' ;;
+    esac ;;
+esac
+exit 0
+FGHSHIM
+chmod +x "$DSHIM/gh"
+cat > "$DSHIM/git" <<'FGITSHIM'
+#!/bin/sh
+echo "$*" >> "$GITREC"
+exit 0
+FGITSHIM
+chmod +x "$DSHIM/git"
+: > "$GITREC"
+kout=$(adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); krc=$?
+check "delete-branch: fork PR rc 0" "0" "$krc"
+contains "delete-branch: fork head reported as skipped" "branch_deleted=skipped-fork" "$kout"
+case "$(cat "$GITREC")" in
+  *"--delete"*) fail "delete-branch: must NEVER delete a fork's head branch (git ran: $(cat "$GITREC"))" ;;
+  *) pass "delete-branch: no delete attempted against a fork head" ;;
+esac
+
+# No --delete-branch requested -> no deletion, and no branch_deleted field at all.
+cat > "$DSHIM/gh" <<'NDGHSHIM'
+#!/bin/sh
+case "$1 $2" in
+  "pr merge")
+    echo "failed to run git: fatal: 'main' is already used by worktree at '/x'" >&2
+    exit 1 ;;
+  "pr view") echo '{"state":"MERGED"}' ;;
+esac
+exit 0
+NDGHSHIM
+chmod +x "$DSHIM/gh"
+: > "$GITREC"
+uout=$(adlc_forge_pr_merge 9 --squash 2>&1); urc=$?
+check "no delete-branch: rc 0" "0" "$urc"
+case "$uout" in
+  *"branch_deleted="*) fail "no delete-branch: must not emit branch_deleted (got: $uout)" ;;
+  *) pass "no delete-branch: emits no branch_deleted field" ;;
+esac
+case "$(cat "$GITREC")" in
+  *"--delete"*) fail "no delete-branch: must not delete anything (git ran: $(cat "$GITREC"))" ;;
+  *) pass "no delete-branch: no deletion attempted" ;;
+esac
+PATH=$OLDPATH4; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE
+export ADLC_FORGE_PROVIDER_OVERRIDE=github
+PATH="$WSHIM:$PATH"; export PATH
+
 # A merge that genuinely did NOT land still fails, with the error block intact.
 NSHIM="$SBX/nbin"; mkdir -p "$NSHIM"
 cat > "$NSHIM/gh" <<'NGHSHIM'
