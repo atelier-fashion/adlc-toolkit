@@ -74,6 +74,17 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 **Cross-repo aggregate log**: after walking every touched repo, emit a one-line summary per repo: `<repo-id>: merged <prUrl>, worktree cleaned` or `<repo-id>: already merged (from /proceed Phase 8)`.
 
 ### Step 3: Update ADLC Artifact Statuses
+
+<!-- retrieval-status: lifecycle-write -->
+- `complete` — the terminal REQ status written by step 1 below
+<!-- /retrieval-status -->
+
+`complete` is the status `/spec` Step 1.6 must be able to retrieve. The block
+above is the machine-readable declaration `tools/lint-skills`'s
+`retrieval-status-parity` check reads; if this status is ever changed here
+without updating `/spec`'s exclusion list, the check fails rather than letting
+spec retrieval go silently empty (BUG-194).
+
 1. Set the requirement's frontmatter status to `complete`
 2. Set all task statuses to `complete`
 3. Update the `updated` date on all modified artifacts to today's date

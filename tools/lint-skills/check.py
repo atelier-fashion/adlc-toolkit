@@ -214,6 +214,31 @@ SYNC_SURFACE_OPEN_RE = re.compile(r"^\s*<!--\s*sync-surfaces:\s*([A-Za-z0-9_-]+)
 SYNC_SURFACE_CLOSE_RE = re.compile(r"^\s*<!--\s*/sync-surfaces\s*-->")
 SYNC_SURFACE_ITEM_RE = re.compile(r"^\s*-\s+`([A-Za-z0-9_-]+)`")
 
+# A retrieval-status marker block: `<!-- retrieval-status: <which> -->` ...
+# `<!-- /retrieval-status -->`, with `- `status`` bullets inside. Same shape and
+# same rationale as the sync-surfaces block above (LESSON-019 stable anchor,
+# LESSON-012 structural-over-prose), reused for a different axis: the REQ status
+# values the lifecycle skills WRITE vs the values `/spec` Step 1.6 EXCLUDES from
+# retrieval. BUG-194: those two drifted apart silently for four months because
+# nothing mechanically compared them.
+RETRIEVAL_STATUS_OPEN_RE = re.compile(
+    r"^\s*<!--\s*retrieval-status:\s*([A-Za-z0-9_-]+)\s*-->"
+)
+RETRIEVAL_STATUS_CLOSE_RE = re.compile(r"^\s*<!--\s*/retrieval-status\s*-->")
+RETRIEVAL_STATUS_ITEM_RE = re.compile(r"^\s*-\s+`([A-Za-z0-9_-]+)`")
+
+# Files that write a REQ `status:` value onto requirement frontmatter. Each MUST
+# carry a `<!-- retrieval-status: lifecycle-write -->` block naming what it writes.
+# The list is explicit rather than discovered so that DELETING a declaration is a
+# finding instead of a silent pass (the guard-rot failure mode of LESSON-019 #1).
+LIFECYCLE_WRITE_SITES = (
+    "architect/SKILL.md",
+    "wrapup/SKILL.md",
+    "proceed/phases-6-8-ship.md",
+)
+# The single reader whose exclusion list must not swallow any written status.
+RETRIEVAL_READER_SITE = "spec/SKILL.md"
+
 
 class Finding(NamedTuple):
     file: str
@@ -850,6 +875,136 @@ def check_sync_surface_parity(root: Path) -> list[Finding]:
     return findings
 
 
+def parse_retrieval_status_block(text: str, which: str) -> set[str] | None:
+    """Return the union of status names in every ``retrieval-status: <which>`` block.
+
+    Returns ``None`` (not an empty set) when no such block is present, so the
+    caller can distinguish "marker absent → pre-BUG-194 checkout, degrade
+    silently" from "marker present but empty → a real, reportable gutting of the
+    filter". Unlike ``parse_sync_surface_block`` this unions across *all* matching
+    blocks in the file: a single skill file may write a status from more than one
+    step, and a second declaration must add to the set rather than shadow it.
+    """
+    lines = text.splitlines()
+    statuses: set[str] = set()
+    found = False
+    i = 0
+    n = len(lines)
+    while i < n:
+        m = RETRIEVAL_STATUS_OPEN_RE.search(lines[i])
+        if m and m.group(1) == which:
+            found = True
+            i += 1
+            while i < n and not RETRIEVAL_STATUS_CLOSE_RE.search(lines[i]):
+                im = RETRIEVAL_STATUS_ITEM_RE.match(lines[i])
+                if im:
+                    statuses.add(im.group(1))
+                i += 1
+        i += 1
+    return statuses if found else None
+
+
+def check_retrieval_status_parity(root: Path) -> list[Finding]:
+    """BUG-194: no REQ status a lifecycle skill writes may be excluded from `/spec` retrieval.
+
+    Per-root check (mirrors ``check_sync_surface_parity``). ``/spec`` Step 1.6
+    filters the spec corpus by frontmatter ``status``; ``/architect``,
+    ``/wrapup``, and ``/proceed`` Phase 6-8 are the skills that write that field.
+    Before BUG-194 the reader's allowlist (``approved`` | ``in-progress`` |
+    ``deployed``) shared exactly one value with the writers' vocabulary
+    (``approved``, ``complete``) — so retrieval returned ~0 specs and reported it
+    as a cold start. Nothing detected it because nothing compared the two sides.
+
+    Gate: the whole check degrades to zero findings unless ``spec/SKILL.md``
+    exists AND carries a ``retrieval-status: spec-exclude`` block. That keeps it
+    inert outside the toolkit checkout and on pre-BUG-194 copies, while making
+    the post-fix shape enforceable.
+
+    Rules:
+      1. The exclusion block must be non-empty — an empty one means the filter
+         was gutted, and an empty exclusion set would silently admit ``draft``
+         and ``superseded`` specs as prior art.
+      2. Every file in ``LIFECYCLE_WRITE_SITES`` must still exist and still carry
+         a ``retrieval-status: lifecycle-write`` block. A missing declaration is
+         reported rather than skipped — otherwise deleting the declaration would
+         silently disarm the guard (LESSON-019 #1).
+      3. No status named by any write site may appear in the reader's exclusion
+         set. This is the actual BUG-194 invariant.
+    """
+    reader_path = root / RETRIEVAL_READER_SITE
+    if not reader_path.is_file():
+        return []  # not the toolkit checkout — skip.
+    try:
+        reader_text = reader_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    excluded = parse_retrieval_status_block(reader_text, "spec-exclude")
+    if excluded is None:
+        return []  # pre-BUG-194 checkout — degrade silently, no false red.
+
+    findings: list[Finding] = []
+
+    # Rule 1: a present-but-empty exclusion block.
+    if not excluded:
+        findings.append(
+            Finding(
+                RETRIEVAL_READER_SITE, 1, "retrieval-status-parity",
+                "the `retrieval-status: spec-exclude` block is present but empty — "
+                "Step 1.6 would admit `draft` and `superseded` specs as prior art",
+            )
+        )
+
+    for rel in LIFECYCLE_WRITE_SITES:
+        site_path = root / rel
+        if not site_path.is_file():
+            findings.append(
+                Finding(
+                    rel, 1, "retrieval-status-parity",
+                    "lifecycle status-write site is missing — if it moved, update "
+                    "LIFECYCLE_WRITE_SITES in tools/lint-skills/check.py in the same "
+                    "change, or the BUG-194 parity guard silently covers nothing",
+                )
+            )
+            continue
+        try:
+            site_text = site_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        written = parse_retrieval_status_block(site_text, "lifecycle-write")
+        # Rule 2: declaration removed or never added.
+        if written is None:
+            findings.append(
+                Finding(
+                    rel, 1, "retrieval-status-parity",
+                    "writes a REQ `status:` but declares no "
+                    "`<!-- retrieval-status: lifecycle-write -->` block — /spec's "
+                    "exclusion list cannot be checked against it (BUG-194)",
+                )
+            )
+            continue
+        if not written:
+            findings.append(
+                Finding(
+                    rel, 1, "retrieval-status-parity",
+                    "`retrieval-status: lifecycle-write` block is present but empty — "
+                    "name the status this site writes (BUG-194)",
+                )
+            )
+            continue
+        # Rule 3: the BUG-194 invariant.
+        for status in sorted(written & excluded):
+            findings.append(
+                Finding(
+                    RETRIEVAL_READER_SITE, 1, "retrieval-status-parity",
+                    f"status `{status}` is written by {rel} but excluded from /spec "
+                    "Step 1.6 spec retrieval — every spec in that state becomes "
+                    "invisible and the skill reports it as a cold start (BUG-194)",
+                )
+            )
+
+    return findings
+
+
 def run(root: Path) -> list[Finding]:
     sentinels = load_sentinels(SENTINELS_FILE)
     # REQ-436 ADR-4: read the sourced telemetry partials ONCE per run (never
@@ -885,6 +1040,8 @@ def run(root: Path) -> list[Finding]:
     findings.extend(check_agent_model_drift(root))
     # Per-root (REQ-525 AC4): /init copy list vs /template-drift checked list parity.
     findings.extend(check_sync_surface_parity(root))
+    # Per-root (BUG-194): lifecycle status writes vs /spec's retrieval exclusion list.
+    findings.extend(check_retrieval_status_parity(root))
     return findings
 
 
