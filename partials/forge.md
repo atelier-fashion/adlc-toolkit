@@ -79,6 +79,29 @@ into one label.
 **State normalization:** `pr_view.state ∈ {OPEN, MERGED, CLOSED}`. GitHub states
 pass through; ADO `active→OPEN`, `completed→MERGED`, `abandoned→CLOSED`.
 
+**Partial success on `pr_merge` (BUG-150, BUG-195).** `gh pr merge` performs a
+remote merge and then a local tidy-up, and it aborts that tidy-up at the first
+failure — routinely, because the default branch is checked out in another
+worktree. The merge is real; gh's exit code is not evidence about it. The adapter
+therefore asks the forge what happened and, when the PR is `MERGED`, returns 0
+with `state=MERGED` plus a `warn=` line and the demoted `warn_class=`/`raw=`
+diagnostics (never `error_class=` — the merge did not fail).
+
+When `--delete-branch` was requested, `pr_merge` additionally emits:
+
+```
+branch_deleted=<1|0|skipped-fork>
+```
+
+`1` the remote branch is gone (gh deleted it, or the adapter completed the
+deletion, or it was already absent); `0` it survives and the `warn=` line names
+the exact `git push origin --delete <branch>` to run; `skipped-fork` the head
+branch lives on a fork and is never auto-deleted. **Branch on this field, not on
+`warn=` prose** — BUG-195 was precisely a remediation written as an English
+sentence in a channel every caller parses for `key=value`. Only the *remote* ref
+is the adapter's to clean up; the local branch stays the caller's own cleanup step
+(it may still be checked out).
+
 **Capability mismatches (BR-5), explicit:** ADO draft (`--draft`/publish), squash
 (`--squash` + auto-complete `--status completed`), delete-source-branch, and a
 branch-policy block → `merge-blocked-by-policy` (surfaced as a blocker, **never
