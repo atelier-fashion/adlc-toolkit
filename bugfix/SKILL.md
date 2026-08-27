@@ -138,6 +138,7 @@ This is the equivalent of `/proceed`'s Phase 8 / `/wrapup` steps, condensed for 
 **Step 1 — Merge each PR.**
 1. Verify the PR is mergeable: `adlc_forge_pr_view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE` (on GitHub; ADO normalizes via `pr_view`). If main has advanced, rebase the fix branch onto `origin/main`, force-push with lease, and wait for CI to re-pass.
 2. Merge with squash + branch delete: `adlc_forge_pr_merge <prUrl> --squash --delete-branch`. In cross-repo mode, walk `touched_repos:` order (or `merge_order:` from `.adlc/config.yml` if not specified on the bug).
+3. **Check `branch_deleted` in the output (BUG-195).** `gh`'s post-merge cleanup routinely aborts when the default branch is checked out in another worktree — the normal state for an agent session. The adapter completes the remote deletion itself and reports `branch_deleted=1` (or `skipped-fork`). If it reports `branch_deleted=0`, the remote branch survived: run the exact `git push origin --delete <branch>` the `warn=` line names before continuing. Branch on this field, never on the `warn=` prose.
 
 **Step 2 — Confirm deploys** (this is the staging-first gate when the project has one — same model as features).
 
