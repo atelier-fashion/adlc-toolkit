@@ -1,7 +1,7 @@
 ---
 id: BUG-194
 title: "/spec Step 1.6 spec-corpus status filter admits no status the pipeline ever writes — spec retrieval silently returns zero"
-status: open
+status: resolved
 severity: high
 created: 2026-08-27
 updated: 2026-08-27
@@ -199,3 +199,17 @@ and it was wrong from the day it shipped (LESSON-012).
 - `proceed/phases-6-8-ship.md` — Phase 6 step 2: `retrieval-status: lifecycle-write` declaration (`complete`)
 - `tools/lint-skills/check.py` — `parse_retrieval_status_block`, `check_retrieval_status_parity`, the `LIFECYCLE_WRITE_SITES` / `RETRIEVAL_READER_SITE` registry and marker regexes; wired into `run()`
 - `tools/lint-skills/tests/test_retrieval_status_parity.py` — 19 tests: parser, graceful degradation, the BUG-194 invariant, anti-rot rules, and regression assertions against the real toolkit tree
+
+## Deployment
+
+n/a — the toolkit is a symlink install with no deploy targets (no
+`.adlc/config.yml`, no Cloud Run services, no iOS stack). The fix is live in
+every session the moment `main` is merged, because `~/.claude/skills/` symlinks
+this checkout. Consumer repos pick it up automatically for the same reason;
+project-vendored `.adlc/partials/` copies are unaffected (no partial changed).
+
+Merged: PR #119 (squash), 2026-08-27.
+
+## Lessons Captured
+
+- `.adlc/knowledge/lessons/LESSON-571-retrieval-filters-must-match-writer-vocabulary.md`
