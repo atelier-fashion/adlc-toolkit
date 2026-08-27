@@ -1,7 +1,7 @@
 ---
 id: BUG-195
 title: "adlc_forge_pr_merge --delete-branch silently downgrades to a stderr suggestion when gh's local cleanup aborts — the remote branch survives and no caller acts on the warning"
-status: open
+status: resolved
 severity: medium
 created: 2026-08-27
 updated: 2026-08-27
@@ -190,3 +190,37 @@ established is preserved, this only adds the outcome.
 - `partials/tests/forge.test.sh` — 20 new cases (section 7c)
 - `bugfix/SKILL.md` — Phase 6 Step 1: new sub-step 3 to check `branch_deleted`
 - `wrapup/SKILL.md` — Step 9: check `branch_deleted`
+
+## Deployment
+
+n/a — symlink install, no deploy targets (no `.adlc/config.yml`, no Cloud Run, no
+iOS stack). Live in every session once `main` is merged and the primary checkout
+is refreshed, since `~/.claude/skills` symlinks it.
+
+Note for consumer repos: `partials/forge.sh` is a **vendored** surface. Projects
+that ran `/init` carry their own `.adlc/partials/forge.sh`, and the call sites
+source that copy first. Those repos pick this fix up via `/template-drift`
+reconciliation, not automatically. The toolkit itself has no `.adlc/partials/`, so
+it resolves to the global copy and is fixed immediately.
+
+Merged: PR #121 (squash), 2026-08-27.
+
+**Dogfooded on its own merge.** PR #121 was merged by sourcing the fixed
+`partials/forge.sh` from the fix branch itself. gh's cleanup failed exactly as
+predicted (`raw=failed to run git: fatal: 'main' is already used by worktree`),
+the adapter completed the deletion, and the output was:
+
+```
+state=MERGED
+warn=merge completed remotely and gh post-merge cleanup failed; the adapter deleted the remote branch instead (local branch, if any, is the caller to clean up)
+branch_deleted=1
+warn_class=local-git
+```
+
+`git ls-remote --heads origin fix/bug-195-forge-merge-completes-branch-delete`
+returned 0 refs — the branch deleted itself, with no manual step. This is the
+first merge in the session that did not require one.
+
+## Lessons Captured
+
+- `.adlc/knowledge/lessons/LESSON-572-remediation-must-reach-an-executor.md`
