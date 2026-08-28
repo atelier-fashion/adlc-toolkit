@@ -51,6 +51,74 @@ Scope: $ARGUMENTS (optional — single template name to check; otherwise all tem
 
 ## Instructions
 
+### Step 0: Resolve the Pipeline Branch Set
+
+**Every comparison in Steps 1–3d runs once per pipeline branch, not once per checkout.**
+
+In a repo with a promotion pipeline (`dev` → `staging` → `main`), a vendored file is not
+one thing — it is one thing *per branch*, and they routinely disagree. A sync PR lands on
+the integration branch and reaches `main` only at the next promotion; a change promoted
+to `main` reaches `dev` only at the next reverse-sync. Comparing whichever branch happens
+to be checked out therefore answers a question nobody asked, and answers it
+**confidently**: it reports drift on repos that are merely awaiting promotion, and
+reports clean on repos whose other branches are stale. Under-reporting is the exact
+failure this skill exists to prevent (BR-4), so a single-branch check is not a smaller
+version of the job — it is a wrong answer wearing the costume of a complete one.
+
+Resolve the branch set once, here, and reuse it for every surface:
+
+1. **Fetch, then read refs — never trust a stale local ref (LESSON-036).**
+   ```bash
+   git fetch --prune origin
+   ```
+2. **Determine the integration branch** using the *same* signals as `/proceed` step 4 —
+   do not invent a second detection rule. Any one signal is sufficient:
+   - `.adlc/config.yml` declares `gcp.staging_project` (or otherwise indicates a
+     staging-first deploy), OR
+   - a `.github/workflows/*` enforces a `verify-head-ref` / branch-protection head-ref
+     check, OR
+   - `CLAUDE.md` describes a "two-branch" / "staging-first" / "staging → main promotion"
+     pipeline.
+
+   If any signal is present the integration branch is `staging` (unless the project names
+   another); otherwise it is the default branch.
+3. **Enumerate the long-lived branches that actually exist on the remote.** Do not assume
+   the full triad — `teton-code` has only `main`, `admin-api` has `staging` + `main`,
+   `atelier-fashion` has all three:
+   ```bash
+   DEFAULT_BRANCH=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+   DEFAULT_BRANCH=${DEFAULT_BRANCH:-main}
+   # Dedupe in-shell (DEFAULT_BRANCH may itself be dev/staging). Deliberately no
+   # awk: its whole-line field reference is a bare positional, which Skill
+   # argument templating clobbers inside a fence (lint rule `arg-templating`).
+   SEEN=""
+   for b in dev staging "$DEFAULT_BRANCH"; do
+     case " $SEEN " in *" $b "*) continue ;; esac
+     SEEN="$SEEN $b"
+     git show-ref --verify --quiet "refs/remotes/origin/$b" && echo "$b"
+   done
+   ```
+   An explicit `pipeline.branches: [dev, staging, main]` in `.adlc/config.yml` overrides
+   this detection when present — projects with non-standard names say so rather than
+   being guessed at.
+4. **Read file content per branch** with `git show`, never from the working tree:
+   ```bash
+   git show "origin/$BRANCH:.adlc/partials/forge.sh"
+   ```
+   A path absent on that branch is `missing` **for that branch**, not for the repo.
+5. **Also check the working tree**, as its own scope, and report it alongside the
+   branches. Uncommitted local edits to a vendored file are themselves drift, and are
+   invisible to any `git show`.
+
+**Degrade, never guess.** If the directory is not a git repo, has no `origin`, or the
+fetch fails (offline, auth), fall back to **working-tree-only** — the pre-existing
+behavior — and say so explicitly in the report header: `branch scope: working tree only
+(<reason>)`. A degraded run must still produce its report; it must never silently present
+a one-branch result as full coverage.
+
+**Single-branch repos are unchanged.** When the enumeration yields one branch, the output
+is materially what it was before, minus the false confidence.
+
 ### Step 1: Enumerate Templates to Compare
 
 1. If the user passed a scope argument (e.g. `requirement-template`), only check `.adlc/templates/<scope>.md` vs `~/.claude/skills/templates/<scope>.md`.
@@ -144,6 +212,40 @@ done
 
 If `.adlc/workflows/` does not exist at all, report `workflow-runtime` as `missing` and recommend `/init`. If both files are identical, report `workflow-runtime` as `clean` (one line).
 
+### Step 3e: Classify Each Surface's Drift Across the Pipeline (promotion state)
+
+Per-branch results are not yet an answer. A surface stale on `main` but in sync on
+`staging` needs **no new work at all** — the fix is already committed and simply has not
+been promoted. Opening a sync PR for it duplicates a commit that is on its way, and
+branching that PR off the wrong base can leave the pipeline with two divergent copies of
+the same fix.
+
+For each surface, fold its per-branch results into exactly one verdict. `I` = integration
+branch, `D` = the default/production branch, `U` = an upstream branch (`dev`) that
+receives work by reverse-sync:
+
+| Per-branch pattern | Verdict | Correct action |
+|---|---|---|
+| in sync everywhere | `clean` | none |
+| stale on **every** branch | `needs-sync` | one sync PR based on **`I`**, then promote normally |
+| in sync on `I`, stale on `D` | **`pending-promotion`** | **no sync PR** — open/await the `I` → `D` promotion |
+| in sync on `I` and `D`, stale on `U` (`dev`) | **`needs-reverse-sync`** | the project's reverse-sync path (e.g. `scripts/git/sync-staging-to-dev.sh`), **not** a hand-rolled PR |
+| in sync on `D`, stale on `I` | `regression` | flag loudly — `I` is *behind* `D`, so the next promotion would undo the fix |
+| absent on some branches only | `partial-missing` | report per branch; do not treat as repo-wide `missing` |
+| working tree differs from its own branch | `uncommitted` | local edit — commit, revert, or explain |
+
+Two rules that follow, and that a single-branch check cannot express:
+
+- **Never propose a sync PR for a `pending-promotion` surface.** The commit exists; the
+  gap is a promotion, not authorship.
+- **Never propose a plain PR for `needs-reverse-sync`.** If the project ships a
+  reverse-sync script, name it — it exists because the merge must preserve ancestry, and
+  a hand-rolled squash breaks the idempotency check that script relies on.
+
+`regression` deserves its own emphasis: it is the one pattern where doing nothing is
+actively unsafe, because the pipeline is primed to *remove* a change that is currently
+live.
+
 ### Step 4: Classify Template Drift as Intentional vs Accidental
 
 (This step applies to the two **template-posture** surfaces — templates and `ethos` (Step 3c). Partials and `workflow-runtime` have no customization classification, per Step 3 / Step 3d. For `ethos`, apply these same intentional-vs-accidental signals to the *body*, but remember the missing-principle sub-check in Step 3c fires loudly regardless of how the file is classified here.)
@@ -174,34 +276,40 @@ Emit a summary table, then per-file detail. The report covers **all five surface
 
 Project: <repo name>
 Toolkit ref: <`git -C "$(readlink ~/.claude/skills)" rev-parse --short HEAD`>
+Branch scope: dev, staging, main (integration: staging) + working tree
+             (or `working tree only (<reason>)` on a degraded run — Step 0)
 
 ETHOS (.adlc/ETHOS.md): DRIFTED — 1 MISSING PRINCIPLE: `## 7. Skeptical by Default` is in the
 toolkit constitution but absent from this project's copy. Every skill is running an outdated
 constitution. Classification: Accidental (structurally older — no project-specific principles added).
 (Reported first because the runtime prefers the project copy — Step 3c.) (Show `clean` when identical.)
 
-| Template | Status | Drift | Classification |
-|---|---|---|---|
-| requirement-template.md | Drifted | +42 / -8 | Intentional (System Model, Entities) |
-| task-template.md | Drifted | +3 / -1 | Accidental (cosmetic) |
-| bug-template.md | Identical | — | — |
-| assumption-template.md | Missing locally | — | Upstream added — needs copy |
-| lesson-template.md | Drifted | +6 / -0 | Accidental (upstream added filename lock comment) |
+| Template | dev | staging | main | tree | Verdict | Classification |
+|---|---|---|---|---|---|---|
+| requirement-template.md | drift | drift | drift | drift | needs-sync | Intentional (System Model, Entities) |
+| task-template.md | stale | synced | stale | synced | pending-promotion | Accidental (cosmetic) |
+| bug-template.md | synced | synced | synced | synced | clean | — |
+| assumption-template.md | missing | missing | missing | missing | needs-sync | Upstream added — needs copy |
+| lesson-template.md | stale | synced | synced | synced | needs-reverse-sync | Accidental (upstream added filename lock comment) |
 
-Templates overall: 3 drifted, 1 missing locally, 1 identical.
+Templates overall: 1 needs-sync (+1 missing), 1 pending-promotion, 1 needs-reverse-sync, 1 clean.
 Intentional: 1. Accidental: 2. Missing: 1.
 
-| Partial | Status |
-|---|---|
-| ethos-include.sh | stale |
-| gate-check.sh | synced |
-| spec-gate.sh | missing |
+Read the verdict column, not the branch columns: `task-template.md` shows drift on two
+branches yet needs **no PR** — the fix is on `staging` awaiting promotion.
 
-Partials overall: 1 stale, 1 synced, 1 missing. (No customization classification — every partial drift is `stale` by design; see Step 3 rationale.)
+| Partial | dev | staging | main | tree | Verdict |
+|---|---|---|---|---|---|
+| ethos-include.sh | stale | stale | stale | stale | needs-sync |
+| forge.sh | stale | synced | synced | synced | needs-reverse-sync |
+| gate-check.sh | synced | synced | stale | synced | pending-promotion |
+| spec-gate.sh | missing | missing | missing | missing | needs-sync |
 
-Workflow runtime (.adlc/workflows/): 1 stale — `adlc-sprint.workflow.js` diverged from the toolkit sprint engine (copy from toolkit); `README.md` synced. (No customization classification — partials-posture, every diff `stale`; see Step 3d. Show `clean` when both files identical.)
+Partials overall: 1 needs-sync (+1 missing), 1 pending-promotion, 1 needs-reverse-sync. (No customization classification — every partial drift is `stale` by design; see Step 3 rationale.)
 
-Workflow test files (.adlc/workflows/): 1 stale — `.adlc/workflows/tests/` (Jest landmine: `*.test.js` under .adlc/ breaks `npm test` in "type":"module" repos; remove). (Show `clean` when none found.)
+Workflow runtime (.adlc/workflows/): 1 stale on every branch — `adlc-sprint.workflow.js` diverged from the toolkit sprint engine (verdict `needs-sync`, base the PR on the integration branch); `README.md` clean across all branches. (No customization classification — partials-posture, every diff `stale`; see Step 3d. Show `clean` when both files identical.)
+
+Workflow test files (.adlc/workflows/): present on dev + staging, absent on main — `.adlc/workflows/tests/` (Jest landmine: `*.test.js` under .adlc/ breaks `npm test` in "type":"module" repos; remove on the integration branch and let it promote). Report the branches it exists on: removing it only in a checkout leaves it live everywhere else. (Show `clean` when none found.)
 ```
 
 Then, for each non-identical template, write a short per-file section:
@@ -233,13 +341,41 @@ Action: safe to sync from toolkit. Propose a one-line change: copy `~/.claude/sk
 
 ### Step 6: Offer Reconciliation Actions
 
-Offer the user a specific action for each reconcilable item, across **all five surfaces**: each **accidental** template drift, each **missing locally** template; each **accidental** or **missing-principle** ETHOS drift; **every** `stale` or `missing` partial (no customization escape hatch — see Step 3); **every** `stale` or `missing` workflow-runtime file (no customization escape hatch — see Step 3d); and **every** stale workflow test file from Step 3b. Format as a numbered list so the user can approve selectively:
+**Route every action by its Step 3e verdict — a bare `cp` into a checkout is the correct
+remedy for exactly one of them.** A copy edits the working tree of whatever branch is out;
+it does not reach the other pipeline branches, and for `pending-promotion` it re-authors a
+commit that already exists upstream.
+
+| Verdict | What to propose |
+|---|---|
+| `needs-sync` | branch off **`origin/<integration-branch>`**, `cp` from toolkit, commit, PR **based on the integration branch** — then the normal promotion carries it onward |
+| `pending-promotion` | **no copy, no sync PR.** Open (or point at) the `<integration>` → `<default>` promotion PR. Say plainly that the fix already exists and name the commit |
+| `needs-reverse-sync` | the project's reverse-sync path — e.g. `scripts/git/sync-staging-to-dev.sh` — **not** a hand-rolled PR, and **not** a squash: ancestry is the script's idempotency check |
+| `regression` | surface first, act second: `<integration>` is behind `<default>` and the next promotion would undo a live fix. Propose no mechanical copy until the user has seen the diff both ways |
+| `uncommitted` | the working tree alone differs — commit, revert, or explain. Never silently overwrite it with a toolkit copy |
+| `partial-missing` | act only on the branches actually missing the file; do not blanket-copy |
+
+Promotion-carried actions must state **which branch the PR is based on**. "Copy the file"
+is not an action in a multi-branch repo; "branch off `origin/staging`, copy, PR to
+`staging`" is.
+
+With that routing settled, offer a specific action for each reconcilable item, across **all five surfaces**: each **accidental** template drift, each **missing locally** template; each **accidental** or **missing-principle** ETHOS drift; **every** `stale` or `missing` partial (no customization escape hatch — see Step 3); **every** `stale` or `missing` workflow-runtime file (no customization escape hatch — see Step 3d); and **every** stale workflow test file from Step 3b. Format as a numbered list so the user can approve selectively:
 
 ```
 ## Proposed Actions
 
-1. **task-template.md**: Copy from toolkit to project (accidental cosmetic drift).
-   Command: `cp ~/.claude/skills/templates/task-template.md .adlc/templates/task-template.md`
+1. **task-template.md** (verdict `pending-promotion`): **No copy.** The current file is
+   already on `staging`; `main` is simply behind. Promote rather than re-author.
+   Action: open/await the `staging` → `main` promotion PR (merge commit — see `LESSON-575`).
+
+1a. **requirement-template.md** (verdict `needs-sync`): stale on every branch — author it once
+   on the integration branch.
+   Commands:
+   ```bash
+   git fetch origin && git checkout -b chore/sync-templates origin/staging
+   cp ~/.claude/skills/templates/requirement-template.md .adlc/templates/requirement-template.md
+   # commit, then PR with --base staging
+   ```
 
 2. **lesson-template.md**: Copy from toolkit to project (toolkit added filename-lock comment).
    Command: `cp ~/.claude/skills/templates/lesson-template.md .adlc/templates/lesson-template.md`
@@ -253,7 +389,7 @@ Offer the user a specific action for each reconcilable item, across **all five s
    Diff first: `diff -u .adlc/ETHOS.md ~/.claude/skills/ETHOS.md`
    Command (on approval): `cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md`
 
-5. **ethos-include.sh** (partial, stale): Copy from toolkit to project. Partials have no customization classification — any drift is reported as `stale` (see Step 3 rationale).
+5. **ethos-include.sh** (partial, `needs-sync`): Copy from toolkit, on a branch cut from the integration branch. Partials have no customization classification — any drift is reported as `stale` (see Step 3 rationale).
    Command: `cp ~/.claude/skills/partials/ethos-include.sh .adlc/partials/ethos-include.sh`
 
 6. **spec-gate.sh** (partial, missing): Copy from toolkit to project.
@@ -268,7 +404,7 @@ Offer the user a specific action for each reconcilable item, across **all five s
 Reply with action numbers to apply (e.g. "1 2 3" or "all"), or "skip" to take no action.
 ```
 
-**Do not apply any changes without explicit user approval.** Writing to `.adlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. Writing to `.adlc/ETHOS.md` changes the constitution injected into **every** skill invocation — show the principle-level diff first (BR-5) and never overwrite an intentionally-customized constitution without explicit consent. Writing to `.adlc/partials/` affects gate logic and the ETHOS preamble injected into every skill; writing to `.adlc/workflows/` changes the sprint orchestrator — all deliberate. If the user approves, apply only the numbered actions they listed and re-run the relevant detection step (Step 2 templates, Step 3 partials, Step 3c ethos, Step 3d workflow-runtime) for those files to confirm drift is now zero.
+**Do not apply any changes without explicit user approval.** Writing to `.adlc/templates/` affects how future `/spec`, `/architect`, and `/bugfix` runs behave, so it's a deliberate choice. Writing to `.adlc/ETHOS.md` changes the constitution injected into **every** skill invocation — show the principle-level diff first (BR-5) and never overwrite an intentionally-customized constitution without explicit consent. Writing to `.adlc/partials/` affects gate logic and the ETHOS preamble injected into every skill; writing to `.adlc/workflows/` changes the sprint orchestrator — all deliberate. If the user approves, apply only the numbered actions they listed and re-run the relevant detection step (Step 2 templates, Step 3 partials, Step 3c ethos, Step 3d workflow-runtime) for those files to confirm drift is now zero. **Re-verify across the branch set, not the working tree** — a local `cp` makes the tree clean while every branch stays stale, so a tree-only recheck reports success that has not happened. Drift is zero only when Step 3e returns `clean` for the surface; until the sync PR merges and promotes, the honest verdict is still `needs-sync` / `pending-promotion`.
 
 For **intentional** template or ETHOS drift, do not propose reconciliation — just note it in the report so the user is aware. The **missing-principle** ETHOS case is always offered for reconciliation even when the rest of the file looks intentional, because a missing canonical principle is never a legitimate customization. Partials and workflow-runtime have no "intentional" path: every diff is offered for reconciliation.
 
@@ -284,7 +420,8 @@ At the end of the report:
 
 - It does not modify toolkit templates — changes to the canonical version go through the adlc-toolkit repo via PR.
 - It does not rename or delete project template files — only copies or reports.
-- It does not touch `.adlc/templates/` in other projects — it's scoped to the current working directory.
+- It does not touch `.adlc/templates/` in other **projects** — it's scoped to the current repo. Within that repo it now reads **every pipeline branch** (Step 0), not only the checked-out one.
+- It does not push, merge, or promote anything. It reports verdicts and proposes branch-correct actions; opening the sync PR, running the reverse-sync script, and merging the promotion remain the caller's steps.
 - It does not check drift of skills or agents — those are symlinked, so drift is structurally impossible.
 
 ## Implementation Notes
