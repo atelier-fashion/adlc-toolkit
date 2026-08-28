@@ -51,6 +51,46 @@ Scope: $ARGUMENTS (optional — single template name to check; otherwise all tem
 
 ## Instructions
 
+### Step 0a: Verify the Canonical Baseline (do this first — everything is measured against it)
+
+`~/.claude/skills` is not a release artifact. It is a **symlink to a working checkout of
+the toolkit repo**, and that checkout can be on a feature branch, mid-rebase, or dirty.
+Whatever it currently contains is what every comparison below calls "canonical". If the
+baseline is wrong, every verdict is wrong — and it fails in the worst direction: a
+consumer that is correctly in sync gets reported `stale`, and the proposed remedy is to
+copy the older file over it. The skill would then be **driving a regression** with full
+confidence.
+
+Establish the baseline before measuring anything against it:
+
+```bash
+TOOLKIT=$(readlink ~/.claude/skills)
+git -C "$TOOLKIT" fetch --prune origin
+TK_BRANCH=$(git -C "$TOOLKIT" branch --show-current)
+TK_DEFAULT=$(git -C "$TOOLKIT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+TK_DEFAULT=${TK_DEFAULT:-main}
+TK_DIRTY=$(git -C "$TOOLKIT" status --porcelain | wc -l | tr -d ' ')
+TK_BEHIND=$(git -C "$TOOLKIT" rev-list --count "HEAD..origin/$TK_DEFAULT" 2>/dev/null)
+```
+
+Report the baseline in the header **always**, and warn loudly when any of these hold:
+
+- `TK_BRANCH` != `TK_DEFAULT` — the baseline is a feature branch, not canonical
+- `TK_BEHIND` > 0 — the checkout is behind the toolkit's default branch
+- `TK_DIRTY` > 0 — uncommitted local edits are being treated as canonical
+
+When any warning fires, say so **before** the tables and state the consequence plainly:
+*"Baseline is `<branch>`, N commits behind `origin/<default>` — surfaces reported `stale`
+may in fact be ahead of this baseline, and copying from it would regress them."* Prefer
+comparing against `git -C "$TOOLKIT" show "origin/$TK_DEFAULT:<path>"` rather than the
+working tree when the checkout is not clean-and-current; if you cannot, downgrade every
+`stale` verdict to `unverified-baseline` rather than asserting drift you cannot stand
+behind.
+
+This is not hypothetical. It produced a false `stale` for `infrastructure`'s `forge.sh`
+on 2026-08-28: the toolkit checkout sat on a feature branch cut before `BUG-201` merged,
+so the consumer — which correctly carried the newer fix — was reported as the stale one.
+
 ### Step 0: Resolve the Pipeline Branch Set
 
 **Every comparison in Steps 1–3d runs once per pipeline branch, not once per checkout.**
