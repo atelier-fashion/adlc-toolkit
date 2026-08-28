@@ -68,13 +68,38 @@ Success: newline-delimited `key=value` lines (`url=`, `number=`, `state=`,
 Failure: a non-zero return plus
 
 ```
-error_class=<auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|network>
+error_class=<auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|
+             local-git|network>
 raw=<verbatim backend stderr, one raw= line per stderr line>
 ```
 
 The raw backend stderr is **never swallowed** — the class is for branching, the
 `raw=` lines for human diagnosis (LESSON-008). Distinct failures never collapse
 into one label.
+
+**`network` is the fall-through default, which makes it the class to distrust
+(BUG-201).** `_adlc_forge_classify` substring-matches backend stderr, so a
+refusal signature the patterns do not know about does not fail loudly — it
+silently acquires `network`, the one class that reads as transient and invites a
+retry. BUG-201 was exactly that: every GitHub `mergePullRequest` branch-protection
+refusal ("4 of 4 required status checks are expected", "Base branch was
+modified", "approving review is required") landed on `network`, and so did the
+Azure DevOps completion refusals whose prose says "policies" — plural, which
+`*"policy"*` does not match. Both backends share the one classifier, so a missing
+pattern is never a single-backend defect.
+
+Two consequences for anyone editing the classifier:
+
+- **Add the signature *and* pin it.** `partials/tests/forge.test.sh` §4b holds the
+  table of real backend stderr strings mapped to the class each must produce, and
+  §4c fails if the classifier can emit a class the header does not document — the
+  guard that caught `local-git` having been added by BUG-150 without updating the
+  contract line.
+- **Order is load-bearing.** Patterns are tried most-specific-first, so an
+  `auth-missing` or `pr-not-found` signature that happens to mention a policy word
+  still wins. Note that `You're not authorized to push to this branch` is a
+  *policy* refusal, not `auth-missing`: the credential is fine, the permission is
+  the point.
 
 **State normalization:** `pr_view.state ∈ {OPEN, MERGED, CLOSED}`. GitHub states
 pass through; ADO `active→OPEN`, `completed→MERGED`, `abandoned→CLOSED`.
@@ -105,7 +130,8 @@ is the adapter's to clean up; the local branch stays the caller's own cleanup st
 **Capability mismatches (BR-5), explicit:** ADO draft (`--draft`/publish), squash
 (`--squash` + auto-complete `--status completed`), delete-source-branch, and a
 branch-policy block → `merge-blocked-by-policy` (surfaced as a blocker, **never
-bypassed** — ethos #6). `pr_comment` on ADO → `feature-unsupported` with the
+bypassed** — ethos #6; this covers the prose forms, not just the `TF` codes,
+since BUG-201). `pr_comment` on ADO → `feature-unsupported` with the
 documented degradation.
 
 ## Mock backend (BR-10)
@@ -114,7 +140,10 @@ documented degradation.
 `gh`/`az`/network. Keyed by:
 
 - `ADLC_FORGE_MOCK_PROVIDER` — `github` | `azure-devops` (default `github`)
-- `ADLC_FORGE_MOCK_SCENARIO` — `ok` (default) or any error-class name
+- `ADLC_FORGE_MOCK_SCENARIO` — `ok` (default) or any error-class name, which
+  means *every* class the classifier can emit, `local-git` included (before
+  BUG-201 that one fell to the unknown-scenario arm and came back as `network` —
+  the same mislabel, reproduced inside the harness)
 
 The mock honors the same provider semantics (ADO `pr_comment` →
 `feature-unsupported`, normalized state) so it is a faithful stand-in, not a stub
