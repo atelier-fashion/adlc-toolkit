@@ -14,7 +14,8 @@
 #
 # Result/error surface (BR-4), normalized — identical field names from BOTH
 # backends. On success: newline-delimited `key=value` lines. On failure:
-#   error_class=<auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|network>
+#   error_class=<auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|
+#                local-git|network>
 #   raw=<verbatim backend stderr>          # never swallowed (LESSON-008)
 # and a non-zero return. Distinct failures never collapse into one label.
 #
@@ -143,6 +144,25 @@ _adlc_forge_classify() {
       echo "pr-not-found" ;;
     *"policy"*|*"Policy"*|*"required review"*|*"branch protection"*|*"TF402455"*|*"not mergeable"*|*"blocked"*)
       echo "merge-blocked-by-policy" ;;
+    # BUG-201 (reported as infrastructure BUG-199): the branch-protection refusals
+    # `gh pr merge` surfaces from the GraphQL `mergePullRequest` mutation. Branch
+    # protection states its objection in prose that shares NO substring with the
+    # patterns above — "4 of 4 required status checks are expected", "Base branch
+    # was modified" — so every one of them fell through to the `network` default.
+    # That is the one class that reads as transient and invites a retry, while the
+    # real fix is to update the branch / wait for checks to re-report / get a
+    # review. Kept as its own arm rather than widened into the line above so each
+    # signature stays legible and the pre-BUG-201 pattern set is unchanged.
+    # `policies` (plural) is here because `*"policy"*` does not match it: the ADO
+    # completion refusals say "policies".
+    *"required status check"*|*"Required status check"*|\
+    *"policies"*|*"Policies"*|*"are not met"*|*"is not met"*|\
+    *"review is required"*|*"approving review"*|*"review required"*|*"Required review"*|\
+    *"Base branch was modified"*|*"base branch was modified"*|\
+    *"Changes must be made through a pull request"*|\
+    *"protected branch"*|*"Protected branch"*|\
+    *"not authorized to push"*|*"must be approved"*|*"merge queue"*)
+      echo "merge-blocked-by-policy" ;;
     *"unsupported"*|*"not supported"*|*"feature-unsupported"*)
       echo "feature-unsupported" ;;
     *"failed to run git"*|*"already used by worktree"*|*"fatal: "*)
@@ -172,7 +192,7 @@ _adlc_forge_mock() {
   fi
   case "$adlc_mk_scn" in
     ok) : ;;
-    auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|network)
+    auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|local-git|network)
       _adlc_forge_err "$adlc_mk_scn" "mock backend ($adlc_mk_prov): simulated $adlc_mk_scn for $adlc_mk_op"
       return 1 ;;
     *)

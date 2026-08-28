@@ -84,6 +84,99 @@ check "classify pr not found" "pr-not-found" \
 check "classify unknown -> network" "network" \
   "$(_adlc_forge_classify 'some transient socket hangup')"
 
+# ---------------------------------------------------------------------------
+# 4b. BUG-201: branch-protection refusals must be merge-blocked-by-policy, not
+# `network`. The classifier's fall-through default is `network`, so a refusal
+# signature the patterns do not know about does not fail loudly — it silently
+# acquires the class that reads as transient and invites a retry, when the fix
+# is to update the branch / wait for checks / get a review. Each string below is
+# real backend stderr; they are pinned so a future pattern edit cannot quietly
+# re-widen the default. (No `for x in $VAR` word-splitting here — BUG-118.)
+# ---------------------------------------------------------------------------
+pol() { check "classify policy: $1" "merge-blocked-by-policy" "$(_adlc_forge_classify "$2")"; }
+
+# GitHub: the GraphQL mergePullRequest refusals.
+pol "required status checks" \
+  'GraphQL: 4 of 4 required status checks are expected. (mergePullRequest)'
+pol "Required status check (singular)" \
+  'GraphQL: Required status check "build" is expected. (mergePullRequest)'
+pol "base branch modified" \
+  'GraphQL: Base branch was modified. Review and try the merge again. (mergePullRequest)'
+pol "changes via pull request" \
+  'GraphQL: Changes must be made through a pull request. (mergePullRequest)'
+pol "approving review required" \
+  'GraphQL: At least 1 approving review is required by reviewers with write access. (mergePullRequest)'
+pol "code-owner review" \
+  'GraphQL: Required review from Code Owners is missing. (mergePullRequest)'
+pol "merge queue" \
+  'GraphQL: Changes must be made through the merge queue. (mergePullRequest)'
+pol "not authorized to push" \
+  "GraphQL: You're not authorized to push to this branch. (mergePullRequest)"
+pol "protected branch (push)" \
+  'remote: error: GH006: Protected branch update failed for refs/heads/main.'
+# Already covered pre-BUG-201 by *"not mergeable"* — pinned as a regression anchor.
+pol "not mergeable (pre-existing)" \
+  'GraphQL: Pull request is not mergeable (mergePullRequest)'
+
+# ADO: the same classifier serves `az`, and its refusals say "policies" (plural),
+# which *"policy"* does NOT match. Pre-BUG-201 these were classed correctly only
+# when the message happened to carry a TF code.
+pol "ADO policies not met" \
+  'ERROR: The pull request has policies that are not met'
+pol "ADO single policy not met" \
+  'ERROR: One or more merge policies is not met'
+pol "ADO approval required" \
+  'ERROR: The pull request must be approved before it can be completed.'
+
+# Negative anchors: the added patterns must not steal from the other classes.
+check "classify real network error" "network" \
+  "$(_adlc_forge_classify 'error connecting to api.github.com: dial tcp: i/o timeout')"
+check "classify gh not-logged-in" "auth-missing" \
+  "$(_adlc_forge_classify 'gh: set the GH_TOKEN. Please run gh auth login')"
+check "classify ADO pr missing" "pr-not-found" \
+  "$(_adlc_forge_classify 'ERROR: TF401174: The pull request does not exist')"
+check "classify local git failure" "local-git" \
+  "$(_adlc_forge_classify "failed to run git: fatal: 'main' is already used by worktree")"
+check "classify ADO comment unsupported" "feature-unsupported" \
+  "$(_adlc_forge_classify 'ADO pr_comment is not supported in v1')"
+
+# ---------------------------------------------------------------------------
+# 4c. BR-4 doc-contract guard: every class the classifier can EMIT must be named
+# in the header's error_class=<...> enumeration. BUG-201 was filed against that
+# contract; the header had itself fallen behind `local-git` (added by BUG-150)
+# with nothing to catch it. This is the check that would have caught it.
+# ---------------------------------------------------------------------------
+EMITTED=$(awk '/^_adlc_forge_classify\(\)/{f=1} f&&/^}/{f=0} f' "$PARTIALS/forge.sh" \
+  | sed -n 's/.*echo "\([a-z-]*\)".*/\1/p' | sort -u)
+DOCUMENTED=$(awk '/error_class=</{f=1} f{print} f&&/>/{exit}' "$PARTIALS/forge.sh" \
+  | tr '<>|' '\n\n\n' | sed -n 's/^#* *\([a-z][a-z-]*\)$/\1/p' | sort -u)
+# Set difference via `comm` on the two sorted lists, NOT a `case` inside `$( )`:
+# bash 3.2 mis-parses the unbalanced `)` of a case arm within a command
+# substitution and dies with "syntax error near unexpected token `;;'".
+_emf=$(mktemp 2>/dev/null || mktemp -t forge_em)
+_dcf=$(mktemp 2>/dev/null || mktemp -t forge_dc)
+printf '%s\n' "$EMITTED" > "$_emf"
+printf '%s\n' "$DOCUMENTED" > "$_dcf"
+MISSING=$(comm -23 "$_emf" "$_dcf" | tr '\n' ' ' | sed 's/  *$//')
+rm -f "$_emf" "$_dcf"
+check "BR-4 header names every emitted class" "" "$MISSING"
+# Non-vacuity: the extraction must actually have found the class set.
+contains "emitted-class extraction non-vacuous" "merge-blocked-by-policy" "$EMITTED"
+contains "documented-class extraction non-vacuous" "merge-blocked-by-policy" "$DOCUMENTED"
+
+# ---------------------------------------------------------------------------
+# 4d. The mock (BR-10) must honor every class the classifier emits. Before
+# BUG-201 `local-git` was not in the scenario list, so it fell to the
+# unknown-scenario arm and came back as `network` — the same mislabel this bug
+# is about, reproduced inside the offline harness.
+# ---------------------------------------------------------------------------
+export ADLC_FORGE_MOCK=1 ADLC_FORGE_MOCK_PROVIDER=github ADLC_FORGE_MOCK_SCENARIO=local-git
+contains "mock honors local-git scenario" "error_class=local-git" "$(adlc_forge_pr_merge 101 2>&1)"
+export ADLC_FORGE_MOCK_SCENARIO=merge-blocked-by-policy
+contains "mock pr_merge policy refusal" "error_class=merge-blocked-by-policy" \
+  "$(adlc_forge_pr_merge 101 --squash --delete-branch 2>&1)"
+unset ADLC_FORGE_MOCK ADLC_FORGE_MOCK_PROVIDER ADLC_FORGE_MOCK_SCENARIO
+
 # ===========================================================================
 # 5. Provider auto-detect + fail-loud (no mock)
 # ===========================================================================
