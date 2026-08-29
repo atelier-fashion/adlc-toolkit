@@ -1,7 +1,7 @@
 ---
 id: BUG-201
 title: "The forge classifier has no pattern for branch-protection merge refusals, so both backends report them as error_class=network"
-status: open
+status: resolved
 severity: medium
 created: 2026-08-28
 updated: 2026-08-28
@@ -201,6 +201,43 @@ statement inside a command substitution** (the unbalanced `)` of a case arm), dy
 `run.sh`, not the `zsh` pass — a concrete instance of why the dual-shell runner exists.
 The set-difference is now computed with `comm` over the two sorted lists instead.
 
+Merged via [#125](https://github.com/atelier-fashion/adlc-toolkit/pull/125).
+
+### Post-merge confirmation
+
+`#125` merged to `main` at 2026-08-28 19:38 UTC (squash — nothing in this repo reads a
+merge commit's second parent, so LESSON-575 does not apply here). `origin/main`'s
+`partials/forge.sh` carries the new arm, and the consumer-side mirror
+([infrastructure#299](https://github.com/atelier-fashion/infrastructure/pull/299)) merged
+three minutes later. The two files on their respective `main` branches are **byte-identical**,
+so `/template-drift` reports clean rather than flagging a permanent one-comment diff — which
+was the point of writing both with the same wording.
+
+The merge itself exercised the BUG-150/BUG-195 machinery in the function this bug is about.
+`adlc_forge_pr_merge 125 --squash --delete-branch` returned:
+
+```
+rc=0
+state=MERGED
+warn=merge completed remotely and gh post-merge cleanup failed; the adapter deleted the remote branch instead
+branch_deleted=1
+warn_class=local-git
+raw=failed to run git: fatal: 'main' is already used by worktree at '…/.claude/worktrees/affectionate-euler-408537'
+```
+
+`gh`'s local cleanup failed because `main` was checked out in another session's worktree;
+the adapter asked the forge what actually happened, confirmed the merge, deleted the remote
+branch itself, and demoted the diagnostics to `warn_class=`. Note the class is **`local-git`**
+— the class BUG-150 added and this PR finally wrote into the BR-4 contract line, `forge.md`,
+and the mock's scenario list. Before this change the mock could not even simulate it.
+
+**The live install does not carry the fix yet, and that is expected.** `~/.claude/skills/`
+symlinks the main clone, which was checked out on another session's feature branch during
+this work and was deliberately not touched. Every session on the machine picks the fix up
+when that clone returns to `main` and pulls — the symlink-install deployment model working
+as documented, with the ordinary caveat that "landed on `main`" and "live on this machine"
+are two different events.
+
 ### Deployment
 
 No deploy. The toolkit is a symlink-based live install: this takes effect for every
@@ -213,10 +250,9 @@ suite into that project's existing hermetic-scripts workflow.)
 
 ### Follow-ups (deliberately not in this PR)
 
-1. **Consumer re-sync.** `atelier-fashion/infrastructure` carries the same fix in its
-   vendored `.adlc/partials/forge.sh`, authored with wording identical to this one so the
-   two files are byte-identical once both land and `/template-drift` reports clean. Other
-   consumers pick it up on their next `/init`.
+1. ~~**Consumer re-sync.**~~ **Done** — `atelier-fashion/infrastructure` merged the same
+   fix in [#299](https://github.com/atelier-fashion/infrastructure/pull/299) and the two
+   files are byte-identical on `main`. Other consumers pick it up on their next `/init`.
 2. **The default class is still the trap.** `network` remains the fall-through, so the
    next unmatched backend message repeats this bug's shape. A structurally safer design is
    a distinct `unclassified` default that is honestly "we do not know" rather than an
@@ -234,3 +270,7 @@ suite into that project's existing hermetic-scripts workflow.)
   fall-through, which makes it the class to distrust" section with the two rules for
   editing the classifier; mock-scenario and capability-mismatch notes corrected
 - `.adlc/bugs/BUG-201-forge-classifier-misses-branch-protection-refusals.md` — this report
+- `.adlc/knowledge/lessons/LESSON-581-fallthrough-default-must-not-assert.md` — the primary
+  lesson: a fall-through default is a claim about every input you have never seen
+- `.adlc/knowledge/lessons/LESSON-582-bash32-case-inside-command-substitution.md` — the
+  portability trap hit while writing the §4c guard
