@@ -72,6 +72,40 @@ PRs (`atelier-fashion/adlc-toolkit`).
   resolved endpoint host, so a hijacked `base_url` is visible at the moment file
   contents leave the machine.
 
+
+- **Atomic remote id reservation at allocation time (REQ-546).** `adlc_alloc_id` now
+  *reserves* a candidate number on `origin` before returning it, by pushing a
+  lightweight `refs/adlc/ids/<kind>/<NNN>` ref at a distinct commit object — first
+  writer wins, because a second push of a different object is rejected
+  non-fast-forward. Adds `adlc_reservation_nonce`, `adlc_reserve_id`, and
+  `adlc_remote_reservation_nums`; wires the reservation namespace into
+  `adlc_remote_high` as a **third independent source** alongside the existing two, so
+  a number in flight on another machine is visible before it has any artifact; and
+  adds a bounded reservation-retry loop inside the existing lock. Push outcomes are
+  classified empirically — `won` / `race` / `policy` / `transport` — rather than by
+  exit code. `assume` becomes a fourth, per-repo-scoped id kind (counter, lockdir,
+  artifact path, scan, single-repo derivation). The refspec uses brace form to avoid
+  the zsh `:r` modifier hazard (LESSON-335).
+
+- **REQ id pre-push recheck wired into `/proceed` (REQ-545).** `/proceed` had no
+  `adlc_recheck_id` call site, so a REQ id allocated by `/spec` could become a pushed
+  `feat/REQ-xxx` branch on a second machine with no pre-push remote re-verification —
+  the REQ-518 BR-4 gap, open for the REQ kind only. The recheck now runs as a labeled
+  sub-block in Step 0 item 4, after the origin fetch and before worktree registration.
+  An exact-full-branch-name `ls-remote` probe provides the BR-3 self-exemption so the
+  pipeline does not halt on its own footprint during resume or crash recovery; a
+  same-id different-slug branch, or a merged artifact, still halts with the renumber
+  instruction. Degraded remotes proceed, per the partial's existing contract.
+
+- **Three specs drafted from the Cerebro ADLC comparison (REQ-593, REQ-594, REQ-595).**
+  Artifacts only — **none is implemented**, all three are `status: draft`, and each
+  carries an adversary report with verdict *found problems* and unresolved
+  critical/major findings. `REQ-593` would attribute a BUG to the REQ that shipped its
+  cause by walking `git blame` → commit trailer → TASK → REQ; `REQ-594` would add an
+  intake step to `/spec` that turns unstructured input into a draft plus a classified
+  gap list with a gate; `REQ-595` would have `/architect` emit per-task `## Verification`
+  blocks mapping each BR/AC to the artifact that proves it, with `/validate` gating on
+  coverage. Listed here because the specs are in the tree, not because the behavior is.
 ### Removed
 
 - **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the
@@ -103,6 +137,238 @@ PRs (`atelier-fashion/adlc-toolkit`).
   (`taxonomy-template.md` was missing) and documented the `id-alloc.sh`/`id-recheck.sh`
   partials in `partials/README.md`, dropping its stale "partial drift detection not yet
   implemented" claim.
+
+### Fixed (post-5.1.0 defect sweep)
+
+Backfilled 2026-08-30. These landed between 2026-06-12 and 2026-08-28 and were not
+recorded at the time; PR numbers are `atelier-fashion/adlc-toolkit`.
+
+- **`/template-drift` trusted an unverified canonical baseline (BUG-204, #127).**
+  `~/.claude/skills` is a symlink to a **working checkout**, not a release artifact — it
+  can sit on a feature branch, behind `origin/main`, or dirty — and whatever it contained
+  was silently treated as canonical. A stale baseline does not weaken verdicts, it
+  **inverts** them: a consumer carrying the *newer* file is reported `stale`, and Step 6
+  then proposes copying the older baseline over it, so the skill drives a regression with
+  full confidence. Observed 2026-08-28, when the checkout sat on a branch cut before
+  BUG-201 merged and `infrastructure` — which correctly carried the fix — was reported as
+  the stale one. New **Step 0a** resolves the real checkout via `readlink`, fetches,
+  captures branch/default/dirty/behind, names the baseline in the report header *always*,
+  and warns with the consequence spelled out. Prefers
+  `git show origin/<default>:<path>` when the checkout is not clean-and-current;
+  otherwise downgrades every `stale` to `unverified-baseline` rather than asserting drift
+  the baseline cannot support.
+
+- **`/template-drift` compared only the checked-out branch (BUG-203, #126).** In a
+  `dev → staging → main` repo a vendored file is one thing *per branch*, and the branches
+  disagree by design: a sync PR reaches `main` only at the next promotion, a promoted
+  change reaches `dev` only at the next reverse-sync. Reading the working tree answered a
+  question nobody asked, and answered it confidently — under-reporting being the exact
+  failure this skill exists to prevent. Both directions were live on 2026-08-28: two
+  repos were in sync on `staging` and stale on `main`, and were given sync PRs that had
+  to be withdrawn; a third was stale on `dev` only and reported clean. New **Step 0**
+  fetches, detects the integration branch using `/proceed` step 4's *existing* signals
+  rather than a second rule, enumerates the long-lived branches that actually exist, and
+  reads per branch with `git show`, degrading to working-tree-only (and saying so in the
+  header) when there is no git or remote. New **Step 3e** folds per-branch results into
+  one verdict — `clean`, `needs-sync`, `pending-promotion`, `needs-reverse-sync`,
+  `regression`, `partial-missing`, `uncommitted` — each routed to its correct remedy.
+  Two rules the old skill could not express: never propose a sync PR for
+  `pending-promotion` (the commit exists; the gap is a promotion), and never propose a
+  plain squash PR for `needs-reverse-sync` (ancestry is the reverse-sync script's
+  idempotency check). The report is now a surface × branch matrix, and proposed actions
+  name their PR base.
+
+- **The forge classifier had no pattern for branch-protection merge refusals (BUG-201,
+  #125).** `_adlc_forge_classify` reported them as `error_class=network` — the one class
+  that reads as transient and invites a retry, when the real fix is to update the head
+  branch and wait for checks to re-report. The classifier substring-matches backend
+  stderr with `network` as its **fall-through default**, so an unknown signature does not
+  fail loudly; it silently acquires the least actionable class. Its policy arm matched
+  only `policy` / `branch protection` / `blocked` / `not mergeable` / `TF402455`, none of
+  which are words GitHub's `mergePullRequest` refusals use. Never a GitHub-only defect:
+  both backends share the classifier, and Azure DevOps completion refusals say
+  "policies" — plural, which `*"policy"*` does not match. Adds a second, **purely
+  additive** `merge-blocked-by-policy` arm (the pre-existing pattern set is byte-unchanged,
+  so no previously-correct classification can regress), placed after `auth-missing` and
+  `pr-not-found` per the documented most-specific-first ordering. Note that
+  `You're not authorized to push to this branch` is a *policy* refusal, not
+  `auth-missing`: the credential is fine, the permission is the point. Also names
+  `local-git` in the BR-4 contract line, in `forge.md`, and in the mock scenario
+  dispatcher — BUG-150 added the class without updating any of them, so
+  `ADLC_FORGE_MOCK_SCENARIO=local-git` came back as `network`. `forge.md` now documents
+  that `network` is the fall-through and therefore the class to distrust. Regression
+  coverage: §4b pins 18 real backend stderr strings to their classes with negative
+  anchors, §4c is a doc-contract guard that fails if the classifier can emit a class the
+  header does not name, §4d drives both classes through the whole `pr_merge` mock path.
+
+- **`adlc_forge_pr_merge --delete-branch` downgraded a request to advice (BUG-195,
+  #121).** It reported `state=MERGED`, returned 0, left the remote branch in place, and
+  emitted a stderr sentence telling the caller to run `git push origin --delete <branch>`
+  — placeholder unsubstituted, in a channel every caller parses for `key=value`. BUG-150
+  had fixed the *reporting* of this partial success and deliberately left the outcome to
+  the caller; no caller ever acted on it, and a grep across all six call sites found no
+  handling of `warn=` at all. The trigger is the default agent topology (worktree +
+  primary checkout on `main`), so essentially every merge from a worktree needed a manual
+  step. The adapter now completes the remote deletion itself via `git push origin
+  --delete`, which touches no local ref and is therefore immune to the worktree collision
+  that breaks `gh`'s cleanup — idempotent (already-gone counts as deleted), never touches
+  a fork head, never converts a merge into a failure. New normalized field
+  `branch_deleted=<1|0|skipped-fork>` on both success paths whenever deletion was
+  requested; `/bugfix` and `/wrapup` now branch on it. **Branch on the field, never on the
+  `warn=` prose.**
+
+- **`/spec` retrieval excluded the status the pipeline actually writes (BUG-194, #119).**
+  Step 1.6 filtered the spec corpus to `approved` | `in-progress` | `deployed`. No
+  toolkit skill writes `in-progress` or `deployed` — `/architect` writes `approved`, and
+  `/wrapup` and `/proceed` Phases 6–8 write `complete`. Reader and writers overlapped on
+  one transient value, so retrieval returned **0 of 42 specs in this repo and 11 of 543
+  (2.0%) ecosystem-wide** — and reported it as a *cold start*, because the "nothing
+  matched" and "everything was filtered out" strings were byte-identical. That is why it
+  hid for four months. The allowlist becomes an exclusion list (`draft`, `superseded`,
+  `cancelled`, `rejected`), admitting 506/543 (93.2%) — the 37 excluded being exactly the
+  withdrawn and unvalidated specs; the bug corpus gains `closed`. New sub-step 1a warns
+  when a non-empty corpus is fully removed by the status filter and records it in
+  `## Retrieved Context` instead of emitting the cold-start line. New
+  `retrieval-status-parity` lint check compares `/spec`'s exclusion list against the
+  statuses `/architect`, `/wrapup`, and `/proceed` declare, written so that removing or
+  relocating a declaration is a finding rather than a silent pass. No data backfill:
+  `complete` is what the pipeline writes, so the corpus was correct and the filter was
+  wrong.
+
+- **Phase 8's terminal state write lived only on the cross-repo path (BUG-193, #117).**
+  It sat inside a block headed "Cross-repo merge sequencing", so a single-repo pipeline
+  following the document literally merged its PR, claimed `merged`, and left
+  `pipeline-state.json` saying the run never finished. Found by auditing 36 state files
+  in one single-repo project: **12 disagreed with their own merged PRs.** Topology decides
+  *who merges*, not *whether Phase 8 closes out*. `proceed/phases-6-8-ship.md` splits
+  Phase 8 into 8a Merge / 8b Close out (both topologies) / 8c `pr-ready` reconciler, with
+  8b reordered so the state write precedes worktree teardown and the primary checkout
+  named as the write target; `agents/pipeline-runner.md` gains the single-repo close-out;
+  `wrapup/SKILL.md` Step 3.5 writes all five fields rather than two. `/status` gains
+  Stale Pipeline State detection so the failure stays visible even when an actor forgets.
+
+- **`/wrapup` session-JSONL discovery mis-encoded `.` in worktree paths (BUG-152, #115).**
+  Claude Code encodes a project path into a `~/.claude/projects/` directory name by
+  replacing every non-alphanumeric character with `-`; the encoder replaced only `/`, so a
+  session inside a harness worktree computed `-.claude-` where the real name is
+  `--claude-` and never matched. The walk then reached the repo-root directory of older,
+  unrelated sessions and "newest wins" silently delegated one of those. Now encodes with
+  the real rule (fork-free, via parameter expansion), tries exact match first and falls
+  back to a normalized scan against the real listing, starts the walk at the working tree,
+  and **refuses** when a REQ id was available and no candidate mentions it rather than
+  serving an arbitrary transcript — "newest wins" applies only when there is no anchor to
+  check against.
+
+- **`gh pr merge`'s exit code was treated as evidence (BUG-150, #113).** `gh pr merge`
+  does two independent things — the merge API call and a local tidy-up — and exits
+  non-zero when only the *local* step fails. Three merges out of three on `teton-code`
+  (PRs #32/#34/#35) landed successfully and were reported as failures. The trigger is the
+  normal agent layout, not an edge case: the default branch checked out in another
+  worktree while the session works from `.worktrees/`. Worse, the local git error matched
+  no classifier pattern and fell through to `network`, inviting a retry against an
+  already-merged PR, and because gh aborts cleanup at the failed step the source branch
+  silently survived. On non-zero rc the GitHub arm now asks
+  `gh pr view <ref> --json state`: if `MERGED`, report success and demote the captured
+  error block to `warn_class=` so the diagnostics survive without the output claiming
+  failure. The exit code is a claim; the PR state is the evidence.
+
+- **Recheck probes did not self-identify (BUG-145, #105).** Two live false-positive
+  instances of the LESSON-435 class: the reservation probe reported the allocator's *own*
+  reservation ref as a collision, so every `/bugfix` and lesson recheck false-halted into
+  a renumber treadmill; and the merged-artifact probe reported a REQ's *own* merged spec
+  directory as a collision, firing on every fresh `/proceed` in the normal
+  spec-merges-first flow. `adlc_reserve_id` now records won pushes to an own-reservation
+  ledger matched by exact object SHA, and `adlc_recheck_id` takes an optional
+  own-artifact-name argument compared against same-number entries via a new `names` mode
+  on the shared artifact scan. Missing ledger data degrades to the historical collision
+  halt — the safe direction.
+
+- **`run.sh`'s harness list did not survive zsh (BUG-118, #97).** Iterates harnesses via
+  positional parameters instead of an unquoted `$TESTS` string, and re-execs `run.sh`
+  under each shell so its own zsh invocation is exercised on every run. Same class as
+  BUG-116 (LESSON-329/335 zsh executor, LESSON-399 single-element masking).
+
+- **`adlc-read` was unreachable from GUI-launched sessions (#111).** GUI-launched Claude
+  Code sessions inherit a `PATH` without `~/bin` (only `.zshrc` adds it), so the gate's
+  bare `command -v adlc-read` returned no-binary on machines where `~/bin/adlc-read` is
+  installed and working — the source of the persistent gate-fail telemetry. Adds
+  `_adlc_resolve_read_bin()` (PATH first, then an executable `$HOME/bin/adlc-read`),
+  exported as `ADLC_READ_BIN` at source time and re-resolved on every gate check; the
+  delegated-invocation fences in `/spec`, `/proceed`, `/analyze`, `/wrapup`, and
+  `agents/delegate-pre-pass.md` invoke `"${ADLC_READ_BIN:-adlc-read}"`, the bare-name
+  default keeping stale vendored gate copies working.
+
+- **Telemetry duration guard and `mktemp` portability (#107).** `emit-step-telemetry.sh`
+  validates that `start_s` is all-digits before the duration arithmetic — an empty or
+  non-numeric operand inside `$(( ))` is fatal in zsh, and missing or garbage marks now
+  yield a duration of `-` instead of crashing `/spec` Step 1.6. `skill-flag.sh` uses a
+  full-path `mktemp` template instead of `-t <name>`: BSD `mktemp` treats the `-t`
+  argument as a literal prefix and never expands its `X`s.
+
+- **Boundary-free artifact-id matching sweep (#99, REQ-524 follow-up).** Fixes the
+  `/sprint` eligibility example, whose bare `grep REQ-xxx` matched prefix siblings, and
+  documents why `id-alloc`/`id-recheck` extraction plus exact-compare is already
+  prefix-sibling safe.
+
+- **Test portability off GitHub and outside the delegate venv (#100).**
+  `test_cli_resolve_provider` asserted `github` against the checkout's own `origin`,
+  failing on Azure DevOps and mirror clones; it now resolves against a synthetic repo with
+  a GitHub remote, with `ADLC_CONFIG` neutralized so a machine config cannot override. The
+  two `test_get_client_*` tests `importorskip("openai")` so they skip with a reason rather
+  than erroring when the delegate venv deps are absent.
+
+### Knowledge
+
+- **LESSON-575 — a squash merge destroys the second parent a promotion depends on.** A
+  `staging → main` promotion in `admin-api` was merged with the reflexive
+  `--squash --delete-branch` idiom. `deploy.yml` resolves the staging image tag via
+  `git rev-parse --verify HEAD^2` — the merge commit's second parent, whose SHA tags the
+  image in the staging Artifact Registry. A squash commit has one parent, so the lookup
+  fell through to a fallback that substituted the squash commit's own SHA and the docker
+  pull missed with `manifest unknown`. Records the decision table for which PR shapes need
+  `--merge`, the `--delete-branch` corollary (on a promotion the head *is* the permanent
+  branch, and `branch_deleted=1` is meaningless there), and the one-line check that
+  reveals a repo's promotion convention before you merge. Noted honestly as a **latent
+  trap rather than a live bug**: the adapter has no default merge method — it forwards
+  `"$@"` — but its signature advertises only `[--squash]` and four skill call sites
+  hardcode it, none of which merges a promotion today.
+
+- **LESSON-581 — a classifier's fall-through default is a claim about every input it has
+  never seen.** `network` is a *diagnosis* ("this was transient, retry"), and making it
+  the `*)` branch silently attached that diagnosis to every message the pattern set had
+  not been taught. Prefer an honest `unclassified`; where a default must be a real class,
+  pin the alternatives in a fixture table, because nothing in the code can detect that the
+  patterns stopped covering the backend's wording.
+
+- **LESSON-582 — bash 3.2 cannot parse a `case` inside `$( )`.** It reads the case
+  pattern's `)` as the closing `)` of the substitution. Verified: syntax error on bash
+  3.2.57 (macOS `/bin/bash` and `/bin/sh`), fine on bash 5.3.15, zsh 5.9, and dash. The
+  sharper half is the failure's *direction*: Ubuntu CI runs bash 5 and would have gone
+  green, and the zsh pass of `run.sh` was clean too — only the old local bash caught it.
+  A parse error is total, so the suite aborted mid-run while still printing a healthy wall
+  of `PASS` lines, and grepping that output for `FAIL` showed a clean bill of health.
+
+- **LESSON-572 — a remediation is only real if its audience can execute it.** BUG-150
+  correctly diagnosed gh's partial-success merge and fixed the reporting, then handed the
+  leftover cleanup to "the caller" as an English sentence with an unsubstituted
+  `<branch>` placeholder, in a channel every caller parses for `key=value`. Give each fact
+  in a partial success its own normalized field, and finish the half you are able to
+  finish.
+
+- **LESSON-571 — a retrieval filter is half of a read/write contract.** Enumerate the
+  actual writers of the field you filter on rather than the values you imagine; prefer an
+  exclusion list over an allowlist for recall-oriented filters; and never let "nothing
+  matched" and "everything was filtered out" render the same string.
+
+- **LESSON-553 — shared post-work stranded on one branch of a fork.** The BUG-193 root
+  cause generalized: work that both topologies owe must not live inside a block headed
+  with one topology's name.
+
+- **Also captured:** LESSON-434–439 (REQ-545/546 sprint knowledge), LESSON-440 (detectors
+  need benign-path acceptance criteria), LESSON-441 (vendored partials shadow canonical
+  fixes), LESSON-465 (verify vendored-surface sync per file; worktree chore branches),
+  LESSON-471 + ASSUME-001 (REQ-553 wrapup knowledge), LESSON-478 (an exit code is a claim,
+  an outcome is the evidence), LESSON-483 (a detected miss must refuse, not guess).
 
 ---
 
