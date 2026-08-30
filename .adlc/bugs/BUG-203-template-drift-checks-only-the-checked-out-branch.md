@@ -1,7 +1,7 @@
 ---
 id: BUG-203
 title: "/template-drift compares only the checked-out branch, so in a promotion-pipeline repo it confidently reports the wrong answer"
-status: open
+status: resolved
 severity: medium
 created: 2026-08-28
 updated: 2026-08-28
@@ -148,3 +148,46 @@ the branch set here would have said `pending-promotion` up front.
   classification); Step 5 report becomes a surface × branch matrix with verdicts; Step 6
   actions routed by verdict with explicit PR bases; corrected scope claim
 - `.adlc/bugs/BUG-203-template-drift-checks-only-the-checked-out-branch.md` — this report
+
+## Deployment
+
+n/a — no deploy targets. `template-drift/SKILL.md` is a **skill**, not one of the four
+vendored sync surfaces (`.adlc/templates/`, `.adlc/partials/`, `.adlc/ETHOS.md`,
+`.adlc/workflows/`), so consumer repos do not carry a copy to reconcile. It resolves
+through the `~/.claude/skills` symlink and is live for every session on the machine once
+the primary checkout returns to `main` and pulls — the ordinary symlink-install caveat
+that "landed on `main`" and "live on this machine" are two separate events.
+
+Merged via [#126](https://github.com/atelier-fashion/adlc-toolkit/pull/126) (squash),
+2026-08-28.
+
+### Post-merge confirmation
+
+`origin/main`'s `template-drift/SKILL.md` carries both new sections — `### Step 0: Resolve
+the Pipeline Branch Set` and `### Step 3e: Classify Each Surface's Drift Across the
+Pipeline (promotion state)` — along with the surface × branch report matrix in Step 5 and
+the verdict-routed actions in Step 6.
+
+**Marked resolved late.** The fix merged on 2026-08-28 and this bookkeeping step was
+skipped at the time; the report was written but `status:` stayed `open`, so `/status`
+carried BUG-203 as in-flight work for two days. The same omission applies to BUG-204.
+The two fixes and their follow-up were a single sitting, and the close-out ran only for
+BUG-201 ([#128](https://github.com/atelier-fashion/adlc-toolkit/pull/128)).
+
+### Follow-ups (deliberately not in this PR)
+
+1. **BUG-204 is the other half.** Step 0 answers "which timelines does the *consumer*
+   have"; Step 0a answers "which timeline is the *baseline* on". Neither is sufficient
+   alone — a per-branch sweep measured against a stale baseline is still wrong on every
+   branch at once.
+2. **No lesson captured yet.** BUG-203 and BUG-204 share one root cause worth writing up
+   on its own terms — reading a working tree as if it were a version — which is stated in
+   both reports but has no `LESSON-*` entry. See Notes.
+
+## Notes
+
+The generalizable claim, recorded here pending a lesson entry: **a working tree is a
+location, not a version.** Every defect in this pair came from treating a path as if it
+named one state of the code, when in a promotion-pipeline repo it names as many states as
+there are branches, and in a symlinked toolkit checkout it names whatever branch someone
+left it on.

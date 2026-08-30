@@ -1,7 +1,7 @@
 ---
 id: BUG-204
 title: "/template-drift treats the toolkit working checkout as canonical without checking which branch it is on — a stale baseline inverts every verdict and proposes regressions"
-status: open
+status: resolved
 severity: high
 created: 2026-08-28
 updated: 2026-08-28
@@ -110,3 +110,53 @@ baseline", but it may never quietly substitute an untrustworthy one.
 
 - `template-drift/SKILL.md` — new Step 0a (canonical baseline verification) ahead of Step 0
 - `.adlc/bugs/BUG-204-template-drift-trusts-an-unverified-canonical-baseline.md` — this report
+
+## Deployment
+
+n/a — no deploy targets. `template-drift/SKILL.md` is a **skill**, not one of the four
+vendored sync surfaces, so no consumer repo carries a copy to reconcile. It resolves
+through the `~/.claude/skills` symlink and goes live for every session once the primary
+checkout returns to `main` and pulls.
+
+That deployment model is not incidental here — it *is* the bug. The symlink points at a
+working checkout, so the same mechanism that makes a fix live instantly is the mechanism
+that lets an arbitrary branch masquerade as canonical.
+
+Merged via [#127](https://github.com/atelier-fashion/adlc-toolkit/pull/127) (squash),
+2026-08-28.
+
+### Post-merge confirmation
+
+`origin/main`'s `template-drift/SKILL.md` carries `### Step 0a: Verify the Canonical
+Baseline`, positioned ahead of Step 0 so the baseline is established before any
+comparison runs.
+
+Confirmed again while writing this close-out, and the check earned its keep: at the time
+of writing, `readlink ~/.claude/skills` resolved to the primary checkout sitting on a
+**feature branch**, which is exactly the first of Step 0a's three warning conditions. The
+content happened to be identical to `origin/main`, so no verdict would have been wrong —
+but a pre-Step-0a run had no way to know that, and would have reported the same confident
+answer either way. That is the whole argument for the step.
+
+**Marked resolved late.** The fix merged on 2026-08-28 and the bookkeeping step was
+skipped at the time; the report was written but `status:` stayed `open`. Same omission as
+BUG-203.
+
+### Follow-ups (deliberately not in this PR)
+
+1. **A branch check is a proxy, not the property.** Step 0a warns when the checkout is on
+   a non-default branch, behind, or dirty. What actually matters is whether the *file*
+   being compared matches `origin/<default>`, and a feature branch that has not touched
+   the file is a false alarm while a clean-and-current checkout of a stale fork is a false
+   negative. Per-file `git show origin/<default>:<path>` comparison — already the
+   preferred path in Step 0a — would make the branch heuristics redundant.
+2. **No lesson captured yet.** Shared with BUG-203; see that report's Notes.
+
+## Notes
+
+The one-line form, pending a lesson entry: **a drift detector may report that it could
+not establish a trustworthy baseline, but it may never quietly substitute an
+untrustworthy one.** The failure direction is what makes this severity `high` rather than
+`medium` — a stale baseline does not merely weaken a verdict, it inverts it, and Step 6
+then proposes copying the older file over the newer one. The tool drives the regression
+itself, with full confidence.
