@@ -1,7 +1,7 @@
 ---
 id: TASK-001
 title: "Create partials/intake.sh with detection, segmentation, budget, and redaction"
-status: draft
+status: complete
 parent: REQ-594
 created: 2026-08-31
 updated: 2026-08-31
