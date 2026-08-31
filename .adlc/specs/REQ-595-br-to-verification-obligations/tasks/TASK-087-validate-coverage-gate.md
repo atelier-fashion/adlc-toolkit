@@ -1,7 +1,7 @@
 ---
 id: TASK-087
 title: "validate — obligation coverage, benign-path, and vacuous-run gates"
-status: draft
+status: complete
 parent: REQ-595
 created: 2026-08-31
 updated: 2026-08-31
