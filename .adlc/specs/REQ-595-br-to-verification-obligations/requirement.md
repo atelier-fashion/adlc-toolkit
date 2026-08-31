@@ -4,7 +4,7 @@ title: "BR→verification obligations: /architect emits the tests, not just the 
 status: draft
 deployable: true
 created: 2026-08-27
-updated: 2026-08-27
+updated: 2026-08-31
 component: "adlc/architect"
 domain: "adlc"
 stack: [markdown, bash, claude-skills]
@@ -62,7 +62,7 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 
 - [ ] BR-1: `/architect` emits a `## Verification` block in each task file, listing every BR and AC that task discharges and the concrete artifact that proves each one. `task-template.md` gains the section (additive; existing task files without it stay valid).
 - [ ] BR-2: `/validate`, run on architecture + tasks, reports every numbered **BR and AC** in the REQ that has no verification obligation anywhere in the task set, naming the unmapped rule ids. Gating both is load-bearing: acceptance criteria do not reduce to business rules — REQ-593 carries cross-repo and `/status` ACs with no one-to-one BR — so gating BRs alone would leave half of LESSON-330's omission class open. In **epoch 1 this report is advisory**: it is surfaced as a finding and does not block advancement, mirroring how REQ-425's corruption detector shipped as an advisory `/analyze` dimension before hardening. Promotion to a blocking gate is a named follow-up REQ, taken once the corpus carries obligations (informed by LESSON-330, REQ-425).
-- [ ] BR-3: obligation `kind` resolves from `.adlc/config.yml` `stack:` **when that file exists and declares one**. A markdown-only surface (a SKILL.md change) maps to `structural-check` against `tools/lint-skills`, never to a behavioral test; a surface with a real runner maps to `test-case`. No framework name is hardcoded in the skill (informed by LESSON-331, and conventions' "no test runner" reality for skills).
+- [ ] BR-3: obligation `kind` resolves from `.adlc/config.yml` `stack:` **when that file exists and declares one**. Note the schema: `stack:` declares platform lists (`languages`, `frontends`, `backends`, `databases`, `ci`) and **names no test runner** — `ci: github-actions` is a CI system, not a runner. Kind resolution therefore asks only whether those lists imply a real runner exists (e.g. `languages: [swift]` does; an empty stack on a markdown surface does not), which is all `kind` needs. A markdown-only surface (a SKILL.md change) maps to `structural-check` against `tools/lint-skills`, never to a behavioral test; a surface with a real runner maps to `test-case`. No framework name is hardcoded in the skill (informed by LESSON-331, and conventions' "no test runner" reality for skills).
 - [ ] BR-4: any BR that describes detection, refusal, or a halt must carry at least one `benign_path` obligation. Like BR-2's coverage report, this check is **advisory in epoch 1** and hardens with it — the two are obligation-shape judgments and must share a posture, or `/validate` presents a mixed gate where one new check blocks and the other does not — a case asserting the detector does **not** fire on the legitimate actor. A detector validated only against adversarial inputs ships broken and passes its own suite (informed by LESSON-440).
 - [ ] BR-5: a verification run that exits 0 having done no work fails the gate — a vacuous scan is a failure, not a pass. "Work done" is defined **per kind**, because the kinds are not commensurable: a `test-case` obligation reports executed test cases, and a `structural-check` obligation reports **files scanned** by the lint invocation (many obligations legitimately share one invocation, so per-obligation case counts do not exist for that kind). Either count reaching zero fails the gate, and this failure is **blocking from epoch 1** — unlike BR-2 and BR-4 it is not a coverage judgment but evidence that the verification did not run at all, which is the REQ-435 vacuous-scan class (informed by REQ-435, LESSON-020).
 - [ ] BR-6: `/architect` may draft obligation boilerplate through the shared delegate gate (`adlc-write`), but the drafted output is untrusted — every cited rule id and artifact path is validated against the REQ and the filesystem before it is written into a task file (informed by LESSON-008).
@@ -78,7 +78,7 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 - [ ] Removing one BR's obligation from the task set causes `/validate` to report that specific rule id as unmapped, as an advisory finding that does not block advancement.
 - [ ] Removing one AC's obligation is reported identically — AC coverage is gated on the same footing as BR coverage.
 - [ ] For a SKILL.md-only REQ in this repo — which has no `.adlc/config.yml` — obligations resolve through BR-11 to `structural-check` entries naming `tools/lint-skills` checks, with no test-file path emitted and no error about the missing config.
-- [ ] For a project whose `.adlc/config.yml` declares a test runner, obligations resolve to `test-case` entries with a file path and case name.
+- [ ] For a project whose `.adlc/config.yml` `stack:` implies a real runner (e.g. `languages: [swift]`), obligations resolve to `test-case` entries with a file path and case name. Because `stack:` names no runner and BR-3 forbids hardcoding framework names, the path and case name are **proposed by `/architect` from the repo's observed test layout** — the directory and naming convention of the test files already present — not derived from a config field and not from a built-in framework table. The proposal is a draft like any other: the `artifact` path must resolve on disk after implementation (System Model constraint), and BR-6's validation drops it if it does not.
 - [ ] A BR worded as a detection/refusal rule that has no `benign_path` obligation is reported by BR-4's check as an advisory finding that does not block — verified with a fixture REQ containing exactly one such rule.
 - [ ] A verification run whose scan matches zero files reports failure, not success — verified by pointing the check at an empty directory (the REQ-435 vacuous-scan regression).
 - [ ] A delegate-drafted obligation citing `BR-99` (absent from the REQ) or a nonexistent artifact path is dropped before the task file is written.
@@ -110,7 +110,7 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 - Self-healing or auto-repairing test selectors.
 - Performance and load testing.
 - Generating the test *bodies* for behavioral suites — this REQ specifies obligations and gates their existence; `task-implementer` still writes the code.
-- Retrofitting obligations onto the 42 existing specs.
+- Retrofitting obligations onto the 45 existing specs.
 
 ## Retrieved Context
 

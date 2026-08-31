@@ -4,7 +4,7 @@ title: "Spec intake: turn raw human input into a draft REQ plus an explicit gap 
 status: draft
 deployable: true
 created: 2026-08-27
-updated: 2026-08-27
+updated: 2026-08-31
 component: "adlc/spec"
 domain: "adlc"
 stack: [markdown, bash, claude-skills]
@@ -15,9 +15,11 @@ tags: [intake, spec, requirements, gap-analysis, ambiguity, skill-md, provenance
 ## Description
 
 `/spec` assumes its input is already a coherent feature request. Its only concession to
-ambiguity is Step 1.3: "If the feature request is vague or ambiguous, ask clarifying
-questions" — an unstructured, unbounded, easy-to-skip instruction with no artifact and
-no gate. The upstream reality is messier: requirements arrive as meeting notes, a chat
+ambiguity is item 3 of Step 1 (`spec/SKILL.md:34`): "If the feature request is vague or
+ambiguous, ask clarifying questions before proceeding. Wait for answers." — an
+unstructured, unbounded, easy-to-skip instruction with no artifact and no gate. (Note for
+the implementer: this is a numbered list item under `### Step 1`, not a `### Step 1.3`
+heading; the only sub-step headings in that skill are Step 1.5 and Step 1.6.) The upstream reality is messier: requirements arrive as meeting notes, a chat
 transcript, a ticket dump, a voice-note transcription, or three paragraphs of stakeholder
 prose. Today the operator does the compression from that into a feature request by hand,
 before `/spec` ever runs, and whatever was lost or assumed in that compression is invisible.
@@ -110,7 +112,7 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 - Calendar, Zoom, Teams, Jira, or ticket-system connectors.
 - Automatic stakeholder follow-up (emailing questions back to whoever left the gap).
 - Changing the requirement template's section set.
-- Retroactive gap analysis of the 42 existing specs.
+- Retroactive gap analysis of the 45 existing specs.
 
 ## Retrieved Context
 

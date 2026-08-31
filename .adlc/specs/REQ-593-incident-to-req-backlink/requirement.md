@@ -4,7 +4,7 @@ title: "Incident→REQ backlink: attribute a BUG to the REQ that shipped its cau
 status: draft
 deployable: true
 created: 2026-08-27
-updated: 2026-08-27
+updated: 2026-08-31
 component: "adlc/bugfix"
 domain: "adlc"
 stack: [markdown, bash, claude-skills]
@@ -24,7 +24,7 @@ to remember.
 
 The linkage is already latent in the repo and merely unexploited. Conventions mandate a
 `<type>(<scope>): <description> [TASK-xxx]` commit trailer for every pipeline-tracked
-change, and each TASK file carries a `req:` frontmatter field. So `git blame` on the
+change, and each TASK file carries a `parent:` frontmatter field naming its REQ. So `git blame` on the
 lines identified during root-cause analysis yields a commit, the commit yields a
 TASK/REQ trailer, and the TASK yields a REQ. This REQ makes that derivation an explicit,
 guarded step of `/bugfix` and records the result on the bug artifact.
@@ -64,13 +64,14 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 - [ ] BR-5: every id read out of a commit trailer is validated with the strict regex `^REQ-[0-9]{3,6}$` and an existence check before it is written to any artifact. The existence check resolves against the **primary** repo's `.adlc/specs/<id>-*/` — never the blamed repo's — because in cross-repo mode the spec directory exists only in the primary. Widening the regex is prohibited (informed by REQ-423, LESSON-008).
 - [ ] BR-6: all shell is BSD- and zsh-safe: `grep -wF` never `\b` in `-E` (informed by LESSON-013), no bare `$<digit>`, no variable named `status`, no reliance on unquoted word-splitting (informed by LESSON-329, LESSON-335).
 - [ ] BR-7: a bug with no derivable REQ — pre-dating the trailer convention, touching untracked files, or blaming to a commit with no trailer — produces `attribution: none` and continues. It does not halt `/bugfix` and never fabricates an id (benign-path rule, informed by LESSON-440).
-- [ ] BR-8: derivation runs per-repo against that repo's own git history, keyed off the bug's `repo`/`touched_repos` frontmatter. A cross-repo bug produces at most one candidate set per touched repo (informed by REQ-484's per-repo attribution precedent).
+- [ ] BR-8: derivation runs per-repo against that repo's own git history. The repo set is **derived, not stored**: each path in the root-cause file/line set — the input BR-2 already blames — is mapped to its owning repo via `.adlc/config.yml` `repos:`, and derivation runs once per distinct repo in that set. No `repo:` or `touched_repos:` field is read from or written to the bug artifact; neither exists in `bug-template.md` and BR-1 does not add them, because a stored repo edge would rot exactly as BR-4's stored reverse edge would. In single-repo mode (no config, or one entry) the set is always the primary and this rule is inert. A cross-repo bug produces at most one candidate set per touched repo (informed by REQ-484's per-repo attribution precedent, and by BR-4's derive-don't-store posture).
 - [ ] BR-9: `/status` gains a read-only line reporting bugs-with-attribution and the REQs they point at, derived per BR-4. No new skill directory is created (conventions: don't create skills casually).
-- [ ] BR-10: TASK→REQ resolution is **scoped, never globbed**. A `TASK-xxx` id resolves only within the REQ identified by the same commit message (a bracketed `[REQ-xxx]`, a `REQ-xxx:` subject prefix, or a `(REQ-xxx)` scope), by reading `.adlc/specs/<that-req>-*/tasks/TASK-xxx*.md`. A bare `TASK-xxx` with no REQ context in the same commit is **not resolvable** and yields no candidate. TASK ids are per-REQ scoped, not global — `TASK-001.md`, `TASK-002.md`, and `TASK-003.md` each occur three times across different REQ directories — so a filesystem-wide glob would return several unrelated REQs and manufacture a false multi-candidate halt under BR-3.
+- [ ] BR-10: TASK→REQ resolution is **scoped, never globbed**. A `TASK-xxx` id resolves only within the REQ identified by the same commit message (a bracketed `[REQ-xxx]`, a `REQ-xxx:` subject prefix, or a `(REQ-xxx)` scope), by reading `.adlc/specs/<that-req>-*/tasks/TASK-xxx*.md` and taking its REQ from the **`parent:`** frontmatter field. `parent:` is the canonical field (152 of 157 task files); the six REQ-258/REQ-380 files predating it use `req:`, so the reader accepts `parent:` first and falls back to `req:`, and accepts no other spelling. A bare `TASK-xxx` with no REQ context in the same commit is **not resolvable** and yields no candidate. TASK ids are per-REQ scoped, not global, and the hazard is sized by the glob rather than the bare name: `TASK-001*.md` matches **16** files across 16 different REQ directories, `TASK-002*.md` 16, `TASK-003*.md` 14 (the exact filenames `TASK-001.md`/`TASK-002.md`/`TASK-003.md` account for only 3 each — the suffixed forms are the bulk). A filesystem-wide glob would therefore return a dozen-plus unrelated REQs and manufacture a false multi-candidate halt under BR-3.
 
 ## Acceptance Criteria
 
-- [ ] A bug whose root cause blames to a commit carrying `[TASK-yyy]`, where `TASK-yyy`'s frontmatter says `req: REQ-xxx`, ends with `introduced_by: [REQ-xxx]` and `attribution: derived` in its frontmatter.
+- [ ] A bug whose root cause blames to a commit carrying `[TASK-yyy]`, where `TASK-yyy`'s frontmatter says `parent: REQ-xxx`, ends with `introduced_by: [REQ-xxx]` and `attribution: derived` in its frontmatter.
+- [ ] A task file carrying the legacy `req:` field instead of `parent:` (the six REQ-258/REQ-380 files) resolves identically — verified against `.adlc/specs/REQ-380-*/tasks/TASK-001-edit-proceed-skill.md`, which has `req:` and no `parent:`.
 - [ ] A bug whose blame yields a commit with a direct `[REQ-xxx]` trailer (no task file) attributes identically.
 - [ ] A bug whose blame yields a commit whose trailer is in the **body** and whose subject has none still attributes — the dominant real-world case, and the one a subject-only read misses.
 - [ ] A bug whose blame yields a `REQ-526: …` subject-prefix commit attributes to REQ-526 with no bracketed trailer present anywhere.
@@ -82,7 +83,7 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 - [ ] Running the derivation on macOS `/usr/bin/grep` and under `zsh -c` produces the same result as under `sh -c` (dogfood requirement, informed by LESSON-329).
 - [ ] Asking for REQ-xxx's incidents scans `.adlc/bugs/` and lists matching bugs; no `.adlc/specs/**` file is modified by that read.
 - [ ] A cross-repo bug whose cause was blamed in a sibling repo still attributes: the id validates against the **primary** repo's specs directory and yields `attribution: derived`, not `none` (the BR-5/BR-8 interaction).
-- [ ] A cross-repo bug touching two repos produces at most one candidate set per repo, each derived from that repo's own history.
+- [ ] A cross-repo bug touching two repos produces at most one candidate set per repo, each derived from that repo's own history — with the repo set derived from the root-cause file/line set via `.adlc/config.yml` `repos:`, not read from bug frontmatter (no such field is added or required).
 - [ ] `/status` reports the bugs-with-attribution line, derived by scanning `.adlc/bugs/`; running it modifies no file.
 - [ ] An existing bug file with neither new field parses and processes unchanged (backward compatibility).
 
@@ -93,7 +94,7 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 
 ## Assumptions
 
-- Commit provenance is recorded in three forms, not one, and no single form dominates. Measured per commit at spec time over this repo's 173 commits: 37 carry a bracketed trailer in the subject, 37 in the body (59 in either), 20 use a `REQ-xxx:` subject prefix, 15 use a `<type>(REQ-xxx)` scope, and 19 use a `<type>(BUG-xxx)` scope that is deliberately not an attribution. 72 commits match at least one accepted form; the remaining 101 (merges, releases, un-tracked chores) carry no derivable provenance and are expected to yield `attribution: none`. BR-2's parser is sized to that measured distribution rather than to the convention as documented. Re-measure before assuming it holds in a consumer repo — a repo that squash-merges differently will have a different distribution.
+- Commit provenance is recorded in three forms, not one, and no single form dominates. Measured per commit at spec time over this repo's 173 commits: 37 carry a bracketed trailer in the subject, 37 in the body (59 in either), 20 use a `REQ-xxx:` subject prefix, 15 use a `<type>(REQ-xxx)` scope, and 19 use a `<type>(BUG-xxx)` scope that is deliberately not an attribution. 72 commits match at least one accepted form; the remaining 101 (merges, releases, un-tracked chores) carry no derivable provenance and are expected to yield `attribution: none`. BR-2's parser is sized to that measured distribution rather than to the convention as documented. Re-measure before assuming it holds in a consumer repo — a repo that squash-merges differently will have a different distribution. **Re-measured 2026-08-31 at `/validate` (185 commits):** bracketed-either 59, bracketed-subject 37, `REQ-xxx:` prefix 20, `(REQ-xxx)` scope 15 — all four unchanged; only the `(BUG-xxx)` scope count moved (19 → 27) as bugfix work merged. BR-2's parser sizing survives the drift.
 - `git blame` on the root-cause file/line set is a sufficient proxy for "the change that introduced this behavior". Refactors and file moves will sometimes blame to the mover rather than the author of the defect; BR-3's refuse-don't-guess rule is what keeps that from becoming a false attribution.
 - REQ ids allocated remotely (REQ-518) are stable and not renumbered after merge, so a stored forward edge stays valid.
 
@@ -107,7 +108,7 @@ _Permissions: not applicable — no runtime actors, no roles. Section omitted de
 
 - Ingesting production logs, APM data, crash reports, or support tickets. The toolkit has no runtime telemetry surface and this REQ does not create one.
 - Any automatic reverse-edge write into REQ spec files (explicitly prohibited by BR-4).
-- Renumbering, backfilling, or migrating attribution onto the 10 existing bugs. A follow-up may do this; it is not part of this REQ.
+- Renumbering, backfilling, or migrating attribution onto the 15 existing bugs. A follow-up may do this; it is not part of this REQ.
 - Statistical or ML-based defect attribution. Derivation is deterministic blame-plus-trailer only.
 
 ## Retrieved Context
