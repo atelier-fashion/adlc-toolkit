@@ -1,7 +1,7 @@
 ---
 id: REQ-594
 title: "Spec intake: turn raw human input into a draft REQ plus an explicit gap list"
-status: draft
+status: approved
 deployable: true
 created: 2026-08-27
 updated: 2026-08-31
