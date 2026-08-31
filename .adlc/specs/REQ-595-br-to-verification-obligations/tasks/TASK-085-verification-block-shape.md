@@ -1,7 +1,7 @@
 ---
 id: TASK-085
 title: "Define the ## Verification obligation shape in task-template.md"
-status: draft
+status: complete
 parent: REQ-595
 created: 2026-08-31
 updated: 2026-08-31
