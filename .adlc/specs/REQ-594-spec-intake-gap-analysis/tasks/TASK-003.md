@@ -1,7 +1,7 @@
 ---
 id: TASK-003
 title: "Wire Provenance section and gap dispositions into Step 3 spec authoring"
-status: draft
+status: complete
 parent: REQ-594
 created: 2026-08-31
 updated: 2026-08-31

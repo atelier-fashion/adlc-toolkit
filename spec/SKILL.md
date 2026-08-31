@@ -428,11 +428,45 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    - **Business Rules**: Explicit, testable constraints governing behavior (e.g., "Only item owner can delete"). Numbered BR-1, BR-2, etc.
    - **Acceptance Criteria**: Concrete, testable criteria as checkboxes
    - **External Dependencies**: Any new APIs, services, or libraries needed
-   - **Assumptions**: Things assumed to be true that could affect the design
-   - **Open Questions**: Questions that need answers before implementation
+   - **Assumptions**: Things assumed to be true that could affect the design. **If Step 1.4 ran**, every `assumption`-severity gap is written here — see sub-step 5.
+   - **Open Questions**: Questions that need answers before implementation. **If Step 1.4 ran in non-interactive mode**, every unanswered `blocking` gap is written here — see sub-step 5.
    - **Out of Scope**: Items explicitly excluded to prevent scope creep
    - **Retrieved Context** (NEW, always present): append a `## Retrieved Context` section at the end of the spec listing every retrieved source from the retrieval summary produced in Step 1.6 in the form `ID (corpus, score): title`. If no context was retrieved (cold-start path — either the corpus is empty or no documents scored above zero), write exactly: `No prior context retrieved — no tagged documents matched this area.` If instead Step 1.6 sub-step 1a fired (spec files existed on disk but none survived the status filter), write exactly: `Spec corpus suppressed by status filter — see stderr warning (BUG-194).` and, when lessons or bugs still matched, list them beneath it. Never emit the cold-start line for a status-filter suppression — collapsing the two is the defect BUG-194 fixed.
 4. **Inline citations**: when a retrieved doc directly informed a Business Rule, Assumption, or Acceptance Criterion, add an inline citation in the form `(informed by BUG-012)` or `(informed by REQ-019, LESSON-034)` at the end of that line. Citations are required when the retrieved doc is load-bearing for the rule; optional when the doc was background reading only.
+
+5. **Persist the intake result — ONLY if Step 1.4 ran** (REQ-594). If intake did not activate, skip this sub-step entirely: write no `## Provenance` heading, no placeholder, and no empty section. A spec written without intake is exactly the shape it is today (BR-8, BR-11).
+
+   **a. Append `## Provenance`** after `## Out of Scope`, recording what the spec was derived from and what the source did not answer:
+
+   ```markdown
+   ## Provenance
+
+   - Source: `standup-2026-08-27.txt` (kind: transcript)
+   - Intake date: 2026-08-27
+
+   | Section | Severity | Gap | Disposition |
+   |---|---|---|---|
+   | System Model | blocking | Who is allowed to archive a project — any member, or only the owner? | answered |
+   | Business Rules | assumption | Does archiving cascade to child items, or leave them active? | assumed |
+   | Acceptance Criteria | blocking | What should the UI show while an archive is in flight? | open |
+   ```
+
+   Record the source **basename only** — never a full local path (BR-7). This table is the complete gap list with every entry classified and attributed to a named section, which is what makes the intake result auditable in one place.
+
+   **b. Mirror gaps into the working sections.** Provenance is the audit record; Assumptions and Open Questions are the surfaces the rest of the pipeline already reads. Writing gaps in both places is deliberate — do not collapse the duplication.
+
+   - Every `assumed` gap → a `## Assumptions` entry containing the gap question **verbatim**:
+     ```
+     - Does archiving cascade to child items, or leave them active? — assumed: archiving is shallow; child items stay active. (intake gap: Business Rules)
+     ```
+     Verbatim matters: the gap text is what a reviewer greps for to confirm nothing was quietly reworded between the gap list and the spec. Put commentary around the question, never inside it.
+   - Every `open` gap (blocking, unanswered — non-interactive mode only) → a `## Open Questions` entry, also verbatim:
+     ```
+     - [ ] What should the UI show while an archive is in flight? (intake gap: Acceptance Criteria — blocking, unanswered at intake)
+     ```
+   - `answered` gaps (blocking, resolved by the operator in interactive mode) appear in Provenance only. Their answers are already reflected in the spec body.
+
+   **c. Zero gaps is the benign path (BR-11).** A complete, unambiguous source adds no Assumptions entries and no Open Questions entries. The only difference from a non-intake spec is the `## Provenance` section, whose table is then empty apart from a `_No gaps identified._` line.
 
 ### Step 4: Present for Review
 1. Display the full requirement spec to the user

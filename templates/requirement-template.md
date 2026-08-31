@@ -65,3 +65,32 @@ _Explicit, testable constraints governing this feature's behavior._
 ## Out of Scope
 
 - Items explicitly excluded
+
+<!--
+OPTIONAL — intake only (REQ-594). When /spec Step 1.4 drafts a REQ from an
+unstructured source (a transcript, meeting notes, a ticket dump), it appends a
+`## Provenance` section here recording what the spec was derived from and what the
+source did not answer:
+
+## Provenance
+
+- Source: `<basename>` (kind: transcript | notes | ticket | prose)
+- Intake date: YYYY-MM-DD
+
+| Section | Severity | Gap | Disposition |
+|---|---|---|---|
+| System Model | blocking | Who is allowed to archive a project? | answered |
+| Business Rules | assumption | Does archiving cascade to child items? | assumed |
+
+OMIT this section entirely for a spec written without intake — do not emit an empty
+heading or a placeholder. The section is additive, which is why existing specs stay
+valid without migration.
+-->
+
+<!--
+OPTIONAL — appended by /spec Step 1.6. Lists every retrieved prior-art document as
+`ID (corpus, score): title`. Omitted only when the skill has not run retrieval.
+
+## Retrieved Context
+-->
+
