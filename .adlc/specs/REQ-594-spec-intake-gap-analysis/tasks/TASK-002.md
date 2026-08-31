@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: "Add Step 1.4 Unstructured-Source Intake to spec/SKILL.md"
-status: draft
+status: complete
 parent: REQ-594
 created: 2026-08-31
 updated: 2026-08-31

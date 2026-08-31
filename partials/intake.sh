@@ -218,21 +218,39 @@ adlc_intake_segment() {
 # --- BR-12: direct-read offsets for an omitted segment --------------------------
 # Prints "<start> <end>" for segment n against the ORIGINAL source, so reconciliation
 # can read just the segment the delegate skipped rather than re-reading everything.
+#
+# Deliberately STATELESS — it takes the total line count as an argument rather than
+# reading ADLC_INTAKE_LINES. Reconciliation happens in a different SKILL.md fenced
+# block than segmentation, and fenced blocks do not share shell state (not even for
+# exported vars: each block is a separate shell invocation). A version that read the
+# export would silently see an empty value and reject every segment as out of range.
+# Pure arithmetic from explicit arguments is the only shape that works at that call
+# site. Both arguments are echoed by adlc_intake_segment for the caller to thread
+# through as literals, exactly as the telemetry `flag` path is threaded.
+#
+#   adlc_intake_range <segment-number> <total-lines>
 adlc_intake_range() {
     _ai_n="$1"
-    case "$_ai_n" in
-        ''|*[!0-9]*)
-            echo "adlc_intake_range: segment number must be a positive integer: ${_ai_n:-<empty>}" >&2
-            return 2
-            ;;
-    esac
-    if [ "$_ai_n" -lt 1 ] || [ "$_ai_n" -gt "${ADLC_INTAKE_SEGMENTS:-0}" ]; then
-        echo "adlc_intake_range: segment ${_ai_n} is outside 1..${ADLC_INTAKE_SEGMENTS:-0}" >&2
+    _ai_tot="$2"
+    for _ai_v in "$_ai_n" "$_ai_tot"; do
+        case "$_ai_v" in
+            ''|*[!0-9]*)
+                echo "adlc_intake_range: usage: adlc_intake_range <segment-number> <total-lines> (both positive integers)" >&2
+                return 2
+                ;;
+        esac
+    done
+
+    _ai_max=$(( (_ai_tot + ADLC_INTAKE_SEGMENT_LINES - 1) / ADLC_INTAKE_SEGMENT_LINES ))
+    [ "$_ai_max" -gt 0 ] || _ai_max=1
+    if [ "$_ai_n" -lt 1 ] || [ "$_ai_n" -gt "$_ai_max" ]; then
+        echo "adlc_intake_range: segment ${_ai_n} is outside 1..${_ai_max} for a ${_ai_tot}-line source" >&2
         return 2
     fi
+
     _ai_s=$(( (_ai_n - 1) * ADLC_INTAKE_SEGMENT_LINES + 1 ))
     _ai_e=$(( _ai_n * ADLC_INTAKE_SEGMENT_LINES ))
-    [ "$_ai_e" -le "${ADLC_INTAKE_LINES:-0}" ] || _ai_e="${ADLC_INTAKE_LINES:-0}"
+    [ "$_ai_e" -le "$_ai_tot" ] || _ai_e="$_ai_tot"
     printf '%s %s\n' "$_ai_s" "$_ai_e"
     return 0
 }
