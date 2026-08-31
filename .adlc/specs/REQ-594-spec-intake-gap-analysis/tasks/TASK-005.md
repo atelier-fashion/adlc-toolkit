@@ -28,6 +28,7 @@ invocation.
 - [ ] Cases cover `adlc_intake_segment`: exact segment count for a known line count, the 40-segment boundary, and the over-budget refusal returning 3 with the size named (AC-10).
 - [ ] Cases cover `adlc_intake_redact`: each of the five credential patterns is replaced, and the `.bak` file is removed.
 - [ ] Cases cover `adlc_intake_sections`: the emitted list excludes `Description`, `Assumptions`, `Open Questions`, and `Retrieved Context`, and includes the five sections the `Gap.section` enum names.
+- [ ] A case proves the disabled path degrades rather than failing: with `ADLC_DISABLE_DELEGATE=1` the gate returns 1, the reason is recorded, and the intake functions still operate on the source (AC-6, second half).
 - [ ] A fixture case proves a delegate response citing `REQ-999999` or a path containing `..` is rejected by the validation regexes (AC-7).
 - [ ] A fixture case proves a response missing a middle segment is detected by reconciliation (AC-9).
 - [ ] Passes under **both** `bash` and `zsh` (the run.sh dual-shell pass).

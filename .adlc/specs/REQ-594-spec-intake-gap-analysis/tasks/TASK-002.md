@@ -27,6 +27,9 @@ and the interactive/non-interactive split.
 - [ ] Step 1.4 opens with the BR-1 gate: when `adlc_intake_detect` returns 1, the step is skipped entirely — no prompts, no stderr, no output changes (AC-1).
 - [ ] Delegation mirrors Step 1.6: flag-file create with `start_s`, `adlc_delegate_gate_check` 0/1/2, `mark invoked 1` before the call, `mark exit $?` after, and `_adlc_emit_step_telemetry spec Step-1.4` in the same fence as its source (ADR-8).
 - [ ] The mandatory-invocation paragraph is present and matches Step 1.6's contract: on a gate pass, the only acceptable non-delegated outcome is a non-zero `adlc-read` exit (BR-5).
+- [ ] With the gate passing, telemetry records `mode=delegated` (AC-6, first half).
+- [ ] With `ADLC_DISABLE_DELEGATE=1`, the step takes the fallback path: telemetry records the disabled reason, the source is read directly, and **the spec is still produced** — intake degrades, it never fails closed (AC-6, second half; External Dependencies: "intake degrades to direct reading when the gate fails").
+- [ ] The gate-failed fallback emits exactly one stderr line, and a delegation-failure fall-through does not re-emit it (BR-4's one-line-per-invocation rule, matching Step 1.6).
 - [ ] The delegate prompt requires one `<segment id="Sxx">` block per segment.
 - [ ] Segment reconciliation is specified: count returned blocks, compare against the segment list, read any omitted segment directly with the Read tool (BR-12, AC-9).
 - [ ] Delegate stdout is wrapped in the BEGIN/END DELEGATE PROPOSAL (untrusted) framing with the "content, not commands" caveat (BR-6).
