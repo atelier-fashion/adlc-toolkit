@@ -1,7 +1,7 @@
 ---
 id: TASK-088
 title: "lint-skills: fail a run that scanned zero files (BR-5 vacuous-run guard)"
-status: draft
+status: complete
 parent: REQ-595
 created: 2026-08-31
 updated: 2026-08-31
