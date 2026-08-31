@@ -1,7 +1,7 @@
 ---
 id: REQ-595
 title: "BR→verification obligations: /architect emits the tests, not just the tasks"
-status: draft
+status: approved
 deployable: true
 created: 2026-08-27
 updated: 2026-08-31
