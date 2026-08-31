@@ -1,7 +1,7 @@
 ---
 id: TASK-086
 title: "architect Step 4.5 — emit verification obligations per task"
-status: draft
+status: complete
 parent: REQ-595
 created: 2026-08-31
 updated: 2026-08-31
