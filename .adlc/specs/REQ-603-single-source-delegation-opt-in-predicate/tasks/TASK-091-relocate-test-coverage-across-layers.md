@@ -1,7 +1,7 @@
 ---
 id: TASK-091
 title: "Relocate cascade coverage to Python; add the cross-layer veto agreement test"
-status: draft
+status: complete
 parent: REQ-603
 created: 2026-09-01
 updated: 2026-09-01
@@ -48,6 +48,8 @@ coverage of the copied layer standing in for coverage of the real resolver.
 | BR-8 | test-case | `partials/tests/delegate-gate.test.sh::a compliant suite is NOT flagged by the case-list audit` | yes |
 | BR-9 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_covered_arm_reports_no_false_gap` | yes |
 | AC-17 | test-case | `partials/tests/delegate-gate.test.sh::passes identically under bash and zsh after relocation` | yes |
+| AC-7 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_gate_verdict_enabled_false_plus_legacy_key` | yes |
+| AC-8 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_gate_verdict_no_config_plus_legacy_key` | yes |
 
 ## Technical Notes
 

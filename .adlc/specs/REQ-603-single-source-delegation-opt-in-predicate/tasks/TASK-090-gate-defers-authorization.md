@@ -47,13 +47,16 @@ its return code.
 | AC-2 | test-case | `partials/tests/delegate-gate.test.sh`: veto present and correctly positioned | yes |
 | BR-6 | test-case | `partials/tests/delegate-gate.test.sh::a well-formed probe is NOT treated as failure` | yes |
 | AC-4 | test-case | `partials/tests/delegate-gate.test.sh::veto beats every authorizing signal` | yes |
-| AC-7 | test-case | `partials/tests/delegate-gate.test.sh::enabled false plus legacy key is disabled-via-config` | yes |
-| AC-8 | test-case | `partials/tests/delegate-gate.test.sh::no config plus legacy key is ok` | yes |
 | AC-9 | test-case | `partials/tests/delegate-gate.test.sh::no-binary returns 2 without probing` | yes |
 | AC-10 | test-case | `partials/tests/delegate-gate.test.sh::broken probe yields not-delegated` | no |
 | AC-11 | test-case | `partials/tests/delegate-gate.test.sh::at most one probe across all four paths` | yes |
 | AC-19 | test-case | `partials/tests/delegate-gate.test.sh::all six reasons byte-identical` | yes |
 | AC-21 | test-case | `partials/tests/delegate-gate.test.sh::exactly one row diverges and it is the ADR-4 row` | yes |
+
+> **Mapping note (discovered during implementation).** AC-7 and AC-8 were mapped here at
+> architecture time, then moved to TASK-091. They assert *which authorizing arm wins*, and
+> BR-8 explicitly relocates cascade assertions to the Python suite — so this harness could
+> not host them without contradicting the rule it implements.
 
 ## Technical Notes
 
