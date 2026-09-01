@@ -68,6 +68,43 @@ behavior. Examples:
   recheck call sites don't load the full allocation machinery, but it sources
   `id-alloc.sh` for the kind mappers + `adlc_remote_high` (one derivation
   surface). Never blocks on the network. Contract in the header comment.
+- `intake.sh` — unstructured-source intake for `/spec` Step 1.4 (REQ-594).
+  Defines six functions:
+  - `adlc_intake_detect <args>` — the activation gate. Returns **0** to run
+    intake, **1** for an ordinary feature request. Intake activates only on an
+    explicit `--intake` flag, an argument resolving to a readable file path, or
+    an argument over 25 lines, so the common one-line-request path is unchanged
+    and adds no prompts and no latency. Exports `ADLC_INTAKE_KIND`
+    (`transcript` | `notes` | `ticket` | `prose`), `_PATH`, `_REASON`, and
+    `_INLINE`. Input pasted inline (BR-1's over-25-lines trigger) carries no path,
+    so it is materialized to a temp file — `_PATH` is always a real file on the
+    intake path, which is what lets every later step be uniformly file-based.
+  - `adlc_intake_segment <path>` — splits the source into labelled 200-line
+    segments and writes the delimited corpus handed to the delegate. Returns
+    **0** ok, **2** unreadable, **3** **over budget**. The budget is 40 segments
+    / **8000 lines**; over it the function *refuses*, naming the actual size,
+    and never truncates — a partial read would report zero gaps precisely
+    because the unread remainder is invisible. Only the source's **basename**
+    is embedded in the corpus. Exports `_SEGMENTS`, `_LINES`, `_CORPUS`,
+    `_SOURCE`.
+  - `adlc_intake_range <segment-number> <total-lines>` — prints `<start> <end>`
+    so a segment the delegate omitted can be read directly from the original.
+    Deliberately **stateless** (both values are arguments, not exports):
+    reconciliation runs in a different fenced block than segmentation, and
+    fenced blocks share no shell state, not even exported variables.
+  - `adlc_intake_redact <path>` — the 5-pattern credential chain, in place.
+  - `adlc_intake_cleanup <corpus> <source>` — removes intake's own temp artifacts.
+    The deletion guards (non-empty path, real temp root, exact `inline-request.txt`
+    basename) live in the partial rather than at call sites, because
+    `rm -rf "$(dirname "$VAR")"` in a SKILL.md becomes `rm -rf .` the moment `VAR`
+    is empty. A user-supplied source file is never deleted.
+  - `adlc_intake_sections` — the gap checklist, derived from the requirement
+    template rather than hardcoded, minus the headings that are *outputs* of
+    intake rather than inputs to it: `Description`, `Assumptions`,
+    `Open Questions`, `Retrieved Context`, and `Provenance`.
+
+  Contract in the header comment. Tested by `tests/intake.test.sh` under both
+  bash and zsh.
 
 Skills invoke a model-2 partial like:
 
