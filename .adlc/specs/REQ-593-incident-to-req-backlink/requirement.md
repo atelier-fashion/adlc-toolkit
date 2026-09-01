@@ -1,7 +1,7 @@
 ---
 id: REQ-593
 title: "Incident→REQ backlink: attribute a BUG to the REQ that shipped its cause"
-status: approved
+status: complete
 deployable: true
 created: 2026-08-27
 updated: 2026-08-31
