@@ -26,7 +26,7 @@ if [ "${1-}" = "--inner" ]; then
   # Inner pass: run.sh re-run under a specific shell ($2) — runs every harness
   # with that shell, and in doing so exercises this script's own list handling
   # under that shell.
-  run_all "$2" "$HERE/id-alloc.test.sh" "$HERE/forge.test.sh"
+  run_all "$2" "$HERE/id-alloc.test.sh" "$HERE/forge.test.sh" "$HERE/attribution.test.sh"
   exit $RC
 fi
 
