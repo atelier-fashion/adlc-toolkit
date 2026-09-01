@@ -181,3 +181,41 @@ def test_real_toolkit_tree_parity_holds():
     # The shipped init/SKILL.md and template-drift/SKILL.md marker blocks must agree.
     findings = check.check_sync_surface_parity(REPO_ROOT)
     assert findings == [], [f.format() for f in findings]
+
+
+# --- REQ-603 BR-13: a stale vendored delegate-gate.sh must be reported ------
+# No new drift-detection machinery is added. `/template-drift` already reports
+# ANY partial diff as `stale` (partials-posture: shared executable code, no
+# customization classification), and `partials` is a surface both /init and
+# /template-drift declare. These cases assert that existing chain holds for the
+# specific partial REQ-603 rewrites, so the guarantee cannot lapse silently the
+# way LESSON-019's linter did when the indirection moved beneath it.
+
+def test_delegate_gate_is_a_vendored_partial():
+    """The gate must actually be vendored, or drift over it is unreachable."""
+    assert (REPO_ROOT / "partials" / "delegate-gate.sh").is_file()
+
+
+def test_partials_surface_declared_by_both_skills():
+    """BR-13. `partials` in both marker blocks is what makes a stale vendored
+    delegate-gate.sh reportable: /init copies the surface, /template-drift checks
+    it, and any diff there is classified `stale`."""
+    init_block = check.parse_sync_surface_block(
+        (REPO_ROOT / "init" / "SKILL.md").read_text(encoding="utf-8"), "init")
+    drift_block = check.parse_sync_surface_block(
+        (REPO_ROOT / "template-drift" / "SKILL.md").read_text(encoding="utf-8"),
+        "template-drift")
+    assert "partials" in init_block, init_block
+    assert "partials" in drift_block, drift_block
+
+
+def test_partials_drift_is_classified_stale_not_customizable():
+    """Benign-path counterpart (BR-13). A drift check that flags everything is
+    indistinguishable from one that works; a partial classified as
+    *customizable* would let a consumer silently shadow the gate. The skill must
+    keep partials on the no-customization posture."""
+    text = (REPO_ROOT / "template-drift" / "SKILL.md").read_text(encoding="utf-8")
+    assert "partials-posture" in text
+    assert "any drift in partials is reported as `stale`" in text.lower() or \
+           "drift in partials is reported as `stale`" in text.lower(), \
+        "template-drift must keep partials on the stale-only posture"
