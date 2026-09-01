@@ -41,18 +41,45 @@ file). They are resolved by the following precedence (highest first):
 | 4 | legacy key-env continuity | `MOONSHOT_API_KEY` / `KIMI_API_KEY` |
 | 5 | shipped defaults | `https://api.moonshot.ai/v1`, `kimi-k2.5`, `MOONSHOT_API_KEY` |
 
+The `enabled` flag follows this same order — rank 2 (`ADLC_DELEGATE_ENABLED`)
+outranks rank 3 (the config file), which outranks rank 4 (a legacy key). It did
+not before BUG-205, when a legacy key silently outranked the config file and an
+explicit `enabled: false` never took effect.
+
 ### Opt-in (delegation is OFF by default)
 
 On a fresh install delegation transmits nothing until you explicitly opt in.
 Opt-in is satisfied by **any one** of:
 
-- `enabled: true` under `delegate:` in the config file, OR
 - `ADLC_DELEGATE_ENABLED=1` in the environment, OR
-- an already-set legacy `KIMI_API_KEY` / `MOONSHOT_API_KEY` (key continuity for
-  today's installs — these stay enabled exactly as before).
+- `enabled: true` under `delegate:` in the config file, OR
+- an already-set legacy `KIMI_API_KEY` / `MOONSHOT_API_KEY` — key continuity for
+  pre-config installs, **unless the config file says `enabled: false`**, which
+  overrides it.
 
-Setting only `ADLC_DELEGATE_BASE_URL` / `_MODEL` is **not** opt-in. Force
-delegation off entirely with `ADLC_DISABLE_DELEGATE=1`.
+Setting only `ADLC_DELEGATE_BASE_URL` / `_MODEL` is **not** opt-in.
+
+### Turning delegation off
+
+Writing `enabled: false` under `delegate:` turns delegation off, and outranks
+any legacy key in the environment. `ADLC_DISABLE_DELEGATE=1` forces it off from
+the environment, overriding everything including `ADLC_DELEGATE_ENABLED=1`.
+
+An **absent** `enabled` key is not the same as `enabled: false`. Absence is a
+default and yields to the key-continuity rule above; a written `false` is an
+instruction and does not. Before BUG-205 the two were collapsed, so an exported
+`MOONSHOT_API_KEY` re-enabled delegation on a machine whose config said `false`
+— and since `install.sh` scaffolds a config containing exactly that line, that
+was the default posture of any install with a key in the environment.
+
+If you rely on a legacy key to opt in and your config carries the scaffolded
+`enabled: false`, delegation is now **off**. Set `enabled: true` (or export
+`ADLC_DELEGATE_ENABLED=1`) to turn it back on. Check which way a machine will
+resolve with:
+
+```
+adlc-read --version      # prints the resolved `enabled:` value
+```
 
 ### Config file
 
@@ -60,7 +87,9 @@ Default location `~/.claude/adlc/config.yml` (override with `ADLC_CONFIG`):
 
 ```yaml
 delegate:
-  enabled: true                       # opt-in; absent/false => disabled
+  enabled: true                       # true => opt in; false => opt OUT, and
+                                      # outranks a legacy key. Absent => defer
+                                      # to the key-continuity rule.
   base_url: "https://api.groq.com/openai/v1"
   model: "llama-3.3-70b-versatile"
   api_key_env: "GROQ_API_KEY"         # the NAME of an env var, never the key
