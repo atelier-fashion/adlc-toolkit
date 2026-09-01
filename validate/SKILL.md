@@ -101,8 +101,14 @@ reported by the coverage check below, not treated as a malformed task.
         `test-case` obligation reports **executed cases**; a `structural-check`
         obligation reports **files scanned** by the lint invocation (many
         obligations legitimately share one invocation, so per-obligation case counts
-        do not exist for that kind). `tools/lint-skills` reports its scanned count on
-        stderr and exits `255` when that count is zero.
+        do not exist for that kind).
+      - Read the count from the runner rather than assuming it. Both surfaces
+        already signal an empty run, so this needs no new tooling:
+        `tools/lint-skills` prints `scanned <N> SKILL.md file(s)` to stderr and
+        exits `255` when N is zero; a `pytest` run that collects nothing prints
+        `no tests ran` and exits `5`. Check whichever runner the obligation's
+        `artifact` names, and treat an exit status the runner reserves for
+        "collected/scanned nothing" as a zero count.
       - Either count reaching zero fails the gate.
       - This one blocks from epoch 1 while the two above do not, and the asymmetry is
         deliberate: the checks above are coverage *judgments* about obligation shape,

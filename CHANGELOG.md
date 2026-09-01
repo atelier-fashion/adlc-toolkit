@@ -34,6 +34,38 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Added
 
+- **BR→verification obligations (REQ-595).** The pipeline audited tests but never
+  *specified* them: `/architect` broke a REQ into tasks, `task-implementer` wrote
+  whatever tests it judged appropriate, and `test-auditor` reported on coverage
+  afterwards — nothing between the Business Rules and the diff ever stated *which*
+  rule was proven by *what*. LESSON-330 named the resulting failure (a numbered BR
+  implemented as zero, caught only by the Phase-5 panel, or not at all). This moves
+  the mapping upstream:
+  - `/architect` gains **Step 4.5**, emitting a `## Verification` block per task —
+    a `rule | kind | artifact | benign_path` table naming every BR and AC that task
+    discharges and the concrete artifact that proves each one. Numbered 4.5 rather
+    than renumbering Steps 5–7, which REQ-483/484 cite by number.
+  - `kind` resolves **surface-first**: a task whose files are all `*.md` maps to
+    `structural-check` (markdown skills have no test runner — their real
+    verification is a `tools/lint-skills` check, not a lesser substitute for one);
+    any other surface maps to `test-case`, with the artifact shape read from that
+    repo's `.adlc/config.yml` `stack:` when present, else its observed test layout.
+    No framework name is written into the skill, and the absent-config branch is
+    silent rather than an error — which matters because the dogfooding repo has no
+    `config.yml` and would otherwise reach the rule only through a failure path.
+  - Every emitted row is validated **before write, regardless of origin**: the rule
+    ordinal must exist in the parent REQ, the artifact is rejected on `..` then
+    charset-validated, and `kind` is checked against the closed enum. Dropped rows
+    are reported — a silent drop is indistinguishable from a rule that was never
+    mapped, which is the failure the step exists to make visible.
+  - `/validate` gains three checks over the task set. Unmapped **BR *and* AC** ids
+    and detector rules missing a benign path are reported as **advisory** warnings
+    (ACs are gated on the same footing as BRs — they do not reduce to business
+    rules, so gating BRs alone would leave half the omission class open). A REQ with
+    zero numbered BRs passes with a notice rather than having rules invented for it.
+  - `templates/task-template.md` gains the section, **optional by design** so the
+    157 task files already on disk stay valid.
+
 - **`--version` / `-V` on the delegation CLIs (REQ-553).** `adlc-read`,
   `adlc-write`, and `extract-chat` report the toolkit version, and the two
   delegate-calling CLIs additionally print the *resolved* provider — `base_url`,
@@ -98,14 +130,36 @@ PRs (`atelier-fashion/adlc-toolkit`).
   instruction. Degraded remotes proceed, per the partial's existing contract.
 
 - **Three specs drafted from the Cerebro ADLC comparison (REQ-593, REQ-594, REQ-595).**
-  Artifacts only — **none is implemented**, all three are `status: draft`, and each
-  carries an adversary report with verdict *found problems* and unresolved
-  critical/major findings. `REQ-593` would attribute a BUG to the REQ that shipped its
-  cause by walking `git blame` → commit trailer → TASK → REQ; `REQ-594` would add an
-  intake step to `/spec` that turns unstructured input into a draft plus a classified
-  gap list with a gate; `REQ-595` would have `/architect` emit per-task `## Verification`
-  blocks mapping each BR/AC to the artifact that proves it, with `/validate` gating on
-  coverage. Listed here because the specs are in the tree, not because the behavior is.
+  Artifacts only when drafted — all three were `status: draft`, and each carried an
+  adversary report with verdict *found problems* and unresolved critical/major
+  findings. `REQ-593` would attribute a BUG to the REQ that shipped its cause by
+  walking `git blame` → commit trailer → TASK → REQ; `REQ-594` would add an intake
+  step to `/spec` that turns unstructured input into a draft plus a classified gap
+  list with a gate. **REQ-595 has since shipped** — see its entry above; its adversary
+  findings (F7–F10) were closed in the spec before implementation. REQ-593 and REQ-594
+  remain drafts: listed here because the specs are in the tree, not because the
+  behavior is.
+
+### Fixed
+
+- **`tools/lint-skills` no longer passes a scan that checked nothing (REQ-595).**
+  REQ-435 fixed the vacuous *walk* — a scan root sitting under `.worktrees` is no
+  longer skipped into oblivion — but a root that genuinely contains no `SKILL.md`
+  still produced zero findings and exited `0`: the same confident green, one layer
+  down. The scanned-file count is now threaded out of `run()` (not recomputed, so
+  it cannot drift from the files the checks actually saw), printed to stderr on
+  every run, and a zero count exits **255**. The findings cap moves to **254** so a
+  saturating findings run can never be mistaken for a vacuous one — POSIX statuses
+  are 8-bit, so the distinct value is carved out of the top of the range rather
+  than placed above it. `/analyze` Step 1.9 already treats a non-zero exit with no
+  parseable output as non-blocking, so it now reports the dimension as unavailable
+  instead of falsely clean.
+
+  Two pre-existing skip-directory tests asserted only that *nothing was reported*
+  over a root whose every `SKILL.md` was excluded — an assertion a wholly broken
+  walker also satisfies. Both now stage a real in-root skill, so exclusion is
+  proven with a demonstrably working walker.
+
 ### Removed
 
 - **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the

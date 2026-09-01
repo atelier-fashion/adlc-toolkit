@@ -29,8 +29,13 @@ What this task accomplishes.
 <!-- OPTIONAL section (REQ-595). Emitted by /architect Step 4.5; read by
      /validate's obligation-coverage gate. A task file WITHOUT this section is
      still valid — the gate reports the gap as an advisory finding and does not
-     block advancement. Delete this section if you are hand-writing a task and
-     have nothing to declare. -->
+     block advancement.
+
+     The two rows below are EXAMPLES showing the shape. REPLACE them with this
+     task's real obligations, or delete the whole section if the task has
+     nothing to declare. Never leave the examples in a real task file: they
+     cite rule ids that almost certainly do not mean anything in your REQ, and
+     the coverage gate would read them as genuine claims of coverage. -->
 
 | rule | kind | artifact | benign_path |
 |------|------|----------|-------------|

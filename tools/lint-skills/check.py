@@ -1099,6 +1099,12 @@ def main(argv: list[str] | None = None) -> int:
         # sits under `.worktrees`); this guards the vacuous *result*.
         # `args.root` (as typed), not the resolved absolute path — same
         # no-leak posture as the Finding labels (BUG-054).
+        #
+        # The per-root checks above can, in principle, produce findings even
+        # when zero SKILL.md files were walked. Those findings are already on
+        # stdout, and this status is non-zero, so nothing is lost and no green
+        # is possible — only the precise findings count is displaced. Reporting
+        # "the scan checked no skill files" is the more useful signal there.
         print(
             f"skill-md-corruption: VACUOUS SCAN — zero SKILL.md files found "
             f"under {args.root!r}; a clean result here proves nothing. Check "
