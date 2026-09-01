@@ -51,7 +51,7 @@ its return code.
 | AC-10 | test-case | `partials/tests/delegate-gate.test.sh::broken probe yields not-delegated` | no |
 | AC-11 | test-case | `partials/tests/delegate-gate.test.sh::at most one probe across all four paths` | yes |
 | AC-19 | test-case | `partials/tests/delegate-gate.test.sh::all six reasons byte-identical` | yes |
-| AC-21 | test-case | `partials/tests/delegate-gate.test.sh::exactly one row diverges and it is the ADR-4 row` | yes |
+| AC-21 | test-case | `partials/tests/delegate-gate.test.sh::exactly the four BR-4 divergences occur and no others` | yes |
 
 > **Mapping note (discovered during implementation).** AC-7 and AC-8 were mapped here at
 > architecture time, then moved to TASK-091. They assert *which authorizing arm wins*, and

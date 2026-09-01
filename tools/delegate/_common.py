@@ -30,6 +30,7 @@ This module also hosts the toolkit-version / ``--version`` reporting helpers
 they work on the local-only ``extract-chat`` path too.
 """
 
+import errno
 import os
 import re
 import stat
@@ -173,14 +174,24 @@ def parse_delegate_config(path=None):
             # this guard would change documented behaviour beyond this REQ.
             # Noted as a residual gap rather than silently altered.
             return {}
-    except OSError:
-        # stat() failed on a path we were told to read: unreadable, not absent.
-        return {_MALFORMED: True} if os.path.lexists(path) else {}
+    except OSError as exc:
+        # Discriminate on errno. os.path.lexists() was wrong here: it swallows
+        # PermissionError and returns False, so an unreadable PARENT DIRECTORY
+        # (EACCES on stat) read as "absent" and fell through to legacy-key
+        # continuity — the gate itself then granted against a written
+        # `enabled: false`. Only "no such entry" is absence; everything else is
+        # a config we were told to read and could not.
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+            return {}
+        return {_MALFORMED: True}
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        with open(path, "r", encoding="utf-8", errors="strict") as fh:
             lines = fh.read(65536).splitlines()
     except OSError:
         # Open/read failed on a file that exists (permissions, I/O error).
+        return {_MALFORMED: True}
+    except UnicodeDecodeError:
+        # Undecodable content is unparsable, not absent.
         return {_MALFORMED: True}
 
     known = {"enabled", "base_url", "model", "api_key_env"}
@@ -359,6 +370,13 @@ def delegation_enabled(cfg=None):
     # so the two layers cannot disagree about what counts as set.
     if _kill_switch_set():
         return False
+    if cfg.get(_MALFORMED) is True:
+        # A config that EXISTS but cannot be read is a refusal, not a default.
+        # This must live here, not in the labeller: require_delegation_enabled()
+        # — the backstop guarding actual transmission — routes through this
+        # function and nothing else. Putting it in resolve_gate_verdict() alone
+        # made the probe refuse while a direct CLI call still transmitted.
+        return False
     if os.environ.get("ADLC_DELEGATE_ENABLED") == "1":
         return True
     configured = cfg.get("enabled")
@@ -399,19 +417,23 @@ def resolve_gate_verdict(cfg=None):
     set). Wrapping only the first still reported ``1 ok`` for a config whose key
     variable was unset, while the real call died on it.
     """
-    # The kill switch is read BEFORE the config, so nothing about config
-    # parsing — including a future parse failure — can preempt the veto.
-    if _kill_switch_set():
-        return False, "disabled-via-env"
     if cfg is None:
         cfg = parse_delegate_config()
-    if cfg.get(_MALFORMED) is True:
-        # A config that exists but cannot be read or parsed is NOT an absent
-        # config. Treating them alike let an unreadable file fall through to
-        # legacy-key continuity and delegate anyway — BUG-205's outcome by a
-        # different route.
-        return False, "disabled-via-config"
+    # ONE decision, taken by the cascade. Everything below only LABELS it.
+    #
+    # An earlier version kept its own kill-switch test here, ahead of the call.
+    # That looked harmless — the answer matched — but it MASKED the cascade: with
+    # the veto mis-ranked inside delegation_enabled(), this function still
+    # returned disabled-via-env from its private copy while
+    # require_delegation_enabled(), which has no such copy, let the call through.
+    # A duplicate check that agrees today is not redundancy; it is a second
+    # authority that hides the first one's bugs.
     if not delegation_enabled(cfg):
+        # Label only — these read state, they do not re-decide it.
+        if _kill_switch_set():
+            return False, "disabled-via-env"
+        if cfg.get(_MALFORMED) is True:
+            return False, "disabled-via-config"
         return False, (
             "disabled-via-config" if cfg.get("enabled") is False else "not-opted-in"
         )
@@ -529,7 +551,7 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
         source = "flags"
     elif os.environ.get("ADLC_DELEGATE_BASE_URL") or os.environ.get("ADLC_DELEGATE_MODEL"):
         source = "env"
-    elif cfg:
+    elif any(k != _MALFORMED for k in cfg):
         source = "config"
     else:
         source = "defaults"

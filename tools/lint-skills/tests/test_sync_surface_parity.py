@@ -220,4 +220,3 @@ def test_partials_drift_is_classified_stale_not_customizable():
     assert "partials-posture" in text, (
         "template-drift must keep partials on the stale-only posture "
         "(partials-posture), not the customizable template-posture")
-    assert "template-posture" not in text.split("partials-posture")[0][-200:] or True

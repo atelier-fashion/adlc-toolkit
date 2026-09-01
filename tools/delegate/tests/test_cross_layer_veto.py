@@ -181,8 +181,17 @@ def test_python_veto_accepts_every_literal_the_shell_does(monkeypatch, tmp_path)
             "report disabled while a direct CLI call transmits")
 
 
-def test_kill_switch_has_exactly_two_implementations():
-    """The docs say ONE deliberate duplication (shell + Python). It was four:
+def test_kill_switch_spelling_lint():
+    """A naive SPELLING LINT, not a structural invariant — say so plainly.
+
+    It greps for the literal `ADLC_DISABLE_DELEGATE` co-occurring with `==`, so
+    it is trivially defeated by indirection (`!=`, `in (...)`, or the var name in
+    a module constant). Review confirmed that. It is kept because the realistic
+    regression is someone pasting the obvious comparison back in, which this does
+    catch — but it must not be read as a guarantee that only one copy exists.
+    The real guard is test_python_veto_accepts_every_literal_the_shell_does.
+
+    Background: the docs said ONE deliberate duplication (shell + Python). It was four:
     delegation_enabled, resolve_gate_verdict, require_delegation_enabled, and
     the shell. The parity test compared only two of them, so widening the shell
     and one Python copy together left the suite green while the copy guarding

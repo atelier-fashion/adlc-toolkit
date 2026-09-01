@@ -204,26 +204,34 @@ def test_adlc_write_print_gate_not_hijacked_from_value_position(clean_env, monke
 # arm in isolation cannot catch a precedence bug, because precedence only exists
 # between arms.
 
+def _expected(veto, env_optin, config, legacy):
+    """The intended verdict, derived from REQ-515 BR-2's ranking as documented.
+
+    Written independently of the implementation so the matrix is a specification
+    of the ranking, not a transcript of whatever the code currently does. The
+    previous hand-listed table covered 13 of 24 combinations and only 3 of the
+    12 veto rows, which is why a legacy-key-over-veto inversion was invisible.
+    """
+    if veto:
+        return (False, "disabled-via-env")          # rank 0, beats everything
+    if env_optin:
+        return (True, "ok")                          # rank 1, beats config
+    if config == "false":
+        return (False, "disabled-via-config")        # rank 2, decisive both ways
+    if config == "true":
+        return (True, "ok")
+    if legacy:
+        return (True, "ok")                          # rank 3, no-config continuity
+    return (False, "not-opted-in")                   # rank 4, fresh-install default
+
+
+# FULL cross-product: 2 x 2 x 3 x 2 = 24 rows, no combination omitted.
 _MATRIX = [
-    # (veto, env_optin, config, legacy_key) -> (enabled, reason)
-    ((False, False, None,    False), (False, "not-opted-in")),
-    ((False, False, None,    True),  (True,  "ok")),
-    ((False, True,  None,    False), (True,  "ok")),
-    ((False, True,  None,    True),  (True,  "ok")),
-    ((False, False, "true",  False), (True,  "ok")),
-    ((False, False, "true",  True),  (True,  "ok")),
-    ((False, False, "false", False), (False, "disabled-via-config")),
-    ((False, False, "false", True),  (False, "disabled-via-config")),
-    # THE ROW THAT REGRESSED. The pre-REQ gate returned 0 ok here: env opt-in is
-    # rank 1 and outranks a config `false` at rank 2. A version of
-    # resolve_gate_verdict that checked config first inverted this, and the gate
-    # refused while a direct CLI call still transmitted.
-    ((False, True,  "false", False), (True,  "ok")),
-    ((False, True,  "false", True),  (True,  "ok")),
-    # The veto outranks everything, on every combination.
-    ((True,  False, None,    False), (False, "disabled-via-env")),
-    ((True,  True,  "true",  True),  (False, "disabled-via-env")),
-    ((True,  True,  "false", True),  (False, "disabled-via-env")),
+    ((veto, env_optin, config, legacy), _expected(veto, env_optin, config, legacy))
+    for veto in (False, True)
+    for env_optin in (False, True)
+    for config in (None, "true", "false")
+    for legacy in (False, True)
 ]
 
 
@@ -259,7 +267,100 @@ def test_matrix_and_delegation_enabled_never_disagree(clean_env, monkeypatch):
             monkeypatch.setenv("ADLC_CONFIG", _cfg(clean_env, f"delegate:\n  enabled: {config}\n"))
         if legacy: monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
         gate_enabled, _ = _common.resolve_gate_verdict()
+        # No exception for D3/D4 here: with a resolvable key and a readable
+        # config, the gate and the cascade must agree on EVERY row. The rows
+        # where they legitimately differ (key unset, config unreadable) are
+        # asserted separately, on all three surfaces, above.
         assert gate_enabled == _common.delegation_enabled(), (
             f"gate and delegation_enabled disagree for "
             f"veto={veto} env={env_optin} config={config} legacy={legacy}: "
             f"gate={gate_enabled} predicate={_common.delegation_enabled()}")
+
+
+# --- Round-2 review: three fixes shipped with ZERO coverage -----------------
+# Mutation testing showed the full suite passed with each of these reverted.
+# "Fixed but untested" is how the previous round's Critical shipped, so each
+# fix below now has a test that fails when the fix is removed.
+
+def _unreadable(tmp_path, body="delegate:\n  enabled: false\n"):
+    f = tmp_path / "unreadable.yml"
+    f.write_text(body, encoding="utf-8")
+    f.chmod(0o000)
+    return str(f)
+
+
+def test_unreadable_config_fails_closed_on_every_surface(clean_env, monkeypatch):
+    """BUG-205's shape via a read failure instead of a precedence bug.
+
+    An operator wrote `enabled: false`; the file became unreadable (permission
+    drift, a partial checkout, an editor lockfile) and a stale legacy key is
+    still exported. Before the fix all three surfaces delegated.
+
+    Asserted on ALL THREE, because the first version of this fix reached only
+    the probe: the gate refused while a direct CLI call still transmitted.
+    """
+    monkeypatch.setenv("ADLC_CONFIG", _unreadable(clean_env))
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.parse_delegate_config().get(_common._MALFORMED) is True
+    assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+    assert _common.delegation_enabled() is False
+    with pytest.raises(SystemExit):
+        _common.require_delegation_enabled("adlc-read")
+
+
+def test_unreadable_parent_directory_fails_closed(clean_env, monkeypatch):
+    """os.path.lexists() swallows PermissionError, so an unreadable PARENT DIR
+    read as 'absent' and fell through to legacy-key continuity — the gate itself
+    granted against a written `enabled: false`. Discrimination is on errno now."""
+    d = clean_env / "locked"
+    d.mkdir()
+    (d / "config.yml").write_text("delegate:\n  enabled: false\n", encoding="utf-8")
+    d.chmod(0o000)
+    try:
+        monkeypatch.setenv("ADLC_CONFIG", str(d / "config.yml"))
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+        assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+        assert _common.delegation_enabled() is False
+    finally:
+        d.chmod(0o755)
+
+
+def test_absent_config_is_still_absent_not_malformed(clean_env, monkeypatch):
+    """Benign path. Fail-closed must not swallow the legitimate no-config case,
+    or every fresh install with a legacy key would stop delegating."""
+    monkeypatch.setenv("ADLC_CONFIG", str(clean_env / "does-not-exist.yml"))
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.parse_delegate_config() == {}
+    assert _common.resolve_gate_verdict() == (True, "ok")
+
+
+def test_key_env_named_but_unset_reports_disabled(clean_env, monkeypatch):
+    """LESSON-392's OTHER half (D3), which had no direct coverage.
+
+    The existing lesson test uses a key-SHAPED value, which resolve_provider()
+    refuses before resolve_key() is ever reached. This is the case resolve_key()
+    alone catches: a syntactically valid env-var name that is genuinely unset.
+    Deleting the resolve_key() call from the probe passed the entire suite.
+    """
+    monkeypatch.setenv("ADLC_CONFIG", _cfg(
+        clean_env, "delegate:\n  enabled: true\n  api_key_env: MY_PROVIDER_KEY\n"))
+    monkeypatch.delenv("MY_PROVIDER_KEY", raising=False)
+    assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+
+
+def test_gate_does_not_hold_a_private_veto_copy(clean_env, monkeypatch):
+    """resolve_gate_verdict() must not re-decide the veto.
+
+    It previously tested the kill switch itself before calling the cascade. The
+    answers agreed, so it looked harmless — but it MASKED the cascade: with the
+    veto mis-ranked inside delegation_enabled(), the probe still reported
+    disabled-via-env from its private copy while require_delegation_enabled(),
+    which has no such copy, let the call through. A duplicate that agrees today
+    is a second authority hiding the first one's bugs.
+
+    Asserted structurally: the verdict must equal the cascade on every input,
+    including ones where only the veto differs.
+    """
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    assert _common.resolve_gate_verdict()[0] == _common.delegation_enabled()

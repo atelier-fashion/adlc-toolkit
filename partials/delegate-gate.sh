@@ -117,6 +117,10 @@ adlc_delegate_gate_check() {
   # with no fallback. Expiry is a non-zero exit and therefore fails closed. Where
   # timeout(1) is absent (stock macOS), this degrades to the unbounded call
   # rather than failing — an unavailable hardening must not become an outage.
+  # 10s: an emergency bound, not a tunable — the probe is ~21ms in practice.
+  # Duplicated across both branches deliberately: building a "timeout 10"
+  # prefix variable would require unquoted word-splitting to inject it as two
+  # argv words, which is IFS-dependent and fragile (LESSON-329).
   if command -v timeout >/dev/null 2>&1; then
     _probe="$(timeout 10 "$ADLC_READ_BIN" --print-gate 2>/dev/null)"
   else
@@ -139,6 +143,9 @@ adlc_delegate_gate_check() {
   # alongside return 1 — an inconsistent record forwarded verbatim into telemetry
   # and to agents/delegate-pre-pass.md, i.e. a withheld run logged as ok. Only
   # the four legal pairs are accepted; anything else fails closed.
+  # Safe only because no frozen reason contains a space: the concatenation
+  # "$_verdict $_reason" is unambiguous. Adding a reason with a space would
+  # silently break this match — keep the enum space-free.
   case "$_verdict $_reason" in
     "1 ok")
       export ADLC_DELEGATE_GATE_REASON="ok"

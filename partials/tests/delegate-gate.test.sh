@@ -120,6 +120,20 @@ check "probe prints garbage -> not delegated" \
 check "probe names a reason outside the frozen enum -> not delegated" \
   "1 not-opted-in yes" "$(run_gate "" "" "" "1 totally-fine" 0)"
 
+# The (verdict, reason) PAIR cases. Reverting the pair validation to the
+# reason-only form previously passed this whole harness — the fix was asserted,
+# not tested. "0 ok" is the one the commit message cites: it exported reason=ok
+# alongside rc=1, so a WITHHELD run was logged as ok in telemetry and forwarded
+# verbatim to agents/delegate-pre-pass.md.
+check "probe '0 ok' (inconsistent pair) -> not delegated, reason NOT ok" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "0 ok" 0)"
+
+check "probe '1 disabled-via-config' (inconsistent pair) -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "1 disabled-via-config" 0)"
+
+check "probe '1 not-opted-in' (inconsistent pair) -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "1 not-opted-in" 0)"
+
 echo "=== (c) no-binary: return 2 WITHOUT probing (REQ-603 BR-5) ==="
 
 _nobin=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED \

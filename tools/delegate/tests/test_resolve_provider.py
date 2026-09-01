@@ -468,9 +468,13 @@ def test_per_arm_revert_enumeration(clean_env, monkeypatch):
     """
     results = {}
 
-    # A key must be resolvable, or LESSON-392's resolve_key half correctly
-    # reports disabled for every row regardless of the arm under test.
-    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-t")
+    # The key comes from a CUSTOM api_key_env, never MOONSHOT_API_KEY. Using the
+    # legacy var here satisfied the legacy-key continuity arm as a side effect,
+    # so the "veto" and "env-opt-in" rows passed with their arms DELETED — the
+    # same shadowing defect this file's sibling test documents fixing, left
+    # unfixed here. Each row must isolate the arm it names.
+    monkeypatch.setenv("ADLC_DELEGATE_API_KEY_ENV", "MY_PROVIDER_KEY")
+    monkeypatch.setenv("MY_PROVIDER_KEY", "sk-t")
     monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
     monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
     results["veto"] = _common.resolve_gate_verdict()
@@ -483,6 +487,9 @@ def test_per_arm_revert_enumeration(clean_env, monkeypatch):
     results["config"] = _common.resolve_gate_verdict()
     monkeypatch.delenv("ADLC_CONFIG")
 
+    # Only now introduce the legacy key, for the row that is actually about it.
+    monkeypatch.delenv("ADLC_DELEGATE_API_KEY_ENV")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
     results["legacy-key"] = _common.resolve_gate_verdict()
 
     assert results == {
