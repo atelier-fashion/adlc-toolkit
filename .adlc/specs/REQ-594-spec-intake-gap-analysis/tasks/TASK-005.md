@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: "Dual-shell test harness for partials/intake.sh"
-status: draft
+status: complete
 parent: REQ-594
 created: 2026-08-31
 updated: 2026-08-31
