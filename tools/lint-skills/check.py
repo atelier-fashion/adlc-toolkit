@@ -6,7 +6,10 @@ Run from the repo root:
 
     python3 tools/lint-skills/check.py [--root <path>]
 
-Exit code: 0 on clean, otherwise min(num_findings, 255).
+Exit code: 0 on clean, ``min(num_findings, 254)`` when findings exist, and
+``255`` when the scan walked **zero** SKILL.md files (REQ-595 BR-5: a run that
+exits 0 having done no work is a failure, not a pass — the count is also
+printed to stderr on every run so a caller can read the work done directly).
 
 Two checks run once per scan root rather than per SKILL.md:
 ``check_agent_model_drift`` (REQ-516 — on-disk ``model:`` vs the config render)
@@ -72,6 +75,14 @@ to the root's own components. Run from inside a ``.worktrees`` / ``.git`` /
 the linter previously scanned **zero** files and exited 0 — a confident green
 having checked nothing. Now a root that itself sits under such a name is fully
 scanned, while a descendant directory with one of those names is still skipped.
+
+Vacuous-*result* guard (REQ-595 BR-5 / AC-7): the fix above corrected the walk,
+but a root that genuinely contains no ``SKILL.md`` still produced zero findings
+and exit 0 — the same confident green, one layer down. ``run`` now returns the
+scanned-file count alongside the findings and ``main`` fails the run when that
+count is zero. The count is threaded out of ``run`` rather than recomputed in
+``main`` so the reported figure cannot drift from the files the checks actually
+saw.
 """
 from __future__ import annotations
 
@@ -85,6 +96,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SENTINELS_FILE = SCRIPT_DIR / "sentinels.txt"
 
 SKIP_DIR_PARTS = {".git", ".worktrees", "node_modules"}
+
+# REQ-595 BR-5 exit-status split. POSIX exit statuses are 8-bit, so a
+# "distinct" vacuous status has to live inside 0..255 rather than above the
+# findings range — it is carved out of the top of that range instead. 255 is
+# reserved for the vacuous scan and the ordinary findings path saturates one
+# lower, so a caller can always tell "scanned nothing" from "found N problems".
+# The only behavior change on the findings path is for a root with >=255
+# findings, which now reports 254.
+VACUOUS_SCAN_EXIT = 255
+MAX_FINDINGS_EXIT = 254
 
 # REQ-522: the delegation surface is fully de-branded — the legacy kimi-*
 # spellings are retired, so the canonical check keys on the delegate-* names
@@ -1005,14 +1026,28 @@ def check_retrieval_status_parity(root: Path) -> list[Finding]:
     return findings
 
 
-def run(root: Path) -> list[Finding]:
+def run(root: Path) -> tuple[list[Finding], int]:
+    """Scan ``root`` and return ``(findings, scanned_count)``.
+
+    ``scanned_count`` is the number of ``SKILL.md`` files actually walked —
+    the "work done" figure the REQ-595 BR-5 vacuous-run guard reads. A file
+    that fails to read still counts as scanned (the attempt happened, and it
+    produces its own ``io-error`` finding); only files the walk never yielded
+    are excluded.
+
+    Counting happens inside this function, as the generator is consumed, so
+    the count can never disagree with the set of files the checks ran over —
+    a second walk in ``main()`` could drift from this one.
+    """
     sentinels = load_sentinels(SENTINELS_FILE)
     # REQ-436 ADR-4: read the sourced telemetry partials ONCE per run (never
     # per SKILL.md) and thread the cached blob into check_canonical so a
     # canonical literal that legitimately moved into a partial is satisfied.
     partials_blob = load_partials_blob(root)
     findings: list[Finding] = []
+    scanned = 0
     for skill_path in find_skill_files(root):
+        scanned += 1
         # Compute the non-leaking label BEFORE the read so the io-error
         # branch can use it too (BUG-054 — was `str(skill_path)`).
         rel = _safe_label(skill_path, root)
@@ -1042,7 +1077,7 @@ def run(root: Path) -> list[Finding]:
     findings.extend(check_sync_surface_parity(root))
     # Per-root (BUG-194): lifecycle status writes vs /spec's retrieval exclusion list.
     findings.extend(check_retrieval_status_parity(root))
-    return findings
+    return findings, scanned
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1050,12 +1085,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=".", help="root to scan (default: .)")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
-    findings = run(root)
+    findings, scanned = run(root)
     for f in findings:
         print(f.format())
+    # Always report the work done, so a caller reads the count rather than
+    # inferring it from a green exit (REQ-595 BR-5).
+    print(f"skill-md-corruption: scanned {scanned} SKILL.md file(s)",
+          file=sys.stderr)
+    if scanned == 0:
+        # REQ-595 BR-5 / AC-7: a run that exits 0 having done no work is a
+        # confident green from a scan that checked nothing. REQ-435 fixed the
+        # vacuous *walk* (the skip-list no longer swallows a root that itself
+        # sits under `.worktrees`); this guards the vacuous *result*.
+        # `args.root` (as typed), not the resolved absolute path — same
+        # no-leak posture as the Finding labels (BUG-054).
+        #
+        # The per-root checks above can, in principle, produce findings even
+        # when zero SKILL.md files were walked. Those findings are already on
+        # stdout, and this status is non-zero, so nothing is lost and no green
+        # is possible — only the precise findings count is displaced. Reporting
+        # "the scan checked no skill files" is the more useful signal there.
+        print(
+            f"skill-md-corruption: VACUOUS SCAN — zero SKILL.md files found "
+            f"under {args.root!r}; a clean result here proves nothing. Check "
+            f"the --root argument.",
+            file=sys.stderr,
+        )
+        return VACUOUS_SCAN_EXIT
     if findings:
         print(f"skill-md-corruption: {len(findings)} findings", file=sys.stderr)
-    return min(len(findings), 255)
+    return min(len(findings), MAX_FINDINGS_EXIT)
 
 
 if __name__ == "__main__":

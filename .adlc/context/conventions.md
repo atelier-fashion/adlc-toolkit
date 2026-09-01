@@ -130,6 +130,38 @@ Every skill that depends on the `.adlc/` scaffold must have a `## Prerequisites`
 - **Parallel implementation**: `task-implementer` agents dispatched one per independent task. Group into dependency tiers.
 - **Subagent mode**: when a skill runs inside a subagent (e.g., via `/sprint`'s `pipeline-runner`), do NOT dispatch further subagents. Execute sequentially in-context instead.
 
+## Verification obligations
+
+A task file may carry an optional `## Verification` section mapping the rules it
+discharges to the artifacts that prove them (REQ-595). `/architect` Step 4.5
+emits it; `/validate`'s obligation-coverage gate reads it. The shape is a
+four-column table — `rule | kind | artifact | benign_path` — defined in
+`templates/task-template.md`.
+
+- **Rule addressing**: `BR-<n>` uses the number written in the REQ. `AC-<n>` uses
+  the **1-based ordinal** within the REQ's `## Acceptance Criteria` list, since
+  the requirement template does not print AC numbers.
+- **`kind` is a closed two-value enum**: `test-case` | `structural-check`.
+  `dogfood` is deliberately excluded — it cannot report an executed-work count.
+  Resolution is **surface first**: a task whose files are all `*.md` maps to
+  `structural-check` (this repo's skills have no test runner — their real
+  verification is a structural check in `tools/lint-skills`); any other surface
+  maps to `test-case`, with the artifact shape read from that repo's
+  `.adlc/config.yml` `stack:` when present. No framework name is ever hardcoded
+  in a skill.
+- **`benign_path: yes`** marks an obligation that includes a must-not-fire case.
+  Any rule describing detection, refusal, or a halt needs one — a detector
+  validated only against adversarial inputs ships broken and passes its own suite.
+- **The section is optional.** A task file without it stays valid; the coverage
+  gate reports the gap and does not block.
+
+**Gate posture (epoch 1)**: coverage and benign-path findings are **advisory** —
+surfaced as warnings, non-blocking, so the REQs written before obligations
+existed do not all fail on day one. The vacuous-run check is **blocking**: a
+verification run that exits 0 having scanned zero files or executed zero cases is
+a failure, not a pass. Promotion of the advisory checks to blocking is a separate
+follow-up REQ, taken once the corpus carries obligations.
+
 ## Pipeline state
 
 Skills that span multiple phases (`/proceed`) write a `pipeline-state.json` next to the REQ spec. This lets a long-running pipeline resume from interruption without replaying phases. Every phase update writes the state file atomically.
