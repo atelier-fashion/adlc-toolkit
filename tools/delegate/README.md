@@ -39,7 +39,7 @@ file). They are resolved by the following precedence (highest first):
 | 2 | `ADLC_DELEGATE_*` env | `ADLC_DELEGATE_MODEL`, `ADLC_DELEGATE_BASE_URL`, `ADLC_DELEGATE_API_KEY_ENV` |
 | 3 | config file | `delegate.base_url`, `delegate.model`, `delegate.api_key_env` |
 | 4 | legacy key-env continuity | `MOONSHOT_API_KEY` / `KIMI_API_KEY` |
-| 5 | shipped defaults | `https://api.moonshot.ai/v1`, `kimi-k2.5`, `MOONSHOT_API_KEY` |
+| 5 | shipped defaults | `https://api.moonshot.ai/v1`, `kimi-k2.6`, `MOONSHOT_API_KEY` |
 
 The `enabled` flag follows this same order — rank 2 (`ADLC_DELEGATE_ENABLED`)
 outranks rank 3 (the config file), which outranks rank 4 (a legacy key). It did

@@ -37,11 +37,17 @@ import subprocess
 import sys
 
 # --- shipped defaults (today's exact Moonshot/Kimi values) ------------------
-# Verified against the Moonshot/Kimi API docs (platform.kimi.ai), May 2026.
-# Other valid model ids: "kimi-k2.6", "kimi-k2-thinking", "kimi-k2-turbo-preview".
+# Verified against a live GET /v1/models against api.moonshot.ai, 2026-08-31.
+# Other model ids the endpoint served that day: "kimi-k2.7-code",
+# "kimi-k2.7-code-highspeed", "kimi-k3".
+#
+# The previous default, "kimi-k2.5", was retired by the provider and every
+# delegated call 404'd. Providers retire ids without notice: when
+# delegation starts failing with "model not found", re-run the models list and
+# re-pin here rather than assuming the key or the SDK is at fault (LESSON-334).
 _DEFAULT_API_KEY_VAR = "MOONSHOT_API_KEY"
 _DEFAULT_BASE_URL = "https://api.moonshot.ai/v1"
-_DEFAULT_MODEL = "kimi-k2.5"
+_DEFAULT_MODEL = "kimi-k2.6"
 
 # Legacy aliases retained for back-compat. MOONSHOT_API_KEY is the canonical
 # default key var; KIMI_API_KEY is accepted as an alias if present.
@@ -777,16 +783,57 @@ def emit_exfil_notice(stream=None, provider=None):
     )
 
 
+def _api_error_message(exc, model):
+    """Turn an ``openai.APIStatusError`` into one actionable line.
+
+    A raw traceback here reads as a local bug and sends people auditing their
+    key or the SDK when the provider simply retired a model id (LESSON-334).
+    """
+    status = getattr(exc, "status_code", None)
+    if status == 404:
+        return (
+            f"model {model!r} not found at the configured endpoint (404). "
+            "The provider may have retired it — list the endpoint's current "
+            "models and re-pin via --model, ADLC_DELEGATE_MODEL, or "
+            "delegate.model in the config file."
+        )
+    if status in (401, 403):
+        return (
+            f"the delegate endpoint rejected the API key ({status}). "
+            "Check that the variable named by api_key_env holds a valid key "
+            "for this endpoint (adlc-read --version prints which one)."
+        )
+    if status == 429:
+        return (
+            "the delegate endpoint is rate-limiting or out of quota (429). "
+            "Retry later or check your account's billing status."
+        )
+    return f"delegate endpoint returned {status or 'an error'}: {exc}"
+
+
 def complete(client, model, messages, max_tokens):
     """Call ``chat.completions.create`` and return the content string.
 
     Raises ``SystemExit`` if the model returns empty/whitespace content.
     """
-    resp = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        max_tokens=max_tokens,
-    )
+    # openai is already in sys.modules — get_client() imported it to build the
+    # client we were handed. Keep the import local anyway so this module stays
+    # importable without the SDK installed (BUG-056).
+    import openai
+
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+    except openai.APIStatusError as exc:
+        raise SystemExit(_api_error_message(exc, model)) from None
+    except openai.APIConnectionError as exc:
+        raise SystemExit(
+            f"could not reach the delegate endpoint: {exc}. "
+            "Check your network and the configured base_url."
+        ) from None
     if not getattr(resp, "choices", None):
         raise SystemExit("API returned no choices — check the model id and your account quota")
     content = resp.choices[0].message.content
