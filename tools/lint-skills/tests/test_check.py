@@ -220,25 +220,48 @@ def test_recursive_walk_finds_nested_skill(tmp_path):
 
 
 def test_skip_dirs_are_excluded(tmp_path):
-    """ADR-4: .git, .worktrees, node_modules are excluded from the walk."""
+    """ADR-4: .git, .worktrees, node_modules are excluded from the walk.
+
+    A real, clean in-root skill is staged alongside the buried corrupt ones so
+    the walker is provably running (same construction as
+    `test_symlink_outside_root_is_excluded`). Without it this asserted only
+    "nothing was reported", which a totally broken walker also satisfies — and
+    which REQ-595's vacuous-scan guard now reports as status 255 rather than a
+    green.
+    """
     for skip in [".git", ".worktrees", "node_modules"]:
         sub = tmp_path / skip / "ignored"
         sub.mkdir(parents=True)
         shutil.copyfile(FIXTURES / "corrupt-sentinel.md", sub / "SKILL.md")
+    real = tmp_path / "realskill"
+    real.mkdir()
+    shutil.copyfile(FIXTURES / "clean.md", real / "SKILL.md")
+
     result = _run(tmp_path)
-    assert result.returncode == 0
+    assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == ""
+    # Exactly the one real skill was walked — the three buried ones were not.
+    assert "scanned 1 SKILL.md file(s)" in result.stderr, result.stderr
 
 
-def test_exit_code_capped_at_255(tmp_path):
-    """BR-6: exit code is min(num_findings, 255)."""
+def test_exit_code_capped_below_the_vacuous_status(tmp_path):
+    """BR-6, as amended by REQ-595 BR-5: the findings exit is
+    `min(num_findings, 254)`. The cap moved down by one so status 255 can mean
+    "vacuous scan" unambiguously — POSIX statuses are 8-bit, so the distinct
+    value had to be carved out of the top of the findings range rather than
+    placed above it. A saturating findings run must NOT be mistakable for a
+    scan that checked nothing.
+    """
     # 256 sentinel hits via 256 separate skill files
     for i in range(256):
         sub = tmp_path / f"sk{i:03d}"
         sub.mkdir()
         (sub / "SKILL.md").write_text("20 20 12 61 80 33 98 100\n")
     result = _run(tmp_path)
-    assert result.returncode == 255
+    assert result.returncode == 254, result.stderr
+    # ...and it is emphatically not the vacuous status.
+    assert "VACUOUS SCAN" not in result.stderr, result.stderr
+    assert "scanned 256 SKILL.md file(s)" in result.stderr, result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -534,9 +557,18 @@ def test_descendant_worktrees_still_skipped(tmp_path):
     sub = tmp_path / ".worktrees" / "ignored"
     sub.mkdir(parents=True)
     shutil.copyfile(FIXTURES / "corrupt-sentinel.md", sub / "SKILL.md")
+    # A real in-root skill keeps the scan non-vacuous, so this asserts
+    # "the descendant was skipped" rather than the weaker "nothing was found"
+    # (which a broken walker also satisfies — and which REQ-595's guard now
+    # reports as status 255).
+    real = tmp_path / "realskill"
+    real.mkdir()
+    shutil.copyfile(FIXTURES / "clean.md", real / "SKILL.md")
+
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "", result.stdout
+    assert "scanned 1 SKILL.md file(s)" in result.stderr, result.stderr
 
 
 def test_io_error_finding_does_not_leak_absolute_path(tmp_path):
@@ -635,3 +667,64 @@ def test_symlink_outside_root_is_excluded(tmp_path):
     assert "realskill/SKILL.md" in result.stdout
     # ...but the symlink escaping the scan root is excluded.
     assert "sneaky/SKILL.md" not in result.stdout
+
+
+# --- REQ-595 BR-5 / AC-7: the vacuous-run guard -----------------------------
+#
+# REQ-435 fixed the vacuous *walk* (a root sitting under `.worktrees` is no
+# longer skipped into oblivion). These cases guard the vacuous *result*: a
+# scan that walked zero files must not report success, because a clean result
+# from a scan that checked nothing is a confident green proving nothing.
+#
+# Both directions are covered on purpose. A guard exercised only against its
+# firing input can be unconditionally broken and still pass its own suite
+# (LESSON-440) — so the benign case below is as load-bearing as the failing one.
+
+
+def test_empty_root_is_a_vacuous_scan_not_a_pass(tmp_path):
+    """AC-7: pointing the check at an empty directory reports failure."""
+    result = _run(tmp_path)
+    # Distinct from an ordinary findings count, so a caller can tell
+    # "scanned nothing" from "found N problems".
+    assert result.returncode == 255, result.stdout + result.stderr
+    assert "VACUOUS SCAN" in result.stderr, result.stderr
+    assert "scanned 0 SKILL.md file(s)" in result.stderr, result.stderr
+    # No findings were invented to justify the failure.
+    assert result.stdout.strip() == "", result.stdout
+
+
+def test_populated_clean_root_still_passes(tmp_path):
+    """BR-5 benign path (LESSON-440): the guard must NOT fire on a root that
+    genuinely has skill files and genuinely has nothing wrong with them. This
+    is the case that fails if the guard is wired to reject unconditionally."""
+    root = _stage(tmp_path, "clean")
+    result = _run(root)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "VACUOUS SCAN" not in result.stderr, result.stderr
+    assert "scanned 1 SKILL.md file(s)" in result.stderr, result.stderr
+
+
+def test_root_of_only_skipped_dirs_is_vacuous(tmp_path):
+    """A root whose only SKILL.md files live under skipped directories walks
+    zero files — the same confident green as an empty root, reached by a
+    different branch. Distinct from `test_empty_root_...`: here the files
+    exist and are deliberately excluded, which is precisely the shape of the
+    REQ-435 near-miss."""
+    buried = tmp_path / "node_modules" / "someskill"
+    buried.mkdir(parents=True)
+    shutil.copyfile(FIXTURES / "corrupt-sentinel.md", buried / "SKILL.md")
+
+    result = _run(tmp_path)
+    assert result.returncode == 255, result.stdout + result.stderr
+    assert "VACUOUS SCAN" in result.stderr, result.stderr
+    # The corrupt buried file was genuinely not scanned, not merely unreported.
+    assert "sentinel" not in result.stdout, result.stdout
+
+
+def test_scanned_count_is_reported_on_every_run(tmp_path):
+    """BR-5: the work-done figure is emitted, not left to be inferred from a
+    green exit — including on a run that DOES have findings."""
+    root = _stage(tmp_path, "clean", "corrupt-sentinel")
+    result = _run(root)
+    assert result.returncode > 0, result.stdout
+    assert "scanned 2 SKILL.md file(s)" in result.stderr, result.stderr

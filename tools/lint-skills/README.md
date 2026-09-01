@@ -103,8 +103,27 @@ python3 tools/lint-skills/check.py
 sh tools/lint-skills/check.sh
 ```
 
-Exit code is `0` on a clean pass, otherwise `min(findings, 255)`. Findings are
-written to stdout in the format `<file>:<line>: <check-name>: <message>`.
+Findings are written to stdout in the format
+`<file>:<line>: <check-name>: <message>`. Every run also writes the work done to
+stderr — `skill-md-corruption: scanned <N> SKILL.md file(s)` — so a caller can
+read the count directly instead of inferring it from a green exit.
+
+| Exit | Meaning |
+|---|---|
+| `0` | clean pass — at least one file scanned, no findings |
+| `1`–`254` | `min(findings, 254)` |
+| `255` | **vacuous scan** — zero `SKILL.md` files were walked |
+
+A run that finds nothing because it *scanned* nothing is a failure, not a pass
+(REQ-595 BR-5). REQ-435 fixed the vacuous *walk* — a scan root that itself sits
+under `.worktrees` / `.git` / `node_modules` is no longer skipped into oblivion —
+but a root that genuinely contains no `SKILL.md` still exited 0, which is the
+same confident green one layer down. Status `255` names that case explicitly, and
+the findings cap sits one lower (`254`) so a saturating findings run can never be
+mistaken for it. POSIX exit statuses are 8-bit, so the distinct value had to be
+carved out of the top of the findings range rather than placed above it.
+
+The usual cause is a wrong `--root`. The stderr message says so.
 
 `/analyze` runs the same check at Step 1.9 and surfaces results as a
 `skill-md-corruption` audit dimension.

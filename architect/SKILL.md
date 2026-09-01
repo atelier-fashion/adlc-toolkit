@@ -82,6 +82,94 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 6. Tasks must form a valid dependency graph (no cycles), even when spanning repos
 7. Order tasks so foundational work comes first (data layer → service → routes → UI). In cross-repo mode, backend/API tasks typically precede their frontend consumers.
 
+### Step 4.5: Emit Verification Obligations (REQ-595)
+
+**Runs AFTER task creation (Step 4) and BEFORE the Step 5 footprint publish**, which
+reads the same task files. Numbered 4.5 rather than renumbering Steps 5–7, because
+`REQ-483` / `REQ-484` architecture docs reference `/architect` Step 5 by number.
+
+Write a `## Verification` block into each task file created in Step 4, naming every
+BR and AC that task discharges and the concrete artifact that proves each one. This
+is the pre-commitment that makes an omitted rule visible at architecture time rather
+than three phases later as a review finding — or never (LESSON-330: the Phase-5
+panel's real catch is a numbered rule implemented as zero).
+
+The block shape is defined in `.adlc/templates/task-template.md` (loaded in
+`## Context` above) — a four-column table, `rule | kind | artifact | benign_path`.
+Emit the columns in that order; `/validate`'s coverage gate reads positionally.
+
+**1. Enumerate the rules.** Read the parent REQ's `## Business Rules` and
+`## Acceptance Criteria`. `BR-<n>` uses the number as written. **`AC-<n>` is the
+1-based ordinal** within the `## Acceptance Criteria` list — the requirement
+template does not print AC numbers, so ordinal position is the addressing.
+
+If the REQ has **zero numbered BRs**, emit a one-line notice and skip obligation
+emission for BRs. Do not invent rules to map. An unnumbered legacy prose spec is
+not gate-able and is not made gate-able by fabricating ids.
+
+**2. Assign each rule to the task that discharges it.** A rule may map to more than
+one task; a task may discharge many rules. Every numbered BR and AC should land
+somewhere across the task set — that is exactly what `/validate` reports on.
+
+**3. Resolve `kind` — surface first, stack for the artifact shape.**
+
+- **All of the task's `## Files to Create/Modify` paths end in `.md`** →
+  `kind: structural-check`. The artifact names the structural check(s) that
+  actually run over that surface (in this toolkit, `tools/lint-skills` checks).
+  Markdown skills have no test runner; a structural check is their real
+  verification mechanism, not a lesser substitute for one. **No config read is
+  attempted on this branch** — a repo without `.adlc/config.yml` resolves here
+  silently, with no error and no test-file path emitted.
+- **Any non-`.md` path** → `kind: test-case`. Resolve the *artifact shape* — which
+  runner, which path and case-name convention — from that task's repo
+  `.adlc/config.yml` `stack:` when the file exists and declares one; otherwise from
+  the test layout already present in that repo.
+
+`kind` is the closed two-value enum `test-case | structural-check`. `dogfood` is
+deliberately excluded: it cannot report an executed-work count, which the
+vacuous-run gate requires.
+
+**Never hardcode a framework name.** Read the declared `stack:` values and use them
+as written. Any runner name written as a literal into this skill is a name that is
+wrong for the next project — the whole point of reading it from config is that the
+skill does not know, and must not guess, which runner a consumer uses.
+
+**4. Cross-repo (BR-9).** Resolution is per task, and a task's repo is its `repo:`
+frontmatter — **absent means the primary repo**, matching the attribution Step 5
+already applies to footprint paths. Each repo's `stack:` and test layout are read
+from *that* repo, so obligations group per repo with per-repo artifact paths. Never
+resolve a sibling's artifact path against the primary's layout.
+
+**5. Detector-shaped rules need a benign path (BR-4).** Any rule describing
+detection, refusal, or a halt must carry at least one obligation with
+`benign_path: yes` — a case asserting the detector does **not** fire on the
+legitimate actor. A detector validated only against adversarial inputs ships broken
+and passes its own suite (LESSON-440). Match the rule text on case-insensitive
+stems (`detect`, `refus`, `halt`, `reject`, `block`, `flag`), never `\b` word
+anchors — BSD `grep -E` on macOS does not honor them and the check would silently
+never fire (LESSON-013).
+
+**6. Validate every row before it is written — regardless of origin.** This applies
+to rows you authored and to any drafted by a delegate; the contract is
+origin-agnostic on purpose, so it cannot be bypassed by changing who wrote the row:
+
+- `rule` matches `^(BR|AC)-[0-9]+$` **and** that ordinal exists in the parent REQ.
+  A row citing `BR-99` on a REQ with 11 BRs is **dropped**.
+- `artifact` — reject any value containing `..`, then charset-validate. Reuse the
+  same reject-then-validate pattern Step 5 applies to footprint paths rather than
+  inventing a second one (LESSON-008: a cited path is untrusted input, and a
+  traversal that merely fails to match must still be refused, not silently allowed).
+- `kind` is one of the two enum values.
+
+**Report every dropped row** with the reason. A silently swallowed drop looks
+identical to a rule that was never mapped, which is the failure this step exists to
+make visible.
+
+**7. Write the block** into each task file, above `## Technical Notes`. A task with
+genuinely nothing to declare may omit the section — it stays valid, and `/validate`
+reports the gap as an advisory finding rather than blocking. Do not emit an empty
+table.
+
 ### Step 5: Publish the File Footprint to the Draft PR(s) (REQ-483 BR-4 / REQ-484)
 
 **Runs AFTER task creation** so per-repo `repo:` attribution from the task files is available
@@ -243,5 +331,13 @@ this skill writes must remain retrievable by `/spec` Step 1.6 (BUG-194).
 - [ ] Task dependencies form a valid DAG (no cycles), including cross-repo edges
 - [ ] Every file to be modified is listed in at least one task
 - [ ] Tests are included in task acceptance criteria
+- [ ] Every numbered BR and AC in the REQ is cited by at least one task's
+      `## Verification` block (Step 4.5) — an unmapped rule is the omitted-requirement
+      class LESSON-330 names, and it is far cheaper to catch here than at review
+- [ ] Every rule describing detection, refusal, or a halt carries at least one
+      `benign_path: yes` obligation
+- [ ] Every obligation's `kind` matches its task's surface, and no framework name is
+      hardcoded — the artifact shape comes from the repo's declared `stack:` or its
+      observed test layout
 - [ ] No task has more than 3 dependencies
 - [ ] In cross-repo mode: every task has a `repo:` field naming a valid repo id from `.adlc/config.yml`, and all files in that task live in that repo
