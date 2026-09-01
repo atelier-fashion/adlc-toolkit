@@ -42,7 +42,7 @@ def _write_config(tmp_path, body):
 def test_defaults_match_shipped_moonshot(clean_env):
     p = _common.resolve_provider()
     assert p.base_url == "https://api.moonshot.ai/v1"
-    assert p.model == "kimi-k2.5"
+    assert p.model == "kimi-k2.6"
     assert p.api_key_env == "MOONSHOT_API_KEY"
 
 
@@ -50,7 +50,7 @@ def test_no_config_legacy_key_is_enabled(clean_env, monkeypatch):
     monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
     p = _common.resolve_provider()
     assert p.enabled is True
-    assert p.model == "kimi-k2.5"
+    assert p.model == "kimi-k2.6"
 
 
 # --- BR-2 precedence cascade ------------------------------------------------
