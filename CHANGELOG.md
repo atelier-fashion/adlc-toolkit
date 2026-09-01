@@ -192,6 +192,37 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **The shipped default model is live again (BUG-208).** The provider retired
+  `kimi-k2.5`, so every delegated call on the shipped defaults returned HTTP 404 —
+  `adlc-read`, `adlc-write`, and every skill routing through them (`/spec` Step 1.6,
+  `/wrapup` Step 4, `/analyze`, `/architect`, `/proceed` Phase 5) silently lost their
+  cheap I/O tier and fell back to the primary model. The default is now `kimi-k2.6`,
+  verified by live round-trip; a dated comment records the endpoint's current ids in
+  place of one advertising `kimi-k2-thinking` and `kimi-k2-turbo-preview`, both also
+  retired.
+
+  Two things made this expensive to diagnose, and both are fixed:
+
+  - **The failure had no handled path.** `complete()` caught empty content but not the
+    SDK's HTTP errors, so a 404 escaped `main()` as a nine-frame traceback ending
+    inside `site-packages/openai/` — the signature of a broken SDK or a bad key, which
+    is not what happened. The provider's `or Permission denied` disjunction reinforced
+    the misread. `APIStatusError` and `APIConnectionError` are now mapped to one
+    actionable line each: 404 names the model and the three knobs that override it,
+    401/403 points at `api_key_env`, 429 names quota. No traceback survives.
+  - **The tests could not have caught it.** `test_resolve_provider.py` asserted that
+    resolution *returns* `kimi-k2.5` — a tautology over the constant that stayed green
+    after the id died. 283 delegate tests passed against a completely non-functional
+    default. The assertions now follow the new value, which does not fix the underlying
+    gap: nothing yet checks that the pinned default is one the endpoint still serves.
+    Detection is filed as a follow-up on BUG-208 rather than bolted on here, since a
+    naive liveness test would make the hermetic suite require a network and a funded key.
+
+  A pinned external identifier is a fact about someone else's system, with an expiry
+  date the toolkit does not track. If delegation starts failing with "model not found",
+  re-run the endpoint's models list and re-pin — the key and the SDK are the usual
+  suspects and are usually innocent (LESSON-334).
+
 - **`delegate.enabled: false` is now honoured (BUG-205).** ⚠️ **Behavior change —
   read this if you rely on a legacy API key to enable delegation.**
 
