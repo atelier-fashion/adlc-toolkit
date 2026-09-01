@@ -65,6 +65,32 @@ PRs (`atelier-fashion/adlc-toolkit`).
     zero numbered BRs passes with a notice rather than having rules invented for it.
   - `templates/task-template.md` gains the section, **optional by design** so the
     157 task files already on disk stay valid.
+- **Unstructured-source intake for `/spec` (REQ-594).** `/spec` assumed its input was
+  already a coherent feature request; its only concession to ambiguity was a prose line
+  telling it to "ask clarifying questions", with no artifact and no gate. Real
+  requirements arrive as meeting notes, chat transcripts, and ticket dumps, and the
+  operator compressed them by hand before `/spec` ever ran — so whatever was lost in that
+  compression was invisible. New **Step 1.4** turns such a source into a draft REQ plus a
+  classified **gap list**, checked section by section against the requirement template:
+  - Each gap is `blocking` (no faithful spec without the answer) or `assumption` (the
+    spec can proceed under a stated one). Interactively, blocking gaps halt before the
+    spec is written; assumption gaps are written verbatim into Assumptions. The gap list
+    lives in the spec rather than a separate `gaps.md` (ADR-4).
+  - Activation is deliberately narrow — an explicit `--intake` flag, a readable file
+    path, or input over 25 lines — so the ordinary one-line request path is untouched:
+    no added prompts, no added latency, no `## Provenance` section.
+  - The source is **segmented before delegation and reconciled after**, with any segment
+    the delegate omitted read directly. Over an 8000-line budget the step **refuses**,
+    naming the size, rather than truncating — a silently truncated read reports zero gaps
+    precisely because the unread remainder is invisible.
+  - Placed before Step 1.5 (a distilled statement is better retrieval-tag input than a
+    raw transcript) and before Step 2 (an interactive halt must not burn a REQ id from
+    the shared machine-global counter).
+  - New `partials/intake.sh` (6 sourceable functions) and `partials/tests/intake.test.sh`
+    (116 assertions, run under both bash and zsh).
+  - **Not yet proven:** the interactive halt and the subagent non-interactive path are
+    SKILL.md control flow, which no unit test reaches — they need a real `/spec --intake`
+    run against a transcript before this is trusted end to end.
 - **Incident→REQ attribution (REQ-593).** A bug and the REQ that caused it stop being
   unrelated artifacts. `partials/attribution.sh` derives the edge from history the repo
   already carries: blame the root-cause lines, read the blamed commit, extract an attested
