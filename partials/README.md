@@ -69,13 +69,16 @@ behavior. Examples:
   `id-alloc.sh` for the kind mappers + `adlc_remote_high` (one derivation
   surface). Never blocks on the network. Contract in the header comment.
 - `intake.sh` — unstructured-source intake for `/spec` Step 1.4 (REQ-594).
-  Defines four functions:
+  Defines six functions:
   - `adlc_intake_detect <args>` — the activation gate. Returns **0** to run
     intake, **1** for an ordinary feature request. Intake activates only on an
     explicit `--intake` flag, an argument resolving to a readable file path, or
     an argument over 25 lines, so the common one-line-request path is unchanged
     and adds no prompts and no latency. Exports `ADLC_INTAKE_KIND`
-    (`transcript` | `notes` | `ticket` | `prose`), `_PATH`, and `_REASON`.
+    (`transcript` | `notes` | `ticket` | `prose`), `_PATH`, `_REASON`, and
+    `_INLINE`. Input pasted inline (BR-1's over-25-lines trigger) carries no path,
+    so it is materialized to a temp file — `_PATH` is always a real file on the
+    intake path, which is what lets every later step be uniformly file-based.
   - `adlc_intake_segment <path>` — splits the source into labelled 200-line
     segments and writes the delimited corpus handed to the delegate. Returns
     **0** ok, **2** unreadable, **3** **over budget**. The budget is 40 segments
@@ -96,9 +99,9 @@ behavior. Examples:
     `rm -rf "$(dirname "$VAR")"` in a SKILL.md becomes `rm -rf .` the moment `VAR`
     is empty. A user-supplied source file is never deleted.
   - `adlc_intake_sections` — the gap checklist, derived from the requirement
-    template rather than hardcoded, minus the four headings that are *outputs*
-    of intake (`Description`, `Assumptions`, `Open Questions`,
-    `Retrieved Context`) and `Provenance` itself.
+    template rather than hardcoded, minus the headings that are *outputs* of
+    intake rather than inputs to it: `Description`, `Assumptions`,
+    `Open Questions`, `Retrieved Context`, and `Provenance`.
 
   Contract in the header comment. Tested by `tests/intake.test.sh` under both
   bash and zsh.
