@@ -9,7 +9,7 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | Skill | Description |
 |-------|-------------|
 | `/init` | Bootstrap `.adlc/` structure in a new repo |
-| `/spec` | Write requirement specs from feature requests |
+| `/spec` | Write requirement specs from feature requests. Pass `--intake` (or a source file path, or over 25 lines of input) to run **intake** on unstructured material — a transcript, meeting notes, a ticket dump — producing a draft REQ plus an explicit gap list naming what the source does not answer (REQ-594) |
 | `/architect` | Design architecture and break requirements into tasks |
 | `/validate` | Validate any ADLC phase output before advancing |
 | `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup. Opens a draft PR early and trial-merge-gates the merge to enforce ordering (REQ-483) |

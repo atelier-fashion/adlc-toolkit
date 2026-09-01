@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: "Document intake in README, partials/README, and toolkit context"
-status: draft
+status: complete
 parent: REQ-594
 created: 2026-08-31
 updated: 2026-08-31
