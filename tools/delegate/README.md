@@ -75,6 +75,28 @@ sends nothing, and the probes are how you diagnose a disabled setup.
 Delegating skills already treat a non-zero exit as "fall back and read directly", so
 a refusal degrades exactly like a missing binary.
 
+### Who resolves opt-in (REQ-603)
+
+One resolver, in Python: `_common.resolve_gate_verdict()`. The shell gate
+(`partials/delegate-gate.sh`) may **withhold** delegation — an unresolvable binary,
+or the `ADLC_DISABLE_DELEGATE` veto — but may never **grant** it. Every path that
+concludes "delegated" goes through one `adlc-read --print-gate` call.
+
+```
+adlc-read --print-gate     # -> "<enabled> <reason>", e.g. "1 ok" or "0 disabled-via-env"
+```
+
+`--print-gate` exits 0 on every path including disabled: it reports, it never
+refuses. `--print-enabled` is frozen and unchanged for callers that predate it.
+
+The veto lives in both layers on purpose — a veto can only return *disabled*, so
+the copies agree or abstain but cannot contradict, provided Python recognises at
+least every input the shell does. Both test the literal `"1"`.
+
+**Upgrade the gate and the CLI together.** An `adlc-read` predating `--print-gate`
+makes the gate fail closed: delegation is off, safely but silently, reported as
+`not-opted-in`.
+
 ### Turning delegation off
 
 Writing `enabled: false` under `delegate:` turns delegation off, and outranks

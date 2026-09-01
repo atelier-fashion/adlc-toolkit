@@ -18,6 +18,31 @@ haven't re-run `/init` since the toolkit shipped the partial:
 
 `.` (dot) is POSIX; do NOT use `source` (bash-only).
 
+## Where the answer comes from (REQ-603)
+
+The gate **may veto; only Python may authorize.** It makes exactly two decisions,
+and both can only *withhold* delegation:
+
+1. **binary resolution** — an unresolvable `adlc-read` returns `2 no-binary`. It
+   is the one question the probe cannot answer.
+2. **the veto** — `ADLC_DISABLE_DELEGATE=1` returns `1 disabled-via-env`, with
+   **zero forks**, so the emergency stop stays the cheapest path in the gate.
+
+Everything that could *grant* delegation is resolved by one call to
+`adlc-read --print-gate`, which prints `<enabled> <reason>` and exits 0 on every
+path — it reports, it never refuses. The gate validates the reason against the
+frozen enum and fails closed on anything else.
+
+The veto is deliberately implemented in **both** layers. That is safe only because
+a veto can never return *enabled*: the copies agree or abstain, but cannot
+contradict — **provided Python recognises at least every input the shell does.**
+Both test the literal `"1"`; widening one alone reintroduces BUG-209, and
+`tools/delegate/tests/test_cross_layer_veto.py` is what enforces it.
+
+**Upgrade note:** the gate and `adlc-read` must be upgraded together. An
+`adlc-read` predating `--print-gate` makes the gate fail closed — delegation is
+off, safely but silently, reported as `not-opted-in`.
+
 ## Return-code contract
 
 `adlc_delegate_gate_check` returns:
@@ -57,9 +82,16 @@ their return codes, are:
 |--------|-----------------------------|-----------------------------------------|
 | 0      | `ok`                        | delegated — adlc-read available, enabled |
 | 1      | `disabled-via-env`          | `ADLC_DISABLE_DELEGATE=1` opted out      |
-| 1      | `disabled-via-config`       | `delegate.enabled: false` — an operator opt-out (BUG-205) |
+| 1      | `disabled-via-config`       | `delegate.enabled: false` — an operator opt-out (BUG-205), **or** a config the real call refuses (key-in-config, LESSON-392) |
 | 1      | `not-opted-in`              | no opt-in signal (fresh install, BR-11)  |
 | 2      | `no-binary`                 | `adlc-read` not resolvable (PATH or `$HOME/bin`) |
+
+> **Behaviour change (REQ-603 ADR-4).** `delegate.enabled: false` now reports
+> `disabled-via-config` whether or not a legacy key is exported. The pre-REQ shell
+> helper never read `enabled` — it returned `disabled-via-config` only when a
+> config file existed *and* a legacy key happened to be set, so the same written
+> instruction produced two different labels depending on an unrelated variable.
+> The **return code is unchanged** (`1` either way); only the label is corrected.
 
 `disabled-via-config` and `not-opted-in` both mean "delegation is off", and a
 caller that only branches on the return code can keep treating them alike. They

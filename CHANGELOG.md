@@ -190,6 +190,46 @@ PRs (`atelier-fashion/adlc-toolkit`).
   remain drafts: listed here because the specs are in the tree, not because the
   behavior is.
 
+### Changed
+
+- **The delegation gate may veto; only Python may authorize (REQ-603).** ⚠️ **Upgrade
+  the gate and `adlc-read` together.**
+
+  The opt-in predicate was implemented twice — in `partials/delegate-gate.sh` and in
+  `_common.delegation_enabled` — and checked by two disjoint suites. That duplication
+  produced two data-governance defects, one per arm shell decided: **BUG-205** (a shell
+  fast path silently overrode a written `enabled: false` and transmitted) and
+  **BUG-209** (`ADLC_DISABLE_DELEGATE` existed in shell and nowhere in Python, so both
+  CLIs ignored the documented emergency stop). Each fix corrected the arm that had just
+  failed; neither removed the condition that lets the next one drift.
+
+  The gate now makes exactly two decisions, and **both can only withhold** delegation:
+
+  1. binary resolution → `2 no-binary`
+  2. the `ADLC_DISABLE_DELEGATE` veto → `1 disabled-via-env`, with **zero forks**
+
+  Everything that could *grant* delegation resolves in one `adlc-read --print-gate`
+  call, which prints `<enabled> <reason>` and exits 0 on every path — it reports, it
+  never refuses. The gate validates the reason against the frozen enum and fails closed
+  on anything else.
+
+  The veto stays duplicated **on purpose**: a veto can only return *disabled*, so the
+  copies agree or abstain but cannot contradict — provided Python recognises at least
+  every input the shell does. Both test the literal `"1"`, and `test_cross_layer_veto.py`
+  drives both layers over one input vector so widening either alone fails. Widening the
+  shell veto alone is exactly how BUG-209 would return.
+
+  **One deliberate behaviour change.** `delegate.enabled: false` now reports
+  `disabled-via-config` whether or not a legacy key is exported. The pre-REQ shell helper
+  never read `enabled` — it returned `disabled-via-config` only when a config file
+  existed *and* a legacy key happened to be set, so the same written instruction produced
+  two labels depending on an unrelated variable. The **return code is unchanged** (`1`
+  either way); only the label is corrected.
+
+  **Migration:** an `adlc-read` predating `--print-gate` makes the gate fail closed —
+  delegation off, safely but silently, reported as `not-opted-in`. `--print-enabled` is
+  frozen and unchanged for callers that predate this.
+
 ### Fixed
 
 - **`ADLC_DISABLE_DELEGATE=1` actually works now (BUG-209).** ⚠️ **Read this if you
