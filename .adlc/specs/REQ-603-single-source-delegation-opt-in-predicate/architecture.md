@@ -72,7 +72,7 @@ re-derives a reason; once the gate stops deriving reasons, Python must carry the
 the information is lost. `disabled-via-config` is the honest label — the config is why
 delegation is unavailable.
 
-## ADR-4 — The reason heuristic is imprecise today, and this REQ must decide whether to preserve the imprecision ⚠️ **NEEDS RATIFICATION**
+## ADR-4 — The reason heuristic is imprecise today; the correction is taken ✅ **RATIFIED 2026-09-01 — option (b)**
 
 **Finding.** `_adlc_delegate_disabled_by_config` never reads `enabled`. It returns
 "disabled-via-config" when *a config file exists AND a legacy key is exported*. Verified:
@@ -109,9 +109,14 @@ rc is unchanged, `delegate-pre-pass` accepts any of the frozen six verbatim, and
 `check-delegation.sh` aggregates `mode` not `reason` — so no known consumer breaks. Option (a)
 would port a bug across a rewrite whose stated purpose is removing a second source of truth.
 
-**This is a spec amendment and is not `/architect`'s to make unilaterally.** Tasks are written
-against (b); if the answer is (a), TASK-089 gains the heuristic port and TASK-091 gains a case
-pinning the old label.
+**Ratified as (b) by the operator on 2026-09-01.** REQ-603 BR-4 is amended to name the
+exception, and AC-21 is appended asserting that this row — and only this row — diverges.
+
+AC-21 was **appended rather than inserted** next to the related AC-7. Acceptance criteria are
+addressed by 1-based ordinal (REQ-595), and 41 verification obligations across the five tasks
+cite those ordinals; inserting mid-list would have silently re-pointed every obligation citing
+AC-8 through AC-20 at the wrong rule. Ordinal stability outranks topical grouping in a spec
+whose ACs are machine-addressed.
 
 ## ADR-5 — The legacy-key shell arm is removed in one change
 

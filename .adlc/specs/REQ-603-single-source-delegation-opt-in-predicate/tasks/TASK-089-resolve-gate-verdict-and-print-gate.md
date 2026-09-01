@@ -43,6 +43,7 @@ This is the foundation task; nothing else can land first.
 | BR-10 | test-case | `tools/delegate/tests/test_print_gate.py::test_probe_reports_disabled_never_refuses` | yes |
 | AC-12 | test-case | `tools/delegate/tests/test_print_gate.py::test_probe_exits_zero_under_kill_switch` | yes |
 | AC-13 | test-case | `tools/delegate/tests/test_print_gate.py::test_print_enabled_against_frozen_caller` | yes |
+| BR-4 | test-case | `tools/delegate/tests/test_print_gate.py::test_enabled_false_without_legacy_key_is_disabled_via_config` | no |
 
 ## Technical Notes
 
@@ -51,8 +52,13 @@ This is the foundation task; nothing else can land first.
 malformed config; `--print-gate` must preserve that behaviour or it silently regresses
 LESSON-392 while passing every test in this REQ.
 
-Reason derivation follows architecture ADR-4 option (b): an explicit `enabled: false` yields
-`disabled-via-config` regardless of whether a legacy key is exported. **If ADR-4 is ratified
-as (a) instead**, this task must instead port the shell heuristic ("config file exists AND a
-legacy key is present") and TASK-091 gains a case pinning `not-opted-in` for the
-no-legacy-key row.
+Reason derivation follows architecture ADR-4, **ratified as option (b)**: an explicit
+`enabled: false` yields `disabled-via-config` regardless of whether a legacy key is exported.
+Derive it from the three-state config `parse_delegate_config` already returns — do **not** port
+the shell heuristic ("config file exists AND a legacy key is present"), which is the
+imprecision being corrected and which would re-introduce a legacy-key read on the Python side
+purely to emulate shell.
+
+This is the REQ's only intentional behaviour change. The return code is unchanged (`1` either
+way); only the label moves, from `not-opted-in` to `disabled-via-config`. Everything else in
+the six-reason matrix must stay byte-identical, which AC-21 asserts exhaustively.

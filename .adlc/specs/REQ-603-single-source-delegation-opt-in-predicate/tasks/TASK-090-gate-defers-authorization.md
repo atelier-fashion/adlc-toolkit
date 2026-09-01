@@ -27,7 +27,8 @@ its return code.
 - [ ] The veto path returns `1 disabled-via-env` with zero probe invocations
 - [ ] At most one probe invocation on any path, counted with an instrumented `ADLC_READ_BIN`
 - [ ] A probe that exits non-zero, prints nothing, prints garbage, or names a reason outside the enum yields not-delegated, with `_probe_rc=$?` captured immediately after the substitution
-- [ ] All six gate reason strings and the 0/1/2 shape are unchanged, except the single ADR-4 correction
+- [ ] All six gate reason strings and the 0/1/2 shape are unchanged, except the single ratified ADR-4 correction: `enabled: false` with **no** legacy key now reports `disabled-via-config` instead of `not-opted-in`, with the return code unchanged at `1`
+- [ ] The full (input, reason) matrix is compared against the pre-REQ gate exhaustively, not spot-checked — exactly one row differs, and it is the ADR-4 row
 - [ ] BSD- and zsh-safe: no `\b` in `grep -E`, no bare `$<digit>`, no `status` variable, no unquoted word-splitting
 
 ## Verification
@@ -51,6 +52,7 @@ its return code.
 | AC-10 | test-case | `partials/tests/delegate-gate.test.sh::broken probe yields not-delegated` | no |
 | AC-11 | test-case | `partials/tests/delegate-gate.test.sh::at most one probe across all four paths` | yes |
 | AC-19 | test-case | `partials/tests/delegate-gate.test.sh::all six reasons byte-identical` | yes |
+| AC-21 | test-case | `partials/tests/delegate-gate.test.sh::exactly one row diverges and it is the ADR-4 row` | yes |
 
 ## Technical Notes
 
