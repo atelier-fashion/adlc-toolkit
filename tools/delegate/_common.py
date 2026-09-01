@@ -310,6 +310,39 @@ def delegation_enabled(cfg=None):
     return False
 
 
+def require_delegation_enabled(prog, cfg=None):
+    """Refuse to transmit when delegation is not opted in (BUG-206).
+
+    The shell gate (``partials/delegate-gate.sh``) is supposed to stop a
+    delegating skill before it ever reaches a CLI invocation. But that gate is
+    **vendored per repo** — skills source ``.adlc/partials/delegate-gate.sh``
+    ahead of the toolkit copy — so a repo carrying a stale vendored copy calls
+    straight through a correct opt-out, and nothing downstream objects. Until
+    this guard existed, ``enabled`` was consulted only by ``--print-enabled``:
+    the flag that governs whether file contents may leave the machine was read
+    exclusively by the probe, never by the code path that does the leaving.
+
+    A governance control cannot live only in a layer that gets copied around.
+    This is the backstop in the one place that is not copied — and it is what
+    makes vendored-gate staleness a correctness problem rather than a
+    data-governance one.
+
+    Exits non-zero with an actionable message. Delegating skills already treat a
+    non-zero exit as "fall back and read directly" (BR-4), so a refusal here
+    degrades exactly like a missing binary rather than breaking the caller.
+    """
+    if delegation_enabled(cfg):
+        return
+    sys.exit(
+        "%s: delegation is not enabled — refusing to send file contents to a "
+        "third-party endpoint.\n"
+        "Enable it with `delegate.enabled: true` in ~/.claude/adlc/config.yml, or "
+        "ADLC_DELEGATE_ENABLED=1 in the environment.\n"
+        "(`%s --version` prints the resolved value. ADLC_DISABLE_DELEGATE=1 forces "
+        "it off regardless.)" % (prog, prog)
+    )
+
+
 def resolve_provider(args_model=None, args_base_url=None, cfg=None):
     """Resolve the provider via the BR-2 precedence cascade.
 
