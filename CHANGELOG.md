@@ -192,6 +192,40 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **`ADLC_DISABLE_DELEGATE=1` actually works now (BUG-209).** ⚠️ **Read this if you
+  relied on it to halt delegation.** The documented emergency stop — "overriding
+  everything including `ADLC_DELEGATE_ENABLED=1`" — was implemented **only** in
+  `partials/delegate-gate.sh`. `delegation_enabled()` never read the variable, so
+  `adlc-read` and `adlc-write` ignored it entirely: with it set, `--version` reported
+  `enabled: true` and a real call printed the privacy notice, transmitted the corpus,
+  and returned a completion.
+
+  The gate is vendored per repo, so a stale `.adlc/partials/delegate-gate.sh` — or any
+  direct CLI call — walked straight past the stop. This is the defect BUG-206 named and
+  fixed one variable short: its own reasoning (*a governance control cannot live only in
+  a layer that gets copied around*) applies verbatim, and its refusal message asserted
+  "`ADLC_DISABLE_DELEGATE=1` forces it off regardless" — false in the file that printed
+  it.
+
+  The switch is now step 0 of the opt-in cascade, ahead of every other arm:
+
+  0. `ADLC_DISABLE_DELEGATE=1` → **off, always**
+  1. `ADLC_DELEGATE_ENABLED=1` → on
+  2. `delegate.enabled`, when present → decisive both directions
+  3. a legacy key, only when no config file exists → on
+  4. otherwise → off
+
+  Matching the shell's exact-`"1"` test, so the two layers cannot disagree about what
+  counts as set — `"true"` and `"yes"` disable in neither. A refusal caused by the switch
+  now names it rather than advising you to enable delegation you deliberately turned off.
+
+  Why it survived this long: `partials/tests/delegate-gate.test.sh:114` asserts
+  "ADLC_DISABLE_DELEGATE=1 beats everything" and passes — covering the vendored copy,
+  the layer whose staleness *is* the threat model — while none of the 499 Python tests
+  referenced the variable. The fixture that claims to clear "every delegate/legacy var"
+  omitted it too, so a developer with it exported got different results from the same
+  suite. Both are fixed; six of the seven new tests fail against the unfixed cascade.
+
 - **The delegate CLIs now enforce `enabled` themselves (BUG-206).** `enabled` decides
   whether file contents may leave the machine, but until now it was consulted in exactly
   one place: `adlc-read --print-enabled`, the probe the shell gate calls. The path that

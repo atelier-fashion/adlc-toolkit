@@ -283,10 +283,24 @@ def delegation_enabled(cfg=None):
     Resolved in the SAME precedence order as the provider fields (BR-2), which
     ``enabled`` previously did not follow (BUG-205):
 
+      0. ``ADLC_DISABLE_DELEGATE=1`` in the environment      → DISABLED, always
       1. ``ADLC_DELEGATE_ENABLED=1`` in the environment      → enabled
       2. ``delegate.enabled`` in the config file, if PRESENT → decisive, either way
       3. a legacy key (``KIMI_API_KEY``/``MOONSHOT_API_KEY``) → enabled (continuity)
       4. otherwise                                           → disabled
+
+    Step 0 is the kill switch, and it outranks every other arm including an
+    explicit ``ADLC_DELEGATE_ENABLED=1`` — matching ``delegate-gate.sh``, which
+    tests it before the opt-in cascade and returns ``disabled-via-env``. Until
+    BUG-209 this arm did not exist in Python at all: the switch was implemented
+    only in the shell gate, which is **vendored per repo**, so a repo carrying a
+    stale ``.adlc/partials/delegate-gate.sh`` — or any direct CLI call — walked
+    straight past a documented emergency stop and transmitted file contents.
+
+    That is the same structural defect BUG-206 fixed for ``enabled``, missed for
+    the one control whose entire purpose is to be reachable when something has
+    already gone wrong. A kill switch that lives only in the copied layer is not
+    a kill switch.
 
     Step 2 is three-state on purpose. ``parse_delegate_config`` records
     ``enabled`` only when the key actually appears, so ``None`` (absent) is
@@ -306,6 +320,11 @@ def delegation_enabled(cfg=None):
     """
     if cfg is None:
         cfg = parse_delegate_config()
+    # Kill switch first: it outranks every arm below, opt-in env var included.
+    # Exact "1" only, matching delegate-gate.sh's `[ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ]`
+    # so the two layers cannot disagree about what counts as set.
+    if os.environ.get("ADLC_DISABLE_DELEGATE") == "1":
+        return False
     if os.environ.get("ADLC_DELEGATE_ENABLED") == "1":
         return True
     configured = cfg.get("enabled")
@@ -339,6 +358,18 @@ def require_delegation_enabled(prog, cfg=None):
     """
     if delegation_enabled(cfg):
         return
+    # Name the kill switch when it is the cause. Telling someone to enable
+    # delegation when they just set ADLC_DISABLE_DELEGATE=1 is advice against
+    # their own stated intent — and it reads as the switch having been ignored,
+    # which is precisely the bug this branch fixes (BUG-209). Mirrors the gate's
+    # disabled-via-env / not-opted-in split.
+    if os.environ.get("ADLC_DISABLE_DELEGATE") == "1":
+        sys.exit(
+            "%s: delegation disabled via ADLC_DISABLE_DELEGATE — refusing to send "
+            "file contents to a third-party endpoint.\n"
+            "Unset it to restore the configured behaviour (`%s --version` prints "
+            "the resolved value)." % (prog, prog)
+        )
     sys.exit(
         "%s: delegation is not enabled — refusing to send file contents to a "
         "third-party endpoint.\n"

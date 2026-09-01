@@ -18,7 +18,7 @@ import _common  # noqa: E402
 _DELEGATE_VARS = (
     "MOONSHOT_API_KEY", "KIMI_API_KEY", "KIMI_MODEL",
     "ADLC_DELEGATE_MODEL", "ADLC_DELEGATE_BASE_URL", "ADLC_DELEGATE_API_KEY_ENV",
-    "ADLC_DELEGATE_ENABLED", "ADLC_CONFIG",
+    "ADLC_DELEGATE_ENABLED", "ADLC_CONFIG", "ADLC_DISABLE_DELEGATE",
 )
 
 
@@ -317,3 +317,75 @@ def test_enabled_run_is_not_blocked_by_the_guard(clean_env, tmp_path):
                   "--paths", str(src), "--question", "q"],
                  {"ADLC_DELEGATE_ENABLED": "1", "MOONSHOT_API_KEY": "sk-fake"}, clean_env)
     assert "not enabled" not in r.stderr, "guard must not block an opted-in run"
+
+
+# --- BUG-209: ADLC_DISABLE_DELEGATE is the kill switch, honoured in Python ---
+# The shell gate has covered this since it was written
+# (partials/tests/delegate-gate.test.sh: "ADLC_DISABLE_DELEGATE=1 beats
+# everything"). The CLI side had no equivalent, so delegation_enabled() never
+# read the variable at all and every direct CLI call ignored a documented
+# emergency stop. These are the missing half.
+
+def test_disable_beats_enabled_env(clean_env, monkeypatch):
+    """The kill switch outranks the opt-in env var (README: 'overriding
+    everything including ADLC_DELEGATE_ENABLED=1')."""
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    assert _common.delegation_enabled() is False
+
+
+def test_disable_beats_config_true(clean_env, monkeypatch):
+    cfg = _write_config(clean_env, "delegate:\n  enabled: true\n")
+    monkeypatch.setenv("ADLC_CONFIG", cfg)
+    assert _common.delegation_enabled() is True
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    assert _common.delegation_enabled() is False
+
+
+def test_disable_beats_legacy_key(clean_env, monkeypatch):
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.delegation_enabled() is True
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    assert _common.delegation_enabled() is False
+
+
+def test_disable_beats_everything_at_once(clean_env, monkeypatch):
+    """Every opt-in arm asserted simultaneously — mirrors the shell gate's
+    'beats everything' case so the two layers are tested on equal terms."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: true\n")
+    monkeypatch.setenv("ADLC_CONFIG", cfg)
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    assert _common.delegation_enabled() is False
+
+
+def test_disable_requires_exactly_one(clean_env, monkeypatch):
+    """Only the literal "1" disables, matching delegate-gate.sh's
+    `[ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ]`. A truthy-looking value that the
+    shell would ignore must not disable here either, or the layers disagree."""
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    for value in ("0", "", "true", "yes", "2"):
+        monkeypatch.setenv("ADLC_DISABLE_DELEGATE", value)
+        assert _common.delegation_enabled() is True, value
+
+
+def test_disable_reflected_in_resolved_provider(clean_env, monkeypatch):
+    """--version / --print-enabled read through resolve_provider, so the switch
+    must show there too — that report is the documented way to check what a
+    machine will actually do."""
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    assert _common.resolve_provider().enabled is False
+
+
+def test_require_delegation_names_the_kill_switch(clean_env, monkeypatch):
+    """A refusal caused by the switch must say so rather than advising the
+    operator to enable delegation they deliberately turned off."""
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    with pytest.raises(SystemExit) as exc:
+        _common.require_delegation_enabled("adlc-read")
+    msg = str(exc.value)
+    assert "ADLC_DISABLE_DELEGATE" in msg
+    assert "delegate.enabled: true" not in msg
