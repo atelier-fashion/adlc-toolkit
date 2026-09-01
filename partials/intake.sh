@@ -230,9 +230,7 @@ adlc_intake_segment() {
 #
 #   adlc_intake_range <segment-number> <total-lines>
 adlc_intake_range() {
-    _ai_n="$1"
-    _ai_tot="$2"
-    for _ai_v in "$_ai_n" "$_ai_tot"; do
+    for _ai_v in "$1" "$2"; do
         case "$_ai_v" in
             ''|*[!0-9]*)
                 echo "adlc_intake_range: usage: adlc_intake_range <segment-number> <total-lines> (both positive integers)" >&2
@@ -240,6 +238,16 @@ adlc_intake_range() {
                 ;;
         esac
     done
+
+    # Decimal-normalize BEFORE any arithmetic (LESSON-396). Segment labels are
+    # zero-padded (S01..S40), so the natural call after reconciliation spots a
+    # missing S08 is `adlc_intake_range 08 <lines>` — and $(( 08 )) is an octal
+    # literal. This is shell-divergent, which makes it worse than a plain error:
+    # bash fails with "value too great for base", while zsh (the macOS executor
+    # shell) silently accepts it. A bug that only appears under bash would sail
+    # through local dogfooding. `sed` rather than `10#$n`, which is a bashism.
+    _ai_n=$(printf '%s' "$1" | sed -e 's/^0*//' -e 's/^$/0/')
+    _ai_tot=$(printf '%s' "$2" | sed -e 's/^0*//' -e 's/^$/0/')
 
     _ai_max=$(( (_ai_tot + ADLC_INTAKE_SEGMENT_LINES - 1) / ADLC_INTAKE_SEGMENT_LINES ))
     [ "$_ai_max" -gt 0 ] || _ai_max=1

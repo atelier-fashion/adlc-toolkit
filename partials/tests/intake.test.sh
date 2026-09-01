@@ -201,6 +201,20 @@ check "range rejects non-numeric segment" "2" "$?"
 adlc_intake_range 3 >/dev/null 2>&1
 check "range rejects missing total-lines" "2" "$?"
 
+# LESSON-396 regression: segment labels are zero-padded (S01..S40), so the natural
+# call after reconciliation spots a missing S08 is `adlc_intake_range 08 <lines>`.
+# $(( 08 )) is an OCTAL literal — bash errors "value too great for base", zsh
+# silently accepts. Shell-divergent, so a regression here would pass under the
+# macOS executor shell and fail under bash. Assert every padded label 01-09.
+check "LESSON-396 padded 01" "1 200"       "$(adlc_intake_range 01 4200 2>&1)"
+check "LESSON-396 padded 07" "1201 1400"   "$(adlc_intake_range 07 4200 2>&1)"
+check "LESSON-396 padded 08" "1401 1600"   "$(adlc_intake_range 08 4200 2>&1)"
+check "LESSON-396 padded 09" "1601 1800"   "$(adlc_intake_range 09 4200 2>&1)"
+check "LESSON-396 padded 10" "1801 2000"   "$(adlc_intake_range 10 4200 2>&1)"
+check "LESSON-396 padded total-lines" "1 200" "$(adlc_intake_range 1 0900 2>&1)"
+adlc_intake_range 08 4200 >/dev/null 2>&1
+check "LESSON-396 padded call returns 0" "0" "$?"
+
 # The range must be usable to recover the omitted segment's real content.
 mkfixture "$SANDBOX/recover.txt" 450 "line"
 set -- $(adlc_intake_range 2 450)
