@@ -75,7 +75,7 @@ Mapping:
 | gate rc | meaning | doctor result |
 |---------|---------|---------------|
 | 0 (`ok`) | delegated path live | **PASS** |
-| 1 (`not-opted-in` / `disabled-via-env`) | opt-in off | **SKIP** (reason shown) |
+| 1 (`not-opted-in` / `disabled-via-config` / `disabled-via-env`) | opt-in off | **SKIP** (reason shown) |
 | 2 (`no-binary`) + config `enabled: false`/absent | not installed, not requested | **SKIP** |
 | 2 (`no-binary`) + config `enabled: true` | **misconfigured** | **FAIL** → `./install.sh --with-delegation`, or set `delegate.enabled: false` |
 

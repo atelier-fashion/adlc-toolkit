@@ -19,18 +19,31 @@
 #   The function exports ADLC_DELEGATE_GATE_REASON on every code path. Canonical
 #   values (paired with the return code):
 #     return 0 → "ok"
-#     return 1 → "disabled-via-env"   (an explicit disable flag) OR
-#                "not-opted-in"        (BR-11: no opt-in signal)
+#     return 1 → "disabled-via-env"    (an explicit disable flag) OR
+#                "disabled-via-config" (delegate.enabled: false — BUG-205) OR
+#                "not-opted-in"         (BR-11: no opt-in signal)
 #     return 2 → "no-binary"
 #   `export` is intentional — a child delegate invocation may read it.
 #
-# Opt-in (BR-11) is satisfied by ANY of:
-#   * ADLC_DELEGATE_ENABLED=1 in the environment, OR
-#   * a legacy key set in env (KIMI_API_KEY / MOONSHOT_API_KEY) — key continuity
-#     is provider-preset data, not branding (REQ-522 BR-1/BR-3), OR
-#   * delegate.enabled: true in the config file (resolved in Python; the gate
-#     shells out to the resolver ONLY when no env opt-in is present AND a config
-#     file exists, so the common paths stay pure-shell and fast).
+# Opt-in (BR-11) is resolved in the SAME precedence order as the provider fields
+# (BR-2), highest first. Before BUG-205 `enabled` did not follow that order — it
+# was a flat OR in which the legacy-key arm outranked the config file:
+#   1. ADLC_DELEGATE_ENABLED=1 in the environment            → opted in
+#   2. delegate.enabled in the config file, when the key is PRESENT → decisive
+#      in BOTH directions. `true` opts in; `false` opts OUT and outranks the
+#      continuity arm below. Resolved in Python, never parsed in shell
+#      (REQ-515 ADR-3).
+#   3. a legacy key in env (KIMI_API_KEY / MOONSHOT_API_KEY) — key continuity is
+#      provider-preset data, not branding (REQ-522 BR-1/BR-3). Reached ONLY when
+#      no config file exists, which is the pre-config install BR-11 wrote it for.
+#   4. otherwise                                             → not opted in
+#
+# An ABSENT `enabled` key is not the same as `enabled: false`: absence is a
+# default and yields to continuity, a written `false` is an instruction and does
+# not. Collapsing the two is what BUG-205 was.
+#
+# Cost: one fork when a config file exists and ADLC_DELEGATE_ENABLED is unset.
+# The no-config path stays pure-shell and fork-free.
 #
 # No `set -eu` here — return codes ARE the contract.
 
@@ -70,28 +83,70 @@ export ADLC_READ_BIN
 # Echoes "1" if delegation is opted in, "" otherwise. Pure-shell fast paths
 # first; config probe last (only when a config file is present).
 _adlc_delegate_opted_in() {
-  # 1. explicit env opt-in
+  # 1. explicit env opt-in. Rank 2 in the BR-2 precedence table, so it outranks
+  #    the config file and needs no probe.
   if [ "${ADLC_DELEGATE_ENABLED:-}" = "1" ]; then
     echo 1
     return 0
   fi
-  # 2. legacy key continuity (today's installs)
+  # 2. config file, when one exists — DECISIVE IN BOTH DIRECTIONS (BUG-205).
+  #    `--print-enabled` runs the full Python predicate (env + config + legacy
+  #    key), so when a config file is present its answer is the whole answer and
+  #    the gate defers to it rather than second-guessing with shell arms.
+  #
+  #    This probe used to sit BELOW the legacy-key arm, as a pure-shell
+  #    fast path that avoided the fork. That was sound for `enabled: true` (every
+  #    arm agrees) and wrong for `enabled: false` (the arms disagree and the cheap
+  #    one won), which silently overrode the operator's opt-out. The fork is the
+  #    correct price for a governance decision; the no-config path below still
+  #    pays nothing.
+  #
+  #    Failure is closed: a probe that errors, prints nothing, or prints anything
+  #    other than "1" counts as NOT opted in. A gate that cannot establish consent
+  #    must not assume it.
+  _cfg="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
+  if [ -n "$_cfg" ] && [ -f "$_cfg" ]; then
+    # Status AND output are both checked. Command substitution captures stdout
+    # and discards the exit code, so a probe that printed "1" and then FAILED
+    # would otherwise be read as consent — the same shape of cheap assumption
+    # that BUG-205 was. `_probe_rc=$?` must be the very next statement.
+    if [ -n "${ADLC_READ_BIN:-}" ]; then
+      _probe=$("$ADLC_READ_BIN" --print-enabled 2>/dev/null)
+      _probe_rc=$?
+    else
+      _probe=""; _probe_rc=127
+    fi
+    if [ "$_probe_rc" -eq 0 ] && [ "$_probe" = "1" ]; then
+      echo 1
+    else
+      echo ""
+    fi
+    return 0
+  fi
+  # 3. no config file at all: legacy key continuity (rank 4) — BR-11's exception
+  #    for pre-config installs, which is the only place it was ever meant to act.
   if [ -n "${MOONSHOT_API_KEY:-}" ] || [ -n "${KIMI_API_KEY:-}" ]; then
     echo 1
     return 0
   fi
-  # 3. config-file enabled: true — resolved by the Python tool, not parsed in
-  #    shell (REQ-515 ADR-3). Only probe when a config file actually exists, so
-  #    the no-config fast path never forks a subprocess.
+  echo ""
+}
+
+# Distinguishes an operator opt-out from a fresh install, for the reason string.
+# Echoes "1" when the config file is what turned delegation off.
+#
+# The inference is sound rather than a re-parse: this is only consulted after the
+# opt-in check has already returned false, and a config whose `enabled` is ABSENT
+# would have fallen through to the legacy-key arm and opted in. So "not opted in,
+# a config file exists, and a legacy key is present" can only mean the config said
+# `false` out loud. Without a key present the two cases are indistinguishable and
+# equally "not opted in", so the generic reason stays correct there.
+_adlc_delegate_disabled_by_config() {
   _cfg="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
-  if [ -n "$_cfg" ] && [ -f "$_cfg" ]; then
-    if [ -n "${ADLC_READ_BIN:-}" ]; then
-      # `adlc-read --print-enabled` prints "1" / "0" and exits 0; never errors.
-      if [ "$("$ADLC_READ_BIN" --print-enabled 2>/dev/null)" = "1" ]; then
-        echo 1
-        return 0
-      fi
-    fi
+  if [ -n "$_cfg" ] && [ -f "$_cfg" ] &&
+     { [ -n "${MOONSHOT_API_KEY:-}" ] || [ -n "${KIMI_API_KEY:-}" ]; }; then
+    echo 1
+    return 0
   fi
   echo ""
 }
@@ -110,7 +165,11 @@ adlc_delegate_gate_check() {
     return 1
   fi
   if [ -z "$(_adlc_delegate_opted_in)" ]; then
-    export ADLC_DELEGATE_GATE_REASON="not-opted-in"
+    if [ -n "$(_adlc_delegate_disabled_by_config)" ]; then
+      export ADLC_DELEGATE_GATE_REASON="disabled-via-config"
+    else
+      export ADLC_DELEGATE_GATE_REASON="not-opted-in"
+    fi
     return 1
   fi
   export ADLC_DELEGATE_GATE_REASON="ok"

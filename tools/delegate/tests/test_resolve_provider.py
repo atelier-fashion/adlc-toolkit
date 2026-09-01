@@ -139,6 +139,63 @@ def test_delegate_enabled_env_opts_in(clean_env, monkeypatch):
     assert _common.resolve_provider().enabled is True
 
 
+# --- BUG-205: an explicit `enabled: false` outranks legacy key continuity ----
+#
+# The regression these pin: `enabled` used to be a flat OR in which the
+# legacy-key arm was tested BEFORE the config file, so a `MOONSHOT_API_KEY` left
+# in the environment silently re-enabled delegation on a machine whose config
+# said `false`. Since REQ-519 `install.sh` scaffolds exactly that line, so this
+# was the default posture of every install with a key exported.
+#
+# The distinction under test is absent-vs-false. Both were previously collapsed
+# to "not true"; only `false` is an operator instruction.
+
+def test_config_enabled_false_beats_legacy_key(clean_env, monkeypatch):
+    """The BUG-205 case itself: written `false` + legacy key → DISABLED."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    monkeypatch.setenv("ADLC_CONFIG", cfg)
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.resolve_provider().enabled is False
+
+
+def test_config_enabled_false_beats_legacy_kimi_key(clean_env, monkeypatch):
+    """Both legacy key names are covered — KIMI_API_KEY is the older alias."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    monkeypatch.setenv("ADLC_CONFIG", cfg)
+    monkeypatch.setenv("KIMI_API_KEY", "sk-legacy")
+    assert _common.resolve_provider().enabled is False
+
+
+def test_absent_enabled_still_yields_to_legacy_key(clean_env, monkeypatch):
+    """The other side of the fix, and the one BR-11 actually wrote the
+    continuity exception for: `enabled` ABSENT (not false) + legacy key stays
+    ENABLED. Absence is a default and yields; a written `false` does not.
+
+    If this flips, the fix has over-reached and broken pre-config installs."""
+    cfg = _write_config(clean_env, 'delegate:\n  model: cfg-model\n')
+    monkeypatch.setenv("ADLC_CONFIG", cfg)
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.resolve_provider().enabled is True
+
+
+def test_env_opt_in_still_outranks_config_false(clean_env, monkeypatch):
+    """ADLC_DELEGATE_ENABLED is rank 2 and the config file rank 3, so an
+    explicit env opt-in deliberately overrides `enabled: false`. This is the
+    documented escape hatch, not a leak — the fix must not swallow it."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    monkeypatch.setenv("ADLC_CONFIG", cfg)
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    assert _common.resolve_provider().enabled is True
+
+
+def test_print_enabled_reports_zero_for_config_false_with_key(clean_env):
+    """The shell gate reads `--print-enabled`, so the CLI must agree with
+    delegation_enabled() on the BUG-205 case or the two surfaces skew."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    r = _print_enabled({"ADLC_CONFIG": cfg, "MOONSHOT_API_KEY": "sk-legacy"}, clean_env)
+    assert r.stdout.strip() == "0"
+
+
 # --- --print-enabled gate probe (used by delegate-gate.sh) ------------------
 
 def _print_enabled(env_overrides, tmp_home):

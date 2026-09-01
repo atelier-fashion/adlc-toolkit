@@ -274,20 +274,37 @@ def _legacy_key_present():
 def delegation_enabled(cfg=None):
     """BR-11 opt-in: delegation is OFF by default on fresh installs.
 
-    Enabled iff ANY of:
-      * ``delegate.enabled: true`` in the config file, OR
-      * ``ADLC_DELEGATE_ENABLED=1`` in the environment, OR
-      * a legacy key (``KIMI_API_KEY``/``MOONSHOT_API_KEY``) is set (continuity
-        exception for today's installs).
+    Resolved in the SAME precedence order as the provider fields (BR-2), which
+    ``enabled`` previously did not follow (BUG-205):
+
+      1. ``ADLC_DELEGATE_ENABLED=1`` in the environment      → enabled
+      2. ``delegate.enabled`` in the config file, if PRESENT → decisive, either way
+      3. a legacy key (``KIMI_API_KEY``/``MOONSHOT_API_KEY``) → enabled (continuity)
+      4. otherwise                                           → disabled
+
+    Step 2 is three-state on purpose. ``parse_delegate_config`` records
+    ``enabled`` only when the key actually appears, so ``None`` (absent) is
+    distinguishable from ``False`` (written down). Absence is a default and
+    yields to the continuity exception below it; an explicit ``false`` is an
+    operator instruction and outranks it.
+
+    That distinction is the whole of BUG-205. The continuity exception in BR-11
+    was specified for pre-config installs — where ``enabled`` is absent — but was
+    implemented as a flat OR that also swallowed an explicit ``enabled: false``.
+    Since REQ-519 ``install.sh`` scaffolds a config containing exactly that line,
+    so any install with a legacy key exported had delegation on while its config
+    said off, and file contents were transmitted after the operator wrote down
+    that they must not be.
 
     Setting only ``ADLC_DELEGATE_BASE_URL``/``_MODEL`` is NOT opt-in.
     """
     if cfg is None:
         cfg = parse_delegate_config()
-    if cfg.get("enabled") is True:
-        return True
     if os.environ.get("ADLC_DELEGATE_ENABLED") == "1":
         return True
+    configured = cfg.get("enabled")
+    if configured is not None:
+        return configured
     if _legacy_key_present():
         return True
     return False
