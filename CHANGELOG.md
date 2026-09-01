@@ -166,6 +166,52 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **`delegate.enabled: false` is now honoured (BUG-205).** ⚠️ **Behavior change —
+  read this if you rely on a legacy API key to enable delegation.**
+
+  The BR-11 opt-in was a flat OR that tested the legacy-key arm *before* the config
+  file, so an exported `MOONSHOT_API_KEY`/`KIMI_API_KEY` silently outranked an
+  explicit `delegate.enabled: false`. The gate returned `ok`, `adlc-read --version`
+  reported `enabled: true` against a config saying `false`, and file contents went to
+  the configured third-party endpoint after the operator had written down that they
+  must not. Since REQ-519 `install.sh` scaffolds a config containing exactly that
+  line, this was the default posture of every install with a key in the environment.
+
+  BR-11's continuity exception was written for *pre-config* installs — where
+  `enabled` is **absent** — but was implemented as "not true", which also swallowed a
+  written `false`. Absence is a default; `false` is an instruction.
+
+  `enabled` now resolves in the same precedence order as the provider fields (BR-2),
+  which it never previously followed:
+
+  1. `ADLC_DELEGATE_ENABLED=1` → on
+  2. `delegate.enabled`, when the key is **present** → decisive **in both directions**
+  3. a legacy key, reached only when **no config file exists** → on
+  4. otherwise → off
+
+  `ADLC_DISABLE_DELEGATE=1` still forces off ahead of all of it.
+
+  **Migration:** if your config carries the scaffolded `enabled: false` and you were
+  relying on a legacy key to opt in, delegation is now **off**. Set `enabled: true`
+  (or export `ADLC_DELEGATE_ENABLED=1`). `adlc-read --version` prints the resolved
+  value. Installs with no config file are unaffected — continuity is preserved
+  exactly where BR-11 meant it.
+
+  Also in this fix:
+  - New gate reason **`disabled-via-config`**, so telemetry distinguishes a
+    deliberate opt-out from a machine that was never opted in. Callers that branch
+    only on the 0/1/2 return code are unaffected; the 0/1/2 contract is unchanged.
+  - The config probe is now **fail-closed on exit status as well as output**. Command
+    substitution captures stdout and discards the exit code, so a probe that printed
+    `1` and then failed was read as consent.
+  - `partials/tests/delegate-gate.test.sh` — new harness (arm ordering, fail-closed
+    posture, and assertions that the no-config path still never forks), registered in
+    `partials/tests/run.sh` and run under both bash and zsh.
+  - The `tools/delegate/README.md` opt-in section contradicted itself: it documented
+    `absent/false => disabled` eleven lines below listing a legacy key as sufficient
+    on its own. Both halves are corrected, and the precedence table now states that
+    `enabled` follows it.
+
 - **`tools/lint-skills` no longer passes a scan that checked nothing (REQ-595).**
   REQ-435 fixed the vacuous *walk* — a scan root sitting under `.worktrees` is no
   longer skipped into oblivion — but a root that genuinely contains no `SKILL.md`

@@ -57,8 +57,21 @@ their return codes, are:
 |--------|-----------------------------|-----------------------------------------|
 | 0      | `ok`                        | delegated — adlc-read available, enabled |
 | 1      | `disabled-via-env`          | `ADLC_DISABLE_DELEGATE=1` opted out      |
+| 1      | `disabled-via-config`       | `delegate.enabled: false` — an operator opt-out (BUG-205) |
 | 1      | `not-opted-in`              | no opt-in signal (fresh install, BR-11)  |
 | 2      | `no-binary`                 | `adlc-read` not resolvable (PATH or `$HOME/bin`) |
+
+`disabled-via-config` and `not-opted-in` both mean "delegation is off", and a
+caller that only branches on the return code can keep treating them alike. They
+are distinguished so telemetry can tell a deliberate opt-out apart from a machine
+that was simply never opted in — the two look identical in a return code and call
+for opposite responses (leave it alone vs. offer to enable it).
+
+The gate reports `disabled-via-config` when a config file exists, the opt-in
+check came back false, and a legacy key IS present. That combination can only
+arise from a written `enabled: false`: a config whose `enabled` is *absent* would
+have fallen through to the key-continuity arm and opted in. With no key present
+the two cases are genuinely indistinguishable and both report `not-opted-in`.
 
 `export` is intentional (not just assignment) so the variable is visible
 to child processes the skill spawns — e.g., a future `adlc-read` invocation

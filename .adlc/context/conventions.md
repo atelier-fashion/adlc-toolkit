@@ -56,9 +56,12 @@ esac
 ```
 
 The reason is exported as `ADLC_DELEGATE_GATE_REASON`. Delegation is **opt-in** (off by
-default on fresh installs) — enabled by `delegate.enabled: true` in
-`~/.claude/adlc/config.yml`, `ADLC_DELEGATE_ENABLED=1`, or an already-set legacy
-`KIMI_API_KEY`/`MOONSHOT_API_KEY` (key continuity, data — REQ-515 BR-11).
+default on fresh installs) — enabled by `ADLC_DELEGATE_ENABLED=1`, `delegate.enabled: true`
+in `~/.claude/adlc/config.yml`, or an already-set legacy `KIMI_API_KEY`/`MOONSHOT_API_KEY`
+(key continuity, data — REQ-515 BR-11), resolved in that precedence order.
+
+An explicit `delegate.enabled: false` turns delegation **off** and outranks the legacy
+key; an *absent* `enabled` key yields to it. Collapsing those two was BUG-205.
 
 Per-step telemetry state crosses the create → gate → invoke → resolve fenced blocks via
 the **flag-file sidecar** (`partials/delegate-tools-path.sh`'s `skill-flag.sh mark`/`read`),
