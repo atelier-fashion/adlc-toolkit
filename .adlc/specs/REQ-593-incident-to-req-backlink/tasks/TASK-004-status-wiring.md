@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: "Add the read-only incident-attribution line to /status"
-status: draft
+status: complete
 parent: REQ-593
 created: 2026-08-31
 updated: 2026-08-31

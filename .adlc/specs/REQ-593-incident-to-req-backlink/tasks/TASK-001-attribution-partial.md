@@ -1,7 +1,7 @@
 ---
 id: TASK-001
 title: "Create partials/attribution.sh with the blame→trailer→REQ derivation and its cross-shell test harness"
-status: draft
+status: complete
 parent: REQ-593
 created: 2026-08-31
 updated: 2026-08-31

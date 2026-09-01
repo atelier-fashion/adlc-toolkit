@@ -58,6 +58,16 @@ spec's own estimate. Scoping is load-bearing, not defensive.
 the candidate falls back to `R` itself rather than being dropped. Dropping would lose a
 correct, independently-attested attribution over a missing file.
 
+**Spec correction (found in Phase 5).** The requirement — and the adversary report before
+it — states that each TASK file carries a `req:` frontmatter field. It does not. The
+canonical `templates/task-template.md` emits `parent:`, and **157 of this repo's 163 task
+files use `parent:` while only 6 use `req:`**. An implementation faithful to the spec's
+wording would have missed 96% of real task files. The resolver therefore reads `req:`
+first (the documented field wins where both appear) and falls back to `parent:`, and the
+test harness deliberately fixtures one of each so the dominant real-world spelling is not
+left unverified. Worth a lesson: a spec that names a field should be checked against the
+template that actually emits it.
+
 ### ADR-3 — `git log`, not `git blame --porcelain`, supplies the commit message
 
 **Decision**: blame yields SHAs only; each SHA is then read with

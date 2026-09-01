@@ -1,7 +1,7 @@
 ---
 id: TASK-003
 title: "Wire attribution derivation into /bugfix Phase 2"
-status: draft
+status: complete
 parent: REQ-593
 created: 2026-08-31
 updated: 2026-08-31

@@ -1,7 +1,7 @@
 ---
 id: TASK-005
 title: "Document the attribution surface in CHANGELOG and architecture context"
-status: draft
+status: complete
 parent: REQ-593
 created: 2026-08-31
 updated: 2026-08-31

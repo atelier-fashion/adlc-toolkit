@@ -48,10 +48,19 @@ mkdir -p "$PRIMARY/.adlc/bugs"
 
 # Two task files with the SAME id in different REQs — the exact collision BR-10 exists
 # for. An unscoped TASK-001*.md glob would return both and manufacture a false halt.
+#
+# Deliberately mixed spellings: REQ-100's task uses `req:` (what the REQ-593 spec says
+# tasks carry) and REQ-200's uses `parent:` (what templates/task-template.md actually
+# emits, and what 157 of this repo's 163 task files use). Both must resolve — testing
+# only the documented spelling would leave the dominant real-world case unverified.
 printf -- '---\nid: TASK-001\nreq: REQ-100\n---\n' \
   > "$PRIMARY/.adlc/specs/REQ-100-alpha/tasks/TASK-001-alpha-thing.md"
-printf -- '---\nid: TASK-001\nreq: REQ-200\n---\n' \
+printf -- '---\nid: TASK-001\nparent: REQ-200\n---\n' \
   > "$PRIMARY/.adlc/specs/REQ-200-beta/tasks/TASK-001-beta-thing.md"
+# A task whose file exists but whose frontmatter names neither field — the resolver must
+# fall back to the commit's own REQ context rather than dropping a correct attribution.
+printf -- '---\nid: TASK-009\ntitle: "no req or parent"\n---\n' \
+  > "$PRIMARY/.adlc/specs/REQ-300-gamma/tasks/TASK-009-orphan.md"
 
 commit_line() { # commit_line <file> <content> <subject> [body]
   printf '%s\n' "$2" >> "$REPO/$1"
@@ -77,6 +86,9 @@ SHA_BARETASK=$(commit_line f.txt "line-baretask" "chore: tidy up [TASK-001]")
 SHA_NONE=$(commit_line    f.txt  "line-none"     "Merge pull request #42 from somewhere")
 SHA_GHOST=$(commit_line   f.txt  "line-ghost"    "feat(core): cites a phantom [REQ-999999]")
 SHA_MULTI=$(commit_line   f.txt  "line-multi"    "docs(REQ-100/300): touches two specs")
+SHA_TASKREQ=$(commit_line f.txt  "line-taskreq"  "feat(REQ-100): work [TASK-001]")
+SHA_TASKORPHAN=$(commit_line f.txt "line-orphan" "feat(REQ-300): work [TASK-009]")
+SHA_TASKMISSING=$(commit_line f.txt "line-missing" "feat(REQ-300): work [TASK-777]")
 SHA_BUGBRACKET=$(commit_line f.txt "line-bugbr"  "fix(BUG-146): scoped fix [REQ-300]")
 
 one() { # one <sha> -> the single-line candidate output, newlines collapsed to ','
@@ -109,6 +121,13 @@ check "BUG scope + explicit [REQ-xxx] bracket still attributes" "REQ-300" "$(one
 # 3. TASK->REQ resolution is scoped, never globbed (AC-1, AC-6, BR-10)
 # ===========================================================================
 check "[TASK-yyy] resolves within its commit's REQ context" "REQ-200" "$(one "$SHA_TASK")"
+# The line above resolves through `parent:` (REQ-200's fixture). Cover `req:` too, and
+# the neither-field fallback, so all three frontmatter shapes are pinned.
+check "task frontmatter 'req:' spelling resolves"          "REQ-100" "$(one "$SHA_TASKREQ")"
+check "task with neither req: nor parent: falls back to commit context" "REQ-300" \
+  "$(one "$SHA_TASKORPHAN")"
+check "[TASK-yyy] naming a task file that does not exist falls back to context" "REQ-300" \
+  "$(one "$SHA_TASKMISSING")"
 check "bare [TASK-001] with no REQ context yields nothing"  ""        "$(one "$SHA_BARETASK")"
 # AC-6 explicitly: it must not halt with the several same-named task files on disk.
 check "bare [TASK-001] does not emit the colliding REQs"    ""        "$(one "$SHA_BARETASK")"

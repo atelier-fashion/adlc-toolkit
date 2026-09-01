@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: "Add optional introduced_by and attribution fields to the bug template"
-status: draft
+status: complete
 parent: REQ-593
 created: 2026-08-31
 updated: 2026-08-31

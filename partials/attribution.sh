@@ -169,9 +169,17 @@ adlc_attr_commit_reqs() {
         _aacr_tf=$(find "$_aacr_pri/.adlc/specs" -maxdepth 3 -type f \
           -path "*/$_aacr_req-*/tasks/$_aacr_task*.md" 2>/dev/null | head -1)
         if [ -n "$_aacr_tf" ]; then
-          # The task file's own `req:` frontmatter is authoritative for the edge.
-          _aacr_fr=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{exit} f' "$_aacr_tf" 2>/dev/null \
-            | grep -E '^(req|parent):' | grep -oE 'REQ-[0-9]{3,6}' | head -1)
+          # The task file's own frontmatter is authoritative for the edge. BOTH spellings
+          # are accepted, and that is not defensive padding: REQ-593's spec says tasks
+          # carry a `req:` field, but the canonical templates/task-template.md emits
+          # `parent:`, and 157 of this repo's 163 task files use `parent:` while only 6
+          # use `req:`. Reading only the documented spelling would miss 96% of real task
+          # files. `req:` is tried first so the documented field wins where both exist.
+          _aacr_fm=$(awk 'NR==1&&/^---/{f=1;next} f&&/^---/{exit} f' "$_aacr_tf" 2>/dev/null)
+          _aacr_fr=$(printf '%s\n' "$_aacr_fm" \
+            | grep -E '^req:' | grep -oE 'REQ-[0-9]{3,6}' | head -1)
+          [ -n "$_aacr_fr" ] || _aacr_fr=$(printf '%s\n' "$_aacr_fm" \
+            | grep -E '^parent:' | grep -oE 'REQ-[0-9]{3,6}' | head -1)
           if [ -n "$_aacr_fr" ]; then
             printf '%s\n' "$_aacr_fr"
           else
