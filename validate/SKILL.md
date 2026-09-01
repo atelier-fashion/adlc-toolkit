@@ -102,13 +102,16 @@ reported by the coverage check below, not treated as a malformed task.
         obligation reports **files scanned** by the lint invocation (many
         obligations legitimately share one invocation, so per-obligation case counts
         do not exist for that kind).
-      - Read the count from the runner rather than assuming it. Both surfaces
-        already signal an empty run, so this needs no new tooling:
-        `tools/lint-skills` prints `scanned <N> SKILL.md file(s)` to stderr and
-        exits `255` when N is zero; a `pytest` run that collects nothing prints
-        `no tests ran` and exits `5`. Check whichever runner the obligation's
-        `artifact` names, and treat an exit status the runner reserves for
-        "collected/scanned nothing" as a zero count.
+      - **Read the count from whichever runner the obligation's `artifact` names**,
+        and treat a status that runner reserves for "collected/scanned nothing" as a
+        zero count. Do not assume a runner here — which one a project uses is the
+        project's choice, read from its `stack:`, and a runner named in this skill
+        would be the wrong one for the next project.
+      - Most runners already signal an empty run, so this needs no new tooling. In
+        *this* repo the two surfaces are concrete: `tools/lint-skills` prints
+        `scanned <N> SKILL.md file(s)` to stderr and exits `255` when N is zero, and
+        the `tools/` test runner exits `5` on zero collected. Consult the consumer
+        project's own runner for the equivalent signal rather than porting these.
       - Either count reaching zero fails the gate.
       - This one blocks from epoch 1 while the two above do not, and the asymmetry is
         deliberate: the checks above are coverage *judgments* about obligation shape,
