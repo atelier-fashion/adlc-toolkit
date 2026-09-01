@@ -90,6 +90,11 @@ behavior. Examples:
     reconciliation runs in a different fenced block than segmentation, and
     fenced blocks share no shell state, not even exported variables.
   - `adlc_intake_redact <path>` — the 5-pattern credential chain, in place.
+  - `adlc_intake_cleanup <corpus> <source>` — removes intake's own temp artifacts.
+    The deletion guards (non-empty path, real temp root, exact `inline-request.txt`
+    basename) live in the partial rather than at call sites, because
+    `rm -rf "$(dirname "$VAR")"` in a SKILL.md becomes `rm -rf .` the moment `VAR`
+    is empty. A user-supplied source file is never deleted.
   - `adlc_intake_sections` — the gap checklist, derived from the requirement
     template rather than hardcoded, minus the four headings that are *outputs*
     of intake (`Description`, `Assumptions`, `Open Questions`,

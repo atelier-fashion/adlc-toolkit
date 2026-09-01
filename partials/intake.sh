@@ -293,6 +293,37 @@ adlc_intake_range() {
     return 0
 }
 
+# --- Cleanup of intake's own temp artifacts -------------------------------------
+# Removes the corpus and, ONLY for a materialized inline source, its temp dir.
+#
+# This exists so no call site has to write `rm -rf "$(dirname "$SOMEVAR")"`. That
+# idiom is a landmine: if the variable is ever empty, `dirname ""` yields `.` and the
+# command becomes `rm -rf .`. Guarding it indirectly at the call site means one
+# careless future edit turns a cleanup line into a working-directory wipe. The
+# guards live here instead, where they cannot drift from the deletion:
+#   * the path must be non-empty
+#   * it must sit under a real temp root (TMPDIR / /tmp / /var/folders)
+#   * its basename must be exactly the name this partial creates
+# A user-supplied source file is NEVER deleted — only what intake itself created.
+adlc_intake_cleanup() {
+    _ai_corp="$1"
+    _ai_srcf="$2"
+
+    [ -n "$_ai_corp" ] && [ -f "$_ai_corp" ] && rm -f "$_ai_corp"
+
+    [ -n "$_ai_srcf" ] || return 0
+    # Only ever remove the synthetic inline file this partial wrote.
+    [ "$(basename "$_ai_srcf")" = "inline-request.txt" ] || return 0
+
+    _ai_pdir=$(dirname "$_ai_srcf")
+    case "$_ai_pdir" in
+        ''|'.'|'/'|"$HOME") return 0 ;;
+        "${TMPDIR%/}"/*|/tmp/*|/var/folders/*) rm -rf "$_ai_pdir" ;;
+        *) return 0 ;;
+    esac
+    return 0
+}
+
 # --- Credential redaction -------------------------------------------------------
 # The same 5-pattern BSD-sed chain /proceed Phase 5 applies to its verify diff. The
 # broader [A-Z_]+_(API_KEY|TOKEN) arm subsumes MOONSHOT_API_KEY, so no separate

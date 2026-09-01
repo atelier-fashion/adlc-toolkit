@@ -49,8 +49,9 @@ The gap list is the point. A spec written from a transcript will always contain 
    echo "intake_gate=$gate  reason=${ADLC_INTAKE_REASON:-none}  kind=${ADLC_INTAKE_KIND:-none}  inline=${ADLC_INTAKE_INLINE:-0}"
    # This fence is a GATE PROBE only — step 2 re-derives everything in its own shell.
    # For an inline source, detect materializes a temp dir; discard this probe's copy
-   # here or every intake run leaks one.
-   [ "${ADLC_INTAKE_INLINE:-0}" = "1" ] && rm -rf "$(dirname "$ADLC_INTAKE_PATH")"
+   # here or every intake run leaks one. Deletion guards live in the partial, never
+   # at the call site.
+   adlc_intake_cleanup "" "$ADLC_INTAKE_PATH"
    exit 0
    ```
 
@@ -209,11 +210,11 @@ The gap list is the point. A spec written from a transcript will always contain 
    Then remove the temp files, substituting the literals echoed in step 2. The corpus holds a redacted copy of the source and there is no `trap` that can span fenced blocks, so this is the only cleanup:
 
    ```sh
-   rm -f <INTAKE_CORPUS literal>
-   # ONLY when the source was inline (ADLC_INTAKE_INLINE=1 in step 2): the pasted
-   # text was materialized into a private temp dir. A user-supplied source file is
-   # theirs — never delete it.
-   # rm -rf "$(dirname <INTAKE_SOURCE literal>)"
+   . .adlc/partials/intake.sh 2>/dev/null || . ~/.claude/skills/partials/intake.sh
+   # Both arguments are the LITERALS echoed in step 2. adlc_intake_cleanup removes the
+   # corpus, and removes the source dir ONLY when the source was the inline file intake
+   # itself materialized — a user-supplied source file is theirs and is never deleted.
+   adlc_intake_cleanup <INTAKE_CORPUS literal> <INTAKE_SOURCE literal>
    ```
 
 ### Step 1.5: Derive Query Tags for Retrieval

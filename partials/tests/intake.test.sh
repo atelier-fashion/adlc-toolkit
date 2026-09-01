@@ -247,6 +247,50 @@ check "recovered S02 first line" "line 201" "$(sed -n "${1},${2}p" "$SANDBOX/rec
 check "recovered S02 last line" "line 400" "$(sed -n "${1},${2}p" "$SANDBOX/recover.txt" | tail -1)"
 
 # ===========================================================================
+# 4b. Cleanup guards — must never delete anything it did not create
+#
+# The guards exist because `rm -rf "$(dirname "$VAR")"` at a call site becomes
+# `rm -rf .` the moment VAR is empty. These cases assert the dangerous inputs are
+# refused, so a future edit cannot quietly turn cleanup into a wipe.
+# ===========================================================================
+GUARD="$SANDBOX/guard"
+mkdir -p "$GUARD"
+printf 'precious\n' > "$GUARD/user-source.txt"
+
+# Empty args are a no-op, not a `.` deletion.
+( CDPATH= cd -- "$GUARD" && adlc_intake_cleanup "" "" )
+check "cleanup: empty args do not delete cwd" "0" "$( [ -d "$GUARD" ] && echo 0 || echo 1 )"
+
+# A user's own source file is never removed — wrong basename.
+adlc_intake_cleanup "" "$GUARD/user-source.txt"
+check "cleanup: user source file preserved" "0" "$( [ -f "$GUARD/user-source.txt" ] && echo 0 || echo 1 )"
+check "cleanup: user source dir preserved" "0" "$( [ -d "$GUARD" ] && echo 0 || echo 1 )"
+
+# Right basename but outside any temp root — still refused.
+#
+# This dir must live under the REPO, not under $SANDBOX: mktemp -d already returns a
+# path under /var/folders on macOS, so a "non-temp" fixture built inside the sandbox
+# is in fact inside a temp root and the guard correctly deletes it. Testing the
+# temp-root guard requires a path that genuinely is not one.
+NONTMP="$ROOT/.intake-guard-fixture"
+mkdir -p "$NONTMP"
+printf 'x\n' > "$NONTMP/inline-request.txt"
+adlc_intake_cleanup "" "$NONTMP/inline-request.txt"
+check "cleanup: non-temp dir refused even with matching basename" "0" \
+  "$( [ -d "$NONTMP" ] && echo 0 || echo 1 )"
+rm -rf "$NONTMP"
+
+# The real case: a materialized inline source IS removed, corpus and all.
+adlc_intake_detect "$LONG"
+REAL_SRC="$ADLC_INTAKE_PATH"
+REAL_DIR=$(dirname "$REAL_SRC")
+adlc_intake_segment "$REAL_SRC"
+REAL_CORPUS="$ADLC_INTAKE_CORPUS"
+adlc_intake_cleanup "$REAL_CORPUS" "$REAL_SRC"
+check "cleanup: corpus removed" "1" "$( [ -f "$REAL_CORPUS" ] && echo 0 || echo 1 )"
+check "cleanup: materialized inline dir removed" "1" "$( [ -d "$REAL_DIR" ] && echo 0 || echo 1 )"
+
+# ===========================================================================
 # 5. Credential redaction — all five patterns
 # ===========================================================================
 {
