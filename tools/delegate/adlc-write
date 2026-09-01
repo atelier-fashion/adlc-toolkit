@@ -123,6 +123,12 @@ def main(argv=None):
         messages.append({"role": "user", "content": reference_block})
     messages.append({"role": "user", "content": args.spec})
 
+    # Refuse to transmit unless delegation is actually opted in (BUG-206).
+    # After the local guards above (a clobber or bad path is the user's typo and
+    # should be reported as such) and before provider resolution, so a disabled
+    # setup reports "disabled" rather than a confusing config/key error.
+    _common.require_delegation_enabled("adlc-write")
+
     # Resolve the provider once (validates key-in-config refusal before any
     # network touch). Notice fires after all local guards (clobber, missing
     # parent dir, unreadable context) but BEFORE get_client(), so the user always
