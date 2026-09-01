@@ -1,7 +1,7 @@
 ---
 id: REQ-603
 title: "Single-source the delegation authorization arms — the gate may veto, only Python may authorize"
-status: draft
+status: approved
 deployable: true
 created: 2026-09-01
 updated: 2026-09-01
