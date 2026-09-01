@@ -65,6 +65,30 @@ PRs (`atelier-fashion/adlc-toolkit`).
     zero numbered BRs passes with a notice rather than having rules invented for it.
   - `templates/task-template.md` gains the section, **optional by design** so the
     157 task files already on disk stay valid.
+- **Incident→REQ attribution (REQ-593).** A bug and the REQ that caused it stop being
+  unrelated artifacts. `partials/attribution.sh` derives the edge from history the repo
+  already carries: blame the root-cause lines, read the blamed commit, extract an attested
+  REQ id, validate it against the primary repo's spec directory. `/bugfix` Phase 2 records
+  the result on the bug (`introduced_by`, `attribution` — both optional and additive on
+  `templates/bug-template.md`), and `/status` gains an **Incident Attribution** section
+  answering "which shipped REQs have produced incidents?".
+
+  Three decisions carry the feature. **The commit body is read, not just the subject**:
+  `git blame --porcelain` exposes only `summary`, which is the subject alone — measured on
+  this repo, a subject-only read finds 37 of the 75 commits carrying provenance and
+  silently loses 51% of available attributions. **TASK→REQ resolution is scoped to the REQ
+  named in the same commit**: `TASK-001*.md` matches 16 of the 157 task files on disk, so
+  an unscoped glob would return unrelated REQs and manufacture a false multi-candidate
+  halt. **The reverse edge is derived, never stored** — REQ→incidents is recomputed by
+  scanning `.adlc/bugs/` frontmatter, because a backlink written into a spec rots silently
+  when an artifact moves or is renumbered.
+
+  Attribution refuses rather than guesses: two or more surviving candidates are presented
+  for the operator to choose from (one *or more* — a defect can genuinely emerge from
+  several merged REQs), a trailer citing a REQ with no spec directory is dropped, and a bug
+  with no derivable REQ records `attribution: none` and continues rather than halting.
+  `partials/tests/attribution.test.sh` pins every case under bash, zsh, and sh against BSD
+  `/usr/bin/grep`.
 
 - **`--version` / `-V` on the delegation CLIs (REQ-553).** `adlc-read`,
   `adlc-write`, and `extract-chat` report the toolkit version, and the two

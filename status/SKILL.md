@@ -36,7 +36,8 @@ Before proceeding, verify that the `.adlc/specs/` directory exists (this skill r
 
 1. Read all `requirement.md` files under `.adlc/specs/REQ-*/` (this repo)
 2. Read all task files under `.adlc/specs/REQ-*/tasks/`
-3. Read all bug reports under `.adlc/bugs/`
+3. Read all bug reports under `.adlc/bugs/` — including the optional `introduced_by` /
+   `attribution` frontmatter, which supplies the Incident Attribution section below
 4. Read all `pipeline-state.json` files under `.adlc/specs/REQ-*/` for live pipeline progress
 5. Also check for nested `.adlc/` directories (e.g., `api/.adlc/`)
 6. Extract frontmatter (id, title, status, updated) from each artifact
@@ -107,6 +108,30 @@ List any artifacts with status `in-review`, `approved`, or in-progress tasks:
 #### Open Bugs
 | ID | Title | Severity | Status | Updated |
 |----|-------|----------|--------|---------|
+
+#### Incident Attribution
+Which shipped REQs have produced incidents (REQ-593). Derived at read time by scanning
+`.adlc/bugs/` frontmatter — the reverse edge is never stored in a REQ spec, because a
+stored backlink rots silently when an artifact is moved or renumbered (BR-4, LESSON-019).
+
+Source the partial and call it **in the same fenced block** (the cross-fence-fn rule):
+
+```bash
+. .adlc/partials/attribution.sh 2>/dev/null || . ~/.claude/skills/partials/attribution.sh
+# Emits one "BUG-id<TAB>REQ-id" line per attributed edge; add a REQ id as a second
+# argument to filter to that REQ's incidents. Strictly read-only.
+adlc_attr_bugs_with_attribution "$PWD"
+```
+
+| REQ | Incidents | Bugs |
+|-----|-----------|------|
+
+One row per REQ that has at least one attributed bug, with the count and the BUG ids.
+A bug carrying no `introduced_by` is simply absent — it is not an error. When nothing is
+attributed, print `No attributed incidents yet.` rather than an empty table or a warning.
+
+This section reads `.adlc/bugs/` only. It **modifies no file**, and in particular opens
+nothing under `.adlc/specs/**`.
 
 #### Recently Completed
 List artifacts completed in the last 7 days (by `updated` date).

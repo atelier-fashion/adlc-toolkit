@@ -70,6 +70,47 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
    - Check for secondary issues or edge cases related to the bug
    - Adjust the root cause and fix approach if validation reveals inaccuracies
 5. Update the bug report with the validated findings
+6. **Attribute the incident to the REQ that shipped its cause** (REQ-593). Root-cause
+   analysis has just produced a file/line set; that set is exactly what `git blame` needs
+   to name the change that introduced the behavior. Derive the candidates, then record or
+   refuse — never guess.
+
+   Derivation is **per-repo** (BR-8), keyed off the bug's `repo:` / `touched_repos:`
+   frontmatter: blame each repo against **its own** history, but validate every id against
+   the **primary** repo, because in cross-repo mode spec directories exist only there
+   (BR-5). Source the partial and call it **in the same fenced block** (the cross-fence-fn
+   rule — see conventions.md "Bash in skills"):
+
+   ```bash
+   . .adlc/partials/attribution.sh 2>/dev/null || . ~/.claude/skills/partials/attribution.sh
+   # <repo> = the repo whose history to blame (this repo, or a sibling's path from
+   # .adlc/config.yml). <primary> = the repo holding .adlc/specs — always the current repo.
+   # <file> <start> <end> = one root-cause range from step 4. Repeat per range, per repo.
+   adlc_attr_blame_reqs "<repo>" "<primary>" "<file>" "<start>" "<end>"
+   ```
+
+   Union the output across every range and repo, then act on the **distinct** id count:
+
+   - **0 candidates** — write `attribution: none` and leave `introduced_by: []`. Emit
+     **exactly one** stderr line naming the reason (no trailer in the blamed commits / the
+     lines pre-date the trailer convention / the file is untracked), then **continue to
+     Phase 3**. A bug with no derivable REQ is a normal outcome, not a failure: never halt,
+     and never fabricate an id (BR-7).
+   - **1 candidate** — write `introduced_by: [REQ-xxx]` and `attribution: derived`.
+   - **2+ candidates** — **present all of them and write nothing.** Ask the operator to
+     select **one or more**; selecting several is legitimate when a defect genuinely emerges
+     from the interaction of multiple merged REQs, and is what makes `introduced_by` an
+     array. Record the selection with `attribution: derived`. Do **not** auto-union and do
+     **not** pick the lowest id or the most recent commit — a detected-but-unresolvable
+     attribution refuses rather than guessing (BR-3, LESSON-483).
+
+   Never write an id the partial did not return: it has already enforced the strict
+   `^REQ-[0-9]{3,6}$` pattern and confirmed the spec directory exists (BR-5). A trailer
+   citing a REQ with no spec directory is dropped on purpose.
+
+   The reverse edge is **not** written anywhere. REQ → its incidents is derived at read
+   time by scanning `.adlc/bugs/` frontmatter (`/status` does this); storing it in the REQ
+   spec would rot the moment an artifact is moved or renumbered (BR-4, LESSON-019).
 
 ### Phase 3: Fix
 1. **Determine target repo**: if the bug's frontmatter has `repo:` and it names a sibling (not this repo), cd into that sibling's path from `.adlc/config.yml` and do all fix work there. For `touched_repos: [...]`, cd into each in turn — one commit per repo, on a shared branch name. Otherwise fix in the current repo.
