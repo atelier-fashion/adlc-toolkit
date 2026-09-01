@@ -27,17 +27,15 @@ incident.
 - [ ] `--print-gate` is documented with its one-line output shape and the frozen reason enum
 - [ ] `.adlc/context/architecture.md` states the withhold-never-grant invariant, citing BUG-205 and BUG-209 as the two directions it was violated from
 - [ ] The ADR-4 reason correction is called out as a behaviour change, with the before/after rows
+- [ ] This task claims **only** BR-12 and AC-16. BR-4, AC-17, and AC-20 were previously mapped here and moved: `tools/lint-skills` does not check reason strings, suite health belongs to TASK-091, and the pre-pass enum contract belongs to TASK-089. An obligation whose artifact cannot prove its rule is worse than an unmapped one — it reports as covered
 - [ ] `tools/lint-skills` still passes over all SKILL.md files, scanning a non-zero count — run from **outside** `.worktrees`, since `SKIP_DIR_PARTS` makes an in-worktree run scan zero files and exit green (LESSON-019 #2)
 
 ## Verification
 
 | rule | kind | artifact | benign_path |
 |------|------|----------|-------------|
-| BR-4 | structural-check | `tools/lint-skills`: retrieval-status and anchor checks over all SKILL.md files | yes |
 | BR-12 | structural-check | `tools/lint-skills`: no new skill directory introduced | yes |
-| AC-16 | structural-check | `git diff --name-only`: no added `*/SKILL.md` path | yes |
-| AC-17 | structural-check | `partials/tests/run.sh` plus the Python suite, both green | yes |
-| AC-20 | test-case | `tools/delegate/tests/test_gate_reason_contract.py::test_pre_pass_receives_frozen_enum_verbatim` | yes |
+| AC-16 | structural-check | `tools/lint-skills`: no added `*/SKILL.md` path in the scanned set | yes |
 
 ## Technical Notes
 

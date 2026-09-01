@@ -22,6 +22,7 @@ This is the foundation task; nothing else can land first.
 - `tools/delegate/_common.py` — add `resolve_gate_verdict()`; it wraps `resolve_provider()` and catches the key-in-config `SystemExit`, mapping it to `disabled-via-config`
 - `tools/delegate/adlc-read` — add `--print-gate`, handled beside `--print-enabled`, before every transmission guard
 - `tools/delegate/adlc-write` — same flag, same placement
+- `tools/delegate/tests/test_print_gate.py` — new: the probe's own suite, including the frozen-enum contract this task's obligations cite
 
 ## Acceptance Criteria
 
@@ -44,6 +45,7 @@ This is the foundation task; nothing else can land first.
 | AC-12 | test-case | `tools/delegate/tests/test_print_gate.py::test_probe_exits_zero_under_kill_switch` | yes |
 | AC-13 | test-case | `tools/delegate/tests/test_print_gate.py::test_print_enabled_against_frozen_caller` | yes |
 | BR-4 | test-case | `tools/delegate/tests/test_print_gate.py::test_enabled_false_without_legacy_key_is_disabled_via_config` | no |
+| AC-20 | test-case | `tools/delegate/tests/test_print_gate.py::test_reason_stays_within_frozen_enum_for_pre_pass` | yes |
 
 ## Technical Notes
 

@@ -18,6 +18,7 @@ its return code.
 ## Files to Create/Modify
 
 - `partials/delegate-gate.sh` — delete `_adlc_delegate_opted_in` and `_adlc_delegate_disabled_by_config`; `adlc_delegate_gate_check` becomes resolve-binary → veto → one probe → map
+- `partials/tests/delegate-gate.test.sh` — the gate's own cases (BR-8's four classes), written here rather than in TASK-091 so this task's obligations resolve when it lands
 
 ## Acceptance Criteria
 
@@ -35,15 +36,15 @@ its return code.
 
 | rule | kind | artifact | benign_path |
 |------|------|----------|-------------|
-| BR-1 | structural-check | `partials/tests/delegate-gate.test.sh`: no-authorizing-arm grep over the file's conditionals | no |
+| BR-1 | test-case | `partials/tests/delegate-gate.test.sh`: no-authorizing-arm grep over the file's conditionals | no |
 | BR-2 | test-case | `partials/tests/delegate-gate.test.sh::veto short-circuits with zero probes` | yes |
 | BR-4 | test-case | `partials/tests/delegate-gate.test.sh::all six reasons unchanged` | yes |
 | BR-5 | test-case | `partials/tests/delegate-gate.test.sh::no-binary returns 2 without probing` | yes |
 | BR-6 | test-case | `partials/tests/delegate-gate.test.sh::fails closed on a broken probe` | no |
 | BR-7 | test-case | `partials/tests/delegate-gate.test.sh::at most one probe per call` | yes |
-| BR-11 | structural-check | `partials/tests/run.sh`: bash and zsh parity over the rewritten gate | yes |
-| AC-1 | structural-check | `partials/tests/delegate-gate.test.sh`: conditional-scan for the three authorizing variables | no |
-| AC-2 | structural-check | `partials/tests/delegate-gate.test.sh`: veto present and correctly positioned | yes |
+| BR-11 | test-case | `partials/tests/delegate-gate.test.sh::rewritten gate behaves identically under bash and zsh` | yes |
+| AC-1 | test-case | `partials/tests/delegate-gate.test.sh`: conditional-scan for the three authorizing variables | no |
+| AC-2 | test-case | `partials/tests/delegate-gate.test.sh`: veto present and correctly positioned | yes |
 | BR-6 | test-case | `partials/tests/delegate-gate.test.sh::a well-formed probe is NOT treated as failure` | yes |
 | AC-4 | test-case | `partials/tests/delegate-gate.test.sh::veto beats every authorizing signal` | yes |
 | AC-7 | test-case | `partials/tests/delegate-gate.test.sh::enabled false plus legacy key is disabled-via-config` | yes |

@@ -38,15 +38,16 @@ coverage of the copied layer standing in for coverage of the real resolver.
 | rule | kind | artifact | benign_path |
 |------|------|----------|-------------|
 | BR-2 | test-case | `tools/delegate/tests/test_cross_layer_veto.py::test_both_layers_agree_over_input_vector` | yes |
-| BR-8 | structural-check | `partials/tests/delegate-gate.test.sh`: case-list audit for authorizing-arm setups | no |
+| BR-8 | test-case | `partials/tests/delegate-gate.test.sh`: case-list audit for authorizing-arm setups | no |
 | BR-9 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_each_arm_reverted_fails_a_test` | no |
 | AC-3 | test-case | `tools/delegate/tests/test_cross_layer_veto.py::test_shared_input_vector_parity` | yes |
 | AC-5 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_removing_env_arm_changes_gate_verdict` | no |
 | AC-6 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_removing_veto_stops_cli_refusing` | yes |
 | AC-14 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_per_arm_revert_enumeration` | no |
-| AC-15 | structural-check | `partials/tests/delegate-gate.test.sh`: four-class coverage audit | no |
-| BR-8 | structural-check | `partials/tests/delegate-gate.test.sh`: a compliant suite is NOT flagged by the case-list audit | yes |
+| AC-15 | test-case | `partials/tests/delegate-gate.test.sh`: four-class coverage audit | no |
+| BR-8 | test-case | `partials/tests/delegate-gate.test.sh::a compliant suite is NOT flagged by the case-list audit` | yes |
 | BR-9 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_covered_arm_reports_no_false_gap` | yes |
+| AC-17 | test-case | `partials/tests/delegate-gate.test.sh::passes identically under bash and zsh after relocation` | yes |
 
 ## Technical Notes
 
