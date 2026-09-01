@@ -9,13 +9,18 @@
 # Functions:
 #   adlc_intake_detect <args>...  BR-1 trigger check.
 #                                 0 = run intake, 1 = ordinary request, skip.
-#                                 Exports ADLC_INTAKE_KIND / _PATH / _REASON.
+#                                 Exports ADLC_INTAKE_KIND / _PATH / _REASON /
+#                                 _INLINE. An inline (pasted) source is written to
+#                                 a temp file so _PATH is ALWAYS a real file on the
+#                                 intake path; _INLINE=1 marks that case.
 #   adlc_intake_segment <path>    Build the delimited, budget-checked corpus.
 #                                 0 = ok, 2 = unreadable, 3 = over budget (refusal).
-#                                 Exports ADLC_INTAKE_SEGMENTS / _LINES / _CORPUS.
-#   adlc_intake_range <n>         Print "<start> <end>" for segment n, so a segment
-#                                 the delegate omitted can be read directly from the
-#                                 ORIGINAL source by line offset (BR-12).
+#                                 Exports ADLC_INTAKE_SEGMENTS / _LINES / _CORPUS /
+#                                 _SOURCE.
+#   adlc_intake_range <n> <total> Print "<start> <end>" for segment n of a <total>-line
+#                                 source, so a segment the delegate omitted can be read
+#                                 directly from the ORIGINAL source by line offset
+#                                 (BR-12). Stateless by design — see its own comment.
 #   adlc_intake_redact <path>     Apply the 5-pattern credential chain in place.
 #   adlc_intake_sections          Print the gap-checklist section list, derived from
 #                                 the requirement template (never hardcoded).
@@ -137,6 +142,31 @@ adlc_intake_detect() {
     else
         return 1
     fi
+
+    # Materialize an INLINE source to a file.
+    #
+    # Two of BR-1's three triggers hand us a path; the third — input over 25 lines
+    # pasted directly — does not. Everything downstream (segmentation, the budget
+    # check, the delegated read, direct re-reads during reconciliation) is
+    # file-based, so without this the entire trigger-(c) path dies at
+    # "source not readable" and BR-1(c) is dead on arrival.
+    #
+    # The file is named `inline-request.txt` inside a private temp dir rather than
+    # given a mktemp-random basename, because that basename is what BR-7 puts in the
+    # corpus header — `<source name="inline-request.txt">` is meaningful to a reader,
+    # `adlc-intake.XXXXXX.k3f9Qm` is noise.
+    if [ -z "$ADLC_INTAKE_PATH" ]; then
+        _ai_dir=$(mktemp -d -t adlc-intake.XXXXXX) || {
+            echo "adlc_intake_detect: could not create a temp dir for the inline source" >&2
+            return 1
+        }
+        ADLC_INTAKE_PATH="$_ai_dir/inline-request.txt"
+        printf '%s\n' "$_ai_raw" > "$ADLC_INTAKE_PATH"
+        ADLC_INTAKE_INLINE=1
+    else
+        ADLC_INTAKE_INLINE=0
+    fi
+    export ADLC_INTAKE_INLINE
 
     _adlc_intake_kind
     return 0

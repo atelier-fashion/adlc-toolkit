@@ -45,13 +45,18 @@ The gap list is the point. A spec written from a transcript will always contain 
 
    ```sh
    . .adlc/partials/intake.sh 2>/dev/null || . ~/.claude/skills/partials/intake.sh
-   adlc_intake_detect "$ARGUMENTS"
-   echo "intake_gate=$?  reason=${ADLC_INTAKE_REASON:-none}  kind=${ADLC_INTAKE_KIND:-none}  path=${ADLC_INTAKE_PATH:-none}"
+   adlc_intake_detect "$ARGUMENTS"; gate=$?
+   echo "intake_gate=$gate  reason=${ADLC_INTAKE_REASON:-none}  kind=${ADLC_INTAKE_KIND:-none}  inline=${ADLC_INTAKE_INLINE:-0}"
+   # This fence is a GATE PROBE only — step 2 re-derives everything in its own shell.
+   # For an inline source, detect materializes a temp dir; discard this probe's copy
+   # here or every intake run leaks one.
+   [ "${ADLC_INTAKE_INLINE:-0}" = "1" ] && rm -rf "$(dirname "$ADLC_INTAKE_PATH")"
+   exit 0
    ```
 
    `adlc_intake_detect` returns **1** for an ordinary feature request — none of BR-1's three triggers (an explicit `--intake` flag, an argument resolving to a readable file path, or an argument exceeding 25 lines) fired. **When it returns 1, skip the entire rest of Step 1.4 and go straight to Step 1.5.** No intake runs, no gap list is produced, no `## Provenance` section is written, and no stderr line is emitted (AC-1). This is the common path and it must stay exactly as fast and as quiet as it is today.
 
-   It returns **0** when intake should run, having exported `ADLC_INTAKE_REASON` (which trigger fired), `ADLC_INTAKE_KIND` (`transcript` | `notes` | `ticket` | `prose`), and `ADLC_INTAKE_PATH`.
+   It returns **0** when intake should run, having exported `ADLC_INTAKE_REASON` (which trigger fired), `ADLC_INTAKE_KIND` (`transcript` | `notes` | `ticket` | `prose`), `ADLC_INTAKE_PATH`, and `ADLC_INTAKE_INLINE`.
 
 2. **Segment the source before delegating (BR-12).** Segmentation is what makes a partial delegate summary *detectable*. Without it a truncated read yields zero gaps precisely because the unread remainder is invisible, and BR-11's benign path would certify the result as complete.
 
@@ -66,13 +71,16 @@ The gap list is the point. A spec written from a transcript will always contain 
    echo "INTAKE_SOURCE=$ADLC_INTAKE_SOURCE"
    echo "INTAKE_SEGMENTS=$ADLC_INTAKE_SEGMENTS"
    echo "INTAKE_LINES=$ADLC_INTAKE_LINES"
+   echo "INTAKE_INLINE=$ADLC_INTAKE_INLINE"
    ```
+
+   `INTAKE_INLINE=1` means the source was pasted rather than a file on disk, and `adlc_intake_detect` materialized it into a private temp dir so the file-based steps below work uniformly. It matters at cleanup (step 7): a materialized temp dir is ours to delete, a user's source file never is.
 
    Return codes from `adlc_intake_segment`: **0** = segmented; **2** = source unreadable; **3** = **over budget**. On rc=3 the partial has already printed a refusal naming the actual line count and the 8000-line / 40-segment budget. **Halt. Do not write a spec** (AC-10). Tell the operator to split the source and run intake on each part. Never truncate: reading the first 8000 lines silently would recreate the exact invisible-compression failure this step exists to eliminate.
 
    The corpus embeds only the source's **basename** (BR-7); full local paths stay on the machine. Redaction runs before anything leaves the machine, applying the same 5-pattern chain `/proceed` Phase 5 uses on its verify diff.
 
-   **Thread the four echoed values forward as literals.** Later fenced blocks cannot read them as variables — substitute the actual printed values into the commands below, the same way the telemetry `flag` path is threaded through Step 1.6. Writing `"$ADLC_INTAKE_CORPUS"` in a later block would silently expand to an empty string.
+   **Thread the echoed values forward as literals.** Later fenced blocks cannot read them as variables — substitute the actual printed values into the commands below, the same way the telemetry `flag` path is threaded through Step 1.6. Writing `"$ADLC_INTAKE_CORPUS"` in a later block would silently expand to an empty string.
 
 3. **Read the source body — gated delegation, hard fallback (BR-5).**
 
@@ -196,7 +204,17 @@ The gap list is the point. A spec written from a transcript will always contain 
    /spec: intake found <N> blocking gap(s) — written to Open Questions, not answered (non-interactive mode)
    ```
 
-7. **Carry the result into Step 3.** Retain the distilled feature request (it replaces `$ARGUMENTS` as the input Step 1.5 tags and Step 3 writes from), the classified gap list with dispositions, and the provenance triple — source **basename**, `kind`, and intake date. Step 3 persists all three.
+7. **Carry the result into Step 3, and clean up.** Retain the distilled feature request (it replaces `$ARGUMENTS` as the input Step 1.5 tags and Step 3 writes from), the classified gap list with dispositions, and the provenance triple — source **basename**, `kind`, and intake date. Step 3 persists all three.
+
+   Then remove the temp files, substituting the literals echoed in step 2. The corpus holds a redacted copy of the source and there is no `trap` that can span fenced blocks, so this is the only cleanup:
+
+   ```sh
+   rm -f <INTAKE_CORPUS literal>
+   # ONLY when the source was inline (ADLC_INTAKE_INLINE=1 in step 2): the pasted
+   # text was materialized into a private temp dir. A user-supplied source file is
+   # theirs — never delete it.
+   # rm -rf "$(dirname <INTAKE_SOURCE literal>)"
+   ```
 
 ### Step 1.5: Derive Query Tags for Retrieval
 

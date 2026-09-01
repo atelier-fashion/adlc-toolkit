@@ -95,6 +95,31 @@ adlc_intake_detect "$B26"; check "boundary 26 lines triggers" "0" "$?"
 # A path that does not exist is not a trigger on its own.
 adlc_intake_detect "$SANDBOX/does-not-exist.txt"; check "nonexistent path does not trigger" "1" "$?"
 
+# BR-1(c) end to end: pasted input over 25 lines carries no file path, but everything
+# downstream is file-based. detect must materialize it, or trigger (c) is dead on
+# arrival at "source not readable". Regression guard for that whole path.
+adlc_intake_detect "$LONG"
+check "BR-1(c) inline source is materialized" "1" "$ADLC_INTAKE_INLINE"
+[ -f "$ADLC_INTAKE_PATH" ] && pass "BR-1(c) inline path is a real file" \
+                           || fail "BR-1(c) inline path is not a file: $ADLC_INTAKE_PATH"
+check "BR-1(c) inline basename is meaningful" "inline-request.txt" "$(basename "$ADLC_INTAKE_PATH")"
+INLINE_DIR=$(dirname "$ADLC_INTAKE_PATH")
+adlc_intake_segment "$ADLC_INTAKE_PATH"; rc=$?
+check "BR-1(c) inline source segments cleanly" "0" "$rc"
+check "BR-1(c) inline line count" "30" "$ADLC_INTAKE_LINES"
+contains "BR-1(c) corpus names the synthetic basename" '<source name="inline-request.txt"' \
+  "$(cat "$ADLC_INTAKE_CORPUS")"
+rm -f "$ADLC_INTAKE_CORPUS"; rm -rf "$INLINE_DIR"
+
+# A file-backed source must NOT be marked inline.
+adlc_intake_detect "$SANDBOX/team-notes.md"
+check "file-backed source is not marked inline" "0" "$ADLC_INTAKE_INLINE"
+
+# AC-1 corollary: the ordinary path returns before materialization, so a one-line
+# request creates no temp file at all.
+adlc_intake_detect "add a logout button"
+check "AC-1 no temp file for an ordinary request" "" "$ADLC_INTAKE_PATH"
+
 # ===========================================================================
 # 2. Kind classification
 # ===========================================================================
