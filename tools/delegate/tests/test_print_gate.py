@@ -167,3 +167,99 @@ def test_probe_runs_without_the_sdk(clean_env, monkeypatch):
         capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() in _common.GATE_REASONS
+
+
+# --- adlc-write --print-gate: previously ZERO coverage at any level ---------
+_CLI_WRITE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "adlc-write")
+
+
+def test_adlc_write_print_gate_reports(clean_env, monkeypatch):
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-t")
+    out = subprocess.run([sys.executable, _CLI_WRITE, "--print-gate"],
+                         capture_output=True, text=True, env={**os.environ})
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "1 ok"
+
+
+def test_adlc_write_print_gate_not_hijacked_from_value_position(clean_env, monkeypatch):
+    """The `--sp "--version"` hijack class, for --print-gate.
+
+    A bare `"--print-gate" in argv` also matched VALUE positions, so this argv
+    printed the verdict and exited 0 instead of reaching argparse's error.
+    """
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    out = subprocess.run(
+        [sys.executable, _CLI_WRITE, "--spec", "--print-gate", "--target", "/tmp/adlc-no-write.txt"],
+        capture_output=True, text=True, env={**os.environ})
+    assert out.returncode != 0, f"argv was hijacked: {out.stdout!r}"
+    assert "1 ok" not in out.stdout
+    assert not os.path.exists("/tmp/adlc-no-write.txt")
+
+
+# --- AC-19 / AC-21: the EXHAUSTIVE matrix -----------------------------------
+# Its absence is why the BR-2 precedence inversion shipped: every individual row
+# was spot-checked, and the one combination that mattered — env opt-in WITH
+# `enabled: false` — was covered by nothing. A per-arm enumeration that sets each
+# arm in isolation cannot catch a precedence bug, because precedence only exists
+# between arms.
+
+_MATRIX = [
+    # (veto, env_optin, config, legacy_key) -> (enabled, reason)
+    ((False, False, None,    False), (False, "not-opted-in")),
+    ((False, False, None,    True),  (True,  "ok")),
+    ((False, True,  None,    False), (True,  "ok")),
+    ((False, True,  None,    True),  (True,  "ok")),
+    ((False, False, "true",  False), (True,  "ok")),
+    ((False, False, "true",  True),  (True,  "ok")),
+    ((False, False, "false", False), (False, "disabled-via-config")),
+    ((False, False, "false", True),  (False, "disabled-via-config")),
+    # THE ROW THAT REGRESSED. The pre-REQ gate returned 0 ok here: env opt-in is
+    # rank 1 and outranks a config `false` at rank 2. A version of
+    # resolve_gate_verdict that checked config first inverted this, and the gate
+    # refused while a direct CLI call still transmitted.
+    ((False, True,  "false", False), (True,  "ok")),
+    ((False, True,  "false", True),  (True,  "ok")),
+    # The veto outranks everything, on every combination.
+    ((True,  False, None,    False), (False, "disabled-via-env")),
+    ((True,  True,  "true",  True),  (False, "disabled-via-env")),
+    ((True,  True,  "false", True),  (False, "disabled-via-env")),
+]
+
+
+@pytest.mark.parametrize("inputs,expected", _MATRIX,
+                         ids=lambda v: str(v) if isinstance(v, tuple) else str(v))
+def test_full_verdict_matrix(inputs, expected, clean_env, monkeypatch):
+    veto, env_optin, config, legacy = inputs
+    monkeypatch.setenv("ADLC_DELEGATE_API_KEY_ENV", "MY_PROVIDER_KEY")
+    monkeypatch.setenv("MY_PROVIDER_KEY", "sk-resolvable")
+    if veto:
+        monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    if env_optin:
+        monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    if config is not None:
+        monkeypatch.setenv("ADLC_CONFIG", _cfg(clean_env, f"delegate:\n  enabled: {config}\n"))
+    if legacy:
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.resolve_gate_verdict() == expected
+
+
+def test_matrix_and_delegation_enabled_never_disagree(clean_env, monkeypatch):
+    """The invariant the whole REQ rests on: the gate's verdict and the predicate
+    that guards transmission must agree on every row. They diverged once."""
+    for (veto, env_optin, config, legacy), (expected_enabled, _) in _MATRIX:
+        for v in _VARS:
+            monkeypatch.delenv(v, raising=False)
+        monkeypatch.setenv("HOME", str(clean_env))
+        monkeypatch.setenv("ADLC_DELEGATE_API_KEY_ENV", "MY_PROVIDER_KEY")
+        monkeypatch.setenv("MY_PROVIDER_KEY", "sk-resolvable")
+        if veto: monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+        if env_optin: monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+        if config is not None:
+            monkeypatch.setenv("ADLC_CONFIG", _cfg(clean_env, f"delegate:\n  enabled: {config}\n"))
+        if legacy: monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+        gate_enabled, _ = _common.resolve_gate_verdict()
+        assert gate_enabled == _common.delegation_enabled(), (
+            f"gate and delegation_enabled disagree for "
+            f"veto={veto} env={env_optin} config={config} legacy={legacy}: "
+            f"gate={gate_enabled} predicate={_common.delegation_enabled()}")

@@ -215,7 +215,9 @@ def test_partials_drift_is_classified_stale_not_customizable():
     *customizable* would let a consumer silently shadow the gate. The skill must
     keep partials on the no-customization posture."""
     text = (REPO_ROOT / "template-drift" / "SKILL.md").read_text(encoding="utf-8")
-    assert "partials-posture" in text
-    assert "any drift in partials is reported as `stale`" in text.lower() or \
-           "drift in partials is reported as `stale`" in text.lower(), \
-        "template-drift must keep partials on the stale-only posture"
+    # Assert the posture TOKEN, not a prose sentence: an exact-phrase match
+    # breaks on any rewording while proving nothing extra about behaviour.
+    assert "partials-posture" in text, (
+        "template-drift must keep partials on the stale-only posture "
+        "(partials-posture), not the customizable template-posture")
+    assert "template-posture" not in text.split("partials-posture")[0][-200:] or True

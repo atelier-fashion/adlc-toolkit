@@ -58,7 +58,6 @@ STUB
 chmod +x "$BIN/adlc-read"
 
 CFG_TRUE="$SANDBOX/true.yml";   printf 'delegate:\n  enabled: true\n'  > "$CFG_TRUE"
-CFG_FALSE="$SANDBOX/false.yml"; printf 'delegate:\n  enabled: false\n' > "$CFG_FALSE"
 
 # run_gate <cfg-path-or-empty> <key-or-empty> <envopt-or-empty> <stub_out> <stub_rc>
 # Echoes "<rc> <reason> <forked:yes|no>".

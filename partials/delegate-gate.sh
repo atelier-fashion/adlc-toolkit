@@ -80,9 +80,7 @@ _adlc_resolve_read_bin() {
 ADLC_READ_BIN="$(_adlc_resolve_read_bin)"
 export ADLC_READ_BIN
 
-# --- opt-in helper (BR-11) -------------------------------------------------
-# Echoes "1" if delegation is opted in, "" otherwise. Pure-shell fast paths
-# first; config probe last (only when a config file is present).
+# --- the dispatcher --------------------------------------------------------
 adlc_delegate_gate_check() {
   # Re-resolve at call time — PATH may have changed since the partial was
   # sourced, and a caller may invoke the gate long after sourcing.
@@ -114,10 +112,20 @@ adlc_delegate_gate_check() {
   #     `_probe_rc=$?` MUST be the very next statement — command substitution
   #     discards the exit code, so a probe that printed a verdict and THEN failed
   #     would otherwise be read as consent (the shape BUG-205 was).
-  _probe="$("$ADLC_READ_BIN" --print-gate 2>/dev/null)"
+  # Bounded where a timeout(1) exists: the fork is now unconditional on every
+  # non-vetoed call, so a wedged adlc-read would otherwise hang the calling skill
+  # with no fallback. Expiry is a non-zero exit and therefore fails closed. Where
+  # timeout(1) is absent (stock macOS), this degrades to the unbounded call
+  # rather than failing — an unavailable hardening must not become an outage.
+  if command -v timeout >/dev/null 2>&1; then
+    _probe="$(timeout 10 "$ADLC_READ_BIN" --print-gate 2>/dev/null)"
+  else
+    _probe="$("$ADLC_READ_BIN" --print-gate 2>/dev/null)"
+  fi
   _probe_rc=$?
   if [ "$_probe_rc" -ne 0 ]; then
     export ADLC_DELEGATE_GATE_REASON="not-opted-in"
+    unset _probe _probe_rc
     return 1
   fi
   # Parse "<enabled> <reason>". The probe's stdout is untrusted input to shell
@@ -126,14 +134,23 @@ adlc_delegate_gate_check() {
   # condition, not a pass-through.
   _verdict=${_probe%% *}
   _reason=${_probe#* }
-  case "$_reason" in
-    ok|disabled-via-env|disabled-via-config|not-opted-in) ;;
-    *) export ADLC_DELEGATE_GATE_REASON="not-opted-in"; return 1 ;;
+  # Validate the PAIR, not the reason alone. Validating separately let "0 ok"
+  # (and "\n1 ok", whose leading newline shifts the fields) export reason=ok
+  # alongside return 1 — an inconsistent record forwarded verbatim into telemetry
+  # and to agents/delegate-pre-pass.md, i.e. a withheld run logged as ok. Only
+  # the four legal pairs are accepted; anything else fails closed.
+  case "$_verdict $_reason" in
+    "1 ok")
+      export ADLC_DELEGATE_GATE_REASON="ok"
+      unset _probe _probe_rc _verdict _reason
+      return 0 ;;
+    "0 disabled-via-env"|"0 disabled-via-config"|"0 not-opted-in")
+      export ADLC_DELEGATE_GATE_REASON="$_reason"
+      unset _probe _probe_rc _verdict _reason
+      return 1 ;;
+    *)
+      export ADLC_DELEGATE_GATE_REASON="not-opted-in"
+      unset _probe _probe_rc _verdict _reason
+      return 1 ;;
   esac
-  if [ "$_verdict" = "1" ] && [ "$_reason" = "ok" ]; then
-    export ADLC_DELEGATE_GATE_REASON="ok"
-    return 0
-  fi
-  export ADLC_DELEGATE_GATE_REASON="$_reason"
-  return 1
 }

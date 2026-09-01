@@ -16,6 +16,7 @@ Two per-layer tests cannot substitute for this one. Each passes in isolation
 precisely while the layers diverge — that is the failure mode.
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -23,7 +24,6 @@ import pytest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DELEGATE = os.path.dirname(_HERE)
-_PARTIALS = os.path.join(os.path.dirname(_DELEGATE), "..", "partials")
 _PARTIALS = os.path.normpath(os.path.join(_DELEGATE, "..", "..", "partials"))
 sys.path.insert(0, _DELEGATE)
 import _common  # noqa: E402
@@ -115,3 +115,84 @@ def test_widening_python_alone_is_safe_widening_shell_alone_is_not(monkeypatch, 
     # divergence this file exists to catch.
     assert _shell_veto_fires("true", tmp_path) is False
     assert _python_veto_fires("true", monkeypatch, tmp_path) is False
+
+
+# --- Q4: enforce the PROPERTY, not a sample --------------------------------
+# The enumerated vector above is a sample. A sample cannot express "Python
+# recognises at least every input the shell does" — it only checks the values
+# someone thought of. Mutating the shell veto to also accept "on" passed the
+# whole suite, and "on" is not exotic: parse_delegate_config's own truthiness set
+# in this same codebase is ("true", "yes", "1", "on"), so a developer harmonising
+# the veto with config truthiness has a live path to exactly the divergence BR-2
+# exists to prevent.
+#
+# These derive the accepted literal set from the shell source itself, so ANY
+# widening of either layer fails whether or not the new value is in a vector.
+
+_GATE_SH = os.path.join(_PARTIALS, "delegate-gate.sh")
+
+
+def _shell_veto_literals():
+    """The literal values delegate-gate.sh's veto compares against.
+
+    Parses the guard rather than trusting a hardcoded copy of it. If the guard's
+    shape changes so this cannot find it, the test fails loudly instead of
+    silently asserting nothing (a vacuous pass is the failure mode here).
+    """
+    text = open(_GATE_SH, encoding="utf-8").read()
+    lits = set()
+    for line in text.splitlines():
+        if "ADLC_DISABLE_DELEGATE" not in line:
+            continue
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        # `[ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ]` and case-arm variants.
+        for m in re.finditer(r'=\s*"([^"]*)"', line):
+            lits.add(m.group(1))
+        for m in re.finditer(r"^\s*([A-Za-z0-9|]+)\)", stripped):
+            lits.update(m.group(1).split("|"))
+    return lits
+
+
+def test_shell_veto_guard_is_parseable():
+    """Guards the guard: if this returns nothing, every assertion below is
+    vacuous, which is the LESSON-602 shape."""
+    assert _shell_veto_literals(), (
+        f"could not parse the veto guard out of {_GATE_SH} — the assertions "
+        "below would pass vacuously")
+
+
+def test_shell_veto_accepts_exactly_the_literal_one():
+    """The property, derived from source. Widening the shell veto fails here
+    even if the new value appears in no test vector."""
+    assert _shell_veto_literals() == {"1"}, (
+        "delegate-gate.sh's veto accepts values beyond the literal \"1\". "
+        "Python must be widened in the same commit, or the gate will report "
+        "disabled while a direct CLI call transmits (BUG-209's shape).")
+
+
+def test_python_veto_accepts_every_literal_the_shell_does(monkeypatch, tmp_path):
+    """BR-2's stated condition, asserted directly rather than sampled:
+    Python must recognise AT LEAST every input the shell does."""
+    for lit in _shell_veto_literals():
+        assert _python_veto_fires(lit, monkeypatch, tmp_path), (
+            f"shell vetoes on {lit!r} but Python does not — the gate would "
+            "report disabled while a direct CLI call transmits")
+
+
+def test_kill_switch_has_exactly_two_implementations():
+    """The docs say ONE deliberate duplication (shell + Python). It was four:
+    delegation_enabled, resolve_gate_verdict, require_delegation_enabled, and
+    the shell. The parity test compared only two of them, so widening the shell
+    and one Python copy together left the suite green while the copy guarding
+    transmission stayed narrow."""
+    src = open(os.path.join(_DELEGATE, "_common.py"), encoding="utf-8").read()
+    comparisons = [
+        ln for ln in src.splitlines()
+        if "ADLC_DISABLE_DELEGATE" in ln and "==" in ln and not ln.strip().startswith("#")
+    ]
+    assert len(comparisons) == 1, (
+        "ADLC_DISABLE_DELEGATE is compared in more than one Python place: "
+        f"{comparisons}. Every site must call _kill_switch_set() so the veto has "
+        "exactly two textual implementations toolkit-wide.")

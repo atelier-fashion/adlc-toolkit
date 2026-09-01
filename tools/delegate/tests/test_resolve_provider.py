@@ -425,12 +425,17 @@ def test_removing_env_arm_changes_gate_verdict(clean_env, monkeypatch):
     delegation_enabled() and this fails — proving the gate no longer decides it
     and that the arm is genuinely load-bearing rather than shadowed by another.
     """
+    # A legacy key must NOT be set here: it is the arm that shadows this one, and
+    # its presence made the original version of this test pass with the env arm
+    # deleted — the opposite of what its docstring claimed. The key is supplied
+    # via a custom api_key_env so resolve_key succeeds without a legacy key
+    # satisfying the opt-in cascade.
+    monkeypatch.setenv("ADLC_DELEGATE_API_KEY_ENV", "MY_PROVIDER_KEY")
+    monkeypatch.setenv("MY_PROVIDER_KEY", "sk-t")
     monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
-    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-t")
     assert _common.resolve_gate_verdict() == (True, "ok")
-    # ...and with the signal absent, the same install is off.
+    # ...and with the ONLY opt-in signal removed, the same install is off.
     monkeypatch.delenv("ADLC_DELEGATE_ENABLED")
-    monkeypatch.delenv("MOONSHOT_API_KEY")
     assert _common.resolve_gate_verdict()[0] is False
 
 
@@ -463,6 +468,9 @@ def test_per_arm_revert_enumeration(clean_env, monkeypatch):
     """
     results = {}
 
+    # A key must be resolvable, or LESSON-392's resolve_key half correctly
+    # reports disabled for every row regardless of the arm under test.
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-t")
     monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
     monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
     results["veto"] = _common.resolve_gate_verdict()
@@ -475,7 +483,6 @@ def test_per_arm_revert_enumeration(clean_env, monkeypatch):
     results["config"] = _common.resolve_gate_verdict()
     monkeypatch.delenv("ADLC_CONFIG")
 
-    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
     results["legacy-key"] = _common.resolve_gate_verdict()
 
     assert results == {
@@ -493,5 +500,6 @@ def test_covered_arm_reports_no_false_gap(clean_env, monkeypatch):
     works, and would train the next reader to ignore it.
     """
     monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-t")
     enabled, reason = _common.resolve_gate_verdict()
     assert enabled is True and reason == "ok"

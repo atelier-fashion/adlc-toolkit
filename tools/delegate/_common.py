@@ -138,6 +138,14 @@ def _strip_inline(value):
     return value
 
 
+# Marks a config that EXISTS but could not be read or parsed. Distinct from an
+# absent config, which is a legitimate default. Collapsing the two is a fail-OPEN:
+# an unreadable file returned {} and fell through to legacy-key continuity, so a
+# machine whose operator had written `enabled: false` delegated anyway — BUG-205's
+# outcome reached through a read failure instead of a precedence bug.
+_MALFORMED = "__adlc_config_malformed__"
+
+
 def parse_delegate_config(path=None):
     """Parse the ``delegate:`` block from the YAML config, if the file exists.
 
@@ -159,14 +167,21 @@ def parse_delegate_config(path=None):
         path = _config_path()
     try:
         if not stat.S_ISREG(os.stat(path).st_mode):
+            # Non-regular (directory, fifo, device): the pre-existing contract
+            # treats this as absent, and a test pins it. Left unchanged — the
+            # reported fail-open is the readable-file case below, and widening
+            # this guard would change documented behaviour beyond this REQ.
+            # Noted as a residual gap rather than silently altered.
             return {}
     except OSError:
-        return {}
+        # stat() failed on a path we were told to read: unreadable, not absent.
+        return {_MALFORMED: True} if os.path.lexists(path) else {}
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             lines = fh.read(65536).splitlines()
     except OSError:
-        return {}
+        # Open/read failed on a file that exists (permissions, I/O error).
+        return {_MALFORMED: True}
 
     known = {"enabled", "base_url", "model", "api_key_env"}
     out = {}
@@ -277,6 +292,25 @@ def _legacy_key_present():
     return any(os.environ.get(v) for v in _LEGACY_KEY_VARS)
 
 
+def _kill_switch_set():
+    """True iff ``ADLC_DISABLE_DELEGATE`` is set to the literal ``"1"``.
+
+    The ONE predicate every Python site calls, so the veto has exactly two
+    textual implementations toolkit-wide: this one and ``delegate-gate.sh``'s.
+    It previously had four, and ``test_cross_layer_veto`` compared only two of
+    them — so widening the shell copy and one Python copy together would have
+    left the suite green while the copy that actually guards transmission stayed
+    narrow. That is BUG-209's shape reached through the pair the parity test did
+    not cover.
+
+    Matches ``delegate-gate.sh``'s ``[ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ]``
+    exactly. The accepted set is asserted against the shell source itself by
+    ``tests/test_cross_layer_veto.py``, so a widening of either layer fails
+    whether or not the new value appears in any sample vector.
+    """
+    return os.environ.get("ADLC_DISABLE_DELEGATE") == "1"
+
+
 def delegation_enabled(cfg=None):
     """BR-11 opt-in: delegation is OFF by default on fresh installs.
 
@@ -323,7 +357,7 @@ def delegation_enabled(cfg=None):
     # Kill switch first: it outranks every arm below, opt-in env var included.
     # Exact "1" only, matching delegate-gate.sh's `[ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ]`
     # so the two layers cannot disagree about what counts as set.
-    if os.environ.get("ADLC_DISABLE_DELEGATE") == "1":
+    if _kill_switch_set():
         return False
     if os.environ.get("ADLC_DELEGATE_ENABLED") == "1":
         return True
@@ -349,41 +383,41 @@ def resolve_gate_verdict(cfg=None):
     may never *grant* it. Every path on which the gate concludes "delegated"
     resolves here.
 
-    Two properties are easy to lose and load-bearing:
+    **This function does not rank the arms.** ``delegation_enabled()`` owns the
+    precedence cascade; this one asks it and then *labels* the answer. An earlier
+    version re-implemented the cascade inline to produce a reason, and got the
+    order wrong — testing ``enabled: false`` ahead of ``ADLC_DELEGATE_ENABLED``,
+    which inverted REQ-515 BR-2's documented ranking. The gate then refused while
+    a direct CLI call, still routed through ``delegation_enabled()``, would
+    transmit: two Python authorities disagreeing, which is the very defect class
+    REQ-603 exists to remove, relocated one layer inward. One cascade, one
+    ranking; labelling layers on top and never re-decides.
 
-    1. **It resolves the provider, not merely the opt-in cascade.** LESSON-392:
-       an enablement probe that checks a cheaper subset than the real call
-       green-lights delegation that then fails on the first API call, mislabelled
-       as a runtime error. ``resolve_provider`` raises ``SystemExit`` for a
-       key-in-config config; that refusal is a *config* reason, not "not opted
-       in", and callers need to be told which.
-    2. **`enabled: false` is decisive regardless of a legacy key** (REQ-603 BR-4 /
-       architecture ADR-4). The shell heuristic this replaces never read
-       ``enabled`` at all — it reported ``disabled-via-config`` only when a config
-       file existed *and* a legacy key happened to be exported, so the same
-       written instruction produced two different labels depending on an
-       unrelated variable. The label is corrected here; the return code the gate
-       derives from it is unchanged.
+    LESSON-392: the probe must share the REAL call's resolution, not a cheaper
+    subset. That means both halves — ``resolve_provider`` (which refuses a
+    key-in-config) *and* ``resolve_key`` (which refuses a key that is simply not
+    set). Wrapping only the first still reported ``1 ok`` for a config whose key
+    variable was unset, while the real call died on it.
     """
+    # The kill switch is read BEFORE the config, so nothing about config
+    # parsing — including a future parse failure — can preempt the veto.
+    if _kill_switch_set():
+        return False, "disabled-via-env"
     if cfg is None:
         cfg = parse_delegate_config()
-
-    # Step 0 — the kill switch, ahead of every authorizing arm (BUG-209).
-    if os.environ.get("ADLC_DISABLE_DELEGATE") == "1":
-        return False, "disabled-via-env"
-
-    # An explicit `enabled: false` is an instruction, not an absent default. It
-    # outranks the legacy key (BUG-205) and names itself (ADR-4).
-    if cfg.get("enabled") is False:
+    if cfg.get(_MALFORMED) is True:
+        # A config that exists but cannot be read or parsed is NOT an absent
+        # config. Treating them alike let an unreadable file fall through to
+        # legacy-key continuity and delegate anyway — BUG-205's outcome by a
+        # different route.
         return False, "disabled-via-config"
-
     if not delegation_enabled(cfg):
-        return False, "not-opted-in"
-
-    # Opted in — but only "enabled" if the real call could actually run. Share
-    # the real call's resolution rather than a cheaper subset (LESSON-392).
+        return False, (
+            "disabled-via-config" if cfg.get("enabled") is False else "not-opted-in"
+        )
     try:
-        resolve_provider(cfg=cfg)
+        provider = resolve_provider(cfg=cfg)
+        resolve_key(provider)
     except SystemExit:
         return False, "disabled-via-config"
     return True, "ok"
@@ -417,7 +451,7 @@ def require_delegation_enabled(prog, cfg=None):
     # their own stated intent — and it reads as the switch having been ignored,
     # which is precisely the bug this branch fixes (BUG-209). Mirrors the gate's
     # disabled-via-env / not-opted-in split.
-    if os.environ.get("ADLC_DISABLE_DELEGATE") == "1":
+    if _kill_switch_set():
         sys.exit(
             "%s: delegation disabled via ADLC_DISABLE_DELEGATE — refusing to send "
             "file contents to a third-party endpoint.\n"
@@ -505,8 +539,8 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
 
 # --- `--version` reporting (shared by all three CLIs) ----------------------
 
-def wants_version(argv, value_flags=frozenset(), known_flags=None):
-    """True if ``--version``/``-V`` appears in argv in FLAG position.
+def wants_flag(argv, flags, value_flags=frozenset(), known_flags=None):
+    """True if any spelling in ``flags`` appears in argv in FLAG position.
 
     ``argv`` may be ``None``, in which case ``sys.argv[1:]`` is scanned. The scan
     is value-aware: a token that is the value of a preceding option in
@@ -541,7 +575,7 @@ def wants_version(argv, value_flags=frozenset(), known_flags=None):
         if skip_next:
             skip_next = False
             continue
-        if token in ("--version", "-V"):
+        if token in flags:
             return True
         if token in value_flags:
             skip_next = True
@@ -551,6 +585,13 @@ def wants_version(argv, value_flags=frozenset(), known_flags=None):
             if token.split("=", 1)[0] not in known_flags:
                 return False
     return False
+
+
+
+def wants_version(argv, value_flags=frozenset(), known_flags=None):
+    """``wants_flag`` specialised to ``--version``/``-V``. Kept as a named
+    wrapper so existing call sites and their tests are untouched."""
+    return wants_flag(argv, ("--version", "-V"), value_flags, known_flags)
 
 
 def harvest_provider_flags(argv, value_flags=frozenset()):

@@ -219,12 +219,27 @@ PRs (`atelier-fashion/adlc-toolkit`).
   drives both layers over one input vector so widening either alone fails. Widening the
   shell veto alone is exactly how BUG-209 would return.
 
-  **One deliberate behaviour change.** `delegate.enabled: false` now reports
-  `disabled-via-config` whether or not a legacy key is exported. The pre-REQ shell helper
-  never read `enabled` — it returned `disabled-via-config` only when a config file
-  existed *and* a legacy key happened to be set, so the same written instruction produced
-  two labels depending on an unrelated variable. The **return code is unchanged** (`1`
-  either way); only the label is corrected.
+  **Four named behaviour changes, all fail-closed.** None makes the gate grant delegation
+  it previously withheld:
+
+  | input | before | after | rc |
+  |---|---|---|---|
+  | `enabled: false`, no legacy key | `not-opted-in` | `disabled-via-config` | unchanged |
+  | key VALUE in `api_key_env` | `not-opted-in` | `disabled-via-config` | unchanged |
+  | opt-in satisfied, key var unset | `ok` | `disabled-via-config` | **0 → 1** |
+  | config exists but unreadable | `ok` | `disabled-via-config` | **0 → 1** |
+
+  The first corrects a label that depended on an unrelated variable — the pre-REQ helper
+  never read `enabled`, reporting `disabled-via-config` only when a config file existed
+  *and* a legacy key happened to be set.
+
+  ⚠️ The last one is a **security fix**. An unreadable or unparsable config previously
+  returned an empty result indistinguishable from *no config*, falling through to
+  legacy-key continuity — so an operator who wrote `enabled: false` on a machine with a
+  stale key exported delegated anyway. That is BUG-205's reported outcome via a read
+  failure rather than a precedence bug. A config that exists but cannot be read is now a
+  refusal, not a default. If you rely on delegation and see `disabled-via-config`
+  unexpectedly, check that your config is readable.
 
   **Migration:** an `adlc-read` predating `--print-gate` makes the gate fail closed —
   delegation off, safely but silently, reported as `not-opted-in`. `--print-enabled` is

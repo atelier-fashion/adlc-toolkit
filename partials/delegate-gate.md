@@ -33,7 +33,7 @@ Everything that could *grant* delegation is resolved by one call to
 path — it reports, it never refuses. The gate validates the reason against the
 frozen enum and fails closed on anything else.
 
-The veto is deliberately implemented in **both** layers. That is safe only because
+The veto is deliberately implemented in **both** layers — and in exactly two places total: this file, and `_common._kill_switch_set()`, which every Python site calls. It briefly had four Python-side comparisons while the parity test checked only two of them. That is safe only because
 a veto can never return *enabled*: the copies agree or abstain, but cannot
 contradict — **provided Python recognises at least every input the shell does.**
 Both test the literal `"1"`; widening one alone reintroduces BUG-209, and

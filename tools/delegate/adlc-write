@@ -44,6 +44,15 @@ def _build_parser():
     parser.add_argument("--context", default=None, help="reference file for patterns/conventions")
     parser.add_argument("--target", required=True, help="output file path")
     parser.add_argument("--force", action="store_true", help="allow overwriting an existing --target")
+    # Declared so it appears in --help and in the parser-vs-_KNOWN_FLAGS mirror
+    # test, even though the pre-argparse scan in main() is what actually handles
+    # it (--spec/--target are required=True, so argparse would exit 2 first).
+    parser.add_argument(
+        "--print-gate",
+        action="store_true",
+        help="print '<enabled> <reason>' and exit — the gate's full verdict "
+             "(REQ-603); no spec or target required, no network call",
+    )
     parser.add_argument("--max-tokens", type=int, default=16384)
     parser.add_argument("--model", default=None, help="override the resolved model")
     parser.add_argument("--base-url", default=None, help="override the resolved base URL")
@@ -81,7 +90,7 @@ _VERSION_VALUE_FLAGS = frozenset({
 # "--version"` hijack. Kept honest by a test that derives the same set from the
 # parser itself.
 _KNOWN_FLAGS = _VERSION_VALUE_FLAGS | frozenset({
-    "-h", "--help", "--force", "--no-warn",
+    "-h", "--help", "--force", "--print-gate", "--no-warn",
 })
 
 
@@ -101,11 +110,15 @@ def main(argv=None):
 
     # --print-gate: scanned out of argv BEFORE argparse for the same reason
     # --version is (ADR-1) — --spec/--target are required=True and argparse would
-    # exit 2 first. Reports the gate's verdict and exits 0 on EVERY path,
+    # exit 2 first. Uses the SAME value-aware scanner, not a membership test: a
+    # bare `"--print-gate" in argv` also matched VALUE positions, so
+    # `adlc-write --spec "--print-gate" --target out` printed the verdict and
+    # exited 0 instead of reaching argparse's error. That is the documented
+    # `--sp "--version"` hijack class this machinery exists to close. Reports the gate's verdict and exits 0 on EVERY path,
     # including disabled: it REPORTS, it never refuses (REQ-603 BR-10). Routing
     # it through require_delegation_enabled() would make a caller read a non-zero
     # exit and mislabel a `disabled-via-env` machine as `not-opted-in`.
-    if "--print-gate" in (sys.argv[1:] if argv is None else argv):
+    if _common.wants_flag(argv, ("--print-gate",), _VERSION_VALUE_FLAGS, _KNOWN_FLAGS):
         enabled, reason = _common.resolve_gate_verdict()
         print(f"{1 if enabled else 0} {reason}")
         return 0

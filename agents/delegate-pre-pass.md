@@ -75,10 +75,15 @@ REQ="<the REQ id from the dispatch prompt>"   # e.g. REQ-474 — bind BEFORE the
 Call the gate predicate and read `$?` IMMEDIATELY (it is clobbered by the next
 command), then read the exported reason. The gate validates `adlc-read`
 resolvability (on PATH, or `$HOME/bin/adlc-read` — it exports the resolved
-command as `ADLC_READ_BIN`), the disable flag, and opt-in; it does **NOT**
-prove a usable API key resolves
-(the key may live in a custom `api_key_env` the gate's opt-in heuristic didn't
-require). So ALSO require the resolved key explicitly:
+command as `ADLC_READ_BIN`), the disable flag, and opt-in.
+
+**Corrected by REQ-603:** the gate now resolves the provider **and** the key
+(ADR-3 / LESSON-392), so a passing gate *does* prove a usable key resolves. The
+older text here claimed the opposite and justified the second probe below on that
+basis. The second probe is retained as a belt-and-braces check — it can only
+withhold, never grant — but note it is a SECOND fork, which is the incoherent-pair
+risk BR-7 names: two invocations straddling an env change can disagree. Do not
+re-add a rationale claiming the gate skips the key.
 
 ```sh
 adlc_delegate_gate_check; gate=$?
