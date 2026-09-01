@@ -94,6 +94,11 @@ _GATE_PROBE = (
 )
 
 
+def _reason_for(enabled):
+    """The reason that pairs with a stubbed verdict (REQ-603 frozen enum)."""
+    return "ok" if str(enabled) == "1" else "not-opted-in"
+
+
 def _stub_adlc_read_on_path(tmp_path):
     """Drop a no-op `adlc-read` stub into a tmp bin dir and return a PATH
     that prepends it. The new gate (REQ-515) probes `command -v adlc-read`,
@@ -103,7 +108,13 @@ def _stub_adlc_read_on_path(tmp_path):
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     stub = bindir / "adlc-read"
-    stub.write_text('#!/bin/sh\n[ "$1" = "--print-enabled" ] && { echo 0; exit 0; }\nexit 0\n')
+    # REQ-603: the gate asks --print-gate and parses "<enabled> <reason>". Since
+    # the probe now decides every authorizing arm, a fixed-verdict stub cannot
+    # serve tests that vary the env — this one mirrors the cascade. These cases
+    # are about BINARY RESOLUTION, not cascade correctness, which is asserted
+    # against the real resolver in test_resolve_provider.py.
+    stub.write_text(
+        '#!/bin/sh\nif [ "$1" = "--print-gate" ]; then\n  [ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ] && { echo "0 disabled-via-env"; exit 0; }\n  [ "${ADLC_DELEGATE_ENABLED:-}" = "1" ] && { echo "1 ok"; exit 0; }\n  [ -n "${MOONSHOT_API_KEY:-}${KIMI_API_KEY:-}" ] && { echo "1 ok"; exit 0; }\n  echo "0 not-opted-in"; exit 0\nfi\n[ "$1" = "--print-enabled" ] && { echo 0; exit 0; }\nexit 0\n')
     stub.chmod(0o755)
     return f"{bindir}:/usr/bin:/bin"
 
@@ -196,7 +207,15 @@ def _stub_adlc_read_in_home_bin(home, enabled="0"):
     bindir.mkdir(parents=True, exist_ok=True)
     stub = bindir / "adlc-read"
     stub.write_text(
-        f'#!/bin/sh\n[ "$1" = "--print-enabled" ] && {{ echo {enabled}; exit 0; }}\nexit 0\n'
+        f'#!/bin/sh\n'
+        f'if [ "$1" = "--print-gate" ]; then\n'
+        f'  [ "${{ADLC_DISABLE_DELEGATE:-0}}" = "1" ] && {{ echo "0 disabled-via-env"; exit 0; }}\n'
+        f'  [ "${{ADLC_DELEGATE_ENABLED:-}}" = "1" ] && {{ echo "1 ok"; exit 0; }}\n'
+        f'  [ -n "${{MOONSHOT_API_KEY:-}}${{KIMI_API_KEY:-}}" ] && {{ echo "1 ok"; exit 0; }}\n'
+        f'  echo "{enabled} {_reason_for(enabled)}"; exit 0\n'
+        f'fi\n'
+        f'[ "$1" = "--print-enabled" ] && {{ echo {enabled}; exit 0; }}\n'
+        f'exit 0\n'
     )
     stub.chmod(0o755)
     return stub

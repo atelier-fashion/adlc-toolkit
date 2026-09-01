@@ -1,7 +1,7 @@
 ---
 id: TASK-090
 title: "Reduce delegate-gate.sh to veto + dispatch; remove every authorizing arm"
-status: draft
+status: complete
 parent: REQ-603
 created: 2026-09-01
 updated: 2026-09-01

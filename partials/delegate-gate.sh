@@ -42,8 +42,9 @@
 # default and yields to continuity, a written `false` is an instruction and does
 # not. Collapsing the two is what BUG-205 was.
 #
-# Cost: one fork when a config file exists and ADLC_DELEGATE_ENABLED is unset.
-# The no-config path stays pure-shell and fork-free.
+# Cost (REQ-603): one fork on every path that could AUTHORIZE. The veto and
+# no-binary paths stay fork-free, so the emergency stop is as cheap as it ever
+# was. Measured: the probe is ~21ms against a ~104s median delegated step.
 #
 # No `set -eu` here — return codes ARE the contract.
 
@@ -82,96 +83,57 @@ export ADLC_READ_BIN
 # --- opt-in helper (BR-11) -------------------------------------------------
 # Echoes "1" if delegation is opted in, "" otherwise. Pure-shell fast paths
 # first; config probe last (only when a config file is present).
-_adlc_delegate_opted_in() {
-  # 1. explicit env opt-in. Rank 2 in the BR-2 precedence table, so it outranks
-  #    the config file and needs no probe.
-  if [ "${ADLC_DELEGATE_ENABLED:-}" = "1" ]; then
-    echo 1
-    return 0
-  fi
-  # 2. config file, when one exists — DECISIVE IN BOTH DIRECTIONS (BUG-205).
-  #    `--print-enabled` runs the full Python predicate (env + config + legacy
-  #    key), so when a config file is present its answer is the whole answer and
-  #    the gate defers to it rather than second-guessing with shell arms.
-  #
-  #    This probe used to sit BELOW the legacy-key arm, as a pure-shell
-  #    fast path that avoided the fork. That was sound for `enabled: true` (every
-  #    arm agrees) and wrong for `enabled: false` (the arms disagree and the cheap
-  #    one won), which silently overrode the operator's opt-out. The fork is the
-  #    correct price for a governance decision; the no-config path below still
-  #    pays nothing.
-  #
-  #    Failure is closed: a probe that errors, prints nothing, or prints anything
-  #    other than "1" counts as NOT opted in. A gate that cannot establish consent
-  #    must not assume it.
-  _cfg="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
-  if [ -n "$_cfg" ] && [ -f "$_cfg" ]; then
-    # Status AND output are both checked. Command substitution captures stdout
-    # and discards the exit code, so a probe that printed "1" and then FAILED
-    # would otherwise be read as consent — the same shape of cheap assumption
-    # that BUG-205 was. `_probe_rc=$?` must be the very next statement.
-    if [ -n "${ADLC_READ_BIN:-}" ]; then
-      _probe=$("$ADLC_READ_BIN" --print-enabled 2>/dev/null)
-      _probe_rc=$?
-    else
-      _probe=""; _probe_rc=127
-    fi
-    if [ "$_probe_rc" -eq 0 ] && [ "$_probe" = "1" ]; then
-      echo 1
-    else
-      echo ""
-    fi
-    return 0
-  fi
-  # 3. no config file at all: legacy key continuity (rank 4) — BR-11's exception
-  #    for pre-config installs, which is the only place it was ever meant to act.
-  if [ -n "${MOONSHOT_API_KEY:-}" ] || [ -n "${KIMI_API_KEY:-}" ]; then
-    echo 1
-    return 0
-  fi
-  echo ""
-}
-
-# Distinguishes an operator opt-out from a fresh install, for the reason string.
-# Echoes "1" when the config file is what turned delegation off.
-#
-# The inference is sound rather than a re-parse: this is only consulted after the
-# opt-in check has already returned false, and a config whose `enabled` is ABSENT
-# would have fallen through to the legacy-key arm and opted in. So "not opted in,
-# a config file exists, and a legacy key is present" can only mean the config said
-# `false` out loud. Without a key present the two cases are indistinguishable and
-# equally "not opted in", so the generic reason stays correct there.
-_adlc_delegate_disabled_by_config() {
-  _cfg="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
-  if [ -n "$_cfg" ] && [ -f "$_cfg" ] &&
-     { [ -n "${MOONSHOT_API_KEY:-}" ] || [ -n "${KIMI_API_KEY:-}" ]; }; then
-    echo 1
-    return 0
-  fi
-  echo ""
-}
-
 adlc_delegate_gate_check() {
   # Re-resolve at call time — PATH may have changed since the partial was
   # sourced, and a caller may invoke the gate long after sourcing.
   ADLC_READ_BIN="$(_adlc_resolve_read_bin)"
   export ADLC_READ_BIN
+  # (1) no-binary stays in shell: it is the one question the probe cannot answer,
+  #     and it can only WITHHOLD delegation, never grant it (REQ-603 BR-5).
+  #     Resolved BEFORE the veto, preserving the pre-REQ order — binary-missing
+  #     plus veto-set yields 2, not 1.
   if [ -z "$ADLC_READ_BIN" ]; then
     export ADLC_DELEGATE_GATE_REASON="no-binary"
     return 2
   fi
+  # (2) the veto: the one deliberate duplication (REQ-603 BR-2). A veto arm can
+  #     only ever return "disabled", so the shell and Python copies can agree or
+  #     abstain but never contradict — PROVIDED Python recognises at least every
+  #     input this test does. Both test the literal "1"; widening one alone is
+  #     the defect, and tests/test_cross_layer_veto.py is what enforces it.
+  #     Kept here so the emergency stop stays fork-free: it is the control most
+  #     likely to be reached when something has already gone wrong.
   if [ "${ADLC_DISABLE_DELEGATE:-0}" = "1" ]; then
     export ADLC_DELEGATE_GATE_REASON="disabled-via-env"
     return 1
   fi
-  if [ -z "$(_adlc_delegate_opted_in)" ]; then
-    if [ -n "$(_adlc_delegate_disabled_by_config)" ]; then
-      export ADLC_DELEGATE_GATE_REASON="disabled-via-config"
-    else
-      export ADLC_DELEGATE_GATE_REASON="not-opted-in"
-    fi
+  # (3) everything that could AUTHORIZE is Python's (REQ-603 BR-1). One probe,
+  #     never two: two invocations could straddle an env change and report an
+  #     incoherent pair (BR-7).
+  #
+  #     `_probe_rc=$?` MUST be the very next statement — command substitution
+  #     discards the exit code, so a probe that printed a verdict and THEN failed
+  #     would otherwise be read as consent (the shape BUG-205 was).
+  _probe="$("$ADLC_READ_BIN" --print-gate 2>/dev/null)"
+  _probe_rc=$?
+  if [ "$_probe_rc" -ne 0 ]; then
+    export ADLC_DELEGATE_GATE_REASON="not-opted-in"
     return 1
   fi
-  export ADLC_DELEGATE_GATE_REASON="ok"
-  return 0
+  # Parse "<enabled> <reason>". The probe's stdout is untrusted input to shell
+  # (LESSON-008): take exactly two fields and validate the reason against the
+  # frozen enum before exporting it. An unrecognised value is a fail-closed
+  # condition, not a pass-through.
+  _verdict=${_probe%% *}
+  _reason=${_probe#* }
+  case "$_reason" in
+    ok|disabled-via-env|disabled-via-config|not-opted-in) ;;
+    *) export ADLC_DELEGATE_GATE_REASON="not-opted-in"; return 1 ;;
+  esac
+  if [ "$_verdict" = "1" ] && [ "$_reason" = "ok" ]; then
+    export ADLC_DELEGATE_GATE_REASON="ok"
+    return 0
+  fi
+  export ADLC_DELEGATE_GATE_REASON="$_reason"
+  return 1
 }
