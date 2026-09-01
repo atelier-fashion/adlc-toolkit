@@ -335,6 +335,60 @@ def delegation_enabled(cfg=None):
     return False
 
 
+# The gate's full reason vocabulary (REQ-603 BR-4). The probe produces only the
+# first four; `no-binary` and `unset` are the shell gate's alone — an unresolvable
+# binary cannot be asked anything, and `unset` is the pre-call initial value.
+GATE_REASONS = ("ok", "disabled-via-env", "disabled-via-config", "not-opted-in")
+_GATE_ONLY_REASONS = ("no-binary", "unset")
+
+
+def resolve_gate_verdict(cfg=None):
+    """Return ``(enabled, reason)`` — the single authority for delegation opt-in.
+
+    REQ-603 BR-1: the shell gate may *withhold* delegation (no-binary, veto) but
+    may never *grant* it. Every path on which the gate concludes "delegated"
+    resolves here.
+
+    Two properties are easy to lose and load-bearing:
+
+    1. **It resolves the provider, not merely the opt-in cascade.** LESSON-392:
+       an enablement probe that checks a cheaper subset than the real call
+       green-lights delegation that then fails on the first API call, mislabelled
+       as a runtime error. ``resolve_provider`` raises ``SystemExit`` for a
+       key-in-config config; that refusal is a *config* reason, not "not opted
+       in", and callers need to be told which.
+    2. **`enabled: false` is decisive regardless of a legacy key** (REQ-603 BR-4 /
+       architecture ADR-4). The shell heuristic this replaces never read
+       ``enabled`` at all — it reported ``disabled-via-config`` only when a config
+       file existed *and* a legacy key happened to be exported, so the same
+       written instruction produced two different labels depending on an
+       unrelated variable. The label is corrected here; the return code the gate
+       derives from it is unchanged.
+    """
+    if cfg is None:
+        cfg = parse_delegate_config()
+
+    # Step 0 — the kill switch, ahead of every authorizing arm (BUG-209).
+    if os.environ.get("ADLC_DISABLE_DELEGATE") == "1":
+        return False, "disabled-via-env"
+
+    # An explicit `enabled: false` is an instruction, not an absent default. It
+    # outranks the legacy key (BUG-205) and names itself (ADR-4).
+    if cfg.get("enabled") is False:
+        return False, "disabled-via-config"
+
+    if not delegation_enabled(cfg):
+        return False, "not-opted-in"
+
+    # Opted in — but only "enabled" if the real call could actually run. Share
+    # the real call's resolution rather than a cheaper subset (LESSON-392).
+    try:
+        resolve_provider(cfg=cfg)
+    except SystemExit:
+        return False, "disabled-via-config"
+    return True, "ok"
+
+
 def require_delegation_enabled(prog, cfg=None):
     """Refuse to transmit when delegation is not opted in (BUG-206).
 

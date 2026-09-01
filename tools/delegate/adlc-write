@@ -99,6 +99,17 @@ def main(argv=None):
         print("\n".join(_common.version_report_lines(args_model=m, args_base_url=b)))
         return 0
 
+    # --print-gate: scanned out of argv BEFORE argparse for the same reason
+    # --version is (ADR-1) — --spec/--target are required=True and argparse would
+    # exit 2 first. Reports the gate's verdict and exits 0 on EVERY path,
+    # including disabled: it REPORTS, it never refuses (REQ-603 BR-10). Routing
+    # it through require_delegation_enabled() would make a caller read a non-zero
+    # exit and mislabel a `disabled-via-env` machine as `not-opted-in`.
+    if "--print-gate" in (sys.argv[1:] if argv is None else argv):
+        enabled, reason = _common.resolve_gate_verdict()
+        print(f"{1 if enabled else 0} {reason}")
+        return 0
+
     args = _parse_args(argv)
 
     if os.path.exists(args.target) and not args.force:

@@ -48,6 +48,12 @@ def _build_parser():
         help="print 1 if delegation is opted-in (BR-11), else 0, and exit; "
              "no files or question required, no network call",
     )
+    parser.add_argument(
+        "--print-gate",
+        action="store_true",
+        help="print '<enabled> <reason>' and exit — the gate's full verdict "
+             "(REQ-603); no files or question required, no network call",
+    )
     parser.add_argument("--paths", nargs="+", help="files to read")
     parser.add_argument("--question", help="question to answer")
     parser.add_argument("--max-tokens", type=int, default=8192)
@@ -87,7 +93,7 @@ _VERSION_VALUE_FLAGS = frozenset({
 # than printing the version for a command the user did not write. Kept honest by
 # a test that derives the same set from the parser itself.
 _KNOWN_FLAGS = _VERSION_VALUE_FLAGS | frozenset({
-    "-h", "--help", "--print-enabled", "--dry-run", "--no-warn",
+    "-h", "--help", "--print-enabled", "--print-gate", "--dry-run", "--no-warn",
 })
 
 
@@ -119,6 +125,16 @@ def main(argv=None):
         except SystemExit:
             # A malformed config (e.g. key-in-config) means "not safely enabled".
             print("0")
+        return 0
+
+    # --print-gate: the reason-bearing form the shell gate consumes (REQ-603).
+    # Exits 0 on EVERY path including disabled — it REPORTS, it does not refuse.
+    # Routing it through require_delegation_enabled() would make the gate read a
+    # non-zero exit, apply its fail-closed rule, and record `not-opted-in` for a
+    # machine whose true state is `disabled-via-env` (REQ-603 BR-10).
+    if args.print_gate:
+        enabled, reason = _common.resolve_gate_verdict()
+        print(f"{1 if enabled else 0} {reason}")
         return 0
 
     if not args.paths or not args.question:
