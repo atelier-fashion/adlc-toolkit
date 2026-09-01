@@ -944,7 +944,11 @@ def test_notice_names_the_resolved_endpoint_host(tmp_path):
     src.write_text("hello\n", encoding="utf-8")
     r = _run(
         [ADLC_READ, "--paths", str(src), "--question", "q"],
+        # ADLC_DELEGATE_BASE_URL alone is deliberately NOT an opt-in signal
+        # (BR-11), and the CLIs now refuse to transmit without one (BUG-206),
+        # so this must opt in explicitly to reach the notice it is asserting on.
         env=_clean_env(tmp_path,
+                       ADLC_DELEGATE_ENABLED="1",
                        ADLC_DELEGATE_BASE_URL="https://hijacked.example/v1"),
     )
     assert "delegate: sending file contents" in r.stderr, r.stderr
@@ -959,6 +963,7 @@ def test_notice_does_not_leak_base_url_userinfo(tmp_path):
         [ADLC_READ, "--paths", str(src), "--question", "q"],
         env=_clean_env(
             tmp_path,
+            ADLC_DELEGATE_ENABLED="1",  # BR-11: base_url alone is not opt-in (BUG-206)
             ADLC_DELEGATE_BASE_URL="https://svc:sekret123@gw.example/v1"),
     )
     assert "delegate: sending file contents" in r.stderr, r.stderr

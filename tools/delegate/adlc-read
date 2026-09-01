@@ -151,6 +151,13 @@ def main(argv=None):
             print(f"{m['role']}: {len(m['content'])} chars")
         return 0
 
+    # Refuse to transmit unless delegation is actually opted in (BUG-206).
+    # Placed AFTER the --dry-run return above — a dry run packs the corpus
+    # locally and sends nothing, so it stays available for debugging while
+    # delegation is off — and BEFORE provider resolution, so a disabled setup
+    # reports "disabled" rather than a confusing config/key error.
+    _common.require_delegation_enabled("adlc-read")
+
     # Resolve the provider once (validates key-in-config refusal before any
     # network touch). Notice fires after the dry-run gate and after path
     # validation, but BEFORE get_client() so the user always sees the privacy

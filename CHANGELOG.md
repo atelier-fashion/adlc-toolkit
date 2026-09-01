@@ -192,6 +192,32 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **The delegate CLIs now enforce `enabled` themselves (BUG-206).** `enabled` decides
+  whether file contents may leave the machine, but until now it was consulted in exactly
+  one place: `adlc-read --print-enabled`, the probe the shell gate calls. The path that
+  actually transmits never looked at it.
+
+  That made `partials/delegate-gate.sh` the sole enforcement — and that gate is
+  **vendored per repo**, sourced ahead of the toolkit copy. A repo carrying a stale
+  vendored gate called straight through a correct opt-out and the payload went out. It
+  is what made BUG-205's blast radius every consumer repo rather than one file.
+
+  `adlc-read` and `adlc-write` now refuse to transmit unless delegation is opted in,
+  exiting non-zero with an actionable message, before any provider resolution or network
+  touch. `--dry-run`, `--print-enabled`, and `--version` still work while disabled — a
+  dry run sends nothing, and the probes are how a disabled setup gets diagnosed.
+  Delegating skills already treat a non-zero exit as "fall back and read directly", so a
+  refusal degrades exactly like a missing binary and no caller changes.
+
+  Net effect: vendored-gate staleness is now a correctness problem rather than a
+  data-governance one.
+
+  Five pre-existing tests were corrected rather than accommodated — they set
+  `ADLC_DELEGATE_BASE_URL` (deliberately not an opt-in signal under BR-11) and relied on
+  reaching the exfiltration notice without opting in. Two of them would otherwise have
+  kept passing **vacuously**, reporting "no notice" because the run was refused rather
+  than because suppression worked.
+
 - **The shipped default model is live again (BUG-208).** The provider retired
   `kimi-k2.5`, so every delegated call on the shipped defaults returned HTTP 404 —
   `adlc-read`, `adlc-write`, and every skill routing through them (`/spec` Step 1.6,

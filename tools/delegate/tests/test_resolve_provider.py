@@ -6,6 +6,7 @@ Each test isolates the environment (monkeypatch clears all delegate/legacy vars)
 so a developer's real shell env cannot leak in.
 """
 import os
+import subprocess
 import sys
 
 import pytest
@@ -229,3 +230,90 @@ def test_print_enabled_reports_zero_fresh_install(clean_env):
     r = _print_enabled({}, clean_env)
     assert r.returncode == 0
     assert r.stdout.strip() == "0", r.stdout + r.stderr
+
+
+# --- BUG-206: the CLIs enforce `enabled` themselves --------------------------
+#
+# Before this guard, `enabled` was consulted ONLY by `--print-enabled`. The flag
+# governing whether file contents may leave the machine was read exclusively by
+# the probe, never by the code path that does the leaving — so the shell gate was
+# the sole enforcement. That gate is vendored per repo, so a stale vendored copy
+# called straight through a correct opt-out with nothing downstream objecting.
+
+def _run_cli(tool, args, env_overrides, tmp_home):
+    """Invoke a delegate CLI in a clean subprocess env."""
+    env = dict(os.environ)
+    for v in _DELEGATE_VARS:
+        env.pop(v, None)
+    env["HOME"] = str(tmp_home)
+    env.update(env_overrides)
+    return subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), tool)] + args,
+                          capture_output=True, text=True, env=env)
+
+
+def test_adlc_read_refuses_to_transmit_when_disabled(clean_env, tmp_path):
+    """The BUG-206 case: config says false, a legacy key is set, and the caller
+    invokes the real read path anyway (as a stale vendored gate would)."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    src = tmp_path / "f.md"; src.write_text("secret contents", encoding="utf-8")
+    r = _run_cli("adlc-read", ["--paths", str(src), "--question", "q"],
+                 {"ADLC_CONFIG": cfg, "MOONSHOT_API_KEY": "sk-legacy"}, clean_env)
+    assert r.returncode != 0, "a disabled CLI must fail, so callers fall back"
+    assert "not enabled" in r.stderr
+    assert "secret contents" not in r.stdout
+
+
+def test_adlc_write_refuses_and_writes_no_target_when_disabled(clean_env, tmp_path):
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    target = tmp_path / "out.md"
+    r = _run_cli("adlc-write", ["--spec", "s", "--target", str(target)],
+                 {"ADLC_CONFIG": cfg, "MOONSHOT_API_KEY": "sk-legacy"}, clean_env)
+    assert r.returncode != 0
+    assert "not enabled" in r.stderr
+    assert not target.exists(), "a refused run must leave no partial artifact"
+
+
+def test_guard_fires_before_any_network_touch(clean_env, tmp_path):
+    """Point the endpoint at an unroutable address. If the guard ran after the
+    client were built, this would hang or emit a connection error instead."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    src = tmp_path / "f.md"; src.write_text("x", encoding="utf-8")
+    r = _run_cli("adlc-read",
+                 ["--base-url", "https://10.255.255.1/v1", "--paths", str(src), "--question", "q"],
+                 {"ADLC_CONFIG": cfg, "MOONSHOT_API_KEY": "sk-legacy"}, clean_env)
+    assert r.returncode != 0
+    assert "not enabled" in r.stderr
+    assert "onnect" not in r.stderr, "should never have reached the network"
+
+
+def test_dry_run_still_works_while_disabled(clean_env, tmp_path):
+    """A dry run packs the corpus locally and sends nothing, so it stays
+    available for debugging while delegation is off."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    src = tmp_path / "f.md"; src.write_text("x", encoding="utf-8")
+    r = _run_cli("adlc-read", ["--dry-run", "--paths", str(src), "--question", "q"],
+                 {"ADLC_CONFIG": cfg, "MOONSHOT_API_KEY": "sk-legacy"}, clean_env)
+    assert r.returncode == 0, r.stderr
+    assert "not enabled" not in r.stderr
+
+
+def test_probes_still_work_while_disabled(clean_env):
+    """--print-enabled and --version are how an operator INSPECTS a disabled
+    setup; the guard must not break the tools used to diagnose it."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    env = {"ADLC_CONFIG": cfg, "MOONSHOT_API_KEY": "sk-legacy"}
+    assert _run_cli("adlc-read", ["--print-enabled"], env, clean_env).stdout.strip() == "0"
+    v = _run_cli("adlc-read", ["--version"], env, clean_env)
+    assert v.returncode == 0 and "enabled: false" in v.stdout
+
+
+def test_enabled_run_is_not_blocked_by_the_guard(clean_env, tmp_path):
+    """The guard must not become a second opt-out. With delegation properly
+    enabled it steps aside — the run proceeds past it and fails later at the
+    network/auth layer, not at the guard."""
+    src = tmp_path / "f.md"; src.write_text("x", encoding="utf-8")
+    r = _run_cli("adlc-read",
+                 ["--no-warn", "--base-url", "https://10.255.255.1/v1",
+                  "--paths", str(src), "--question", "q"],
+                 {"ADLC_DELEGATE_ENABLED": "1", "MOONSHOT_API_KEY": "sk-fake"}, clean_env)
+    assert "not enabled" not in r.stderr, "guard must not block an opted-in run"

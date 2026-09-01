@@ -36,6 +36,15 @@ def _env_without_key(home_override=None, **extra):
               "ADLC_DELEGATE_API_KEY_ENV", "ADLC_DELEGATE_BASE_URL",
               "ADLC_DELEGATE_MODEL", "ADLC_CONFIG"):
         env.pop(v, None)
+    # Opt in explicitly (BUG-206). Every test in this module is about what a
+    # REAL run prints on its way to the network — the notice firing, a bad path
+    # being skipped, the suppression flags. Since the CLIs now refuse to
+    # transmit unless delegation is opted in, an un-opted-in env would stop
+    # short of all of it: the notice-fires tests would fail, and the
+    # notice-suppressed tests would pass VACUOUSLY (no notice because the run
+    # was refused, not because suppression worked). Removing the KEY is what
+    # these tests need; removing the OPT-IN is not.
+    env["ADLC_DELEGATE_ENABLED"] = "1"
     if home_override is not None:
         env["HOME"] = str(home_override)
     env.update(extra)

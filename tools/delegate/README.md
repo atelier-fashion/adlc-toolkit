@@ -59,6 +59,22 @@ Opt-in is satisfied by **any one** of:
 
 Setting only `ADLC_DELEGATE_BASE_URL` / `_MODEL` is **not** opt-in.
 
+### The CLIs enforce this themselves
+
+`adlc-read` and `adlc-write` refuse to transmit unless delegation is opted in, and
+exit non-zero with an actionable message. This is deliberate redundancy with the
+shell gate: the gate is **vendored per repo** (`.adlc/partials/delegate-gate.sh`,
+sourced ahead of the toolkit copy), so a repo carrying a stale copy could otherwise
+call straight through a correct opt-out. A control that lives only in the layer that
+gets copied around is not a control (BUG-206).
+
+The refusal fires before any provider resolution or network touch. `--dry-run`,
+`--print-enabled`, and `--version` still work while delegation is off — a dry run
+sends nothing, and the probes are how you diagnose a disabled setup.
+
+Delegating skills already treat a non-zero exit as "fall back and read directly", so
+a refusal degrades exactly like a missing binary.
+
 ### Turning delegation off
 
 Writing `enabled: false` under `delegate:` turns delegation off, and outranks
