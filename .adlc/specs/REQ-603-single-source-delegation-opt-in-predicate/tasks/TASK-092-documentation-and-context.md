@@ -1,7 +1,7 @@
 ---
 id: TASK-092
 title: "Bring the gate's documented contract and the durable context in line"
-status: draft
+status: complete
 parent: REQ-603
 created: 2026-09-01
 updated: 2026-09-01

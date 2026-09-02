@@ -190,6 +190,62 @@ PRs (`atelier-fashion/adlc-toolkit`).
   remain drafts: listed here because the specs are in the tree, not because the
   behavior is.
 
+### Changed
+
+- **The delegation gate may veto; only Python may authorize (REQ-603).** ⚠️ **Upgrade
+  the gate and `adlc-read` together.**
+
+  The opt-in predicate was implemented twice — in `partials/delegate-gate.sh` and in
+  `_common.delegation_enabled` — and checked by two disjoint suites. That duplication
+  produced two data-governance defects, one per arm shell decided: **BUG-205** (a shell
+  fast path silently overrode a written `enabled: false` and transmitted) and
+  **BUG-209** (`ADLC_DISABLE_DELEGATE` existed in shell and nowhere in Python, so both
+  CLIs ignored the documented emergency stop). Each fix corrected the arm that had just
+  failed; neither removed the condition that lets the next one drift.
+
+  The gate now makes exactly two decisions, and **both can only withhold** delegation:
+
+  1. binary resolution → `2 no-binary`
+  2. the `ADLC_DISABLE_DELEGATE` veto → `1 disabled-via-env`, with **zero forks**
+
+  Everything that could *grant* delegation resolves in one `adlc-read --print-gate`
+  call, which prints `<enabled> <reason>` and exits 0 on every path — it reports, it
+  never refuses. The gate validates the reason against the frozen enum and fails closed
+  on anything else.
+
+  The veto stays duplicated **on purpose**: a veto can only return *disabled*, so the
+  copies agree or abstain but cannot contradict — provided Python recognises at least
+  every input the shell does. Both test the literal `"1"`, and `test_cross_layer_veto.py`
+  drives both layers over one input vector so widening either alone fails. Widening the
+  shell veto alone is exactly how BUG-209 would return.
+
+  **Five named behaviour changes, all fail-closed.** None makes the gate grant delegation
+  it previously withheld:
+
+  | input | before | after | rc |
+  |---|---|---|---|
+  | `enabled: false`, no legacy key | `not-opted-in` | `disabled-via-config` | unchanged |
+  | key VALUE in `api_key_env` | `not-opted-in` | `disabled-via-config` | unchanged |
+  | opt-in satisfied, key var unset | `ok` | `disabled-via-config` | **0 → 1** |
+  | config exists but unreadable | `ok` | `disabled-via-config` | **0 → 1** |
+  | `--print-enabled`, unreadable config + legacy key | prints `1` | prints `0` | output |
+
+  The first corrects a label that depended on an unrelated variable — the pre-REQ helper
+  never read `enabled`, reporting `disabled-via-config` only when a config file existed
+  *and* a legacy key happened to be set.
+
+  ⚠️ The last one is a **security fix**. An unreadable or unparsable config previously
+  returned an empty result indistinguishable from *no config*, falling through to
+  legacy-key continuity — so an operator who wrote `enabled: false` on a machine with a
+  stale key exported delegated anyway. That is BUG-205's reported outcome via a read
+  failure rather than a precedence bug. A config that exists but cannot be read is now a
+  refusal, not a default. If you rely on delegation and see `disabled-via-config`
+  unexpectedly, check that your config is readable.
+
+  **Migration:** an `adlc-read` predating `--print-gate` makes the gate fail closed —
+  delegation off, safely but silently, reported as `not-opted-in`. `--print-enabled` is
+  frozen and unchanged for callers that predate this.
+
 ### Fixed
 
 - **`ADLC_DISABLE_DELEGATE=1` actually works now (BUG-209).** ⚠️ **Read this if you

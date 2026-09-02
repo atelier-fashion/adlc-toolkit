@@ -1,7 +1,7 @@
 ---
 id: TASK-089
 title: "Add resolve_gate_verdict() as the single authority, exposed as --print-gate"
-status: draft
+status: complete
 parent: REQ-603
 created: 2026-09-01
 updated: 2026-09-01

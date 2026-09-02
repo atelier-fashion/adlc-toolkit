@@ -63,6 +63,15 @@ in `~/.claude/adlc/config.yml`, or an already-set legacy `KIMI_API_KEY`/`MOONSHO
 An explicit `delegate.enabled: false` turns delegation **off** and outranks the legacy
 key; an *absent* `enabled` key yields to it. Collapsing those two was BUG-205.
 
+**Where that cascade is resolved (REQ-603):** in Python, once. The shell gate may
+*withhold* delegation — `no-binary`, and the `ADLC_DISABLE_DELEGATE` veto — but may
+never *grant* it; every path that concludes "delegated" runs through
+`_common.resolve_gate_verdict()` via one `adlc-read --print-gate` call. The veto is
+the single deliberate duplication, safe because a veto can only return *disabled*,
+and enforced by a cross-layer test that drives both layers over one input vector.
+Do not add an authorizing arm to the gate: BUG-205 and BUG-209 are the two
+directions that invariant has already been violated from.
+
 Per-step telemetry state crosses the create → gate → invoke → resolve fenced blocks via
 the **flag-file sidecar** (`partials/delegate-tools-path.sh`'s `skill-flag.sh mark`/`read`),
 never via shell variables, because fenced blocks do not share shell state (REQ-522 BR-4).

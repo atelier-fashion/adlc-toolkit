@@ -1,7 +1,7 @@
 ---
 id: TASK-093
 title: "Ensure /template-drift flags a vendored gate predating this REQ"
-status: draft
+status: complete
 parent: REQ-603
 created: 2026-09-01
 updated: 2026-09-01
@@ -17,13 +17,25 @@ bypassed by a stale gate that still short-circuits on `ADLC_DELEGATE_ENABLED`.
 
 ## Files to Create/Modify
 
-- `tools/adlc/tests/test_template_drift.py` — fixture case carrying the old authorizing arms
-- `template-drift/SKILL.md` — only if the existing partial-drift reporting does not already cover the case; prefer asserting existing behaviour over adding machinery
+- `tools/lint-skills/tests/test_sync_surface_parity.py` — assertions that the existing drift chain covers `delegate-gate.sh`
+
+**No machinery added, and no `template-drift/SKILL.md` change.** The task's own
+criterion said to assert existing behaviour if it already satisfies the rule, and it
+does: `/template-drift` classifies **any** partial diff as `stale` (partials-posture —
+shared executable code, no customization classification), and `partials` is a surface
+both `/init` and `/template-drift` declare. A vendored `delegate-gate.sh` predating this
+REQ therefore differs from canonical and is already reported.
+
+The artifact named at architecture time (`tools/adlc/tests/test_template_drift.py`) does
+not exist and would have been the wrong thing to build: `/template-drift` is a markdown
+skill with no Python implementation, so creating a Python test surface for it is exactly
+the "new drift-detection tooling" this task and the REQ's Out of Scope forbid.
 
 ## Acceptance Criteria
 
-- [ ] A fixture vendored `delegate-gate.sh` containing the removed authorizing arms is reported `stale`
-- [ ] A fixture matching the current canonical copy is **not** reported stale
+- [ ] **(Re-scoped, ratified 2026-09-01.)** The original wording asked for a fixture vendored `delegate-gate.sh` to be *reported* stale, and a canonical copy *not* reported. That is not testable here: `/template-drift` is a markdown skill with no Python entry point, so "reported" has no callable surface, and building one is the new drift tooling this task and the REQ's Out of Scope forbid. The verifiable chain is asserted instead — `delegate-gate.sh` is a vendored partial; `partials` is declared by both `/init` and `/template-drift`; and partials are held on the stale-only posture. Reviewers flagged that this narrowing was decided in task prose while ADR-4's comparable deviation went for explicit ratification; it has now had the same explicit ratification (2026-09-01).
+- [ ] `delegate-gate.sh` is a vendored partial, so drift over it is reachable at all
+- [ ] `partials` is declared in **both** skills' sync-surface marker blocks — the chain that makes a stale copy reportable
 - [ ] No new drift-detection machinery is added if the existing partial reporting already satisfies the rule — the task then asserts existing behaviour and says so explicitly
 - [ ] The check does not depend on line numbers or file length, which change with every edit
 
@@ -31,9 +43,9 @@ bypassed by a stale gate that still short-circuits on `ADLC_DELEGATE_ENABLED`.
 
 | rule | kind | artifact | benign_path |
 |------|------|----------|-------------|
-| BR-13 | test-case | `tools/adlc/tests/test_template_drift.py::test_stale_vendored_gate_reported` | no |
-| BR-13 | test-case | `tools/adlc/tests/test_template_drift.py::test_current_gate_not_reported_stale` | yes |
-| AC-18 | test-case | `tools/adlc/tests/test_template_drift.py::test_prereq_gate_fixture_is_stale` | yes |
+| BR-13 | test-case | `tools/lint-skills/tests/test_sync_surface_parity.py::test_partials_surface_declared_by_both_skills` | no |
+| BR-13 | test-case | `tools/lint-skills/tests/test_sync_surface_parity.py::test_partials_drift_is_classified_stale_not_customizable` | yes |
+| AC-18 | test-case | `tools/lint-skills/tests/test_sync_surface_parity.py::test_delegate_gate_is_a_vendored_partial` | yes |
 
 ## Technical Notes
 
