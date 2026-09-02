@@ -122,11 +122,11 @@ The gap list is the point. A spec written from a transcript will always contain 
       ```bash
       . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
       . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
-      [ -n "$ADLC_READ_BIN" ] || { echo "/spec: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
+      case "$ADLC_READ_BIN" in /*) ;; *) echo "/spec: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
       "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
       # --paths takes the LITERAL corpus path echoed as INTAKE_CORPUS in step 2 —
       # not "$ADLC_INTAKE_CORPUS", which is empty in this separate shell.
-      "$ADLC_READ_BIN" --no-warn --paths <INTAKE_CORPUS literal> --question "This is an unstructured requirements source split into <segment id=\"Sxx\"> blocks. For EACH segment, return one block delimited '<segment id=\"Sxx\">' containing: (a) the concrete feature intent stated in that segment, (b) any entities, fields, rules, or constraints named, (c) anything stated as a decision or a hard requirement. Return one block per segment even if a segment adds nothing — say 'nothing new' rather than omitting it. Then a final '<distilled>' block: a 5-10 sentence feature request written from the whole source. 1500 words max total."
+      command "$ADLC_READ_BIN" --no-warn --paths <INTAKE_CORPUS literal> --question "This is an unstructured requirements source split into <segment id=\"Sxx\"> blocks. For EACH segment, return one block delimited '<segment id=\"Sxx\">' containing: (a) the concrete feature intent stated in that segment, (b) any entities, fields, rules, or constraints named, (c) anything stated as a decision or a hard requirement. Return one block per segment even if a segment adds nothing — say 'nothing new' rather than omitting it. Then a final '<distilled>' block: a 5-10 sentence feature request written from the whole source. 1500 words max total."
       "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
       ```
       (The gate partial is re-sourced here because fenced blocks do not share shell state — it exports `ADLC_READ_BIN`, the resolved binary.)
@@ -379,9 +379,9 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
       ```bash
       . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
       . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
-      [ -n "$ADLC_READ_BIN" ] || { echo "/spec: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
+      case "$ADLC_READ_BIN" in /*) ;; *) echo "/spec: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
       "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
-      "$ADLC_READ_BIN" --no-warn --paths <top-15 paths> --question "For each file, return a structured summary: (a) one-paragraph topic, (b) the 3-5 most important business rules / lesson points / bug-resolution facts likely relevant to a NEW feature being specified, (c) any REQ or LESSON ids cited inside. Output as one block per file with explicit '<doc id=\"<ID>\">' delimiters. 1200 words max total."
+      command "$ADLC_READ_BIN" --no-warn --paths <top-15 paths> --question "For each file, return a structured summary: (a) one-paragraph topic, (b) the 3-5 most important business rules / lesson points / bug-resolution facts likely relevant to a NEW feature being specified, (c) any REQ or LESSON ids cited inside. Output as one block per file with explicit '<doc id=\"<ID>\">' delimiters. 1200 words max total."
       "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
       ```
       (The gate partial is re-sourced here because fenced blocks do not share shell state — it exports `ADLC_READ_BIN`, the resolved binary (PATH, or `$HOME/bin/adlc-read` in GUI-launched sessions whose PATH lacks `~/bin`).)

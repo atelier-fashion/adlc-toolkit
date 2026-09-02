@@ -294,7 +294,6 @@ esac
    ```bash
    . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
    . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
-   [ -n "$ADLC_READ_BIN" ] || { echo "/wrapup: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
    # Re-read the transcript path step 1 persisted to the sidecar (fenced blocks
    # do not share shell state — REQ-522 BR-4). The gate partial is re-sourced
    # for the same reason: it exports ADLC_READ_BIN, the resolved binary (PATH,
@@ -314,9 +313,15 @@ esac
        else
            # Best-effort key redaction so a stray pasted key in the transcript doesn't leave the machine.
            sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE" && rm -f "$TMPFILE.bak"
-           # Delegate the draft. Mark invoked/exit around the call (REQ-424 telemetry).
+           # Delegate the draft. The refusal lives HERE, in the branch that
+           # actually delegates — hoisted above the `[ -z "$JSONL" ]` test it
+           # turned "no transcript to summarise", an ordinary non-delegating
+           # fallback, into a hard exit. It still precedes `mark invoked 1`, so
+           # a refusal is recorded as NOT invoked.
+           case "$ADLC_READ_BIN" in /*) ;; *) echo "/wrapup: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+           # Mark invoked/exit around the call (REQ-424 telemetry).
            "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
-           "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "Propose a LESSON-<reqid> draft following the template at .adlc/templates/lesson-template.md (or ~/.claude/skills/templates/lesson-template.md if absent). 400 words max. Include frontmatter (id, title, component, domain, stack, concerns, tags, req, dates) and the four template sections."
+           command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "Propose a LESSON-<reqid> draft following the template at .adlc/templates/lesson-template.md (or ~/.claude/skills/templates/lesson-template.md if absent). 400 words max. Include frontmatter (id, title, component, domain, stack, concerns, tags, req, dates) and the four template sections."
            "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
        fi
    fi

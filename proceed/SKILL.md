@@ -392,9 +392,9 @@ esac
    ```bash
    . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
    . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
-   [ -n "$ADLC_READ_BIN" ] || { echo "/proceed: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
+   case "$ADLC_READ_BIN" in /*) ;; *) echo "/proceed: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
-   "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
+   command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
    ```
    (The gate partial is re-sourced here because fenced blocks do not share shell state — it exports `ADLC_READ_BIN`, the resolved binary (PATH, or `$HOME/bin/adlc-read` in GUI-launched sessions whose PATH lacks `~/bin`).)

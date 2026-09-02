@@ -155,20 +155,34 @@ defined under an absolute-path name cannot intercept either.
 
 A delegated-invocation fence MUST source this partial **in the same fenced block**
 as the invocation — fenced blocks do not share shell state, so the export from the
-gate-check fence does not reach the invocation fence — and then refuse an empty
-value in that same fence before invoking `"$ADLC_READ_BIN"` (REQ-609 BR-12):
+gate-check fence does not reach the invocation fence — and then satisfy three
+obligations before the corpus is handed over (REQ-609 BR-12, ADR-3):
 
 ```sh
 . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
-[ -n "$ADLC_READ_BIN" ] || { echo "/<skill>: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
-"$ADLC_READ_BIN" --no-warn --paths ... --question "..."
+case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+command "$ADLC_READ_BIN" --no-warn --paths ... --question "..."
 ```
 
-The old `:-adlc-read` default is **retired**. It was a second resolver at the call
-site, by the weakest rule available, reached in exactly the situation where the
-first resolver had already declined to answer. An empty `ADLC_READ_BIN` at the
-moment the corpus would be handed over is a hard error, not an invitation to
-resolve the name again less carefully.
+1. **No second resolver.** The old `:-adlc-read` default is **retired**. It was a
+   second resolution at the call site, by the weakest rule available, reached in
+   exactly the situation where the first resolver had already declined to answer.
+2. **The guard tests for an absolute path, not for non-empty.** This partial
+   exports an absolute path or the empty string and nothing else — but a consumer
+   repo whose vendored copy predates REQ-609 exports the plain command name on a
+   `$PATH` hit, which the canonical resolver never does, and `[ -n … ]` passes
+   that through to the shell's lookup machinery. So the shape of the value is
+   what is checked, and the message quotes the value that failed.
+3. **The invocation goes through `command`.** bash and zsh both permit a function
+   whose *name* is an absolute path, so a bare `"$ADLC_READ_BIN" --paths …` runs
+   that function rather than the file the resolver proved is on disk — and the
+   function is handed the corpus. `command` bypasses function and alias lookup,
+   which is why the probe in this partial already used it; the call sites, which
+   are the ones actually holding the corpus, did not.
+
+Where a fence marks telemetry, the refusal goes **before**
+`skill-flag.sh mark "$flag" invoked 1`, so a refusal is recorded as *not* invoked
+rather than as a delegated call that produced nothing.
 
 **The refusal shape differs by call site, and both refuse before any transmission:**
 
@@ -178,15 +192,51 @@ resolve the name again less carefully.
 - **The `delegate-pre-pass` agent** must not exit non-zero — its contract makes a
   non-zero exit a signal it is not allowed to send — so its two fences emit the
   same stderr line and **degrade into the sanctioned empty-candidates object**
-  (`invoked:false`), exiting 0.
+  (`invoked:false`, `exit:-1`), exiting 0. Its telemetry record is
+  `gate=fail`, `mode=fallback`, `reason=no-binary`: an unusable recipient is what
+  this gate itself reports as `no-binary`, and a `gate=fail` record is left alone
+  by `emit-telemetry.sh`'s ghost-skip unmasker. It is specifically **not**
+  `reason=api-error`, the one reason sanctioned for `gate=pass`/`mode=fallback`,
+  which asserts that the delegate was really invoked and the API rejected the
+  call — nothing was invoked here, and claiming otherwise would put a fabricated
+  API call into the telemetry the reflector reads.
 
-`tools/lint-skills`'s `read-bin-fallback` check rejects any `SKILL.md` fence
-containing a bare-name default for this variable, so the retired shape cannot rot
-back in — the same structural posture as `forge-direct-gh` (LESSON-012). The
-agent's fences are outside the linter's walk and are covered by the
-fence-execution test in `tools/lint-skills/tests/test_read_bin_fences.py`.
+`tools/lint-skills`'s `read-bin-fallback` check enforces all three obligations
+structurally — no `:-` default, `command` on every invocation, and the guard
+before the first invocation — so the retired shapes cannot rot back in (the same
+posture as `forge-direct-gh`, LESSON-012). It scans `SKILL.md` files and, for
+this one check only, `agents/*.md`, so the pre-pass agent's fences are covered
+too; `tools/lint-skills/tests/test_read_bin_fences.py` then *executes* every
+fence under `sh`, `bash` and `zsh` against an empty value, a bare command name,
+and a planted absolute-path function, each with a positive control.
 
-**Vendored copies.** A consumer repo whose `.adlc/partials/delegate-gate.sh` predates REQ-609 still exports a bare name on a `$PATH` hit, which the canonical resolver never does; the new fences then invoke that value and the shell resolves it — the pre-REQ-609 state, not a hard failure. `/template-drift` reports the stale copy (LESSON-441); re-run `/init` to re-vendor.
+**Outside the threat model: a hostile in-process shell.** `command` is itself a
+shell builtin, and a function named `command` can shadow it — so a shell that has
+already been made hostile before the fence runs can forge a grant. That is out of
+scope by construction: everything inside this process is code the operator is
+running on purpose, and the arms that *authorize* delegation live in Python
+(REQ-603), which does not consult shell state. Such a shell could fake a verdict,
+but it cannot cause transmission — `adlc-read` re-resolves the gate itself and
+refuses. What `command` closes is the narrower and realistic case: a function
+planted by an unrelated rc file, tool wrapper, or dotfile that happens to shadow
+a path the resolver returned.
+
+**Vendored copies.** A consumer repo whose `.adlc/partials/delegate-gate.sh`
+predates REQ-609 still exports a plain command name on a `$PATH` hit; the new
+call-site guard now refuses that value outright rather than invoking it, so the
+stale copy degrades to "no delegation" instead of to the pre-REQ-609 resolution.
+`/template-drift` reports the stale copy (LESSON-441); re-run `/init` to
+re-vendor, which the refusal message says.
+
+**Known limitation: the vendored gate is trusted as repo-local code.** A skill
+fence sources `.adlc/partials/delegate-gate.sh` from the working repo before
+falling back to `~/.claude/skills/partials/`, and there is no digest pin on that
+copy — it is trusted exactly as every other vendored partial (`forge.sh`,
+`emit-step-telemetry.sh`, `delegate-tools-path.sh`) is trusted, i.e. as code the
+operator has checked out and is running on purpose. Anyone who can write that
+file can also write the `SKILL.md` that sources it. Pinning the vendored partials
+to a digest and having `/template-drift` verify it is a follow-up, not something
+this contract relies on.
 
 ## Canonical stderr emit pattern
 

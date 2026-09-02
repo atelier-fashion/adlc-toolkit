@@ -94,14 +94,24 @@ reason="$ADLC_DELEGATE_GATE_REASON"   # ok | no-binary | disabled-via-env
 # belt-and-braces check that can only withhold, never grant. It is a SECOND fork
 # (the incoherent-pair risk BR-7 names); keep it only as long as that is
 # understood, and never re-add a rationale calling it a key probe.
-# REQ-609 BR-12: no bare-name fallback. An empty ADLC_READ_BIN cannot happen after a
-# gate rc of 0 (the gate reports no-binary first), so this is a defensive refusal —
-# and this agent never exits non-zero to signal a problem, so it degrades: key_ok=0
-# routes to the "do NOT call the delegate" branch below.
-if [ -n "$ADLC_READ_BIN" ]; then
-  key_ok=$("$ADLC_READ_BIN" --print-enabled 2>/dev/null || echo 0)
+# REQ-609 BR-12: no bare-name fallback, and the guard tests for an ABSOLUTE PATH
+# rather than for non-empty. The canonical gate exports an absolute path or empty
+# and nothing else, but a consumer repo whose vendored gate predates REQ-609 still
+# exports the BARE NAME on a $PATH hit, and a non-empty test hands that straight
+# back to the shell's lookup machinery — the resolution the gate walks $PATH
+# precisely to avoid (BUG-209). Unreachable after a gate rc of 0 (the gate reports
+# no-binary first), so this is a defensive refusal — and this agent never exits
+# non-zero to signal a problem, so it degrades: key_ok=0 routes to the "do NOT
+# call the delegate" branch below, and read_bin_missing makes that record say
+# no-binary rather than key-absent.
+# `command` bypasses function and alias lookup: bash and zsh both permit a
+# function whose name is an absolute path, and without the prefix that function —
+# not the file the resolver proved is there — is what would run (REQ-609 ADR-3).
+case "$ADLC_READ_BIN" in /*) read_bin_missing=0 ;; *) read_bin_missing=1 ;; esac
+if [ "$read_bin_missing" = "0" ]; then
+  key_ok=$(command "$ADLC_READ_BIN" --print-enabled 2>/dev/null || echo 0)
 else
-  echo "delegate-pre-pass: ADLC_READ_BIN is empty — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation)" >&2
+  echo "delegate-pre-pass: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2
   key_ok=0
 fi
 ```
@@ -119,14 +129,24 @@ if [ "$gate" -ne 0 ]; then
   gate_word=fail            # gate predicate already failed
   # `reason` is already the gate reason; pass it through untouched.
 else
-  # Gate said ok, but the KEY is absent. The gate predicate does NOT check the
-  # key, so this is a PRECONDITION miss. Emit it as gate=fail / reason=key-absent
-  # so it lands on emit-telemetry.sh's legitimate gate=fail branch — NOT the
-  # gate=pass/mode=fallback combination, which the ghost-skip guard would coerce
-  # to a scary `ghost-skip` (the call genuinely never happened, but it is not a
-  # ghost-skip — the key was simply unset). (LESSON-012, emit-telemetry guard)
+  # Gate said ok, but either the resolver's answer was unusable (REQ-609 BR-12)
+  # or the KEY is absent — the gate predicate does not check the key. Both are
+  # PRECONDITION misses in which NOTHING was invoked, so both are emitted as
+  # gate=fail: that lands on emit-telemetry.sh's legitimate gate=fail branch,
+  # never on gate=pass/mode=fallback, whose ONE sanctioned reason is `api-error`
+  # ("adlc-read was really invoked and the API failed") and whose ghost-skip
+  # guard would otherwise coerce this into a scary `ghost-skip`. The call
+  # genuinely never happened, but it is not a ghost-skip.
+  # (LESSON-012, emit-telemetry guard)
   gate_word=fail
-  reason=key-absent
+  if [ "${read_bin_missing:-0}" = "1" ]; then
+    # An unusable recipient is exactly what the gate itself reports as
+    # `no-binary`; reuse that reason rather than inventing one — REQ-603 BR-4
+    # freezes the reason vocabulary.
+    reason=no-binary
+  else
+    reason=key-absent
+  fi
 fi
 "$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
 ```
@@ -198,18 +218,30 @@ elapsed time around the call so `duration_ms` is real on the success path:
 ```sh
 start_ms=$(date +%s%3N 2>/dev/null || echo "")
 case "$start_ms" in *[!0-9]*|"") start_ms="" ;; esac   # BSD date prints a literal N for %N; keep only digits or empty
-if [ -n "$ADLC_READ_BIN" ]; then
-  "$ADLC_READ_BIN" --no-warn --paths "$TMP" --question "<5-dimension request below>"; delegate_exit=$?
+# REQ-609 BR-12 / ADR-3: an ABSOLUTE-PATH guard (a bare name is what a stale
+# vendored gate still exports, and `[ -n ]` would pass it), and `command` so a
+# function named with that absolute path — which bash and zsh both permit —
+# cannot stand in for the file the resolver proved is there.
+case "$ADLC_READ_BIN" in /*) read_bin_missing=0 ;; *) read_bin_missing=1 ;; esac
+if [ "$read_bin_missing" = "0" ]; then
+  command "$ADLC_READ_BIN" --no-warn --paths "$TMP" --question "<5-dimension request below>"; delegate_exit=$?
 else
-  # REQ-609 BR-12: no bare-name fallback, and never a non-zero exit from this agent.
-  # Unreachable after a gate rc of 0; kept as a defensive refusal that mirrors the
-  # redaction-failure block above: nothing is transmitted, the sanctioned
-  # gate=pass/mode=fallback/reason=api-error record is emitted, and the degraded
-  # object is returned with invoked:false, exit:-1.
-  echo "delegate-pre-pass: ADLC_READ_BIN is empty — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation)" >&2
-  gate_word=pass; mode=fallback; reason=api-error; duration_ms=-
+  # Never a non-zero exit from this agent. Unreachable after a gate rc of 0; kept
+  # as a defensive refusal: nothing is transmitted and the degraded object is
+  # returned with invoked:false, exit:-1.
+  #
+  # The record is gate=fail / reason=no-binary, NOT the api-error shape the
+  # redaction-failure block above uses. `api-error` is the one reason
+  # emit-telemetry.sh sanctions for gate=pass/mode=fallback, and it means "the
+  # delegate was really invoked and the API rejected the call" — here nothing was
+  # invoked at all, so claiming it would put a fabricated API call into the
+  # telemetry the reflector reads. An unusable recipient is what the gate itself
+  # reports as `no-binary` (REQ-603 BR-4 freezes the vocabulary), and gate=fail
+  # records are left alone by the ghost-skip unmasker.
+  echo "delegate-pre-pass: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2
+  gate_word=fail; mode=fallback; reason=no-binary; duration_ms=-
   "$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
-  delegate_exit=-1; read_bin_missing=1
+  delegate_exit=-1
 fi
 end_ms=$(date +%s%3N 2>/dev/null || echo "")
 case "$end_ms" in *[!0-9]*|"") end_ms="" ;; esac
@@ -228,7 +260,7 @@ dimensions, each citing a file and line range from the diff:
 > own line for any dimension with no candidates. Cite only files present in the
 > diff. Total 1000 words max.
 
-**If `read_bin_missing` is set**: the record is already emitted; RETURN the degraded object with `invoked:false`, `exit:-1`, the TRUSTED `changedFiles`, `candidates: []`, and STOP.
+**If `read_bin_missing` is `1`**: the record is already emitted — `gate=fail`, `mode=fallback`, `reason=no-binary`, because nothing was invoked; RETURN the degraded object with `invoked:false`, `exit:-1`, the TRUSTED `changedFiles`, `candidates: []`, and STOP.
 
 **If `delegate_exit` is non-zero**: `adlc-read` was really invoked but the API failed.
 Set the step-6 vars and emit the fallback record, then RETURN the degraded object

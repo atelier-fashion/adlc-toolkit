@@ -56,24 +56,44 @@ esac
 ```
 
 The invocation fence sources the partial again — fenced blocks share no shell state —
-and invokes the **absolute path** the gate exported, refusing an empty value in that
-same fence before any corpus is handed over (REQ-609 BR-12):
+and invokes the **absolute path** the gate exported, refusing anything that is not an
+absolute path in that same fence before any corpus is handed over (REQ-609 BR-12):
 
 ```sh
 . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
-[ -n "$ADLC_READ_BIN" ] || { echo "/<skill>: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
-"$ADLC_READ_BIN" --no-warn --paths ... --question "..."
+case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+command "$ADLC_READ_BIN" --no-warn --paths ... --question "..."
 ```
 
-There is **no bare-name default** any more. Falling back to the plain command name
-was a second resolver at the call site, by the weakest rule available, reached in
-exactly the case where the first resolver had already declined — and the gate now
-resolves by walking `$PATH` itself precisely so the shell's lookup machinery cannot
-answer (REQ-609 BR-11). `lint-skills`' **`read-bin-fallback`** check rejects any
-fence carrying that default, the same structural posture as `forge-direct-gh`
-(LESSON-012). Skills refuse by exiting non-zero; `agents/delegate-pre-pass.md`,
-whose contract forbids a non-zero exit, refuses into its degraded empty-candidates
-object instead.
+Three properties, all three enforced by `lint-skills`' **`read-bin-fallback`** check
+(the same structural posture as `forge-direct-gh`, LESSON-012 — and the one check
+that also walks `agents/*.md`, since the pre-pass agent hands over a corpus too):
+
+- **No bare-name default.** Falling back to the plain command name was a second
+  resolver at the call site, by the weakest rule available, reached in exactly the
+  case where the first resolver had already declined — and the gate now resolves by
+  walking `$PATH` itself precisely so the shell's lookup machinery cannot answer
+  (REQ-609 BR-11).
+- **The guard tests the *shape* of the value**, not just that it is non-empty. The
+  canonical gate exports an absolute path or empty, but a project whose vendored
+  `.adlc/partials/delegate-gate.sh` predates REQ-609 still exports the plain command
+  name on a `$PATH` hit, and `[ -n … ]` hands that back to the shell to resolve.
+- **`command` on every invocation.** bash and zsh both permit a function whose name
+  is an absolute path, so without the prefix a planted function — not the file the
+  resolver proved is on disk — receives the corpus. The gate's own probe already
+  used `command`; the call sites did not (REQ-609 ADR-3).
+
+Skills refuse by exiting non-zero; `agents/delegate-pre-pass.md`, whose contract
+forbids a non-zero exit, refuses into its degraded empty-candidates object instead
+and records `gate=fail`/`mode=fallback`/`reason=no-binary` — never `api-error`,
+which asserts a call that in this branch never happened.
+
+A hostile in-process shell can shadow `command` itself with a function of that name;
+that is out of the threat model (everything in the process is code the operator ran
+on purpose) and it cannot cause transmission anyway, because only Python authorizes.
+Likewise, a project's vendored `.adlc/partials/*.sh` are trusted as repo-local code —
+there is no digest pin on them yet; that is a follow-up, not something this pattern
+relies on.
 
 The reason is exported as `ADLC_DELEGATE_GATE_REASON`. Delegation is **opt-in** (off by
 default on fresh installs) — enabled by `ADLC_DELEGATE_ENABLED=1`, `delegate.enabled: true`
