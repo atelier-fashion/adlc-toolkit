@@ -3,7 +3,7 @@
 # The SINGLE place gh/az PR commands live (BR-1). Source this partial, then call
 # the adapter functions WITHIN THE SAME fenced block (conventions.md cross-fence
 # rule):
-#   . .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+#   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
 #   out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 #
 # Provider resolution (BR-2): per-project .adlc/config.yml forge.provider >

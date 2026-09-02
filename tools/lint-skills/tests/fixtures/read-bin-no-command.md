@@ -11,7 +11,7 @@ This prose spells `"$ADLC_READ_BIN" --no-warn` outside any fence and must NOT be
 flagged (fences only, same posture as `forge-direct-gh`).
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 case "$ADLC_READ_BIN" in /*) ;; *) echo "/example: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing" >&2; exit 1 ;; esac
 "$ADLC_READ_BIN" --no-warn --paths ./notes.md --question "summarize"
 ```

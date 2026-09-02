@@ -22,7 +22,10 @@ prints it. Skills invoke it like:
 ```
 
 The consumer-project-first fallback works whether or not `/init` has been run
-in the consumer repo.
+in the consumer repo. This form needs **no** `[ -f ]` guard: `sh <file>` is an
+ordinary command, so an absent repo-local copy fails with exit 127 and the `||`
+arm runs normally. Model 2 below is the one that has to be guarded, because `.`
+is a POSIX special built-in and a failed `.` is fatal under `sh` (REQ-610).
 
 ### 2. Sourceable partial (defines a function)
 
@@ -109,11 +112,23 @@ behavior. Examples:
 Skills invoke a model-2 partial like:
 
 ```bash
-. .adlc/partials/<name>.sh 2>/dev/null || . ~/.claude/skills/partials/<name>.sh
+if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi
 adlc_<name>_function; result=$?
 ```
 
 Capture `$?` immediately — every subsequent command clobbers it.
+
+The `if`/`else` guard is not decoration and there is exactly **one** accepted
+spelling of it. `.` is a POSIX special built-in, so a *failed* `.` makes a
+non-interactive shell exit outright: the retired
+`. <local> 2>/dev/null || . <canonical>` never reached its fallback under `dash`
+or macOS `/bin/sh` — the block just died, and the `2>/dev/null` made it silent
+(REQ-610). `command .` does not fix it (macOS `/bin/sh` still exits) and
+`[ -f A ] && . A || . B` does not either: it sources the canonical copy *on top
+of* the repo-local one whenever the repo-local copy's last command returns
+non-zero, inverting the repo-local-first precedence. `tools/lint-skills`'
+`unguarded-source` check rejects every spelling but the one above; the full
+reasoning is in conventions.md "Bash in skills".
 
 ## When does a partial need a companion `.md`?
 

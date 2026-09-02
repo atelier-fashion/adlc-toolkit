@@ -9,11 +9,11 @@ bodies stay inline at the call site.
 
 ## Sourcing the partial
 
-Use a two-level fallback so the macro works in consumer projects that
+Use the guarded two-level source (conventions.md "Bash in skills") so the macro works in consumer projects that
 haven't re-run `/init` since the toolkit shipped the partial:
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 ```
 
 `.` (dot) is POSIX; do NOT use `source` (bash-only).
@@ -59,7 +59,7 @@ Read `$?` IMMEDIATELY into a variable — `$?` is clobbered by every
 subsequent command:
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 adlc_delegate_gate_check; gate=$?
 case $gate in
   0) # delegated path — invoke adlc-read, capture stdout, post-validate
@@ -159,7 +159,7 @@ gate-check fence does not reach the invocation fence — and then satisfy three
 obligations before the corpus is handed over (REQ-609 BR-12, ADR-3):
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
 command "$ADLC_READ_BIN" --no-warn --paths ... --question "..."
 ```

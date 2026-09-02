@@ -9,7 +9,7 @@ finding, which it can only draw if the braced form is recognised as an
 invocation in the first place.
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 command "${ADLC_READ_BIN}" --no-warn --paths ./notes.md --question "summarize"
 ```
 

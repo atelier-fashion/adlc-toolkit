@@ -79,6 +79,30 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    Fences only, so prose describing a retired shape is not flagged. This is the
    ONE check that also walks ``agents/*.md`` (see ``find_read_bin_extra_files``):
    ``agents/delegate-pre-pass.md`` hands over a corpus exactly as a skill does.
+9. ``check_unguarded_source`` — how a fence sources a partial (REQ-610 BR-3/BR-5,
+   ADR-2). ``.`` is a POSIX *special built-in*: a failed source **exits** a
+   non-interactive ``sh``, so the retired two-level spelling
+   (``. <local> 2>/dev/null || . <canonical>``) kills the whole block at its
+   first line on any machine with no vendored copy — the ``||`` never runs. The
+   one accepted spelling is the ``[ -f ]`` guard (``CANONICAL_SOURCE_RE``,
+   backreferenced so all three ``<name>``s must agree). Two rules: (a) inside a
+   shell fence, a statement-position ``.`` whose operand is a
+   ``partials/<name>.sh`` path must match that regex exactly; (b) the retired
+   literal anywhere in the file — prose, inline code, fence comment — is a
+   finding, because a SKILL.md sentence telling the agent to type the line is as
+   executable as a fence. Walks ``SKILL.md``, ``agents/*.md``,
+   ``proceed/phase*.md`` AND the partials themselves (``find_partial_files``:
+   ``partials/*.sh`` / ``.adlc/partials/*.sh``, whole file — a partial has no
+   fences), because ``id-recheck.sh`` carried a three-level ``. A || . B || . C``
+   chain on continuation lines that only the ``dash`` pass in ``run.sh`` ever
+   saw. Unlike ``check_posix_fence``, ``bash`` fences are
+   **not** exempt (ADR-2): the fence label does not choose the shell that runs
+   the block, and the failure is a property of the executing shell. Benign and
+   fixture-pinned as must-not-fire: the canonical spelling itself, and the
+   executable-partial macro ``sh <local> 2>/dev/null || sh <canonical>``, which
+   runs ``sh <file>`` as an ordinary command (exit 127 on absence, never fatal).
+   This check walks ``agents/*.md`` and ``proceed/phase*.md`` as well (see
+   ``find_phase_files``); neither extra walk feeds the scanned count.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
 deferred follow-up; LESSON-019 #2): the ``SKIP_DIR_PARTS`` membership test is
@@ -143,11 +167,16 @@ CANONICAL_LITERALS = (
     ("_adlc_emit_step_telemetry ",),
     # The emit-telemetry exec (lives in the emit-step-telemetry.sh partial).
     ('"$DELEGATE_TOOLS"/emit-telemetry.sh ',),
+    # REQ-610 ADR-4: the two source lines move to the `[ -f ]`-guarded spelling
+    # in the SAME change as the fences. The old two-level spelling is now a
+    # `unguarded-source` finding, so a skill that kept it fails BOTH checks —
+    # which is what proves the literal moved rather than being widened
+    # (REQ-436 ADR-4 / LESSON-019 #1).
     (
-        ". .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh",
+        "if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi",
     ),
     (
-        ". .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh",
+        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi",
     ),
 )
 
@@ -168,6 +197,47 @@ FENCE_CLOSE_RE = re.compile(r"^\s*```\s*$")
 # (e.g. `mylocal`, `local_var=`) — `\S` after the space ensures a declared
 # name follows. Only applied to sh/shell fences (bash is exempt — see docstring).
 POSIX_LOCAL_RE = re.compile(r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*local\s+\S")
+
+# REQ-610 ADR-2: the ONE accepted spelling for sourcing a partial. `.` is a
+# POSIX special built-in — a failed source exits a non-interactive `sh` — so the
+# repo-local copy is TESTED before it is sourced, never guessed at with `||`.
+# The backreference is load-bearing: all three <name>s must agree, so a line
+# that guards `forge.sh` and then sources `intake.sh` is a finding, not a pass.
+# A trailing shell comment is allowed; nothing else may follow on the line.
+CANONICAL_SOURCE_RE = re.compile(
+    r"^\s*if \[ -f \.adlc/partials/([A-Za-z0-9_-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
+    r"else \. ~/\.claude/skills/partials/\1\.sh; fi\s*(#.*)?$"
+)
+# A statement-position `.` (or bash-only `source`, which dash lacks entirely —
+# both arms fail and the functions are silently undefined) whose operand is one
+# of the toolkit's CONVENTION paths: `.adlc/partials/<name>.sh`,
+# `~/.claude/skills/partials/<name>.sh`, or `$HOME/.claude/skills/partials/...`.
+# Same statement positions POSIX_LOCAL_RE uses (start of line, or after `;`,
+# `&&`, `||`, `then`, `do`, `{`). Deliberately NOT any operand containing
+# `partials/`: a consumer's own partial that resolves a sibling through a
+# variable (`. "$D/partials/x.sh"` behind its own `[ -f ]`) is that author's
+# guard to write, and the two-level spelling this check prescribes would point
+# at a `~/.claude/skills/partials/<their-name>.sh` that does not exist. `\b` is
+# fine inside Python `re`; the LESSON-013 ban is for BSD `grep -E`. The
+# `sh <file>` executable-macro form is NOT matched: its command is `sh`.
+# Statement positions include `else`/`elif` and `(` (a subshell), matching
+# READ_BIN_COMMAND_POSITION_RE; the name class admits `_` and uppercase so a
+# partial named outside the current lowercase-hyphen convention cannot slip past.
+DOT_SOURCE_PARTIAL_RE = re.compile(
+    r"(?:^|;|&&|\|\||\bthen\b|\belse\b|\belif\b|\bdo\b|\{|\()\s*(?:\.|source)\s+"
+    r"[\"']?(?:\.adlc/partials/|~/\.claude/skills/partials/|\$\{?HOME\}?/\.claude/skills/partials/)"
+    r"[A-Za-z0-9_-]+\.sh"
+)
+# The retired two-level spelling, flagged ANYWHERE in a walked file (ADR-2 rule
+# 2) — prose included: a sentence instructing the agent to type the line is as
+# executable as a fence, and a fence comment quoting it is one paste away from
+# being live. Whitespace-tolerant around `||` because the corpus really did
+# carry an aligned variant (`delegate-pre-pass.md`). Deliberately excludes the
+# benign `|| sh ~/` macro form. The literal is what the finding message quotes.
+RETIRED_SOURCE_LITERAL = "2>/dev/null || . ~/.claude/skills/partials/"
+RETIRED_SOURCE_RE = re.compile(
+    r"2>/dev/null\s*\|\|\s*(?:\.|source)\s+[\"']?(?:~|\$\{?HOME\}?)/\.claude/skills/partials/"
+)
 
 # A bare $<digit> — Skill argument templating substitutes $0–$9 (and
 # $ARGUMENTS) across the whole SKILL.md body, clobbering shell positionals and
@@ -424,6 +494,80 @@ def find_read_bin_extra_files(root: Path) -> list[Path]:
             continue
         if resolved.is_file():
             out.append(path)
+    return out
+
+
+def find_phase_files(root: Path) -> list[Path]:
+    """``proceed/phase*.md`` — the extra surface ``check_unguarded_source`` walks.
+
+    The glob covers all three ``/proceed`` companion files
+    (``phase-4-implementation.md``, ``phases-1-3-validation.md``,
+    ``phases-6-8-ship.md``); they carry executable fences — one of them sources
+    ``forge.sh`` — and no lint check walked them before REQ-610.
+
+    A SEPARATE walk, for the same two reasons ``find_read_bin_extra_files``
+    gives (REQ-610 ADR-3): the other checks encode a *skill's* contract and
+    would be false positives on a phase companion file, and these files are
+    deliberately NOT added to ``scanned`` so the REQ-595 vacuous-scan figure
+    keeps counting ``SKILL.md`` — a dead skill walk must not be maskable by
+    companion files. ``find_read_bin_extra_files``'s own walk is not widened to
+    match: ``read-bin-fallback`` on the phase files would be a scope change to
+    an unrelated check.
+
+    Symlinks that resolve outside ``root`` are skipped, the same defence the
+    other two walks carry.
+    """
+    # Also `partials/*.md` — the companion docs (`forge.md`, `delegate-gate.md`,
+    # `emit-step-telemetry.md`, `trial-merge.md`, `README.md`) whose copy-paste
+    # fences are where a call-site spelling ORIGINATES; leaving them unwalked put
+    # the hole exactly at the source of copy-paste (REQ-610 review).
+    root_resolved = root.resolve()
+    candidates: list[Path] = []
+    proceed_dir = root / "proceed"
+    if proceed_dir.is_dir():
+        candidates.extend(sorted(proceed_dir.glob("phase*.md")))
+    partials_dir = root / "partials"
+    if partials_dir.is_dir():
+        candidates.extend(sorted(partials_dir.glob("*.md")))
+    out: list[Path] = []
+    for path in candidates:
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(root_resolved)
+        except (OSError, ValueError):
+            continue
+        if resolved.is_file():
+            out.append(path)
+    return out
+
+
+def find_partial_files(root: Path) -> list[Path]:
+    """``partials/*.sh`` and ``.adlc/partials/*.sh`` — the surface where a partial
+    sources ANOTHER partial, walked by ``check_unguarded_source`` alone.
+
+    Added after the fact (REQ-610): ``id-recheck.sh`` carried a three-level
+    ``. A || . B || . C`` chain spread over continuation lines, and
+    ``emit-step-telemetry.sh`` a live two-level self-source. Neither is a fence,
+    so the markdown walks could not see them; the harness's line-anchored
+    extraction could not see the multi-line one either, and ``dash`` found it
+    before any reviewer did. Same two-layout order as ``load_partials_blob``
+    (toolkit-self, then consumer). Not added to ``scanned`` (REQ-595 BR-5
+    counts ``SKILL.md``); same symlink-escape guard as every other walk.
+    """
+    root_resolved = root.resolve()
+    out: list[Path] = []
+    for sub in ("partials", ".adlc/partials"):
+        d = root / sub
+        if not d.is_dir():
+            continue
+        for path in sorted(d.glob("*.sh")):
+            try:
+                resolved = path.resolve()
+                resolved.relative_to(root_resolved)
+            except (OSError, ValueError):
+                continue
+            if resolved.is_file():
+                out.append(path)
     return out
 
 
@@ -997,6 +1141,83 @@ def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> list[Finding]:
+    """REQ-610 BR-3/BR-5 (ADR-2): a partial must be sourced with the ``[ -f ]``
+    guard, and the retired two-level spelling must appear nowhere in the file.
+
+    Rule 1 (fences). Inside any ``sh``/``bash``/``shell`` fence, a non-comment
+    line carrying a statement-position ``.`` whose operand is a
+    ``partials/<name>.sh`` path must match ``CANONICAL_SOURCE_RE`` exactly.
+    **``bash`` fences are NOT exempt** — the opposite of ``check_posix_fence``,
+    and deliberately so: the fence label does not choose the shell that executes
+    the block (``run.sh`` and consumers run fences under ``/bin/sh`` regardless
+    of the label), and a fatal ``.`` is a property of the executing shell, not
+    of the label. ``#``-prefixed lines source nothing and are skipped.
+
+    Rule 2 (the retired spelling, everywhere). ``RETIRED_SOURCE_RE`` (the
+    whitespace-tolerant form of ``RETIRED_SOURCE_LITERAL``, which the finding
+    message quotes) is reported on ANY line of the file, prose and fence comments included: the
+    prose occurrence in ``analyze/SKILL.md`` Step 1.5 instructs the agent to
+    type the line, which is as executable as a fence.
+
+    A retired fence line matches both rules; the second pass is deduped by line
+    number so it yields ONE finding, not two.
+
+    Benign, both fixture-pinned as must-not-fire: the canonical spelling (rule 1
+    passes it, rule 2's literal is absent from it), and the executable-partial
+    macro ``sh <local> 2>/dev/null || sh <canonical>`` — its command is ``sh``,
+    not ``.``, so it fails as an ordinary command (exit 127), never fatally.
+    """
+    findings: list[Finding] = []
+    flagged: set[int] = set()
+    if whole_file:
+        # A partial (`partials/*.sh`) has no fences: every non-comment line is
+        # executable, so the whole file is one body (REQ-610, find_partial_files).
+        bodies = [list(enumerate(text.splitlines(), start=1))]
+    else:
+        bodies = [body for _lang, _idx, _start, body in _iter_fences(text)]
+    for body in bodies:
+        for lineno, line in body:
+            if line.lstrip().startswith("#"):
+                continue
+            if CANONICAL_SOURCE_RE.match(line):
+                continue
+            if not DOT_SOURCE_PARTIAL_RE.search(line):
+                continue
+            flagged.add(lineno)
+            findings.append(
+                Finding(
+                    rel, lineno, "unguarded-source",
+                    "sources a partial without the guard — `.` is a POSIX "
+                    "special built-in, so a failed source EXITS a "
+                    "non-interactive `sh` before any `||` can run; spell it "
+                    "`if [ -f .adlc/partials/<name>.sh ]; then "
+                    ". .adlc/partials/<name>.sh; else "
+                    ". ~/.claude/skills/partials/<name>.sh; fi` on ONE line "
+                    "(a guard split across lines is not recognised), "
+                    "with the same <name> in all three places "
+                    "(conventions.md 'Bash in skills', REQ-610 BR-3)",
+                )
+            )
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if lineno in flagged or not RETIRED_SOURCE_RE.search(line):
+            continue
+        findings.append(
+            Finding(
+                rel, lineno, "unguarded-source",
+                "carries the retired two-level source spelling "
+                f"(`. <local> {RETIRED_SOURCE_LITERAL}<name>.sh`) — it is fatal "
+                "under `sh` wherever it runs, and prose that shows it is one "
+                "paste away from being live; replace it with the guarded "
+                "spelling `if [ -f .adlc/partials/<name>.sh ]; then "
+                ". .adlc/partials/<name>.sh; else "
+                ". ~/.claude/skills/partials/<name>.sh; fi` "
+                "(conventions.md 'Bash in skills', REQ-610 BR-5)",
+            )
+        )
+    return sorted(findings, key=lambda f: f.line)
+
+
 def _safe_label(skill_path: Path, root: Path) -> str:
     """Non-leaking finding label for ``skill_path``.
 
@@ -1341,7 +1562,10 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_cross_fence_var(text, rel))
         findings.extend(check_forge_direct_gh(text, rel))
         findings.extend(check_read_bin_fallback(text, rel))
-    # REQ-609: `check_read_bin_fallback` ALONE also walks `agents/*.md` — see
+        findings.extend(check_unguarded_source(text, rel))
+    # REQ-609: `check_read_bin_fallback` also walks `agents/*.md`, and REQ-610
+    # adds `check_unguarded_source` to the same walk (`agents/delegate-pre-pass.md`
+    # carries both a corpus handover and a partial source line) — see
     # find_read_bin_extra_files for why this is a separate walk and why these
     # files are deliberately NOT added to `scanned` (which counts SKILL.md).
     for agent_path in find_read_bin_extra_files(root):
@@ -1355,6 +1579,34 @@ def run(root: Path) -> tuple[list[Finding], int]:
             )
             continue
         findings.extend(check_read_bin_fallback(agent_text, agent_rel))
+        findings.extend(check_unguarded_source(agent_text, agent_rel))
+    # REQ-610 ADR-3: `check_unguarded_source` ALONE also walks
+    # `proceed/phase*.md`. Same posture as the agents walk — a third separate
+    # walk, and `scanned` is untouched so the vacuous-scan figure keeps meaning
+    # "SKILL.md files walked" (REQ-595 BR-5).
+    for phase_path in find_phase_files(root):
+        phase_rel = _safe_label(phase_path, root)
+        try:
+            phase_text = phase_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            findings.append(
+                Finding(phase_rel, 1, "io-error",
+                        f"could not read: {exc.strerror or 'I/O error'}")
+            )
+            continue
+        findings.extend(check_unguarded_source(phase_text, phase_rel))
+    # REQ-610: partials sourcing partials — no fences, the whole file is executable.
+    for partial_path in find_partial_files(root):
+        partial_rel = _safe_label(partial_path, root)
+        try:
+            partial_text = partial_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            findings.append(
+                Finding(partial_rel, 1, "io-error",
+                        f"could not read: {exc.strerror or 'I/O error'}")
+            )
+            continue
+        findings.extend(check_unguarded_source(partial_text, partial_rel, whole_file=True))
     # Per-root (not per-SKILL.md): agent model: drift vs the config render (BR-5).
     findings.extend(check_agent_model_drift(root))
     # Per-root (REQ-525 AC4): /init copy list vs /template-drift checked list parity.

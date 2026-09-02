@@ -72,7 +72,7 @@ clean_field() { printf '%s' "${1}" | tr -c 'A-Za-z0-9 ._/:-' ' ' | cut -c1-60; }
 # The GitHub backend forwards args verbatim, so the existing --json/--jq pipelines
 # below stay byte-identical (BR-3); the branch-only ls-remote fallback (Step 2b)
 # is pure git and unchanged (BR-8).
-. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
 
 TAB=$(printf '\t')
 raw=$(mktemp "${TMPDIR:-/tmp}/manifest.XXXXXX") || { echo "/manifest: mktemp failed — skipping manifest" >&2; exit 0; }
