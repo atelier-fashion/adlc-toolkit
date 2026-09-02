@@ -20,10 +20,11 @@
 # and what belongs HERE is the shell's arm ordering, its fail-closed posture, and
 # whether it forks at all. A stub is the only way to assert the last two.
 #
-# Run under BOTH shells (BR-6 — the gate must behave identically under the
-# operator's zsh and under sh):
-#   bash partials/tests/delegate-gate.test.sh
-#   zsh  partials/tests/delegate-gate.test.sh
+# Run under ALL THREE shells (REQ-603 BR-6, REQ-609 BR-16 — the gate must behave
+# identically under the operator's zsh, under bash, and under /bin/sh):
+#   bash    partials/tests/delegate-gate.test.sh
+#   zsh     partials/tests/delegate-gate.test.sh
+#   /bin/sh partials/tests/delegate-gate.test.sh
 # or via the wrapper:  sh partials/tests/run.sh
 #
 # Exits 0 iff every case passes; prints one line per case.
@@ -234,6 +235,310 @@ if [ -n "$_veto_line" ] && [ -n "$_bin_line" ] && [ "$_veto_line" -gt "$_bin_lin
   pass "veto present and positioned after binary resolution (AC-2)"
 else
   fail "veto present and positioned after binary resolution (AC-2) (veto=$_veto_line bin=$_bin_line)"
+fi
+
+# ==========================================================================
+# REQ-609 (TASK-097): the resolver asks the FILESYSTEM, never the shell.
+# ==========================================================================
+# BUG-209's residue: REQ-603 stopped the gate echoing a bare name, but the
+# answer still came out of the shell's lookup machinery, and the hash table
+# hands that machinery an absolute path to anything at all. Sections (i)-(n)
+# assert the walk's own rules, and each one names the marker or the resolved
+# path rather than an exit code (LESSON-478).
+#
+# Which shell drives the inner runs: run.sh exports it, so `sh run.sh`'s
+# three-shell loop exercises the walk under bash, zsh and /bin/sh in turn
+# rather than always under sh. A direct invocation is detected instead.
+if [ -n "${ADLC_TEST_SHELL-}" ]; then SELF_SH="$ADLC_TEST_SHELL"
+elif [ -n "${ZSH_VERSION-}" ]; then SELF_SH=zsh
+elif [ -n "${BASH_VERSION-}" ]; then SELF_SH=bash
+else SELF_SH=/bin/sh; fi
+
+# Every inner run below is launched through `env PATH=<sandbox>`, which sets the
+# PATH env(1) itself searches — so the shell has to be named by absolute path or
+# env cannot find it. This is the harness, not the gate: `command -v` is exactly
+# the right tool for "where is bash", and it is the gate that must not ask.
+abs_shell() { # abs_shell <name-or-path> — absolute path, or empty if absent
+  case "$1" in
+    /*) if [ -x "$1" ]; then printf '%s' "$1"; fi ;;
+    *) command -v "$1" 2>/dev/null ;;
+  esac
+}
+SELF_SH=$(abs_shell "$SELF_SH")
+[ -n "$SELF_SH" ] || SELF_SH=/bin/sh
+
+# Fixtures, on top of the sandbox above:
+#   planted/adlc-read      a binary the SHELL can be made to name; appends to
+#                          $MARKER when it runs, so "was it invoked" is evidence
+#   ptime/{timeout,gtimeout}  a timeout(1) planted on $PATH; appends to $TMARKER
+#   dirbin/adlc-read       a DIRECTORY: executable, not a regular file
+#   noxbin/adlc-read       a regular file that is not executable
+#   rel/bin/adlc-read      reachable only through a RELATIVE $PATH entry
+#   cwdbin/adlc-read       reachable only through an EMPTY $PATH entry
+#   home2/bin, relhome/bin the $HOME arm, absolute and relative
+#   home3/bin/adlc-read    a DIRECTORY on the $HOME arm — its own -f case
+PLANTED="$SANDBOX/planted"; mkdir -p "$PLANTED"
+MARKER="$SANDBOX/marker"
+TMARKER="$SANDBOX/timeout-marker"
+PTIME="$SANDBOX/ptime"; mkdir -p "$PTIME"
+ZMARK="$SANDBOX/zfunc-marker"
+
+cat > "$PLANTED/adlc-read" <<PLANT
+#!/bin/sh
+printf 'ran\n' >> "$MARKER"
+echo "1 ok"
+exit 0
+PLANT
+chmod +x "$PLANTED/adlc-read"
+
+for _n in timeout gtimeout; do
+  cat > "$PTIME/$_n" <<PTIMEOUT
+#!/bin/sh
+printf 'ran\n' >> "$TMARKER"
+shift
+exec "\$@"
+PTIMEOUT
+  chmod +x "$PTIME/$_n"
+done
+
+mkdir -p "$SANDBOX/dirbin/adlc-read"
+mkdir -p "$SANDBOX/home3/bin/adlc-read"
+mkdir -p "$SANDBOX/noxbin"
+printf '#!/bin/sh\nexit 0\n' > "$SANDBOX/noxbin/adlc-read"
+chmod 644 "$SANDBOX/noxbin/adlc-read"
+for _d in rel/bin cwdbin home2/bin relhome/bin; do
+  mkdir -p "$SANDBOX/$_d"
+  cp "$BIN/adlc-read" "$SANDBOX/$_d/adlc-read"
+  chmod +x "$SANDBOX/$_d/adlc-read"
+done
+
+# resolve_bin <PATH> <HOME> [cwd] — what the gate resolves ADLC_READ_BIN to.
+# Sourcing alone is enough; resolution happens at source time.
+resolve_bin() {
+  ( if [ -n "${3-}" ]; then cd "$3" || exit 1; fi
+    env -u ADLC_DISABLE_DELEGATE PATH="$1" HOME="$2" \
+        "$SELF_SH" -c '. "$1/delegate-gate.sh"
+                       printf "%s" "$ADLC_READ_BIN"' _ "$PARTIALS" )
+}
+
+# gate_out <PATH> <HOME> [cwd] — "<rc> <reason>" from a full gate call, with the
+# stub scripted to GRANT, so anything but "0 ok" is a resolution outcome.
+gate_out() {
+  : > "$SANDBOX/calls"
+  ( if [ -n "${3-}" ]; then cd "$3" || exit 1; fi
+    env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+        -u ADLC_DISABLE_DELEGATE PATH="$1" HOME="$2" \
+        STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
+        "$SELF_SH" -c '. "$1/delegate-gate.sh"
+                       adlc_delegate_gate_check
+                       printf "%s %s" "$?" "$ADLC_DELEGATE_GATE_REASON"' _ "$PARTIALS" )
+}
+
+echo "=== (i) the walk resolves a real file on an absolute PATH entry (BR-11) ==="
+
+check "resolves to the file's ABSOLUTE path, never to a name" \
+  "$BIN/adlc-read" "$(resolve_bin "$BIN:$SANDBOX/empty" "$FAKEHOME")"
+
+check "the FIRST absolute entry holding the file wins" \
+  "$BIN/adlc-read" "$(resolve_bin "$BIN:$SANDBOX/home2/bin" "$FAKEHOME")"
+
+# -x alone is satisfied by a directory; -f is what rejects it.
+check "a DIRECTORY named adlc-read is not a match — the walk keeps going" \
+  "$BIN/adlc-read" "$(resolve_bin "$SANDBOX/dirbin:$BIN" "$FAKEHOME")"
+
+check "a directory named adlc-read and nothing else -> 2 no-binary" \
+  "2 no-binary" "$(gate_out "$SANDBOX/dirbin" "$FAKEHOME")"
+
+check "a non-executable adlc-read is not a match — the walk keeps going" \
+  "$BIN/adlc-read" "$(resolve_bin "$SANDBOX/noxbin:$BIN" "$FAKEHOME")"
+
+check "a non-executable adlc-read and nothing else -> 2 no-binary" \
+  "2 no-binary" "$(gate_out "$SANDBOX/noxbin" "$FAKEHOME")"
+
+# BR-11's first clause, structurally: one lookup builtin anywhere in the gate is
+# the whole defect back. Fixed string, no \b (LESSON-013).
+_lookup=$(grep -cF 'command -v' "$PARTIALS/delegate-gate.sh" | tr -d ' ')
+check "the gate consults no shell lookup builtin at all" "0" "$_lookup"
+
+echo "=== (j) a function, an alias and a hash entry cannot satisfy resolution (BR-11, AC-6) ==="
+
+# The body lives in a file so the three shells run byte-identical text, and its
+# inputs arrive as exported variables because zsh's -c handles positional
+# parameters differently from sh's.
+cat > "$SANDBOX/hijack-body.sh" <<'HIJACK'
+_mechs=""
+# 1. A shell function. It is asked of a SUBSHELL first: /bin/sh here is bash in
+#    POSIX mode, which rejects a hyphen in a function name, and a syntax error
+#    inside eval takes a non-interactive shell down with it — the probe keeps
+#    that fatality inside a child.
+if ( eval 'adlc-read() { :; }' ) >/dev/null 2>&1; then
+  eval 'adlc-read() { "$ADLC_PLANTED" "$@"; }'
+  _mechs="$_mechs fn"
+fi
+# 2. An alias. bash needs expand_aliases in a non-interactive shell; zsh's
+#    ALIASES option is on by default and is set here so the intent is on the
+#    page; /bin/sh needs neither. Each guard is a not-found command in the other
+#    shells, which is why both are swallowed.
+shopt -s expand_aliases 2>/dev/null || true
+setopt aliases 2>/dev/null || true
+if alias adlc-read="$ADLC_PLANTED" 2>/dev/null; then _mechs="$_mechs alias"; fi
+# 3. A hash-table entry — the one REQ-603's fix did NOT close, because the table
+#    hands the shell an absolute path and a slash-check is satisfied by it.
+#    `hash -p file name` in bash, `hash name=file` in zsh (zsh's hash has no -p).
+if hash -p "$ADLC_PLANTED" adlc-read 2>/dev/null; then _mechs="$_mechs hash"
+elif hash "adlc-read=$ADLC_PLANTED" 2>/dev/null; then _mechs="$_mechs hash"; fi
+printf '%s' "${_mechs# }" > "$ADLC_HIJACK_LOG"
+# The control (LESSON-602): the shell's own lookup must FIND the hijack, or the
+# case below would pass by proving nothing.
+_live=$(command -v adlc-read 2>/dev/null)
+case "$_live" in "") _live=none ;; *) _live=found ;; esac
+. "$ADLC_PARTIALS/delegate-gate.sh"
+adlc_delegate_gate_check
+printf '%s %s bin=[%s] live=[%s]' "$?" "$ADLC_DELEGATE_GATE_REASON" "$ADLC_READ_BIN" "$_live"
+HIJACK
+
+for _sh in bash zsh /bin/sh; do
+  _shabs=$(abs_shell "$_sh")
+  if [ -z "$_shabs" ]; then
+    echo "SKIP: $_sh not installed — hijack case not run under it"
+    continue
+  fi
+  rm -f "$MARKER"
+  : > "$SANDBOX/hijacks"
+  _hj=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+            -u ADLC_DISABLE_DELEGATE PATH="$SANDBOX/empty" HOME="$FAKEHOME" \
+            ADLC_PLANTED="$PLANTED/adlc-read" ADLC_PARTIALS="$PARTIALS" \
+            ADLC_HIJACK_LOG="$SANDBOX/hijacks" \
+            ADLC_HIJACK_BODY="$SANDBOX/hijack-body.sh" \
+        "$_shabs" -c '. "$ADLC_HIJACK_BODY"')
+  if [ -e "$MARKER" ]; then _hj="$_hj marker=[yes]"; else _hj="$_hj marker=[no]"; fi
+  echo "  ($_shabs installed: $(cat "$SANDBOX/hijacks"))"
+  check "$_sh: function + alias + hash entry -> 2 no-binary, planted binary never ran" \
+    "2 no-binary bin=[] live=[found] marker=[no]" "$_hj"
+done
+
+# The control for the marker itself: the planted binary IS runnable and DOES
+# write, so "marker=[no]" above is evidence and not an artefact.
+rm -f "$MARKER"
+"$PLANTED/adlc-read" >/dev/null 2>&1
+if [ -e "$MARKER" ]; then _pctl=ran; else _pctl=silent; fi
+check "the planted binary writes its marker when actually invoked" "ran" "$_pctl"
+rm -f "$MARKER"
+
+echo "=== (k) relative and empty PATH entries are skipped (BR-11) ==="
+
+check "a relative PATH entry holding adlc-read resolves to nothing" \
+  "" "$(resolve_bin "rel/bin:$SANDBOX/empty" "$FAKEHOME" "$SANDBOX")"
+
+check "the same file on an ABSOLUTE entry does resolve (working subject)" \
+  "$SANDBOX/rel/bin/adlc-read" "$(resolve_bin "$SANDBOX/rel/bin" "$FAKEHOME")"
+
+check "a relative entry does not stop the walk — a later absolute one wins" \
+  "$BIN/adlc-read" "$(resolve_bin "rel/bin:$BIN" "$FAKEHOME" "$SANDBOX")"
+
+check "an EMPTY PATH entry (the shell's 'current directory') is skipped" \
+  "" "$(resolve_bin ":$SANDBOX/empty" "$FAKEHOME" "$SANDBOX/cwdbin")"
+
+check "a wholly empty PATH resolves to nothing (and terminates)" \
+  "" "$(resolve_bin "" "$FAKEHOME" "$SANDBOX/cwdbin")"
+
+check "relative-only PATH -> the gate returns 2 no-binary" \
+  "2 no-binary" "$(gate_out "rel/bin:$SANDBOX/empty" "$FAKEHOME" "$SANDBOX")"
+
+echo "=== (l) a timeout(1) planted on PATH is never invoked (BR-11, AC-7) ==="
+
+# The fixed list, recomputed here independently of the gate: the first candidate
+# that exists is what the resolver must name, and where none exists the answer
+# must be EMPTY — never the planted one, which is first on $PATH.
+_want_timeout=""
+for _c in /usr/bin/timeout /opt/homebrew/bin/timeout /usr/local/bin/timeout /opt/homebrew/bin/gtimeout /usr/local/bin/gtimeout; do
+  if [ -f "$_c" ] && [ -x "$_c" ]; then _want_timeout="$_c"; break; fi
+done
+_got_timeout=$(env PATH="$PTIME:$BIN" HOME="$FAKEHOME" \
+    "$SELF_SH" -c '. "$1/delegate-gate.sh"
+                   _adlc_resolve_timeout
+                   printf "%s" "$_timeout"' _ "$PARTIALS")
+check "the wrapper comes from the fixed list (or is empty), never from PATH" \
+  "$_want_timeout" "$_got_timeout"
+
+rm -f "$TMARKER"
+_lt=$(gate_out "$PTIME:$BIN" "$FAKEHOME")
+if [ -e "$TMARKER" ]; then _lt="$_lt timeout-ran=[yes]"; else _lt="$_lt timeout-ran=[no]"; fi
+check "the gate delegates with a planted timeout first on PATH, and never runs it" \
+  "0 ok timeout-ran=[no]" "$_lt"
+check "... and the real adlc-read is what ran, exactly once" \
+  "1" "$(wc -l < "$SANDBOX/calls" | tr -d ' ')"
+
+# The control: the planted wrapper is runnable and does write its marker.
+rm -f "$TMARKER"
+"$PTIME/timeout" 1 /bin/sh -c 'exit 0' >/dev/null 2>&1
+if [ -e "$TMARKER" ]; then _tctl=ran; else _tctl=silent; fi
+check "the planted timeout writes its marker when actually invoked" "ran" "$_tctl"
+rm -f "$TMARKER"
+
+# Structural: every candidate on the fixed list is absolute, and the resolver
+# reads no PATH. Fixed strings, no \b (LESSON-013).
+_tline=$(grep -F 'for _t in ' "$PARTIALS/delegate-gate.sh" | head -1)
+_tbad=$(printf '%s\n' "$_tline" | sed 's/^.*for _t in //; s/;.*$//' \
+        | tr ' ' '\n' | grep -v '^$' | grep -cv '^/' | tr -d ' ')
+check "every timeout candidate on the fixed list is an absolute path" "0" "$_tbad"
+_tpath=$(sed -n '/^_adlc_resolve_timeout() {/,/^}/p' "$PARTIALS/delegate-gate.sh" \
+         | grep -c 'PATH' | tr -d ' ')
+check "the timeout resolver never reads PATH" "0" "$_tpath"
+
+echo "=== (m) a HOME that is not absolute is ignored (BR-11) ==="
+
+check "an absolute HOME still resolves \$HOME/bin/adlc-read (working subject)" \
+  "$SANDBOX/home2/bin/adlc-read" "$(resolve_bin "$SANDBOX/empty" "$SANDBOX/home2")"
+
+check "a relative HOME is ignored" \
+  "" "$(resolve_bin "$SANDBOX/empty" "relhome" "$SANDBOX")"
+
+# The HOME arm carries its own -f, and it needs its own case: dropping it there
+# is invisible to (i), which only exercises the walk.
+check "a DIRECTORY at \$HOME/bin/adlc-read is not a match either" \
+  "" "$(resolve_bin "$SANDBOX/empty" "$SANDBOX/home3")"
+
+check "an empty HOME is ignored" \
+  "" "$(resolve_bin "$SANDBOX/empty" "" "$SANDBOX")"
+
+check "a relative HOME -> the gate returns 2 no-binary" \
+  "2 no-binary" "$(gate_out "$SANDBOX/empty" "relhome" "$SANDBOX")"
+
+echo "=== (n) a zsh function named with the ABSOLUTE path does not intercept (BR-11) ==="
+
+# Written with an expanding heredoc so the sandbox path lands in the file
+# LITERALLY: `function /abs/path/adlc-read { ... }`, which is what zsh accepts
+# and what a plain invocation of that path would run.
+cat > "$SANDBOX/zfunc-body.zsh" <<ZFUNC
+function $BIN/adlc-read {
+  printf 'ran\n' >> "$ZMARK"
+  echo "1 ok"
+}
+# The control (LESSON-602): prove the hijack is LIVE before asserting it lost.
+$BIN/adlc-read --print-gate >/dev/null 2>&1
+. "$PARTIALS/delegate-gate.sh"
+adlc_delegate_gate_check
+printf '%s %s bin=[%s]' "\$?" "\$ADLC_DELEGATE_GATE_REASON" "\$ADLC_READ_BIN"
+ZFUNC
+
+ZSH_ABS=$(abs_shell zsh)
+if [ -n "$ZSH_ABS" ]; then
+  : > "$ZMARK"
+  : > "$SANDBOX/calls"
+  _zn=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+            -u ADLC_DISABLE_DELEGATE PATH="$BIN:$SANDBOX/empty" HOME="$FAKEHOME" \
+            STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
+            ADLC_ZFUNC_BODY="$SANDBOX/zfunc-body.zsh" \
+        "$ZSH_ABS" -c '. "$ADLC_ZFUNC_BODY"')
+  check "zsh: the gate delegates through the FILE, not the same-named function" \
+    "0 ok bin=[$BIN/adlc-read]" "$_zn"
+  check "the absolute-path function ran ONCE — for the control, never for the gate" \
+    "1" "$(wc -l < "$ZMARK" | tr -d ' ')"
+  check "the real file on disk is what the gate executed" \
+    "1" "$(wc -l < "$SANDBOX/calls" | tr -d ' ')"
+else
+  echo "SKIP: zsh not installed — the absolute-path function case needs it"
 fi
 
 echo

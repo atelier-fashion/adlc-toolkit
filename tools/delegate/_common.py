@@ -15,14 +15,15 @@ ordered cascade (REQ-515 ADR-2):
 A machine with today's setup (MOONSHOT_API_KEY in env, no config file) resolves
 to the exact current defaults, so behavior is byte-identical.
 
-Dependency-light by design: only ``os``, ``re``, ``stat``, ``subprocess``,
-``sys`` from the stdlib plus ``openai`` (``subprocess`` only to locate the repo
-root for ``toolkit_version``; ``stat`` only to refuse a non-regular config file;
-``urllib.parse`` is imported inside the URL helpers, keeping the module-import
-surface small). ``openai`` is imported lazily inside ``get_client`` /
-``complete`` so that the pre-API guard paths (privacy notice, --dry-run, clobber
-check, the key-in-config refusal, ``--version``) work even when the SDK isn't
-installed.
+Dependency-light by design: only ``os``, ``re``, ``subprocess``, ``sys`` from
+the stdlib plus the sibling ``_machine_config`` and ``openai`` (``subprocess``
+only to locate the repo root for ``toolkit_version``; ``urllib.parse`` is
+imported inside the URL helpers, keeping the module-import surface small).
+``openai`` is imported lazily inside ``get_client`` / ``complete`` so that the
+pre-API guard paths (privacy notice, --dry-run, clobber check, the
+key-in-config refusal, ``--version``) work even when the SDK isn't installed —
+and ``_machine_config`` imports ``yaml`` lazily, inside the loader, for the
+same reason (REQ-609 BR-1).
 
 This module also hosts the toolkit-version / ``--version`` reporting helpers
 (``toolkit_version``, ``wants_version``, ``harvest_provider_flags``,
@@ -30,12 +31,15 @@ This module also hosts the toolkit-version / ``--version`` reporting helpers
 they work on the local-only ``extract-chat`` path too.
 """
 
-import errno
 import os
 import re
-import stat
 import subprocess
 import sys
+
+# The one loader for ~/.claude/adlc/config.yml (REQ-609 ADR-1). Imported at
+# module level, but it imports `yaml` lazily inside `load_machine_config`, so
+# nothing here costs a PyYAML import until a config is actually read.
+import _machine_config
 
 # --- shipped defaults (today's exact Moonshot/Kimi values) ------------------
 # Verified against a live GET /v1/models against api.moonshot.ai, 2026-08-31.
@@ -119,114 +123,86 @@ def toolkit_version():
 
 
 def _config_path():
-    """Path to the delegate config file: ``$ADLC_CONFIG`` or the default."""
-    override = os.environ.get("ADLC_CONFIG")
-    if override:
-        return override
-    return os.path.join(os.path.expanduser("~"), ".claude", "adlc", "config.yml")
+    """Path to the delegate config file: ``$ADLC_CONFIG`` or the default.
+
+    Defers to ``_machine_config.default_config_path`` so the delegate and forge
+    consumers cannot drift apart about which file they read (REQ-609 BR-8).
+    """
+    return _machine_config.default_config_path()
 
 
-def _strip_inline(value):
-    """Strip surrounding quotes and a trailing ``# comment`` from a YAML scalar."""
-    value = value.strip()
-    # Drop an unquoted trailing comment (only when not inside quotes).
-    if value[:1] not in ("'", '"'):
-        hashpos = value.find(" #")
-        if hashpos != -1:
-            value = value[:hashpos].strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        value = value[1:-1]
-    return value
-
-
-# Marks a config that EXISTS but could not be read or parsed. Distinct from an
-# absent config, which is a legitimate default. Collapsing the two is a fail-OPEN:
-# an unreadable file returned {} and fell through to legacy-key continuity, so a
-# machine whose operator had written `enabled: false` delegated anyway — BUG-205's
-# outcome reached through a read failure instead of a precedence bug.
+# Marks a config that EXISTS but could not be read, parsed, or validated.
+# Distinct from an absent config, which is a legitimate default. Collapsing the
+# two is a fail-OPEN: an unreadable file returned {} and fell through to
+# legacy-key continuity, so a machine whose operator had written
+# `enabled: false` delegated anyway — BUG-205's outcome reached through a read
+# failure instead of a precedence bug.
 _MALFORMED = "__adlc_config_malformed__"
+# The reason class and the path, carried alongside, so a refusal can name the
+# file and the condition instead of telling a locked-out operator to edit a file
+# it cannot describe (REQ-609 BR-13). Every existing consumer tests only
+# `cfg.get(_MALFORMED) is True`, so adding these two keys changes nothing for
+# them.
+_MALFORMED_REASON = "__adlc_config_malformed_reason__"
+_MALFORMED_PATH = "__adlc_config_malformed_path__"
+# All three sentinels together. A malformed cfg carries three keys, not one, so
+# "does this cfg hold anything the operator wrote?" has to exclude all of them —
+# testing against `_MALFORMED` alone answers yes for a config that could not be
+# read at all.
+_MALFORMED_KEYS = frozenset({_MALFORMED, _MALFORMED_REASON, _MALFORMED_PATH})
 
 
 def parse_delegate_config(path=None):
-    """Parse the ``delegate:`` block from the YAML config, if the file exists.
+    """The validated ``delegate:`` section of the machine config.
 
-    Deliberately a minimal flat ``key: value`` reader — NOT a full YAML parser
-    (REQ-515 ADR-3: no PyYAML dependency for three scalar fields). Reads only the
-    keys it knows under a top-level ``delegate:`` mapping; ignores everything
-    else. Returns a dict with any of ``enabled``/``base_url``/``model``/
-    ``api_key_env`` that were present (``enabled`` coerced to bool). An absent or
-    unreadable file yields ``{}`` — a valid legacy/env-only configuration.
+    A thin ADAPTER over ``_machine_config.load_machine_config`` (REQ-609 ADR-1),
+    which is the one loader for that file. This function keeps the return
+    convention its callers were written against, and nothing else:
 
-    Only a REGULAR file is read. ``ADLC_CONFIG`` is caller-controlled, and
-    ``os.path.isfile``-style existence checks say nothing about the kind of
-    object: pointing it at a fifo would block ``open()`` forever (a ``--version``
-    that never returns), and a device node would stream unbounded input. The read
-    is bounded too — a config with three scalar fields has no business being
-    larger than 64 KiB, and the parser must not be a memory amplifier.
+      * absent config                   -> ``{}``
+      * parsed, no ``delegate`` section -> ``{}`` (unconfigured, BR-6)
+      * parsed and valid                -> the section's keys
+      * anything else                   -> ``{_MALFORMED: True, ...}``
+
+    The three surfaces above it — ``delegation_enabled``'s cascade,
+    ``resolve_gate_verdict``'s labelling, ``resolve_provider``'s per-field
+    resolution — are untouched by REQ-609: they read ``enabled`` and the three
+    strings exactly as before, and test ``cfg.get(_MALFORMED) is True`` exactly
+    as before. What changed is what counts as readable.
+
+    It used to be a hand-written flat ``key: value`` reader (REQ-515 ADR-3, "no
+    PyYAML for three scalar fields"). That decision was made while the shell
+    gate still had authorizing arms of its own; since REQ-603 these three
+    scalars are the SOLE authority over whether a developer's files are sent to
+    a third-party endpoint, and hand parsing had cost nine distinct fail-opens
+    — a comment on the header, a nested mapping, a tab, a second block, a
+    quoted ``"false"``. A reader that skips what it does not understand cannot
+    be the thing that decides this. ADR-3 is amended by REQ-609 BR-14.
+
+    ``{}`` for a missing section is deliberate and is NOT the old fail-open:
+    absence means *unconfigured*, so legacy-key continuity may still apply,
+    while every defect — unreadable, undecodable, over-cap, duplicated key,
+    unknown key, wrong type — is ``_MALFORMED``, which the cascade refuses.
     """
     if path is None:
         path = _config_path()
+    outcome = _machine_config.load_machine_config(path)
+    if outcome.kind == _machine_config.KIND_ABSENT:
+        return {}
+    if outcome.kind == _machine_config.KIND_MALFORMED:
+        return {_MALFORMED: True,
+                _MALFORMED_REASON: outcome.reason,
+                _MALFORMED_PATH: outcome.path}
     try:
-        if not stat.S_ISREG(os.stat(path).st_mode):
-            # Non-regular (directory, fifo, device): the pre-existing contract
-            # treats this as absent, and a test pins it. Left unchanged — the
-            # reported fail-open is the readable-file case below, and widening
-            # this guard would change documented behaviour beyond this REQ.
-            # Noted as a residual gap rather than silently altered.
-            return {}
-    except OSError as exc:
-        # Discriminate on errno. os.path.lexists() was wrong here: it swallows
-        # PermissionError and returns False, so an unreadable PARENT DIRECTORY
-        # (EACCES on stat) read as "absent" and fell through to legacy-key
-        # continuity — the gate itself then granted against a written
-        # `enabled: false`. Only "no such entry" is absence; everything else is
-        # a config we were told to read and could not.
-        if exc.errno in (errno.ENOENT, errno.ENOTDIR):
-            return {}
-        return {_MALFORMED: True}
-    try:
-        with open(path, "r", encoding="utf-8", errors="strict") as fh:
-            lines = fh.read(65536).splitlines()
-    except OSError:
-        # Open/read failed on a file that exists (permissions, I/O error).
-        return {_MALFORMED: True}
-    except UnicodeDecodeError:
-        # Undecodable content is unparsable, not absent.
-        return {_MALFORMED: True}
-
-    known = {"enabled", "base_url", "model", "api_key_env"}
-    out = {}
-    in_block = False
-    block_indent = None
-    for raw in lines:
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indent = len(raw) - len(raw.lstrip())
-        if not in_block:
-            if stripped.rstrip() == "delegate:" and indent == 0:
-                in_block = True
-            continue
-        # Inside the delegate block: a key at deeper indent than `delegate:`.
-        if indent == 0:
-            # Dedent back to top level — block ended.
-            break
-        if block_indent is None:
-            block_indent = indent
-        if indent < block_indent:
-            break
-        if ":" not in stripped:
-            continue
-        key, _, value = stripped.partition(":")
-        key = key.strip()
-        if key not in known:
-            continue
-        value = _strip_inline(value)
-        if key == "enabled":
-            out["enabled"] = value.lower() in ("true", "yes", "1", "on")
-        else:
-            out[key] = value
-    return out
+        return _machine_config.validate_delegate_section(outcome.document)
+    except _machine_config.SchemaError as exc:
+        # A file that parses but says something the schema does not allow is
+        # just as unusable as one that does not parse, and for the same reason:
+        # we cannot tell what the operator meant. LESSON-483 — refuse, never
+        # guess.
+        return {_MALFORMED: True,
+                _MALFORMED_REASON: "schema: %s" % (exc,),
+                _MALFORMED_PATH: outcome.path}
 
 
 # `\Z`, never `$`: Python's `$` also matches just before a trailing newline, so
@@ -466,6 +442,10 @@ def require_delegation_enabled(prog, cfg=None):
     non-zero exit as "fall back and read directly" (BR-4), so a refusal here
     degrades exactly like a missing binary rather than breaking the caller.
     """
+    if cfg is None:
+        # Resolved once, here, so the refusal can describe the SAME config the
+        # cascade judged — not a second read that might disagree with it.
+        cfg = parse_delegate_config()
     if delegation_enabled(cfg):
         return
     # Name the kill switch when it is the cause. Telling someone to enable
@@ -479,6 +459,23 @@ def require_delegation_enabled(prog, cfg=None):
             "file contents to a third-party endpoint.\n"
             "Unset it to restore the configured behaviour (`%s --version` prints "
             "the resolved value)." % (prog, prog)
+        )
+    if cfg.get(_MALFORMED) is True:
+        # REQ-609 BR-13. The generic branch below tells a locked-out operator to
+        # edit the file that is unreadable, and to set an env var that CANNOT
+        # lift this arm — `_MALFORMED` outranks `ADLC_DELEGATE_ENABLED` in the
+        # cascade. Advice that does not work reads as the control having been
+        # ignored, so this branch names the file and the condition instead, and
+        # mentions no env var at all.
+        sys.exit(
+            "%s: the delegation config at %s cannot be used (%s) — refusing to "
+            "send file contents to a third-party endpoint.\n"
+            "Fix that file, or remove it to fall back to the environment. "
+            "(`%s --version` prints the resolved value.)"
+            % (prog,
+               _clean_report_value(cfg.get(_MALFORMED_PATH) or _config_path()),
+               _clean_report_value(cfg.get(_MALFORMED_REASON) or "unreadable"),
+               prog)
         )
     sys.exit(
         "%s: delegation is not enabled — refusing to send file contents to a "
@@ -551,7 +548,13 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
         source = "flags"
     elif os.environ.get("ADLC_DELEGATE_BASE_URL") or os.environ.get("ADLC_DELEGATE_MODEL"):
         source = "env"
-    elif any(k != _MALFORMED for k in cfg):
+    elif any(k not in _MALFORMED_KEYS for k in cfg):
+        # The guard exists so a config that could not be read is not reported as
+        # the SOURCE of the values being used — every field below came from the
+        # shipped defaults. It was written against a one-key sentinel and stayed
+        # that way when the reason and the path joined it (REQ-609 BR-13), so it
+        # had been answering "yes, config" for every malformed file since: the
+        # `--version` report then named a file it had just refused to read.
         source = "config"
     else:
         source = "defaults"
@@ -663,7 +666,12 @@ def harvest_provider_flags(argv, value_flags=frozenset()):
     return model, base_url
 
 
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+# C0 + DEL, C1 (\x80-\x9f), and the bidi overrides/isolates (U+202A-202E,
+# U+2066-2069): a caller-supplied path is printed to a terminal, and a
+# right-to-left override can reorder what the operator reads. Kept
+# byte-identical in tools/delegate/_common.py and tools/adlc/forge_config.py;
+# test_forge_config pins the two patterns equal.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
 def _clean_report_value(v):
@@ -794,6 +802,27 @@ def _read_key_from_rc(var_name):
     (REQ-422 / LESSON-011). Returns the key or empty string. Only applied to the
     default Moonshot var (the legacy launchctl-propagation defense); arbitrary
     provider key vars are expected to be set in the environment directly.
+
+    Opens through the same descriptor-based helper the config loader uses
+    (REQ-609 BR-5): ``O_RDONLY | O_NONBLOCK``, then ``S_ISREG`` on the
+    descriptor that was actually opened. A ``~/.zshrc`` that is a fifo — the
+    home directory is not a privileged location, and this runs on the path that
+    resolves an API key — would otherwise block ``open()`` forever, and a plain
+    ``open()`` decides nothing about the kind of object it got. A non-regular rc
+    file is skipped, like an unreadable one.
+
+    The read is bounded at :data:`_machine_config.RC_CAP_BYTES`. Unlike the
+    config cap this one truncates rather than refusing: an rc file is not a
+    governance document, and a key export past a quarter-megabyte of shell
+    startup is not a shape worth failing a real machine over. Decoding stays
+    ``errors="replace"`` for the same reason — BR-5 mandates only the open
+    pattern here, not the config's strict decode.
+
+    Lines are split on ``\\n`` and ``\\r\\n`` only — the separators a shell
+    honours — and never with ``str.splitlines``, which also breaks on a set of
+    further characters (a lone ``\\r`` among them) that leave a shell command on
+    the same physical line. The exact set is enumerated, and derived rather than
+    asserted from memory, by ``_NOT_SHELL_LINE_BREAKS`` in the tests.
     """
     home = os.path.expanduser("~")
     candidates = [
@@ -804,19 +833,45 @@ def _read_key_from_rc(var_name):
     needle = f"export {var_name}="
     for rc in candidates:
         try:
-            with open(rc, "r", encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    # Only match the canonical, non-indented `export VAR="..."` form.
-                    if line.startswith(needle):
-                        try:
-                            _, after = line.split('="', 1)
-                            value, _ = after.split('"', 1)
-                        except ValueError:
-                            continue
-                        if value:
-                            return value
+            fh = _machine_config._open_regular(rc)
+        except (OSError, ValueError):
+            # Missing, unreadable, a fifo, a directory, a device: skip it and
+            # try the next candidate, exactly as a missing file behaved before.
+            continue
+        try:
+            try:
+                data = fh.read(_machine_config.RC_CAP_BYTES)
+            finally:
+                fh.close()
         except OSError:
             continue
+        # Split the way a SHELL does, not the way `str` does. `str.splitlines`
+        # also breaks on \x0b, \x0c, \x1c-\x1e, \x85,  ,   and a LONE
+        # \r, none of which ends a command for sh, bash or zsh: text after one
+        # of those is still part of the same physical line, so
+        # `# note\x0bexport K="v"` is a COMMENT the shell never runs — and
+        # reporting a key from it would be this reader inventing an environment
+        # the machine does not have.
+        #
+        # A lone \r is in that list (REQ-609 verify D4). Normalizing it to \n
+        # made `# note\rexport K="v"` two lines, the second one canonical — a
+        # split no shell performs, on a file every shell reads as one comment.
+        # The \r\n PAIR is normalized, because there the separator is the \n;
+        # what a CR-normalization left behind (`…\r\r\n` yields one trailing CR)
+        # belongs to that ending and is dropped per line, while a \r ELSEWHERE
+        # in a line stays put as the ordinary character it is.
+        text = data.decode("utf-8", "replace")
+        for raw in text.replace("\r\n", "\n").split("\n"):
+            line = raw[:-1] if raw.endswith("\r") else raw
+            # Only match the canonical, non-indented `export VAR="..."` form.
+            if line.startswith(needle):
+                try:
+                    _, after = line.split('="', 1)
+                    value, _ = after.split('"', 1)
+                except ValueError:
+                    continue
+                if value:
+                    return value
     return ""
 
 

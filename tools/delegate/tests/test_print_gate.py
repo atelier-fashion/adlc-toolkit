@@ -334,6 +334,79 @@ def test_absent_config_is_still_absent_not_malformed(clean_env, monkeypatch):
     assert _common.resolve_gate_verdict() == (True, "ok")
 
 
+# --- REQ-609: the shapes that used to resolve as ABSENCE --------------------
+# Rewritten, not added: the assertions these replace lived one layer down (in
+# `test_version.py`, on `parse_delegate_config` alone) and read `== {}` for a
+# directory and for an over-cap file. `{}` is ABSENCE, absence falls through to
+# legacy-key continuity, and continuity GRANTS — so each of these was a config
+# the operator had written that the gate resolved into an opt-in. The rule they
+# encoded is gone (BR-4: no carve-out for a non-regular file; BR-3: the cap
+# refuses); what stays is that the gate must not hang or crash on them, and the
+# assertions now say what the System Model says. The benign case immediately
+# above — an absent path really is absent — is the half that must NOT change.
+
+def _refuses(monkeypatch, path):
+    """Assert the gate, the predicate, and the backstop all refuse `path`."""
+    monkeypatch.setenv("ADLC_CONFIG", path)
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")   # continuity is live
+    assert _common.parse_delegate_config().get(_common._MALFORMED) is True
+    assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+    assert _common.delegation_enabled() is False
+    with pytest.raises(SystemExit):
+        _common.require_delegation_enabled("adlc-read")
+
+
+def test_directory_at_the_config_path_is_refused(clean_env, monkeypatch):
+    """Was `{}` — a directory at the path granted through continuity."""
+    d = clean_env / "config.yml"
+    d.mkdir()
+    _refuses(monkeypatch, str(d))
+
+
+def test_dev_null_config_is_refused(clean_env, monkeypatch):
+    """BUG-205's shape through the carve-out: `/dev/null` returned `{}`, so
+    `ADLC_CONFIG=/dev/null` turned delegation ON."""
+    if not os.path.exists("/dev/null"):
+        pytest.skip("no /dev/null on this platform")
+    _refuses(monkeypatch, "/dev/null")
+
+
+def test_over_cap_config_is_refused(clean_env, monkeypatch):
+    """Was read-bounded-and-parsed: a header inside the cap with the operator's
+    `enabled: false` past it resolved as unconfigured, which grants."""
+    big = clean_env / "big.yml"
+    big.write_text("delegate:\n" + "# pad\n" * 20000 + "  enabled: false\n",
+                   encoding="utf-8")
+    _refuses(monkeypatch, str(big))
+
+
+def test_comment_on_the_header_no_longer_discards_the_block(clean_env, monkeypatch):
+    """The pass-3 finding. `delegate:  # settings` did not equal the literal
+    `delegate:`, so the whole block was skipped, the written `enabled: false`
+    was never seen, and continuity granted. A parser reads it as a comment."""
+    monkeypatch.setenv("ADLC_CONFIG", _cfg(
+        clean_env, "delegate:  # settings\n  enabled: false\n"))
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.parse_delegate_config() == {"enabled": False}
+    assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+    assert _common.delegation_enabled() is False
+
+
+def test_a_second_delegate_block_no_longer_overrides_the_first(clean_env,
+                                                               monkeypatch):
+    """The pass-4 finding, from the other side: the second block was
+    unreachable for the flat reader and is a silent override for PyYAML's
+    default loader. Both are wrong for a governance file, so it refuses."""
+    monkeypatch.setenv("ADLC_CONFIG", _cfg(
+        clean_env,
+        "delegate:\n  enabled: false\ndelegate:\n  enabled: true\n"))
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    cfg = _common.parse_delegate_config()
+    assert cfg.get(_common._MALFORMED) is True
+    assert "duplicate-key" in cfg[_common._MALFORMED_REASON]
+    assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+
+
 def test_key_env_named_but_unset_reports_disabled(clean_env, monkeypatch):
     """LESSON-392's OTHER half (D3), which had no direct coverage.
 

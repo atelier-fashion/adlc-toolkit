@@ -31,6 +31,22 @@ supported providers — never a silent GitHub default (LESSON-009). Config parsi
 and the fail-loud message live in `tools/adlc/forge_config.py` (no shell YAML
 parsing — REQ-515 ADR-3); the no-config path is pure shell.
 
+**Which interpreter runs the resolver** (REQ-609 BR-8 / ADR-2). `_adlc_forge_python`
+carries the one interpreter rule: prefer `$HOME/.claude/delegate-venv/bin/python3`
+when it is a regular executable file **and** that venv carries a `yaml` package
+directory under `lib/python*/site-packages/`; otherwise `python3` from `$PATH`.
+The same rule is written out in the root `install.sh`'s `adlc` shim and in
+`tools/adlc/checks.py::_delegate_interpreter` — change one, change all three. The
+venv directory is tested rather than an interpreter spawned, so all three sites can
+ask the identical question.
+
+**The resolver's stderr is never swallowed.** Where the selected interpreter cannot
+import PyYAML, `forge_config.py` proceeds *unconfigured* — a written
+`forge.provider` is then ignored and the provider is auto-detected from the origin
+URL. That is tolerable only because the operator is told: the resolver's stderr is
+captured and re-emitted verbatim, and it names the missing package and the
+interpreter.
+
 ## Config: the `forge:` section
 
 ```yaml

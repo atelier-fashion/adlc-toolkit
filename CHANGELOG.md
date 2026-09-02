@@ -192,6 +192,103 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Changed
 
+- **A real config parser behind a strict schema, and shell resolution that never
+  consults shell state (REQ-609).** ⚠️ **Re-run `install.sh --with-delegation`, and
+  read the refusal table below if you keep a hand-edited config.**
+
+  REQ-603 made Python the sole authority over whether your source files leave the
+  machine — which made `parse_delegate_config`, a hand-written flat reader, that
+  authority. Four adversarial passes then found **nine distinct fail-opens** in it,
+  six of them introduced by the pass that rewrote it under a tests-first,
+  mutation-proven discipline. A comment on the `delegate:` header defeated it. A
+  nested mapping hoisted `enabled: true` over a written `false`. A second
+  `delegate:` block was unreachable. The discipline proved what its author tested;
+  it could not reach what its author did not imagine — because the reader **skipped**
+  what it did not understand, and a reader that skips cannot be patched into one
+  that refuses.
+
+  The config is now parsed by **PyYAML** (`yaml.safe_load`, never `yaml.load`) behind
+  a **closed schema**, in one loader (`tools/delegate/_machine_config.py`) that returns
+  exactly `absent`, `parsed`, or `malformed` and never raises. `tools/delegate/_common.py`
+  and `tools/adlc/forge_config.py` are both adapters over it, so a multi-section config
+  can no longer lock one consumer out by the other's rule.
+
+  **Shapes that used to be ignored and are now refusals** — every one of them
+  previously fell through to legacy-key continuity and **granted** delegation against
+  a written `enabled: false`. They are registered as named parity divergences D6–D11
+  against the frozen pre-REQ-603 gate, so each is a measured fact and not a claim:
+
+  | input | before | after | id |
+  |---|---|---|---|
+  | a directory at the config path | `0 ok` | `1 disabled-via-config` | D6 |
+  | `delegate:  # settings` (comment on the header) | `0 ok` | `1 disabled-via-config` | D7 |
+  | `ADLC_CONFIG=/dev/null` (BUG-205's shape) | `0 ok` | `1 disabled-via-config` | D8 |
+  | a second `enabled:` key under `delegate:` | `0 ok` | `1 disabled-via-config` | D9 |
+  | a BOM before the header | `0 ok` | `1 disabled-via-config` | D10 |
+  | `enbaled: false` (an unknown key) | `0 ok` | `1 disabled-via-config` | D11 |
+
+  Also refused now: a non-boolean `enabled` (`"false"` is the *string*, which Python
+  treats as true), any nested mapping under `delegate:`, a repeated key **anywhere**
+  in the document (the refusal names the key and its line, and is whole-document —
+  one loader gives one verdict), a non-regular file at the path with no carve-outs, a
+  dangling symlink, undecodable bytes, and a file over the **64 KiB** cap. The cap is
+  unconditional, because a truncated YAML document can still parse. The 24-row
+  well-formed matrix shows **zero** new divergence, and a config carrying only a
+  `forge:` section still grants — the benign path a fail-closed change needs.
+
+  What is *not* a refusal: an empty file, or one holding only comments. It parses to a
+  null document and reads as **unconfigured**, exactly like a mapping with no
+  `delegate:` key. An operator who created the file and wrote nothing has not opted
+  out, and anyone able to truncate it could equally have written `enabled: true`.
+
+  A **differential oracle** now compares the adapter against `yaml.safe_load` itself —
+  a second implementation — over the reviewers' seeded shape corpus and 864 generated
+  documents, so the suite is no longer bounded by one author's imagination.
+
+  **The shell resolver asks the filesystem.** REQ-603 rejected binary resolution that
+  came back as a bare name, which closed shell functions and aliases — and the hash
+  table still handed the corpus to a planted binary, because `hash -p` answers with an
+  absolute path. That closed a mechanism, not a class: any answer sourced from the
+  shell's own lookup machinery inherits every table that machinery consults. The gate
+  now walks `$PATH` itself, skips every entry that does not begin with `/`, and takes
+  the first executable *regular file* named `adlc-read`; `timeout(1)` comes from a
+  fixed list of absolute paths and never from `$PATH`, because a wrapper sees — and
+  can replace — the binary it wraps. `command -v` appears nowhere in the gate, and the
+  shell harness proves it under `sh`, `bash`, and `zsh`.
+
+  **Call sites carry no second resolver.** Every delegated-invocation fence dropped its
+  bare-name default and now refuses an empty `ADLC_READ_BIN` before any transmission —
+  skills by exiting non-zero, `agents/delegate-pre-pass.md` (whose contract forbids a
+  non-zero exit) by degrading into its sanctioned empty-candidates object. A new
+  `lint-skills` check, **`read-bin-fallback`**, rejects the retired
+  `"${ADLC_READ_BIN:-adlc-read}"` shape so it cannot rot back in.
+
+  **One managed interpreter.** The `adlc` shim written by `install.sh` now prefers
+  `~/.claude/delegate-venv/bin/python3` when it exists, falling back to `$PATH`'s
+  `python3` otherwise, so both config consumers run where PyYAML is pinned. `adlc
+  doctor` gains a **`pyyaml`** check reporting whether it imports in the interpreter
+  `adlc` actually runs under, with a copy-pasteable fix. `pyyaml` is pinned in
+  `tools/delegate/requirements.txt` (floor `>=6.0`, pinned at the tested `==6.0.3`).
+  The import is lazy, so `--help` never pays for it; the probe's measured cost went
+  from a 21.2 ms median to 25.5 ms, which is 0.004% of a 104-second delegated step.
+
+  **Migration.**
+  - **Re-run `./install.sh --with-delegation`** (or `bash tools/delegate/install.sh`)
+    to get PyYAML into the venv. Without it the loader reports
+    `malformed / dependency-missing`, one stderr line names the package, and the
+    delegate CLIs **fail closed** — a partial install never falls through to "no
+    config found". `/proceed`'s PR operations are the one carve-out: `forge_config`
+    treats that single reason as unconfigured after the same stderr line.
+  - **A config that relied on one of the fail-open shapes above now refuses**, with a
+    named reason and the path — and, for a duplicate key, the key and its line. If a
+    machine that used to delegate now reports `disabled-via-config`, run
+    `adlc-read --print-gate` and fix the file the message names; the refusal
+    deliberately does **not** advise setting `ADLC_DELEGATE_ENABLED=1`, because an env
+    var cannot lift an arm the file just failed.
+  - Consumer repos with a vendored `.adlc/partials/delegate-gate.sh` predating this
+    REQ keep working (the pre-REQ-609 resolution behaviour) until `/init` re-vendors;
+    `/template-drift` reports the stale copy.
+
 - **The delegation gate may veto; only Python may authorize (REQ-603).** ⚠️ **Upgrade
   the gate and `adlc-read` together.**
 

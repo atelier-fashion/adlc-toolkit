@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
-(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522).
+(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609).
 
 Run from the repo root:
 
@@ -66,6 +66,19 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    ``gh pr checks`` are exempt — a local read-only diff convenience and
    CI-status polling, the latter explicitly out of scope. Only shell fences
    are scanned, so prose / lesson mentions of ``gh pr`` are never flagged.
+8. ``check_read_bin_fallback`` — the ``ADLC_READ_BIN`` call-site contract inside
+   a shell fence (REQ-609 BR-12, ADR-3). ``partials/delegate-gate.sh`` is the
+   single resolver and exports an absolute path or the empty string. A fence
+   that hands the corpus over must (a) carry no ``${ADLC_READ_BIN:-…}`` default
+   — a second resolution by a weaker rule, the planted-binary class BUG-209
+   recorded; (b) invoke only as ``command "$ADLC_READ_BIN"``, because bash and
+   zsh both permit a function named with an absolute path and that function
+   would otherwise receive the corpus; and (c) refuse a non-absolute value
+   before the first invocation, spelled ``case "$ADLC_READ_BIN" in /*)`` — a
+   non-empty test passes the bare name a stale vendored gate still exports.
+   Fences only, so prose describing a retired shape is not flagged. This is the
+   ONE check that also walks ``agents/*.md`` (see ``find_read_bin_extra_files``):
+   ``agents/delegate-pre-pass.md`` hands over a corpus exactly as a skill does.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
 deferred follow-up; LESSON-019 #2): the ``SKIP_DIR_PARTS`` membership test is
@@ -203,6 +216,95 @@ FORGE_DIRECT_GH_RE = re.compile(
     r"\bgh\s+pr\s+(create|ready|edit|view|list|merge|comment)\b"
 )
 
+# REQ-609 BR-12: a SECOND resolution of `adlc-read` at a call site, written as a
+# `${ADLC_READ_BIN:-<default>}` default. `partials/delegate-gate.sh` is the sole
+# resolver; it walks `$PATH` itself and exports an absolute path or the empty
+# string, and nothing else (ADR-3). A `:-` default at the call site re-answers
+# the question the gate already answered, by a weaker rule — the bare-name form
+# hands the corpus to whatever the shell resolves, which is exactly the planted-
+# binary class BUG-209 recorded. The correct shape is `"$ADLC_READ_BIN"` plus an
+# `[ -n "$ADLC_READ_BIN" ]` refusal in the same fence. Fixed-string match on the
+# parameter-expansion operator, so ANY default is flagged, not just the bare
+# name; same structural posture as `forge-direct-gh` (LESSON-012 — prose in a
+# skill is the honor system, only a check keeps this from rotting back).
+READ_BIN_FALLBACK_LITERAL = "ADLC_READ_BIN:-"
+
+# REQ-609 (verify C1/C2): the other two halves of the same call-site contract.
+#
+# The GUARD tests for an absolute path, not for non-empty. The canonical gate
+# exports an absolute path or the empty string, but a consumer repo whose
+# vendored `.adlc/partials/delegate-gate.sh` predates REQ-609 still exports the
+# BARE NAME on a `$PATH` hit; `[ -n "$ADLC_READ_BIN" ]` passes that straight
+# through to the shell's lookup machinery, which is the resolution the walk
+# exists to avoid (BUG-209). Matched as a fixed string, and required to sit
+# BEFORE the first invocation in the same fence.
+READ_BIN_GUARD_LITERAL = 'case "$ADLC_READ_BIN" in /*)'
+
+# The resolved binary's EXPANSION, in the two legal spellings. `\$ADLC_READ_BIN`
+# is closed against a longer name (`$ADLC_READ_BIN_OLD` is a different variable),
+# and the braced alternative is the CLOSED `${ADLC_READ_BIN}` — `${ADLC_READ_BIN:-…}`
+# is the retired default and belongs to READ_BIN_FALLBACK_LITERAL, not here.
+READ_BIN_EXPANSION = r"\$ADLC_READ_BIN(?![A-Za-z0-9_])|\$\{ADLC_READ_BIN\}"
+
+# An INVOCATION of the resolved binary: the expansion — quoted or not, braced or
+# not — followed by an argument (a flag `-`, a quoted word `"`, or an expansion
+# `$`). All four spellings, because they are all the same command and a check
+# that knows only one of them is one paste away from seeing nothing (REQ-609
+# verify D3): `$ADLC_READ_BIN --paths …` unquoted is the BUG-209 shape written
+# without quotes, and `${ADLC_READ_BIN}` is the other legal way to write the
+# name. The optional-quote group is back-referenced, so an opening quote must be
+# matched by a closing one; `"$ADLC_READ_BIN --paths x"` inside a longer string
+# is therefore not an invocation of anything.
+#
+# The lookahead separates an invocation from the guard (`… " in /*)`) and from a
+# test (`[ -n "$ADLC_READ_BIN" ]`), so neither draws a "missing command" finding
+# whose message would not describe it. The single-quoted spelling the refusal
+# message uses to echo the offending value (`'$ADLC_READ_BIN'`) is excluded by
+# the COMMAND-POSITION test below rather than by the quoting.
+READ_BIN_INVOKE_RE = re.compile(
+    r'(?P<q>"?)(?:' + READ_BIN_EXPANSION + r')(?P=q)(?=\s+(?:-|"|\$))'
+)
+
+# Where a matched expansion has to sit for it to BE an invocation: at the start
+# of the line, or after a command separator (`;`, `&`, `|`, `(`, `{`) or a
+# compound-command keyword, optionally behind `command `. Without this the
+# unquoted spelling would match inside prose-carrying arguments — the refusal
+# message's own `('$ADLC_READ_BIN')`, or an `echo "$ADLC_READ_BIN -- …"` — and
+# report a "missing command prefix" on a line that invokes nothing.
+READ_BIN_COMMAND_POSITION_RE = re.compile(
+    r"(?:^|[;&|({]|\bthen\b|\bdo\b|\belse\b)\s*(?:command\s+)?$"
+)
+
+# A COPY of the resolver's answer into another variable: `B="$ADLC_READ_BIN"`,
+# with or without quotes, braces, or an `export`/`readonly`/`local` keyword.
+# One hop is enough to leave the contract — the new name is guarded by nothing,
+# re-checked by nothing, and invisible to every check written against
+# `ADLC_READ_BIN`. Anchored at the start of the line so a command substitution
+# (`key_ok=$(command "$ADLC_READ_BIN" --print-enabled)`), which invokes rather
+# than copies, is not caught by it.
+READ_BIN_COPY_RE = re.compile(
+    r"^\s*(?:export\s+|readonly\s+|local\s+)?[A-Za-z_][A-Za-z0-9_]*="
+    r'\s*"?(?:' + READ_BIN_EXPANSION + r")"
+)
+
+# A hand-off to `eval`. `eval` re-parses its argument as shell source, which
+# undoes the quoting and puts function and alias lookup back in play regardless
+# of any `command` written inside the string — so the value the resolver
+# vouched for is resolved a second time, by the weaker rule, at the moment the
+# corpus is handed over.
+READ_BIN_EVAL_RE = re.compile(
+    r"(?:^|[;&|({]|\s)eval\b.*(?:" + READ_BIN_EXPANSION + r")"
+)
+
+# The `command ` prefix, at the end of the text preceding an invocation. bash and
+# zsh both permit a function whose NAME is an absolute path, so without this
+# prefix a planted `/Users/<u>/bin/adlc-read()` function — not the file the
+# resolver proved is on disk — receives the corpus. `command` bypasses function
+# and alias lookup, which is why the gate's own probe already used it
+# (REQ-609 ADR-3); the call sites did not, and they are the ones holding the
+# corpus. Anchored with `$` so only the IMMEDIATELY preceding word counts.
+READ_BIN_COMMAND_PREFIX_RE = re.compile(r"(?:^|[;&|(]|\s)command\s+$")
+
 # REQ-525 (AC4 / BR-4): the canonical five-surface vocabulary (the SyncSurface
 # enum). Single source of truth that both the parity check below and its tests
 # reference. The first four are physically vendored into a consumer project by
@@ -292,6 +394,37 @@ def find_skill_files(root: Path) -> Iterable[Path]:
         if any(part in SKIP_DIR_PARTS for part in rel.parts[:-1]):
             continue
         yield path
+
+
+def find_read_bin_extra_files(root: Path) -> list[Path]:
+    """``agents/*.md`` — the ONE extra surface ``check_read_bin_fallback`` walks.
+
+    ``agents/delegate-pre-pass.md`` hands a diff to the delegate exactly as a
+    skill does, and it is not a ``SKILL.md``, so the structural guard could not
+    see the very fences REQ-609 BR-12 was written for. This is a SEPARATE walk
+    rather than a widening of ``find_skill_files`` on purpose: the other checks
+    (sentinels, canonical, arg-templating, posix-fence) encode obligations that
+    belong to a skill's contract and would be false positives on an agent prompt
+    file, and the REQ-595 vacuous-scan count must keep counting ``SKILL.md``
+    files so a dead skill walk cannot be masked by agent files.
+
+    Symlinks that resolve outside ``root`` are skipped, the same defence
+    ``find_skill_files`` carries.
+    """
+    agents_dir = root / "agents"
+    if not agents_dir.is_dir():
+        return []
+    root_resolved = root.resolve()
+    out: list[Path] = []
+    for path in sorted(agents_dir.glob("*.md")):
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(root_resolved)
+        except (OSError, ValueError):
+            continue
+        if resolved.is_file():
+            out.append(path)
+    return out
 
 
 def load_sentinels(path: Path) -> list[str]:
@@ -728,6 +861,142 @@ def check_forge_direct_gh(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
+    """REQ-609 BR-12 / ADR-3: the whole call-site contract for ``ADLC_READ_BIN``.
+
+    ``partials/delegate-gate.sh`` is the single resolver for ``adlc-read``: it
+    walks ``$PATH`` itself (never ``command -v``, so no function, alias, or hash
+    entry can answer for it) and exports an absolute path or the empty string.
+    A fence that hands the corpus over must therefore satisfy three things, and
+    all three are checked here because each one alone is bypassable:
+
+    (a) **No** ``${ADLC_READ_BIN:-…}`` **default.** That is a second resolution
+        by a weaker rule — with the bare name it hands the corpus to whatever
+        the shell resolves, the planted-binary class BUG-209 recorded. Fixed
+        string on the expansion operator, not on one default value, so
+        re-introducing the pattern under a different default is caught too.
+    (b) **Every invocation goes through** ``command``. bash and zsh both permit
+        a function whose NAME is an absolute path, so a bare
+        ``"$ADLC_READ_BIN" --paths …`` runs a planted function instead of the
+        file the resolver proved is on disk. The gate's own probe already used
+        ``command``; the call sites — the ones actually holding the corpus —
+        did not.
+    (c) **An absolute-path guard precedes the first invocation**, spelled
+        ``case "$ADLC_READ_BIN" in /*)``. ``[ -n "$ADLC_READ_BIN" ]`` is not
+        enough: a consumer repo's stale vendored gate still exports the bare
+        name on a ``$PATH`` hit, and a non-empty test passes it through.
+    (d) **The invocation is quoted.** An unquoted ``$ADLC_READ_BIN`` is
+        word-split and glob-expanded before it is a command name, so a resolved
+        path with a space in it runs the wrong file with the rest as arguments
+        and one with a glob character runs whatever matches — the shell
+        re-deriving the binary the resolver already proved (REQ-609 verify D3).
+    (e) **The value is invoked directly**, never copied into another variable
+        and never handed to ``eval``. A copy is guarded by nothing and checked
+        by nothing; ``eval`` re-parses the string as source, which undoes the
+        quoting and restores function lookup whatever prefix is written inside.
+
+    All four spellings of the expansion count as an invocation — quoted or bare,
+    ``$ADLC_READ_BIN`` or ``${ADLC_READ_BIN}`` — when they sit in command
+    position, so no obligation can be stepped around by respelling the name.
+
+    Only shell fences are scanned, so prose that *describes* a retired shape (a
+    lesson, a CHANGELOG entry quoted in a skill) is never flagged — the same
+    posture as ``check_forge_direct_gh``. (b), (c) and (d) apply only to fences
+    that actually invoke, so a fence that merely mentions the variable is
+    untouched. COMMENT lines are skipped by every check here: a `#`-prefixed
+    line hands nothing to anything, so a retired invocation kept beside its
+    replacement is not a finding — and, in the other direction, a commented-out
+    guard does not satisfy (c), which would otherwise make the ordering
+    obligation satisfiable by pasting a comment (LESSON-019).
+    """
+    findings: list[Finding] = []
+    for _lang, _idx, _start, body in _iter_fences(text):
+        guard_pos: tuple[int, int] | None = None
+        first_invoke: tuple[int, int] | None = None
+        first_invoke_line = 0
+        for offset, (lineno, line) in enumerate(body):
+            # A commented line runs nowhere: it neither hands the corpus over
+            # nor refuses anything, so no check below may read it (verify D3).
+            if line.lstrip().startswith("#"):
+                continue
+            # (a) the retired second resolver.
+            if READ_BIN_FALLBACK_LITERAL in line:
+                findings.append(
+                    Finding(
+                        rel, lineno, "read-bin-fallback",
+                        "fence resolves adlc-read a second time via a bare-name "
+                        "default; source the gate and refuse on a non-absolute "
+                        "ADLC_READ_BIN (REQ-609 BR-12)",
+                    )
+                )
+            column = line.find(READ_BIN_GUARD_LITERAL)
+            if column != -1 and guard_pos is None:
+                guard_pos = (offset, column)
+            # (e) a copy into another name, or a hand-off to `eval`. Both leave
+            # the contract on the line that does it, whatever follows.
+            if READ_BIN_COPY_RE.search(line) or READ_BIN_EVAL_RE.search(line):
+                findings.append(
+                    Finding(
+                        rel, lineno, "read-bin-fallback",
+                        "the resolver's value must be invoked directly as "
+                        '`command "$ADLC_READ_BIN"` — copying it into another '
+                        "variable, or handing it to `eval`, moves it out of "
+                        "reach of the absolute-path guard and puts the shell's "
+                        "own resolution back in play (REQ-609 BR-12, ADR-3)",
+                    )
+                )
+            for match in READ_BIN_INVOKE_RE.finditer(line):
+                prefix = line[: match.start()]
+                # Only an expansion in COMMAND POSITION invokes anything. The
+                # refusal message's own `('$ADLC_READ_BIN')` and any other
+                # mention inside an argument are not invocations, and a finding
+                # on one would describe something the line does not do.
+                if not READ_BIN_COMMAND_POSITION_RE.search(prefix):
+                    continue
+                if first_invoke is None:
+                    first_invoke = (offset, match.start())
+                    first_invoke_line = lineno
+                # (d) the quoting, on EVERY invocation.
+                if not match.group("q"):
+                    findings.append(
+                        Finding(
+                            rel, lineno, "read-bin-fallback",
+                            "invokes the resolved binary unquoted — the shell "
+                            "word-splits and glob-expands the path before it is "
+                            "a command name, so a resolved path containing a "
+                            "space runs a different file and one containing a "
+                            "glob character runs whatever matches; spell it "
+                            '`command "$ADLC_READ_BIN"` (REQ-609 BR-12)',
+                        )
+                    )
+                # (b) the `command` prefix, on EVERY invocation.
+                if not READ_BIN_COMMAND_PREFIX_RE.search(prefix):
+                    findings.append(
+                        Finding(
+                            rel, lineno, "read-bin-fallback",
+                            'invokes "$ADLC_READ_BIN" without the `command` '
+                            "prefix — bash and zsh both allow a function named "
+                            "with an absolute path, and that function, not the "
+                            "resolved file, would receive the corpus "
+                            "(REQ-609 ADR-3)",
+                        )
+                    )
+        # (c) the absolute-path guard, before the first invocation.
+        if first_invoke is not None and (
+            guard_pos is None or guard_pos > first_invoke
+        ):
+            findings.append(
+                Finding(
+                    rel, first_invoke_line, "read-bin-fallback",
+                    "fence invokes \"$ADLC_READ_BIN\" with no preceding "
+                    f'`{READ_BIN_GUARD_LITERAL}` guard — a non-empty test is '
+                    "not enough, because a stale vendored gate exports the bare "
+                    "name on a $PATH hit (REQ-609 BR-12)",
+                )
+            )
+    return findings
+
+
 def _safe_label(skill_path: Path, root: Path) -> str:
     """Non-leaking finding label for ``skill_path``.
 
@@ -1071,6 +1340,21 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_cross_fence_fn(text, rel))
         findings.extend(check_cross_fence_var(text, rel))
         findings.extend(check_forge_direct_gh(text, rel))
+        findings.extend(check_read_bin_fallback(text, rel))
+    # REQ-609: `check_read_bin_fallback` ALONE also walks `agents/*.md` — see
+    # find_read_bin_extra_files for why this is a separate walk and why these
+    # files are deliberately NOT added to `scanned` (which counts SKILL.md).
+    for agent_path in find_read_bin_extra_files(root):
+        agent_rel = _safe_label(agent_path, root)
+        try:
+            agent_text = agent_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            findings.append(
+                Finding(agent_rel, 1, "io-error",
+                        f"could not read: {exc.strerror or 'I/O error'}")
+            )
+            continue
+        findings.extend(check_read_bin_fallback(agent_text, agent_rel))
     # Per-root (not per-SKILL.md): agent model: drift vs the config render (BR-5).
     findings.extend(check_agent_model_drift(root))
     # Per-root (REQ-525 AC4): /init copy list vs /template-drift checked list parity.
