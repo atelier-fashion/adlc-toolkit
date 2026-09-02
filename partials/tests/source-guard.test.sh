@@ -224,6 +224,12 @@ if [ "$NLINES" -eq 0 ]; then
 else
   pass "vacuous_extraction_fails: extraction yielded $NLINES distinct line(s)"
 fi
+# The guard's failing branch is driven, not just written: an empty root must
+# come back as zero lines (the exact input that branch fires on), otherwise the
+# guard could never fail and BR-12's obligation would be dead code.
+mkdir -p "$SANDBOX/emptyroot"
+empty_n=$(extract "$SANDBOX/emptyroot" | grep -c .)
+check "vacuous_extraction_guard_fires: an empty root yields zero lines (the fail-branch input)" "0" "$empty_n"
 
 # The self-source inside partials/*.sh is the reason the extraction reads more than
 # the fence-bearing markdown. The live line in emit-step-telemetry.sh sources
@@ -306,7 +312,15 @@ if [ "${surface_lines:-0}" -ge 5000 ]; then
 else
   fail "case_e_surface_nonvacuous: distribution surface is only ${surface_lines:-0} lines — a family went missing"
 fi
-hits=$(surface_files | while IFS= read -r f; do grep -cF "$RETIRED" "$f" 2>/dev/null || true; done | awk '{s+=$1} END{print s+0}')
+count_retired() { # count_retired <file>... — total retired-literal hits across the files given on stdin
+  while IFS= read -r f; do grep -cF "$RETIRED" "$f" 2>/dev/null || true; done | awk '{s+=$1} END{print s+0}'
+}
+# Positive control (LESSON-602): the counter must be able to fire before its
+# zero on the real surface means anything.
+printf 'prose: `. .adlc/partials/x.sh 2>/dev/null || . ~/.claude/skills/partials/x.sh`\n' > "$SANDBOX/retired-probe.md"
+probe_hits=$(printf '%s\n' "$SANDBOX/retired-probe.md" | count_retired)
+check "case_e_counter_fires_on_probe: a planted retired line is counted" "1" "$probe_hits"
+hits=$(surface_files | count_retired)
 check "case_e_retired_literal_absent_from_distribution: '$RETIRED' hits on the distribution surface" "0" "$hits"
 if grep -qF "$CANON_SPELLING" "$ROOT/.adlc/context/conventions.md"; then
   pass "case_e_conventions_carry_canonical_spelling: conventions.md teaches the guarded form"
@@ -360,9 +374,19 @@ case_f_architect_step5_under_sh
 #    self-sufficient. Run from $ROOT so the labels are repo-relative without
 #    interpolating a path into a regex.
 # ===========================================================================
-unguarded=$( cd "$ROOT" && grep -nHE '(^|[;&|{(]|then|else|elif|do)[[:space:]]*(\.|source)[[:space:]]+[^[:space:]]*partials/[A-Za-z0-9_-]+\.sh' partials/*.sh 2>/dev/null \
-  | grep -v ':[0-9][0-9]*:[[:space:]]*#' \
-  | grep -vE '\[ -f [^]]*partials/[A-Za-z0-9_-]+\.sh \].*(\.|source) [^[:space:]]*partials/' )
+unguarded_in() { # unguarded_in <root> — unguarded partial-to-partial dot-sources under <root>/partials, repo-relative labels
+  ( cd "$1" && grep -nHE '(^|[;&|{(]|then|else|elif|do)[[:space:]]*(\.|source)[[:space:]]+[^[:space:]]*partials/[A-Za-z0-9_-]+\.sh' partials/*.sh 2>/dev/null \
+    | grep -v ':[0-9][0-9]*:[[:space:]]*#' \
+    | grep -vE '\[ -f [^]]*partials/[A-Za-z0-9_-]+\.sh \].*(\.|source) [^[:space:]]*partials/' )
+}
+# Positive control (LESSON-602): the exact chain shape id-recheck.sh carried,
+# planted in a sandbox root, must be found — otherwise the empty result on the
+# real tree proves nothing.
+mkdir -p "$SANDBOX/badroot/partials"
+printf '#!/bin/sh\n# . .adlc/partials/comment-only.sh\nf() {\n  { [ -n "$D" ] && . "$D/id-alloc.sh"; } \\\n    || . .adlc/partials/id-alloc.sh 2>/dev/null \\\n    || . ~/.claude/skills/partials/id-alloc.sh 2>/dev/null\n}\n' > "$SANDBOX/badroot/partials/bad.sh"
+bad_hits=$(unguarded_in "$SANDBOX/badroot" | grep -c .)
+check "case_g_detector_fires_on_planted_chain: the id-recheck-shaped chain is found (2 continuation lines, comment skipped)" "2" "$bad_hits"
+unguarded=$(unguarded_in "$ROOT")
 if [ -z "$unguarded" ]; then
   pass "case_g_partials_have_no_unguarded_dot_source: every partial-to-partial source is [ -f ]-guarded"
 else

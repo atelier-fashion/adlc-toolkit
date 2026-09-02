@@ -50,5 +50,20 @@ defines is silently undefined until a later `command not found`.
 source .adlc/partials/forge.sh 2>/dev/null || source ~/.claude/skills/partials/forge.sh
 ```
 
-Expect exactly five `unguarded-source` findings and no other finding of any
+The `$HOME` spelling of the canonical operand. The canonical form never uses it,
+so every occurrence is, by construction, a finding — and the regex branch that
+recognises `$HOME`/`${HOME}` is otherwise unexercised.
+
+```sh
+[ -f .adlc/partials/forge.sh ] || . ${HOME}/.claude/skills/partials/forge.sh
+```
+
+A quoted operand: quoting does not change what `.` does, and `"~/…"` does not
+even tilde-expand, so this shape is doubly wrong.
+
+```sh
+. ".adlc/partials/forge.sh" 2>/dev/null || . "~/.claude/skills/partials/forge.sh"
+```
+
+Expect exactly seven `unguarded-source` findings and no other finding of any
 kind.
