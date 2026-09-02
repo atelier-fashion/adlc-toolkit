@@ -134,12 +134,27 @@ adlc_forge_provider() {
 # under zsh too, where an unmatched glob is an error that writes to stderr and
 # aborts the command (LESSON-335). No interpreter is spawned to answer the
 # question, so the shim can ask it identically.
+#
+# Three details of that `find` are what make "identically" true (REQ-609 D1):
+#   * `-L`. The shim tests `[ -d "$_d" ]` and checks.py calls `os.path.isdir`,
+#     and both FOLLOW symlinks. A `site-packages/yaml` that is a symlink to a
+#     directory is an ordinary shape, and a bare `-type d` does not follow it —
+#     so this site alone answered no, and one machine got two interpreters.
+#   * `*/python*/site-packages/yaml`, not `*/site-packages/yaml`. The other two
+#     sites glob `lib/python*`, which a `lib/pypy3.10/...` layout does not
+#     satisfy; the unanchored pattern matched it here. Same split, other
+#     direction.
+#   * the pattern never interpolates the venv path. `-path` takes a PATTERN, so
+#     a `$HOME` like `h[1] x` would be read as a character class and match
+#     nothing — the identical bug `glob.escape` fixes in checks.py. The venv is
+#     passed as find's starting POINT, where it is a literal, and `-maxdepth 3`
+#     keeps the walk to `lib/<interpreter>/site-packages/yaml`.
 _adlc_forge_python() {
   adlc_fpy_venv="${HOME:-}/.claude/delegate-venv"
   adlc_fpy_exe="$adlc_fpy_venv/bin/python3"
   if [ -f "$adlc_fpy_exe" ] && [ -x "$adlc_fpy_exe" ] && [ -d "$adlc_fpy_venv/lib" ]; then
-    adlc_fpy_yaml=$(find "$adlc_fpy_venv/lib" -maxdepth 3 -type d \
-                      -path '*/site-packages/yaml' 2>/dev/null)
+    adlc_fpy_yaml=$(find -L "$adlc_fpy_venv/lib" -maxdepth 3 -type d \
+                      -path '*/python*/site-packages/yaml' 2>/dev/null)
     if [ -n "$adlc_fpy_yaml" ]; then
       printf '%s\n' "$adlc_fpy_exe"
       return 0
@@ -151,6 +166,14 @@ _adlc_forge_python() {
 
 # Locate and invoke forge_config.py with the two-level fallback (project vendored
 # copy first, then toolkit). Args after the repo are passed to the script.
+#
+# Every invocation goes through `command` (REQ-609 D5, ADR-3). On the fallback
+# arm `$adlc_fp_py` is the BARE WORD `python3`, and this partial is SOURCED into
+# the caller's shell — so a function named `python3` there (a debug wrapper, a
+# version shim, a planted one) takes precedence over the $PATH lookup and would
+# receive the forge_config path, making its stdout the resolved provider.
+# `command` bypasses function lookup, which is why the delegate gate's own probe
+# already used it; this is the site /proceed takes for every PR operation.
 _adlc_forge_py() {
   adlc_fp_repo=$1
   shift
@@ -159,11 +182,11 @@ _adlc_forge_py() {
   adlc_fp_vend="$adlc_fp_repo/.adlc/tools/adlc/forge_config.py"
   adlc_fp_glob="${HOME:-}/.claude/skills/tools/adlc/forge_config.py"
   if [ -f "$adlc_fp_local" ]; then
-    "$adlc_fp_py" "$adlc_fp_local" "$@"
+    command "$adlc_fp_py" "$adlc_fp_local" "$@"
   elif [ -f "$adlc_fp_vend" ]; then
-    "$adlc_fp_py" "$adlc_fp_vend" "$@"
+    command "$adlc_fp_py" "$adlc_fp_vend" "$@"
   else
-    "$adlc_fp_py" "$adlc_fp_glob" "$@"
+    command "$adlc_fp_py" "$adlc_fp_glob" "$@"
   fi
 }
 

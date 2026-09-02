@@ -189,7 +189,12 @@ def _note_dependency_missing():
 #: closure (it has to load on a machine with no delegation install at all), and
 #: two lines of regex are a smaller cost than that coupling. Keep the two in
 #: step — the origin is `tools/delegate/_common._clean_report_value`.
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+# C0 + DEL, C1 (\x80-\x9f), and the bidi overrides/isolates (U+202A-202E,
+# U+2066-2069): a caller-supplied path is printed to a terminal, and a
+# right-to-left override can reorder what the operator reads. Kept
+# byte-identical in tools/delegate/_common.py and tools/adlc/forge_config.py;
+# test_forge_config pins the two patterns equal.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
 def _clean_report_value(v):

@@ -503,7 +503,13 @@ def _emit_dependency_notice(stream=None):
     if _dependency_notice_emitted:
         return False
     _dependency_notice_emitted = True
-    (sys.stderr if stream is None else stream).write(dependency_missing_line())
+    # The write itself must not break "never raises": with fd 2 closed (a
+    # launcher that runs `2>&-`) `sys.stderr.write` raises ValueError, and this
+    # is the arm whose whole promise is a closed outcome plus one notice.
+    try:
+        (sys.stderr if stream is None else stream).write(dependency_missing_line())
+    except Exception:
+        return False
     return True
 
 

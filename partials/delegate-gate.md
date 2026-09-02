@@ -216,8 +216,11 @@ already been made hostile before the fence runs can forge a grant. That is out o
 scope by construction: everything inside this process is code the operator is
 running on purpose, and the arms that *authorize* delegation live in Python
 (REQ-603), which does not consult shell state. Such a shell could fake a verdict,
-but it cannot cause transmission — `adlc-read` re-resolves the gate itself and
-refuses. What `command` closes is the narrower and realistic case: a function
+but it cannot make **`adlc-read`** transmit — `adlc-read` re-resolves the gate
+itself and refuses. (A function that shadows `command` is arbitrary code holding
+the corpus path as an argument, so it could read and send the file by its own
+means; that is code execution the operator already granted by running the shell,
+not a property of this gate.) What `command` closes is the narrower and realistic case: a function
 planted by an unrelated rc file, tool wrapper, or dotfile that happens to shadow
 a path the resolver returned.
 
@@ -233,8 +236,14 @@ fence sources `.adlc/partials/delegate-gate.sh` from the working repo before
 falling back to `~/.claude/skills/partials/`, and there is no digest pin on that
 copy — it is trusted exactly as every other vendored partial (`forge.sh`,
 `emit-step-telemetry.sh`, `delegate-tools-path.sh`) is trusted, i.e. as code the
-operator has checked out and is running on purpose. Anyone who can write that
-file can also write the `SKILL.md` that sources it. Pinning the vendored partials
+operator has checked out and is running on purpose. The bound is exact and not
+small: `/init` vendors the partials into the repo but never the `SKILL.md` files,
+which stay machine-global under `~/.claude/skills/`, so a checkout — a branch, a
+PR, a fork — can carry a modified `delegate-gate.sh` while the skill that sources
+it does not travel with it. Sourcing that copy is already arbitrary code execution
+in the fence's shell; the corpus hand-over is not the marginal risk, and the
+absolute-path guard does not narrow this case (it narrows the honest-but-stale
+copy that exports a bare command name, which the guard rejects). Pinning the vendored partials
 to a digest and having `/template-drift` verify it is a follow-up, not something
 this contract relies on.
 

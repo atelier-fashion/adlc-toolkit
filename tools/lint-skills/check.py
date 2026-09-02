@@ -240,14 +240,61 @@ READ_BIN_FALLBACK_LITERAL = "ADLC_READ_BIN:-"
 # BEFORE the first invocation in the same fence.
 READ_BIN_GUARD_LITERAL = 'case "$ADLC_READ_BIN" in /*)'
 
-# An INVOCATION of the resolved binary: `"$ADLC_READ_BIN"` followed by an
-# argument — a flag (`-`), a quoted word (`"`), or an expansion (`$`). The
-# lookahead is what separates an invocation from the guard (`… " in /*)`) and
-# from a test (`[ -n "$ADLC_READ_BIN" ]`), so neither draws a "missing command"
-# finding whose message would not describe it. The single-quoted spelling the
-# refusal message uses to echo the offending value (`'$ADLC_READ_BIN'`) does not
-# match either — the pattern requires double quotes.
-READ_BIN_INVOKE_RE = re.compile(r'"\$ADLC_READ_BIN"(?=\s+(?:-|"|\$))')
+# The resolved binary's EXPANSION, in the two legal spellings. `\$ADLC_READ_BIN`
+# is closed against a longer name (`$ADLC_READ_BIN_OLD` is a different variable),
+# and the braced alternative is the CLOSED `${ADLC_READ_BIN}` — `${ADLC_READ_BIN:-…}`
+# is the retired default and belongs to READ_BIN_FALLBACK_LITERAL, not here.
+READ_BIN_EXPANSION = r"\$ADLC_READ_BIN(?![A-Za-z0-9_])|\$\{ADLC_READ_BIN\}"
+
+# An INVOCATION of the resolved binary: the expansion — quoted or not, braced or
+# not — followed by an argument (a flag `-`, a quoted word `"`, or an expansion
+# `$`). All four spellings, because they are all the same command and a check
+# that knows only one of them is one paste away from seeing nothing (REQ-609
+# verify D3): `$ADLC_READ_BIN --paths …` unquoted is the BUG-209 shape written
+# without quotes, and `${ADLC_READ_BIN}` is the other legal way to write the
+# name. The optional-quote group is back-referenced, so an opening quote must be
+# matched by a closing one; `"$ADLC_READ_BIN --paths x"` inside a longer string
+# is therefore not an invocation of anything.
+#
+# The lookahead separates an invocation from the guard (`… " in /*)`) and from a
+# test (`[ -n "$ADLC_READ_BIN" ]`), so neither draws a "missing command" finding
+# whose message would not describe it. The single-quoted spelling the refusal
+# message uses to echo the offending value (`'$ADLC_READ_BIN'`) is excluded by
+# the COMMAND-POSITION test below rather than by the quoting.
+READ_BIN_INVOKE_RE = re.compile(
+    r'(?P<q>"?)(?:' + READ_BIN_EXPANSION + r')(?P=q)(?=\s+(?:-|"|\$))'
+)
+
+# Where a matched expansion has to sit for it to BE an invocation: at the start
+# of the line, or after a command separator (`;`, `&`, `|`, `(`, `{`) or a
+# compound-command keyword, optionally behind `command `. Without this the
+# unquoted spelling would match inside prose-carrying arguments — the refusal
+# message's own `('$ADLC_READ_BIN')`, or an `echo "$ADLC_READ_BIN -- …"` — and
+# report a "missing command prefix" on a line that invokes nothing.
+READ_BIN_COMMAND_POSITION_RE = re.compile(
+    r"(?:^|[;&|({]|\bthen\b|\bdo\b|\belse\b)\s*(?:command\s+)?$"
+)
+
+# A COPY of the resolver's answer into another variable: `B="$ADLC_READ_BIN"`,
+# with or without quotes, braces, or an `export`/`readonly`/`local` keyword.
+# One hop is enough to leave the contract — the new name is guarded by nothing,
+# re-checked by nothing, and invisible to every check written against
+# `ADLC_READ_BIN`. Anchored at the start of the line so a command substitution
+# (`key_ok=$(command "$ADLC_READ_BIN" --print-enabled)`), which invokes rather
+# than copies, is not caught by it.
+READ_BIN_COPY_RE = re.compile(
+    r"^\s*(?:export\s+|readonly\s+|local\s+)?[A-Za-z_][A-Za-z0-9_]*="
+    r'\s*"?(?:' + READ_BIN_EXPANSION + r")"
+)
+
+# A hand-off to `eval`. `eval` re-parses its argument as shell source, which
+# undoes the quoting and puts function and alias lookup back in play regardless
+# of any `command` written inside the string — so the value the resolver
+# vouched for is resolved a second time, by the weaker rule, at the moment the
+# corpus is handed over.
+READ_BIN_EVAL_RE = re.compile(
+    r"(?:^|[;&|({]|\s)eval\b.*(?:" + READ_BIN_EXPANSION + r")"
+)
 
 # The `command ` prefix, at the end of the text preceding an invocation. bash and
 # zsh both permit a function whose NAME is an absolute path, so without this
@@ -838,11 +885,29 @@ def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
         ``case "$ADLC_READ_BIN" in /*)``. ``[ -n "$ADLC_READ_BIN" ]`` is not
         enough: a consumer repo's stale vendored gate still exports the bare
         name on a ``$PATH`` hit, and a non-empty test passes it through.
+    (d) **The invocation is quoted.** An unquoted ``$ADLC_READ_BIN`` is
+        word-split and glob-expanded before it is a command name, so a resolved
+        path with a space in it runs the wrong file with the rest as arguments
+        and one with a glob character runs whatever matches — the shell
+        re-deriving the binary the resolver already proved (REQ-609 verify D3).
+    (e) **The value is invoked directly**, never copied into another variable
+        and never handed to ``eval``. A copy is guarded by nothing and checked
+        by nothing; ``eval`` re-parses the string as source, which undoes the
+        quoting and restores function lookup whatever prefix is written inside.
+
+    All four spellings of the expansion count as an invocation — quoted or bare,
+    ``$ADLC_READ_BIN`` or ``${ADLC_READ_BIN}`` — when they sit in command
+    position, so no obligation can be stepped around by respelling the name.
 
     Only shell fences are scanned, so prose that *describes* a retired shape (a
     lesson, a CHANGELOG entry quoted in a skill) is never flagged — the same
-    posture as ``check_forge_direct_gh``. (b) and (c) apply only to fences that
-    actually invoke, so a fence that merely mentions the variable is untouched.
+    posture as ``check_forge_direct_gh``. (b), (c) and (d) apply only to fences
+    that actually invoke, so a fence that merely mentions the variable is
+    untouched. COMMENT lines are skipped by every check here: a `#`-prefixed
+    line hands nothing to anything, so a retired invocation kept beside its
+    replacement is not a finding — and, in the other direction, a commented-out
+    guard does not satisfy (c), which would otherwise make the ordering
+    obligation satisfiable by pasting a comment (LESSON-019).
     """
     findings: list[Finding] = []
     for _lang, _idx, _start, body in _iter_fences(text):
@@ -850,6 +915,10 @@ def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
         first_invoke: tuple[int, int] | None = None
         first_invoke_line = 0
         for offset, (lineno, line) in enumerate(body):
+            # A commented line runs nowhere: it neither hands the corpus over
+            # nor refuses anything, so no check below may read it (verify D3).
+            if line.lstrip().startswith("#"):
+                continue
             # (a) the retired second resolver.
             if READ_BIN_FALLBACK_LITERAL in line:
                 findings.append(
@@ -863,12 +932,45 @@ def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
             column = line.find(READ_BIN_GUARD_LITERAL)
             if column != -1 and guard_pos is None:
                 guard_pos = (offset, column)
+            # (e) a copy into another name, or a hand-off to `eval`. Both leave
+            # the contract on the line that does it, whatever follows.
+            if READ_BIN_COPY_RE.search(line) or READ_BIN_EVAL_RE.search(line):
+                findings.append(
+                    Finding(
+                        rel, lineno, "read-bin-fallback",
+                        "the resolver's value must be invoked directly as "
+                        '`command "$ADLC_READ_BIN"` — copying it into another '
+                        "variable, or handing it to `eval`, moves it out of "
+                        "reach of the absolute-path guard and puts the shell's "
+                        "own resolution back in play (REQ-609 BR-12, ADR-3)",
+                    )
+                )
             for match in READ_BIN_INVOKE_RE.finditer(line):
+                prefix = line[: match.start()]
+                # Only an expansion in COMMAND POSITION invokes anything. The
+                # refusal message's own `('$ADLC_READ_BIN')` and any other
+                # mention inside an argument are not invocations, and a finding
+                # on one would describe something the line does not do.
+                if not READ_BIN_COMMAND_POSITION_RE.search(prefix):
+                    continue
                 if first_invoke is None:
                     first_invoke = (offset, match.start())
                     first_invoke_line = lineno
+                # (d) the quoting, on EVERY invocation.
+                if not match.group("q"):
+                    findings.append(
+                        Finding(
+                            rel, lineno, "read-bin-fallback",
+                            "invokes the resolved binary unquoted — the shell "
+                            "word-splits and glob-expands the path before it is "
+                            "a command name, so a resolved path containing a "
+                            "space runs a different file and one containing a "
+                            "glob character runs whatever matches; spell it "
+                            '`command "$ADLC_READ_BIN"` (REQ-609 BR-12)',
+                        )
+                    )
                 # (b) the `command` prefix, on EVERY invocation.
-                if not READ_BIN_COMMAND_PREFIX_RE.search(line[: match.start()]):
+                if not READ_BIN_COMMAND_PREFIX_RE.search(prefix):
                     findings.append(
                         Finding(
                             rel, lineno, "read-bin-fallback",

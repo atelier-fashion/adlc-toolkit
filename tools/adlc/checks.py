@@ -92,8 +92,19 @@ def _delegate_venv() -> str:
 
 
 def _venv_has_pyyaml(venv: str) -> bool:
-    """True if ``venv`` carries a PyYAML package directory. No subprocess."""
-    pattern = os.path.join(venv, "lib", "python*", "site-packages", "yaml")
+    """True if ``venv`` carries a PyYAML package directory. No subprocess.
+
+    ``venv`` is INTERPOLATED into a glob pattern, so it is escaped first: it is
+    derived from ``$HOME``, and ``glob`` reads ``[``, ``]``, ``*`` and ``?`` in
+    that prefix as pattern syntax. A home directory named ``h[1] x`` turns the
+    literal path into a character class that matches nothing, and a fully
+    populated venv comes back ``no-pyyaml`` — the doctor then tells the operator
+    to install a PyYAML they already have, and ``_delegate_interpreter`` walks
+    away from the one interpreter on that machine which can parse the config.
+    Only the ``python*`` component is meant to be a pattern (REQ-609 verify D2).
+    """
+    pattern = os.path.join(
+        glob.escape(venv), "lib", "python*", "site-packages", "yaml")
     return any(os.path.isdir(p) for p in glob.glob(pattern))
 
 

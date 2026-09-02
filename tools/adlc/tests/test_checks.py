@@ -352,6 +352,49 @@ def test_delegate_interpreter_ignores_non_executable_venv(tmp_path, monkeypatch)
     assert checks._delegate_interpreter() == sys.executable
 
 
+def test_venv_state_reads_a_home_holding_glob_metacharacters(tmp_path, monkeypatch):
+    """`$HOME` is data, not a pattern (REQ-609 verify D2).
+
+    `_venv_has_pyyaml` asks the question with `glob.glob`, and `glob` reads
+    `[`, `]`, `*` and `?` in the INTERPOLATED prefix as pattern syntax. A home
+    directory named `h[1] x` therefore turns the `lib/python*/site-packages/yaml`
+    probe into a character class that matches nothing, and a fully populated
+    venv is reported `no-pyyaml` — so `adlc doctor` tells the operator to
+    reinstall PyYAML they already have, and `_delegate_interpreter` walks away
+    from the one interpreter on the machine that can parse the config.
+
+    A space is in the name too: it is not glob syntax, so it is the control that
+    keeps this pinned to the metacharacters rather than to "any odd home".
+    """
+    home = tmp_path / "h[1] x"
+    (home / ".claude" / "delegate-venv" / "lib" / "python3.9"
+     / "site-packages" / "yaml").mkdir(parents=True)
+    _script(home / ".claude" / "delegate-venv" / "bin" / "python3",
+            '#!/bin/sh\nexit 0\n')
+    monkeypatch.setattr(os.path, "expanduser",
+                        lambda p: p.replace("~", str(home)))
+    assert checks._venv_state() == "ready"
+    assert checks._delegate_interpreter() == str(
+        home / ".claude" / "delegate-venv" / "bin" / "python3")
+
+
+def test_venv_state_is_no_pyyaml_in_a_glob_home_without_the_package(tmp_path, monkeypatch):
+    """Working subject for the case above (LESSON-602).
+
+    Escaping the prefix must not turn the probe into one that answers `ready`
+    for every venv: the SAME metacharacter home, minus the `yaml` directory,
+    still reports `no-pyyaml`.
+    """
+    home = tmp_path / "h[1] x"
+    (home / ".claude" / "delegate-venv" / "lib" / "python3.9"
+     / "site-packages").mkdir(parents=True)
+    _script(home / ".claude" / "delegate-venv" / "bin" / "python3",
+            '#!/bin/sh\nexit 0\n')
+    monkeypatch.setattr(os.path, "expanduser",
+                        lambda p: p.replace("~", str(home)))
+    assert checks._venv_state() == "no-pyyaml"
+
+
 @pytest.mark.parametrize("probe", ["_config_enabled", "_forge_pat_status"])
 def test_config_probes_run_in_the_selected_interpreter(tmp_path, monkeypatch, probe):
     """Both config probes read with the interpreter the real call uses (BR-8).

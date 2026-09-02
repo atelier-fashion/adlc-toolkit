@@ -556,3 +556,23 @@ def test_refusal_message_strips_control_characters(tmp_path):
     with pytest.raises(fc.MalformedConfigError) as exc:
         fc.parse_forge_config(str(top_level_list))
     assert "ev il" in str(exc.value)
+
+
+def test_clean_report_value_matches_the_delegate_copy_and_strips_bidi():
+    """The sanitiser is duplicated on purpose (forge_config must not import
+    _common); a structural pin keeps the two patterns equal, and both must
+    strip C1 and bidi overrides, not only C0/DEL (Step D finding)."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    common_path = os.path.join(here, "..", "..", "delegate", "_common.py")
+    spec = importlib.util.spec_from_file_location("_common_for_pin", common_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert fc._CONTROL_CHARS_RE.pattern == mod._CONTROL_CHARS_RE.pattern
+    hostile = "a\u202eb\x85c\x1bd"
+    for clean in (fc._clean_report_value, mod._clean_report_value):
+        out = clean(hostile)
+        # \x85 (NEL) is whitespace to str.split(), so it collapses to one space
+        # before the control strip; the bidi override and ESC are removed.
+        assert out == "ab cd", repr(out)
+    assert fc._clean_report_value("plain path/with space") == "plain path/with space"

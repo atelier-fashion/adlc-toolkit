@@ -242,9 +242,86 @@ mkdir -p "$FAKEVENV/lib/python3.9/site-packages/yaml"
 chmod -x "$FAKEVENV/bin/python3"
 check "interpreter rule: non-executable venv python3 falls back" \
   "python3" "$(_adlc_forge_python)"
+
+# --- REQ-609 verify D1: three sites, ONE answer ----------------------------
+# The other two sites answer this question with a shell glob + `[ -d ]` (the
+# shim) and `os.path.isdir` (checks.py). BOTH follow symlinks, and BOTH anchor
+# the pattern at `lib/python*/`. `find … -type d` without `-L` does not follow,
+# and `-path '*/site-packages/yaml'` is not anchored — so this site disagreed
+# with the other two in both directions, which is exactly what BR-8 forbids.
+chmod +x "$FAKEVENV/bin/python3"
+rm -rf "$FAKEVENV/lib"
+mkdir -p "$FAKEVENV/lib/python3.9/site-packages" "$SBX/realyaml"
+ln -s "$SBX/realyaml" "$FAKEVENV/lib/python3.9/site-packages/yaml"
+check "interpreter rule: a SYMLINKED yaml dir counts, as it does at the shim" \
+  "$FAKEVENV/bin/python3" "$(_adlc_forge_python)"
+
+# A pypy venv is not a `lib/python*/site-packages` layout: the shim's glob and
+# checks.py's both skip it, so this site must too — whatever one thinks of the
+# rule, the three sites may not answer differently.
+rm -rf "$FAKEVENV/lib"
+mkdir -p "$FAKEVENV/lib/pypy3.10/site-packages/yaml"
+check "interpreter rule: a pypy site-packages is not a python* one" \
+  "python3" "$(_adlc_forge_python)"
+
+# $HOME is DATA, not a pattern. A home directory named `h[1] x` carries a space
+# and glob metacharacters; the venv path may therefore never be interpolated
+# INTO the `-path` pattern (the same class as `glob.escape` in checks.py), and
+# the quoting must survive zsh, where an unmatched glob aborts the command
+# (LESSON-335). Both halves of the rule are asserted under that home so neither
+# a false yes nor a false no hides there.
+GLOBHOME="$SBX/h[1] x"
+GLOBVENV="$GLOBHOME/.claude/delegate-venv"
+mkdir -p "$GLOBVENV/bin" "$GLOBVENV/lib/python3.9/site-packages" "$SBX/realyaml2"
+printf '#!/bin/sh\nexit 0\n' > "$GLOBVENV/bin/python3"
+chmod +x "$GLOBVENV/bin/python3"
+ln -s "$SBX/realyaml2" "$GLOBVENV/lib/python3.9/site-packages/yaml"
+HOME=$GLOBHOME; export HOME
+check "interpreter rule: HOME with a space and glob chars is matched literally" \
+  "$GLOBVENV/bin/python3" "$(_adlc_forge_python)"
+rm -rf "$GLOBVENV/lib"
+mkdir -p "$GLOBVENV/lib/pypy3.10/site-packages/yaml"
+check "interpreter rule: glob-char HOME does not turn pypy into a match" \
+  "python3" "$(_adlc_forge_python)"
+HOME=$FAKEHOME; export HOME
+
 rm -rf "$FAKEVENV"
 check "interpreter rule: no venv at all falls back" "python3" "$(_adlc_forge_python)"
 HOME=$REALHOME; export HOME
+
+# ===========================================================================
+# 6b2. The interpreter is INVOKED through `command` (REQ-609 verify D5)
+# ===========================================================================
+# `_adlc_forge_py` runs `$adlc_fp_py`, which on the fallback arm is the bare
+# word `python3`. This partial is SOURCED, so a shell function named `python3`
+# in the sourcing shell — a debug wrapper, a version shim, a planted one — takes
+# precedence over the $PATH lookup, and it, not the interpreter, receives the
+# forge_config path and produces the "provider". `command` bypasses function
+# lookup; the delegate gate's own probe already used it (REQ-609 ADR-3), and
+# this site is the one /proceed actually takes for every PR operation.
+#
+# Run with a $HOME carrying no venv, so the rule really is on its bare-word
+# fallback arm — against a real venv path there would be no bare name to hijack
+# and the case would prove nothing.
+NOVENV="$SBX/novenv"; mkdir -p "$NOVENV"
+REALHOME2=$HOME; HOME=$NOVENV; export HOME
+check "hijack case runs on the bare-name arm (non-vacuity)" \
+  "python3" "$(_adlc_forge_python)"
+HIJACK_REPO=$(mktemp -d "$SBX/hijack.XXXXXX")
+mkdir -p "$HIJACK_REPO/tools/adlc"
+printf 'print("REAL-PYTHON")\n' > "$HIJACK_REPO/tools/adlc/forge_config.py"
+python3() { echo HIJACKED; }
+# Positive control (LESSON-602): the SAME function, invoked the way this partial
+# used to invoke it, really does intercept. Without this, "the answer was not
+# HIJACKED" would also be produced by a function that was never installed.
+hj_control=$("$(_adlc_forge_python)" "$HIJACK_REPO/tools/adlc/forge_config.py" 2>/dev/null)
+hj=$(_adlc_forge_py "$HIJACK_REPO" resolve-provider "$HIJACK_REPO" 2>/dev/null)
+unset -f python3
+check "a python3 function DOES intercept a bare invocation (control)" \
+  "HIJACKED" "$hj_control"
+check "_adlc_forge_py invokes through command, not the python3 function" \
+  "REAL-PYTHON" "$hj"
+HOME=$REALHOME2; export HOME
 
 # ===========================================================================
 # 6c. The resolver's stderr is never swallowed (REQ-609 BR-4/BR-9, verify B2)

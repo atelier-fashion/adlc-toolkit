@@ -35,6 +35,7 @@ stub was not called") and a completely broken harness produces the same thing
 from __future__ import annotations
 
 import importlib.util
+import re
 import subprocess
 from pathlib import Path
 
@@ -726,3 +727,31 @@ def test_control_fences_are_the_retired_shapes():
 
     assert INVOKE_LITERAL not in NO_COMMAND_PREFIX_FENCE
     assert '"$ADLC_READ_BIN" --' in NO_COMMAND_PREFIX_FENCE
+
+
+def test_pre_pass_miss_reason_is_derived_in_the_fence_that_emits_it():
+    """Step D finding: the pre-pass agent's miss record read `read_bin_missing`
+    from a different fenced block, and fenced blocks share no shell state, so
+    it always defaulted to key-absent. The reason must be derived from the
+    exported ADLC_READ_BIN in the same fence that emits the record, and no
+    fence may read the cross-fence variable."""
+    text = (REPO_ROOT / "agents" / "delegate-pre-pass.md").read_text(encoding="utf-8")
+    fences = re.findall(r"```(?:sh|bash)\n(.*?)```", text, re.S)
+    # A `:-` default on that variable is the cross-fence read; comments may explain it.
+    live = [l for f in fences for l in f.splitlines() if l.strip() and not l.strip().startswith("#")]
+    assert not [l for l in live if "${read_bin_missing:-" in l], [l for l in live if "read_bin_missing:-" in l]
+    emitting = [f for f in fences if "emit-telemetry.sh delegate-pre-pass" in f and "key-absent" in f]
+    assert emitting, "no fence emits the key-absent/no-binary miss record"
+    for body in emitting:
+        assert 'case "$ADLC_READ_BIN" in' in body, body
+        assert "no-binary" in body and "key-absent" in body, body
+    # Nothing may record the delegate as invoked without a call: the only
+    # gate=pass fallback reason is api-error, and it appears only after a real
+    # invocation line.
+    def _live(body):
+        return [l for l in body.splitlines() if l.strip() and not l.strip().startswith("#")]
+    api_error = [i for i, f in enumerate(fences) if any("reason=api-error" in l for l in _live(f))]
+    invoking = [i for i, f in enumerate(fences) if 'command "$ADLC_READ_BIN" --no-warn' in f]
+    assert len(api_error) == 1, api_error          # exactly one sanctioned record
+    assert invoking, "no fence invokes the delegate"
+    assert api_error[0] > invoking[0], (api_error, invoking)   # and it follows the real call

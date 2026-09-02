@@ -567,6 +567,154 @@ def test_read_bin_guard_after_invocation_fires(tmp_path):
     ), rb_lines
 
 
+def test_read_bin_unquoted_invocation_fires(tmp_path):
+    """REQ-609 verify D3: `command $ADLC_READ_BIN --paths …` → one finding.
+
+    The guard and the `command` prefix are both correct, so this isolates the
+    quoting half. An unquoted expansion is word-split and glob-expanded before
+    it is a command name: `/Users/a b/bin/adlc-read` becomes two words and a
+    path carrying a glob character becomes whatever matches — which is the
+    shell re-deriving the binary the resolver already proved, the BUG-209 class
+    the whole contract exists to close.
+    """
+    root = _stage(tmp_path, "read-bin-unquoted", "read-bin-guarded")
+    result = _run(root)
+    rb_lines = [
+        ln for ln in result.stdout.splitlines() if " read-bin-fallback:" in ln
+    ]
+    assert len(rb_lines) == 1, result.stdout
+    fence_line = _line_of("read-bin-unquoted", "command $ADLC_READ_BIN --no-warn")
+    assert (
+        f"read-bin-unquoted/SKILL.md:{fence_line}: read-bin-fallback:" in rb_lines[0]
+    ), rb_lines
+    assert "unquoted" in rb_lines[0]
+    assert [
+        ln for ln in result.stdout.splitlines() if "read-bin-guarded/SKILL.md" in ln
+    ] == [], result.stdout
+
+
+def test_read_bin_braced_spelling_is_an_invocation(tmp_path):
+    """REQ-609 verify D3: `"${ADLC_READ_BIN}"` is the same invocation.
+
+    A check that sees only `"$ADLC_READ_BIN"` lets the braced spelling — the
+    same command, written the other legal way — walk past every one of the
+    three obligations. The fixture's fence is correct except that it has NO
+    guard, so the single finding it draws can only be produced by a check that
+    recognised the braced form as an invocation in the first place.
+    """
+    root = _stage(tmp_path, "read-bin-braced-no-guard", "read-bin-guarded")
+    result = _run(root)
+    rb_lines = [
+        ln for ln in result.stdout.splitlines() if " read-bin-fallback:" in ln
+    ]
+    assert len(rb_lines) == 1, result.stdout
+    fence_line = _line_of("read-bin-braced-no-guard", 'command "${ADLC_READ_BIN}"')
+    assert (
+        f"read-bin-braced-no-guard/SKILL.md:{fence_line}: read-bin-fallback:"
+        in rb_lines[0]
+    ), rb_lines
+    assert 'case "$ADLC_READ_BIN" in /*)' in rb_lines[0]
+    assert [
+        ln for ln in result.stdout.splitlines() if "read-bin-guarded/SKILL.md" in ln
+    ] == [], result.stdout
+
+
+def test_read_bin_copied_into_another_variable_fires(tmp_path):
+    """REQ-609 verify D3: one hop into another name → one finding.
+
+    `READER="$ADLC_READ_BIN"` moves the resolver's answer into a variable no
+    guard covers and no check knows the name of; the fence that follows reads
+    as clean to every other obligation here. The finding is on the ASSIGNMENT,
+    because that is the line that leaves the contract.
+    """
+    root = _stage(tmp_path, "read-bin-copied", "read-bin-guarded")
+    result = _run(root)
+    rb_lines = [
+        ln for ln in result.stdout.splitlines() if " read-bin-fallback:" in ln
+    ]
+    assert len(rb_lines) == 1, result.stdout
+    fence_line = _line_of("read-bin-copied", 'READER="$ADLC_READ_BIN"')
+    assert (
+        f"read-bin-copied/SKILL.md:{fence_line}: read-bin-fallback:" in rb_lines[0]
+    ), rb_lines
+    assert 'command "$ADLC_READ_BIN"' in rb_lines[0]
+    assert [
+        ln for ln in result.stdout.splitlines() if "read-bin-guarded/SKILL.md" in ln
+    ] == [], result.stdout
+
+
+def test_read_bin_handed_to_eval_fires(tmp_path):
+    """REQ-609 verify D3: `eval "$ADLC_READ_BIN …"` → one finding.
+
+    `eval` re-parses the string as shell source, which undoes the quoting AND
+    puts function lookup back in play no matter what prefix is written inside
+    it — so the value the resolver vouched for is resolved a second time, by
+    the weaker rule, at the moment the corpus is handed over.
+    """
+    root = _stage(tmp_path, "read-bin-eval", "read-bin-guarded")
+    result = _run(root)
+    rb_lines = [
+        ln for ln in result.stdout.splitlines() if " read-bin-fallback:" in ln
+    ]
+    assert len(rb_lines) == 1, result.stdout
+    fence_line = _line_of("read-bin-eval", 'eval "$ADLC_READ_BIN')
+    assert (
+        f"read-bin-eval/SKILL.md:{fence_line}: read-bin-fallback:" in rb_lines[0]
+    ), rb_lines
+    assert 'command "$ADLC_READ_BIN"' in rb_lines[0]
+    assert [
+        ln for ln in result.stdout.splitlines() if "read-bin-guarded/SKILL.md" in ln
+    ] == [], result.stdout
+
+
+def test_read_bin_commented_guard_does_not_satisfy_the_ordering(tmp_path):
+    """REQ-609 verify D3: a `#`-prefixed guard is not a guard.
+
+    The literal is present character-for-character and runs nowhere. Reading it
+    as the refusal makes the ordering obligation satisfiable by pasting a
+    comment above the invocation, which is the guard-rot class LESSON-019 is
+    about — a check anchored on text that no longer executes.
+    """
+    root = _stage(tmp_path, "read-bin-comment-guard", "read-bin-guarded")
+    result = _run(root)
+    rb_lines = [
+        ln for ln in result.stdout.splitlines() if " read-bin-fallback:" in ln
+    ]
+    assert len(rb_lines) == 1, result.stdout
+    fence_line = _line_of("read-bin-comment-guard", 'command "$ADLC_READ_BIN"')
+    assert (
+        f"read-bin-comment-guard/SKILL.md:{fence_line}: read-bin-fallback:"
+        in rb_lines[0]
+    ), rb_lines
+    assert 'case "$ADLC_READ_BIN" in /*)' in rb_lines[0]
+    assert [
+        ln for ln in result.stdout.splitlines() if "read-bin-guarded/SKILL.md" in ln
+    ] == [], result.stdout
+
+
+def test_read_bin_retired_shapes_in_comments_are_clean(tmp_path):
+    """REQ-609 verify D3: the other half of the comment rule — no false fire.
+
+    A call site that was edited into the current shape ordinarily keeps the old
+    one beside it, commented. Neither a commented invocation nor a commented
+    `:-` default hands anything to anything, so neither is a finding — and the
+    fence's live lines are the correct shape, so the whole fixture is clean.
+    Staged with `read-bin-comment-guard`, which draws its finding in the SAME
+    run: without that, "the comments drew nothing" would also be produced by a
+    linter that had stopped running the check (LESSON-602).
+    """
+    root = _stage(tmp_path, "read-bin-comment-ok", "read-bin-comment-guard")
+    result = _run(root)
+    assert [
+        ln for ln in result.stdout.splitlines() if "read-bin-comment-ok/SKILL.md" in ln
+    ] == [], result.stdout
+    assert [
+        ln for ln in result.stdout.splitlines()
+        if "read-bin-comment-guard/SKILL.md" in ln and " read-bin-fallback:" in ln
+    ], result.stdout
+    assert "scanned 2 SKILL.md file(s)" in result.stderr, result.stderr
+
+
 def test_read_bin_fallback_walks_agents_and_nothing_else_does(tmp_path):
     """REQ-609: `read-bin-fallback` — and ONLY it — also scans `agents/*.md`.
 

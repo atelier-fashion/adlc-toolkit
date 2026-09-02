@@ -1015,3 +1015,37 @@ def test_refusal_reason_is_one_line(clean_env):
     reason_line = str(exc.value).split("\n")[0]
     assert "\x1b" not in str(exc.value)
     assert "cannot be used" in reason_line
+
+
+def test_dependency_notice_write_failure_does_not_escape(tmp_path, monkeypatch):
+    """Step D finding: with stderr closed, the notice write raised out of
+    load_machine_config — the one arm that promises a closed outcome and one
+    line. The outcome must still be malformed/dependency-missing."""
+    import io
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("delegate:\n  enabled: true\n")
+    poison = tmp_path / "yaml"
+    poison.mkdir()
+    (poison / "__init__.py").write_text("raise ImportError('poisoned')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "yaml", raising=False)
+    closed = io.StringIO()
+    closed.close()
+    _machine_config._reset_dependency_notice()
+    try:
+        monkeypatch.setattr(sys, "stderr", closed)
+        outcome = _machine_config.load_machine_config(str(cfg))
+    finally:
+        _machine_config._reset_dependency_notice()
+    assert outcome.kind == _machine_config.KIND_MALFORMED
+    assert outcome.reason.startswith("dependency-missing"), outcome.reason
+    # Benign twin: with a writable stream the line is written exactly once.
+    _machine_config._reset_dependency_notice()
+    try:
+        buf = io.StringIO()
+        monkeypatch.setattr(sys, "stderr", buf)
+        _machine_config.load_machine_config(str(cfg))
+        _machine_config.load_machine_config(str(cfg))
+    finally:
+        _machine_config._reset_dependency_notice()
+    assert buf.getvalue().count("PyYAML") == 1, buf.getvalue()

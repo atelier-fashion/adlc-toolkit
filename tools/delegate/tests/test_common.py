@@ -143,8 +143,13 @@ def test_read_key_from_rc_ignores_indented_export(monkeypatch, tmp_path):
 
 #: Separators `str.splitlines` honours that a shell does not. Text after one of
 #: these is still on the same command line for sh, bash and zsh.
+#:
+#: `\r` is in this list (REQ-609 verify D4). A LONE carriage return ends a line
+#: for classic Mac OS and for `str.splitlines`, and for nothing sh, bash or zsh
+#: has ever run: `# note\rexport K="v"` is one COMMENT to every shell. Only the
+#: `\r\n` PAIR is a separator, and it is one because of the `\n`.
 _NOT_SHELL_LINE_BREAKS = ("\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85",
-                          " ", " ")
+                          " ", " ", "\r")
 
 
 @pytest.mark.parametrize("sep", _NOT_SHELL_LINE_BREAKS,
@@ -173,14 +178,16 @@ def test_rc_reader_splits_only_where_a_shell_does(monkeypatch, tmp_path, sep):
     assert _common._read_key_from_rc("MOONSHOT_API_KEY") == ""
 
 
-@pytest.mark.parametrize("eol,label", [("\n", "lf"), ("\r\n", "crlf"),
-                                       ("\r", "cr")])
+@pytest.mark.parametrize("eol,label", [("\n", "lf"), ("\r\n", "crlf")])
 def test_rc_reader_still_reads_a_real_line(monkeypatch, tmp_path, eol, label):
     """The working subject for the test above (LESSON-602).
 
     An exclusion test passes just as well against a reader that finds nothing at
-    all, so the same export on its own line — after each of the three endings a
-    shell actually honours — must still be found.
+    all, so the same export on its own line — after each of the two endings a
+    shell actually honours — must still be found. A lone `\r` is NOT one of them
+    and moved up into `_NOT_SHELL_LINE_BREAKS` (REQ-609 verify D4): an rc file
+    whose only line endings are lone CRs is a file no shell reads as more than
+    one command, so neither does this reader.
     """
     home = tmp_path
     (home / ".zshrc").write_text(
@@ -188,6 +195,22 @@ def test_rc_reader_still_reads_a_real_line(monkeypatch, tmp_path, eol, label):
         encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     assert _common._read_key_from_rc("MOONSHOT_API_KEY") == "sk-real"
+
+
+def test_rc_reader_reads_a_crlf_line_that_carries_a_stray_cr(monkeypatch, tmp_path):
+    """Regression anchor for the CRLF half of the split rule (REQ-609 verify D4).
+
+    Narrowing the separators to `\n` and the `\r\n` pair must not cost the
+    reader a real DOS-line-ending rc file, including one whose export line has a
+    stray CR before the pair: `\r\n` is normalized first, the ONE carriage
+    return that ending leaves behind is dropped, and a following line is still a
+    following line.
+    """
+    home = tmp_path
+    (home / ".zshrc").write_bytes(
+        b'export MOONSHOT_API_KEY="sk-crlf"\r\r\nexport OTHER=1\r\n')
+    monkeypatch.setenv("HOME", str(home))
+    assert _common._read_key_from_rc("MOONSHOT_API_KEY") == "sk-crlf"
 
 
 def test_provider_source_is_defaults_when_the_config_is_malformed(monkeypatch):

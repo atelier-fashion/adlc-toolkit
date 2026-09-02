@@ -666,7 +666,12 @@ def harvest_provider_flags(argv, value_flags=frozenset()):
     return model, base_url
 
 
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+# C0 + DEL, C1 (\x80-\x9f), and the bidi overrides/isolates (U+202A-202E,
+# U+2066-2069): a caller-supplied path is printed to a terminal, and a
+# right-to-left override can reorder what the operator reads. Kept
+# byte-identical in tools/delegate/_common.py and tools/adlc/forge_config.py;
+# test_forge_config pins the two patterns equal.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 
 
 def _clean_report_value(v):
@@ -813,9 +818,11 @@ def _read_key_from_rc(var_name):
     ``errors="replace"`` for the same reason — BR-5 mandates only the open
     pattern here, not the config's strict decode.
 
-    Lines are split on ``\\n``, ``\\r\\n`` and ``\\r`` only — the separators a
-    shell honours — and never with ``str.splitlines``, which also breaks on six
-    characters that leave a shell command on the same physical line.
+    Lines are split on ``\\n`` and ``\\r\\n`` only — the separators a shell
+    honours — and never with ``str.splitlines``, which also breaks on a set of
+    further characters (a lone ``\\r`` among them) that leave a shell command on
+    the same physical line. The exact set is enumerated, and derived rather than
+    asserted from memory, by ``_NOT_SHELL_LINE_BREAKS`` in the tests.
     """
     home = os.path.expanduser("~")
     candidates = [
@@ -839,13 +846,23 @@ def _read_key_from_rc(var_name):
         except OSError:
             continue
         # Split the way a SHELL does, not the way `str` does. `str.splitlines`
-        # also breaks on \x0b, \x0c, \x1c-\x1e, \x85,   and  , none of
-        # which ends a command for sh, bash or zsh: text after one of those is
-        # still part of the same physical line, so `# note\x0bexport K="v"` is a
-        # COMMENT the shell never runs — and reporting a key from it would be
-        # this reader inventing an environment the machine does not have.
+        # also breaks on \x0b, \x0c, \x1c-\x1e, \x85,  ,   and a LONE
+        # \r, none of which ends a command for sh, bash or zsh: text after one
+        # of those is still part of the same physical line, so
+        # `# note\x0bexport K="v"` is a COMMENT the shell never runs — and
+        # reporting a key from it would be this reader inventing an environment
+        # the machine does not have.
+        #
+        # A lone \r is in that list (REQ-609 verify D4). Normalizing it to \n
+        # made `# note\rexport K="v"` two lines, the second one canonical — a
+        # split no shell performs, on a file every shell reads as one comment.
+        # The \r\n PAIR is normalized, because there the separator is the \n;
+        # what a CR-normalization left behind (`…\r\r\n` yields one trailing CR)
+        # belongs to that ending and is dropped per line, while a \r ELSEWHERE
+        # in a line stays put as the ordinary character it is.
         text = data.decode("utf-8", "replace")
-        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        for raw in text.replace("\r\n", "\n").split("\n"):
+            line = raw[:-1] if raw.endswith("\r") else raw
             # Only match the canonical, non-indented `export VAR="..."` form.
             if line.startswith(needle):
                 try:
