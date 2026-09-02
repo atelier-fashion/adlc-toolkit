@@ -42,5 +42,13 @@ shape reads as guarded.
 if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/intake.sh; fi
 ```
 
-Expect exactly four `unguarded-source` findings and no other finding of any
+The bash-only `source` spelling. Not fatal under bash — but `dash` has no
+`source` builtin at all, so both arms fail and every function the partial
+defines is silently undefined until a later `command not found`.
+
+```sh
+source .adlc/partials/forge.sh 2>/dev/null || source ~/.claude/skills/partials/forge.sh
+```
+
+Expect exactly five `unguarded-source` findings and no other finding of any
 kind.

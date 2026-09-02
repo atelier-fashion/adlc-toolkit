@@ -795,8 +795,9 @@ def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
     """REQ-610 BR-3/BR-5: every non-canonical way of sourcing a partial inside a
     shell fence is a finding, on the offending line.
 
-    Four shapes, four findings, and each of the four carries information the
-    others do not:
+    Five shapes, five findings, and each carries information the others do not
+    (the fifth, the bash-only ``source`` spelling, is silent degradation under
+    ``dash``, which has no ``source`` builtin at all):
 
     * the retired two-level spelling in an ``sh`` fence — the shape that made
       `/architect` Step 5 die at its first line under `/bin/sh`;
@@ -807,15 +808,15 @@ def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
     * a guard whose ``<name>`` does not match what it sources — the assertion
       that `CANONICAL_SOURCE_RE`'s backreference is load-bearing.
 
-    The two retired lines match BOTH of the check's rules; the count of exactly
-    four is what proves the per-line dedupe (one finding, not two).
+    The two retired lines match BOTH of the check's rules; the exact count is
+    what proves the per-line dedupe (one finding, not two).
     """
     root = _stage(tmp_path, "unguarded-source-fence")
     result = _run(root)
-    assert result.returncode == 4, result.stdout + result.stderr
+    assert result.returncode == 5, result.stdout + result.stderr
 
     lines = _unguarded_lines(result)
-    assert len(lines) == 4, result.stdout
+    assert len(lines) == 5, result.stdout
     sh_retired = _line_of(
         "unguarded-source-fence", "2>/dev/null || . ~/.claude/skills/partials/forge.sh"
     )
@@ -824,7 +825,8 @@ def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
     mismatch = _line_of(
         "unguarded-source-fence", "else . ~/.claude/skills/partials/intake.sh; fi"
     )
-    assert [sh_retired, bash_retired, chain, mismatch] == sorted(
+    source_spelling = _line_of("unguarded-source-fence", "source .adlc/partials/forge.sh")
+    assert [sh_retired, bash_retired, chain, mismatch, source_spelling] == sorted(
         int(ln.split(":")[1]) for ln in lines
     ), lines
     for ln in lines:
@@ -832,7 +834,7 @@ def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
         assert "conventions.md 'Bash in skills'" in ln, ln
     # The whole finding set is unguarded-source — no collateral from another
     # check, so the counts above mean what they say.
-    assert len(result.stdout.strip().splitlines()) == 4, result.stdout
+    assert len(result.stdout.strip().splitlines()) == 5, result.stdout
 
 
 def test_unguarded_source_flags_prose_occurrence(tmp_path):
@@ -846,10 +848,10 @@ def test_unguarded_source_flags_prose_occurrence(tmp_path):
     """
     root = _stage(tmp_path, "unguarded-source-prose")
     result = _run(root)
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 2, result.stdout + result.stderr
 
     lines = _unguarded_lines(result)
-    assert len(lines) == 1, result.stdout
+    assert len(lines) == 2, result.stdout
     prose_line = _line_of("unguarded-source-prose", "source the adapter with")
     assert lines[0].startswith(
         f"unguarded-source-prose/SKILL.md:{prose_line}: unguarded-source:"
@@ -879,7 +881,7 @@ def test_guarded_source_ok_is_clean(tmp_path):
     _stage(both, "guarded-source-ok", "unguarded-source-fence")
     result = _run(both)
     lines = _unguarded_lines(result)
-    assert len(lines) == 4, result.stdout
+    assert len(lines) == 5, result.stdout
     assert all("unguarded-source-fence/" in ln for ln in lines), lines
     assert "guarded-source-ok" not in result.stdout, result.stdout
 

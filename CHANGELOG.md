@@ -347,7 +347,7 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 - **Partial sourcing is guarded — an absent repo-local copy no longer kills the block
   under POSIX `sh` (REQ-610).** ⚠️ **Re-sync `.adlc/partials/` per file: `/template-drift`
-  will report every vendored partial as `stale`.**
+  will report six vendored partials as `stale`, and two of them carry executable fixes.**
 
   Every two-level call site was written `. <local> 2>/dev/null || . <canonical>` — dot-source
   the repo-local `.adlc/partials/<name>.sh`, fall back to `~/.claude/skills/partials/` when
@@ -386,14 +386,20 @@ PRs (`atelier-fashion/adlc-toolkit`).
   executes the real lines extracted from the real files under every shell `run.sh` drives, so
   the lint and the harness cannot disagree about what the corpus says.
 
-  **Re-syncing.** Every partial's header comment changed, so `/template-drift` will list each
-  vendored `.adlc/partials/*.sh` as `stale`. That is expected, not a regression. Re-sync
+  **Re-syncing.** Six partials changed — `attribution.sh`, `emit-step-telemetry.sh`,
+  `forge.sh`, `id-alloc.sh`, `id-recheck.sh`, `trial-merge.sh` — so `/template-drift` will list
+  those vendored `.adlc/partials/*.sh` as `stale` (`delegate-gate.sh`, `delegate-tools-path.sh`,
+  `ethos-include.sh`, `intake.sh` are untouched). That is expected, not a regression. Re-sync
   **per file and byte-for-byte** rather than trusting the summary — a partially-synced surface
-  looks healthy (LESSON-465). Only `emit-step-telemetry.sh` carries an **executable** fix (its
-  live self-source of `delegate-tools-path.sh`), and it is therefore the one file where staying
-  stale still behaves differently under `sh`; `id-alloc.sh`, `id-recheck.sh`, `trial-merge.sh`,
-  `forge.sh`, and `attribution.sh` are header-comment updates only. The `SKILL.md` fences are
-  not vendored — they reach every session on a symlink install the moment this lands.
+  looks healthy (LESSON-465). **Two carry executable fixes** and are the files where staying
+  stale still behaves differently under `sh`: `emit-step-telemetry.sh` (its live self-source of
+  `delegate-tools-path.sh`) and `id-recheck.sh`, whose `adlc_recheck_id` sourced its sibling
+  `id-alloc.sh` through a three-level `. A || . B || . C` chain spread over continuation lines —
+  a shape no reader had noticed and that the new `dash` pass in `run.sh` found. `/proceed`
+  Step 4 sources `id-recheck.sh` repo-local-first (LESSON-441), so a stale vendored copy keeps
+  dying at that chain under `sh`. `attribution.sh`, `forge.sh`, `id-alloc.sh`, and
+  `trial-merge.sh` are header-comment updates only. The `SKILL.md` fences are not vendored —
+  they reach every session on a symlink install the moment this lands.
 
 - **`ADLC_DISABLE_DELEGATE=1` actually works now (BUG-209).** ⚠️ **Read this if you
   relied on it to halt delegation.** The documented emergency stop — "overriding

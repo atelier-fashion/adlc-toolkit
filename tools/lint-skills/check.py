@@ -208,19 +208,31 @@ CANONICAL_SOURCE_RE = re.compile(
     r"^\s*if \[ -f \.adlc/partials/([a-z0-9-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
     r"else \. ~/\.claude/skills/partials/\1\.sh; fi\s*(#.*)?$"
 )
-# A statement-position `.` whose operand is a partials path — the same statement
-# positions POSIX_LOCAL_RE uses (start of line, or after `;`, `&&`, `||`,
-# `then`, `do`, `{`). `\b` is fine inside Python `re`; the LESSON-013 ban is for
-# BSD `grep -E`. The `sh <file>` executable-macro form is NOT matched: its
-# command is `sh`, and `.adlc/...` has no space after the dot.
+# A statement-position `.` (or bash-only `source`, which dash lacks entirely —
+# both arms fail and the functions are silently undefined) whose operand is one
+# of the toolkit's CONVENTION paths: `.adlc/partials/<name>.sh`,
+# `~/.claude/skills/partials/<name>.sh`, or `$HOME/.claude/skills/partials/...`.
+# Same statement positions POSIX_LOCAL_RE uses (start of line, or after `;`,
+# `&&`, `||`, `then`, `do`, `{`). Deliberately NOT any operand containing
+# `partials/`: a consumer's own partial that resolves a sibling through a
+# variable (`. "$D/partials/x.sh"` behind its own `[ -f ]`) is that author's
+# guard to write, and the two-level spelling this check prescribes would point
+# at a `~/.claude/skills/partials/<their-name>.sh` that does not exist. `\b` is
+# fine inside Python `re`; the LESSON-013 ban is for BSD `grep -E`. The
+# `sh <file>` executable-macro form is NOT matched: its command is `sh`.
 DOT_SOURCE_PARTIAL_RE = re.compile(
-    r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*\.\s+\S*partials/[a-z0-9-]+\.sh"
+    r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*(?:\.|source)\s+"
+    r"[\"']?(?:\.adlc/partials/|~/\.claude/skills/partials/|\$\{?HOME\}?/\.claude/skills/partials/)"
+    r"[a-z0-9-]+\.sh"
 )
 # The retired two-level spelling, flagged ANYWHERE in a walked file (ADR-2 rule
 # 2) — prose included: a sentence instructing the agent to type the line is as
 # executable as a fence, and a fence comment quoting it is one paste away from
-# being live. Deliberately excludes the benign `|| sh ~/` macro form.
+# being live. Whitespace-tolerant around `||` because the corpus really did
+# carry an aligned variant (`delegate-pre-pass.md`). Deliberately excludes the
+# benign `|| sh ~/` macro form. The literal is what the finding message quotes.
 RETIRED_SOURCE_LITERAL = "2>/dev/null || . ~/.claude/skills/partials/"
+RETIRED_SOURCE_RE = re.compile(r"2>/dev/null\s*\|\|\s*(?:\.|source)\s+~/\.claude/skills/partials/")
 
 # A bare $<digit> — Skill argument templating substitutes $0–$9 (and
 # $ARGUMENTS) across the whole SKILL.md body, clobbering shell positionals and
@@ -1173,7 +1185,7 @@ def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> lis
                 )
             )
     for lineno, line in enumerate(text.splitlines(), start=1):
-        if lineno in flagged or RETIRED_SOURCE_LITERAL not in line:
+        if lineno in flagged or not RETIRED_SOURCE_RE.search(line):
             continue
         findings.append(
             Finding(

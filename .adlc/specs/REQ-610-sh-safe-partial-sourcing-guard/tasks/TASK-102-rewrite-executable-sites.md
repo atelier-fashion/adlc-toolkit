@@ -10,7 +10,7 @@ dependencies: [TASK-100, TASK-101, TASK-103]
 
 ## Description
 
-Apply the canonical spelling (ADR-1) to every site that *executes*: the 45 fence lines
+Apply the canonical spelling (ADR-1) to every site that *executes*: the 55 fence lines
 across eight `SKILL.md` files, the one prose instruction in `analyze/SKILL.md` Step 1.5,
 the fences in `agents/delegate-pre-pass.md` and `proceed/phases-6-8-ship.md`, and the live
 self-source line in `partials/emit-step-telemetry.sh`. Then add harness case (f) — the
@@ -40,7 +40,7 @@ TASK-101's red repo lint green.
 - [ ] `sh partials/tests/run.sh` is green under bash, zsh, `/bin/sh` (and dash if present): case (a) now passes for every extracted line under `/bin/sh` (AC-2)
 - [ ] Case (f): the `/architect` Step 5 fence, run under `/bin/sh` with no `.adlc/`, prints the standalone-run skip line and exits 0 (AC-8)
 - [ ] `grep -rF '2>/dev/null || . ~/.claude/skills/partials/' */SKILL.md agents proceed partials` returns nothing
-- [ ] Indented fence lines (33 of the 45 sit inside numbered-list items) keep their indentation; only the statement changed
+- [ ] Indented fence lines (33 of the 55 sit inside numbered-list items) keep their indentation; only the statement changed
 - [ ] `/status` (single fence, `bash` label) run under the real zsh executor after the change behaves as before — record the invocation in the PR (AC-9; manual dogfood, not an obligation row)
 - [ ] `git diff --stat` touches exactly the files listed here
 

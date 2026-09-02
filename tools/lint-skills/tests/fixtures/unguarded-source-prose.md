@@ -18,4 +18,7 @@ source the adapter with `. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/sk
 if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
 ```
 
-Expect exactly one `unguarded-source` finding, on the prose line above.
+A whitespace-aligned variant, as the corpus really carried in
+`agents/delegate-pre-pass.md`: `. .adlc/partials/forge.sh   2>/dev/null  ||  . ~/.claude/skills/partials/forge.sh`.
+
+Expect exactly two `unguarded-source` findings, one on each prose line above.

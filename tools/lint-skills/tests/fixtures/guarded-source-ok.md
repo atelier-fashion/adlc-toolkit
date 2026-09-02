@@ -44,6 +44,17 @@ failure, and the `||` arm does run.
 sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh
 ```
 
+A source through a variable path is outside this check's remit even when the
+path happens to contain `partials/`: the rule prescribes the toolkit's two-level
+convention, and a consumer's own sibling resolution behind its own `[ -f ]` is
+that author's guard to write (a two-level spelling here would point at a
+`~/.claude/skills/partials/<their-name>.sh` that does not exist).
+
+```sh
+if [ -f "$ADLC_PARTIALS/partials/helper.sh" ]; then . "$ADLC_PARTIALS/partials/helper.sh"; fi
+. "$HERE/../partials/helper.sh"
+```
+
 Comment lines hand nothing to any shell, and a path mentioned without a `.` in
 front of it is not a source at all.
 

@@ -197,9 +197,15 @@ a general markdown linter and NOT a general shell linter.
 
    Two rules, both on every walked file:
 
-   - **inside a shell fence** (or anywhere in a partial), a non-comment line with a `.` at statement
-     position (start of line, or after `;`, `&&`, `||`, `then`, `do`, `{`) whose
-     operand is a `partials/<name>.sh` path must match that spelling exactly;
+   - **inside a shell fence** (or anywhere in a partial), a non-comment line with a `.`
+     (or bash-only `source`, which `dash` lacks entirely) at statement position
+     (start of line, or after `;`, `&&`, `||`, `then`, `do`, `{`) whose operand is one
+     of the toolkit's **convention paths** — `.adlc/partials/<name>.sh`,
+     `~/.claude/skills/partials/<name>.sh`, `$HOME/.claude/skills/partials/<name>.sh` —
+     must match that spelling exactly. A source through a variable path
+     (`. "$D/partials/x.sh"` behind the author's own `[ -f ]`) is deliberately out of
+     remit: the two-level spelling would point a consumer's own partial at a
+     `~/.claude/skills/partials/<their-name>.sh` that does not exist;
    - **anywhere in the file** — prose, inline code, fence comment — the retired
      literal is a finding. A SKILL.md sentence instructing the agent to type the
      line is as executable as a fence (`analyze/SKILL.md` Step 1.5 carried

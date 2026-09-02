@@ -15,7 +15,7 @@ The change has three independent legs and one dependent leg:
 | A | `partials/tests/source-guard.test.sh` + `run.sh` registration (+ `dash`) | — |
 | B | `tools/lint-skills` `unguarded-source` check, `CANONICAL_LITERALS` move, fixtures, tests, README, `/analyze` check-name list | — |
 | C | Documentation, partial header comments, companion `.md` examples, `CHANGELOG` | — |
-| D | The rewrite of every executable site (45 fences, 1 prose line, 2 non-skill fence files, 1 live line in a partial) | A, B |
+| D | The rewrite of every executable site (55 fences, 1 prose line, 2 non-skill fence files, 1 live line in a partial) | A, B |
 
 A and B are the verification; D is the change they verify. Landing A and B first is what
 lets the PR record the **red** `/bin/sh` state (AC-1) before D turns it green, and lets the
@@ -44,7 +44,14 @@ function-defining partial is whatever its last top-level statement returned, a p
 partial author is thinking about. One line, so it survives the Skill loader's
 `$<digit>` templating unchanged (LESSON-335) and stays a single statement for the
 `cross-fence-fn` check's line-based parsing. No `2>/dev/null` anywhere: BR-4, and
-LESSON-441 says the copy that crashed must be diagnosable.
+LESSON-441 says the copy that crashed must be diagnosable. The final canonical arm is
+deliberately **not** `[ -f ]`-tested: a missing `~/.claude/skills/partials/` means the toolkit
+is not installed, which no fallback can recover, so it fails loudly — fatal under `sh`, an
+error line under bash/zsh — instead of silently continuing into `command not found`. One
+consequence, found by the reflector: `adlc_recheck_id`'s `return 2` for "cannot source
+id-alloc.sh" is reachable only under bash/zsh; under `sh` the same condition is a loud exit,
+which its header now documents, and the `id-alloc.test.sh` sandboxes carry the canonical
+sibling as every real install does.
 
 `[ -f ]` rather than `[ -r ]`: an existing-but-unreadable vendored copy then fails loudly
 at the `.` instead of silently falling through to canonical and hiding a permissions

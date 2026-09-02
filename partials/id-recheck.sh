@@ -32,7 +32,12 @@
 #               remote was unreachable (degraded: cannot find a collision; warns, BR-3).
 #   return 1 -> COLLISION: <ID> is already on the remote. A halt message naming the exact
 #               `adlc renumber <KIND-old> <KIND-new>` command is printed to stderr (BR-4/BR-9).
-#   return 2 -> usage error (bad kind / malformed ID).
+#   return 2 -> usage error (bad kind / malformed ID), or — under bash/zsh only — the
+#               sibling id-alloc.sh could not be sourced from any convention path.
+#               Under POSIX sh that last case is a loud FATAL exit instead (`.` of the
+#               absent canonical copy is a special-built-in error): the toolkit is not
+#               installed, which is unrecoverable, so the block must not continue
+#               (REQ-610 BR-1/BR-4; the final canonical arm is deliberately unguarded).
 # NEVER blocks on network (BR-3): an unreachable remote can only fail to FIND a
 # collision, never invent one from absence of data.
 #

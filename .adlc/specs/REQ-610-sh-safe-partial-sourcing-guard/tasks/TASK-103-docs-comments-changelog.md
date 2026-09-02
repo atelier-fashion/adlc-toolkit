@@ -25,7 +25,7 @@ grep-level outcome, is added by TASK-102 (single owner of the harness file after
 - `partials/id-alloc.sh`, `partials/id-recheck.sh`, `partials/trial-merge.sh`, `partials/forge.sh`, `partials/attribution.sh` — header-comment call-site examples to the canonical spelling
 - `partials/delegate-gate.sh` — header comment: add the call-site example in canonical form if it shows one, else leave
 - `partials/delegate-gate.md`, `partials/forge.md`, `partials/emit-step-telemetry.md`, `partials/trial-merge.md` — every code-fence example to the canonical spelling
-- `CHANGELOG.md` — entry under the unreleased/next section: what changed, why (`sh` special built-in), that vendored `.adlc/partials/*.sh` will report `stale` in `/template-drift` and must be re-synced per file (`emit-step-telemetry.sh` carries a live fix, the others comment-only), and that `tools/lint-skills` now rejects the retired shape
+- `CHANGELOG.md` — entry under the unreleased/next section: what changed, why (`sh` special built-in), that vendored `.adlc/partials/*.sh` will report `stale` in `/template-drift` and must be re-synced per file (`emit-step-telemetry.sh` and — found later by the dash pass — `id-recheck.sh` carry live fixes, the other four comment-only), and that `tools/lint-skills` now rejects the retired shape
 
 ## Acceptance Criteria
 
@@ -33,7 +33,7 @@ grep-level outcome, is added by TASK-102 (single owner of the harness file after
 - [ ] conventions.md "Bash in skills" contains the canonical spelling verbatim, the phrase "special built-in", and names both rejected forms with their failure (AC-7)
 - [ ] `partials/README.md` model-1 example is byte-identical to before; model-2 example is the canonical spelling
 - [ ] Every partial header comment that shows a call-site example shows the canonical spelling; `grep -c 'if \[ -f .adlc/partials/' partials/*.sh partials/*.md` is ≥ 1 for each of the nine files that show a call-site example (`delegate-gate.sh` shows none; its contract lives in `delegate-gate.md`)
-- [ ] CHANGELOG entry names the re-sync and distinguishes the one partial with a live fix from the comment-only ones (AC-10)
+- [ ] CHANGELOG entry names the re-sync and distinguishes the two partials with live fixes from the comment-only ones (AC-10)
 - [ ] No historical file under `.adlc/specs/`, `.adlc/knowledge/`, `.adlc/bugs/` is modified (BR-8 last sentence) — `git diff --stat` confirms
 
 ## Verification
@@ -48,7 +48,7 @@ grep-level outcome, is added by TASK-102 (single owner of the harness file after
 
 - Header comments are `#` lines; the harness extraction skips them, so the *only* thing that proves they were updated is case (e)'s grep — keep the grep over `partials/` in the surface list.
 - `partials/delegate-gate.sh`'s header today does not show a call-site example (its contract is in `delegate-gate.md`); do not invent one — update the `.md`.
-- CHANGELOG: follow the existing entry style (check the top of the file). Suggested consumer line: "Re-sync `.adlc/partials/` per file (`/template-drift` will list every partial as `stale`); `emit-step-telemetry.sh` carries an executable fix, the rest are header-comment updates."
+- CHANGELOG: follow the existing entry style (check the top of the file). Suggested consumer line: "Re-sync `.adlc/partials/` per file (`/template-drift` will list six partials as `stale`); `emit-step-telemetry.sh` and `id-recheck.sh` carry executable fixes, the rest are header-comment updates."
 - BR-10 and AC-10 have no obligation row: a CHANGELOG entry is prose, and no artifact in this repo executes over it. `/validate` will report them as advisory gaps; that is the honest state, not an omission.
 - BR-9 (no new partial) is mapped in TASK-102 to `sync-surface-parity` as the closest structural surface; it is a weak proxy and review should confirm no `partials/source-partial.sh` exists.
 - This task does not touch `partials/tests/source-guard.test.sh`; TASK-102 adds case (e) so two parallel tasks never edit one file.

@@ -61,7 +61,7 @@ extract() { # prints distinct sourcing lines, leading whitespace stripped
   { cat "$ROOT"/*/SKILL.md "$ROOT"/agents/*.md "$ROOT"/proceed/phase*.md 2>/dev/null
     grep -hv '^[[:space:]]*#' "$ROOT"/partials/*.sh 2>/dev/null; } \
   | sed 's/^[[:space:]]*//' \
-  | grep -E '^(\. |if \[ -f ).*partials/[a-z0-9-]+\.sh' | sort -u
+  | grep -E '^(\. |source |\[ -f |if \[ -f ).*partials/[a-z0-9-]+\.sh' | sort -u
 }
 
 names_of() { # names_of <line> — the distinct <name>s the line references
@@ -222,8 +222,8 @@ case_d_macro_form_continues
 RETIRED='2>/dev/null || . ~/.claude/skills/partials/'
 CANON_SPELLING='if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi'
 hits=$( { cat "$ROOT"/*/SKILL.md "$ROOT"/agents/*.md "$ROOT"/partials/*.sh "$ROOT"/partials/*.md \
-           "$ROOT"/proceed/*.md "$ROOT"/templates/*.md "$ROOT"/README.md "$ROOT"/.adlc/context/*.md \
-           "$ROOT"/tools/lint-skills/README.md 2>/dev/null; } | grep -cF "$RETIRED")
+           "$ROOT"/proceed/*.md "$ROOT"/templates/*.md "$ROOT"/workflows/* "$ROOT"/README.md \
+           "$ROOT"/.adlc/context/*.md "$ROOT"/tools/lint-skills/README.md 2>/dev/null; } | grep -cF "$RETIRED")
 check "case_e_retired_literal_absent_from_distribution: '$RETIRED' hits on the distribution surface" "0" "$hits"
 if grep -qF "$CANON_SPELLING" "$ROOT/.adlc/context/conventions.md"; then
   pass "case_e_conventions_carry_canonical_spelling: conventions.md teaches the guarded form"
@@ -264,13 +264,15 @@ case_f_architect_step5_under_sh
 #    `. A || . B || . C` chain (id-recheck.sh carried one, on continuation lines
 #    beginning with `||`, and dash found it before any reviewer did — REQ-610).
 #    A dot-source of a partials path is compliant only when the line also tests
-#    `[ -f ` before it; anything else is a finding. Mirrors the lint's
-#    unguarded-source rule over partials/*.sh so run.sh is self-sufficient.
+#    `[ -f ` before it; anything else is a finding. This is a COARSER same-line
+#    check than the lint's unguarded-source rule (it does not verify the guarded
+#    and sourced names agree) — the lint is authoritative; this keeps run.sh
+#    self-sufficient. Run from $ROOT so the labels are repo-relative without
+#    interpolating a path into a regex.
 # ===========================================================================
-unguarded=$(grep -nE '(^|[;&|{]|then|do)[[:space:]]*\.[[:space:]]+[^[:space:]]*partials/[a-z0-9-]+\.sh' "$ROOT"/partials/*.sh 2>/dev/null \
-  | grep -v ':[[:space:]]*#' \
-  | grep -vE '\[ -f [^]]*partials/[a-z0-9-]+\.sh \].*\. [^[:space:]]*partials/' \
-  | sed "s#^$ROOT/##")
+unguarded=$( cd "$ROOT" && grep -nE '(^|[;&|{]|then|do)[[:space:]]*(\.|source)[[:space:]]+[^[:space:]]*partials/[a-z0-9-]+\.sh' partials/*.sh 2>/dev/null \
+  | grep -v ':[0-9][0-9]*:[[:space:]]*#' \
+  | grep -vE '\[ -f [^]]*partials/[a-z0-9-]+\.sh \].*(\.|source) [^[:space:]]*partials/' )
 if [ -z "$unguarded" ]; then
   pass "case_g_partials_have_no_unguarded_dot_source: every partial-to-partial source is [ -f ]-guarded"
 else
