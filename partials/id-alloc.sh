@@ -90,6 +90,33 @@ adlc_id_kind_prefix() {
   esac
 }
 
+# --- main-worktree resolution (BUG-210) ----------------------------------------------
+# `git rev-parse --show-toplevel` returns the CURRENT worktree. Inside a linked worktree
+# that is NOT the repo whose siblings define the machine-global namespace: `/proceed` and
+# `/sprint` run every pipeline in `<repo>/.worktrees/<id>` or `<repo>/.claude/worktrees/<id>`,
+# so the parent-of-toplevel default for ADLC_REPOS_ROOT resolves to the worktree CONTAINER
+# and the scan collapses from every repo on the machine to one checkout. BR-11 makes the
+# scan root define the namespace, so a narrowed root silently narrows the namespace — and
+# it is NOT flagged degraded, because a worktree has a perfectly good `origin` and every
+# source "succeeds" against it. That is BUG-210: three REQ ids double-issued on 2026-08-31.
+#
+# `--git-common-dir` points at the MAIN worktree's .git for both a main checkout and a
+# linked worktree, so its parent is the main worktree in both cases. Prints nothing (rc 1)
+# outside a git repo, so callers keep their existing "not a repo" branch.
+adlc_main_worktree() {
+  adlc_mw_common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+  # --path-format needs git >= 2.31; fall back to resolving a possibly-relative answer.
+  if [ -z "$adlc_mw_common" ]; then
+    adlc_mw_raw=$(git rev-parse --git-common-dir 2>/dev/null) || return 1
+    [ -n "$adlc_mw_raw" ] || return 1
+    adlc_mw_common=$(cd "$adlc_mw_raw" 2>/dev/null && pwd) || return 1
+  fi
+  [ -n "$adlc_mw_common" ] || return 1
+  adlc_mw_top=$(cd "$(dirname "$adlc_mw_common")" 2>/dev/null && pwd) || return 1
+  [ -n "$adlc_mw_top" ] || return 1
+  printf '%s\n' "$adlc_mw_top"
+}
+
 # The counter path. req/bug/lesson are machine-global (one file under ~/.claude);
 # `assume` is PER-REPO (BR-12): the reservation makes the per-project namespace
 # collision-safe across clones without globalizing it. The per-repo counter/lock live
@@ -100,8 +127,8 @@ adlc_id_kind_counter() {
     bug)    echo "$HOME/.claude/.global-next-bug" ;;
     lesson) echo "$HOME/.claude/.global-next-lesson" ;;
     assume)
-      adlc_ic_top=$(git rev-parse --show-toplevel 2>/dev/null)
-      [ -n "$adlc_ic_top" ] || { echo "adlc_id_kind_counter: assume requires a git repo (git rev-parse --show-toplevel failed)" >&2; return 2; }
+      adlc_ic_top=$(adlc_main_worktree)
+      [ -n "$adlc_ic_top" ] || { echo "adlc_id_kind_counter: assume requires a git repo (main-worktree resolution failed)" >&2; return 2; }
       echo "$adlc_ic_top/.adlc/.next-assume" ;;
     *) echo "adlc_id_kind_counter: unknown kind '$1'" >&2; return 2 ;;
   esac
@@ -113,8 +140,8 @@ adlc_id_kind_lockdir() {
     bug)    echo "$HOME/.claude/.global-next-bug.lock.d" ;;
     lesson) echo "$HOME/.claude/.global-next-lesson.lock.d" ;;
     assume)
-      adlc_il_top=$(git rev-parse --show-toplevel 2>/dev/null)
-      [ -n "$adlc_il_top" ] || { echo "adlc_id_kind_lockdir: assume requires a git repo (git rev-parse --show-toplevel failed)" >&2; return 2; }
+      adlc_il_top=$(adlc_main_worktree)
+      [ -n "$adlc_il_top" ] || { echo "adlc_id_kind_lockdir: assume requires a git repo (main-worktree resolution failed)" >&2; return 2; }
       echo "$adlc_il_top/.adlc/.next-assume.lock.d" ;;
     *) echo "adlc_id_kind_lockdir: unknown kind '$1'" >&2; return 2 ;;
   esac
@@ -393,11 +420,11 @@ adlc_remote_high() {
   # $ADLC_REPOS_ROOT (default: parent of the current repo), the machine-global namespace
   # scope (BR-11 — the scan root defines the namespace, LESSON-313).
   if [ "$adlc_rh_kind" = assume ]; then
-    adlc_rh_top=$(git rev-parse --show-toplevel 2>/dev/null)
+    adlc_rh_top=$(adlc_main_worktree)
     adlc_rh_root="${adlc_rh_top:-.}"
     if [ -n "$adlc_rh_top" ]; then set -- "$adlc_rh_top"; else set --; fi
   else
-    adlc_rh_root="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel 2>/dev/null)/.." 2>/dev/null && pwd)}"
+    adlc_rh_root="${ADLC_REPOS_ROOT:-$(cd "$(adlc_main_worktree)/.." 2>/dev/null && pwd)}"
     [ -n "$adlc_rh_root" ] || adlc_rh_root="."
     # zsh aborts the whole enclosing eval on a no-match glob (NOMATCH); sh/bash leave the
     # pattern literal and the .git check skips it. Make zsh behave like nullglob, scoped
@@ -491,10 +518,10 @@ adlc_local_scan_high() {
   # assume is per-repo (BR-12): bootstrap-seed from the CURRENT repo only, never
   # siblings. The global kinds seed from the machine-global $ADLC_REPOS_ROOT scan.
   if [ "$adlc_ls_kind" = assume ]; then
-    adlc_ls_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    adlc_ls_root=$(adlc_main_worktree)
     [ -n "$adlc_ls_root" ] || adlc_ls_root="."
   else
-    adlc_ls_root="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel 2>/dev/null)/.." 2>/dev/null && pwd)}"
+    adlc_ls_root="${ADLC_REPOS_ROOT:-$(cd "$(adlc_main_worktree)/.." 2>/dev/null && pwd)}"
     [ -n "$adlc_ls_root" ] || adlc_ls_root="."
   fi
   adlc_ls_high=$(find "$adlc_ls_root" -path "$adlc_ls_glob" -type "$adlc_ls_type" 2>/dev/null \
@@ -541,6 +568,10 @@ adlc_alloc_id() {
   # The reservation (REQ-546 BR-1) targets the origin of the repo the allocation runs in
   # (BR-11/BR-12) — the current git worktree. Resolved OUTSIDE the lock; empty means we
   # are not in a git repo, so allocation proceeds unreserved (degraded, non-blocking).
+  # DELIBERATELY the CURRENT worktree, not adlc_main_worktree (BUG-210): a linked
+  # worktree shares its main repo's `origin`, so the reservation lands on the same remote
+  # either way, and `git -C <worktree> push` is valid. Only the NAMESPACE SCOPE had to
+  # move to the main worktree; the push target did not.
   adlc_ai_reserve_repo=$(git rev-parse --show-toplevel 2>/dev/null)
 
   adlc_ai_num=$(
