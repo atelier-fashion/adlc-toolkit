@@ -56,7 +56,7 @@ coverage of the copied layer standing in for coverage of the real resolver.
 | AC-7 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_gate_verdict_enabled_false_plus_legacy_key` | yes |
 | AC-8 | test-case | `tools/delegate/tests/test_resolve_provider.py::test_gate_verdict_no_config_plus_legacy_key` | yes |
 
-> **BR-14 obligation.** The known limitation is not implemented here; it is *observed* here. The two parity rows for a directory at the config path and a header comment assert that BOTH gates grant — the detector does not fire on either — which is the limitation stated as a measured fact rather than prose, and is why the obligation's benign path is `yes`. REQ-604 discharges it.
+> **BR-14 obligation.** The known limitation is not implemented here; it is *observed* here. The two parity rows for a directory at the config path and a header comment assert that BOTH gates grant — the detector does not fire on either — which is the limitation stated as a measured fact rather than prose, and is why the obligation's benign path is `yes`. REQ-609 discharges it.
 
 ## Technical Notes
 

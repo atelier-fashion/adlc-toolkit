@@ -93,6 +93,78 @@ a general markdown linter and NOT a general shell linter.
    assign-and-read within the SAME fence is legitimate. The sanctioned carriers
    `$flag` (the telemetry flag-path) and the id-allocation `*_NUM` counters
    (allocate-then-recheck flow, REQ-518 domain) are exempt by name.
+8. **Read-bin fallback (`read-bin-fallback`)** — the `ADLC_READ_BIN` call-site
+   contract, checked inside shell fences (REQ-609 BR-12, ADR-3).
+   `partials/delegate-gate.sh` is the *single* resolver for `adlc-read`: it
+   walks `$PATH` itself — never `command -v`, so no shell function, alias, or
+   hash-table entry can answer for it — and exports an absolute path or the
+   empty string, and nothing else. The correct shape is:
+
+   ```sh
+   . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+   case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+   command "$ADLC_READ_BIN" --no-warn --paths … --question "…"
+   ```
+
+   All four spellings of the expansion count as an invocation — quoted or bare,
+   `$ADLC_READ_BIN` or `${ADLC_READ_BIN}` — when they sit in **command
+   position** (line start, after `;`/`&`/`|`/`(`/`{` or a `then`/`do`/`else`,
+   optionally behind `command`). Anywhere else the name is an argument, not a
+   command, so the refusal message's own `('$ADLC_READ_BIN')` is not mistaken
+   for a call. Recognising every spelling is the point: no obligation below can
+   be stepped around by respelling the variable.
+
+   A fence that references `$ADLC_READ_BIN` draws a finding when it:
+
+   - **carries a `${ADLC_READ_BIN:-…}` default** — a second resolution of the
+     binary at the call site, by a weaker rule, reached in exactly the case
+     where the first resolver already declined. With the bare name it hands the
+     corpus to whatever the shell resolves, the planted-binary class BUG-209
+     recorded. Matched as a fixed string on the expansion operator, not on one
+     default value, so the pattern is caught under any default;
+   - **invokes without the `command` prefix** — bash and zsh both permit a
+     function whose *name* is an absolute path, so `"$ADLC_READ_BIN" --paths …`
+     runs that function rather than the file the resolver proved is on disk, and
+     the function receives the corpus. The gate's own probe already went through
+     `command`; the call sites, which are the ones holding the corpus, did not;
+   - **invokes with no preceding `case "$ADLC_READ_BIN" in /*)` guard** — or
+     with the guard placed *after* the invocation. `[ -n "$ADLC_READ_BIN" ]` is
+     not enough: a consumer repo whose vendored `delegate-gate.sh` predates
+     REQ-609 still exports the **bare name** on a `$PATH` hit, and a non-empty
+     test passes that straight through. The refusal must precede the handover,
+     and where a fence marks telemetry it goes **before**
+     `skill-flag.sh mark "$flag" invoked 1`, so a refusal is recorded as *not*
+     invoked;
+   - **invokes unquoted** — `command $ADLC_READ_BIN --paths …` hands the path
+     to word-splitting and pathname expansion *before* it is a command name, so
+     a resolved `/Users/a b/bin/adlc-read` runs `/Users/a` with the rest as
+     arguments and one carrying a glob character runs whatever matches. That is
+     the shell re-deriving the binary the resolver already proved, which is the
+     whole of BUG-209 restated without quotes;
+   - **copies the value into another variable, or hands it to `eval`** —
+     `READER="$ADLC_READ_BIN"; command "$READER" …` moves the resolver's answer
+     into a name no guard covers and no check knows, and `eval` re-parses its
+     argument as shell source, undoing the quoting and restoring function and
+     alias lookup whatever prefix is written inside the string. The resolver's
+     value must be invoked directly, as `command "$ADLC_READ_BIN"`.
+
+   **Comment lines are skipped by every one of these checks.** A `#`-prefixed
+   line hands nothing to anything, so a retired invocation kept beside its
+   replacement — the ordinary way a call site is edited — is not a finding; and
+   in the other direction a commented-out guard does not satisfy the ordering
+   obligation, which would otherwise be satisfiable by pasting a comment above
+   the invocation (the guard-rot class LESSON-019 names).
+
+   Only shell fences are scanned, so prose describing a retired shape is never
+   flagged — the same structural posture as `forge-direct-gh` (LESSON-012).
+
+   This is the **one** check that also walks `agents/*.md`, via a separate walk
+   (`find_read_bin_extra_files`) rather than a widening of `find_skill_files`:
+   `agents/delegate-pre-pass.md` hands a redacted diff to the delegate exactly
+   as a skill does, so BR-12's obligations are its obligations — while the other
+   checks encode a *skill's* contract and would be false positives on an agent
+   prompt file. Agent files are not added to the `scanned N SKILL.md file(s)`
+   count, so they can never mask a dead skill walk (REQ-595 BR-5).
 
 ## Usage
 

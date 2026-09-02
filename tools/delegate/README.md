@@ -55,7 +55,7 @@ Opt-in is satisfied by **any one** of:
 - `enabled: true` under `delegate:` in the config file, OR
 - an already-set legacy `KIMI_API_KEY` / `MOONSHOT_API_KEY` — key continuity for
   pre-config installs, **unless the config file says `enabled: false`**, which
-  overrides it.
+  overrides it, **or the config file is malformed**, which refuses outright.
 
 Setting only `ADLC_DELEGATE_BASE_URL` / `_MODEL` is **not** opt-in.
 
@@ -96,6 +96,50 @@ least every input the shell does. Both test the literal `"1"`.
 **Upgrade the gate and the CLI together.** An `adlc-read` predating `--print-gate`
 makes the gate fail closed: delegation is off, safely but silently, reported as
 `not-opted-in`.
+
+### Which `adlc-read` runs (REQ-609)
+
+The gate resolves the binary by asking the **filesystem**, never the shell. It
+walks `$PATH` itself and takes the first entry holding an executable *regular
+file* named `adlc-read`; then `$HOME/bin/adlc-read`, and only when `$HOME` is
+itself absolute. It never calls `command -v`, `type`, or `which`: those answer out
+of the shell's own machinery — functions, aliases, the hash table — and none of
+those is a statement about the filesystem (BUG-209).
+
+**A `$PATH` entry that does not begin with `/` is rejected**, as is an empty entry.
+A relative entry names whatever directory the caller happens to be sitting in,
+which is not a property of the machine's install; a `PATH` of
+`relative/bin:/abs/bin` with `adlc-read` only under `relative/bin` resolves to
+nothing and the gate returns `2 no-binary`. `timeout(1)`, which bounds the probe,
+is likewise taken from a fixed list of absolute paths and never from `$PATH`.
+
+The result is exported as `ADLC_READ_BIN` and is an **absolute path or empty**.
+Empty is a refusal for a call site to act on, not an invitation to resolve the
+name a second time by a weaker rule — see `partials/delegate-gate.md`.
+
+### The rc-file key read
+
+`resolve_key` — on the path a real call and `adlc-read --print-gate` share, which
+is why the probe reports what the call would do (LESSON-392) — falls back to
+reading `export MOONSHOT_API_KEY="…"` out of `~/.zshrc`, `~/.bash_profile`, or
+`~/.bashrc` when the environment is empty. This is the macOS
+launchctl-propagation defense, and it applies **only** to the legacy default
+Moonshot var; a custom provider's key var is expected to be set in the environment
+directly. It never sources or evaluates the rc file — a narrow textual extraction
+of the canonical non-indented `export VAR="…"` form (REQ-422 / LESSON-011).
+
+The read opens by descriptor (`O_RDONLY | O_NONBLOCK`) and decides `S_ISREG` on
+**the descriptor it actually opened**, so a `~/.zshrc` that is a fifo cannot block
+it forever and a file swapped between `stat` and `open` cannot change what it
+reads. It is bounded at **256 KiB** and, unlike the config cap, **truncates rather
+than refusing**: an rc file is not a governance document, and a key export past a
+quarter-megabyte of shell startup is not a shape worth failing a real machine
+over. Its decode stays lossy for the same reason.
+
+Note the asymmetry this creates, which is deliberate: `--print-gate` resolves the
+key and so can report `0 disabled-via-config` on a machine where `--version` prints
+`enabled: true`. `--version` reports the *opt-in cascade*; the gate additionally
+requires that the key the cascade names can actually be found.
 
 ### Turning delegation off
 
@@ -139,6 +183,90 @@ including an `ADLC_DELEGATE_API_KEY_ENV` override, which outranks the file — s
 a key pasted into either place is refused with an actionable error before any
 network call. The refusal never echoes the offending value.
 
+### The `delegate:` schema (REQ-609)
+
+The file is parsed by **PyYAML** (`yaml.safe_load`, never `yaml.load`) behind a
+**closed schema**. The `delegate:` section accepts exactly these four keys and
+nothing else:
+
+<!-- delegate-schema:start -->
+
+| key | type | meaning |
+|-----|------|---------|
+| `enabled` | boolean | opt in (`true`) or opt OUT (`false`, which outranks a legacy key). Absent ⇒ defer to key continuity. |
+| `model` | string | the model name a real call sends |
+| `base_url` | string | the OpenAI-compatible chat-completions endpoint |
+| `api_key_env` | string | the **NAME** of the env var holding the key, never the key |
+
+<!-- delegate-schema:end -->
+
+The section is validated, not scanned. Anything the schema does not recognise is
+**refused** — the file is reported malformed and delegation is off — rather than
+skipped:
+
+- an **unknown key** under `delegate:`, `enbaled: false` included. A typo silently
+  ignored is an exfiltration the operator wrote down and did not get (LESSON-483);
+  forward compatibility can be versioned when there is a second schema revision.
+- a **non-boolean `enabled`**. `enabled: "false"` is the *string* `"false"`, which
+  Python treats as true; it is refused as ambiguous rather than lowercased into an
+  opt-out nobody wrote. YAML 1.1 spellings (`yes`, `no`, `on`, `off`) do arrive as
+  booleans and are accepted.
+- a **nested mapping or sequence** anywhere under `delegate:`. A nested block
+  hoisting `enabled: true` over a written `false` was a real fail-open.
+- a **repeated key anywhere in the document**, `delegate:` itself included. PyYAML's
+  default loader silently keeps the last one; in a governance file that is a silent
+  override, so a custom loader raises and the refusal names the key and its line.
+  The refusal is **whole-document** — a duplicate under `forge:` makes the delegate
+  section malformed too — because one loader gives one verdict.
+
+`tools/adlc/forge_config.py` reads the `forge:` section of the same document
+through the same loader, so a multi-section config cannot lock one consumer out
+by the other's rule. The `agents:` block still has its own reader in
+`tools/adlc/agents_render.py` — schemas for the other sections are out of scope
+here, and only `delegate:` carries a strict one today.
+
+Structural limits, both unconditional:
+
+| limit | value | on breach |
+|-------|-------|-----------|
+| config file size | **64 KiB** | refused (`over-cap`) — a truncated YAML document can still parse, so the cap cannot be conditional on parseability |
+| rc-file key read | **256 KiB** | truncated, not refused (see below) |
+
+Also refused: a non-regular file at the path with **no exceptions** — a directory,
+a fifo, a device node. `ADLC_CONFIG=/dev/null` used to mean *absence*, which fell
+through to legacy-key continuity and turned delegation **on** (BUG-205's shape). A
+dangling symlink is malformed; only a genuinely missing path is *absent*.
+
+An **empty file, or one holding only comments, is not a refusal** — it parses to a
+null document, which is treated exactly like a mapping with no `delegate:` key:
+*unconfigured*, so key continuity may still apply. An operator who created the file
+and wrote nothing has not opted out, and anyone able to truncate the file could
+equally have written `enabled: true` into it. Likewise a config carrying only a
+`forge:` section leaves delegation unconfigured rather than locking it out.
+
+### PyYAML is a hard dependency of the delegate venv
+
+`pyyaml` is pinned in `tools/delegate/requirements.txt` (floor `>=6.0`, pinned at
+the tested `==6.0.3`) and installed into `~/.claude/delegate-venv` by the
+installer. The import is **lazy** — `--help`, and a `--version` on a machine with
+no config file, never pay for it.
+
+If PyYAML is not importable at runtime the outcome is `malformed` /
+`dependency-missing`, one stderr line names the package and the interpreter, and
+the delegate CLIs **fail closed**: a partial install never falls through to "no
+config found". `adlc doctor`'s `pyyaml` check reports whether it imports in the
+interpreter `adlc` itself runs under, with a copy-pasteable fix. The one carve-out
+is `tools/adlc/forge_config.py`, which treats *that single reason* as unconfigured
+after the same stderr line — a missing parser is a statement about the machine's
+install, not about the file, and `forge.auth` never carries authority. Every other
+malformed reason refuses for both consumers.
+
+To get PyYAML into an existing venv, re-run the installer:
+
+```bash
+./install.sh --with-delegation          # or: bash tools/delegate/install.sh
+```
+
 ## Setup
 
 1. **Get an API key** for your provider (the default is a Moonshot key from
@@ -148,7 +276,7 @@ network call. The refusal never echoes the offending value.
    bash tools/delegate/install.sh
    ```
    This creates a Python venv at `~/.claude/delegate-venv`, installs the `openai`
-   client into it, writes wrapper scripts to `~/bin/` (for `adlc-read`,
+   client and `pyyaml` into it, writes wrapper scripts to `~/bin/` (for `adlc-read`,
    `adlc-write`, `extract-chat`), adds
    `~/bin` to your `PATH`, appends the routing block to `~/.claude/CLAUDE.md`,
    and adds the commands to the allowlist in `~/.claude/settings.json`. It is
@@ -234,10 +362,13 @@ adlc-toolkit <version>
 config_error: config 'delegate.api_key_env' must be the NAME of an environment variable (e.g. MY_PROVIDER_KEY), not a key value. ...
 ```
 
-A config file that simply cannot be *parsed* is a different case: the minimal
-reader yields no `delegate:` keys, resolution falls through to the shipped
-defaults, and `--version` reports those with no `config_error:` line — matching
-what a real call would resolve. `config_error:` means refused, not "unreadable".
+A config file that simply cannot be *parsed* is a different case. Since REQ-609 it
+is a **refusal of the opt-in**: the file yields no usable `delegate:` keys, the
+gate reports `disabled-via-config`, and `--version` prints `enabled: false`. But
+the provider block still shows the shipped defaults with **no** `config_error:`
+line, because `config_error:` marks a *written value* that was refused — a key
+pasted into `api_key_env` — and not "the file is unreadable". The two are
+different operator problems and the output distinguishes them.
 
 ## CLAUDE.md routing block
 

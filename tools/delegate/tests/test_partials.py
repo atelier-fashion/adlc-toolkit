@@ -248,13 +248,24 @@ def test_delegate_gate_home_bin_not_executable(tmp_path, partials_dir):
 
 def test_delegate_gate_path_wins_over_home_bin(tmp_path, partials_dir):
     """When adlc-read is BOTH on PATH and at $HOME/bin, PATH wins and
-    ADLC_READ_BIN is the bare name (today's behavior, unchanged)."""
-    path = _stub_adlc_read_on_path(tmp_path)
-    _stub_adlc_read_in_home_bin(tmp_path)
-    env = {"PATH": path, "HOME": str(tmp_path), "ADLC_DELEGATE_ENABLED": "1"}
+    ADLC_READ_BIN is the ABSOLUTE path of the PATH hit — never the bare name
+    (REQ-609 BR-11: the resolver walks $PATH itself and consults no shell
+    state, so its answer is always a filesystem path or empty)."""
+    # Two DIFFERENT directories, or the test cannot tell the arms apart: the
+    # helper's PATH stub lives under tmp_path/bin, which is also $HOME/bin when
+    # HOME is tmp_path. Keep the $HOME stub there and put the PATH stub elsewhere.
+    home_stub = _stub_adlc_read_in_home_bin(tmp_path)
+    pathdir = tmp_path / "pathbin"
+    pathdir.mkdir()
+    path_stub = pathdir / "adlc-read"
+    path_stub.write_text((tmp_path / "bin" / "adlc-read").read_text())
+    path_stub.chmod(0o755)
+    env = {"PATH": f"{pathdir}:/usr/bin:/bin", "HOME": str(tmp_path), "ADLC_DELEGATE_ENABLED": "1"}
     r = _run(_GATE_PROBE_BIN.format(partials=partials_dir), env, tmp_path)
     assert "RC=0" in r.stdout, r.stdout + r.stderr
-    assert "READBIN=adlc-read" in r.stdout, r.stdout
+    line = [l for l in r.stdout.splitlines() if l.startswith("READBIN=")][0]
+    got = line[len("READBIN="):]
+    assert got == str(path_stub), (got, str(home_stub))   # PATH arm won, as an absolute path
 
 
 def test_delegate_gate_read_bin_resolved_at_source_time(tmp_path, partials_dir):

@@ -70,16 +70,28 @@ adlc_forge_provider() {
   adlc_fg_cfg_proj="$adlc_fg_repo/.adlc/config.yml"
   adlc_fg_cfg_mach="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
   if [ -f "$adlc_fg_cfg_proj" ] || [ -f "$adlc_fg_cfg_mach" ]; then
-    adlc_fg_pv=$(_adlc_forge_py "$adlc_fg_repo" resolve-provider "$adlc_fg_repo" 2>/dev/null)
+    # The resolver's stderr is CAPTURED and re-emitted, never discarded (BR-4,
+    # LESSON-008). It carries two things an operator must see: the fail-loud
+    # message on a bad provider / unrecognized host, and — on an exit-0 run —
+    # the one `dependency-missing` line that says this machine could not parse
+    # the config, so the `forge.provider` it names was not honoured and the
+    # provider below was auto-detected from the origin URL instead. Swallowing
+    # it made that override silent, which is the whole failure it warns about.
+    # One invocation, not two: re-running the resolver to "surface" the error
+    # printed it twice and paid for the parse twice.
+    adlc_fg_errf=$(mktemp 2>/dev/null || mktemp -t forge)
+    adlc_fg_pv=$(_adlc_forge_py "$adlc_fg_repo" resolve-provider "$adlc_fg_repo" 2>"$adlc_fg_errf")
     adlc_fg_rc=$?
+    if [ -s "$adlc_fg_errf" ]; then cat "$adlc_fg_errf" >&2; fi
+    rm -f "$adlc_fg_errf"
     if [ "$adlc_fg_rc" -eq 0 ] && [ -n "$adlc_fg_pv" ]; then
       export ADLC_FORGE_PROVIDER="$adlc_fg_pv"
       printf '%s\n' "$ADLC_FORGE_PROVIDER"
       return 0
     fi
     if [ "$adlc_fg_rc" -ne 0 ]; then
-      # Resolver failed loud (unrecognized host / bad explicit provider). Surface it.
-      _adlc_forge_py "$adlc_fg_repo" resolve-provider "$adlc_fg_repo" >/dev/null
+      # Resolver failed loud (unrecognized host / bad explicit provider); its
+      # message is already on stderr, verbatim.
       return 2
     fi
   fi
@@ -98,20 +110,83 @@ adlc_forge_provider() {
   return 0
 }
 
+# THE ONE INTERPRETER RULE (REQ-609 BR-8, ADR-2).
+#
+#   Prefer $HOME/.claude/delegate-venv/bin/python3 when it is a regular
+#   executable file AND that venv carries a `yaml` package directory under
+#   lib/python*/site-packages/; otherwise python3 from $PATH.
+#
+# Written out at three sites, because a partial cannot import Python and a
+# Python module cannot be sourced by sh. The other two:
+#   * `ensure_adlc_shim` in the root install.sh — the `adlc` shim's own text
+#   * tools/adlc/checks.py::_delegate_interpreter — the doctor probes
+# Change one, change all three.
+#
+# Why this file needs it at all: this is the path /proceed actually takes for
+# every PR operation, and it ran a bare `python3` while the shim preferred the
+# venv — two interpreters answering one question. On a machine whose venv
+# predates REQ-609 (openai, no PyYAML) or whose $PATH python3 lacks PyYAML
+# (a fresh Mac: PyYAML is NOT shipped by Apple), the loser answers
+# `dependency-missing`, forge_config takes its ADR-2 carve-out, and a written
+# forge.provider is silently overridden by origin-URL auto-detection.
+#
+# `find` with a QUOTED pattern rather than a shell glob: this partial is sourced
+# under zsh too, where an unmatched glob is an error that writes to stderr and
+# aborts the command (LESSON-335). No interpreter is spawned to answer the
+# question, so the shim can ask it identically.
+#
+# Three details of that `find` are what make "identically" true (REQ-609 D1):
+#   * `-L`. The shim tests `[ -d "$_d" ]` and checks.py calls `os.path.isdir`,
+#     and both FOLLOW symlinks. A `site-packages/yaml` that is a symlink to a
+#     directory is an ordinary shape, and a bare `-type d` does not follow it —
+#     so this site alone answered no, and one machine got two interpreters.
+#   * `*/python*/site-packages/yaml`, not `*/site-packages/yaml`. The other two
+#     sites glob `lib/python*`, which a `lib/pypy3.10/...` layout does not
+#     satisfy; the unanchored pattern matched it here. Same split, other
+#     direction.
+#   * the pattern never interpolates the venv path. `-path` takes a PATTERN, so
+#     a `$HOME` like `h[1] x` would be read as a character class and match
+#     nothing — the identical bug `glob.escape` fixes in checks.py. The venv is
+#     passed as find's starting POINT, where it is a literal, and `-maxdepth 3`
+#     keeps the walk to `lib/<interpreter>/site-packages/yaml`.
+_adlc_forge_python() {
+  adlc_fpy_venv="${HOME:-}/.claude/delegate-venv"
+  adlc_fpy_exe="$adlc_fpy_venv/bin/python3"
+  if [ -f "$adlc_fpy_exe" ] && [ -x "$adlc_fpy_exe" ] && [ -d "$adlc_fpy_venv/lib" ]; then
+    adlc_fpy_yaml=$(find -L "$adlc_fpy_venv/lib" -maxdepth 3 -type d \
+                      -path '*/python*/site-packages/yaml' 2>/dev/null)
+    if [ -n "$adlc_fpy_yaml" ]; then
+      printf '%s\n' "$adlc_fpy_exe"
+      return 0
+    fi
+  fi
+  printf '%s\n' "python3"
+  return 0
+}
+
 # Locate and invoke forge_config.py with the two-level fallback (project vendored
 # copy first, then toolkit). Args after the repo are passed to the script.
+#
+# Every invocation goes through `command` (REQ-609 D5, ADR-3). On the fallback
+# arm `$adlc_fp_py` is the BARE WORD `python3`, and this partial is SOURCED into
+# the caller's shell — so a function named `python3` there (a debug wrapper, a
+# version shim, a planted one) takes precedence over the $PATH lookup and would
+# receive the forge_config path, making its stdout the resolved provider.
+# `command` bypasses function lookup, which is why the delegate gate's own probe
+# already used it; this is the site /proceed takes for every PR operation.
 _adlc_forge_py() {
   adlc_fp_repo=$1
   shift
+  adlc_fp_py=$(_adlc_forge_python)
   adlc_fp_local="$adlc_fp_repo/tools/adlc/forge_config.py"
   adlc_fp_vend="$adlc_fp_repo/.adlc/tools/adlc/forge_config.py"
   adlc_fp_glob="${HOME:-}/.claude/skills/tools/adlc/forge_config.py"
   if [ -f "$adlc_fp_local" ]; then
-    python3 "$adlc_fp_local" "$@"
+    command "$adlc_fp_py" "$adlc_fp_local" "$@"
   elif [ -f "$adlc_fp_vend" ]; then
-    python3 "$adlc_fp_vend" "$@"
+    command "$adlc_fp_py" "$adlc_fp_vend" "$@"
   else
-    python3 "$adlc_fp_glob" "$@"
+    command "$adlc_fp_py" "$adlc_fp_glob" "$@"
   fi
 }
 

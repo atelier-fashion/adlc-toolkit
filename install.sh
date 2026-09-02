@@ -119,20 +119,82 @@ ensure_symlink() {
 }
 
 # --- adlc shim (no hardcoded path beyond derived REPO_ROOT, BR-3/BR-11) -----
+# The shim carries THE ONE INTERPRETER RULE (REQ-609 BR-8, ADR-2): prefer
+# $HOME/.claude/delegate-venv/bin/python3 when it is a regular executable file
+# AND that venv carries a `yaml` package directory under lib/python*/site-packages/;
+# otherwise python3 from $PATH. The same rule is written out in
+# tools/adlc/checks.py::_delegate_interpreter and partials/forge.sh::_adlc_forge_python
+# — a partial cannot import Python and a Python module cannot be sourced by sh,
+# so it exists three times and each site names the other two. Change one, change
+# all three.
+#
+# Both halves earn their place. The PyYAML half: a venv created before REQ-609
+# carries `openai` and no PyYAML, and this very function rewrites the shim
+# BEFORE any venv refresh (a plain `./install.sh` refreshes none at all), so
+# without it the shim would point every config read at the one interpreter on
+# the machine that cannot parse the file. The fallback half: the venv exists
+# only after --with-delegation, and a shim that `exec`s a missing interpreter
+# would break `adlc doctor` on exactly the machine that most needs it
+# (LESSON-395). $HOME is expanded by the shim at RUN time, not stamped here.
 ensure_adlc_shim() {
     shim="$BIN_DIR/adlc"
     want="#!/usr/bin/env bash
+# The ONE interpreter rule (REQ-609 BR-8, ADR-2) — see install.sh,
+# tools/adlc/checks.py::_delegate_interpreter, partials/forge.sh::_adlc_forge_python.
+_v=\"\$HOME/.claude/delegate-venv/bin/python3\"
+_y=\"\"
+for _d in \"\$HOME\"/.claude/delegate-venv/lib/python*/site-packages/yaml; do
+  if [ -d \"\$_d\" ]; then _y=1; fi
+done
+if [ -f \"\$_v\" ] && [ -x \"\$_v\" ] && [ -n \"\$_y\" ]; then
+  exec \"\$_v\" \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\"
+fi
 exec python3 \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\""
+    # Whole-text comparison: the idempotency key is the shim's CONTENT, so a
+    # machine carrying the old single-line shim is re-stamped rather than
+    # reported "already current" (BR-1, LESSON-017).
     if [ -f "$shim" ] && [ "$(cat "$shim")" = "$want" ]; then
         note "  ok: $shim already current"
         return 0
     fi
     if [ "$DRY" -eq 1 ]; then
-        plan "write adlc shim $shim -> $REPO_ROOT/tools/adlc/adlc.py"
+        plan "write adlc shim $shim -> $REPO_ROOT/tools/adlc/adlc.py (delegate venv python3 when present)"
         return 0
     fi
     atomic_write "$shim" "$want"
     chmod +x "$shim"
+}
+
+# --- delegate venv PyYAML report (REQ-609 BR-8, ADR-2) ---------------------
+# `ensure_adlc_shim` above runs BEFORE any venv work, and a plain `./install.sh`
+# does no venv work at all — so a machine whose venv predates REQ-609 keeps an
+# interpreter the shim deliberately skips. The rule keeps that CORRECT; this
+# says it out loud, because "adlc quietly runs a different python3 than you
+# think" is not a thing an operator should have to discover.
+#
+# It never pip-installs: touching a venv the operator did not ask to touch is a
+# mutation outside the --with-delegation opt-in (BR-9). It never aborts either
+# — the fallback works, so this is a degraded machine, not a broken install.
+report_venv_pyyaml() {
+    venv="$HOME/.claude/delegate-venv"
+    if [ ! -f "$venv/bin/python3" ] || [ ! -x "$venv/bin/python3" ]; then
+        note "  ok: no delegate venv — adlc runs \$PATH's python3"
+        return 0
+    fi
+    venv_yaml=""
+    # Same test as the shim, unmatched-glob-safe: bash leaves an unmatched glob
+    # literal, and `[ -d ]` on the literal is false.
+    for d in "$venv"/lib/python*/site-packages/yaml; do
+        if [ -d "$d" ]; then venv_yaml=1; fi
+    done
+    if [ -n "$venv_yaml" ]; then
+        note "  ok: delegate venv has PyYAML — adlc runs $venv/bin/python3"
+        return 0
+    fi
+    note "  WARN: $venv exists but has no PyYAML, so adlc falls back to \$PATH's"
+    note "        python3 and the delegate CLIs cannot parse the ADLC config."
+    note "  fix:  $venv/bin/pip install -r $REPO_ROOT/tools/delegate/requirements.txt"
+    return 0
 }
 
 # --- PATH wiring (marker-guarded, idempotent BR-1) -------------------------
@@ -212,6 +274,7 @@ if [ "$WITH_DELEGATION" -eq 1 ]; then
 else
     note "  skipped (opt-in). Re-run with --with-delegation to install (off by default)."
 fi
+report_venv_pyyaml
 
 # --- summary + embedded doctor (BR-1 summary, System Model install event) --
 note ""

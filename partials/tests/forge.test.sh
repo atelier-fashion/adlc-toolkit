@@ -192,6 +192,9 @@ check "auto github (https)" "github" "$(adlc_forge_provider "$gh_repo" 2>/dev/nu
 ado_repo=$(mk_repo "git@ssh.dev.azure.com:v3/org/proj/repo")
 # az path requires forge_config.py reachable; provide it via the project copy.
 mkdir -p "$ado_repo/tools/adlc"; cp "$ROOT/tools/adlc/forge_config.py" "$ado_repo/tools/adlc/" 2>/dev/null
+# REQ-609 BR-8: forge_config.py reads the machine config through the shared loader,
+# resolved relative to its own file (../delegate); vendor it beside the copy.
+mkdir -p "$ado_repo/tools/delegate"; cp "$ROOT/tools/delegate/_machine_config.py" "$ado_repo/tools/delegate/" 2>/dev/null
 # No config file -> pure-shell auto handles the ADO SSH host directly.
 check "auto azure-devops (ssh)" "azure-devops" "$(adlc_forge_provider "$ado_repo" 2>/dev/null)"
 bad_repo=$(mk_repo "https://gitlab.com/o/r.git")
@@ -208,9 +211,150 @@ contains "fail-loud names providers" "github" "$err"
 cfg_repo=$(mk_repo "https://github.com/o/r.git")
 mkdir -p "$cfg_repo/.adlc" "$cfg_repo/tools/adlc"
 cp "$ROOT/tools/adlc/forge_config.py" "$cfg_repo/tools/adlc/"
+mkdir -p "$cfg_repo/tools/delegate"; cp "$ROOT/tools/delegate/_machine_config.py" "$cfg_repo/tools/delegate/"   # REQ-609 BR-8 (see above)
 printf 'forge:\n  provider: azure-devops\n  auth: ADO_PAT\n' > "$cfg_repo/.adlc/config.yml"
 check "project config overrides remote" "azure-devops" \
   "$(ADLC_FORGE_REPO="$cfg_repo" adlc_forge_provider "$cfg_repo" 2>/dev/null)"
+
+# ===========================================================================
+# 6b. THE ONE INTERPRETER RULE (REQ-609 BR-8, ADR-2)
+# ===========================================================================
+# This partial is the path /proceed actually takes for every PR operation, and
+# it used to run a bare `python3` while the `adlc` shim preferred the delegate
+# venv — two interpreters answering one question. The rule has two halves and
+# both are asserted here: a regular EXECUTABLE bin/python3, and a `yaml`
+# package directory in that venv. A venv created before REQ-609 satisfies the
+# first and not the second, and preferring it points every config read at the
+# one interpreter on the machine that cannot parse the file.
+FAKEHOME="$SBX/fakehome"
+FAKEVENV="$FAKEHOME/.claude/delegate-venv"
+mkdir -p "$FAKEVENV/bin" "$FAKEVENV/lib/python3.9/site-packages/yaml"
+printf '#!/bin/sh\nexit 0\n' > "$FAKEVENV/bin/python3"
+chmod +x "$FAKEVENV/bin/python3"
+REALHOME=$HOME
+HOME=$FAKEHOME; export HOME
+check "interpreter rule: venv WITH PyYAML is preferred" \
+  "$FAKEVENV/bin/python3" "$(_adlc_forge_python)"
+rm -rf "$FAKEVENV/lib/python3.9/site-packages/yaml"
+check "interpreter rule: venv WITHOUT PyYAML falls back to PATH python3" \
+  "python3" "$(_adlc_forge_python)"
+mkdir -p "$FAKEVENV/lib/python3.9/site-packages/yaml"
+chmod -x "$FAKEVENV/bin/python3"
+check "interpreter rule: non-executable venv python3 falls back" \
+  "python3" "$(_adlc_forge_python)"
+
+# --- REQ-609 verify D1: three sites, ONE answer ----------------------------
+# The other two sites answer this question with a shell glob + `[ -d ]` (the
+# shim) and `os.path.isdir` (checks.py). BOTH follow symlinks, and BOTH anchor
+# the pattern at `lib/python*/`. `find … -type d` without `-L` does not follow,
+# and `-path '*/site-packages/yaml'` is not anchored — so this site disagreed
+# with the other two in both directions, which is exactly what BR-8 forbids.
+chmod +x "$FAKEVENV/bin/python3"
+rm -rf "$FAKEVENV/lib"
+mkdir -p "$FAKEVENV/lib/python3.9/site-packages" "$SBX/realyaml"
+ln -s "$SBX/realyaml" "$FAKEVENV/lib/python3.9/site-packages/yaml"
+check "interpreter rule: a SYMLINKED yaml dir counts, as it does at the shim" \
+  "$FAKEVENV/bin/python3" "$(_adlc_forge_python)"
+
+# A pypy venv is not a `lib/python*/site-packages` layout: the shim's glob and
+# checks.py's both skip it, so this site must too — whatever one thinks of the
+# rule, the three sites may not answer differently.
+rm -rf "$FAKEVENV/lib"
+mkdir -p "$FAKEVENV/lib/pypy3.10/site-packages/yaml"
+check "interpreter rule: a pypy site-packages is not a python* one" \
+  "python3" "$(_adlc_forge_python)"
+
+# $HOME is DATA, not a pattern. A home directory named `h[1] x` carries a space
+# and glob metacharacters; the venv path may therefore never be interpolated
+# INTO the `-path` pattern (the same class as `glob.escape` in checks.py), and
+# the quoting must survive zsh, where an unmatched glob aborts the command
+# (LESSON-335). Both halves of the rule are asserted under that home so neither
+# a false yes nor a false no hides there.
+GLOBHOME="$SBX/h[1] x"
+GLOBVENV="$GLOBHOME/.claude/delegate-venv"
+mkdir -p "$GLOBVENV/bin" "$GLOBVENV/lib/python3.9/site-packages" "$SBX/realyaml2"
+printf '#!/bin/sh\nexit 0\n' > "$GLOBVENV/bin/python3"
+chmod +x "$GLOBVENV/bin/python3"
+ln -s "$SBX/realyaml2" "$GLOBVENV/lib/python3.9/site-packages/yaml"
+HOME=$GLOBHOME; export HOME
+check "interpreter rule: HOME with a space and glob chars is matched literally" \
+  "$GLOBVENV/bin/python3" "$(_adlc_forge_python)"
+rm -rf "$GLOBVENV/lib"
+mkdir -p "$GLOBVENV/lib/pypy3.10/site-packages/yaml"
+check "interpreter rule: glob-char HOME does not turn pypy into a match" \
+  "python3" "$(_adlc_forge_python)"
+HOME=$FAKEHOME; export HOME
+
+rm -rf "$FAKEVENV"
+check "interpreter rule: no venv at all falls back" "python3" "$(_adlc_forge_python)"
+HOME=$REALHOME; export HOME
+
+# ===========================================================================
+# 6b2. The interpreter is INVOKED through `command` (REQ-609 verify D5)
+# ===========================================================================
+# `_adlc_forge_py` runs `$adlc_fp_py`, which on the fallback arm is the bare
+# word `python3`. This partial is SOURCED, so a shell function named `python3`
+# in the sourcing shell — a debug wrapper, a version shim, a planted one — takes
+# precedence over the $PATH lookup, and it, not the interpreter, receives the
+# forge_config path and produces the "provider". `command` bypasses function
+# lookup; the delegate gate's own probe already used it (REQ-609 ADR-3), and
+# this site is the one /proceed actually takes for every PR operation.
+#
+# Run with a $HOME carrying no venv, so the rule really is on its bare-word
+# fallback arm — against a real venv path there would be no bare name to hijack
+# and the case would prove nothing.
+NOVENV="$SBX/novenv"; mkdir -p "$NOVENV"
+REALHOME2=$HOME; HOME=$NOVENV; export HOME
+check "hijack case runs on the bare-name arm (non-vacuity)" \
+  "python3" "$(_adlc_forge_python)"
+HIJACK_REPO=$(mktemp -d "$SBX/hijack.XXXXXX")
+mkdir -p "$HIJACK_REPO/tools/adlc"
+printf 'print("REAL-PYTHON")\n' > "$HIJACK_REPO/tools/adlc/forge_config.py"
+python3() { echo HIJACKED; }
+# Positive control (LESSON-602): the SAME function, invoked the way this partial
+# used to invoke it, really does intercept. Without this, "the answer was not
+# HIJACKED" would also be produced by a function that was never installed.
+hj_control=$("$(_adlc_forge_python)" "$HIJACK_REPO/tools/adlc/forge_config.py" 2>/dev/null)
+hj=$(_adlc_forge_py "$HIJACK_REPO" resolve-provider "$HIJACK_REPO" 2>/dev/null)
+unset -f python3
+check "a python3 function DOES intercept a bare invocation (control)" \
+  "HIJACKED" "$hj_control"
+check "_adlc_forge_py invokes through command, not the python3 function" \
+  "REAL-PYTHON" "$hj"
+HOME=$REALHOME2; export HOME
+
+# ===========================================================================
+# 6c. The resolver's stderr is never swallowed (REQ-609 BR-4/BR-9, verify B2)
+# ===========================================================================
+# With no PyYAML reachable, forge_config takes the ADR-2 `dependency-missing`
+# carve-out: it proceeds UNCONFIGURED, so the `forge.provider: azure-devops`
+# written below is NOT honoured and the provider is auto-detected from the
+# github origin instead. That override is only tolerable if the operator is
+# told, and the one line that tells them was going to /dev/null.
+poison_repo=$(mk_repo "https://github.com/o/r.git")
+mkdir -p "$poison_repo/.adlc" "$poison_repo/tools/adlc" "$poison_repo/tools/delegate"
+cp "$ROOT/tools/adlc/forge_config.py" "$poison_repo/tools/adlc/"
+cp "$ROOT/tools/delegate/_machine_config.py" "$poison_repo/tools/delegate/"
+printf 'forge:\n  provider: azure-devops\n' > "$poison_repo/.adlc/config.yml"
+POISON="$SBX/poison"; mkdir -p "$POISON/yaml"
+printf "raise ImportError('no module named yaml (test poison)')\n" \
+  > "$POISON/yaml/__init__.py"
+OLDPP=${PYTHONPATH:-}
+PYTHONPATH="$POISON"; export PYTHONPATH
+pout=$(adlc_forge_provider "$poison_repo" 2>"$SBX/poison.err"); prc=$?
+perr=$(cat "$SBX/poison.err")
+if [ -n "$OLDPP" ]; then PYTHONPATH=$OLDPP; export PYTHONPATH; else unset PYTHONPATH; fi
+check "no-PyYAML: the resolver still answers" "0" "$prc"
+check "no-PyYAML: falls back to origin auto-detect" "github" "$pout"
+contains "no-PyYAML: the dependency line reaches stderr" "PyYAML" "$perr"
+# Benign twin: the same repo with PyYAML reachable honours the written provider,
+# and says nothing on stderr.
+cout=$(adlc_forge_provider "$poison_repo" 2>"$SBX/clean.err"); crc=$?
+cerr=$(cat "$SBX/clean.err")
+check "with PyYAML: the written provider wins" "azure-devops" "$cout"
+check "with PyYAML: rc 0" "0" "$crc"
+check "with PyYAML: stderr is empty" "" "$cerr"
+unset ADLC_FORGE_PROVIDER
 
 # ===========================================================================
 # 7. GitHub byte-compat: recording gh shim asserts exact argv (BR-3)
