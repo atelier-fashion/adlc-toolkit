@@ -14,6 +14,17 @@ introduced_by: ["REQ-515"]
 attribution: derived
 ---
 
+
+> **Cross-repo id collision (BUG-210).** This id is also held by
+> **atelier-fashion**, whose `BUG-206` is *"The Colima preflight guards against a
+> stopped daemon but not a failed start"* (created 2026-08-29). Both were issued
+> from one machine-global namespace by an allocator that, run from a git
+> worktree, could see only one repository — fixed in `0cacbff`. **Neither is
+> renumbered:** this id already appears in 14 files here, including BUG-209,
+> BUG-210, REQ-609, `CHANGELOG.md` and two test fixtures. Within this repository
+> `BUG-206` unambiguously means the bug below; cross-repo references must name
+> the repository.
+
 ## Description
 
 `enabled` decides whether file contents may leave the machine. Until this fix, the
