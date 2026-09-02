@@ -13,6 +13,7 @@ import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
+import _child_env  # noqa: E402
 import _common  # noqa: E402
 
 _DELEGATE_VARS = (
@@ -204,6 +205,9 @@ def _print_enabled(env_overrides, tmp_home):
     import subprocess
     env = {"HOME": str(tmp_home), "PATH": os.environ.get("PATH", "")}
     env.update(env_overrides)
+    # HOME is redirected, which on this interpreter can also hide a user-site
+    # PyYAML from the child; hand it the parent's (see tests/_child_env.py).
+    env = _child_env.with_yaml(env)
     adlc_read = os.path.join(os.path.dirname(HERE), "adlc-read")
     r = subprocess.run([sys.executable, adlc_read, "--print-enabled"],
                        capture_output=True, text=True, env=env)
@@ -247,6 +251,7 @@ def _run_cli(tool, args, env_overrides, tmp_home):
         env.pop(v, None)
     env["HOME"] = str(tmp_home)
     env.update(env_overrides)
+    env = _child_env.with_yaml(env)
     return subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), tool)] + args,
                           capture_output=True, text=True, env=env)
 

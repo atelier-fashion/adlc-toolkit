@@ -45,11 +45,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)                                  # tools/delegate
 REPO_ROOT = os.path.dirname(os.path.dirname(TOOLS))            # toolkit root
 sys.path.insert(0, TOOLS)
+import _child_env  # noqa: E402
 import _common  # noqa: E402
 
 ADLC_READ = os.path.join(TOOLS, "adlc-read")
 ADLC_WRITE = os.path.join(TOOLS, "adlc-write")
 EXTRACT_CHAT = os.path.join(TOOLS, "extract-chat")
+
+# Everything a copied `adlc-read` needs beside it to start at all. `_common`
+# imports `_machine_config` (REQ-609 ADR-1), so a fake checkout carrying only
+# `_common.py` dies on import — and the failure would read as a version bug.
+_ADLC_READ_FILES = (os.path.join(TOOLS, "_common.py"),
+                    os.path.join(TOOLS, "_machine_config.py"),
+                    ADLC_READ)
 
 ALL_CLIS = (ADLC_READ, ADLC_WRITE, EXTRACT_CHAT)
 CONFIG_CLIS = (ADLC_READ, ADLC_WRITE)  # the two that also print resolved config
@@ -75,10 +83,17 @@ def _clean_env(home, **extra):
 
     Built by construction rather than by deleting keys from ``os.environ`` so a
     delegate var added later cannot silently start leaking into these tests.
+
+    Plus one deliberate entry: a PYTHONPATH carrying the PARENT's PyYAML and
+    nothing else. Redirecting HOME also hides a user-site-installed PyYAML from
+    the child, and the config these tests write would then read back as
+    `dependency-missing` — the right product behaviour (REQ-609 BR-9, which has
+    its own tests) and the wrong premise for a test about precedence. See
+    `_child_env`.
     """
     env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home)}
     env.update(extra)
-    return env
+    return _child_env.with_yaml(env)
 
 
 def _run(argv, env, cwd=None, python=None):
@@ -474,7 +489,7 @@ def test_vendored_checkout_reports_its_own_version(tmp_path):
     (outer / "VERSION").write_text("9.9.9-decoy\n", encoding="utf-8")
     (outer / "vendor" / "tk" / "VERSION").write_text("1.2.3-vendored\n",
                                                      encoding="utf-8")
-    for src in (os.path.join(TOOLS, "_common.py"), ADLC_READ):
+    for src in _ADLC_READ_FILES:
         shutil.copy(src, str(vendored))
 
     r = _run([str(vendored / "adlc-read"), "--version"], env=_clean_env(tmp_path))
@@ -817,7 +832,7 @@ def test_outer_toolkit_does_not_win_over_the_inner_copy(tmp_path):
     (inner / "VERSION").write_text("1.2.3-inner\n", encoding="utf-8")
     # The outer checkout carries the marker file too — that is the whole point.
     shutil.copy(os.path.join(TOOLS, "_common.py"), str(outer_delegate))
-    for src in (os.path.join(TOOLS, "_common.py"), ADLC_READ):
+    for src in _ADLC_READ_FILES:
         shutil.copy(src, str(inner_delegate))
 
     r = _run([str(inner_delegate / "adlc-read"), "--version"],
@@ -1024,21 +1039,40 @@ def test_fifo_config_does_not_hang_the_version_path(tmp_path):
 
 
 def test_directory_config_is_ignored_not_crashed(tmp_path):
-    """The same file-type guard, on the case a plain `open()` would raise for."""
+    """The same file-type guard, on the case a plain `open()` would raise for.
+
+    REWRITTEN by REQ-609 BR-4. This asserted `== {}` — *absence* — which is a
+    legitimate configuration that falls through to legacy-key continuity, so
+    `ADLC_CONFIG=<a directory>` GRANTED delegation. A non-regular file at the
+    path is now malformed, with no carve-out, and malformed fails closed. The
+    property the test was written for is unchanged: no crash, no hang.
+    """
     cfg = tmp_path / "config.yml"
     cfg.mkdir()
-    assert _common.parse_delegate_config(str(cfg)) == {}
+    parsed = _common.parse_delegate_config(str(cfg))
+    assert parsed.get(_common._MALFORMED) is True, parsed
+    assert parsed.get(_common._MALFORMED_REASON, "").startswith("not-regular-file")
+    assert _common.delegation_enabled(parsed) is False
 
 
 def test_oversized_config_is_read_bounded(tmp_path):
-    """A three-scalar config is never 64 KiB. The `delegate:` block is at the
-    top, so the bounded read still finds it — the tail is simply not loaded."""
+    """REWRITTEN by REQ-609 BR-3: the cap refuses, it does not truncate.
+
+    This asserted that a 200 KiB file still resolved `model` from the block at
+    its top — a bounded read that PARSES what it got. The same read, on a file
+    whose `delegate:` header is inside the cap and whose `enabled: false` is
+    past it, resolves the operator's opt-out as unconfigured and grants. A
+    truncated YAML document still parses, so the cap has to be a refusal.
+    """
     cfg = tmp_path / "config.yml"
     cfg.write_text(
         'delegate:\n  model: "bounded-probe"\n' + "# pad\n" * 40000,
         encoding="utf-8",
     )
-    assert _common.parse_delegate_config(str(cfg))["model"] == "bounded-probe"
+    parsed = _common.parse_delegate_config(str(cfg))
+    assert parsed.get(_common._MALFORMED) is True, parsed
+    assert parsed.get(_common._MALFORMED_REASON, "").startswith("over-cap")
+    assert "model" not in parsed
 
 
 # --- harvest is value-aware and treats an empty value as absent ------------

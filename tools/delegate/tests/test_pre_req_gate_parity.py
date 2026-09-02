@@ -15,6 +15,8 @@ import sys
 
 import pytest
 
+import _child_env  # noqa: E402  (REQ-609: child interpreters need the parent's PyYAML)
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DELEGATE = os.path.dirname(_HERE)
 _ROOT = os.path.normpath(os.path.join(_DELEGATE, "..", ".."))
@@ -65,7 +67,7 @@ def _env(tmp_path, veto=False, env_optin=False, config=None, legacy=False,
         if unreadable:
             cfg.chmod(0o000)
         e["ADLC_CONFIG"] = str(cfg)
-    return e
+    return _child_env.with_yaml(e)
 
 
 # The full exported cross-product, with the SAME Python behind both gates. This
@@ -186,10 +188,15 @@ def _cfg_file(tmp_path, body):
     # expected the old gate to grant here, and was wrong).
     ("undecodable byte in a comment (both refuse — benign path)",
      lambda t: _cfg_file(t, b"delegate:\n  enabled: false  # d\xe9sactiv\xe9\n"), "1 disabled-via-config", "1 disabled-via-config"),
-    ("directory at the path (BR-14 known limitation: both grant)",
-     lambda t: _cfg_dir(t), "0 ok", "0 ok"),
-    ("header comment discards block (BR-14 known limitation: both grant)",
-     lambda t: _cfg_file(t, b"delegate:  # settings\n  enabled: false\n"), "0 ok", "0 ok"),
+    # REQ-609 flips both: a non-regular file is malformed with no carve-out
+    # (BR-4), and a real parser reads the block behind a header comment (BR-3,
+    # BR-7). The old gate still grants — that is the pre-existing fail-open
+    # REQ-603 BR-14 recorded; the current gate refuses. TASK-095 registers these
+    # as named divergences (ADR-4) beside D1-D5.
+    ("directory at the path (REQ-603 BR-14 fail-open, discharged by REQ-609 BR-4: old grants, new refuses)",
+     lambda t: _cfg_dir(t), "0 ok", "1 disabled-via-config"),
+    ("header comment no longer discards the block (REQ-603 BR-14 fail-open, discharged by REQ-609: old grants, new reads enabled: false)",
+     lambda t: _cfg_file(t, b"delegate:  # settings\n  enabled: false\n"), "0 ok", "1 disabled-via-config"),
 ], ids=lambda v: v if isinstance(v, str) else "")
 def test_malformed_classes_against_pre_req_gate(label, make, expect_old, expect_new, tmp_path):
     path = make(tmp_path)

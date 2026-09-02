@@ -1,10 +1,10 @@
 ---
 id: TASK-094
 title: "One config loader by descriptor, PyYAML behind a strict schema, adapters in _common"
-status: draft
+status: complete
 parent: REQ-609
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 dependencies: []
 ---
 
@@ -23,6 +23,9 @@ Tests first, in a scratch copy for mutations (never in the shared worktree while
 - `tools/delegate/tests/test_machine_config.py` — new: the tests listed under Verification
 - `tools/delegate/tests/test_print_gate.py` — rewrite (do not delete) the assertions that encode the pre-existing fail-opens: absent config still reads `{}`; a directory, `/dev/null`, a comment-headed block now resolve as the System Model says
 - `tools/delegate/tests/test_common.py` — rc-reader cases for the descriptor-based open
+- `tools/delegate/tests/_child_env.py` — new (found at implementation): a child interpreter with a redirected `HOME` loses a user-site PyYAML (the system `python3` case), so tests that spawn the CLIs put a symlink to the parent's `yaml` package on the child's `PYTHONPATH`; the venv wrapper is unaffected in production
+- `tools/delegate/tests/test_resolve_provider.py`, `tools/delegate/tests/test_version.py` — child env through the helper; the fake-checkout copy list gains `_machine_config.py`
+- `tools/delegate/tests/test_pre_req_gate_parity.py` — minimal: child env through the helper, and the two "both grant" known-limitation rows flipped to REQ-609's outcomes; TASK-095 registers them as named divergences
 
 ## Acceptance Criteria
 
@@ -58,6 +61,12 @@ Tests first, in a scratch copy for mutations (never in the shared worktree while
 | AC-9 | test-case | `tools/delegate/tests/test_machine_config.py::test_refusal_names_path_and_condition` | yes |
 | AC-12 | test-case | `tools/delegate/tests/test_machine_config.py::test_help_does_not_import_yaml` | yes |
 | AC-13 | test-case | `tools/delegate/tests/test_machine_config.py::test_fifo_returns_malformed_within_one_second` | yes |
+
+## Implementation notes (recorded at completion)
+
+- The implementing agent stalled during its mutation re-runs (whole-suite runs under CPU contention exceeded the tool's time limit); the orchestrator verified its work, applied the helper to the parity test it was not allowed to edit, re-ran the four required mutations against the targeted test files in a scratch copy, and committed. Mutation results are in the commit body.
+- PyYAML is pinned `pyyaml==6.0.3` (the tested version); the README task records the `>=6.0` floor.
+- The rc-file reader keeps `errors="replace"`; its cap is 256 KiB (`RC_CAP_BYTES`), separate from the 64 KiB config cap.
 
 ## Technical Notes
 
