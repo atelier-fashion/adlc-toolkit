@@ -1,7 +1,7 @@
 ---
 id: TASK-103
 title: "Retire the pattern where it is documented: conventions, partials README, architecture, header comments, companion .md, CHANGELOG"
-status: draft
+status: complete
 parent: REQ-610
 created: 2026-09-02
 updated: 2026-09-02
@@ -32,7 +32,7 @@ grep-level outcome, is added by TASK-102 (single owner of the harness file after
 - [ ] `grep -rF '2>/dev/null || . ~/.claude/skills/partials/' */SKILL.md agents partials proceed templates README.md .adlc/context` returns nothing once TASK-102 has also landed (case (e) is red until then; both tasks are in the same PR)
 - [ ] conventions.md "Bash in skills" contains the canonical spelling verbatim, the phrase "special built-in", and names both rejected forms with their failure (AC-7)
 - [ ] `partials/README.md` model-1 example is byte-identical to before; model-2 example is the canonical spelling
-- [ ] Every partial header comment that shows a call-site example shows the canonical spelling; `grep -c 'if \[ -f .adlc/partials/' partials/*.sh partials/*.md` is ≥ 1 for each of the ten files listed
+- [ ] Every partial header comment that shows a call-site example shows the canonical spelling; `grep -c 'if \[ -f .adlc/partials/' partials/*.sh partials/*.md` is ≥ 1 for each of the nine files that show a call-site example (`delegate-gate.sh` shows none; its contract lives in `delegate-gate.md`)
 - [ ] CHANGELOG entry names the re-sync and distinguishes the one partial with a live fix from the comment-only ones (AC-10)
 - [ ] No historical file under `.adlc/specs/`, `.adlc/knowledge/`, `.adlc/bugs/` is modified (BR-8 last sentence) — `git diff --stat` confirms
 

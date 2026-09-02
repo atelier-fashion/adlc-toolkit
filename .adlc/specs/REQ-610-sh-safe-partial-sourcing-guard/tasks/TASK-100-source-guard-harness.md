@@ -1,7 +1,7 @@
 ---
 id: TASK-100
 title: "source-guard harness: execute every real partial-sourcing line under bash, zsh, /bin/sh, dash"
-status: draft
+status: complete
 parent: REQ-610
 created: 2026-09-02
 updated: 2026-09-02
@@ -21,6 +21,7 @@ four situations in ADR-5 (a)–(d). On the unfixed tree, case (a) is **red under
 
 - `partials/tests/source-guard.test.sh` — new harness (ADR-5): corpus extraction, fake-`$HOME` sandbox, cases (a)–(d), `pass`/`fail`/`check` helpers in the style of `attribution.test.sh`
 - `partials/tests/run.sh` — add `"$HERE/source-guard.test.sh"` to the `run_all` positional list; add `dash` to the outer `for shell in …` loop (ADR-6)
+- `partials/tests/id-alloc.test.sh` — (found by the dash pass) `new_sandbox` links the canonical `id-alloc.sh` into the sandbox `$HOME/.claude/skills/partials/`, because dash exposes no `BASH_SOURCE`/`%x` and `id-recheck.sh` then legitimately resolves its sibling through the convention path, as on every real install
 
 ## Acceptance Criteria
 

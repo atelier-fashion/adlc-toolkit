@@ -214,7 +214,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    if [ -n "$(git -C <repo-path> ls-remote --heads origin "refs/heads/$BRANCH" 2>/dev/null)" ]; then
      echo "id recheck: remote already carries this pipeline's own '$BRANCH' (resume / crash-recovery) — skipping self-collision halt (REQ-545 BR-3)." >&2
    else
-     . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+     if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
      # OWN_SPEC_DIR is this REQ's own spec dir basename (REQ-xxx-<dirslug>) from the
      # invoking repo — passed so the recheck recognizes the REQ's OWN merged spec as
      # self (specs merge BEFORE /proceed in the normal flow; without this the
@@ -273,7 +273,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, integrationBranch: <integration-branch>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. `integrationBranch` is the value resolved in step 4 — Phase 6 (PR base) and Phase 8 (merge target) MUST read it from state, never re-derive or assume `main`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
 8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR through the forge adapter (so the step works on GitHub or Azure DevOps — REQ-520), making this REQ's intent — and, after `/architect`, its footprint — visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
    ```bash
-   . .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
    git -C <worktree> push -u origin <branch-name>
    adlc_forge_pr_create -R <owner/repo> --draft --base <integration-branch> --head <branch-name> --title "[WIP] REQ-xxx: <short title>" --body "Draft opened at Step 0 by /proceed; body filled in at Phase 6."
    ```
@@ -350,7 +350,7 @@ log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
-. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
 flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)
 trap '"$DELEGATE_TOOLS"/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"
@@ -364,8 +364,8 @@ REQ-522 BR-4). The resolution block reads it back with `skill-flag.sh read`.
 Gate the pre-pass via the shared predicate (REQ-416 ADR-2 — see `partials/delegate-gate.md`):
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
-. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
 adlc_delegate_gate_check; gate=$?
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" reason "$ADLC_DELEGATE_GATE_REASON"
 case $gate in
@@ -390,8 +390,8 @@ esac
    ```
 4. Invoke the delegate over the redacted diff. Mark `invoked=1` to the flag sidecar immediately before the call (REQ-424 telemetry), and mark the call's `exit` immediately after it returns — these marks are how the resolution block detects a real call vs a ghost-skip:
    ```bash
-   . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
-   . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
    case "$ADLC_READ_BIN" in /*) ;; *) echo "/proceed: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
    command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
@@ -434,7 +434,7 @@ esac
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes for this Phase 5 pre-pass, before continuing to the 6-agent dispatch. Emit telemetry ONLY by sourcing and calling the shared resolver in the SAME fenced block — it derives `mode`/`reason`/`gate_result`/`duration_ms` from the flag-file sidecar the steps above `mark`ed, so no shell variable crosses a fence boundary (REQ-522 BR-4). Never hand-construct a telemetry line:
 
 ```sh
-. .adlc/partials/emit-step-telemetry.sh 2>/dev/null || . ~/.claude/skills/partials/emit-step-telemetry.sh
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
 _adlc_emit_step_telemetry proceed-phase-5 Phase-5-Verify
 ```
 

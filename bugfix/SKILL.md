@@ -33,7 +33,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 1. If given a bug description (not a BUG ID), create a bug report:
    - Determine the next BUG ID using the **global** atomic counter file `~/.claude/.global-next-bug` (shared across all repos for unique IDs, mirroring the REQ counter — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the existing `mkdir` lock. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its REQ-416/LESSON-014 rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
      ```bash
-     . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+     if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
      BUG_NUM=$(adlc_alloc_id bug)
      # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — BUG_NUM
      # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
@@ -45,7 +45,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
      Note: the legacy per-repo `.adlc/.next-bug` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
    - **Pre-push recheck (BR-4, BR-8).** Before the bug file is committed on a branch for push, re-verify `BUG-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
      ```bash
-     . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+     if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
      BUG_ID=$(printf 'BUG-%03d' "$BUG_NUM")
      if ! adlc_recheck_id bug "$BUG_ID"; then
        echo "Halting: $BUG_ID collides on the remote — renumber before pushing (see message above)." >&2
@@ -82,7 +82,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
    rule — see conventions.md "Bash in skills"):
 
    ```bash
-   . .adlc/partials/attribution.sh 2>/dev/null || . ~/.claude/skills/partials/attribution.sh
+   if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . ~/.claude/skills/partials/attribution.sh; fi
    # <repo> = the repo whose history to blame (this repo, or a sibling's path from
    # .adlc/config.yml). <primary> = the repo holding .adlc/specs — always the current repo.
    # <file> <start> <end> = one root-cause range from step 4. Repeat per range, per repo.
@@ -228,7 +228,7 @@ Evaluate honestly: did this bug reveal something a future implementer should kno
 
 If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the **global** atomic counter `~/.claude/.global-next-lesson` (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock (`~/.claude/.global-next-lesson.lock.d`, shared with `/wrapup` so concurrent `/bugfix` and `/wrapup` runs mutually exclude). Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its LESSON-014 symlink pre-check live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
 ```bash
-. .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
 LESSON_NUM=$(adlc_alloc_id lesson)
 # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — LESSON_NUM
 # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
@@ -238,7 +238,7 @@ LESSON_NUM=$(adlc_alloc_id lesson)
 
 **Pre-push recheck (BR-4, BR-8).** Before the lesson file is committed on a branch for push, re-verify `LESSON-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
 ```bash
-. .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
 LESSON_ID=$(printf 'LESSON-%03d' "$LESSON_NUM")
 if ! adlc_recheck_id lesson "$LESSON_ID"; then
   echo "Halting: $LESSON_ID collides on the remote — renumber before pushing (see message above)." >&2

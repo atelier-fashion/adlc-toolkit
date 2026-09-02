@@ -345,6 +345,56 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **Partial sourcing is guarded — an absent repo-local copy no longer kills the block
+  under POSIX `sh` (REQ-610).** ⚠️ **Re-sync `.adlc/partials/` per file: `/template-drift`
+  will report every vendored partial as `stale`.**
+
+  Every two-level call site was written `. <local> 2>/dev/null || . <canonical>` — dot-source
+  the repo-local `.adlc/partials/<name>.sh`, fall back to `~/.claude/skills/partials/` when
+  that fails. Under bash and zsh a failed `.` is an ordinary non-zero status and the `||` arm
+  fires. Under POSIX `sh` it is not: `.` is a **special built-in**, and POSIX requires a
+  non-interactive shell to *exit* when a special built-in fails (XCU 2.8.1). Under `dash`, and
+  under `bash` in posix mode — which is what macOS ships as `/bin/sh` — the fallback was never
+  reached, and the `2>/dev/null` made the death silent. Observed 2026-09-01: the `/architect`
+  Step 5 footprint block, run with `sh` in a checkout with no `.adlc/partials/`, died at its
+  first line and published nothing; the identical block under `zsh` worked. The executor shell
+  for skills is zsh (LESSON-329), so this was latent there — but `partials/tests/run.sh` already
+  re-runs every harness under `/bin/sh`, and any consumer or CI job that runs a fence under `sh`
+  hit it.
+
+  There is now exactly **one** canonical spelling, on a single line:
+
+  ```sh
+  if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi
+  ```
+
+  It is the only one of the four candidate forms correct under all of `/bin/sh` (macOS),
+  `dash`, `bash`, `bash --posix`, and `zsh`. `command .` is **not** a fix — macOS `/bin/sh`
+  still exits. `[ -f A ] && . A || . B` is not one either: when the repo-local copy exists and
+  its last command returns non-zero, the canonical copy is sourced *on top of* it, inverting the
+  repo-local-first precedence LESSON-441 depends on. No `2>/dev/null` survives, so a syntax
+  error inside a vendored copy — or a canonical copy missing on a machine without the toolkit —
+  now reaches stderr naming the path. The executable-partial `!`-macro (`sh … || sh …`) is
+  unaffected and unchanged: `sh <file>` is an ordinary command, so it fails with exit 127, never
+  fatally.
+
+  `tools/lint-skills` gains an **`unguarded-source`** check so the spelling cannot drift back
+  (LESSON-012): inside a ` ```sh `/` ```bash `/` ```shell ` fence, any statement-position `.` of
+  a `partials/<name>.sh` path that is not the canonical spelling is a finding, and the retired
+  shape is rejected **anywhere** in a walked file, prose included — prose that instructs the
+  agent to type the line is as executable as a fence. `partials/tests/source-guard.test.sh`
+  executes the real lines extracted from the real files under every shell `run.sh` drives, so
+  the lint and the harness cannot disagree about what the corpus says.
+
+  **Re-syncing.** Every partial's header comment changed, so `/template-drift` will list each
+  vendored `.adlc/partials/*.sh` as `stale`. That is expected, not a regression. Re-sync
+  **per file and byte-for-byte** rather than trusting the summary — a partially-synced surface
+  looks healthy (LESSON-465). Only `emit-step-telemetry.sh` carries an **executable** fix (its
+  live self-source of `delegate-tools-path.sh`), and it is therefore the one file where staying
+  stale still behaves differently under `sh`; `id-alloc.sh`, `id-recheck.sh`, `trial-merge.sh`,
+  `forge.sh`, and `attribution.sh` are header-comment updates only. The `SKILL.md` fences are
+  not vendored — they reach every session on a symlink install the moment this lands.
+
 - **`ADLC_DISABLE_DELEGATE=1` actually works now (BUG-209).** ⚠️ **Read this if you
   relied on it to halt delegation.** The documented emergency stop — "overriding
   everything including `ADLC_DELEGATE_ENABLED=1`" — was implemented **only** in

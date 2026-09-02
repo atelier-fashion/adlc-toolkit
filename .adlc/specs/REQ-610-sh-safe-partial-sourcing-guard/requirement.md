@@ -44,7 +44,7 @@ prints a marker; cwd with no `.adlc/partials/`):
 
 | Form | `/bin/sh` (macOS, bash-posix) | `dash` | `bash` | `bash --posix` | `zsh` |
 |---|---|---|---|---|---|
-| `. A 2>/dev/null \|\| . B` (today) | **dies silently** | **dies silently** | ok | **dies silently** | ok |
+| `. A 2>/dev/null \|\| . B` (today) | **dies silently** | **dies silently** | ok (but see below) | **dies silently** | ok (but see below) |
 | `command . A 2>/dev/null \|\| . B` | **dies silently** | ok | ok | — | ok |
 | `[ -f A ] && . A \|\| . B` | ok, but sources **B as well** when A's last status is non-zero | same | same | — | same |
 | `if [ -f A ]; then . A; else . B; fi` | ok | ok | ok | ok | ok |
@@ -52,14 +52,20 @@ prints a marker; cwd with no `.adlc/partials/`):
 So the `command` prefix is not a fix (macOS `/bin/sh` still exits), and the `&&`/`||`
 chain is not a fix either: when the repo-local copy exists and its final command returns
 non-zero, the canonical copy is sourced *on top of it*, inverting the repo-local-first
-precedence that LESSON-441 depends on. Only the `if`/`else` form is correct under every
-shell in the table.
+precedence that LESSON-441 depends on. The harness written for this REQ showed that **today's
+`||` form has the same double-source defect** under bash and zsh: `.` returns the status of the
+last command the sourced file ran, so a vendored copy whose final statement is non-zero also
+triggers the canonical fallback on top of itself. Only the `if`/`else` form is correct under
+every shell in the table.
 
 **Blast radius.** The unguarded spelling is executable in 45 fenced call sites across
 eight skills (`spec` 18, `analyze` 11, `wrapup` 10, `proceed` 8, `bugfix` 5, `architect`,
 `manifest`, `status` 1 each), plus one fence each in `proceed/phases-6-8-ship.md` and
-`agents/delegate-pre-pass.md`, and once in `analyze/SKILL.md` prose that instructs the
-agent to type the line. It is also the *documented* pattern in `partials/README.md`, in
+`agents/delegate-pre-pass.md`, once in `analyze/SKILL.md` prose that instructs the
+agent to type the line, and **inside two partials**: a live two-level self-source in
+`partials/emit-step-telemetry.sh`, and a three-level `. A || . B || . C` chain spread over
+continuation lines in `partials/id-recheck.sh` — found not by any reader of the code but by
+running the existing harnesses under `dash` once this REQ added it to `run.sh`. It is also the *documented* pattern in `partials/README.md`, in
 `.adlc/context/conventions.md` "Bash in skills", in `.adlc/context/architecture.md`, in
 the header comment of six partials and four companion `.md` files, and — load-bearing —
 in `tools/lint-skills/check.py`, whose `CANONICAL_LITERALS` pins the *exact* old spelling
@@ -106,7 +112,7 @@ _Permissions: not applicable — no runtime actors. Section omitted deliberately
 - [ ] BR-2: Exactly one copy is sourced. When the repo-local copy exists it is sourced and the canonical copy is NOT, even when the repo-local copy's final command returns non-zero — the `[ -f A ] && . A || . B` chain violates this and is therefore forbidden. Repo-local-first precedence is preserved unchanged (informed by LESSON-441).
 - [ ] BR-3: There is **one** canonical guarded spelling — `if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi` — on a single line, and the lint enforces that spelling, not "any guarded form". A family of accepted spellings is what rots a literal-presence guard (informed by LESSON-019 via REQ-436; REQ-425). The spelling contains no `$<digit>` (LESSON-335 arg-templating), no `[[`, no `local`, and stays correct under `set -e` and `set -u`.
 - [ ] BR-4: The guarded form suppresses **no** stderr. A syntax error inside a vendored copy, or a canonical copy missing on a machine without the toolkit, is reported on stderr naming the path. Today's `2>/dev/null` on the first arm is what made the 2026-09-01 death silent, and LESSON-441 requires that a crash be diagnosable against the copy actually sourced.
-- [ ] BR-5: `tools/lint-skills` gains an `unguarded-source` check: inside any ` ```sh `/` ```bash `/` ```shell ` fence, a statement-position `.` whose operand is a `partials/<name>.sh` path and which is not the BR-3 canonical spelling is a finding. In addition, the retired spelling (`.sh 2>/dev/null || . ~/.claude/skills/partials/`) is flagged **anywhere** in a walked file, prose included — the one prose occurrence in `analyze/SKILL.md` instructs the agent to type the line, so it is as executable as a fence. The check walks every file that carries such a fence: `*/SKILL.md`, `agents/*.md`, and `proceed/phases-*.md` — the last of which no lint check walks today and must be added without inflating the REQ-595 vacuous-scan count of `SKILL.md` files. Benign path (must NOT fire): the canonical spelling, and the executable-partial `!`-macro form `sh .adlc/partials/<name>.sh 2>/dev/null || sh ~/.claude/skills/partials/<name>.sh`, which runs `sh <file>` rather than `.` and so fails as an ordinary command (exit 127), never fatally (informed by LESSON-012, LESSON-440 via REQ-595 BR-4).
+- [ ] BR-5: `tools/lint-skills` gains an `unguarded-source` check: inside any ` ```sh `/` ```bash `/` ```shell ` fence, a statement-position `.` whose operand is a `partials/<name>.sh` path and which is not the BR-3 canonical spelling is a finding. In addition, the retired spelling (`.sh 2>/dev/null || . ~/.claude/skills/partials/`) is flagged **anywhere** in a walked file, prose included — the one prose occurrence in `analyze/SKILL.md` instructs the agent to type the line, so it is as executable as a fence. The check walks every file that carries such a source line: `*/SKILL.md`, `agents/*.md`, `proceed/phases-*.md`, and the partials themselves (`partials/*.sh` and a consumer's `.adlc/partials/*.sh`, every non-comment line, since a partial has no fences) — the last two families no lint check walks today and must be added without inflating the REQ-595 vacuous-scan count of `SKILL.md` files. Benign path (must NOT fire): the canonical spelling, and the executable-partial `!`-macro form `sh .adlc/partials/<name>.sh 2>/dev/null || sh ~/.claude/skills/partials/<name>.sh`, which runs `sh <file>` rather than `.` and so fails as an ordinary command (exit 127), never fatally (informed by LESSON-012, LESSON-440 via REQ-595 BR-4).
 - [ ] BR-6: `CANONICAL_LITERALS` in `check.py` is updated to the BR-3 spelling for the `delegate-gate.sh` and `delegate-tools-path.sh` source lines **in the same change** as the fences, and every lint fixture carrying the old spelling is updated so the suite stays green for the reason it should. A fixture that still carries the old spelling of the delegate-gate source line must fail the canonical check afterwards — proving the literal moved rather than being silently widened (informed by REQ-436 ADR-4, LESSON-019).
 - [ ] BR-7: A new harness `partials/tests/source-guard.test.sh` is added to `run.sh`'s harness list and runs under bash, zsh, and `/bin/sh` (and `dash` when installed — `run.sh`'s shell loop gains it with the same skip-with-notice posture as the others, because dash is the `/bin/sh` of Debian-family consumers). The harness does not hardcode the spelling under test: it extracts every distinct partial-sourcing line from the real fence-bearing files (BR-5's walk set) and executes each **verbatim** in a sandbox whose `$HOME` holds a marker-printing canonical partial per name, under the shell `run.sh` hands it via `ADLC_TEST_SHELL`. Cases: (a) repo-local absent → marker printed and a sentinel line *after* the source line printed (this case is **red under `/bin/sh` before the fences change** — the failing test is recorded, then made green); (b) repo-local present with a non-zero final status → repo-local marker printed, canonical marker NOT printed (BR-2); (c) both absent → stderr non-empty and naming the path (BR-4); (d) the `!`-macro executable form with the file absent → falls back, continues (BR-5 benign path). Extracting the lines from the corpus is what keeps the harness and the lint from disagreeing about what the fences actually say (informed by LESSON-329, REQ-609 BR-16).
 - [ ] BR-8: The pattern is retired from every place it is *documented*, not only where it executes: `.adlc/context/conventions.md` "Bash in skills" states the canonical spelling and the special-built-in reason; `partials/README.md`'s model-2 example, `.adlc/context/architecture.md`'s Partials paragraph, `tools/lint-skills/README.md`, and every partial header comment and companion `.md` example are updated. A grep for the retired spelling over the distribution surface (`*/SKILL.md`, `agents/`, `partials/`, `proceed/*.md`, `templates/`, `README.md`, `.adlc/context/`) returns zero hits. Historical records (`.adlc/specs/`, `.adlc/knowledge/`, `.adlc/bugs/`, `CHANGELOG.md`) are not rewritten.
@@ -137,7 +143,7 @@ _Permissions: not applicable — no runtime actors. Section omitted deliberately
 - The relevant POSIX-sh implementations are macOS `/bin/sh` (bash 3.2 in posix mode) and dash. The `if`/`else` form was verified under both on 2026-09-02, plus bash, `bash --posix`, and zsh; no other shell is claimed.
 - `[ -f ]` (regular file exists) is the right existence test. An existing-but-unreadable repo-local copy then fails loudly at the `.` (BR-4), which is preferable to `[ -r ]` silently skipping to the canonical copy and hiding a permissions problem on the vendored file.
 - The executor shell for skills stays zsh; this REQ is defence for `run.sh`, consumers, CI, and any future executor change, not a claim that skills fail today.
-- The set of fence-bearing files is `*/SKILL.md`, `agents/*.md`, and `proceed/phases-*.md`. If a fourth file family appears, the lint walk and the harness's extraction share one definition so they widen together.
+- The set of source-bearing files is `*/SKILL.md`, `agents/*.md`, `proceed/phases-*.md`, and `partials/*.sh` (plus a consumer's `.adlc/partials/*.sh`). If a fourth file family appears, the lint walk and the harness's extraction share one definition so they widen together.
 - `~` is expanded by every shell in the table when it is the leading character of a `.` operand and of a `[ -f ]` operand; the canonical spelling relies on this exactly as the current one does.
 
 ## Open Questions

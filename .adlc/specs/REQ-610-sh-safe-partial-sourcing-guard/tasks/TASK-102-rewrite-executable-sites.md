@@ -1,7 +1,7 @@
 ---
 id: TASK-102
 title: "Rewrite every executable partial-sourcing site to the canonical guarded spelling"
-status: draft
+status: complete
 parent: REQ-610
 created: 2026-09-02
 updated: 2026-09-02
@@ -29,8 +29,9 @@ TASK-101's red repo lint green.
 - `status/SKILL.md` — 1 fence line
 - `proceed/phases-6-8-ship.md` — 1 fence line
 - `agents/delegate-pre-pass.md` — 2 fence lines
+- `partials/id-recheck.sh` — (found during implementation by the `dash` pass) the three-level `. A || . B || . C` chain that sources `id-alloc.sh`, rewritten as `[ -f ]`-guarded steps with the canonical spelling for the two-level part
 - `partials/emit-step-telemetry.sh` — the live `delegate-tools-path.sh` self-source (line 56 today); comment above it gains the special-built-in reason
-- `partials/tests/source-guard.test.sh` — add case (e): `grep -rF` of the retired literal over `*/SKILL.md agents partials proceed templates README.md .adlc/context` → zero lines, and `grep -F` of the canonical spelling (with `<name>` as written) in `.adlc/context/conventions.md` → at least one line (proves TASK-103's outcome; owned here so one task edits the harness); add case (f): extract the `/architect` Step 5 fence, run under `$SUT` in a sandbox with a fake canonical `forge.sh` and no `.adlc/`, expect `standalone run, skipping footprint publish`
+- `partials/tests/source-guard.test.sh` — add case (e): `grep -rF` of the retired literal over `*/SKILL.md agents partials proceed templates README.md .adlc/context` → zero lines, and `grep -F` of the canonical spelling (with `<name>` as written) in `.adlc/context/conventions.md` → at least one line (proves TASK-103's outcome; owned here so one task edits the harness); add case (g): grep `partials/*.sh` for any dot-source of a partials path not `[ -f ]`-guarded on the same line (the multi-line chain shape); add case (f): extract the `/architect` Step 5 fence, run under `$SUT` in a sandbox with a fake canonical `forge.sh` and no `.adlc/`, expect `standalone run, skipping footprint publish`
 
 ## Acceptance Criteria
 
@@ -62,7 +63,7 @@ TASK-101's red repo lint green.
 - Rewrite script (scratchpad, not committed — ADR-7):
   ```python
   import re, sys, pathlib
-  PAT = re.compile(r"\. \.adlc/partials/([a-z0-9-]+)\.sh 2>/dev/null \|\| \. ~/\.claude/skills/partials/\1\.sh")
+  PAT = re.compile(r"\. \.adlc/partials/([a-z0-9-]+)\.sh[ \t]+2>/dev/null \|\| \. ~/\.claude/skills/partials/\1\.sh")
   REPL = r"if [ -f .adlc/partials/\1.sh ]; then . .adlc/partials/\1.sh; else . ~/.claude/skills/partials/\1.sh; fi"
   EXPECT = {"spec/SKILL.md": 18, "analyze/SKILL.md": 12, "wrapup/SKILL.md": 10, "proceed/SKILL.md": 8,
             "bugfix/SKILL.md": 5, "architect/SKILL.md": 1, "manifest/SKILL.md": 1, "status/SKILL.md": 1,
@@ -74,6 +75,7 @@ TASK-101's red repo lint green.
       p.write_text(new)
   ```
   `analyze/SKILL.md` counts 12 because the Step 1.5 prose sentence contains the same literal; the regex rewrites it too, which is the intended prose fix (the backticked inline code becomes the canonical line). Re-read that sentence afterwards and make sure it still reads as an instruction.
+- `agents/delegate-pre-pass.md` line 61 aligns `2>/dev/null` with extra spaces — the regex allows `[ \t]+` there for that reason; the harness and lint both see it as a distinct line.
 - Verify counts first with `PAT.findall` per file against the table before running with writes; if a count differs, find the variant by hand — do not loosen the regex.
 - `partials/emit-step-telemetry.sh`: the line is executable code inside a partial that is itself sourced by fences; the same guard applies. Add a two-line comment above it: `# Guarded with [ -f ] because "." is a POSIX special built-in — a failed source is fatal under sh (REQ-610).`
 - Case (f) extraction: `awk '/^### Step 5/{f=1} f' architect/SKILL.md | awk '/^```sh$/{c++; next} c==1 && /^```$/{exit} c==1'` → temp file; run in a sandbox cwd with no `.adlc/`, `HOME` pointing at a fake home whose `forge.sh` defines no-op `adlc_forge_pr_view`/`adlc_forge_pr_edit` (they are never reached — the block exits at the "no pipeline-state.json" guard). Assert stdout contains `standalone run, skipping footprint publish` and the exit status is 0. `REQ` may be unset; the fence tolerates it.

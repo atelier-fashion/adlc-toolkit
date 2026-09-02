@@ -7,7 +7,7 @@ actual contract — refuse BEFORE the corpus is handed over — is broken. Only 
 ORDER distinguishes the two.
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 command "$ADLC_READ_BIN" --no-warn --paths ./notes.md --question "summarize"
 case "$ADLC_READ_BIN" in /*) ;; *) echo "/example: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing" >&2; exit 1 ;; esac
 ```

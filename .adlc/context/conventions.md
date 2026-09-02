@@ -46,7 +46,7 @@ Skills that delegate bulk reads or drafting to the configured delegate (`adlc-re
 (REQ-522 retired the legacy `kimi-gate.sh` back-compat alias):
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 adlc_delegate_gate_check; gate=$?
 case $gate in
   0) ;;  # delegated
@@ -60,7 +60,7 @@ and invokes the **absolute path** the gate exported, refusing anything that is n
 absolute path in that same fence before any corpus is handed over (REQ-609 BR-12):
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
 command "$ADLC_READ_BIN" --no-warn --paths ... --question "..."
 ```
@@ -138,7 +138,7 @@ Source the sourceable partial and call the op **in the same fenced block** (the
 cross-fence rule above):
 
 ```sh
-. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
 out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 ```
 
@@ -182,6 +182,14 @@ Every skill that depends on the `.adlc/` scaffold must have a `## Prerequisites`
 - **Never write a destructive command whose safety depends on a variable being non-empty.** `rm -rf "$(dirname "$VAR")"` becomes `rm -rf .` the moment `$VAR` is empty, and a guard sitting a few lines above it in a SKILL.md is one careless edit from being bypassed. Put the guards in a partial, next to the deletion, where they cannot drift from it — check the path is non-empty, that it lives under a real temp root, and that its basename is one the toolkit itself created. `partials/intake.sh`'s `adlc_intake_cleanup` is the reference (REQ-594).
 
 **Fenced blocks do not share shell state across steps.** Each ```sh fenced block in a SKILL.md may be an independent shell invocation — shell functions and non-exported variables defined in one fenced block are NOT visible in another (the Claude Code Bash-tool contract: "the working directory persists between commands, but shell state does not"). Therefore a shared shell **function** MUST be sourced from a `partials/*.sh` at *each* call site, in the **same fenced block as the invocation**, and MUST NEVER be defined in one fenced block and invoked from another (the silent-`command not found` telemetry-loss class — REQ-436, REQ-424). The canonical pattern is `partials/delegate-gate.sh` and `partials/emit-step-telemetry.sh`: a function-exporting partial sourced with the two-level fallback immediately before it is called. This is enforced structurally, not by prose/honor-system (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but invoked from a different fenced block in the same SKILL.md.
+
+**Source a partial with the guarded two-level form.** There is exactly one canonical spelling, on a single line:
+
+```sh
+if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi
+```
+
+`.` is a POSIX **special built-in**, and POSIX requires a non-interactive shell to *exit* when a special built-in fails (XCU 2.8.1, "Consequences of Shell Errors"). So under `dash` and under `bash` in posix mode — which is what macOS ships as `/bin/sh` — dot-sourcing an absent repo-local copy kills the whole block before any fallback can run; under bash and zsh it is merely a non-zero status, which is why this stayed latent (REQ-610, observed 2026-09-01). The repo-local copy is therefore proven to exist with `[ -f ]` before it is sourced, and never guessed at with `||`. Two forms that look like fixes and are not: **`command .`** — still exits under macOS `/bin/sh` (it only rescues `dash`); and **`[ -f A ] && . A || . B`** — when `A` exists but its last command returns non-zero, the `||` arm fires as well and the canonical copy is sourced *on top of* the repo-local one, inverting the repo-local-first precedence LESSON-441 depends on. The retired shape, `. <local> 2>/dev/null || . <canonical>`, is rejected by the `tools/lint-skills` `unguarded-source` check in fences and in prose alike; its `2>/dev/null` is also what made the original failure silent, so the guarded form suppresses **no** stderr — a missing canonical copy or a syntax error in a vendored one must reach stderr naming the path. `[ -f ]` rather than `[ -r ]`: an existing-but-unreadable vendored copy then fails loudly at the `.` instead of silently falling through and hiding a permissions problem. The executable-partial `!`-macro form (`sh <local> || sh <canonical>`) needs no guard — `sh <file>` is an ordinary command, so it fails with exit 127, never fatally.
 
 ## Agent dispatch patterns
 

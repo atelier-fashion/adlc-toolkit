@@ -32,7 +32,7 @@ merge sequencing, and terminal-state contract live here.
 
 3. **Flip each touched repo's draft PR (opened at Step 0, step 8a) to ready** with `adlc_forge_pr_ready <prNumber>` (read `prNumber`/`prUrl` from `pipeline-state.json`) — do **NOT** create a new PR (REQ-483 BR-2). **Fallback (LESSON-004):** if `prNumber` is absent (a pipeline started before draft-PR-early), `adlc_forge_pr_create --base <integrationBranch>` instead (never default base to `main`). Then set the full body **preserving the `adlc-footprint` block** `/architect` published — read the current body, extract the fenced footprint block, and re-append it to the new body, and drop the Step-0 `[WIP]` title prefix:
    ```sh
-   . .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
    tick=$(printf '\140\140\140')
    tmp=$(mktemp "${TMPDIR:-/tmp}/prbody.XXXXXX"); trap 'rm -f "$tmp"' EXIT
    fp=$(adlc_forge_pr_view "$prNumber" --json body -q .body 2>/dev/null | sed -n "/^${tick}adlc-footprint/,/^${tick}/{ /^${tick}/d; p; }")

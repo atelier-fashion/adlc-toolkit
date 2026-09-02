@@ -25,6 +25,13 @@ check() { # check <desc> <expected> <actual>
 new_sandbox() {
   SBX=$(mktemp -d -t idalloc.XXXXXX)
   HOME="$SBX/home"; export HOME; mkdir -p "$HOME/.claude"
+  # The sandbox home also carries the CANONICAL id-alloc.sh, as every real install
+  # does (~/.claude/skills is the toolkit symlink). id-recheck.sh finds its sibling
+  # via BASH_SOURCE / zsh %x first, but dash exposes neither, so under dash the
+  # recheck legitimately falls to the ~/.claude/skills/partials/ convention path
+  # (REQ-610 — the dash pass in run.sh is what surfaced this).
+  mkdir -p "$HOME/.claude/skills/partials"
+  ln -s "$PARTIALS/id-alloc.sh" "$HOME/.claude/skills/partials/id-alloc.sh"
   ADLC_REPOS_ROOT="$SBX/repos"; export ADLC_REPOS_ROOT; mkdir -p "$ADLC_REPOS_ROOT"
   # REQ-546: the allocator now PUSHES a reservation ref to the current repo's origin.
   # GIT_TERMINAL_PROMPT=0 guarantees a push/ls-remote against an unreachable or
@@ -395,6 +402,10 @@ cleanup
 two_machines() {
   SHARED_BARE="$SBX/shared.git"; git init -q --bare "$SHARED_BARE"
   HA="$SBX/homeA"; HB="$SBX/homeB"; mkdir -p "$HA/.claude" "$HB/.claude"
+  # Same canonical-sibling link as new_sandbox, per machine home (dash has no BASH_SOURCE — REQ-610).
+  mkdir -p "$HA/.claude/skills/partials" "$HB/.claude/skills/partials"
+  ln -s "$PARTIALS/id-alloc.sh" "$HA/.claude/skills/partials/id-alloc.sh"
+  ln -s "$PARTIALS/id-alloc.sh" "$HB/.claude/skills/partials/id-alloc.sh"
   ROOTA="$SBX/reposA"; ROOTB="$SBX/reposB"; mkdir -p "$ROOTA" "$ROOTB"
   RA="$ROOTA/proj"; RB="$ROOTB/proj"
   git clone -q "$SHARED_BARE" "$RA" 2>/dev/null

@@ -17,7 +17,7 @@ Use a two-level fallback so the macro works in consumer projects that
 haven't re-run `/init` since the toolkit shipped the partial:
 
 ```sh
-. .adlc/partials/emit-step-telemetry.sh 2>/dev/null || . ~/.claude/skills/partials/emit-step-telemetry.sh
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
 ```
 
 `.` (dot) is POSIX; do NOT use `source` (bash-only).
@@ -119,7 +119,7 @@ the source line and the invocation **MUST live in the same fenced block**, with
 the source immediately before the call:
 
 ```sh
-. .adlc/partials/emit-step-telemetry.sh 2>/dev/null || . ~/.claude/skills/partials/emit-step-telemetry.sh
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
 _adlc_emit_step_telemetry analyze Step-1.5
 ```
 

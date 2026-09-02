@@ -1,7 +1,7 @@
 ---
 id: TASK-101
 title: "lint-skills: unguarded-source check, CANONICAL_LITERALS move, phase-file walk, fixtures and tests"
-status: draft
+status: complete
 parent: REQ-610
 created: 2026-09-02
 updated: 2026-09-02
@@ -20,7 +20,7 @@ TASK-102; the pytest suite is green.
 
 ## Files to Create/Modify
 
-- `tools/lint-skills/check.py` — `CANONICAL_SOURCE_RE`, `DOT_SOURCE_PARTIAL_RE`, `RETIRED_SOURCE_LITERAL` constants; `check_unguarded_source()`; `find_phase_files()`; dispatch in `run()` for all three walks; module docstring entry; `CANONICAL_LITERALS` entries 4 and 5 updated
+- `tools/lint-skills/check.py` — `CANONICAL_SOURCE_RE`, `DOT_SOURCE_PARTIAL_RE`, `RETIRED_SOURCE_LITERAL` constants; `check_unguarded_source()`; `find_phase_files()`; `find_partial_files()` (added during implementation — see ADR-3 amendment); `check_unguarded_source(..., whole_file=True)` for partials; dispatch in `run()` for all four walks; module docstring entry; `CANONICAL_LITERALS` entries 4 and 5 updated
 - `tools/lint-skills/README.md` — new numbered item describing the check, both rules, the non-exempt `bash` fence, the benign macro form, and the placeholder-described retired shape (ADR-8)
 - `tools/lint-skills/tests/test_check.py` — new tests (below); update assertions at the lines that pin the old literal (144–145, 190, 322–323, 338–341)
 - `tools/lint-skills/tests/fixtures/unguarded-source-fence.md` — new: one `sh` fence and one `bash` fence with the retired spelling; a fence with `[ -f A ] && . A || . B`; a fence with a name-mismatched guard → four findings

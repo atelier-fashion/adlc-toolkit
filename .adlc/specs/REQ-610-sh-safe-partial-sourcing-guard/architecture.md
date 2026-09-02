@@ -83,7 +83,7 @@ matches neither rule (the command is `sh`, not `.`; the literal has `|| sh ~/`, 
 `|| . ~/`). The canonical spelling matches rule 1's regex and contains no retired literal.
 Both are fixture-tested as must-not-fire.
 
-### ADR-3: Walk set = `SKILL.md` ∪ `agents/*.md` ∪ `proceed/phase*.md`; only `SKILL.md` counts
+### ADR-3: Walk set = `SKILL.md` ∪ `agents/*.md` ∪ `proceed/phase*.md` ∪ `partials/*.sh`; only `SKILL.md` counts
 
 **Decision.** A new `find_phase_files(root)` yields `proceed/phase*.md` (the glob covers
 `phase-4-implementation.md`, `phases-1-3-validation.md`, `phases-6-8-ship.md` — all three
@@ -93,6 +93,13 @@ are `/proceed` companion files that carry fences; one of them sources `forge.sh`
 loop increments `scanned` (REQ-609's reasoning in `find_read_bin_extra_files`'s docstring:
 the REQ-595 vacuous-scan figure must keep counting `SKILL.md` so a dead skill walk cannot
 be masked by companion files). Same symlink-escape guard as the other walks.
+
+**Amended during implementation.** A `find_partial_files(root)` walk over `partials/*.sh` and
+`.adlc/partials/*.sh` was added, applying rule 1 to every non-comment line (a partial has no
+fences). `id-recheck.sh` carried a three-level `. A || . B || . C` chain on continuation
+lines — invisible to the markdown walks, to the harness's line-anchored extraction, and to
+the three exploration agents — and the `dash` pass ADR-6 added is what found it. The
+harness gained a matching grep case (g) so `run.sh` stays self-sufficient.
 
 `find_read_bin_extra_files`'s own walk is **not** widened: `read-bin-fallback` on the
 phase files would be a scope change to an unrelated check.

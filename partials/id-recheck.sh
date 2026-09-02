@@ -1,7 +1,7 @@
 # partials/id-recheck.sh — pre-push / PR-time id collision recheck (REQ-518 BR-4, BR-8).
 #
 # Source this partial, then call adlc_recheck_id WITHIN THE SAME fenced block:
-#   . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+#   if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
 #   if ! adlc_recheck_id req REQ-518; then
 #     echo "halt: rename before pushing (see message above)" >&2
 #     exit 1
@@ -77,11 +77,21 @@ adlc_recheck_id() {
   fi
 
   # Ensure the kind mappers + adlc_remote_high are available (idempotent re-source).
+  # Every candidate is proven to exist with [ -f ] BEFORE it is dot-sourced: "." is a
+  # POSIX special built-in, so a failed source is fatal under sh and a `. A || . B`
+  # chain never reaches its fallback arm — this block was a three-level chain of
+  # exactly that shape and died silently under dash (REQ-610). No stderr is
+  # suppressed: a syntax error in the copy actually sourced must be diagnosable
+  # against that copy (LESSON-441).
   if ! command -v adlc_remote_high >/dev/null 2>&1; then
-    { [ -n "$_ADLC_RECHECK_DIR" ] && . "$_ADLC_RECHECK_DIR/id-alloc.sh" 2>/dev/null; } \
-      || . .adlc/partials/id-alloc.sh 2>/dev/null \
-      || . ~/.claude/skills/partials/id-alloc.sh 2>/dev/null \
-      || { echo "adlc_recheck_id: cannot source id-alloc.sh (kind mappers)" >&2; return 2; }
+    if [ -n "$_ADLC_RECHECK_DIR" ] && [ -f "$_ADLC_RECHECK_DIR/id-alloc.sh" ]; then . "$_ADLC_RECHECK_DIR/id-alloc.sh"; fi
+  fi
+  if ! command -v adlc_remote_high >/dev/null 2>&1; then
+    if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+  fi
+  if ! command -v adlc_remote_high >/dev/null 2>&1; then
+    echo "adlc_recheck_id: cannot source id-alloc.sh (kind mappers)" >&2
+    return 2
   fi
 
   adlc_rc_prefix=$(adlc_id_kind_prefix "$adlc_rc_kind") || return 2

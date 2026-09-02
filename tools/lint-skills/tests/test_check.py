@@ -47,6 +47,27 @@ def _stage_agent(tmp_path: Path, *fixture_names: str) -> Path:
     return tmp_path
 
 
+def _stage_phase(tmp_path: Path, *names: str, dest_name: str | None = None) -> Path:
+    """Copy named fixtures into tmp_path/proceed/<name>.md and return tmp_path.
+
+    `proceed/phase*.md` is the extra surface `check_unguarded_source` walks
+    (REQ-610 ADR-3): the `/proceed` companion phase files carry executable
+    fences — one of them sources `forge.sh` — and no check walked them before.
+    `dest_name` renames a single fixture on the way in, so a test can stage a
+    fixture at the REAL file name (`phases-6-8-ship.md`) and prove the
+    `phase*.md` glob covers it.
+    """
+    proceed = tmp_path / "proceed"
+    proceed.mkdir(exist_ok=True)
+    if dest_name is not None:
+        assert len(names) == 1, "dest_name renames exactly one fixture"
+        shutil.copyfile(FIXTURES / f"{names[0]}.md", proceed / dest_name)
+        return tmp_path
+    for name in names:
+        shutil.copyfile(FIXTURES / f"{name}.md", proceed / f"{name}.md")
+    return tmp_path
+
+
 def _stage_partial(tmp_path: Path, layout: str = "partials") -> Path:
     """Stage the real `partials/emit-step-telemetry.sh` under the scan root so
     `check_canonical`'s partial-aware path (REQ-436 ADR-4) is exercised.
@@ -141,8 +162,9 @@ def test_missing_canonical_reports_per_rule(tmp_path):
     assert 'skill-flag.sh mark "$flag" start_s ' in result.stdout
     assert "_adlc_emit_step_telemetry " in result.stdout
     assert '"$DELEGATE_TOOLS"/emit-telemetry.sh ' in result.stdout
-    assert ". .adlc/partials/delegate-gate.sh 2>/dev/null" in result.stdout
-    assert ". .adlc/partials/delegate-tools-path.sh 2>/dev/null" in result.stdout
+    # REQ-610 ADR-4: the two source literals are the `[ -f ]`-guarded spelling.
+    assert "if [ -f .adlc/partials/delegate-gate.sh ]; then" in result.stdout
+    assert "if [ -f .adlc/partials/delegate-tools-path.sh ]; then" in result.stdout
 
 
 def test_delegate_gate_new_spelling_is_clean(tmp_path):
@@ -187,7 +209,7 @@ def test_missing_only_resolver_source_reports_one(tmp_path):
     # Exactly one finding, and it is the missing resolver-source literal (the
     # count==1 already proves the other four present literals were NOT flagged).
     assert result.stdout.count("canonical-helper") == 1, result.stdout
-    assert ". .adlc/partials/delegate-tools-path.sh 2>/dev/null" in result.stdout
+    assert "if [ -f .adlc/partials/delegate-tools-path.sh ]; then" in result.stdout
 
 
 def test_mixed_clean_and_corrupt_scans_both(tmp_path):
@@ -319,8 +341,10 @@ def test_canonical_via_partial_negative_without_partial(tmp_path):
     # four must NOT be flagged (count==1 already implies that).
     assert '"$DELEGATE_TOOLS"/emit-telemetry.sh ' in result.stdout
     assert 'skill-flag.sh mark "$flag" start_s ' not in result.stdout
-    assert ". .adlc/partials/delegate-gate.sh 2>/dev/null" not in result.stdout
-    assert ". .adlc/partials/delegate-tools-path.sh 2>/dev/null" not in result.stdout
+    assert "if [ -f .adlc/partials/delegate-gate.sh ]; then" not in result.stdout
+    assert (
+        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then" not in result.stdout
+    )
 
 
 def test_canonical_partial_does_not_rescue_skill_that_does_not_source_it(tmp_path):
@@ -335,10 +359,12 @@ def test_canonical_partial_does_not_rescue_skill_that_does_not_source_it(tmp_pat
     (sub / "SKILL.md").write_text(
         "# no-source\n\n"
         "```sh\n"
-        ". .adlc/partials/delegate-gate.sh 2>/dev/null || "
-        ". ~/.claude/skills/partials/delegate-gate.sh\n"
-        ". .adlc/partials/delegate-tools-path.sh 2>/dev/null || "
-        ". ~/.claude/skills/partials/delegate-tools-path.sh\n"
+        "if [ -f .adlc/partials/delegate-gate.sh ]; then "
+        ". .adlc/partials/delegate-gate.sh; else "
+        ". ~/.claude/skills/partials/delegate-gate.sh; fi\n"
+        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then "
+        ". .adlc/partials/delegate-tools-path.sh; else "
+        ". ~/.claude/skills/partials/delegate-tools-path.sh; fi\n"
         'flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)\n'
         '"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"\n'
         "_adlc_emit_step_telemetry some-skill Some-Step\n"
@@ -761,6 +787,194 @@ def test_read_bin_fallback_walks_agents_and_nothing_else_does(tmp_path):
     assert "scanned 2 SKILL.md file(s)" in result.stderr, result.stderr
 
 
+def _unguarded_lines(result) -> list[str]:
+    return [ln for ln in result.stdout.splitlines() if " unguarded-source:" in ln]
+
+
+def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
+    """REQ-610 BR-3/BR-5: every non-canonical way of sourcing a partial inside a
+    shell fence is a finding, on the offending line.
+
+    Four shapes, four findings, and each of the four carries information the
+    others do not:
+
+    * the retired two-level spelling in an ``sh`` fence — the shape that made
+      `/architect` Step 5 die at its first line under `/bin/sh`;
+    * the SAME line in a ``bash`` fence — unlike `posix-fence`, ``bash`` is NOT
+      exempt (ADR-2): the label does not choose the shell that runs the block;
+    * the ``&&``/``||`` chain, which reads as guarded and double-sources when
+      the repo-local copy's final status is non-zero;
+    * a guard whose ``<name>`` does not match what it sources — the assertion
+      that `CANONICAL_SOURCE_RE`'s backreference is load-bearing.
+
+    The two retired lines match BOTH of the check's rules; the count of exactly
+    four is what proves the per-line dedupe (one finding, not two).
+    """
+    root = _stage(tmp_path, "unguarded-source-fence")
+    result = _run(root)
+    assert result.returncode == 4, result.stdout + result.stderr
+
+    lines = _unguarded_lines(result)
+    assert len(lines) == 4, result.stdout
+    sh_retired = _line_of(
+        "unguarded-source-fence", "2>/dev/null || . ~/.claude/skills/partials/forge.sh"
+    )
+    bash_retired = _line_of("unguarded-source-fence", "partials/intake.sh 2>/dev/null")
+    chain = _line_of("unguarded-source-fence", "] && . .adlc/partials/id-alloc.sh")
+    mismatch = _line_of(
+        "unguarded-source-fence", "else . ~/.claude/skills/partials/intake.sh; fi"
+    )
+    assert [sh_retired, bash_retired, chain, mismatch] == sorted(
+        int(ln.split(":")[1]) for ln in lines
+    ), lines
+    for ln in lines:
+        assert ln.startswith("unguarded-source-fence/SKILL.md:"), ln
+        assert "conventions.md 'Bash in skills'" in ln, ln
+    # The whole finding set is unguarded-source — no collateral from another
+    # check, so the counts above mean what they say.
+    assert len(result.stdout.strip().splitlines()) == 4, result.stdout
+
+
+def test_unguarded_source_flags_prose_occurrence(tmp_path):
+    """REQ-610 BR-5 rule 2: the retired spelling in PROSE is a finding, reported
+    at the prose line.
+
+    `analyze/SKILL.md` Step 1.5 carried a sentence telling the agent to type the
+    retired line — as executable as a fence, since the agent types what the
+    sentence says. The fences in this fixture are all canonical, so the finding
+    can only come from the prose pass.
+    """
+    root = _stage(tmp_path, "unguarded-source-prose")
+    result = _run(root)
+    assert result.returncode == 1, result.stdout + result.stderr
+
+    lines = _unguarded_lines(result)
+    assert len(lines) == 1, result.stdout
+    prose_line = _line_of("unguarded-source-prose", "source the adapter with")
+    assert lines[0].startswith(
+        f"unguarded-source-prose/SKILL.md:{prose_line}: unguarded-source:"
+    ), lines
+    assert "conventions.md 'Bash in skills'" in lines[0], lines
+
+
+def test_guarded_source_ok_is_clean(tmp_path):
+    """REQ-610 BR-5 benign path: the canonical spelling (in ``sh``, ``bash`` and
+    ``shell`` fences, indented, and with a trailing comment), the
+    executable-partial ``sh <local> ... || sh <canonical>`` macro, and a comment
+    line naming a partial all produce ZERO findings.
+
+    Staged a second time ALONGSIDE the negative fixture, so "clean" cannot be
+    produced by a linter that had stopped running the check at all
+    (LESSON-602): the same run must still report the four bad lines.
+    """
+    alone = tmp_path / "alone"
+    alone.mkdir()
+    _stage(alone, "guarded-source-ok")
+    result = _run(alone)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "", result.stdout
+
+    both = tmp_path / "both"
+    both.mkdir()
+    _stage(both, "guarded-source-ok", "unguarded-source-fence")
+    result = _run(both)
+    lines = _unguarded_lines(result)
+    assert len(lines) == 4, result.stdout
+    assert all("unguarded-source-fence/" in ln for ln in lines), lines
+    assert "guarded-source-ok" not in result.stdout, result.stdout
+
+
+def test_unguarded_source_walks_phase_files_without_counting_them(tmp_path):
+    """REQ-610 BR-12 / ADR-3: `proceed/phase*.md` is walked by
+    `unguarded-source`, and is NOT counted toward `scanned N SKILL.md file(s)`.
+
+    Both halves matter and are asserted in two runs:
+
+    * staged ALONE, the phase file's finding is reported but the run still exits
+      255 VACUOUS — a companion file can never stand in for a skill walk, so a
+      dead `SKILL.md` walk cannot be masked (REQ-595 BR-5);
+    * staged beside one clean `SKILL.md`, the finding is reported at its line
+      and the scanned figure is 1, not 2.
+    """
+    alone = tmp_path / "alone"
+    alone.mkdir()
+    _stage_phase(alone, "phase-file-unguarded", dest_name="phases-6-8-ship.md")
+    result = _run(alone)
+    assert result.returncode == 255, result.stdout + result.stderr
+    assert "VACUOUS SCAN" in result.stderr, result.stderr
+    assert "scanned 0 SKILL.md file(s)" in result.stderr, result.stderr
+    assert len(_unguarded_lines(result)) == 1, result.stdout
+
+    with_skill = tmp_path / "with_skill"
+    with_skill.mkdir()
+    _stage(with_skill, "clean")
+    _stage_phase(with_skill, "phase-file-unguarded", dest_name="phases-6-8-ship.md")
+    result = _run(with_skill)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "VACUOUS SCAN" not in result.stderr, result.stderr
+    assert "scanned 1 SKILL.md file(s)" in result.stderr, result.stderr
+
+    lines = _unguarded_lines(result)
+    assert len(lines) == 1, result.stdout
+    fence_line = _line_of("phase-file-unguarded", "2>/dev/null")
+    assert lines[0].startswith(
+        f"proceed/phases-6-8-ship.md:{fence_line}: unguarded-source:"
+    ), lines
+
+
+def test_old_delegate_gate_spelling_fails_canonical_and_unguarded(tmp_path):
+    """REQ-610 BR-6 / ADR-4: a SKILL.md that kept the OLD spelling of the
+    delegate-gate source line is reported TWICE over — once by
+    `canonical-helper` (the literal moved) and once by `unguarded-source` (the
+    shape is retired).
+
+    This is the deliberate old-shape negative case: it is what proves the
+    `CANONICAL_LITERALS` entry genuinely moved to the guarded spelling rather
+    than being widened to accept both (REQ-436 ADR-4 / LESSON-019 #1). Every
+    other literal in the file is present — the tools-path source line, the
+    start_s mark, the resolver call, and (via the staged partial) the
+    emit-telemetry exec — so `canonical-helper == 1` names the gate line alone.
+    """
+    sub = tmp_path / "old-gate-spelling"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(
+        "# The post-REQ-522 telemetry shape with ONE retired source line.\n\n"
+        "```sh\n"
+        # The deliberate old shape under test — the only retired delegate-*
+        # source line left anywhere in this suite (REQ-610 BR-6).
+        ". .adlc/partials/delegate-gate.sh 2>/dev/null || "
+        ". ~/.claude/skills/partials/delegate-gate.sh\n"
+        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then "
+        ". .adlc/partials/delegate-tools-path.sh; else "
+        ". ~/.claude/skills/partials/delegate-tools-path.sh; fi\n"
+        'flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)\n'
+        '"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"\n'
+        "if [ -f .adlc/partials/emit-step-telemetry.sh ]; then "
+        ". .adlc/partials/emit-step-telemetry.sh; else "
+        ". ~/.claude/skills/partials/emit-step-telemetry.sh; fi\n"
+        "_adlc_emit_step_telemetry some-skill Some-Step\n"
+        "# anchor: ADLC_DISABLE_DELEGATE gate-case comment\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    _stage_partial(tmp_path, layout="partials")
+    result = _run(tmp_path)
+
+    assert result.stdout.count("canonical-helper") == 1, result.stdout
+    assert "if [ -f .adlc/partials/delegate-gate.sh ]; then" in result.stdout
+    # The retired spelling is what the file HAS, so it must not be what the
+    # canonical check ASKS for.
+    assert "canonical-helper: missing required literal" in result.stdout
+
+    lines = _unguarded_lines(result)
+    assert len(lines) == 1, result.stdout
+    body = (sub / "SKILL.md").read_text().splitlines()
+    old_line = next(i + 1 for i, ln in enumerate(body) if "2>/dev/null" in ln)
+    assert lines[0].startswith(
+        f"old-gate-spelling/SKILL.md:{old_line}: unguarded-source:"
+    ), lines
+
+
 def test_cross_fence_fn_flagged(tmp_path):
     """REQ-436 ADR-7: `myfn` defined in fence A but invoked only from fence B
     (a different fenced block) → one `cross-fence-fn` finding naming `myfn`,
@@ -1050,3 +1264,43 @@ def test_scanned_count_is_reported_on_every_run(tmp_path):
     result = _run(root)
     assert result.returncode > 0, result.stdout
     assert "scanned 2 SKILL.md file(s)" in result.stderr, result.stderr
+
+
+def test_unguarded_source_walks_partials_in_both_layouts_without_counting_them(tmp_path):
+    """REQ-610 (find_partial_files): a partial that dot-sources another partial is
+    walked in BOTH layouts (`partials/` and `.adlc/partials/`), an unguarded line
+    is a finding, the canonical line is not, and neither layout counts toward the
+    SKILL.md scanned figure. The unguarded shape here is the multi-line chain
+    id-recheck.sh actually carried — continuation lines beginning with `||` —
+    which no line-anchored extraction sees.
+    """
+    _stage(tmp_path, "clean")
+    (tmp_path / "partials").mkdir()
+    (tmp_path / ".adlc" / "partials").mkdir(parents=True)
+    bad = (
+        "#!/bin/sh\n"
+        "# header comment quoting `. .adlc/partials/x.sh` is not a source\n"
+        "f() {\n"
+        "  { [ -n \"$D\" ] && . \"$D/id-alloc.sh\" 2>/dev/null; } \\\n"
+        "    || . .adlc/partials/id-alloc.sh 2>/dev/null \\\n"
+        "    || . ~/.claude/skills/partials/id-alloc.sh 2>/dev/null \\\n"
+        "    || return 2\n"
+        "}\n"
+    )
+    ok = (
+        "#!/bin/sh\n"
+        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; "
+        "else . ~/.claude/skills/partials/delegate-tools-path.sh; fi\n"
+    )
+    (tmp_path / "partials" / "bad.sh").write_text(bad, encoding="utf-8")
+    (tmp_path / ".adlc" / "partials" / "also-bad.sh").write_text(bad, encoding="utf-8")
+    (tmp_path / "partials" / "ok.sh").write_text(ok, encoding="utf-8")
+    result = _run(tmp_path)
+    out = result.stdout
+    assert "partials/bad.sh:5: unguarded-source" in out
+    assert "partials/bad.sh:6: unguarded-source" in out
+    assert ".adlc/partials/also-bad.sh:5: unguarded-source" in out
+    assert "partials/ok.sh" not in out
+    assert "bad.sh:2:" not in out  # the header comment is not a source
+    assert "scanned 1 SKILL.md file(s)" in result.stderr
+    assert result.returncode == 4  # 2 findings x 2 copies; partials never inflate `scanned`

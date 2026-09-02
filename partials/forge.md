@@ -11,7 +11,7 @@ Source the partial with the two-level fallback and call the op **in the same
 fenced block** (conventions.md cross-fence rule):
 
 ```sh
-. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
 out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 # branch on rc and the normalized error_class / fields in $out
 ```

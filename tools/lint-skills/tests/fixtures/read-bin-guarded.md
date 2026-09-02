@@ -8,7 +8,7 @@ zsh both permit — cannot stand in for the file the resolver proved is there.
 This is the shape `read-bin-fallback` exists to protect, so it must be clean.
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 case "$ADLC_READ_BIN" in /*) ;; *) echo "/example: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
 command "$ADLC_READ_BIN" --no-warn --paths ./notes.md --question "summarize"
 ```
