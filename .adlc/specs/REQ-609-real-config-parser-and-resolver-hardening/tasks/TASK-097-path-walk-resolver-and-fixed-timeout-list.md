@@ -1,7 +1,7 @@
 ---
 id: TASK-097
 title: "The gate resolves adlc-read by walking $PATH and picks timeout from a fixed absolute list; proven under sh, bash, zsh"
-status: draft
+status: complete
 parent: REQ-609
 created: 2026-09-01
 updated: 2026-09-01
@@ -17,6 +17,7 @@ Replace `_adlc_resolve_read_bin` in `partials/delegate-gate.sh` with a `$PATH` w
 - `partials/delegate-gate.sh` — new `_adlc_resolve_read_bin`; new `_adlc_resolve_timeout`; both call sites use `command`; header comment no longer says "the bare name, when it is on PATH"
 - `partials/tests/delegate-gate.test.sh` — new sections (i) walk resolves a real file on an absolute entry, (j) function + alias + hash-table entry named `adlc-read` under each shell → `2 no-binary` and the planted binary's marker file is never written, (k) relative and empty `$PATH` entries are skipped, (l) a planted `timeout` on `$PATH` is not invoked, (m) `HOME` without a leading `/` is ignored, (n) a zsh function named with the absolute path does not intercept
 - `partials/tests/run.sh` — add `sh` to the shell loop (skip with notice if `/bin/sh` is absent, as zsh is today)
+- `tools/delegate/tests/test_partials.py` — `test_delegate_gate_path_wins_over_home_bin` expects the absolute PATH hit, not the bare name (found at implementation: it pinned the contract BR-11 replaces)
 
 ## Acceptance Criteria
 
@@ -41,6 +42,7 @@ Replace `_adlc_resolve_read_bin` in `partials/delegate-gate.sh` with a `$PATH` w
 | AC-6 | test-case | `partials/tests/delegate-gate.test.sh::(j) function alias hash cannot satisfy resolution` | yes |
 | AC-7 | test-case | `partials/tests/delegate-gate.test.sh::(l) planted timeout never invoked` | yes |
 | AC-14 | test-case | `partials/tests/run.sh (bash, zsh, sh)` | yes |
+| BR-11 | test-case | `tools/delegate/tests/test_partials.py::test_delegate_gate_path_wins_over_home_bin` | yes |
 
 ## Technical Notes
 
