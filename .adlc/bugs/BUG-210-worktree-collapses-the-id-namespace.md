@@ -1,7 +1,7 @@
 ---
 id: BUG-210
 title: "An allocation running inside a git worktree collapses the machine-global id namespace to one checkout, and never reports it as degraded"
-status: open
+status: resolved
 severity: high
 created: 2026-09-02
 updated: 2026-09-02
@@ -185,3 +185,45 @@ Full partial suite: **1840 passing, 0 failures**, `sh partials/tests/run.sh` rc=
 - `partials/id-recheck.sh` — repos-root default resolves from the main worktree
 - `partials/tests/id-alloc.test.sh` — two BUG-210 regression cases + the recorded
   mutation outcome
+
+## Deployment
+
+No service deploy — this is shell partials and a test. "Deployed" here means the
+fix reaching the copies that actually execute, because skills resolve
+`.adlc/partials/` **before** the toolkit copy, so an upstream merge alone changes
+nothing in a consumer.
+
+- adlc-toolkit `main`: `0cacbff` (PR #153)
+- Toolkit working checkout moved to `main` — `~/.claude/skills` symlinks to it, so
+  the canonical fallback every consumer uses was stale until this
+- teton-code `main`: `00c1850` (#268) · infrastructure `main`: `ad38896` (#313)
+- admin-api `staging`: `d14abd8` (#236) · atelier-web `staging`: `dc93af8` (#285)
+  · atelier-fashion `staging`: `64d06f8` (#1668)
+
+Verified after the fact: all five consumers' `.adlc/partials/` match canonical
+byte-for-byte, and the **vendored** copy sourced from inside a teton-code worktree
+— the exact path a skill takes — returns `610 0` where it previously returned
+`608 0`.
+
+**Not done, and deliberately named rather than left implicit:**
+
+- **atelier-fashion's `dev` branch** is not covered. The fix is on `staging`; `dev`
+  receives it through that project's reverse-sync path, not a PR — a squashed
+  hand-merge breaks the ancestry those scripts use as their idempotency check.
+- **staging → main promotions** for admin-api, atelier-web and atelier-fashion are
+  their pipelines' normal next step, not forced here.
+- **Existing duplicate ids are not reconciled.** teton-code's REQ-600 and REQ-602
+  still duplicate sibling ids, and BUG-206 is still double-issued between
+  adlc-toolkit and atelier-fashion. This stops new collisions; renumbering shipped
+  artifacts is LESSON-599's warning and belongs to a separate decision.
+- **The class is not closed, only its cause.** `adlc_remote_high` still cannot
+  distinguish a narrowed namespace from a genuinely small one — a manually
+  mis-set `ADLC_REPOS_ROOT` would still produce a confident wrong answer. A
+  scope-plausibility guard would close it; inventing a threshold inside a bugfix
+  is how you get a guard nobody trusts. See LESSON-620.
+
+## Knowledge Captured
+
+- `LESSON-620` — a guard that degrades only on failure cannot see a narrowed
+  input; when the scan root defines the namespace, resolving it wrongly redefines
+  the question instead of failing to answer it.
