@@ -145,7 +145,12 @@ adlc_recheck_id() {
 
   # Exact-id presence probe across participating repos. We re-walk the same repo set
   # adlc_remote_high uses, looking for the EXACT id as a pushed branch or merged dir/file.
-  adlc_rc_root="${ADLC_REPOS_ROOT:-$(cd "$(git rev-parse --show-toplevel 2>/dev/null)/.." 2>/dev/null && pwd)}"
+  # BUG-210: resolve from the MAIN worktree, not the current one — inside a linked
+  # worktree the parent-of-toplevel default is the worktree container, which narrows the
+  # namespace this recheck is supposed to cover. adlc_main_worktree lives in id-alloc.sh;
+  # source it if the caller has not (both partials are always vendored together).
+  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+  adlc_rc_root="${ADLC_REPOS_ROOT:-$(cd "$(adlc_main_worktree)/.." 2>/dev/null && pwd)}"
   [ -n "$adlc_rc_root" ] || adlc_rc_root="."
 
   # Branch token per kind: REQ rides feat/REQ-NNN, BUG rides fix/bug-NNN (lowercase

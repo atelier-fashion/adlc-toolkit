@@ -629,6 +629,52 @@ else
   fail "BR-6: reservation git push/ls-remote for refs/adlc/ids missing"
 fi
 
+
+# --- BUG-210: a linked worktree must not narrow the machine-global namespace ---------
+# KNOWN-BAD — RUN, and this is what actually went red. Mutation: make adlc_main_worktree
+# return `git rev-parse --show-toplevel` (its pre-fix behaviour). Both cases fail:
+#   case 1: expected .../repos/alpha, got .../repos/alpha/.worktrees/wt
+#   case 2: expected 2, got 1        <- the namespace collapse itself, in a test
+# Case 2 is the one that matters: 1 instead of 2 is precisely the shape that double-issued
+# REQ-600/601/602 on 2026-08-31 — seven participating repos seen as one. It was NEVER
+# flagged degraded, because a linked worktree has a perfectly good `origin` and every
+# derivation source "succeeds" against it, so the caller gets a confident wrong answer.
+BUG210_SBX=$(mktemp -d -t idalloc210.XXXXXX)
+mkdir -p "$BUG210_SBX/repos/alpha" "$BUG210_SBX/repos/beta"
+for r in alpha beta; do
+  git -C "$BUG210_SBX/repos/$r" init -q 2>/dev/null
+  git -C "$BUG210_SBX/repos/$r" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null
+done
+# A linked worktree nested under alpha, mirroring `<repo>/.worktrees/<id>`.
+BUG210_WTERR=$(git -C "$BUG210_SBX/repos/alpha" worktree add -q -b bug210wt "$BUG210_SBX/repos/alpha/.worktrees/wt" 2>&1)
+BUG210_WTRC=$?
+[ "$BUG210_WTRC" -eq 0 ] || echo "  (bug210 fixture: worktree add rc=$BUG210_WTRC err=$BUG210_WTERR)" >&2
+
+BUG210_WT="$BUG210_SBX/repos/alpha/.worktrees/wt"
+if [ -d "$BUG210_WT" ]; then
+  # Case 1: the helper resolves the MAIN worktree from inside the linked one.
+  # Source the partial INSIDE the subshell, as every other case in this file does —
+  # nothing here is sourced globally.
+  BUG210_MAIN=$( cd "$BUG210_WT" && . "$PARTIALS/id-alloc.sh" && adlc_main_worktree )
+  [ -n "$BUG210_MAIN" ] || echo "  (bug210 fixture: adlc_main_worktree returned EMPTY from $BUG210_WT)" >&2
+  BUG210_WANT=$( cd "$BUG210_SBX/repos/alpha" && pwd -P )
+  check "BUG-210: adlc_main_worktree from a linked worktree returns the main worktree" \
+    "$BUG210_WANT" "$(cd "$BUG210_MAIN" 2>/dev/null && pwd -P)"
+
+  # Case 2: the derived scan root still sees BOTH sibling repos. This is the
+  # non-vacuity arm — a root that resolved to the worktree container would count 1.
+  BUG210_ROOT=$( cd "$BUG210_WT" && . "$PARTIALS/id-alloc.sh" && cd "$(adlc_main_worktree)/.." 2>/dev/null && pwd -P )
+  BUG210_N=0
+  for g in "$BUG210_ROOT"/*; do
+    { [ -d "$g/.git" ] || [ -f "$g/.git" ]; } && BUG210_N=$((BUG210_N + 1))
+  done
+  check "BUG-210: scan root from a linked worktree still covers every sibling repo" \
+    "2" "$BUG210_N"
+else
+  fail "BUG-210: could not create the linked worktree fixture (git worktree add failed)"
+fi
+rm -rf "$BUG210_SBX"
+
 echo
 if [ "$FAILS" -eq 0 ]; then
   echo "ALL PASS"
