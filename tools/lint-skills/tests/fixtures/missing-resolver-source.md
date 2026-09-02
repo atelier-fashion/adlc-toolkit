@@ -7,7 +7,7 @@ absent while a `"$DELEGATE_TOOLS"/…` invocation remains. Exactly one
 this is the precise REQ-433 corruption vector the linter must catch.
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"
 adlc_delegate_gate_check; gate=$?

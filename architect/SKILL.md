@@ -207,7 +207,7 @@ zero attributable files is skipped with a note — never publish an empty block 
 # pr_view/pr_edit, never direct gh. Sourced in THIS fence (shell state does not
 # cross fences). GitHub backend forwards args verbatim, so the body read/write is
 # byte-identical (BR-3).
-. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
 
 # Scope to THIS REQ's spec dir. $REQ is the REQ id (e.g. REQ-484) the skill is operating on;
 # fall back to the lone pipeline-state.json if $REQ is unset (resolve to its spec dir either way).

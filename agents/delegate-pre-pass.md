@@ -57,8 +57,8 @@ class, LESSON-020). Then source the gate predicate. Use the standard two-level
 fallback (`.adlc/partials/…` → `~/.claude/skills/partials/…`):
 
 ```sh
-. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
-. .adlc/partials/delegate-gate.sh       2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 ```
 
 ### 1. Gate + explicit key check

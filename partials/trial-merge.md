@@ -29,7 +29,7 @@ Only **rc=1** is a merge conflict. Collapsing rc=2/3 into the `blocked`/conflict
 Source the partial and call it **within the same fenced block** (shell state does not cross SKILL.md fences — conventions "Bash in skills"), and **fetch the base ref first** (the helper does not fetch):
 
 ```sh
-. .adlc/partials/trial-merge.sh 2>/dev/null || . ~/.claude/skills/partials/trial-merge.sh
+if [ -f .adlc/partials/trial-merge.sh ]; then . .adlc/partials/trial-merge.sh; else . ~/.claude/skills/partials/trial-merge.sh; fi
 git -C "$wt" fetch origin "$integration_branch" >/dev/null 2>&1
 conflicts=$(adlc_trial_merge "$wt" "origin/$integration_branch"); rc=$?
 case $rc in

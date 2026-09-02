@@ -4,7 +4,7 @@ PR ops route through the adapter, and the two exempt direct ops (`gh pr diff`,
 `gh pr checks`) are allowed.
 
 ```sh
-. .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
 adlc_forge_pr_merge "$prUrl" --squash --delete-branch
 adlc_forge_pr_view "$prUrl" --fields state,url
 ```

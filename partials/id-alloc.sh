@@ -1,7 +1,7 @@
 # partials/id-alloc.sh — collision-safe id allocation, remote as source of truth (REQ-518).
 #
 # Source this partial, then call adlc_alloc_id WITHIN THE SAME fenced block:
-#   . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+#   if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
 #   REQ_NUM=$(adlc_alloc_id req)
 #   # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — REQ_NUM
 #   # would be silently empty. Guard the parent context (REQ-416 verify D-pass).

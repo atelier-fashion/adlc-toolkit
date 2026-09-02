@@ -51,7 +51,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
    - Create a commit with message: `feat(REQ-xxx): <summary of changes>`
    - Include `Co-Authored-By: Claude <noreply@anthropic.com>`
 4. Push the branch to remote with `git -C <worktree> push -u origin <branch>`
-5. If no PR exists for this branch, create one using `adlc_forge_pr_create` (source `partials/forge.sh` in the same fence; from inside the worktree, or with `-R <owner/repo>`) with a summary of what shipped — PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1)
+5. If no PR exists for this branch, create one using `adlc_forge_pr_create` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; from inside the worktree, or with `-R <owner/repo>`) with a summary of what shipped — PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1)
 6. If CI checks exist, monitor the pipeline with `gh run watch` and report the result
 7. **Rebase onto current main before merging** — in a sprint or long-running pipeline, upstream `main` may have advanced since the branch was cut. Run `git -C <worktree> fetch origin main` and check whether the branch is behind: `git -C <worktree> merge-base --is-ancestor origin/main HEAD`. If that command fails (exit 1), the branch is behind main and must be updated:
    - `git -C <worktree> rebase origin/main`
@@ -114,7 +114,7 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 - Use the assumption template (check `.adlc/templates/assumption-template.md` first, fall back to `~/.claude/skills/templates/assumption-template.md`)
 - Name files: `ASSUME-xxx-slug.md`. Determine the next ID with the reservation-aware allocator `adlc_alloc_id assume` (REQ-546 BR-12): it atomically reserves the number on this repo's `origin` (`refs/adlc/ids/assume/<NNN>`) BEFORE returning it, so concurrent `/wrapup` runs across clones of one repo — or concurrent `/sprint` wrapups — cannot double-allocate an ASSUME id. The per-checkout `.adlc/.next-assume` counter is now a CACHE: `max(remote, local) + 1` supersedes the old "never re-scan after the counter exists" rule, and the mkdir-lock + symlink pre-check (LESSON-014, LESSON-110) now live inside `adlc_alloc_id`. Source the partial and call it in the SAME fenced block (fenced blocks don't share shell state):
   ```bash
-  . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
   ASSUME_NUM=$(adlc_alloc_id assume)
   # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — guard parent.
   [ -n "$ASSUME_NUM" ] || { echo "ERROR: failed to allocate ASSUME number — aborting" >&2; exit 1; }
@@ -126,7 +126,7 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
-. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
 flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)
 trap '"$DELEGATE_TOOLS"/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"
@@ -140,8 +140,8 @@ REQ-522 BR-4). The resolution block reads it back with `skill-flag.sh read`.
 Decide drafting strategy via the shared predicate (REQ-416 ADR-2 — see `partials/delegate-gate.md`), then proceed down the appropriate branch:
 
 ```sh
-. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
-. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
 adlc_delegate_gate_check; gate=$?
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" reason "$ADLC_DELEGATE_GATE_REASON"
 case $gate in
@@ -286,14 +286,14 @@ esac
    # Persist the chosen transcript path to the flag sidecar so step 2's separate
    # fenced block can read it — SKILL.md fenced blocks do not share shell state
    # (REQ-522 BR-4). An empty JSONL (no candidates) is persisted as empty.
-   . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl "$JSONL"
    ```
    (The leading `-` on every `~/.claude/projects/` entry is just the absolute path's leading `/` run through the same non-alphanumeric substitution — there is no separate prefix step, and stripping the `/` first would produce a name one `-` short. The walk terminates at `$HOME` per BR-6 — see REQ-423 architecture ADR-2.)
 2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when discovery emitted "no candidates found", `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
    ```bash
-   . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
-   . .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
    # Re-read the transcript path step 1 persisted to the sidecar (fenced blocks
    # do not share shell state — REQ-522 BR-4). The gate partial is re-sourced
    # for the same reason: it exports ADLC_READ_BIN, the resolved binary (PATH,
@@ -354,7 +354,7 @@ esac
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
 - **Allocate the next ID atomically via the global `~/.claude/.global-next-lesson` counter** (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004; directory scans also race against concurrent `/sprint` pipelines — LESSON-110). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock with its LESSON-014 symlink pre-check. The lock path `~/.claude/.global-next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
   ```bash
-  . .adlc/partials/id-alloc.sh 2>/dev/null || . ~/.claude/skills/partials/id-alloc.sh
+  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
   LESSON_NUM=$(adlc_alloc_id lesson)
   # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — LESSON_NUM
   # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
@@ -364,7 +364,7 @@ esac
 
   **Pre-push recheck (BR-4, BR-8).** Before the lesson file is committed on a branch for push, re-verify `LESSON-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
   ```bash
-  . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+  if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
   LESSON_ID=$(printf 'LESSON-%03d' "$LESSON_NUM")
   if ! adlc_recheck_id lesson "$LESSON_ID"; then
     echo "Halting: $LESSON_ID collides on the remote — renumber before pushing (see message above)." >&2
@@ -377,7 +377,7 @@ esac
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback drafting path completes, before continuing to Convention Updates. Emit telemetry ONLY by sourcing and calling the shared resolver in the SAME fenced block — it derives `mode`/`reason`/`gate_result`/`duration_ms` from the flag-file sidecar the steps above `mark`ed, so no shell variable crosses a fence boundary (REQ-522 BR-4). Never hand-construct a telemetry line:
 
 ```sh
-. .adlc/partials/emit-step-telemetry.sh 2>/dev/null || . ~/.claude/skills/partials/emit-step-telemetry.sh
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
 _adlc_emit_step_telemetry wrapup Step-4-Lessons-Learned
 ```
 

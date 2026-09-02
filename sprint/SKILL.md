@@ -178,7 +178,7 @@ Background `pipeline-runner` agents send an automatic notification when they fin
 2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.adlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
 
    **Verify the agent's terminal-state claim before accepting it.** A pipeline-runner's final report MUST lead with one of `{merged, pr-ready, blocked, failed}` (see `~/.claude/agents/pipeline-runner.md` Terminal state contract). The orchestrator MUST NOT trust the claim at face value:
-   - For `merged` and `pr-ready` claims: run `adlc_forge_pr_view <prUrl> --json state,mergedAt` (source `partials/forge.sh` in the same fence; forge-neutral per REQ-520) against every touched-repo PR before updating the dashboard.
+   - For `merged` and `pr-ready` claims: run `adlc_forge_pr_view <prUrl> --json state,mergedAt` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; forge-neutral per REQ-520) against every touched-repo PR before updating the dashboard.
      - If the agent claimed `merged` but the PR is `OPEN`: treat the claim as `pr-ready` and merge the PR per Step 5.
      - If the agent claimed `pr-ready` but the PR is `MERGED`: just move on (agent was conservative, no harm done).
      - If the PR is `CLOSED` (not merged) or in any other unexpected state: surface as a blocker.
@@ -223,7 +223,7 @@ Completed: 0/3 | Blocked: 0 | Running: 3
 - **Cross-repo REQ** (multiple touched repos): the pipeline-runner stops at Phase 7 and reports `pr-ready`. The orchestrator owns merge sequencing and walks the per-REQ `mergeOrder` itself.
 
 The sequential flow when the orchestrator is the merge actor (cross-repo, or single-repo fallback after a failed agent merge):
-1. Merge the PR: `adlc_forge_pr_merge --squash --delete-branch` (source `partials/forge.sh` in the same fence)
+1. Merge the PR: `adlc_forge_pr_merge --squash --delete-branch` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence)
 2. Pull main: `git checkout main && git pull`
 3. Move on — other pipelines keep running in the background
 

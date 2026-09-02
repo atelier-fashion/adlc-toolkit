@@ -33,11 +33,11 @@ if [ "${1-}" = "--inner" ]; then
   # Inner pass: run.sh re-run under a specific shell ($2) — runs every harness
   # with that shell, and in doing so exercises this script's own list handling
   # under that shell.
-  run_all "$2" "$HERE/id-alloc.test.sh" "$HERE/forge.test.sh" "$HERE/attribution.test.sh" "$HERE/intake.test.sh" "$HERE/delegate-gate.test.sh"
+  run_all "$2" "$HERE/id-alloc.test.sh" "$HERE/forge.test.sh" "$HERE/attribution.test.sh" "$HERE/intake.test.sh" "$HERE/delegate-gate.test.sh" "$HERE/source-guard.test.sh"
   exit $RC
 fi
 
-for shell in bash zsh /bin/sh; do
+for shell in bash zsh /bin/sh dash; do
   if command -v "$shell" >/dev/null 2>&1; then
     echo "=== $shell ==="
     "$shell" "$0" --inner "$shell" || RC=1

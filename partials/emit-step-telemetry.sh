@@ -53,7 +53,9 @@
 # call site sources this in its own short-lived block shell, so namespace
 # leakage is a non-issue (REQ-436 ADR-3).
 
-. .adlc/partials/delegate-tools-path.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-tools-path.sh
+# Guarded with [ -f ] because "." is a POSIX special built-in — a failed source is
+# fatal under sh, so the fallback arm of a `. A || . B` chain never runs (REQ-610).
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
 _adlc_emit_step_telemetry() {
     # $1 = skill name, $2 = step label. All telemetry state is read from the
     # flag-file sidecar — NEVER from caller shell vars (REQ-522 BR-4).

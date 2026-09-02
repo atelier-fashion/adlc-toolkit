@@ -117,7 +117,7 @@ stored backlink rots silently when an artifact is moved or renumbered (BR-4, LES
 Source the partial and call it **in the same fenced block** (the cross-fence-fn rule):
 
 ```bash
-. .adlc/partials/attribution.sh 2>/dev/null || . ~/.claude/skills/partials/attribution.sh
+if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . ~/.claude/skills/partials/attribution.sh; fi
 # Emits one "BUG-id<TAB>REQ-id" line per attributed edge; add a REQ id as a second
 # argument to filter to that REQ's incidents. Strictly read-only.
 adlc_attr_bugs_with_attribution "$PWD"

@@ -1,7 +1,7 @@
 # partials/id-recheck.sh — pre-push / PR-time id collision recheck (REQ-518 BR-4, BR-8).
 #
 # Source this partial, then call adlc_recheck_id WITHIN THE SAME fenced block:
-#   . .adlc/partials/id-recheck.sh 2>/dev/null || . ~/.claude/skills/partials/id-recheck.sh
+#   if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
 #   if ! adlc_recheck_id req REQ-518; then
 #     echo "halt: rename before pushing (see message above)" >&2
 #     exit 1
@@ -32,7 +32,12 @@
 #               remote was unreachable (degraded: cannot find a collision; warns, BR-3).
 #   return 1 -> COLLISION: <ID> is already on the remote. A halt message naming the exact
 #               `adlc renumber <KIND-old> <KIND-new>` command is printed to stderr (BR-4/BR-9).
-#   return 2 -> usage error (bad kind / malformed ID).
+#   return 2 -> usage error (bad kind / malformed ID), or — under bash/zsh only — the
+#               sibling id-alloc.sh could not be sourced from any convention path.
+#               Under POSIX sh that last case is a loud FATAL exit instead (`.` of the
+#               absent canonical copy is a special-built-in error): the toolkit is not
+#               installed, which is unrecoverable, so the block must not continue
+#               (REQ-610 BR-1/BR-4; the final canonical arm is deliberately unguarded).
 # NEVER blocks on network (BR-3): an unreachable remote can only fail to FIND a
 # collision, never invent one from absence of data.
 #
@@ -77,11 +82,21 @@ adlc_recheck_id() {
   fi
 
   # Ensure the kind mappers + adlc_remote_high are available (idempotent re-source).
+  # Every candidate is proven to exist with [ -f ] BEFORE it is dot-sourced: "." is a
+  # POSIX special built-in, so a failed source is fatal under sh and a `. A || . B`
+  # chain never reaches its fallback arm — this block was a three-level chain of
+  # exactly that shape and died silently under dash (REQ-610). No stderr is
+  # suppressed: a syntax error in the copy actually sourced must be diagnosable
+  # against that copy (LESSON-441).
   if ! command -v adlc_remote_high >/dev/null 2>&1; then
-    { [ -n "$_ADLC_RECHECK_DIR" ] && . "$_ADLC_RECHECK_DIR/id-alloc.sh" 2>/dev/null; } \
-      || . .adlc/partials/id-alloc.sh 2>/dev/null \
-      || . ~/.claude/skills/partials/id-alloc.sh 2>/dev/null \
-      || { echo "adlc_recheck_id: cannot source id-alloc.sh (kind mappers)" >&2; return 2; }
+    if [ -n "$_ADLC_RECHECK_DIR" ] && [ -f "$_ADLC_RECHECK_DIR/id-alloc.sh" ]; then . "$_ADLC_RECHECK_DIR/id-alloc.sh"; fi
+  fi
+  if ! command -v adlc_remote_high >/dev/null 2>&1; then
+    if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+  fi
+  if ! command -v adlc_remote_high >/dev/null 2>&1; then
+    echo "adlc_recheck_id: cannot source id-alloc.sh (kind mappers)" >&2
+    return 2
   fi
 
   adlc_rc_prefix=$(adlc_id_kind_prefix "$adlc_rc_kind") || return 2

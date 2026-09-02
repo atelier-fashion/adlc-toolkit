@@ -101,7 +101,7 @@ a general markdown linter and NOT a general shell linter.
    empty string, and nothing else. The correct shape is:
 
    ```sh
-   . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
    case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
    command "$ADLC_READ_BIN" --no-warn --paths … --question "…"
    ```
@@ -165,6 +165,78 @@ a general markdown linter and NOT a general shell linter.
    checks encode a *skill's* contract and would be false positives on an agent
    prompt file. Agent files are not added to the `scanned N SKILL.md file(s)`
    count, so they can never mask a dead skill walk (REQ-595 BR-5).
+9. **Unguarded partial source (`unguarded-source`)** — how a fence sources a
+   partial (REQ-610 BR-3/BR-5, ADR-2). `.` is a POSIX **special built-in**, so a
+   failed source is fatal: a non-interactive `sh` *exits* rather than returning
+   non-zero. The retired two-level shape — `. <local> 2>/dev/null || . <canonical>`
+   — therefore kills the whole block at its first line on any machine with no
+   vendored `.adlc/partials/` copy, because the `||` arm is never reached. There
+   is exactly **one** accepted spelling, on a single line:
+
+   ```sh
+   if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi
+   ```
+
+   The repo-local copy is *tested* before it is sourced, never guessed at with
+   `||`. `[ -f ]` rather than `[ -r ]`: an existing-but-unreadable vendored copy
+   then fails loudly at the `.` instead of silently falling through to canonical
+   and hiding a permissions problem. One line, so Skill `$<digit>` argument
+   templating cannot split it and `cross-fence-fn`'s line-based parsing still
+   sees one statement. The regex carries a **backreference**, so all three
+   `<name>`s must agree — a line that guards `forge.sh` and then sources
+   `intake.sh` is a finding, not a pass. A trailing `#` comment is allowed.
+
+   This check walks five file families — `*/SKILL.md`, `agents/*.md`,
+   `proceed/phase*.md`, the partials' companion docs `partials/*.md` (whose
+   copy-paste fences are where a call-site spelling originates), and the partials themselves (`partials/*.sh` and a
+   consumer's `.adlc/partials/*.sh`, where every non-comment line is executable,
+   so the whole file is treated as one fence). The last family was added after
+   `id-recheck.sh` turned out to carry a three-level `. A || . B || . C` chain on
+   continuation lines that no markdown walk and no line-anchored extraction could
+   see; the `dash` pass in `partials/tests/run.sh` found it. None of the extra
+   families count toward the `scanned` figure.
+
+   Two rules, both on every walked file:
+
+   - **inside a shell fence** (or anywhere in a partial), a non-comment line with a `.`
+     (or bash-only `source`, which `dash` lacks entirely) at statement position
+     (start of line, or after `;`, `&&`, `||`, `then`, `do`, `{`) whose operand is one
+     of the toolkit's **convention paths** — `.adlc/partials/<name>.sh`,
+     `~/.claude/skills/partials/<name>.sh`, `$HOME/.claude/skills/partials/<name>.sh` —
+     must match that spelling exactly. A source through a variable path
+     (`. "$D/partials/x.sh"` behind the author's own `[ -f ]`) is deliberately out of
+     remit: the two-level spelling would point a consumer's own partial at a
+     `~/.claude/skills/partials/<their-name>.sh` that does not exist;
+   - **anywhere in the file** — prose, inline code, fence comment — the retired
+     literal is a finding. A SKILL.md sentence instructing the agent to type the
+     line is as executable as a fence (`analyze/SKILL.md` Step 1.5 carried
+     exactly such a sentence), and a fence comment quoting it is one paste away
+     from being live. A retired fence line matches both rules and is deduped by
+     line number into one finding.
+
+   **` ```bash ` fences are NOT exempt** — the opposite of `posix-fence`, and
+   deliberately so: the fence label does not choose the shell that executes the
+   block (`partials/tests/run.sh` and consumers run fences under `/bin/sh`
+   regardless of the label), and a fatal `.` is a property of the executing
+   shell, not of the label.
+
+   Two rejected alternatives, for the record: `command . <local> || . <canonical>`
+   still exits under macOS `/bin/sh`; `[ -f A ] && . A || . B` double-sources
+   whenever `A`'s final status is non-zero — which, for a function-defining
+   partial, is whatever its last top-level statement returned, a property no
+   partial author is thinking about.
+
+   Benign and fixture-pinned as must-not-fire: the canonical spelling itself,
+   and the **executable-partial macro** `sh <local> 2>/dev/null || sh <canonical>`
+   (partials README model 1), whose command is `sh`, not `.` — an absent file is
+   an ordinary command failure (exit 127), the `||` arm does run, and no guard
+   is needed.
+
+   This check walks `agents/*.md` **and** `proceed/phase*.md` (via
+   `find_phase_files`) in addition to every `SKILL.md`: the retired spelling
+   lived in all three families. Like the agents walk, neither extra walk feeds
+   the `scanned N SKILL.md file(s)` count, so a companion file can never mask a
+   dead skill walk (REQ-595 BR-5).
 
 ## Usage
 
