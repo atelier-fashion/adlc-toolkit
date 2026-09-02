@@ -224,7 +224,7 @@ fi
 
 If `tools/lint-skills/check.sh` does not exist (older install of the toolkit), silently skip Step 1.9 — emit nothing, raise no warning, and continue to Step 2.
 
-**Parse the output:** the linter emits one line per finding in the format `<file>:<line>: <check-name>: <message>` where `<check-name>` is one of `sentinel`, `balance`, `canonical-helper`, `posix-fence`, `cross-fence-fn`, `unguarded-source`. Each line is already report-ready; just prefix them with the `skill-md-corruption:` dimension marker.
+**Parse the output:** the linter emits one line per finding in the format `<file>:<line>: <check-name>: <message>` where `<check-name>` is a check name such as `sentinel`, `balance`, `canonical-helper`, `posix-fence`, `cross-fence-fn`, `unguarded-source` — illustrative, not a closed list: the full set is whatever `check.py` currently emits (`read-bin-fallback`, `forge-direct-gh`, `cross-fence-var`, `arg-templating`, the per-root parity checks, `io-error`, …), and every line has the same shape. Each line is already report-ready; just prefix them with the `skill-md-corruption:` dimension marker.
 
 **Finding format:**
 

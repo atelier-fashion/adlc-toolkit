@@ -1141,8 +1141,9 @@ def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> lis
     of the label), and a fatal ``.`` is a property of the executing shell, not
     of the label. ``#``-prefixed lines source nothing and are skipped.
 
-    Rule 2 (the retired literal, everywhere). ``RETIRED_SOURCE_LITERAL`` is
-    reported on ANY line of the file, prose and fence comments included: the
+    Rule 2 (the retired spelling, everywhere). ``RETIRED_SOURCE_RE`` (the
+    whitespace-tolerant form of ``RETIRED_SOURCE_LITERAL``, which the finding
+    message quotes) is reported on ANY line of the file, prose and fence comments included: the
     prose occurrence in ``analyze/SKILL.md`` Step 1.5 instructs the agent to
     type the line, which is as executable as a fence.
 
@@ -1179,7 +1180,8 @@ def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> lis
                     "non-interactive `sh` before any `||` can run; spell it "
                     "`if [ -f .adlc/partials/<name>.sh ]; then "
                     ". .adlc/partials/<name>.sh; else "
-                    ". ~/.claude/skills/partials/<name>.sh; fi` on one line, "
+                    ". ~/.claude/skills/partials/<name>.sh; fi` on ONE line "
+                    "(a guard split across lines is not recognised), "
                     "with the same <name> in all three places "
                     "(conventions.md 'Bash in skills', REQ-610 BR-3)",
                 )
@@ -1191,7 +1193,7 @@ def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> lis
             Finding(
                 rel, lineno, "unguarded-source",
                 "carries the retired two-level source spelling "
-                "(`. <local> 2>/dev/null || . <canonical>`) — it is fatal "
+                f"(`. <local> {RETIRED_SOURCE_LITERAL}<name>.sh`) — it is fatal "
                 "under `sh` wherever it runs, and prose that shows it is one "
                 "paste away from being live; replace it with the guarded "
                 "spelling `if [ -f .adlc/partials/<name>.sh ]; then "
