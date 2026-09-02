@@ -141,6 +141,80 @@ def test_read_key_from_rc_ignores_indented_export(monkeypatch, tmp_path):
     assert _common._read_key_from_rc("MOONSHOT_API_KEY") == ""
 
 
+#: Separators `str.splitlines` honours that a shell does not. Text after one of
+#: these is still on the same command line for sh, bash and zsh.
+_NOT_SHELL_LINE_BREAKS = ("\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85",
+                          " ", " ")
+
+
+@pytest.mark.parametrize("sep", _NOT_SHELL_LINE_BREAKS,
+                         ids=[repr(s) for s in _NOT_SHELL_LINE_BREAKS])
+def test_rc_reader_splits_only_where_a_shell_does(monkeypatch, tmp_path, sep):
+    """The rc reader answers "what did the shell export?", so it has to split
+    the file the way the shell does.
+
+    `str.splitlines` breaks on eight characters beyond `\\n`/`\\r\\n`/`\\r`, and a
+    shell breaks on none of them. So `# note\\x0bexport K="v"` is one COMMENT
+    line that never runs — while a `splitlines`-based reader sees two lines, the
+    second one canonical, and reports a key the environment does not and will
+    never contain. The reader would then hand `get_client` a credential the
+    machine never had, and the failure lands on a real call.
+
+    Derived, not asserted from memory: each separator is confirmed to be one
+    `str.splitlines` really does honour, so a future Python that adds another
+    surfaces as a red row rather than as a value invented out of a comment.
+    """
+    assert len(("a" + sep + "b").splitlines()) == 2, repr(sep)
+    home = tmp_path
+    (home / ".zshrc").write_text(
+        '# a note about the key' + sep + 'export MOONSHOT_API_KEY="sk-smuggled"\n',
+        encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    assert _common._read_key_from_rc("MOONSHOT_API_KEY") == ""
+
+
+@pytest.mark.parametrize("eol,label", [("\n", "lf"), ("\r\n", "crlf"),
+                                       ("\r", "cr")])
+def test_rc_reader_still_reads_a_real_line(monkeypatch, tmp_path, eol, label):
+    """The working subject for the test above (LESSON-602).
+
+    An exclusion test passes just as well against a reader that finds nothing at
+    all, so the same export on its own line — after each of the three endings a
+    shell actually honours — must still be found.
+    """
+    home = tmp_path
+    (home / ".zshrc").write_text(
+        '# a note about the key' + eol + 'export MOONSHOT_API_KEY="sk-real"' + eol,
+        encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    assert _common._read_key_from_rc("MOONSHOT_API_KEY") == "sk-real"
+
+
+def test_provider_source_is_defaults_when_the_config_is_malformed(monkeypatch):
+    """`source` is a claim about where the reported values CAME from.
+
+    A malformed config supplies nothing: every field below comes from the
+    shipped defaults. But the guard that decides this was written against a
+    single `_MALFORMED` sentinel and stayed that way when the reason and the
+    path joined it (REQ-609 BR-13) — three keys, only one of them excluded — so
+    it answered "config" for every unreadable file, and `--version` named a file
+    the loader had just refused to read as the source of values it never
+    supplied.
+    """
+    for var in ("ADLC_DELEGATE_MODEL", "ADLC_DELEGATE_BASE_URL",
+                "ADLC_DELEGATE_API_KEY_ENV"):
+        monkeypatch.delenv(var, raising=False)
+    malformed = {_common._MALFORMED: True,
+                 _common._MALFORMED_REASON: "duplicate-key: 'enabled' at line 3",
+                 _common._MALFORMED_PATH: "/tmp/config.yml"}
+    provider = _common.resolve_provider(cfg=malformed)
+    assert provider.source == "defaults", provider
+    assert provider.enabled is False
+
+    # Not vacuous: a config that really did supply a field still says "config".
+    assert _common.resolve_provider(cfg={"model": "m"}).source == "config"
+
+
 def test_rc_reader_opens_by_descriptor_and_skips_fifo(monkeypatch, tmp_path):
     """REQ-609 BR-5: the rc reader opens the way the config loader does.
 

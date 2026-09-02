@@ -249,6 +249,57 @@ CORPUS = [
                b"delegate:\n  enabled: false\n",
           note="whole-document by design (BR-2): one loader, one verdict"),
 
+    # -- aliases and merge keys (BR-2, BR-7) --------------------------------
+    #
+    # An alias is the one construct that puts a key's VALUE somewhere the key
+    # is not. `enabled` can then be true for the delegate section without the
+    # word appearing anywhere under `delegate:` — an operator reading the file,
+    # and every reviewer who has read this one, would see no opt-in. The loader
+    # refuses aliases and merge keys document-wide rather than resolving them.
+    Entry("merge-only", "malformed", reason="alias-or-merge",
+          data=b"defaults: &d\n  enabled: true\ndelegate:\n  <<: *d\n",
+          note="the section says only `<<: *d`; resolving it grants, and "
+               "nothing under `delegate:` says `enabled` at all"),
+    Entry("whole-section-alias", "malformed", reason="alias-or-merge",
+          data=b"base: &x\n  enabled: true\ndelegate: *x\n",
+          note="the same smuggle one level up: the whole section is an alias"),
+    Entry("anchor-with-alias", "malformed", reason="alias-or-merge",
+          data=b'delegate:\n  model: &m "m"\n  base_url: *m\n',
+          note="an alias inside the section, on a field that is not `enabled`: "
+               "the refusal is about the construct, not about which key it "
+               "happens to reach"),
+    Entry("merge-plus-explicit", "malformed", reason="alias-or-merge",
+          data=b"defaults: &d\n  enabled: true\n"
+               b"delegate:\n  <<: *d\n  enabled: false\n",
+          note="merge-BEFORE-scan used to report this as `duplicate-key`, "
+               "which is a lie about the file: `<<` and `enabled` are two "
+               "different keys and the operator wrote each of them once"),
+    Entry("anchor-without-alias", "parsed", section={"enabled": False},
+          data=b"delegate: &d\n  enabled: false\n",
+          note="the working subject (LESSON-602): an anchor NOBODY references "
+               "is not an alias, and must still parse — otherwise the four "
+               "rows above pass against a loader that refuses everything"),
+
+    # -- constructors that raise plain built-ins, not YAMLError (BR-3) ------
+    #
+    # `load_machine_config` never raises. PyYAML's own constructors do not
+    # honour that boundary: they raise `ValueError`, `KeyError`, and
+    # `AttributeError` straight out of the standard library, none of which is a
+    # `yaml.YAMLError`. A caller that catches only YAMLError gets a traceback
+    # where the contract promises a verdict.
+    Entry("bad-timestamp", "malformed", reason="yaml-error",
+          data=b"delegate:\n  enabled: false\nupdated: 2026-09-31\n",
+          note="September has 30 days; `datetime.date` raises ValueError from "
+               "inside the timestamp constructor, and the operator's written "
+               "`false` never gets a verdict at all"),
+    Entry("explicit-tag-bool-maybe", "malformed", reason="yaml-error",
+          data=b'delegate:\n  enabled: !!bool "maybe"\n',
+          note="`construct_yaml_bool` indexes a dict of the spellings it "
+               "knows; an unknown one is a bare KeyError"),
+    Entry("explicit-tag-int", "malformed", reason="yaml-error",
+          data=b'delegate:\n  model: !!int "abc"\n',
+          note="`int('abc')` — a ValueError from the standard library"),
+
     # -- YAML that does not parse -------------------------------------------
     Entry("tab-indented-header", "malformed", reason="yaml-error",
           data=b"\tdelegate:\n\t  enabled: false\n"),

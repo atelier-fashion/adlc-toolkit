@@ -31,7 +31,6 @@ import _child_env  # noqa: E402
 from config_corpus import CORPUS  # noqa: E402
 
 _DELEGATE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CLI = os.path.join(_DELEGATE, "adlc-read")
 _REQUIREMENTS = os.path.join(_DELEGATE, "requirements.txt")
 _README = os.path.join(_DELEGATE, "README.md")
 
@@ -64,13 +63,21 @@ def _load(tmp_path, body):
     return _machine_config.load_machine_config(_write(tmp_path, body))
 
 
-def _skip_unless_available(entry):
+def _available(entry):
+    """False when the platform cannot build this shape at all."""
     if entry.needs == "mkfifo" and not hasattr(os, "mkfifo"):
-        pytest.skip("no os.mkfifo on this platform")
+        return False
     if entry.needs == "dev-null" and not os.path.exists("/dev/null"):
-        pytest.skip("no /dev/null on this platform")
+        return False
     if entry.needs == "not-root" and hasattr(os, "geteuid") and os.geteuid() == 0:
-        pytest.skip("root reads through a 0o000 directory")
+        return False
+    return True
+
+
+def _skip_unless_available(entry):
+    if not _available(entry):
+        pytest.skip("this shape needs %r, which this platform lacks"
+                    % (entry.needs,))
 
 
 # --- AC-1: the seeded corpus, on all three surfaces -------------------------
@@ -133,15 +140,76 @@ def test_seeded_corpus_three_surfaces(entry, clean_env, monkeypatch):
         entry.cleanup(clean_env)
 
 
-def test_corpus_covers_every_reason_class():
-    """The corpus is only a specification if it reaches every refusal class.
+#: The two classes no corpus FILE can make the LOADER emit.
+#: `dependency-missing` is a statement about the interpreter, not the file, and
+#: has its own test below. `schema` is emitted one layer up, by
+#: `parse_delegate_config` when a document that PARSED says something the closed
+#: schema does not allow — so it never appears as an `Entry.reason`, and the
+#: test below reaches it through the adapter instead.
+_NOT_FROM_A_FILE = frozenset({"dependency-missing"})
+_NOT_FROM_THE_LOADER = _NOT_FROM_A_FILE | frozenset({"schema"})
 
-    `dependency-missing` is the one class no FILE can produce — it is a
-    statement about the interpreter — and it has its own test below.
-    """
+
+def test_corpus_covers_every_reason_class():
+    """The corpus is only a specification if it reaches every refusal class."""
     seen = set(e.reason for e in CORPUS if e.reason)
-    assert seen == _machine_config.REASON_CLASSES - {"dependency-missing"}, (
-        sorted(_machine_config.REASON_CLASSES - {"dependency-missing"} - seen))
+    expected = _machine_config.REASON_CLASSES - _NOT_FROM_THE_LOADER
+    assert seen == expected, sorted(expected.symmetric_difference(seen))
+
+
+def test_every_reason_the_corpus_emits_is_in_the_closed_set(clean_env):
+    """The vocabulary is closed at the surface that PUBLISHES it, not just at
+    the loader.
+
+    `REASON_CLASSES` is the closed set, and `reason_class` splits on the first
+    colon — but the adapter builds one reason of its own, `"schema: ..."`, from
+    a `SchemaError` rather than from a `ConfigOutcome`, and for a while that
+    token was not in the set at all. Nothing failed, because nothing checked the
+    adapter's half: the loader-level tests only ever saw loader reasons. A
+    consumer that branches on the class (ADR-2's forge carve-out matches
+    `dependency-missing`) is reading a vocabulary one of its producers never
+    joined, and the next token invented that way is the one that silently
+    misses a carve-out.
+
+    So this walks the whole corpus through `parse_delegate_config` — the
+    function that writes the string an operator and a consumer both read — and
+    holds every class it emits to the closed set, both ways: nothing outside it,
+    and nothing in it that no file can reach.
+    """
+    seen = set()
+    skipped = set()
+    for index, entry in enumerate(CORPUS):
+        if not _available(entry):
+            # Not a hole in the vocabulary, a hole in the platform: discount it
+            # below unless another shape reaches the same class anyway.
+            if entry.reason:
+                skipped.add(entry.reason)
+            continue
+        # One directory per shape: several of them build a `config.yml` of a
+        # different KIND (a file, a directory, a symlink) under the name they
+        # are given, and a shared directory would make the corpus order decide
+        # what each entry ends up reading.
+        home = clean_env / ("shape-%03d" % index)
+        home.mkdir()
+        path = entry.make(home)
+        try:
+            cfg = _common.parse_delegate_config(path)
+        finally:
+            entry.cleanup(home)
+        reason = cfg.get(_common._MALFORMED_REASON)
+        if reason is None:
+            assert cfg.get(_common._MALFORMED) is not True, (entry.name, cfg)
+            continue
+        klass = reason.split(":", 1)[0]
+        assert klass in _machine_config.REASON_CLASSES, (entry.name, reason)
+        seen.add(klass)
+
+    expected = (_machine_config.REASON_CLASSES - _NOT_FROM_A_FILE
+                - (skipped - seen))
+    assert seen == expected, sorted(expected.symmetric_difference(seen))
+    # Named explicitly: this is the class the loader never produces, and the
+    # reason this test exists as well as the one above.
+    assert "schema" in seen
 
 
 # --- BR-3: three states, and it never raises --------------------------------
@@ -182,6 +250,96 @@ def test_a_yaml_tag_cannot_construct_a_python_object(clean_env):
                     b"  model: !!python/object/apply:os.system ['echo pwned']\n")
     assert outcome.kind == "malformed"
     assert outcome.reason_class == "yaml-error"
+
+
+_BUILTIN_RAISERS = [
+    ("an out-of-range date", b"delegate:\n  enabled: false\nupdated: 2026-09-31\n",
+     "ValueError", "2026"),
+    ("an out-of-range time", b"delegate:\n  enabled: false\nx: 2020-01-01 25:00:00\n",
+     "ValueError", "25:00"),
+    ("an explicit !!bool the constructor does not know",
+     b'delegate:\n  enabled: !!bool "maybe"\n', "KeyError", "maybe"),
+    ("an explicit !!int over a non-number",
+     b'delegate:\n  model: !!int "abc"\n', "ValueError", "abc"),
+    ("an explicit !!timestamp over a non-date",
+     b'delegate:\n  model: !!timestamp "nope"\n', "AttributeError", "nope"),
+]
+
+
+@pytest.mark.parametrize("label,body,exc_name,fragment", _BUILTIN_RAISERS,
+                         ids=[r[0] for r in _BUILTIN_RAISERS])
+def test_a_constructor_raising_a_builtin_is_malformed(clean_env, label, body,
+                                                      exc_name, fragment):
+    """BR-3: "never raises" has no exceptions, including PyYAML's own.
+
+    `yaml.YAMLError` is the boundary PyYAML documents and not the one it keeps.
+    Its constructors call into the standard library and let what comes back
+    through: `datetime.date(2026, 9, 31)` is a `ValueError`, an unrecognised
+    `!!bool` spelling is a `KeyError` off a lookup table, `!!timestamp` over a
+    string the regex does not match is an `AttributeError` on `None`. None of
+    those is a `YAMLError`, so a loader that catches only `YAMLError` hands the
+    caller a traceback where the contract promises one of three kinds — and the
+    caller here is a governance gate whose refusal path is the safe one.
+
+    The reason must also stay content-free (the fragment assertion): a
+    `KeyError` carries the offending VALUE out of the file, so the detail names
+    the exception TYPE and never `str(exc)`.
+    """
+    outcome = _machine_config.load_machine_config(_write(clean_env, body))
+    assert outcome.kind == "malformed", (label, outcome)
+    assert outcome.reason_class == "yaml-error", (label, outcome)
+    assert exc_name in outcome.reason, (label, outcome.reason)
+    assert fragment not in outcome.reason, (label, outcome.reason)
+
+
+def test_an_expansion_that_exhausts_memory_is_malformed(clean_env, monkeypatch):
+    """The other escape route BR-3 has to close.
+
+    PyYAML expands aliases eagerly, so a document inside the 64 KiB cap can ask
+    for far more memory than the machine has — and `MemoryError` is neither a
+    `YAMLError` nor a `RecursionError`. Injected rather than provoked: a test
+    that really allocates until the machine gives up is a test that takes the
+    machine down with it, and the arm under test is "an unexpected exception
+    from the parse becomes a verdict", not "PyYAML expands aliases".
+    """
+    def _boom(yaml, text):
+        raise MemoryError("expansion")
+
+    monkeypatch.setattr(_machine_config, "_parse_strict", _boom)
+    outcome = _machine_config.load_machine_config(
+        _write(clean_env, b"delegate:\n  enabled: false\n"))
+    assert outcome.kind == "malformed", outcome
+    assert outcome.reason_class == "yaml-error", outcome
+
+
+def test_a_constructor_crash_refuses_end_to_end(clean_env):
+    """The same shape through the surfaces an operator actually meets.
+
+    A traceback out of `load_machine_config` is not merely untidy: `--print-gate`
+    is the probe every skill fence consults, and a non-zero exit with no verdict
+    on stdout is a *different* answer from `0 disabled-via-config` — the fence
+    reads it as "the probe is broken", which is not a refusal anyone wrote down.
+    So the gate line and the exit code are both asserted, and the direct-call
+    backstop is asserted beside them (the first version of the malformed-config
+    fix reached only the probe while a direct call still transmitted).
+    """
+    body = b"delegate:\n  enabled: false\nupdated: 2026-09-31\n"
+    path = _write(clean_env, body)
+
+    cfg = _common.parse_delegate_config(path)
+    assert cfg.get(_common._MALFORMED) is True, cfg
+    with pytest.raises(SystemExit) as exc:
+        _common.require_delegation_enabled("adlc-read", cfg)
+    message = str(exc.value)
+    assert path in message, message
+    assert "yaml-error" in message, message
+
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(clean_env),
+           "ADLC_CONFIG": path, "MOONSHOT_API_KEY": "sk-legacy"}
+    gate = _cli(["--print-gate"], _child_env.with_yaml(env))
+    assert gate.returncode == 0, gate.stdout + gate.stderr
+    assert gate.stdout.strip() == "0 disabled-via-config", (
+        gate.stdout + gate.stderr)
 
 
 def test_strict_loader_is_a_safe_loader_subclass():
@@ -286,14 +444,114 @@ def test_distinct_keys_still_parse(clean_env):
 
 
 def test_a_merge_key_does_not_smuggle_a_duplicate(clean_env):
-    """`<<` merges are flattened BEFORE the repeat check, so a merged key that
-    is also written explicitly is caught rather than silently resolved."""
+    """A merge beside an explicit key is refused AS a merge, not as a duplicate.
+
+    Flattening first and scanning after did refuse this document — but it
+    refused it by reporting `duplicate-key` on `enabled`, which is a statement
+    about the file that is not true: `<<` and `enabled` are two different keys
+    and the operator wrote each of them exactly once. BR-13 exists so the
+    refusal tells the operator what to delete; a line number pointing at a key
+    that is not duplicated sends them to the wrong line.
+    """
     outcome = _load(
         clean_env,
         b"defaults: &d\n  enabled: true\n"
         b"delegate:\n  <<: *d\n  enabled: false\n")
     assert outcome.kind == "malformed"
-    assert outcome.reason_class == "duplicate-key"
+    assert outcome.reason_class == "alias-or-merge"
+
+
+# --- BR-2 / BR-7: aliases and merge keys are refused document-wide ---------
+
+_ALIAS_SHAPES = [
+    ("a merge of an anchored mapping",
+     b"defaults: &d\n  enabled: true\ndelegate:\n  <<: *d\n"),
+    ("the whole section as an alias",
+     b"base: &x\n  enabled: true\ndelegate: *x\n"),
+    ("an alias on a scalar field",
+     b'delegate:\n  model: &m "m"\n  base_url: *m\n'),
+    ("a merge key with an INLINE mapping and no alias at all",
+     b"delegate:\n  <<: {enabled: true}\n"),
+    ("a merge beside an explicitly written key",
+     b"defaults: &d\n  enabled: true\n"
+     b"delegate:\n  <<: *d\n  enabled: false\n"),
+    ("an alias in a section this consumer does not read",
+     b"anchors: &a\n  x: 1\nforge:\n  provider: *a\n"
+     b"delegate:\n  enabled: false\n"),
+    ("an alias with no anchor to resolve",
+     b"delegate:\n  enabled: *nowhere\n"),
+]
+
+
+@pytest.mark.parametrize("label,body", _ALIAS_SHAPES,
+                         ids=[r[0] for r in _ALIAS_SHAPES])
+def test_an_alias_or_a_merge_key_is_refused(clean_env, label, body):
+    """An alias puts a key's VALUE somewhere the key is not.
+
+    That is the whole finding. `delegate:\\n  <<: *d` makes `enabled` true for
+    the delegate section with the word `enabled` appearing nowhere under
+    `delegate:` — an operator reading their own file, and a reviewer reading it
+    over their shoulder, both see a section that opts into nothing. A governance
+    file whose meaning is assembled from somewhere else in the document is a
+    file nobody can review by reading it, so the loader refuses the construct
+    rather than resolving it (REQ BR-2's whole-document posture, BR-7's "the
+    section is what it says").
+
+    Two arms, because there are two ways in: `compose_node` refuses an alias
+    NODE, and `flatten_mapping` refuses a `<<` KEY — the inline-mapping row
+    reaches the second with no alias anywhere in the document, so deleting
+    either arm leaves a row red. The undefined-alias row is here because a
+    reference to a missing anchor must refuse as an alias, not fall through to
+    PyYAML's own composer error.
+    """
+    outcome = _load(clean_env, body)
+    assert outcome.kind == "malformed", (label, outcome)
+    assert outcome.reason_class == "alias-or-merge", (label, outcome)
+    # BR-13: the operator is told which line to look at.
+    assert re.search(r"line \d+", outcome.reason), (label, outcome.reason)
+
+
+def test_an_alias_cannot_grant_delegation(clean_env, monkeypatch):
+    """The security half, on the surface that decides transmission.
+
+    Asserted separately from the loader rows above because "malformed" is only
+    the right answer if the three surfaces above it treat it as a refusal: the
+    document below resolves, under stock PyYAML, to `delegate.enabled == True`.
+    """
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    path = _write(clean_env,
+                  b"defaults: &d\n  enabled: true\ndelegate:\n  <<: *d\n")
+    # The premise: stock PyYAML really does read this as an opt-in.
+    yaml = pytest.importorskip("yaml")
+    with open(path, encoding="utf-8") as fh:
+        assert yaml.safe_load(fh)["delegate"]["enabled"] is True
+
+    cfg = _common.parse_delegate_config(path)
+    assert cfg.get(_common._MALFORMED) is True
+    assert _common.delegation_enabled(cfg) is False
+    assert _common.resolve_gate_verdict(cfg) == (False, "disabled-via-config")
+    with pytest.raises(SystemExit):
+        _common.require_delegation_enabled("adlc-read", cfg)
+
+
+def test_an_anchor_nobody_references_still_parses(clean_env):
+    """The working subject (LESSON-602).
+
+    Every assertion above is an exclusion, and an exclusion test passes just as
+    well against a loader that refuses every document. An anchor is not an
+    alias: nothing is resolved from elsewhere, so nothing is smuggled, and the
+    file still means what it says.
+    """
+    outcome = _load(clean_env, b"delegate: &d\n  enabled: false\n")
+    assert outcome.kind == "parsed", outcome
+    assert _machine_config.validate_delegate_section(outcome.document) == {
+        "enabled": False}
+
+    # And a `<<` that is a VALUE, or a quoted string, is not a merge key.
+    quoted = _load(clean_env, b'delegate:\n  model: "<<"\n')
+    assert quoted.kind == "parsed", quoted
+    assert _machine_config.validate_delegate_section(quoted.document) == {
+        "model": "<<"}
 
 
 # --- BR-4 / BR-5: the file kind is decided on the opened descriptor ---------
@@ -620,8 +878,13 @@ def _poison(tmp_path, statement):
     return str(tmp_path / "poison")
 
 
-def _cli(argv, env):
-    return subprocess.run([sys.executable, _CLI] + argv,
+#: Both delegate CLIs. Every one of them parses the config on the path that
+#: decides transmission, so a claim about "the CLI" is a claim about each.
+_CLIS = ("adlc-read", "adlc-write")
+
+
+def _cli(argv, env, name="adlc-read"):
+    return subprocess.run([sys.executable, os.path.join(_DELEGATE, name)] + argv,
                           capture_output=True, text=True, env=env, timeout=30)
 
 
@@ -654,13 +917,20 @@ def test_help_does_not_import_yaml(clean_env, tmp_path):
     assert "RuntimeError" in control.stderr
 
 
-def test_missing_pyyaml_refuses_and_names_package(clean_env, tmp_path,
+@pytest.mark.parametrize("cli_name", _CLIS)
+def test_missing_pyyaml_refuses_and_names_package(cli_name, clean_env, tmp_path,
                                                   monkeypatch, capsys):
     """AC-3 / BR-9: a partial install fails CLOSED, with one line naming the
     package — never through to `{}`, which is absence, which grants.
 
     Both surfaces: the loader in-process, and the real CLI with a poisoned
     module on PYTHONPATH.
+
+    Parametrised over BOTH CLIs. `adlc-write` reaches the same gate through its
+    own argv scan and its own `--print-gate` arm, and a claim proved on
+    `adlc-read` alone is a claim about one of the two binaries that transmit —
+    which is exactly the shape of defect this REQ keeps finding: a verdict that
+    is right on one surface and absent on another.
     """
     path = _write(clean_env, b"delegate:\n  enabled: true\n")
     monkeypatch.setitem(sys.modules, "yaml", None)   # import raises ImportError
@@ -685,7 +955,7 @@ def test_missing_pyyaml_refuses_and_names_package(clean_env, tmp_path,
     env = {"PATH": os.environ.get("PATH", ""), "HOME": str(clean_env),
            "ADLC_CONFIG": path, "MOONSHOT_API_KEY": "sk-legacy",
            "PYTHONPATH": _poison(tmp_path, 'raise ImportError("poisoned")')}
-    gate = _cli(["--print-gate"], env)
+    gate = _cli(["--print-gate"], env, name=cli_name)
     assert gate.returncode == 0, gate.stdout + gate.stderr
     assert gate.stdout.strip() == "0 disabled-via-config", gate.stdout
     assert "PyYAML" in gate.stderr

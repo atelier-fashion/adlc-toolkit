@@ -44,6 +44,13 @@ Replace `_adlc_resolve_read_bin` in `partials/delegate-gate.sh` with a `$PATH` w
 | AC-14 | test-case | `partials/tests/run.sh (bash, zsh, sh)` | yes |
 | BR-11 | test-case | `tools/delegate/tests/test_partials.py::test_delegate_gate_path_wins_over_home_bin` | yes |
 
+## Implementation notes (recorded at completion)
+
+- Under `/bin/sh` (bash 3.2 in POSIX mode) the hijack that cannot be installed is the hyphenated function name, not `hash -p` as this task predicted; section (j) installs function + alias + hash where the shell allows and prints the installed set per shell.
+- `_adlc_resolve_timeout` sets `$_timeout` rather than echoing, so the authorize path gains no second fork; the candidate list is one line so the harness can assert every entry is absolute.
+- The harness's inner runs use the shell named by `run.sh` (`ADLC_TEST_SHELL`) so the walk is exercised under all three, not always `/bin/sh`.
+- `test_partials.py::test_delegate_gate_path_wins_over_home_bin` needed two distinct directories to tell the arms apart (the helper's PATH stub lived under `$HOME/bin`).
+
 ## Technical Notes
 
 - **Walk.**

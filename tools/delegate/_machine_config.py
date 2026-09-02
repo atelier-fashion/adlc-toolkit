@@ -16,11 +16,26 @@ malformed fails closed (REQ-609 Description).
 
 **The contract** (REQ BR-3): :func:`load_machine_config` returns a
 :class:`ConfigOutcome` whose ``kind`` is exactly one of ``absent``, ``parsed``,
-``malformed``, and it **never raises**. ``reason`` is a short class token from
-:data:`REASON_CLASSES`, a colon, and a human detail that may carry a line
-number but never carries file content — key names in a duplicate-key reason are
-the one exception, because they are the operator's own key names and naming
-them is what lets the operator fix the file (REQ BR-13).
+``malformed``, and it **never raises** — not for a ``yaml.YAMLError``, and not
+for the plain ``ValueError``/``KeyError``/``AttributeError`` PyYAML's own
+constructors raise straight out of the standard library, which is why the last
+arm of the parse is an unbounded ``except Exception``. ``reason`` is a short
+class token from :data:`REASON_CLASSES`, a colon, and a human detail that may
+carry a line number but never carries a VALUE from the file.
+
+Key NAMES are the exception, and they appear in **two** reasons, not one: the
+duplicated key in a ``duplicate-key`` refusal, and the offending key in the
+unknown-key ``SchemaError`` that ``_common.parse_delegate_config`` publishes as
+a ``schema`` reason. Both are the operator's own key names, and naming them is
+what lets the operator fix the file (REQ BR-13); both go through
+:func:`_short`, whose ``repr`` escapes control characters so a key lifted out of
+the file cannot rewrite the message it lands in.
+
+A recognizer also refuses meaning **borrowed from elsewhere in the document**:
+an alias or a ``<<`` merge makes ``delegate.enabled`` true with the word
+``enabled`` appearing nowhere under ``delegate:``, and a governance file that
+cannot be reviewed by reading it is not reviewable at all (see
+:func:`_strict_loader_class`).
 
 **Reading** (REQ BR-4, BR-5): :func:`_open_regular` opens with
 ``O_RDONLY | O_NONBLOCK`` and decides ``S_ISREG`` on ``fstat`` of the descriptor
@@ -77,8 +92,16 @@ REASON_CLASSES = frozenset({
     "over-cap",
     "yaml-error",
     "duplicate-key",
+    "alias-or-merge",
     "not-a-mapping",
     "dependency-missing",
+    # Emitted one layer up, by `_common.parse_delegate_config`, when a document
+    # that PARSED says something `validate_delegate_section` does not allow.
+    # It belongs in the closed set even though this module never writes it: the
+    # vocabulary is what consumers branch on (ADR-2's forge carve-out matches
+    # `dependency-missing`), and a token invented outside the set is a token no
+    # carve-out can be checked against.
+    "schema",
 })
 
 _O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
@@ -146,6 +169,16 @@ class DuplicateKey(Exception):
     ``yaml.YAMLError`` without importing PyYAML themselves. The concrete class
     raised by the loader also derives from ``yaml.constructor.ConstructorError``
     and is built lazily, when yaml is first imported.
+    """
+
+
+class AliasOrMerge(Exception):
+    """Marker base for the loader's alias / merge-key refusal (REQ BR-2, BR-7).
+
+    Same construction as :class:`DuplicateKey`, and for the same reason: the
+    concrete class also derives from ``yaml.constructor.ConstructorError`` and
+    is built lazily, so a caller can catch this specific case ahead of the
+    general ``yaml.YAMLError`` without importing PyYAML.
     """
 
 
@@ -225,14 +258,39 @@ _loader_cache = []
 
 
 def _strict_loader_class(yaml):
-    """Build (once) the ``yaml.SafeLoader`` subclass that refuses repeated keys.
+    """Build (once) the ``yaml.SafeLoader`` subclass this module parses with.
 
-    REQ BR-2. PyYAML's default construction takes the LAST of a repeated key.
-    For a governance file that is a silent override: a second ``delegate:``
-    block, or a second ``enabled:`` under one, quietly outranks the first, and
-    nothing in the file says so. The refusal is whole-document — a duplicate
-    under ``forge:`` makes the delegate section malformed too — because one
-    loader gives one verdict.
+    Two refusals, both whole-document, both because a governance file has to
+    mean what it visibly says.
+
+    **Repeated keys** (REQ BR-2). PyYAML's default construction takes the LAST
+    of a repeated key. For a governance file that is a silent override: a second
+    ``delegate:`` block, or a second ``enabled:`` under one, quietly outranks
+    the first, and nothing in the file says so. A duplicate under ``forge:``
+    makes the delegate section malformed too, because one loader gives one
+    verdict.
+
+    **Aliases and merge keys** (REQ BR-2, BR-7). An alias puts a key's *value*
+    somewhere the key is not::
+
+        defaults: &d
+          enabled: true
+        delegate:
+          <<: *d
+
+    Under stock PyYAML that document opts delegation IN, with the word
+    ``enabled`` appearing nowhere under ``delegate:``. An operator reading their
+    own file sees a section that says nothing, and so does the reviewer reading
+    it over their shoulder — the file's meaning has been assembled from another
+    part of the document. The same trick works one level up (``delegate: *x``)
+    and on any single field. So both constructs are refused rather than
+    resolved: :meth:`_StrictLoader.compose_node` rejects an alias node, and
+    :meth:`_StrictLoader.flatten_mapping` rejects a ``<<`` key — two arms
+    because a merge written with an inline mapping carries no alias, and an
+    alias can appear with no merge.
+
+    An *anchor* on its own is untouched: nothing is borrowed from elsewhere, so
+    the file still says what it means.
 
     Built lazily because ``yaml`` itself is imported lazily; cached because the
     class only needs to exist once per process.
@@ -244,11 +302,57 @@ def _strict_loader_class(yaml):
         """A repeated mapping key. Both a DuplicateKey and a YAMLError, so
         callers can catch the specific case ahead of the general one."""
 
+    class _AliasOrMergeError(AliasOrMerge, yaml.constructor.ConstructorError):
+        """An alias reference or a merge key. Both an AliasOrMerge and a
+        YAMLError, for the same reason as the duplicate above."""
+
+    #: The tag PyYAML's resolver gives a plain ``<<`` in key position.
+    merge_tag = "tag:yaml.org,2002:merge"
+
     class _StrictLoader(yaml.SafeLoader):
-        """SafeLoader plus one override. Derived from ``yaml.SafeLoader``, so
+        """SafeLoader plus three overrides. Derived from ``yaml.SafeLoader``, so
         no non-safe constructor is reachable from it (REQ BR-1)."""
 
         duplicate_key_error = _DuplicateKeyError
+        alias_or_merge_error = _AliasOrMergeError
+
+        def compose_node(self, parent, index):
+            """Refuse an alias before it is resolved.
+
+            The check is on the EVENT, ahead of the base implementation's
+            ``self.anchors[event.anchor]`` lookup, so an alias to a missing
+            anchor refuses here as an alias rather than as PyYAML's own
+            composer error — the two are the same defect for an operator, and
+            one message is easier to act on than two.
+            """
+            if self.check_event(yaml.AliasEvent):
+                event = self.peek_event()
+                raise _AliasOrMergeError(
+                    "while composing a node", None,
+                    "found an alias reference, which this file may not use",
+                    event.start_mark)
+            return yaml.SafeLoader.compose_node(self, parent, index)
+
+        def flatten_mapping(self, node):
+            """Refuse a ``<<`` key instead of merging what it points at.
+
+            Reached for every mapping in the document, because
+            ``construct_mapping`` below calls it on each. A merge whose value is
+            an inline mapping never goes near an alias, so this arm is not
+            redundant with :meth:`compose_node`.
+
+            Delegating to the base implementation afterwards is deliberate: with
+            no merge key left it does nothing but the ``=`` value-key rewrite,
+            and dropping that would be a second behaviour change hidden inside
+            this one.
+            """
+            for key_node, _value_node in node.value:
+                if getattr(key_node, "tag", None) == merge_tag:
+                    raise _AliasOrMergeError(
+                        "while constructing a mapping", node.start_mark,
+                        "found a merge key ('<<'), which this file may not use",
+                        key_node.start_mark)
+            return yaml.SafeLoader.flatten_mapping(self, node)
 
         def construct_mapping(self, node, deep=False):
             self.flatten_mapping(node)
@@ -284,17 +388,19 @@ def _parse_strict(yaml, text):
 
     This is exactly what ``yaml.safe_load`` does — ``load(stream, SafeLoader)``,
     which is ``Loader(stream).get_single_data()`` under a ``dispose()`` —
-    with the one ``construct_mapping`` override BR-2 requires. ``safe_load``
-    itself takes no loader parameter, so the same machinery is driven directly
-    rather than through ``yaml.load``, which is never called here with any
-    loader (REQ BR-1; a structural test pins the SafeLoader ancestry).
+    with the overrides BR-2 requires. ``safe_load`` itself takes no loader
+    parameter, so the same machinery is driven directly rather than through
+    ``yaml.load``, which is never called here with any loader (REQ BR-1; a
+    structural test pins the SafeLoader ancestry).
 
-    Known and accepted: PyYAML expands aliases without a bound, so a document
-    inside the 64 KiB cap can still expand to far more than that in memory (the
-    "billion laughs" shape). The threat model does not change because of it —
-    anyone who can write this file can write ``enabled: true`` into it, which is
-    strictly easier — and bounding expansion means a different parser. Recorded
-    here rather than fixed, so the next reader knows it was considered.
+    Unbounded alias expansion — the "billion laughs" shape, where a document
+    inside the 64 KiB cap expands to far more than that in memory — was recorded
+    here as known and accepted, on the grounds that bounding expansion means a
+    different parser. It is no longer reachable: the loader refuses aliases
+    outright (see :func:`_strict_loader_class`), for a governance reason rather
+    than a resource one, and a document with no aliases has nothing to expand.
+    Should that refusal ever be relaxed, this becomes a live consideration
+    again, which is why the shape is still named here.
     """
     loader = _strict_loader_class(yaml)(text)
     try:
@@ -335,14 +441,41 @@ def _yaml_detail(exc):
     return "not valid YAML"
 
 
-def _duplicate_detail(exc):
-    """The duplicated key and the line of its SECOND occurrence (REQ BR-13)."""
-    problem = getattr(exc, "problem", None) or "found a duplicate key"
+def _marked_detail(exc, fallback):
+    """``exc``'s own problem text and the line it marks (REQ BR-13).
+
+    The problem strings these carry are written by this module, never lifted
+    out of the file — apart from a duplicated key NAME, which is bounded by
+    :func:`_short` and is the thing the operator has to go and delete.
+    """
+    problem = getattr(exc, "problem", None) or fallback
     mark = getattr(exc, "problem_mark", None)
     if mark is not None:
         return "%s at line %d, column %d" % (
             problem, mark.line + 1, mark.column + 1)
     return problem
+
+
+def _duplicate_detail(exc):
+    """The duplicated key and the line of its SECOND occurrence (REQ BR-13)."""
+    return _marked_detail(exc, "found a duplicate key")
+
+
+def _alias_or_merge_detail(exc):
+    """The borrowed construct and the line it sits on (REQ BR-13)."""
+    return _marked_detail(exc, "found an alias or a merge key")
+
+
+def _construction_detail(exc):
+    """A detail for an exception PyYAML did not promise, naming no content.
+
+    ``str(exc)`` is not usable here: a ``KeyError`` from ``!!bool "maybe"``
+    carries the offending VALUE out of the file, and reason strings do not carry
+    file content. The exception's TYPE is a fact about the parser, not about the
+    operator's data, and it is the one thing that makes a bug report from this
+    message actionable.
+    """
+    return "the document could not be constructed (%s)" % type(exc).__name__
 
 
 # --- the PyYAML dependency notice ------------------------------------------
@@ -449,8 +582,15 @@ def load_machine_config(path=None):
 
     try:
         document = _parse_strict(yaml, text)
+    # The arms below are ordered narrowest-first, and the order is load-bearing:
+    # both refusals this module raises are ALSO `yaml.YAMLError`s, so a
+    # `YAMLError` arm ahead of them would collapse `duplicate-key` and
+    # `alias-or-merge` into the generic class and take BR-13's key name and line
+    # with them.
     except DuplicateKey as exc:
         return _malformed(path, "duplicate-key", _duplicate_detail(exc))
+    except AliasOrMerge as exc:
+        return _malformed(path, "alias-or-merge", _alias_or_merge_detail(exc))
     except yaml.YAMLError as exc:
         return _malformed(path, "yaml-error", _yaml_detail(exc))
     except RecursionError:
@@ -458,6 +598,22 @@ def load_machine_config(path=None):
         # RecursionError is not a YAMLError, and "never raises" has no
         # exceptions (REQ BR-3).
         return _malformed(path, "yaml-error", "nested too deeply to parse")
+    except Exception as exc:
+        # And the rest of "no exceptions". `yaml.YAMLError` is the boundary
+        # PyYAML documents, not the one it keeps: its constructors call into the
+        # standard library and let what comes back through, so `2026-09-31` is a
+        # `ValueError` from `datetime`, `!!bool "maybe"` a `KeyError` off a
+        # lookup table, `!!timestamp "nope"` an `AttributeError` on a failed
+        # regex match, and an expansion the machine cannot hold a `MemoryError`.
+        # None of those is a YAMLError, and every one of them used to leave this
+        # function as a traceback — where the contract promises one of three
+        # kinds and the gate above promises a refusal.
+        #
+        # Deliberately last, and deliberately unbounded: a list of the built-ins
+        # PyYAML happens to raise today is the same enumeration that let these
+        # five through in the first place. `BaseException` is NOT caught —
+        # a Ctrl-C or a SystemExit is the caller's, not the file's.
+        return _malformed(path, "yaml-error", _construction_detail(exc))
 
     if document is None:
         # A null document — an empty file, or comments only. Parsed, with no

@@ -145,6 +145,11 @@ _MALFORMED = "__adlc_config_malformed__"
 # them.
 _MALFORMED_REASON = "__adlc_config_malformed_reason__"
 _MALFORMED_PATH = "__adlc_config_malformed_path__"
+# All three sentinels together. A malformed cfg carries three keys, not one, so
+# "does this cfg hold anything the operator wrote?" has to exclude all of them —
+# testing against `_MALFORMED` alone answers yes for a config that could not be
+# read at all.
+_MALFORMED_KEYS = frozenset({_MALFORMED, _MALFORMED_REASON, _MALFORMED_PATH})
 
 
 def parse_delegate_config(path=None):
@@ -543,7 +548,13 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
         source = "flags"
     elif os.environ.get("ADLC_DELEGATE_BASE_URL") or os.environ.get("ADLC_DELEGATE_MODEL"):
         source = "env"
-    elif any(k != _MALFORMED for k in cfg):
+    elif any(k not in _MALFORMED_KEYS for k in cfg):
+        # The guard exists so a config that could not be read is not reported as
+        # the SOURCE of the values being used — every field below came from the
+        # shipped defaults. It was written against a one-key sentinel and stayed
+        # that way when the reason and the path joined it (REQ-609 BR-13), so it
+        # had been answering "yes, config" for every malformed file since: the
+        # `--version` report then named a file it had just refused to read.
         source = "config"
     else:
         source = "defaults"
@@ -801,6 +812,10 @@ def _read_key_from_rc(var_name):
     startup is not a shape worth failing a real machine over. Decoding stays
     ``errors="replace"`` for the same reason — BR-5 mandates only the open
     pattern here, not the config's strict decode.
+
+    Lines are split on ``\\n``, ``\\r\\n`` and ``\\r`` only — the separators a
+    shell honours — and never with ``str.splitlines``, which also breaks on six
+    characters that leave a shell command on the same physical line.
     """
     home = os.path.expanduser("~")
     candidates = [
@@ -823,7 +838,14 @@ def _read_key_from_rc(var_name):
                 fh.close()
         except OSError:
             continue
-        for line in data.decode("utf-8", "replace").splitlines():
+        # Split the way a SHELL does, not the way `str` does. `str.splitlines`
+        # also breaks on \x0b, \x0c, \x1c-\x1e, \x85,   and  , none of
+        # which ends a command for sh, bash or zsh: text after one of those is
+        # still part of the same physical line, so `# note\x0bexport K="v"` is a
+        # COMMENT the shell never runs — and reporting a key from it would be
+        # this reader inventing an environment the machine does not have.
+        text = data.decode("utf-8", "replace")
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
             # Only match the canonical, non-indented `export VAR="..."` form.
             if line.startswith(needle):
                 try:

@@ -9,7 +9,8 @@ bounded by one imagination, and the fix for that is not more imagination.
 
 So this file does not state expected outcomes. It computes them from **PyYAML
 itself** — ``yaml.safe_load`` for the value, a walk over ``yaml.compose``'s
-mapping nodes for repeated keys — plus a second, independent copy of the schema
+mapping nodes for repeated keys, ``yaml.parse``'s events and those same nodes
+for aliases and merge keys — plus a second, independent copy of the schema
 rules, and then asserts our implementation agrees on every document in both
 corpora. A disagreement is a finding, not a test to update (LESSON-602: an
 exclusion test needs a working subject; here the working subject is the parser
@@ -108,6 +109,72 @@ def _node_repeats_a_key(node):
     return False
 
 
+#: The tag PyYAML's resolver gives a plain `<<` key.
+_MERGE_TAG = "tag:yaml.org,2002:merge"
+
+
+def oracle_uses_alias_or_merge(text):
+    """True if ``text`` contains an alias reference or a merge key. Raises
+    ``yaml.YAMLError`` if ``text`` does not parse.
+
+    Independent of ``_machine_config._StrictLoader`` by construction, and at a
+    layer BELOW the one the implementation refuses at: the loader raises inside
+    ``compose_node`` and ``flatten_mapping``, while this reads the finished
+    event stream and the composed node graph and never constructs anything.
+
+    Two signals, because there are two constructs and only one of them is
+    visible in each place:
+
+      * an alias is an ``AliasEvent`` in ``yaml.parse``. Events are used rather
+        than nodes on purpose — ``yaml.compose`` RESOLVES an alias into a shared
+        reference to the anchored node, so by the time there is a graph the
+        alias is gone and the only trace is that one node object appears twice.
+        Detecting that would mean tracking ``id()`` of every node seen; reading
+        the event that says "alias" is the same answer without the bookkeeping.
+      * a merge key is a ``<<`` scalar in KEY position, and "in key position" is
+        a structural fact the flat event stream does not carry. The resolver
+        does carry it: in a composed graph that key node's tag is
+        ``tag:yaml.org,2002:merge``. So merges are read off the graph and
+        aliases off the events, each from the layer that states it plainly.
+
+    A merge written with an inline mapping (``<<: {a: 1}``) has no alias at all,
+    and an alias can appear with no merge anywhere, so neither signal implies
+    the other.
+    """
+    for event in yaml.parse(text, Loader=yaml.SafeLoader):
+        if isinstance(event, yaml.AliasEvent):
+            return True
+    return _node_has_a_merge_key(yaml.compose(text, Loader=yaml.SafeLoader))
+
+
+def _node_has_a_merge_key(node, seen=None):
+    """Recurse a composed node graph looking for a merge-tagged KEY.
+
+    ``seen`` guards against the shared nodes an alias leaves behind: a document
+    that references one anchor twice composes to a graph where the same object
+    is reachable by two paths, and an unguarded recursion over a self-referential
+    anchor would not terminate at all.
+    """
+    if seen is None:
+        seen = set()
+    if id(node) in seen:
+        return False
+    seen.add(id(node))
+    if isinstance(node, yaml.MappingNode):
+        for key_node, value_node in node.value:
+            if key_node.tag == _MERGE_TAG:
+                return True
+            if _node_has_a_merge_key(key_node, seen):
+                return True
+            if _node_has_a_merge_key(value_node, seen):
+                return True
+    elif isinstance(node, yaml.SequenceNode):
+        for item in node.value:
+            if _node_has_a_merge_key(item, seen):
+                return True
+    return False
+
+
 def oracle_expectation(data):
     """What ``parse_delegate_config`` must return for ``data``: a dict, or
     :data:`MALFORMED`.
@@ -118,6 +185,7 @@ def oracle_expectation(data):
       * over the cap                          -> malformed (BR-3, unconditional)
       * not UTF-8                             -> malformed (BR-3)
       * does not parse, or repeats a key      -> malformed (BR-3, BR-2)
+      * uses an alias or a merge key          -> malformed (BR-2, BR-7)
       * null document                         -> ``{}``     (BR-3)
       * top level is not a mapping            -> malformed (BR-3)
       * no ``delegate`` key                   -> ``{}``     (BR-6, unconfigured)
@@ -145,9 +213,23 @@ def oracle_expectation(data):
     try:
         document = yaml.safe_load(text)
         repeats = oracle_repeats_a_key(text)
-    except yaml.YAMLError:
+        borrows = oracle_uses_alias_or_merge(text)
+    except Exception:
+        # `Exception`, not `yaml.YAMLError`. PyYAML's constructors raise plain
+        # built-ins straight out of the standard library — `ValueError` from
+        # `datetime` on `2026-09-31`, `KeyError` from a `!!bool` lookup table,
+        # `AttributeError` from `!!timestamp` — and BR-3's "never raises" makes
+        # every one of those a `malformed`. An oracle that caught only
+        # `YAMLError` would raise here instead of stating an expectation, so the
+        # row it was meant to check would ERROR rather than disagree.
         return MALFORMED
     if repeats:
+        return MALFORMED
+    if borrows:
+        # An alias or a merge assembles the section's meaning from somewhere
+        # else in the document; `safe_load` resolves it silently, which is the
+        # override BR-2 refuses one construct further out. Stated as a rule
+        # rather than compared, for the same reason a repeated key is.
         return MALFORMED
     if document is None:
         document = {}
@@ -362,6 +444,84 @@ def test_oracle_marks_duplicates_independently(clean_env):
     for label, data in _NO_REPEAT:
         text = data.decode("utf-8")
         assert oracle_repeats_a_key(text) is False, label
+        outcome = _machine_config.load_machine_config(_write(clean_env, data))
+        assert outcome.kind == "parsed", (label, outcome)
+
+
+# --- BR-2 / BR-7: the alias detector, on its own ----------------------------
+
+_BORROWS = [
+    ("a merge of an anchored mapping",
+     b"defaults: &d\n  enabled: true\ndelegate:\n  <<: *d\n"),
+    ("the whole section as an alias",
+     b"base: &x\n  enabled: true\ndelegate: *x\n"),
+    ("an alias on a scalar field",
+     b'delegate:\n  model: &m "m"\n  base_url: *m\n'),
+    ("a merge with an inline mapping and no alias",
+     b"delegate:\n  <<: {enabled: true}\n"),
+    ("an alias inside a sequence",
+     b"anchors:\n  - &a x\n  - *a\ndelegate:\n  enabled: false\n"),
+    ("an alias in a section this consumer does not read",
+     b"anchors: &a\n  x: 1\nforge:\n  provider: *a\ndelegate:\n  enabled: false\n"),
+]
+
+# The working subject again (LESSON-602). A detector that has been commented out
+# passes every row above only if some row here would have come back True — so
+# these are documents that LOOK like the ones above and borrow nothing.
+_NO_BORROW = [
+    ("an anchor nobody references",
+     b"delegate: &d\n  enabled: false\n"),
+    ("a quoted `<<` as a VALUE",
+     b'delegate:\n  model: "<<"\n'),
+    ("an ampersand inside a string",
+     b'delegate:\n  model: "a & b"\n  base_url: "https://h/v1?a=1&b=2"\n'),
+    ("an asterisk inside a quoted string",
+     b'delegate:\n  model: "*not-an-alias"\n'),
+    ("the well-formed opt-in",
+     b'delegate:\n  enabled: true\n  model: "m"\n'),
+]
+
+
+def test_oracle_marks_aliases_independently(clean_env):
+    """BR-2/BR-7: the detector reads events and composed nodes, not our loader.
+
+    Asserted the same three ways the duplicate detector is, and for the same
+    reason — agreeing with the implementation is the one thing that would not
+    prove independence:
+
+      1. structurally — the source reaches ``yaml.parse`` and ``yaml.compose``
+         and mentions neither ``_machine_config`` nor the loader's overrides;
+      2. positively — it finds every borrow, including a merge written with an
+         inline mapping (no alias in the document at all) and an alias in a
+         section this consumer does not read;
+      3. negatively — it finds none in five documents that borrow nothing, four
+         of which are shaped like borrows: a bare anchor, a quoted ``<<``, an
+         ``&`` inside a URL, an ``*`` inside a quoted string.
+
+    Then the implementation is held to the same answers WITH the reason class
+    checked. A merge beside an explicit key used to refuse as ``duplicate-key``,
+    which is a true refusal for a false reason — BR-13's line number then points
+    at a key the operator wrote exactly once.
+    """
+    source = _code_of(oracle_uses_alias_or_merge) + _code_of(_node_has_a_merge_key)
+    assert "yaml.parse" in source
+    assert "yaml.compose" in source
+    assert "_machine_config" not in source
+    assert "_StrictLoader" not in source
+    assert "compose_node" not in source
+    assert "flatten_mapping" not in source
+    assert "parse_delegate_config" not in source
+
+    for label, data in _BORROWS:
+        text = data.decode("utf-8")
+        assert oracle_uses_alias_or_merge(text) is True, label
+        outcome = _machine_config.load_machine_config(_write(clean_env, data))
+        assert outcome.kind == "malformed", (label, outcome)
+        assert outcome.reason_class == "alias-or-merge", (label, outcome)
+
+    for label, data in _NO_BORROW:
+        text = data.decode("utf-8")
+        assert oracle_uses_alias_or_merge(text) is False, label
         outcome = _machine_config.load_machine_config(_write(clean_env, data))
         assert outcome.kind == "parsed", (label, outcome)
 
