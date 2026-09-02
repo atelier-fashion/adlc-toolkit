@@ -51,9 +51,29 @@ adlc_delegate_gate_check; gate=$?
 case $gate in
   0) ;;  # delegated
   1) ;;  # disabled (ADLC_DISABLE_DELEGATE=1, or not opted-in — BR-11)
-  2) ;;  # unavailable (adlc-read not on PATH)
+  2) ;;  # unavailable (adlc-read did not resolve)
 esac
 ```
+
+The invocation fence sources the partial again — fenced blocks share no shell state —
+and invokes the **absolute path** the gate exported, refusing an empty value in that
+same fence before any corpus is handed over (REQ-609 BR-12):
+
+```sh
+. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+[ -n "$ADLC_READ_BIN" ] || { echo "/<skill>: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
+"$ADLC_READ_BIN" --no-warn --paths ... --question "..."
+```
+
+There is **no bare-name default** any more. Falling back to the plain command name
+was a second resolver at the call site, by the weakest rule available, reached in
+exactly the case where the first resolver had already declined — and the gate now
+resolves by walking `$PATH` itself precisely so the shell's lookup machinery cannot
+answer (REQ-609 BR-11). `lint-skills`' **`read-bin-fallback`** check rejects any
+fence carrying that default, the same structural posture as `forge-direct-gh`
+(LESSON-012). Skills refuse by exiting non-zero; `agents/delegate-pre-pass.md`,
+whose contract forbids a non-zero exit, refuses into its degraded empty-candidates
+object instead.
 
 The reason is exported as `ADLC_DELEGATE_GATE_REASON`. Delegation is **opt-in** (off by
 default on fresh installs) — enabled by `ADLC_DELEGATE_ENABLED=1`, `delegate.enabled: true`
@@ -62,6 +82,12 @@ in `~/.claude/adlc/config.yml`, or an already-set legacy `KIMI_API_KEY`/`MOONSHO
 
 An explicit `delegate.enabled: false` turns delegation **off** and outranks the legacy
 key; an *absent* `enabled` key yields to it. Collapsing those two was BUG-205.
+
+That config is parsed by PyYAML behind a **closed schema** in one loader
+(`tools/delegate/_machine_config.py`, shared with `tools/adlc/forge_config.py` — REQ-609).
+Unknown keys, a non-boolean `enabled`, a nested mapping, a repeated key anywhere in the
+document, and a non-regular file at the path are all **refused**, not skipped: a reader
+that skips what it does not understand fails open, and this one gates exfiltration.
 
 **Where that cascade is resolved (REQ-603):** in Python, once. The shell gate may
 *withhold* delegation — `no-binary`, and the `ADLC_DISABLE_DELEGATE` veto — but may

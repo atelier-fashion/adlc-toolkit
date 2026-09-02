@@ -1,10 +1,10 @@
 ---
 id: TASK-099
 title: "Docs to the new contract, REQ-515 ADR-3 amended, REQ-603 BR-14 discharged, probe cost measured"
-status: draft
+status: complete
 parent: REQ-609
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 dependencies: [TASK-095, TASK-096, TASK-098]
 ---
 
@@ -49,6 +49,16 @@ Bring every document this REQ owns to the landed behaviour (REQ BR-14, BR-15), a
 | AC-10 | test-case | `tools/delegate/tests/test_req609_docs.py::test_req515_adr3_amended` | no |
 | AC-11 | test-case | `tools/delegate/tests/test_req609_docs.py::test_bare_name_only_rejected` | yes |
 | AC-12 | test-case | `tools/delegate/tests/test_req609_docs.py::test_assumptions_record_probe_cost` | no |
+
+## Implementation notes (recorded at completion)
+
+- **The ADR-3 amendment is dated 2026-09-02**, not the 2026-09-01 the Files list guessed — the task landed the following day and a dated block that lies about its date is exactly the drift the block exists to prevent.
+- **The probe cost is `+4.3 ms`, not "roughly thirty".** `--print-gate` went from a 21.2 ms median (min 20.6) on `main` `e70a1f1` to 25.5 ms (min 25.0) on this branch; `--help` is unchanged at 21.6 → 19.5 ms (the sign is noise, and it never reaches the loader — BR-1). Measured with `time.perf_counter()` around `subprocess.run`, 20 runs each, **through `~/.claude/delegate-venv/bin/python3` directly**: `~/bin/adlc-read` `exec`s the primary checkout, which is still on `main`, so the wrapper would have measured the *before* code twice. The after figure includes the import **and** the strict parse of the reference machine's real config.
+- **`tools/delegate/claude-md-routing.txt` was NOT changed** — nothing in it is made wrong by this REQ (it names the opt-in *enablers* and the precedence order, both unchanged) — so the `.sha256` was not regenerated. Verified pinned == computed by install.sh's own method (trailing newlines collapsed to one).
+- **BR-15's "`--version`'s rc-file read" is documented as measured, not as written.** `--version` does *not* read the rc file: `_read_key_from_rc` is reached only from `resolve_key`, which is on the real call's path and therefore on `--print-gate`'s. The README documents the read, its 256 KiB cap and its descriptor-based open under the resolver, and names the asymmetry it creates — `--print-gate` can report `0 disabled-via-config` on a machine where `--version` prints `enabled: true`, verified by hand on a temp `HOME`.
+- **`test_unparseable_config_reports_shipped_defaults` already passed** under the new loader; only the framing was wrong. It gained one assertion (`enabled: false`) so the docstring's fail-closed claim is asserted rather than asserted-about.
+- Two positive controls back the exclusion tests (LESSON-602): `test_bare_name_checker_flags_the_retired_sentence` plants the sentence the doc used to carry, and `test_schema_table_parser_notices_a_missing_key` plants a table missing a key. `test_probe_cost_parser_needs_both_numbers` is the third.
+- The `AC8_TASK_099_RESIDUALS` waiver is now `set()`; its comment and the assertion's guidance were rewritten too, since a waiver that is empty but still tells the reader to "delete the matching entry" is the guard rot LESSON-019 names.
 
 ## Technical Notes
 

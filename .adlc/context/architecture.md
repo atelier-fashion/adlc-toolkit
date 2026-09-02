@@ -149,3 +149,22 @@ That invariant has already been violated from both directions:
 REQ-603 consolidated the authorizing arms and kept the veto duplicated under a
 stated condition: Python must recognise at least every input the shell does,
 enforced by `tools/delegate/tests/test_cross_layer_veto.py`.
+
+**Both sides of that authority are hardened by REQ-609.** Making Python the sole
+authority made its config reader the sole authority, and that reader was a
+hand-written flat scanner that **skipped** what it did not understand — nine
+distinct fail-opens, six of them added by the pass that tried to fix it. The
+opt-in config is now parsed by PyYAML (`yaml.safe_load`, a loader that raises on a
+repeated key) behind a **strict, closed schema**, in one loader —
+`tools/delegate/_machine_config.py` — that returns exactly `absent`, `parsed`, or
+`malformed` and never raises. `tools/delegate/_common.py` and
+`tools/adlc/forge_config.py` are both adapters over it, so a multi-section config
+cannot lock out one consumer by the other's rule, and a differential oracle
+compares the adapter against `yaml.safe_load` itself over a seeded and a generated
+corpus, so the suite is no longer bounded by one author's imagination. A recognizer
+refuses what it does not understand; there is no skipped line left to fail open on.
+On the shell side, binary resolution asks the **filesystem** — a `$PATH` walk over
+absolute entries only — and never a lookup builtin, because any answer sourced from
+the shell's own machinery inherits every table that machinery consults (a `hash -p`
+entry defeated REQ-603's bare-name rejection). REQ-515 ADR-3's "no PyYAML for three
+scalar fields" is **amended by REQ-609**: those three scalars now gate exfiltration.

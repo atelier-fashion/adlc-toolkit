@@ -51,9 +51,9 @@ off, safely but silently, reported as `not-opted-in`.
 
 `adlc_delegate_gate_check` returns:
 
-- **0 — delegated**: `adlc-read` resolves (on PATH, or executable at `$HOME/bin/adlc-read`) AND `ADLC_DISABLE_DELEGATE` is not `1` AND opt-in is satisfied. Run the delegated path.
+- **0 — delegated**: `adlc-read` resolves (an executable regular file under an absolute `$PATH` entry, or at `$HOME/bin/adlc-read`) AND `ADLC_DISABLE_DELEGATE` is not `1` AND opt-in is satisfied. Run the delegated path.
 - **1 — disabled**: `ADLC_DISABLE_DELEGATE=1` is set, OR delegation is not opted in (fresh-install posture, BR-11). Run the fallback path and emit the **disabled-via-env** stderr line.
-- **2 — unavailable**: `adlc-read` does not resolve (not on PATH and no executable at `$HOME/bin/adlc-read`). Run the fallback path and emit the **unavailable** stderr line.
+- **2 — unavailable**: `adlc-read` does not resolve (no executable regular file under any absolute `$PATH` entry, and none at `$HOME/bin/adlc-read`). Run the fallback path and emit the **unavailable** stderr line.
 
 Read `$?` IMMEDIATELY into a variable — `$?` is clobbered by every
 subsequent command:
@@ -88,7 +88,7 @@ their return codes, are:
 | 1      | `disabled-via-env`          | `ADLC_DISABLE_DELEGATE=1` opted out      |
 | 1      | `disabled-via-config`       | the configured provider cannot be used: `delegate.enabled: false` (an operator opt-out, BUG-205); a key VALUE in `api_key_env` or the named key var unset (LESSON-392 — `--version` then shows `enabled: true` beside `gate: 0`, which is why both lines exist); or a config file that exists but cannot be read or understood (BR-14) |
 | 1      | `not-opted-in`              | no opt-in signal (fresh install, BR-11)  |
-| 2      | `no-binary`                 | `adlc-read` not resolvable (PATH or `$HOME/bin`) |
+| 2      | `no-binary`                 | `adlc-read` not resolvable (no executable regular file under an absolute `$PATH` entry, none at `$HOME/bin`) |
 
 > **Behaviour change (REQ-603 ADR-4).** `delegate.enabled: false` now reports
 > `disabled-via-config` whether or not a legacy key is exported. The pre-REQ shell
@@ -114,25 +114,79 @@ to child processes the skill spawns — e.g., a future `adlc-read` invocation
 could read it for self-documentation. Adding a new gate condition (e.g.,
 a budget cap) means editing ONLY this file — no per-skill churn.
 
-## `ADLC_READ_BIN`: the resolved binary
+## `ADLC_READ_BIN`: the resolved binary (REQ-609)
 
-GUI-launched Claude Code sessions may run with a PATH that lacks `~/bin`
-(only `.zshrc` adds it), so `command -v adlc-read` alone would report
-`no-binary` on machines where `~/bin/adlc-read` is installed and working.
-Sourcing the partial (and every `adlc_delegate_gate_check` call) resolves and
-exports `ADLC_READ_BIN`:
+The resolver asks the **filesystem**, never the shell (REQ-609 BR-11, ADR-3). A
+lookup builtin — `command -v`, `type`, `which` — answers out of the shell's own
+machinery, and functions, aliases and the hash table all feed it. None of those is
+a statement about the filesystem, so a planted function or one `hash -p` entry
+named `adlc-read` was enough to be handed the corpus (BUG-209). REQ-603 closed
+that by rejecting an answer that came back as a bare name — which covers functions
+and aliases, while the hash table still returned an *absolute path* to the planted
+binary. That fix closed a mechanism, not the class.
 
-- `adlc-read` — the bare name, when it is on PATH (PATH wins);
-- `$HOME/bin/adlc-read` — the absolute path, when not on PATH but executable
-  there;
-- empty — neither (the gate returns 2 / `no-binary`).
+So sourcing the partial (and every `adlc_delegate_gate_check` call, since `PATH`
+may have changed since) walks `$PATH` itself and exports `ADLC_READ_BIN`:
 
-Delegated-invocation fences MUST source this partial in the same fenced
-block and invoke `"${ADLC_READ_BIN:-adlc-read}"` instead of bare
-`adlc-read` — fenced blocks do not share shell state, so the export from
-the gate-check fence does not reach the invocation fence. The `:-adlc-read`
-default keeps the invocation working in a consumer repo whose vendored
-`.adlc/partials/delegate-gate.sh` predates this variable.
+- entries are split on `:` with parameter expansion only — no `IFS` change, no
+  unquoted word-splitting (zsh does not split, LESSON-329), no globs
+  (LESSON-335), no arrays. Identical under `sh`, `bash` and `zsh`.
+- an entry that does not begin with `/` is **skipped**, empty entries included. A
+  relative entry names whatever directory the caller happens to be sitting in,
+  which is not a property of the machine's install.
+- the first `$dir/adlc-read` that is a regular file (`-f`) **and** executable
+  (`-x`) wins. `-x` alone is satisfied by a *directory* named `adlc-read`.
+- then `$HOME/bin/adlc-read`, by the same two tests and only when `$HOME` itself
+  begins with `/`. GUI-launched Claude Code sessions may run with a `PATH` that
+  lacks `~/bin` (only `.zshrc` adds it), which is why this arm exists at all.
+
+The exported value is an **absolute path, or empty, and nothing else**; a bare name is never exported, because the shell would re-resolve it through the very machinery this walk exists to avoid. Empty means the gate returns `2` / `no-binary`.
+
+`timeout(1)`, which bounds the probe, is resolved the same way: from a **fixed
+list of absolute paths** — `/usr/bin/timeout`, `/opt/homebrew/bin/timeout`,
+`/usr/local/bin/timeout`, `/opt/homebrew/bin/gtimeout`,
+`/usr/local/bin/gtimeout` — and never from `$PATH`, because a wrapper sees, and
+can replace, the very binary it is wrapping. No candidate present (stock macOS)
+means the probe runs *unbounded* rather than failing: an unavailable hardening
+must not become an outage. Both invocations go through `command`, so a function
+defined under an absolute-path name cannot intercept either.
+
+### What a call site does with it
+
+A delegated-invocation fence MUST source this partial **in the same fenced block**
+as the invocation — fenced blocks do not share shell state, so the export from the
+gate-check fence does not reach the invocation fence — and then refuse an empty
+value in that same fence before invoking `"$ADLC_READ_BIN"` (REQ-609 BR-12):
+
+```sh
+. .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+[ -n "$ADLC_READ_BIN" ] || { echo "/<skill>: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
+"$ADLC_READ_BIN" --no-warn --paths ... --question "..."
+```
+
+The old `:-adlc-read` default is **retired**. It was a second resolver at the call
+site, by the weakest rule available, reached in exactly the situation where the
+first resolver had already declined to answer. An empty `ADLC_READ_BIN` at the
+moment the corpus would be handed over is a hard error, not an invitation to
+resolve the name again less carefully.
+
+**The refusal shape differs by call site, and both refuse before any transmission:**
+
+- **Skills** (`analyze`, `proceed`, `spec`, `wrapup`) emit the stderr line and
+  **exit non-zero**. Every caller already reads a non-zero exit as "fall back and
+  read directly", so this degrades exactly like a missing binary.
+- **The `delegate-pre-pass` agent** must not exit non-zero — its contract makes a
+  non-zero exit a signal it is not allowed to send — so its two fences emit the
+  same stderr line and **degrade into the sanctioned empty-candidates object**
+  (`invoked:false`), exiting 0.
+
+`tools/lint-skills`'s `read-bin-fallback` check rejects any `SKILL.md` fence
+containing a bare-name default for this variable, so the retired shape cannot rot
+back in — the same structural posture as `forge-direct-gh` (LESSON-012). The
+agent's fences are outside the linter's walk and are covered by the
+fence-execution test in `tools/lint-skills/tests/test_read_bin_fences.py`.
+
+**Vendored copies.** A consumer repo whose `.adlc/partials/delegate-gate.sh` predates REQ-609 still exports a bare name on a `$PATH` hit, which the canonical resolver never does; the new fences then invoke that value and the shell resolves it — the pre-REQ-609 state, not a hard failure. `/template-drift` reports the stale copy (LESSON-441); re-run `/init` to re-vendor.
 
 ## Canonical stderr emit pattern
 

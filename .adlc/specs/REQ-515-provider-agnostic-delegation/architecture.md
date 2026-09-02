@@ -89,6 +89,48 @@ delegate:
   api_key_env: "MY_PROVIDER_KEY"     # NAME of the env var, never the key
 ```
 
+**Amendment (2026-09-02, REQ-609)** — *the "NOT PyYAML" half of this ADR is
+reversed; everything else above stands.* The config is now parsed with
+`yaml.safe_load` behind a strict, closed schema in
+`tools/delegate/_machine_config.py`, and `pyyaml` is pinned in
+`tools/delegate/requirements.txt`. The hand-rolled flat reader is retired, along
+with the "reads only the keys it knows and ignores everything else" rule — an
+unknown key is now a refusal.
+
+Four things changed since this decision was taken, and each of them moves it:
+
+1. **The three scalar fields now gate exfiltration.** ADR-3 was written while
+   `delegate-gate.sh` still carried authorizing arms of its own, so the Python
+   reader was one input among several. REQ-603 removed every authorizing arm from
+   the shell (the gate may veto; only Python may authorize), which made this
+   reader the **sole authority** over whether a developer's source files are sent
+   to a third-party API. "Three scalar fields" understates what they decide.
+2. **The dependency argument no longer holds.** The venv this reader runs in
+   already pins `openai`; `requirements.txt` already exists and is already
+   installed by `install.sh`. PyYAML is pure Python. Adding a second pin to a venv
+   that has one is not the cost this ADR priced.
+3. **Hand parsing has cost nine fail-opens.** Four adversarial passes over
+   REQ-603 found nine distinct shapes on which the flat reader fails **open** — a
+   comment on the `delegate:` header, a BOM, a tab-indented header, a nested
+   mapping hoisting `enabled: true` over a written `false`, a second `delegate:`
+   block, a directory at the path, and more. Six of those were introduced by the
+   pass that rewrote the reader under a tests-first, mutation-proven discipline.
+   The discipline proved what its author tested; it could not reach what its
+   author did not imagine. The structural defect is that the reader **skips** what
+   it does not understand — and a reader that skips cannot be patched into one
+   that refuses.
+4. **A real parser can be constrained, and checked against itself.** PyYAML sits
+   behind a closed schema (four keys, `enabled` boolean only, no nested mappings,
+   duplicate keys raise) so its permissiveness never reaches the opt-in, and a
+   **differential oracle** compares our validated result against `yaml.safe_load`
+   directly over a seeded and a generated corpus — a second implementation, so a
+   disagreement is the finding rather than a shared blind spot.
+
+OQ-1 (location, `ADLC_CONFIG` override) and OQ-3's *shell* half (the gate parses
+no YAML) are unchanged: the shell still reads nothing, and the schema above is
+still the schema — it is now enforced rather than scanned. See REQ-609's
+architecture ADR-1 for the loader and ADR-5 for the oracle.
+
 ### ADR-4 — Key-in-config refusal (BR-3)
 
 If `api_key_env`'s value (or any scalar under `delegate:`) looks like a key — a

@@ -89,18 +89,14 @@ AC8_EXCLUDED_PREFIXES = (
     "partials/tests/fixtures/",
     "CHANGELOG.md",
 )
-# One residual outside those prefixes, owned by a LATER task. REQ-609 BR-15 /
-# TASK-099 rewrites `partials/delegate-gate.md`'s call-site contract paragraph,
-# which today still prescribes `"${ADLC_READ_BIN:-adlc-read}"` and describes the
-# pre-REQ-609 resolver ("the bare name, when it is on PATH"). TASK-098 must not
-# edit that file, so the residual is named here rather than hidden by a widened
-# exclusion.
-#
-# DELETE THIS ENTRY WHEN TASK-099 LANDS. The assertion below is an exact match,
-# not a subset, precisely so that a waiver cannot outlive its reason — an
-# allowlist that survives the thing it excused is the guard-rot class LESSON-019
-# is about.
-AC8_TASK_099_RESIDUALS = {"partials/delegate-gate.md"}
+# EMPTY, and it stays empty. TASK-098 landed with one residual here —
+# `partials/delegate-gate.md`, whose call-site contract paragraph still
+# prescribed the retired spelling and which TASK-098 was not allowed to edit.
+# TASK-099 rewrote that paragraph (REQ-609 BR-15), so the waiver was deleted with
+# the reason for it. The assertion below is an exact match, not a subset,
+# precisely so that a waiver cannot outlive its reason — an allowlist that
+# survives the thing it excused is the guard-rot class LESSON-019 is about.
+AC8_TASK_099_RESIDUALS = set()
 
 # Skill fences are executed by Claude's Bash tool, whose shell on macOS is zsh —
 # not the `sh` the fence is written against (LESSON-329: lint checks structure,
@@ -378,10 +374,10 @@ def test_no_bare_name_fallback_outside_fixtures_and_specs(tmp_path):
         "surfaces.\n"
         f"  found:    {sorted(residual_files)}\n"
         f"  expected: {sorted(AC8_TASK_099_RESIDUALS)}\n"
-        "If this set SHRANK, TASK-099 has rewritten the doc it names — delete "
-        "the matching entry from AC8_TASK_099_RESIDUALS in this file. If it "
-        "GREW, a call site has re-introduced `${ADLC_READ_BIN:-…}`; source the "
-        "gate and refuse on empty instead (REQ-609 BR-12)."
+        "The expected set is EMPTY since TASK-099. A call site has "
+        "re-introduced `${ADLC_READ_BIN:-…}`; source the gate and refuse on "
+        "empty instead (REQ-609 BR-12). Do not widen this set to make the "
+        "failure go away — that is the guard rot LESSON-019 names."
     )
 
 

@@ -549,14 +549,22 @@ def test_base_url_userinfo_is_redacted_on_the_print_path(cli, tmp_path):
     assert "sekret123" not in r.stdout + r.stderr
 
 
-# --- BR-6: unparseable config is fail-SOFT, not a refusal ------------------
+# --- BR-6: an unreadable config is not a `config_error:` -------------------
 
 @pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
 def test_unparseable_config_reports_shipped_defaults(cli, tmp_path):
-    """`config_error:` is the REFUSAL path, not the "something was odd" path.
-    A config the minimal reader cannot make sense of yields no delegate keys at
-    all, so resolution falls through to the shipped defaults — which is exactly
-    what a real call would use, so reporting anything else would be a lie."""
+    """`config_error:` marks a written VALUE that was refused, not a file that
+    could not be read. The two are different operator problems and the output
+    has to distinguish them.
+
+    The file itself is refused: since REQ-609 an unparseable config is
+    `malformed`, the opt-in fails closed (`enabled: false` here, and the gate
+    reports `disabled-via-config`), and legacy-key continuity does not apply.
+    But no *value* was refused, so there is no `config_error:` line, and the
+    provider block reports the shipped defaults — which is what a real call
+    would resolve from if the opt-in let one happen. Reporting a refused value
+    that nobody wrote would be a lie about a different problem.
+    """
     cfg_dir = tmp_path / ".claude" / "adlc"
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "config.yml").write_bytes(
@@ -570,6 +578,8 @@ def test_unparseable_config_reports_shipped_defaults(cli, tmp_path):
     assert cfg["base_url"] == _common._DEFAULT_BASE_URL
     assert cfg["model"] == _common._DEFAULT_MODEL
     assert cfg["api_key_env"] == _common._DEFAULT_API_KEY_VAR
+    # The fail-closed half: the file was refused even though no value was.
+    assert cfg["enabled"] == "false", r.stdout
 
 
 # --- unit coverage for the shared helpers ----------------------------------
