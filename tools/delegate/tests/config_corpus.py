@@ -25,6 +25,7 @@ can skip rather than fail where the capability is missing.
 """
 
 import os
+import random
 
 # --- entry ------------------------------------------------------------------
 
@@ -321,3 +322,158 @@ TEXT_CORPUS = [e for e in CORPUS if e.data is not None]
 BY_NAME = dict((e.name, e) for e in CORPUS)
 
 assert len(BY_NAME) == len(CORPUS), "corpus entry names must be unique"
+
+
+# --- the generated corpus (TASK-095, ADR-5) ---------------------------------
+#
+# The seeded corpus above is a transcript of what two reviewers thought of. It
+# is the better half of this file — every entry is a shape that actually broke
+# something — but it is still bounded by an imagination, and that boundedness is
+# exactly what REQ-609 exists to fix (BR-10). The generated corpus is the other
+# half: a full product of the axes those reviewers' findings ran along, so the
+# combinations nobody wrote down get tested too. It carries NO expected
+# outcomes, because the differential oracle computes them from PyYAML — a
+# generated corpus with hand-written expectations would just be a longer
+# transcript.
+
+#: Every spelling REQ-609 names for `enabled`, as it appears in the file. The
+#: three that are NOT YAML booleans (`"false"`, `1`, `ture`) must each refuse:
+#: `"false"` is the string Python calls true, `1` is an int, `ture` is a typo
+#: that a reader taking the last thing it recognised would have skipped.
+_ENABLED_SPELLINGS = ("true", "false", '"false"', "yes", "no", "on", "off",
+                      "1", "ture")
+
+#: none | a comment line above the header | a comment ON the header. The third
+#: is the shape that discarded the whole block for the flat reader.
+_COMMENT_STYLES = ("none", "leading", "header")
+
+#: Two indentation widths. A reader that pattern-matches a fixed indent reads
+#: one of these and not the other.
+_INDENT_WIDTHS = (2, 4)
+
+#: `enabled` before or after another key. A reader that stops at its first hit
+#: and one that keeps the last hit differ only on this axis.
+_KEY_ORDERS = ("enabled-first", "enabled-last")
+
+_LINE_ENDINGS = (("lf", "\n"), ("crlf", "\r\n"))
+
+#: Drawn per document from the seeded rng. `model` is deliberately in this list
+#: and is NOT an unknown key: with `model` already written above it, picking it
+#: here REPEATS a key, so the generated corpus reaches the duplicate-key arm
+#: (BR-2) organically rather than by a hand-written case.
+_EXTRA_KEY_NAMES = ("enbaled", "note", "verbose", "timeout_s", "model")
+
+#: Scalar strings only. Anything non-string here would refuse for a reason that
+#: has nothing to do with the axis under test.
+_MODEL_VALUES = ('"m"', '"provider/model-1"', "plain-model")
+
+_COMMENT_TEXTS = ("# machine config", "# written by install.sh",
+                  "# keep the key OUT of this file")
+
+
+class Generated(object):
+    """One generated document: a name and its bytes, and nothing else.
+
+    Exposes the same two attributes a text-level reader uses on :class:`Entry`
+    (``name``, ``data``) so the oracle can walk both corpora with one loop, and
+    deliberately carries no expected ``kind``/``section``: the expectation comes
+    from PyYAML (REQ-609 ADR-5).
+
+    ``data`` is bytes, not str, because the CRLF axis is a byte-level property
+    and the tests write corpus entries with ``write_bytes``.
+    """
+
+    __slots__ = ("name", "data", "axes")
+
+    def __init__(self, name, data, axes):
+        self.name = name
+        self.data = data
+        self.axes = axes
+
+    def __repr__(self):
+        return "Generated(%r)" % (self.name,)
+
+
+_SPELLING_TAGS = {'"false"': "q-false"}
+
+
+def _axis_tag(comment, indent, order, spelling, extra, nested, eol_name):
+    return "-".join((
+        {"none": "c0", "leading": "cl", "header": "ch"}[comment],
+        "i%d" % indent,
+        "oe" if order == "enabled-first" else "om",
+        _SPELLING_TAGS.get(spelling, spelling),
+        "x1" if extra else "x0",
+        "n1" if nested else "n0",
+        eol_name,
+    ))
+
+
+def _build_document(comment, indent, order, spelling, extra, nested, eol, rng):
+    """Render one document. Every axis is applied to the SAME base block, so a
+    disagreement between two documents is attributable to the axes that differ.
+    """
+    pad = " " * indent
+    lines = []
+    if comment == "leading":
+        lines.append(rng.choice(_COMMENT_TEXTS))
+    header = "delegate:"
+    if comment == "header":
+        header += "  " + rng.choice(_COMMENT_TEXTS)
+    lines.append(header)
+
+    body = [pad + "enabled: " + spelling,
+            pad + "model: " + rng.choice(_MODEL_VALUES)]
+    if order == "enabled-last":
+        body.reverse()
+    if extra:
+        body.append(pad + rng.choice(_EXTRA_KEY_NAMES) + ': "x"')
+    if nested:
+        body.append(pad + "nested:")
+        body.append(pad * 2 + "enabled: true")
+    lines.extend(body)
+    return eol.join(lines) + eol
+
+
+def generated_corpus(seed, n=None):
+    """The seeded product of the axes above, as a list of :class:`Generated`.
+
+    Deterministic: the same ``seed`` yields the same documents, in the same
+    order, with the same per-document filler (comment text, model value, extra
+    key name), so a failure names a document a later run can reproduce. ``n``
+    caps the number returned — ``None`` means the whole product, which is what
+    the oracle runs over; a cap exists so a caller that wants a smoke-sized
+    slice does not have to invent one.
+
+    The rng is used only for filler DRAWS, never to decide which axis
+    combinations appear: every combination is always present (subject to ``n``),
+    because a sampled product is a corpus whose coverage depends on a seed
+    nobody audits.
+    """
+    rng = random.Random(seed)
+    docs = []
+    for comment in _COMMENT_STYLES:
+        for indent in _INDENT_WIDTHS:
+            for order in _KEY_ORDERS:
+                for spelling in _ENABLED_SPELLINGS:
+                    for extra in (False, True):
+                        for nested in (False, True):
+                            for eol_name, eol in _LINE_ENDINGS:
+                                text = _build_document(
+                                    comment, indent, order, spelling, extra,
+                                    nested, eol, rng)
+                                axes = (comment, indent, order, spelling,
+                                        extra, nested, eol_name)
+                                docs.append(Generated(
+                                    "gen-" + _axis_tag(comment, indent, order,
+                                                       spelling, extra, nested,
+                                                       eol_name),
+                                    text.encode("utf-8"), axes))
+    rng.shuffle(docs)
+    return docs if n is None else docs[:n]
+
+
+#: The seed the oracle runs at. Fixed so a failure is reproducible from the test
+#: name alone, and named here rather than in the test so the shell-side tests
+#: can walk the same documents.
+GENERATED_SEED = 609

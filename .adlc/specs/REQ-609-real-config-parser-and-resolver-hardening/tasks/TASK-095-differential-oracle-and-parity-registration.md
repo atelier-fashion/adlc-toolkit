@@ -1,10 +1,10 @@
 ---
 id: TASK-095
 title: "Differential oracle over seeded and generated corpora; register REQ-609 divergences in the parity suite"
-status: draft
+status: complete
 parent: REQ-609
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 dependencies: [TASK-094]
 ---
 
@@ -36,6 +36,13 @@ Add the test that makes the suite no longer bounded by one author's imagination 
 | BR-2 | test-case | `tools/delegate/tests/test_differential_oracle.py::test_oracle_marks_duplicates_independently` | yes |
 | AC-2 | test-case | `tools/delegate/tests/test_differential_oracle.py::test_generated_corpus_agrees_with_safe_load` | yes |
 | AC-1 | test-case | `tools/delegate/tests/test_pre_req_gate_parity.py::test_malformed_classes_against_pre_req_gate` | yes |
+
+## Implementation notes (recorded at completion)
+
+- `_NAMED` is keyed by the 24-row matrix tuple and cannot express a directory or a byte sequence, so the REQ-609 divergences live in `_MALFORMED_ROWS`, a registry with `divergence`, `source`, `label`, `make`, `old`, `new`; `_NAMED` is pinned to REQ-603's D1 so a well-formed divergence cannot be registered away.
+- Registered D6–D11 (directory, header comment, `/dev/null`, second `enabled`, BOM, `enbaled`): old grants, new refuses. Three rows carry no id because both gates refuse (mechanism differs, outcome does not), plus a benign control: a `forge:`-only config grants on both.
+- Generated corpus: seed 609, 864 documents (full product); 720 malformed, 72 true, 72 false, asserted non-empty per bucket.
+- Oracle limit, fail-closed direction only: `yes:` and `true:` as keys look distinct to the composed-node comparison and identical to the strict loader; no corpus document has the pair.
 
 ## Technical Notes
 
