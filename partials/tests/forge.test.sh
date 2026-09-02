@@ -192,6 +192,9 @@ check "auto github (https)" "github" "$(adlc_forge_provider "$gh_repo" 2>/dev/nu
 ado_repo=$(mk_repo "git@ssh.dev.azure.com:v3/org/proj/repo")
 # az path requires forge_config.py reachable; provide it via the project copy.
 mkdir -p "$ado_repo/tools/adlc"; cp "$ROOT/tools/adlc/forge_config.py" "$ado_repo/tools/adlc/" 2>/dev/null
+# REQ-609 BR-8: forge_config.py reads the machine config through the shared loader,
+# resolved relative to its own file (../delegate); vendor it beside the copy.
+mkdir -p "$ado_repo/tools/delegate"; cp "$ROOT/tools/delegate/_machine_config.py" "$ado_repo/tools/delegate/" 2>/dev/null
 # No config file -> pure-shell auto handles the ADO SSH host directly.
 check "auto azure-devops (ssh)" "azure-devops" "$(adlc_forge_provider "$ado_repo" 2>/dev/null)"
 bad_repo=$(mk_repo "https://gitlab.com/o/r.git")
@@ -208,6 +211,7 @@ contains "fail-loud names providers" "github" "$err"
 cfg_repo=$(mk_repo "https://github.com/o/r.git")
 mkdir -p "$cfg_repo/.adlc" "$cfg_repo/tools/adlc"
 cp "$ROOT/tools/adlc/forge_config.py" "$cfg_repo/tools/adlc/"
+mkdir -p "$cfg_repo/tools/delegate"; cp "$ROOT/tools/delegate/_machine_config.py" "$cfg_repo/tools/delegate/"   # REQ-609 BR-8 (see above)
 printf 'forge:\n  provider: azure-devops\n  auth: ADO_PAT\n' > "$cfg_repo/.adlc/config.yml"
 check "project config overrides remote" "azure-devops" \
   "$(ADLC_FORGE_REPO="$cfg_repo" adlc_forge_provider "$cfg_repo" 2>/dev/null)"

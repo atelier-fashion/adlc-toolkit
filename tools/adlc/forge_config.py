@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Forge config reader + provider resolution (REQ-520 BR-2/BR-6).
 
-A thin reader for the ``forge:`` block of the shared ADLC config, mirroring
-``tools/delegate/_common.parse_delegate_config`` (flat ``key: value``, NO PyYAML —
-REQ-515 ADR-3). Resolves the active forge provider with precedence:
+Reads the ``forge:`` block of the shared ADLC config through the **one loader**,
+``tools/delegate/_machine_config.load_machine_config`` (REQ-609 BR-8, ADR-1), the
+same call ``_common.parse_delegate_config`` reads its own section from. The flat
+``key: value`` reader this replaces (REQ-515 ADR-3, "no PyYAML for three scalar
+fields") was a second, independent answer to "what does this file say", so one
+file could be read two ways: a multi-section config locked one consumer out by
+the other's rule, and nine fail-open shapes were found in the flat reader's
+delegate twin. One loader, one verdict. ADR-3 is amended by REQ-609 BR-14.
+
+Resolves the active forge provider with precedence:
 
     per-project .adlc/config.yml  >  machine ~/.claude/adlc/config.yml  >  auto
 
@@ -20,31 +27,131 @@ only — ``gh`` (logged-in CLI), an env-var NAME holding a PAT, or ``az`` (CLI l
 A key-shaped ``auth`` value is refused via :func:`looks_like_key` (ported from
 ``_common._looks_like_key``) — never a key value in config.
 
-Pure standard library; importable without the delegation venv. Deliberately keeps
-NO import dependency on the delegate module (adlc must work on a skills-only checkout),
-so the two small helpers are ported rather than imported — the same boundary
-discipline ``checks._config_enabled`` uses via a subprocess probe.
+Nothing YAML-related is imported at module level: the loader imports PyYAML lazily
+(LESSON-022 / BUG-056), so importing this module never puts a third-party package
+in the import closure of a tool that has to run before that package exists — the
+one thing a bootstrap diagnostic may never have (LESSON-395). The credential helpers
+(:func:`looks_like_key`, :func:`validate_auth`) stay ported rather than imported:
+they are policy, not parsing, and the delegate module's copies answer a different
+question (an API key vs. a PAT source name).
 """
 
 import os
 import re
 import subprocess
+import sys
 
 SUPPORTED_PROVIDERS = ("github", "azure-devops")
+
+#: The only ``malformed`` reason class the forge consumer tolerates (REQ-609
+#: ADR-2). A missing parser is a statement about the machine's install, not
+#: about the file: making every `/proceed` PR operation hostage to a delegation
+#: install the operator never opted into would be a regression with no
+#: governance benefit, because `forge.auth` never carries authority (a
+#: key-shaped value is refused at validation, REQ-520 BR-6). Every FILE defect
+#: stays whole-document and fail-loud for both consumers.
+_TOLERATED_REASON = "dependency-missing"
 
 
 class ForgeConfigError(Exception):
     """A forge config value is invalid (e.g. a key-shaped auth value)."""
 
 
+class MalformedConfigError(ForgeConfigError):
+    """The shared config exists but cannot be read (REQ-609 BR-13).
+
+    A subclass of :class:`ForgeConfigError` so :func:`main` — and every caller
+    that already catches the base class — turns it into a non-zero exit with an
+    actionable message rather than a traceback. The message names the path and
+    the reason class (for a duplicate key, the key and its line) and never
+    advises setting an environment variable: no env var can make an unreadable
+    file readable, and pointing at one sends a locked-out operator away from
+    the file that is actually broken.
+    """
+
+
 class UnknownForgeError(Exception):
     """``auto`` resolution hit an unrecognized remote host."""
+
+
+# --- the one loader (REQ-609 ADR-1) ----------------------------------------
+
+def _delegate_dirs():
+    """Where ``_machine_config.py`` may live, most-local first.
+
+    Two levels, mirroring how ``partials/forge.sh`` locates *this* file (project
+    copy, then the toolkit at ``~/.claude/skills``) and how
+    ``checks._partial_path`` resolves partials. The second level is not
+    decoration: a project may vendor ``tools/adlc/forge_config.py`` alone —
+    forge.sh supports exactly that — and a vendored copy with no sibling
+    ``tools/delegate/`` would otherwise read every config as unconfigured and
+    silently fall back to origin-URL auto-detection, overriding the operator's
+    written `forge.provider`.
+
+    ``realpath``, not ``abspath``: for a symlinked checkout ``abspath`` walks
+    from the symlink's directory and resolves wrongly (ASSUME-001's
+    sharpening). The ``~/bin`` shim `exec`s this tree by absolute path, so
+    script-relative resolution survives the wrapper indirection.
+    """
+    tools = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    dirs = [os.path.join(tools, "delegate")]
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    if home and home != "~":
+        dirs.append(os.path.join(home, ".claude", "skills", "tools", "delegate"))
+    return dirs
+
+
+for _candidate in _delegate_dirs():
+    if os.path.isfile(os.path.join(_candidate, "_machine_config.py")):
+        if _candidate not in sys.path:
+            sys.path.insert(0, _candidate)
+        break
+
+try:
+    import _machine_config
+except ImportError:  # exercised by test_missing_loader_is_unconfigured_with_stderr
+    # A checkout without `tools/delegate/` (skills-only vendoring) is the same
+    # install-defect CLASS as an interpreter without PyYAML: the machine cannot
+    # parse the file, which says nothing about the file. Treated as
+    # `dependency-missing` below, with the same one stderr line.
+    _machine_config = None
+
+
+_dependency_notice_emitted = False
+
+
+def _note_dependency_missing():
+    """Write the one stderr line for "this machine cannot parse the config".
+
+    Once per process, not once per read: :func:`resolve_provider` parses two
+    configs on a single call, and two identical lines read as two problems. The
+    loader's own emitter already dedupes, so in the normal path (PyYAML absent,
+    loader present) this is a no-op that leaves the loader's single line
+    standing (REQ-609 BR-9).
+    """
+    global _dependency_notice_emitted
+    if _machine_config is not None:
+        _machine_config._emit_dependency_notice()
+        return
+    if _dependency_notice_emitted:
+        return
+    _dependency_notice_emitted = True
+    sys.stderr.write(
+        "adlc: the ADLC config loader (tools/delegate/_machine_config.py) was not "
+        "found in %s; run install.sh\n" % " or ".join(_delegate_dirs()))
 
 
 # --- config file paths -----------------------------------------------------
 
 def _machine_config_path():
-    """Machine config path: ``$ADLC_CONFIG`` or the default."""
+    """Machine config path: ``$ADLC_CONFIG`` or the default.
+
+    Defers to the loader's spelling so the two consumers cannot drift apart
+    about which file they are reading (REQ-609 BR-8); the inline fallback is
+    only for the no-loader sentinel.
+    """
+    if _machine_config is not None:
+        return _machine_config.default_config_path()
     override = os.environ.get("ADLC_CONFIG")
     if override:
         return override
@@ -56,63 +163,89 @@ def _project_config_path(repo_dir):
     return os.path.join(repo_dir, ".adlc", "config.yml")
 
 
-# --- minimal flat-YAML reader (ported shape from parse_delegate_config) -----
+# --- the forge section, read through the one loader (REQ-609 BR-8) ---------
 
-def _strip_inline(value):
-    """Strip surrounding quotes and a trailing `` # comment`` from a scalar."""
-    value = value.strip()
-    if value[:1] not in ("'", '"'):
-        hashpos = value.find(" #")
-        if hashpos != -1:
-            value = value[:hashpos].strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        value = value[1:-1]
-    return value
+#: The keys this consumer reads. Unknown keys under ``forge:`` are IGNORED, not
+#: refused — unlike the delegate schema, whose closed key set exists because an
+#: ignored `enbaled: false` costs an exfiltration. `forge.auth` never carries
+#: authority, and closing this section's schema is explicitly out of scope for
+#: REQ-609 ("their validation stays where it is").
+FORGE_KEYS = ("provider", "auth")
 
 
 def parse_forge_config(path=None):
-    """Parse the ``forge:`` block from the YAML config, if the file exists.
+    """The ``forge:`` section of the config at ``path``, or ``{}``.
 
-    A minimal flat ``key: value`` reader (NOT a full YAML parser — REQ-515 ADR-3).
-    Reads only ``provider`` and ``auth`` under a top-level ``forge:`` mapping;
-    ignores everything else. An absent/unreadable file yields ``{}`` (a valid
-    auto-detect configuration). The same block-parsing loop shape as
-    ``parse_delegate_config``: top-level ``forge:`` mapping, dedent ends the block.
+    Reads through :func:`_machine_config.load_machine_config` — the same call,
+    on the same file, that the delegation opt-in is read with (REQ-609 BR-8), so
+    a defect anywhere in the document is one verdict rather than two. Outcomes:
+
+      * absent config                -> ``{}`` (nothing configured)
+      * parsed, no ``forge`` section -> ``{}`` (unconfigured, not locked out)
+      * parsed with a ``forge`` map  -> its ``provider``/``auth`` keys
+      * ``dependency-missing``       -> ``{}`` after one stderr line (ADR-2)
+      * any other ``malformed``      -> :class:`MalformedConfigError`
+
+    The single tolerated reason is the machine's install, not the file (see
+    :data:`_TOLERATED_REASON`). Every file defect — unreadable, undecodable,
+    over-cap, a duplicated key ANYWHERE in the document including under
+    ``delegate:``, a top level that is not a mapping — refuses here exactly as
+    it refuses for the delegate consumer (REQ-609 BR-2).
     """
     if path is None:
         path = _machine_config_path()
-    try:
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.read().splitlines()
-    except OSError:
+
+    if _machine_config is None:
+        _note_dependency_missing()
         return {}
 
-    known = {"provider", "auth"}
+    outcome = _machine_config.load_machine_config(path)
+    if outcome.kind == _machine_config.KIND_ABSENT:
+        return {}
+    if outcome.kind == _machine_config.KIND_MALFORMED:
+        if outcome.reason_class == _TOLERATED_REASON:
+            _note_dependency_missing()
+            return {}
+        raise MalformedConfigError(
+            "the ADLC config at %s cannot be read (%s). Fix the file — the "
+            "forge provider cannot be resolved from a config that does not "
+            "parse." % (outcome.path, outcome.reason))
+    return _forge_section(outcome.document, outcome.path)
+
+
+def _forge_section(document, path):
+    """Pick ``forge:`` out of a parsed document; refuse a shape we cannot read.
+
+    An absent section, and a ``forge:`` header with nothing under it, are both
+    ``{}`` — *unconfigured*, which resolves to ``auto`` detection. A section
+    that is present but is not a mapping, or a ``provider``/``auth`` that is not
+    a string, is refused rather than coerced: ``str()`` of a mapping is not what
+    the operator wrote, and guessing is how a reader that skips what it does not
+    understand fails open (LESSON-483).
+    """
+    if not document:
+        return {}
+    section = document.get("forge")
+    if section is None:
+        return {}
+    if not isinstance(section, dict):
+        raise MalformedConfigError(
+            "the ADLC config at %s cannot be read (not-a-mapping: the 'forge' "
+            "section is not a mapping). Fix the file." % (path,))
     out = {}
-    in_block = False
-    block_indent = None
-    for raw in lines:
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
+    for key in FORGE_KEYS:
+        if key not in section:
             continue
-        indent = len(raw) - len(raw.lstrip())
-        if not in_block:
-            if stripped.rstrip() == "forge:" and indent == 0:
-                in_block = True
+        value = section[key]
+        if value is None:
+            # `provider:` with nothing after it. Written but empty is the same
+            # as unwritten for both fields, and the flat reader read it as "".
             continue
-        if indent == 0:
-            break
-        if block_indent is None:
-            block_indent = indent
-        if indent < block_indent:
-            break
-        if ":" not in stripped:
-            continue
-        key, _, value = stripped.partition(":")
-        key = key.strip()
-        if key not in known:
-            continue
-        out[key] = _strip_inline(value)
+        if not isinstance(value, str):
+            raise MalformedConfigError(
+                "the ADLC config at %s cannot be read (not-a-string: "
+                "'forge.%s' must be a string). Fix the file." % (path, key))
+        out[key] = value
     return out
 
 

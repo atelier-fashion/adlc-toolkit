@@ -1,10 +1,10 @@
 ---
 id: TASK-096
 title: "forge_config reads through the loader; adlc doctor gains a pyyaml check; the adlc shim prefers the venv"
-status: draft
+status: complete
 parent: REQ-609
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 dependencies: [TASK-094]
 ---
 
@@ -21,6 +21,7 @@ Retire the second hand reader. `tools/adlc/forge_config.parse_forge_config` read
 - `tools/adlc/tests/test_checks.py` — `check_pyyaml` PASS/FAIL cases, interpreter selection
 - `tools/adlc/tests/test_install_shim.py` — new: run root `install.sh --dry-run`-equivalent shim generation in a sandbox `HOME`, execute the generated shim with and without a fake venv, assert which interpreter ran
 - `tools/adlc/README.md` — add `pyyaml` to the doctor check list
+- `partials/tests/forge.test.sh` — (found at implementation) the fixture copies `forge_config.py` alone; it now vendors `tools/delegate/_machine_config.py` beside it at both copy sites, since the loader resolves relative to the file
 
 ## Acceptance Criteria
 
@@ -45,6 +46,13 @@ Retire the second hand reader. `tools/adlc/forge_config.parse_forge_config` read
 | BR-6 | test-case | `tools/adlc/tests/test_forge_config.py::test_forge_only_config_leaves_delegate_unconfigured` | yes |
 | AC-5 | test-case | `tools/adlc/tests/test_forge_config.py::test_reads_section_through_load_machine_config` | yes |
 | AC-5 | test-case | `tools/adlc/tests/test_install_shim.py::test_shim_prefers_venv_when_present` | yes |
+
+## Implementation notes (recorded at completion)
+
+- Loader lookup is two-level: `<file>/../../delegate`, then `$HOME/.claude/skills/tools/delegate`, with `realpath` — a project vendoring `forge_config.py` alone (which `partials/forge.sh` supports) otherwise loses config resolution silently.
+- `test_install_shim.py` evaluates the real text of `ensure_adlc_shim` and its helpers extracted from `install.sh`, then executes the generated shim with a fake venv interpreter present and absent; a full installer run ends in `adlc doctor`, whose reservation check pushes a probe ref to the real origin.
+- Forge refuses a non-mapping `forge:` section and non-string `provider`/`auth`; unknown keys under `forge:` stay ignored (schema for other sections is out of scope).
+- The `pyyaml` fix string substitutes the repo root so it is copy-pasteable.
 
 ## Technical Notes
 

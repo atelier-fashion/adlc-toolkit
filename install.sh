@@ -119,16 +119,27 @@ ensure_symlink() {
 }
 
 # --- adlc shim (no hardcoded path beyond derived REPO_ROOT, BR-3/BR-11) -----
+# The shim prefers the delegation venv's interpreter (REQ-609 BR-8, ADR-2): since
+# REQ-609 the ADLC config is parsed with PyYAML, and the venv is where this
+# installer pins it. The fallback to $PATH's python3 is NOT a nicety — the venv
+# exists only after --with-delegation, and a shim that `exec`s a missing
+# interpreter would break `adlc doctor` on exactly the machine that most needs it
+# (LESSON-395). $HOME is expanded by the shim at RUN time, not stamped here.
 ensure_adlc_shim() {
     shim="$BIN_DIR/adlc"
     want="#!/usr/bin/env bash
+_v=\"\$HOME/.claude/delegate-venv/bin/python3\"
+if [ -x \"\$_v\" ]; then exec \"\$_v\" \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\"; fi
 exec python3 \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\""
+    # Whole-text comparison: the idempotency key is the shim's CONTENT, so a
+    # machine carrying the old single-line shim is re-stamped rather than
+    # reported "already current" (BR-1, LESSON-017).
     if [ -f "$shim" ] && [ "$(cat "$shim")" = "$want" ]; then
         note "  ok: $shim already current"
         return 0
     fi
     if [ "$DRY" -eq 1 ]; then
-        plan "write adlc shim $shim -> $REPO_ROOT/tools/adlc/adlc.py"
+        plan "write adlc shim $shim -> $REPO_ROOT/tools/adlc/adlc.py (delegate venv python3 when present)"
         return 0
     fi
     atomic_write "$shim" "$want"

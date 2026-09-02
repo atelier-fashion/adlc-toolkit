@@ -12,12 +12,17 @@ reinventing config resolution (REQ-519 ADR-4): it sources
 distinguish "not opted in" (SKIP) from "config says enabled but the binary is
 missing" (FAIL — misconfigured).
 
-Pure standard library: doctor must run before/without the delegation venv.
+Pure standard library: doctor must run before/without the delegation venv. That
+holds transitively (LESSON-395) — nothing YAML-related is imported here or in
+anything imported here, because the `pyyaml` check below exists precisely to
+report on a machine where PyYAML is missing, and a check that cannot load
+without the thing it diagnoses cannot report it.
 """
 
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 from doctor import Check, Profile, Result
@@ -49,6 +54,25 @@ def _resolves_into_checkout(link_path: str) -> bool:
         ["git", "-C", probe, "rev-parse", "--is-inside-work-tree"],
         capture_output=True, text=True,
     ).returncode == 0
+
+
+def _delegate_interpreter() -> str:
+    """The interpreter ``adlc`` runs under (REQ-609 BR-8, ADR-2).
+
+    The delegate venv's ``python3`` when it exists and is executable, else the
+    interpreter running us. This is exactly the selection the ``adlc`` shim
+    written by the root ``install.sh`` makes, and it is one helper on purpose:
+    the doctor's ``pyyaml`` check must report on the SAME interpreter the config
+    probes below run in, or it reports on a machine nobody is using (LESSON-392).
+
+    Not unconditional: the venv only exists after ``install.sh
+    --with-delegation``, and a probe that `exec`s a missing interpreter breaks
+    doctor on exactly the machine that most needs it (LESSON-395).
+    """
+    venv = os.path.join(_claude_home(), "delegate-venv", "bin", "python3")
+    if os.path.isfile(venv) and os.access(venv, os.X_OK):
+        return venv
+    return sys.executable
 
 
 def _partial_path(profile: Profile, name: str) -> str:
@@ -276,6 +300,11 @@ def _forge_pat_status(profile: Profile):
 
     Reuses tools/adlc/forge_config.parse_forge_config via subprocess probe so
     checks keeps no hard import of the forge module at registry-build time.
+    The probe runs in ``_delegate_interpreter()`` — the interpreter that has
+    PyYAML where delegation is installed — so the probe reads the config the
+    same way the real call does (REQ-609 BR-8, LESSON-392). A malformed config
+    makes the reader exit non-zero, which lands here as "no PAT var", and the
+    `pyyaml`/`forge` checks report the real cause.
     """
     reader = os.path.join(profile.repo_root, "tools", "adlc", "forge_config.py")
     if not os.path.isfile(reader):
@@ -286,7 +315,7 @@ def _forge_pat_status(profile: Profile):
         "d = fc.parse_forge_config(sys.argv[2]); print(d.get('auth', ''))"
     )
     out = subprocess.run(
-        ["python3", "-c", code, os.path.dirname(reader), cfg_proj],
+        [_delegate_interpreter(), "-c", code, os.path.dirname(reader), cfg_proj],
         capture_output=True, text=True,
     )
     auth = out.stdout.strip() if out.returncode == 0 else ""
@@ -450,6 +479,11 @@ def _config_enabled(profile: Profile):
     adlc keeps no hard import dependency on the delegate module (it may be absent
     on a skills-only checkout). Returns False on any failure (treated as
     not-opted-in). (REQ-522 renamed tools/kimi -> tools/delegate.)
+
+    The probe runs in ``_delegate_interpreter()``: the config is parsed with
+    PyYAML since REQ-609, and the venv is where ``install.sh`` pins it — probing
+    with a bare ``python3`` from ``$PATH`` would answer for an interpreter the
+    real call never uses (BR-8, LESSON-392).
     """
     common_dir = os.path.join(profile.repo_root, "tools", "delegate")
     if not os.path.isfile(os.path.join(common_dir, "_common.py")):
@@ -459,9 +493,54 @@ def _config_enabled(profile: Profile):
         "print('1' if _common.parse_delegate_config().get('enabled') else '0')"
     )
     out = subprocess.run(
-        ["python3", "-c", code, common_dir], capture_output=True, text=True,
+        [_delegate_interpreter(), "-c", code, common_dir],
+        capture_output=True, text=True,
     )
     return out.returncode == 0 and out.stdout.strip() == "1"
+
+
+# --- PyYAML in the interpreter adlc runs under (REQ-609 BR-8, ADR-2) -------
+
+def check_pyyaml(profile: Profile):
+    """Is PyYAML importable in the interpreter that parses the ADLC config?
+
+    Since REQ-609 the machine config is parsed by ``yaml.safe_load`` behind a
+    strict schema, and a missing PyYAML is not a silent degradation: the
+    delegate consumer refuses outright, and the forge consumer proceeds
+    unconfigured after a stderr line. Either way the operator's config is not
+    being read, so doctor says so with the fix.
+
+    There is no SKIP: the check is meaningful on every machine, delegation
+    opted into or not. The probe is a subprocess, never an import here — this
+    module must load on a machine that has no PyYAML at all (LESSON-395).
+    """
+    interp = _delegate_interpreter()
+    fix = (
+        f"{os.path.join(profile.repo_root, 'install.sh')} --with-delegation"
+        "   # or: python3 -m pip install --user 'pyyaml>=6.0'"
+    )
+    try:
+        probe = subprocess.run(
+            [interp, "-c", "import yaml; print(yaml.__version__)"],
+            capture_output=True, text=True,
+        )
+    except OSError as exc:
+        # The selected interpreter could not be executed at all. Still a FAIL
+        # with the same fix — doctor reports, it never crashes.
+        return (
+            Result.FAIL,
+            f"could not run {interp} to check PyYAML ({exc.strerror or exc})",
+            fix,
+        )
+    version = probe.stdout.strip()
+    if probe.returncode == 0 and version:
+        return Result.PASS, f"PyYAML {version} in {interp}", ""
+    return (
+        Result.FAIL,
+        f"PyYAML is not importable in {interp} — the ADLC config "
+        f"(~/.claude/adlc/config.yml) cannot be parsed there",
+        fix,
+    )
 
 
 def check_delegate_gate(profile: Profile):
@@ -591,6 +670,9 @@ REGISTRY = [
     Check("reservations", check_reservations),
     Check("git-identity", check_git_identity),
     Check("delegate-gate", check_delegate_gate),
+    # Reads on the interpreter BOTH config consumers use, so it is registered
+    # next to the delegation check it explains (REQ-609 ADR-2).
+    Check("pyyaml", check_pyyaml),
     Check("counters", check_counters),
     Check(
         "launchctl",

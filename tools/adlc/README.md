@@ -53,6 +53,7 @@ and re-run doctor; it should turn green.
 | `forge` | resolved forge provider's backend CLI present + auth valid + read-only API probe (github: `gh auth status`; azure-devops: `az account show` or PAT env var). **Supersedes the former `gh-auth` check** (REQ-520). | provider-specific (`gh auth login`; `az login` / set the PAT env var; or install `az`) | repo has no git remote |
 | `git-identity` | `user.name` and `user.email` set | `git config --global user.email …` | — |
 | `delegate-gate` | delegation enabled and reachable | (see below) | delegation not opted in (default) |
+| `pyyaml` | PyYAML imports in the interpreter `adlc` runs under — the one that parses `~/.claude/adlc/config.yml` (REQ-609) | `<root>/install.sh --with-delegation`, or `python3 -m pip install --user 'pyyaml>=6.0'` | never — the config is parsed on every machine, delegation or not |
 | `counters` | each `~/.claude/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
 | `launchctl` | (macOS) delegate setenv LaunchAgent loaded *when delegation is on* | `launchctl bootstrap gui/$(id -u) <plist>` | Linux (macOS-only); delegation off |
 | `template-version` | project `.adlc/` scaffold present | run `/template-drift` to compare | run outside a consumer project |
@@ -78,6 +79,25 @@ Mapping:
 | 1 (`not-opted-in` / `disabled-via-config` / `disabled-via-env`) | opt-in off | **SKIP** (reason shown) |
 | 2 (`no-binary`) + config `enabled: false`/absent | not installed, not requested | **SKIP** |
 | 2 (`no-binary`) + config `enabled: true` | **misconfigured** | **FAIL** → `./install.sh --with-delegation`, or set `delegate.enabled: false` |
+
+### Which interpreter parses the config (REQ-609 BR-8 / ADR-2)
+
+The ADLC config is parsed with PyYAML behind a strict schema
+([`tools/delegate/_machine_config.py`](../delegate/_machine_config.py)), and both
+consumers — the delegation opt-in and `forge_config.py` — read it through that one
+loader. So *which* interpreter runs `adlc` matters: the `adlc` shim written by the
+root `install.sh` `exec`s `~/.claude/delegate-venv/bin/python3` when that file is
+executable (the venv is where the installer pins PyYAML) and falls back to `python3`
+from `$PATH` otherwise, because the venv exists only after `--with-delegation`.
+`checks._delegate_interpreter()` makes the same choice for the two config probes,
+and the `pyyaml` check reports on that interpreter — no other one is being used.
+
+Where PyYAML is missing there, the loader returns `malformed / dependency-missing`:
+the delegation consumer refuses (fail-closed, REQ-609 BR-9) and `forge_config.py`
+proceeds *unconfigured* after the same single stderr line — the one carve-out, and
+only for that reason class. Every **file** defect (unreadable, undecodable,
+over-cap, a duplicated key anywhere in the document, a top level that is not a
+mapping) refuses for both consumers.
 
 ## `adlc agents render` (REQ-516)
 
@@ -164,10 +184,15 @@ forge backend is authed" step with `adlc doctor --checks forge`).
 
 ## `forge_config.py` (REQ-520)
 
-A pure-standard-library helper module (not a subcommand) that backs the forge
+A helper module (not a subcommand) whose *imports* are pure standard library — the
+YAML parse happens inside the loader, lazily, so importing this module never drags
+PyYAML into an import closure that has to work without it (LESSON-395) — backing the forge
 adapter (`partials/forge.sh`) and the `forge` doctor check. It reads the `forge:`
-block of the shared ADLC config (a minimal flat-YAML reader mirroring
-`tools/delegate/_common.parse_delegate_config`), resolves the provider with precedence
+block of the shared ADLC config through
+[`load_machine_config()`](../delegate/_machine_config.py) — the one loader, the same
+call `_common.parse_delegate_config` uses (REQ-609 BR-8); a malformed config is a
+non-zero exit naming the path and the reason class, not a silent `{}`. It resolves
+the provider with precedence
 per-project `.adlc/config.yml` > machine config > `auto` (origin-URL detection,
 fail-loud on an unrecognized host), and refuses a key-shaped `forge.auth` value
 (BR-6). CLI surface used by the partial and the check:
