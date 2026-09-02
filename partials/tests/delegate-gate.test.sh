@@ -134,6 +134,24 @@ check "probe '1 disabled-via-config' (inconsistent pair) -> not delegated" \
 check "probe '1 not-opted-in' (inconsistent pair) -> not delegated" \
   "1 not-opted-in yes" "$(run_gate "" "" "" "1 not-opted-in" 0)"
 
+echo "=== (b2) a failed probe is VISIBLE, not silent (pass-3 M9) ==="
+# Every probe failure collapses to not-opted-in, byte-identical to "never opted
+# in" — a stale ~/bin/adlc-read silently stopped every skill delegating. One
+# stderr line is the difference. Captured with stdout discarded.
+_notice=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+              -u ADLC_DISABLE_DELEGATE PATH="$BIN:$PATH" HOME="$FAKEHOME" \
+              STUB_CALLS="$SANDBOX/calls" STUB_OUT="" STUB_RC=3 \
+          sh -c '. "$1/delegate-gate.sh"; adlc_delegate_gate_check' _ "$PARTIALS" 2>&1 >/dev/null)
+case "$_notice" in
+  *"probe exited 3"*) pass "non-zero probe emits a stderr notice naming the exit code" ;;
+  *) fail "non-zero probe emits a stderr notice naming the exit code (got: '$_notice')" ;;
+esac
+_quiet=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+             -u ADLC_DISABLE_DELEGATE PATH="$BIN:$PATH" HOME="$FAKEHOME" \
+             STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
+         sh -c '. "$1/delegate-gate.sh"; adlc_delegate_gate_check' _ "$PARTIALS" 2>&1 >/dev/null)
+check "a healthy probe emits NO notice (benign path)" "" "$_quiet"
+
 echo "=== (c) no-binary: return 2 WITHOUT probing (REQ-603 BR-5) ==="
 
 _nobin=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED \
@@ -189,6 +207,13 @@ env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG 
     STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
   sh -c '. "$1/delegate-gate.sh"; adlc_delegate_gate_check' _ "$PARTIALS" >/dev/null 2>&1
 check "delegated path forks exactly once" "1" "$(wc -l < "$SANDBOX/calls" | tr -d " ")"
+
+echo "=== (h) AC-1 must also catch an arm hoisted through a temp variable (pass-3 m2) ==="
+# `_optin="${ADLC_DELEGATE_ENABLED:-}"; if [ "$_optin" = "1" ]` is the natural
+# shape of a re-added fast path, and a conditional-only grep is blind to it.
+_hoist=$(grep -nE 'ADLC_DELEGATE_ENABLED|MOONSHOT_API_KEY|KIMI_API_KEY' "$PARTIALS/delegate-gate.sh" \
+         | grep -vE '^[0-9]+:[[:space:]]*#' | grep -E '=|\$\{' | wc -l | tr -d " ")
+check "no non-comment line READS an authorizing variable at all" "0" "$_hoist"
 
 echo "=== (f) BR-1: the gate contains no AUTHORIZING arm (AC-1) ==="
 

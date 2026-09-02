@@ -87,7 +87,7 @@ adlc-read --print-gate     # -> "<enabled> <reason>", e.g. "1 ok" or "0 disabled
 ```
 
 `--print-gate` exits 0 on every path including disabled: it reports, it never
-refuses. `--print-enabled` is frozen and unchanged for callers that predate it.
+refuses. `--print-enabled` keeps its `1`/`0` shape for callers that predate it, but is **not** byte-frozen: it inherited the fail-closed unreadable-config rule (BR-4 D5) — a config that exists but cannot be read now yields `0` where it yielded `1`.
 
 The veto lives in both layers on purpose — a veto can only return *disabled*, so
 the copies agree or abstain but cannot contradict, provided Python recognises at
@@ -100,7 +100,7 @@ makes the gate fail closed: delegation is off, safely but silently, reported as
 ### Turning delegation off
 
 Writing `enabled: false` under `delegate:` turns delegation off, and outranks
-any legacy key in the environment. `ADLC_DISABLE_DELEGATE=1` forces it off from
+any legacy key in the environment. `export ADLC_DISABLE_DELEGATE=1` forces it off from
 the environment, overriding everything including `ADLC_DELEGATE_ENABLED=1`.
 
 An **absent** `enabled` key is not the same as `enabled: false`. Absence is a

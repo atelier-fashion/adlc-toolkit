@@ -219,7 +219,7 @@ PRs (`atelier-fashion/adlc-toolkit`).
   drives both layers over one input vector so widening either alone fails. Widening the
   shell veto alone is exactly how BUG-209 would return.
 
-  **Four named behaviour changes, all fail-closed.** None makes the gate grant delegation
+  **Five named behaviour changes, all fail-closed.** None makes the gate grant delegation
   it previously withheld:
 
   | input | before | after | rc |
@@ -228,6 +228,7 @@ PRs (`atelier-fashion/adlc-toolkit`).
   | key VALUE in `api_key_env` | `not-opted-in` | `disabled-via-config` | unchanged |
   | opt-in satisfied, key var unset | `ok` | `disabled-via-config` | **0 → 1** |
   | config exists but unreadable | `ok` | `disabled-via-config` | **0 → 1** |
+  | `--print-enabled`, unreadable config + legacy key | prints `1` | prints `0` | output |
 
   The first corrects a label that depended on an unrelated variable — the pre-REQ helper
   never read `enabled`, reporting `disabled-via-config` only when a config file existed

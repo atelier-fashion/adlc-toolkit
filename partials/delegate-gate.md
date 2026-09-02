@@ -37,6 +37,10 @@ The veto is deliberately implemented in **both** layers — and in exactly two p
 a veto can never return *enabled*: the copies agree or abstain, but cannot
 contradict — **provided Python recognises at least every input the shell does.**
 Both test the literal `"1"`; widening one alone reintroduces BUG-209, and
+**the variable must be `export`ed** — the shell copy sees an unexported shell variable, the
+Python copy runs in a child process and cannot, so an unexported `ADLC_DISABLE_DELEGATE=1`
+makes the gate report disabled while a direct CLI call still transmits. That is the one
+visibility axis on which shell is broader than Python, and no code can close it; and
 `tools/delegate/tests/test_cross_layer_veto.py` is what enforces it.
 
 **Upgrade note:** the gate and `adlc-read` must be upgraded together. An
@@ -82,7 +86,7 @@ their return codes, are:
 |--------|-----------------------------|-----------------------------------------|
 | 0      | `ok`                        | delegated — adlc-read available, enabled |
 | 1      | `disabled-via-env`          | `ADLC_DISABLE_DELEGATE=1` opted out      |
-| 1      | `disabled-via-config`       | `delegate.enabled: false` — an operator opt-out (BUG-205), **or** a config the real call refuses (key-in-config, LESSON-392) |
+| 1      | `disabled-via-config`       | the configured provider cannot be used: `delegate.enabled: false` (an operator opt-out, BUG-205); a key VALUE in `api_key_env` or the named key var unset (LESSON-392 — `--version` then shows `enabled: true` beside `gate: 0`, which is why both lines exist); or a config file that exists but cannot be read or understood (BR-14) |
 | 1      | `not-opted-in`              | no opt-in signal (fresh install, BR-11)  |
 | 2      | `no-binary`                 | `adlc-read` not resolvable (PATH or `$HOME/bin`) |
 

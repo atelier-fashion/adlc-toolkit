@@ -364,3 +364,24 @@ def test_gate_does_not_hold_a_private_veto_copy(clean_env, monkeypatch):
     monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
     monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
     assert _common.resolve_gate_verdict()[0] == _common.delegation_enabled()
+
+
+def test_malformed_config_outranks_env_opt_in(clean_env, monkeypatch):
+    """The _MALFORMED arm sits ABOVE ADLC_DELEGATE_ENABLED=1 — deliberately: a
+    config we were told to read and could not is not a state the env override
+    may lift. Pass 4 found this ordering had ZERO coverage: every malformed test
+    ran under a fixture that deletes the env var, and moving the arm below it
+    passed 610 tests. This sets both, on all three surfaces."""
+    f = clean_env / "cfg.yml"
+    f.write_text("delegate:\n  enabled: false\n", encoding="utf-8")
+    f.chmod(0o000)
+    try:
+        monkeypatch.setenv("ADLC_CONFIG", str(f))
+        monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+        monkeypatch.setenv("MOONSHOT_API_KEY", "sk-stale")
+        assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+        assert _common.delegation_enabled() is False
+        with pytest.raises(SystemExit):
+            _common.require_delegation_enabled("adlc-read")
+    finally:
+        f.chmod(0o644)

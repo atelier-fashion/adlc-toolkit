@@ -210,13 +210,47 @@ def test_partials_surface_declared_by_both_skills():
 
 
 def test_partials_drift_is_classified_stale_not_customizable():
-    """Benign-path counterpart (BR-13). A drift check that flags everything is
-    indistinguishable from one that works; a partial classified as
-    *customizable* would let a consumer silently shadow the gate. The skill must
-    keep partials on the no-customization posture."""
+    """Benign-path counterpart (BR-13). The skill must keep partials on the
+    stale-only posture — a partial classified as customizable would let a
+    consumer silently shadow the gate."""
     text = (REPO_ROOT / "template-drift" / "SKILL.md").read_text(encoding="utf-8")
-    # Assert the posture TOKEN, not a prose sentence: an exact-phrase match
-    # breaks on any rewording while proving nothing extra about behaviour.
-    assert "partials-posture" in text, (
-        "template-drift must keep partials on the stale-only posture "
-        "(partials-posture), not the customizable template-posture")
+    # The posture is DECLARED on the `partials` bullet inside the sync-surfaces
+    # marker block — the same block check.parse_sync_surface_block() reads — not
+    # in the Step 3 body, which never contains the token. Assert on that bullet
+    # alone. A whole-file substring check stayed green with the partials section
+    # deleted ("partials-posture" appears five times, including workflow-runtime
+    # prose); a guessed "Step 3" slice landed on this very list, where
+    # template-posture legitimately appears for OTHER surfaces.
+    lo = text.index("<!-- sync-surfaces: template-drift -->")
+    hi = text.index("<!-- /sync-surfaces -->", lo)
+    bullets = [l for l in text[lo:hi].splitlines() if l.lstrip().startswith("- `partials`")]
+    assert len(bullets) == 1, f"expected exactly one partials bullet in the marker block, got {bullets}"
+    assert "partials-posture" in bullets[0], bullets[0]
+    assert "template-posture" not in bullets[0], "partials must not be customizable: " + bullets[0]
+
+
+def test_stale_vendored_gate_differs_from_canonical():
+    """AC-18 as written: a vendored delegate-gate.sh predating REQ-603 must be
+    reportable as stale. /template-drift reports a partial as stale when it
+    DIFFERS from canonical, so the testable property is a non-empty diff between
+    the frozen pre-REQ fixture and the current file. Three passes asked for this
+    fixture; the earlier substitute asserted a prose token instead."""
+    import difflib
+    fixture = (REPO_ROOT / "partials" / "tests" / "fixtures" / "delegate-gate.pre-req-603.sh")
+    current = REPO_ROOT / "partials" / "delegate-gate.sh"
+    assert fixture.is_file(), "frozen pre-REQ gate fixture missing"
+    diff = list(difflib.unified_diff(
+        fixture.read_text(encoding="utf-8").splitlines(),
+        current.read_text(encoding="utf-8").splitlines(), lineterm=""))
+    assert diff, "pre-REQ gate is byte-identical to current — it could never be reported stale"
+    # And the removed authorizing arms are what changed: the fixture has them.
+    assert "_adlc_delegate_opted_in" in fixture.read_text(encoding="utf-8")
+    assert "_adlc_delegate_opted_in" not in current.read_text(encoding="utf-8")
+
+
+def test_current_gate_is_not_stale_against_itself():
+    """Benign path for AC-18: a drift check that flags everything is
+    indistinguishable from one that works."""
+    import difflib
+    current = (REPO_ROOT / "partials" / "delegate-gate.sh").read_text(encoding="utf-8")
+    assert not list(difflib.unified_diff(current.splitlines(), current.splitlines(), lineterm=""))

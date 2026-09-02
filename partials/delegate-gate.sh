@@ -128,6 +128,12 @@ adlc_delegate_gate_check() {
   fi
   _probe_rc=$?
   if [ "$_probe_rc" -ne 0 ]; then
+    # Fail closed, but SAY SO. Every probe failure — an adlc-read predating
+    # --print-gate, a wedged probe, a timeout expiry (124) — previously collapsed
+    # into `not-opted-in`, byte-identical to "this machine never opted in". A
+    # consumer with a stale ~/bin/adlc-read silently stopped delegating
+    # everywhere. One stderr line is the difference.
+    echo "delegate-gate: probe exited $_probe_rc — failing closed as not-opted-in (an adlc-read predating --print-gate, or a wedged probe; run adlc-read --version)" >&2
     export ADLC_DELEGATE_GATE_REASON="not-opted-in"
     unset _probe _probe_rc
     return 1

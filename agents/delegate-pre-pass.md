@@ -88,10 +88,12 @@ re-add a rationale claiming the gate skips the key.
 ```sh
 adlc_delegate_gate_check; gate=$?
 reason="$ADLC_DELEGATE_GATE_REASON"   # ok | no-binary | disabled-via-env
-# Probe that a key actually resolves without making a network call. The
-# default provider uses MOONSHOT_API_KEY; a custom provider names its own var
-# via config/ADLC_DELEGATE_API_KEY_ENV. `adlc-read --print-enabled` returns "1"
-# only when delegation is opted-in AND resolvable, so it doubles as a key probe.
+# REQ-603: the gate above already resolves the provider AND the key (ADR-3,
+# LESSON-392), so a passing gate proves a usable key resolves. `--print-enabled`
+# does NOT probe the key — it answers opt-in only — so this second call is a
+# belt-and-braces check that can only withhold, never grant. It is a SECOND fork
+# (the incoherent-pair risk BR-7 names); keep it only as long as that is
+# understood, and never re-add a rationale calling it a key probe.
 key_ok=$("${ADLC_READ_BIN:-adlc-read}" --print-enabled 2>/dev/null || echo 0)
 ```
 
