@@ -1,10 +1,10 @@
 ---
 id: REQ-609
 title: "A real config parser behind a strict schema, and shell resolution that never consults shell state"
-status: approved
+status: complete
 deployable: true
 created: 2026-09-01
-updated: 2026-09-01
+updated: 2026-09-02
 component: "tools/delegate"
 domain: "adlc"
 stack: [python, yaml, shell]
