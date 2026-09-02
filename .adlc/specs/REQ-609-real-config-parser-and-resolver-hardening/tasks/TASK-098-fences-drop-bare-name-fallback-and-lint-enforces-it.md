@@ -1,7 +1,7 @@
 ---
 id: TASK-098
 title: "Every call-site fence refuses an empty ADLC_READ_BIN; lint-skills rejects the bare-name fallback"
-status: draft
+status: complete
 parent: REQ-609
 created: 2026-09-01
 updated: 2026-09-01
@@ -42,6 +42,14 @@ Remove the second resolver from every fence (REQ BR-12). Each fence that invokes
 | AC-8 | test-case | `tools/lint-skills/tests/test_read_bin_fences.py::test_each_fence_refuses_when_empty` | yes |
 | AC-8 | test-case | `tools/lint-skills/tests/test_read_bin_fences.py::test_no_bare_name_fallback_outside_fixtures_and_specs` | yes |
 | BR-16 | structural-check | `tools/lint-skills`: cross-fence-fn | yes |
+
+## Implementation notes (recorded at completion)
+
+- `analyze/SKILL.md` has two call sites but one fence: Step 1.5's invocation is inline code in a prose bullet, guarded inline; the AC-8 grep covers it, the execution test pins seven executable fences.
+- The `delegate-pre-pass` agent's contract forbids a non-zero exit as a signal, so its two fences refuse into the degraded object (fence 1 sets `key_ok=0`; fence 2 mirrors the redaction-failure block, emits the sanctioned record, sets `read_bin_missing=1`). REQ AC-8 was amended to say so; the execution test expects exit 0 for that file and non-zero for every skill.
+- The linter walks `SKILL.md` only, so `read-bin-fallback` never sees `agents/*.md`; the agent's fences are covered by the execution test.
+- `test_read_bin_fences.py` carries a one-line waiver `AC8_TASK_099_RESIDUALS` for `partials/delegate-gate.md:131`, asserted as exact equality: TASK-099 must delete it when it rewrites that paragraph.
+- REQ AC-8's `grep -vE '^\./…'` is a no-op on BSD grep (paths print without `./`); the test normalises and applies the exclusions in Python.
 
 ## Technical Notes
 

@@ -439,6 +439,40 @@ def test_forge_adapter_ok_is_clean(tmp_path):
     assert fd_lines == [], result.stdout
 
 
+def test_read_bin_fallback_fires_and_passes(tmp_path):
+    """REQ-609 BR-12: a `${ADLC_READ_BIN:-…}` default inside a shell fence →
+    exactly one `read-bin-fallback` finding, on the fence line (the prose
+    mention above it is NOT flagged). The post-REQ-609 shape — gate sourced,
+    empty `ADLC_READ_BIN` refused, `"$ADLC_READ_BIN"` invoked — produces none.
+
+    Both fixtures are staged into ONE scan so the clean half is a positive
+    control for the flagged half: "the guarded shape reported nothing" only
+    means something when the same run demonstrably reports the shape the check
+    exists to catch (LESSON-602). The flagged fixture's default is deliberately
+    not the bare name, which also pins the match to the expansion operator
+    rather than to one default value.
+    """
+    root = _stage(tmp_path, "read-bin-fallback", "read-bin-guarded")
+    result = _run(root)
+    assert result.returncode > 0, (result.stdout, result.stderr)
+    rb_lines = [
+        ln for ln in result.stdout.splitlines() if " read-bin-fallback:" in ln
+    ]
+    assert len(rb_lines) == 1, result.stdout
+    fence_line = _line_of("read-bin-fallback", '--paths ./notes.md')
+    assert (
+        f"read-bin-fallback/SKILL.md:{fence_line}: read-bin-fallback:" in rb_lines[0]
+    ), rb_lines
+    assert "REQ-609 BR-12" in rb_lines[0]
+    # Positive-control half: the guarded fixture draws no finding from ANY check.
+    guarded = [
+        ln for ln in result.stdout.splitlines() if "read-bin-guarded/SKILL.md" in ln
+    ]
+    assert guarded == [], result.stdout
+    # And the scan was not vacuous — both fixtures were actually walked.
+    assert "scanned 2 SKILL.md file(s)" in result.stderr, result.stderr
+
+
 def test_cross_fence_fn_flagged(tmp_path):
     """REQ-436 ADR-7: `myfn` defined in fence A but invoked only from fence B
     (a different fenced block) → one `cross-fence-fn` finding naming `myfn`,

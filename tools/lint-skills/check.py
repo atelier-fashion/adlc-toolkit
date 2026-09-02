@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
-(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522).
+(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609).
 
 Run from the repo root:
 
@@ -66,6 +66,15 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    ``gh pr checks`` are exempt — a local read-only diff convenience and
    CI-status polling, the latter explicitly out of scope. Only shell fences
    are scanned, so prose / lesson mentions of ``gh pr`` are never flagged.
+8. ``check_read_bin_fallback`` — a ``${ADLC_READ_BIN:-…}`` default inside a
+   shell fence (REQ-609 BR-12). ``partials/delegate-gate.sh`` is the single
+   resolver and exports an absolute path or the empty string; a ``:-`` default
+   at the call site resolves ``adlc-read`` a second time by a weaker rule, and
+   with the bare name it hands the corpus to whatever the shell resolves — the
+   planted-binary class BUG-209 recorded. The correct shape is ``"$ADLC_READ_BIN"``
+   plus an ``[ -n "$ADLC_READ_BIN" ]`` refusal in the same fence. Fixed-string
+   match on the expansion operator, so any default is flagged; fences only, so
+   prose describing the retired shape is not.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
 deferred follow-up; LESSON-019 #2): the ``SKIP_DIR_PARTS`` membership test is
@@ -202,6 +211,19 @@ FN_CALL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\b")
 FORGE_DIRECT_GH_RE = re.compile(
     r"\bgh\s+pr\s+(create|ready|edit|view|list|merge|comment)\b"
 )
+
+# REQ-609 BR-12: a SECOND resolution of `adlc-read` at a call site, written as a
+# `${ADLC_READ_BIN:-<default>}` default. `partials/delegate-gate.sh` is the sole
+# resolver; it walks `$PATH` itself and exports an absolute path or the empty
+# string, and nothing else (ADR-3). A `:-` default at the call site re-answers
+# the question the gate already answered, by a weaker rule — the bare-name form
+# hands the corpus to whatever the shell resolves, which is exactly the planted-
+# binary class BUG-209 recorded. The correct shape is `"$ADLC_READ_BIN"` plus an
+# `[ -n "$ADLC_READ_BIN" ]` refusal in the same fence. Fixed-string match on the
+# parameter-expansion operator, so ANY default is flagged, not just the bare
+# name; same structural posture as `forge-direct-gh` (LESSON-012 — prose in a
+# skill is the honor system, only a check keeps this from rotting back).
+READ_BIN_FALLBACK_LITERAL = "ADLC_READ_BIN:-"
 
 # REQ-525 (AC4 / BR-4): the canonical five-surface vocabulary (the SyncSurface
 # enum). Single source of truth that both the parity check below and its tests
@@ -728,6 +750,38 @@ def check_forge_direct_gh(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
+    """REQ-609 BR-12: flag a ``${ADLC_READ_BIN:-…}`` default inside a shell fence.
+
+    ``partials/delegate-gate.sh`` is the single resolver for ``adlc-read``: it
+    walks ``$PATH`` itself (never ``command -v``, so no function, alias, or hash
+    entry can answer for it) and exports an absolute path or the empty string.
+    A ``:-`` default at the call site is a second resolution by a weaker rule —
+    with the bare name it hands the corpus to whatever the shell resolves, the
+    planted-binary class BUG-209 recorded. An empty ``ADLC_READ_BIN`` where the
+    corpus is handed over is a hard error, not a fallback.
+
+    Fixed-string match on the expansion operator (``ADLC_READ_BIN:-``) rather
+    than on one default value, so re-introducing the pattern under a different
+    default is caught too. Only shell fences are scanned, so prose that
+    *describes* the retired shape (a lesson, a CHANGELOG entry quoted in a
+    skill) is never flagged — the same posture as ``check_forge_direct_gh``.
+    """
+    findings: list[Finding] = []
+    for _lang, _idx, _start, body in _iter_fences(text):
+        for lineno, line in body:
+            if READ_BIN_FALLBACK_LITERAL in line:
+                findings.append(
+                    Finding(
+                        rel, lineno, "read-bin-fallback",
+                        "fence resolves adlc-read a second time via a bare-name "
+                        "default; source the gate and refuse on empty "
+                        "ADLC_READ_BIN (REQ-609 BR-12)",
+                    )
+                )
+    return findings
+
+
 def _safe_label(skill_path: Path, root: Path) -> str:
     """Non-leaking finding label for ``skill_path``.
 
@@ -1071,6 +1125,7 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_cross_fence_fn(text, rel))
         findings.extend(check_cross_fence_var(text, rel))
         findings.extend(check_forge_direct_gh(text, rel))
+        findings.extend(check_read_bin_fallback(text, rel))
     # Per-root (not per-SKILL.md): agent model: drift vs the config render (BR-5).
     findings.extend(check_agent_model_drift(root))
     # Per-root (REQ-525 AC4): /init copy list vs /template-drift checked list parity.

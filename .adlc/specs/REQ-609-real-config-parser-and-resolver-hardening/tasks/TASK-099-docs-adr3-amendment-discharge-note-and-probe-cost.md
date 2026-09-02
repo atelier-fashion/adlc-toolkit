@@ -15,7 +15,7 @@ Bring every document this REQ owns to the landed behaviour (REQ BR-14, BR-15), a
 ## Files to Create/Modify
 
 - `tools/delegate/README.md` — the `delegate:` schema (four keys, `enabled` bool only, unknown keys refuse), the 64 KiB cap, relative `$PATH` entries rejected, `--version`'s rc-file read, the PyYAML floor and the `dependency-missing` behaviour
-- `partials/delegate-gate.md` — resolver contract: absolute path or empty, never a bare name; the fixed `timeout` list; the call-site refusal shape
+- `partials/delegate-gate.md` — resolver contract: absolute path or empty, never a bare name; the fixed `timeout` list; the call-site refusal shape (skills exit non-zero; the pre-pass agent degrades — see TASK-098's notes); line ~131 still says `"${ADLC_READ_BIN:-adlc-read}"` and must go
 - `CHANGELOG.md` — REQ-609 entry naming the behaviour changes and the parity divergences registered in TASK-095
 - `.adlc/context/architecture.md` — the paragraph proposed in this REQ's architecture
 - `.adlc/context/conventions.md` — delegation pattern without the bare-name fallback; mention `read-bin-fallback`
@@ -24,6 +24,7 @@ Bring every document this REQ owns to the landed behaviour (REQ BR-14, BR-15), a
 - `.adlc/specs/REQ-609-real-config-parser-and-resolver-hardening/requirement.md` — Assumptions: the measured probe cost before/after (median of 20 runs of `adlc-read --print-gate`)
 - `tools/delegate/tests/test_unparseable_config_reports_shipped_defaults.py` or wherever `test_unparseable_config_reports_shipped_defaults` lives — drop the "fail-SOFT is deliberate" header, keep the test with its new expectation
 - `tools/delegate/tests/test_req609_docs.py` — new: the doc-contract cases under Verification
+- `tools/lint-skills/tests/test_read_bin_fences.py` — delete the `AC8_TASK_099_RESIDUALS` waiver entry for `partials/delegate-gate.md:131` once that paragraph is rewritten (the test asserts exact equality and will go red until you do)
 - `tools/delegate/claude-md-routing.txt` + `.sha256` — only if the routing text changes
 
 ## Acceptance Criteria

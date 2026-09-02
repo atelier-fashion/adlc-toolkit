@@ -94,7 +94,16 @@ reason="$ADLC_DELEGATE_GATE_REASON"   # ok | no-binary | disabled-via-env
 # belt-and-braces check that can only withhold, never grant. It is a SECOND fork
 # (the incoherent-pair risk BR-7 names); keep it only as long as that is
 # understood, and never re-add a rationale calling it a key probe.
-key_ok=$("${ADLC_READ_BIN:-adlc-read}" --print-enabled 2>/dev/null || echo 0)
+# REQ-609 BR-12: no bare-name fallback. An empty ADLC_READ_BIN cannot happen after a
+# gate rc of 0 (the gate reports no-binary first), so this is a defensive refusal —
+# and this agent never exits non-zero to signal a problem, so it degrades: key_ok=0
+# routes to the "do NOT call the delegate" branch below.
+if [ -n "$ADLC_READ_BIN" ]; then
+  key_ok=$("$ADLC_READ_BIN" --print-enabled 2>/dev/null || echo 0)
+else
+  echo "delegate-pre-pass: ADLC_READ_BIN is empty — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation)" >&2
+  key_ok=0
+fi
 ```
 
 **If `gate` ≠ 0 OR `key_ok` ≠ "1"**, do NOT call the delegate. Set the
@@ -188,8 +197,22 @@ elapsed time around the call so `duration_ms` is real on the success path:
 
 ```sh
 start_ms=$(date +%s%3N 2>/dev/null || echo "")
-"${ADLC_READ_BIN:-adlc-read}" --no-warn --paths "$TMP" --question "<5-dimension request below>"; delegate_exit=$?
+case "$start_ms" in *[!0-9]*|"") start_ms="" ;; esac   # BSD date prints a literal N for %N; keep only digits or empty
+if [ -n "$ADLC_READ_BIN" ]; then
+  "$ADLC_READ_BIN" --no-warn --paths "$TMP" --question "<5-dimension request below>"; delegate_exit=$?
+else
+  # REQ-609 BR-12: no bare-name fallback, and never a non-zero exit from this agent.
+  # Unreachable after a gate rc of 0; kept as a defensive refusal that mirrors the
+  # redaction-failure block above: nothing is transmitted, the sanctioned
+  # gate=pass/mode=fallback/reason=api-error record is emitted, and the degraded
+  # object is returned with invoked:false, exit:-1.
+  echo "delegate-pre-pass: ADLC_READ_BIN is empty — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation)" >&2
+  gate_word=pass; mode=fallback; reason=api-error; duration_ms=-
+  "$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
+  delegate_exit=-1; read_bin_missing=1
+fi
 end_ms=$(date +%s%3N 2>/dev/null || echo "")
+case "$end_ms" in *[!0-9]*|"") end_ms="" ;; esac
 if [ -n "$start_ms" ] && [ -n "$end_ms" ]; then duration_ms=$((end_ms - start_ms)); else duration_ms=-; fi
 ```
 
@@ -204,6 +227,8 @@ dimensions, each citing a file and line range from the diff:
 > Output 5 labeled blocks (one per dimension, in that order). Reply `NONE` on its
 > own line for any dimension with no candidates. Cite only files present in the
 > diff. Total 1000 words max.
+
+**If `read_bin_missing` is set**: the record is already emitted; RETURN the degraded object with `invoked:false`, `exit:-1`, the TRUSTED `changedFiles`, `candidates: []`, and STOP.
 
 **If `delegate_exit` is non-zero**: `adlc-read` was really invoked but the API failed.
 Set the step-6 vars and emit the fallback record, then RETURN the degraded object

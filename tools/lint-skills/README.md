@@ -93,6 +93,30 @@ a general markdown linter and NOT a general shell linter.
    assign-and-read within the SAME fence is legitimate. The sanctioned carriers
    `$flag` (the telemetry flag-path) and the id-allocation `*_NUM` counters
    (allocate-then-recheck flow, REQ-518 domain) are exempt by name.
+8. **Read-bin fallback (`read-bin-fallback`)** — a `${ADLC_READ_BIN:-…}`
+   default inside a shell fence is a finding (REQ-609 BR-12).
+   `partials/delegate-gate.sh` is the *single* resolver for `adlc-read`: it
+   walks `$PATH` itself — never `command -v`, so no shell function, alias, or
+   hash-table entry can answer for it — and exports an absolute path or the
+   empty string, and nothing else. A `:-` default at the call site resolves the
+   binary a second time by a weaker rule; with the bare name it hands the
+   corpus to whatever the shell resolves, which is the planted-binary class
+   BUG-209 recorded. An empty `ADLC_READ_BIN` at the point the corpus is handed
+   over is a hard error, not a fallback. The correct shape is:
+
+   ```sh
+   . .adlc/partials/delegate-gate.sh 2>/dev/null || . ~/.claude/skills/partials/delegate-gate.sh
+   [ -n "$ADLC_READ_BIN" ] || { echo "/<skill>: ADLC_READ_BIN is empty — refusing to hand over the corpus (re-run install.sh --with-delegation)" >&2; exit 1; }
+   "$ADLC_READ_BIN" --no-warn --paths … --question "…"
+   ```
+
+   Where a fence marks telemetry, the refusal goes **before**
+   `skill-flag.sh mark "$flag" invoked 1`, so a refusal is recorded as *not*
+   invoked. The match is a fixed string on the expansion operator
+   (`ADLC_READ_BIN:-`), not on one default value, so re-introducing the pattern
+   under a different default is caught too. Only shell fences are scanned, so
+   prose describing the retired shape is never flagged — the same structural
+   posture as `forge-direct-gh` (LESSON-012).
 
 ## Usage
 
