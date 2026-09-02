@@ -140,7 +140,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 For each touched repo (just the current repo in single-repo mode; each entry in `touched_repos:` in cross-repo mode):
 
 1. Push the fix branch: `git -C <worktree> push -u origin fix/bug-xxx-slug`
-2. Create the PR with `adlc_forge_pr_create` (source `partials/forge.sh` in the same fence; run from inside the worktree, or pass `-R <owner/repo>`). All PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1). In cross-repo mode, create the **primary** repo's PR **last** so its body can link every sibling.
+2. Create the PR with `adlc_forge_pr_create` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; run from inside the worktree, or pass `-R <owner/repo>`). All PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1). In cross-repo mode, create the **primary** repo's PR **last** so its body can link every sibling.
    - **Title**: `fix(BUG-xxx): short description` — when cross-repo, scope to the repo (e.g., `fix(api): null deref in user serializer [BUG-042]`).
    - **Body**:
      ```

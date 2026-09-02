@@ -7,7 +7,7 @@ functions instead of shelling out to `gh pr` directly. A `lint-skills` check
 
 ## Call pattern
 
-Source the partial with the two-level fallback and call the op **in the same
+Source the partial with the guarded two-level spelling (conventions.md "Bash in skills") and call the op **in the same
 fenced block** (conventions.md cross-fence rule):
 
 ```sh

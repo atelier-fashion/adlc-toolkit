@@ -806,7 +806,8 @@ def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
     * the ``&&``/``||`` chain, which reads as guarded and double-sources when
       the repo-local copy's final status is non-zero;
     * a guard whose ``<name>`` does not match what it sources — the assertion
-      that `CANONICAL_SOURCE_RE`'s backreference is load-bearing.
+      that `CANONICAL_SOURCE_RE`'s backreference is load-bearing;
+    * the bash-only ``source`` spelling of the retired line.
 
     The two retired lines match BOTH of the check's rules; the exact count is
     what proves the per-line dedupe (one finding, not two).
@@ -857,6 +858,12 @@ def test_unguarded_source_flags_prose_occurrence(tmp_path):
         f"unguarded-source-prose/SKILL.md:{prose_line}: unguarded-source:"
     ), lines
     assert "conventions.md 'Bash in skills'" in lines[0], lines
+    # The aligned variant is the reason RETIRED_SOURCE_RE is whitespace-tolerant
+    # rather than a fixed string: locate it, do not merely count it.
+    aligned_line = _line_of("unguarded-source-prose", "2>/dev/null  ||  . ~/")
+    assert lines[1].startswith(
+        f"unguarded-source-prose/SKILL.md:{aligned_line}: unguarded-source:"
+    ), lines
 
 
 def test_guarded_source_ok_is_clean(tmp_path):
@@ -1306,3 +1313,22 @@ def test_unguarded_source_walks_partials_in_both_layouts_without_counting_them(t
     assert "bad.sh:2:" not in out  # the header comment is not a source
     assert "scanned 1 SKILL.md file(s)" in result.stderr
     assert result.returncode == 4  # 2 findings x 2 copies; partials never inflate `scanned`
+
+
+def test_unguarded_source_walks_partials_companion_docs(tmp_path):
+    """REQ-610 (review): `partials/*.md` — the companion docs whose copy-paste
+    fences are where a call-site spelling ORIGINATES — are walked by
+    `unguarded-source` (via find_phase_files) and do not count as SKILL.md.
+    """
+    _stage(tmp_path, "clean")
+    (tmp_path / "partials").mkdir()
+    doc = (
+        "# forge.md\n\nSource it like this:\n\n```sh\n"
+        ". .adlc/partials/forge.sh 2>/dev/null || . ~/.claude/skills/partials/forge.sh\n"
+        "adlc_forge_pr_view 1\n```\n"
+    )
+    (tmp_path / "partials" / "forge.md").write_text(doc, encoding="utf-8")
+    result = _run(tmp_path)
+    assert "partials/forge.md:6: unguarded-source" in result.stdout, result.stdout
+    assert "scanned 1 SKILL.md file(s)" in result.stderr
+    assert result.returncode == 1

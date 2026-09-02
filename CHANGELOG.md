@@ -389,7 +389,10 @@ PRs (`atelier-fashion/adlc-toolkit`).
   **Re-syncing.** Six partials changed — `attribution.sh`, `emit-step-telemetry.sh`,
   `forge.sh`, `id-alloc.sh`, `id-recheck.sh`, `trial-merge.sh` — so `/template-drift` will list
   those vendored `.adlc/partials/*.sh` as `stale` (`delegate-gate.sh`, `delegate-tools-path.sh`,
-  `ethos-include.sh`, `intake.sh` are untouched). That is expected, not a regression. Re-sync
+  `ethos-include.sh`, `intake.sh` are untouched). That is expected, not a regression. Note that
+  on a root which also carries `tools/lint-skills` (the toolkit repo, or a consumer that vendored
+  the linter), `check.sh` now walks `.adlc/partials/*.sh` and goes **red** on the stale copies
+  until the re-sync lands. Re-sync
   **per file and byte-for-byte** rather than trusting the summary — a partially-synced surface
   looks healthy (LESSON-465). **Two carry executable fixes** and are the files where staying
   stale still behaves differently under `sh`: `emit-step-telemetry.sh` (its live self-source of

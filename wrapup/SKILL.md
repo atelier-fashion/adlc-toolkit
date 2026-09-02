@@ -51,7 +51,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
    - Create a commit with message: `feat(REQ-xxx): <summary of changes>`
    - Include `Co-Authored-By: Claude <noreply@anthropic.com>`
 4. Push the branch to remote with `git -C <worktree> push -u origin <branch>`
-5. If no PR exists for this branch, create one using `adlc_forge_pr_create` (source `partials/forge.sh` in the same fence; from inside the worktree, or with `-R <owner/repo>`) with a summary of what shipped — PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1)
+5. If no PR exists for this branch, create one using `adlc_forge_pr_create` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; from inside the worktree, or with `-R <owner/repo>`) with a summary of what shipped — PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1)
 6. If CI checks exist, monitor the pipeline with `gh run watch` and report the result
 7. **Rebase onto current main before merging** — in a sprint or long-running pipeline, upstream `main` may have advanced since the branch was cut. Run `git -C <worktree> fetch origin main` and check whether the branch is behind: `git -C <worktree> merge-base --is-ancestor origin/main HEAD`. If that command fails (exit 1), the branch is behind main and must be updated:
    - `git -C <worktree> rebase origin/main`

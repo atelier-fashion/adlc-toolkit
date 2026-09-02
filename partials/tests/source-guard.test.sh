@@ -24,11 +24,12 @@
 #   vacuous_extraction_fails — a zero-line extraction is a FAILURE, not a silent
 #       green run; a rotted regex must not pass                             (BR-12)
 #
-# Run under every shell:
-#   bash partials/tests/source-guard.test.sh
-#   zsh  partials/tests/source-guard.test.sh
-#   sh   partials/tests/source-guard.test.sh
-# or via the wrapper:  sh partials/tests/run.sh
+# The shell UNDER TEST is $ADLC_TEST_SHELL (default /bin/sh) — the shell that
+# runs this harness file is not the one the corpus lines are executed with. So:
+#   ADLC_TEST_SHELL=bash    sh partials/tests/source-guard.test.sh
+#   ADLC_TEST_SHELL=zsh     sh partials/tests/source-guard.test.sh
+#   ADLC_TEST_SHELL=/bin/sh sh partials/tests/source-guard.test.sh
+# or via the wrapper, which sets it for each shell:  sh partials/tests/run.sh
 #
 # Exits 0 iff every case passes; prints one PASS:/FAIL: line per case.
 
@@ -61,11 +62,30 @@ ERR="$SANDBOX/err"
 # Corpus extraction (ADR-5). Split-free: the lines are carried through files
 # and `while IFS= read -r`, never through an unquoted expansion (LESSON-329).
 # ===========================================================================
-extract() { # prints distinct sourcing lines, leading whitespace stripped
-  { cat "$ROOT"/*/SKILL.md "$ROOT"/agents/*.md "$ROOT"/proceed/phase*.md 2>/dev/null
-    grep -hv '^[[:space:]]*#' "$ROOT"/partials/*.sh 2>/dev/null; } \
-  | sed 's/^[[:space:]]*//' \
-  | grep -E '^(\. |source |\[ -f |if \[ -f ).*partials/[a-z0-9-]+\.sh' | sort -u
+# A line is a sourcing line when it starts with one of these constructs and
+# names a partial. `else`/`elif` are statement positions too (a `. x` after
+# `else` is as live as one after `then`); the name class admits `_` and
+# uppercase so an unconventionally named partial cannot slip past.
+SRC_LINE_RE='^(\. |source |\[ -f |if \[ -f |elif \[ -f |else \. ).*partials/[A-Za-z0-9_-]+\.sh'
+
+# File lists come from `find`, never from globs: zsh aborts the WHOLE command
+# on one unmatched glob (LESSON-335 #3), so a single missing family would have
+# silently emptied the corpus — and, in case (e), an empty corpus yields the
+# expected zero hits. Each leg is its own function so the partials leg can be
+# proven to contribute independently of the markdown leg.
+extract_markdown_leg() { # extract_markdown_leg <root>
+  { find "$1" -maxdepth 2 -name SKILL.md -type f 2>/dev/null
+    find "$1/agents" -maxdepth 1 -name '*.md' -type f 2>/dev/null
+    find "$1/proceed" -maxdepth 1 -name 'phase*.md' -type f 2>/dev/null; } \
+  | sort | while IFS= read -r f; do cat "$f"; done
+}
+extract_partials_leg() { # extract_partials_leg <root> — non-comment lines of partials/*.sh
+  find "$1/partials" -maxdepth 1 -name '*.sh' -type f 2>/dev/null | sort \
+  | while IFS= read -r f; do grep -hv '^[[:space:]]*#' "$f"; done
+}
+extract() { # extract <root> — distinct sourcing lines, leading whitespace stripped
+  { extract_markdown_leg "$1"; extract_partials_leg "$1"; } \
+  | sed 's/^[[:space:]]*//' | grep -E "$SRC_LINE_RE" | sort -u
 }
 
 # Execution allowlist (REQ-610 security review). Extraction is a loose prefix
@@ -78,7 +98,7 @@ extract() { # prints distinct sourcing lines, leading whitespace stripped
 # token here, so it is REFUSED with a FAIL and never executed. The lint's
 # unguarded-source rule is deliberately NOT the gate for this — it only sees
 # dot-sources of convention paths, not arbitrary trailing commands.
-TOKEN_RE='^(if|then|else|fi|\.|source|sh|\[|-f|\]|\];|;|\|\||&&|2>/dev/null|(\.adlc/partials/|~/\.claude/skills/partials/)[a-z0-9-]+\.sh;?)$'
+TOKEN_RE='^(if|then|elif|else|fi|\.|source|sh|\[|-f|\]|\];|;|\|\||&&|2>/dev/null|(\.adlc/partials/|~/\.claude/skills/partials/)[A-Za-z0-9_-]+\.sh;?)$'
 conforms() { # conforms <line> — 0 iff every token is allowlisted
   if printf '%s\n' "$1" | tr '\t' ' ' | tr -s ' ' '\n' | grep -vqE "$TOKEN_RE"; then
     return 1
@@ -88,7 +108,7 @@ conforms() { # conforms <line> — 0 iff every token is allowlisted
 
 names_of() { # names_of <line> — the distinct <name>s the line references
   printf '%s\n' "$1" \
-    | grep -oE 'partials/[a-z0-9-]+\.sh' \
+    | grep -oE 'partials/[A-Za-z0-9_-]+\.sh' \
     | sed 's#partials/##; s#\.sh$##' | sort -u
 }
 
@@ -194,7 +214,7 @@ case_d_macro_form_continues() { # the `!`-macro executable form — benign contr
 # 1. Extraction, and the vacuous-run guard (BR-12 / REQ-595 BR-5 posture)
 # ===========================================================================
 LINES_FILE="$SANDBOX/lines.txt"
-extract > "$LINES_FILE"
+extract "$ROOT" > "$LINES_FILE"
 NLINES=$(grep -c . "$LINES_FILE")
 
 if [ "$NLINES" -eq 0 ]; then
@@ -206,18 +226,29 @@ else
 fi
 
 # The self-source inside partials/*.sh is the reason the extraction reads more than
-# the fence-bearing markdown; assert the partials/*.sh leg of the walk really does
-# contribute (AC of TASK-100). The live line in emit-step-telemetry.sh sources
+# the fence-bearing markdown. The live line in emit-step-telemetry.sh sources
 # delegate-tools-path.sh, and the SKILL.md fences carry byte-identical text, so a
 # grep over the merged, deduplicated set would pass even if the partials leg were
-# dropped. Run that leg alone and look for the line it is known to contain.
-PARTIAL_LEG=$(grep -hv '^[[:space:]]*#' "$ROOT"/partials/emit-step-telemetry.sh 2>/dev/null \
-  | sed 's/^[[:space:]]*//' \
-  | grep -E '^(\. |if \[ -f ).*partials/delegate-tools-path\.sh' | head -1)
-if [ -n "$PARTIAL_LEG" ] && grep -qxF "$PARTIAL_LEG" "$LINES_FILE"; then
-  pass "emit_step_telemetry_self_source_extracted: partials/*.sh leg contributed '$PARTIAL_LEG'"
+# dropped (the correctness review proved it by deleting the leg). Two checks that
+# the merged set cannot satisfy:
+#   1. the partials leg ALONE, run through the same filter, yields that line;
+#   2. provenance — extract() over a synthetic root holding ONLY a partials/*.sh
+#      returns the distinct line planted there and not its comment.
+PARTIAL_LEG=$(extract_partials_leg "$ROOT" | sed 's/^[[:space:]]*//' | grep -E "$SRC_LINE_RE" \
+  | grep -F 'partials/delegate-tools-path.sh' | head -1)
+if [ -n "$PARTIAL_LEG" ]; then
+  pass "emit_step_telemetry_self_source_extracted: partials/*.sh leg alone yields '$PARTIAL_LEG'"
 else
-  fail "emit_step_telemetry_self_source_extracted: the delegate-tools-path self-source in emit-step-telemetry.sh was not extracted (leg='$PARTIAL_LEG')"
+  fail "emit_step_telemetry_self_source_extracted: the partials/*.sh leg alone did not yield the delegate-tools-path self-source"
+fi
+PROV="$SANDBOX/prov"; mkdir -p "$PROV/partials"
+printf '#!/bin/sh\n# comment: . .adlc/partials/not-a-source.sh\nif [ -f .adlc/partials/provenance-probe.sh ]; then . .adlc/partials/provenance-probe.sh; else . ~/.claude/skills/partials/provenance-probe.sh; fi\n' > "$PROV/partials/probe.sh"
+prov_out=$(extract "$PROV")
+if printf '%s\n' "$prov_out" | grep -qF 'partials/provenance-probe.sh' \
+   && ! printf '%s\n' "$prov_out" | grep -qF 'not-a-source'; then
+  pass "partials_leg_provenance: extract() over a partials-only root returns the planted line and skips its comment"
+else
+  fail "partials_leg_provenance: extract() over a partials-only root returned '$prov_out'"
 fi
 
 # The allowlist itself is tested in both directions before anything runs: a
@@ -261,9 +292,21 @@ case_d_macro_form_continues
 # ===========================================================================
 RETIRED='2>/dev/null || . ~/.claude/skills/partials/'
 CANON_SPELLING='if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi'
-hits=$( { cat "$ROOT"/*/SKILL.md "$ROOT"/agents/*.md "$ROOT"/partials/*.sh "$ROOT"/partials/*.md \
-           "$ROOT"/proceed/*.md "$ROOT"/templates/*.md "$ROOT"/workflows/* "$ROOT"/README.md \
-           "$ROOT"/.adlc/context/*.md "$ROOT"/tools/lint-skills/README.md 2>/dev/null; } | grep -cF "$RETIRED")
+surface_files() { # the distribution surface — find, not globs (zsh unmatched-glob abort)
+  { find "$ROOT" -maxdepth 2 -name SKILL.md -type f
+    find "$ROOT/agents" "$ROOT/partials" "$ROOT/proceed" "$ROOT/templates" "$ROOT/workflows" \
+         "$ROOT/.adlc/context" -maxdepth 1 -type f
+    printf '%s\n' "$ROOT/README.md" "$ROOT/tools/lint-skills/README.md"; } 2>/dev/null
+}
+# Positive control first: an expected value of zero hits is only evidence when
+# the corpus it was counted over is demonstrably non-empty.
+surface_lines=$(surface_files | while IFS= read -r f; do cat "$f" 2>/dev/null; done | wc -l | tr -d ' ')
+if [ "${surface_lines:-0}" -ge 5000 ]; then
+  pass "case_e_surface_nonvacuous: distribution surface is $surface_lines lines (floor 5000)"
+else
+  fail "case_e_surface_nonvacuous: distribution surface is only ${surface_lines:-0} lines — a family went missing"
+fi
+hits=$(surface_files | while IFS= read -r f; do grep -cF "$RETIRED" "$f" 2>/dev/null || true; done | awk '{s+=$1} END{print s+0}')
 check "case_e_retired_literal_absent_from_distribution: '$RETIRED' hits on the distribution surface" "0" "$hits"
 if grep -qF "$CANON_SPELLING" "$ROOT/.adlc/context/conventions.md"; then
   pass "case_e_conventions_carry_canonical_spelling: conventions.md teaches the guarded form"
@@ -317,9 +360,9 @@ case_f_architect_step5_under_sh
 #    self-sufficient. Run from $ROOT so the labels are repo-relative without
 #    interpolating a path into a regex.
 # ===========================================================================
-unguarded=$( cd "$ROOT" && grep -nE '(^|[;&|{]|then|do)[[:space:]]*(\.|source)[[:space:]]+[^[:space:]]*partials/[a-z0-9-]+\.sh' partials/*.sh 2>/dev/null \
+unguarded=$( cd "$ROOT" && grep -nHE '(^|[;&|{(]|then|else|elif|do)[[:space:]]*(\.|source)[[:space:]]+[^[:space:]]*partials/[A-Za-z0-9_-]+\.sh' partials/*.sh 2>/dev/null \
   | grep -v ':[0-9][0-9]*:[[:space:]]*#' \
-  | grep -vE '\[ -f [^]]*partials/[a-z0-9-]+\.sh \].*(\.|source) [^[:space:]]*partials/' )
+  | grep -vE '\[ -f [^]]*partials/[A-Za-z0-9_-]+\.sh \].*(\.|source) [^[:space:]]*partials/' )
 if [ -z "$unguarded" ]; then
   pass "case_g_partials_have_no_unguarded_dot_source: every partial-to-partial source is [ -f ]-guarded"
 else

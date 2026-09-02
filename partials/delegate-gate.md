@@ -9,7 +9,7 @@ bodies stay inline at the call site.
 
 ## Sourcing the partial
 
-Use a two-level fallback so the macro works in consumer projects that
+Use the guarded two-level source (conventions.md "Bash in skills") so the macro works in consumer projects that
 haven't re-run `/init` since the toolkit shipped the partial:
 
 ```sh

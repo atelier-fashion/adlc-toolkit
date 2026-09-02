@@ -186,8 +186,9 @@ a general markdown linter and NOT a general shell linter.
    `<name>`s must agree — a line that guards `forge.sh` and then sources
    `intake.sh` is a finding, not a pass. A trailing `#` comment is allowed.
 
-   This check walks four file families — `*/SKILL.md`, `agents/*.md`,
-   `proceed/phase*.md`, and the partials themselves (`partials/*.sh` and a
+   This check walks five file families — `*/SKILL.md`, `agents/*.md`,
+   `proceed/phase*.md`, the partials' companion docs `partials/*.md` (whose
+   copy-paste fences are where a call-site spelling originates), and the partials themselves (`partials/*.sh` and a
    consumer's `.adlc/partials/*.sh`, where every non-comment line is executable,
    so the whole file is treated as one fence). The last family was added after
    `id-recheck.sh` turned out to carry a three-level `. A || . B || . C` chain on

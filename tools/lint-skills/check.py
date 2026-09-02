@@ -205,7 +205,7 @@ POSIX_LOCAL_RE = re.compile(r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*local\s+\S")
 # that guards `forge.sh` and then sources `intake.sh` is a finding, not a pass.
 # A trailing shell comment is allowed; nothing else may follow on the line.
 CANONICAL_SOURCE_RE = re.compile(
-    r"^\s*if \[ -f \.adlc/partials/([a-z0-9-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
+    r"^\s*if \[ -f \.adlc/partials/([A-Za-z0-9_-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
     r"else \. ~/\.claude/skills/partials/\1\.sh; fi\s*(#.*)?$"
 )
 # A statement-position `.` (or bash-only `source`, which dash lacks entirely —
@@ -220,10 +220,13 @@ CANONICAL_SOURCE_RE = re.compile(
 # at a `~/.claude/skills/partials/<their-name>.sh` that does not exist. `\b` is
 # fine inside Python `re`; the LESSON-013 ban is for BSD `grep -E`. The
 # `sh <file>` executable-macro form is NOT matched: its command is `sh`.
+# Statement positions include `else`/`elif` and `(` (a subshell), matching
+# READ_BIN_COMMAND_POSITION_RE; the name class admits `_` and uppercase so a
+# partial named outside the current lowercase-hyphen convention cannot slip past.
 DOT_SOURCE_PARTIAL_RE = re.compile(
-    r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*(?:\.|source)\s+"
+    r"(?:^|;|&&|\|\||\bthen\b|\belse\b|\belif\b|\bdo\b|\{|\()\s*(?:\.|source)\s+"
     r"[\"']?(?:\.adlc/partials/|~/\.claude/skills/partials/|\$\{?HOME\}?/\.claude/skills/partials/)"
-    r"[a-z0-9-]+\.sh"
+    r"[A-Za-z0-9_-]+\.sh"
 )
 # The retired two-level spelling, flagged ANYWHERE in a walked file (ADR-2 rule
 # 2) — prose included: a sentence instructing the agent to type the line is as
@@ -232,7 +235,9 @@ DOT_SOURCE_PARTIAL_RE = re.compile(
 # carry an aligned variant (`delegate-pre-pass.md`). Deliberately excludes the
 # benign `|| sh ~/` macro form. The literal is what the finding message quotes.
 RETIRED_SOURCE_LITERAL = "2>/dev/null || . ~/.claude/skills/partials/"
-RETIRED_SOURCE_RE = re.compile(r"2>/dev/null\s*\|\|\s*(?:\.|source)\s+~/\.claude/skills/partials/")
+RETIRED_SOURCE_RE = re.compile(
+    r"2>/dev/null\s*\|\|\s*(?:\.|source)\s+[\"']?(?:~|\$\{?HOME\}?)/\.claude/skills/partials/"
+)
 
 # A bare $<digit> — Skill argument templating substitutes $0–$9 (and
 # $ARGUMENTS) across the whole SKILL.md body, clobbering shell positionals and
@@ -512,12 +517,20 @@ def find_phase_files(root: Path) -> list[Path]:
     Symlinks that resolve outside ``root`` are skipped, the same defence the
     other two walks carry.
     """
-    proceed_dir = root / "proceed"
-    if not proceed_dir.is_dir():
-        return []
+    # Also `partials/*.md` — the companion docs (`forge.md`, `delegate-gate.md`,
+    # `emit-step-telemetry.md`, `trial-merge.md`, `README.md`) whose copy-paste
+    # fences are where a call-site spelling ORIGINATES; leaving them unwalked put
+    # the hole exactly at the source of copy-paste (REQ-610 review).
     root_resolved = root.resolve()
+    candidates: list[Path] = []
+    proceed_dir = root / "proceed"
+    if proceed_dir.is_dir():
+        candidates.extend(sorted(proceed_dir.glob("phase*.md")))
+    partials_dir = root / "partials"
+    if partials_dir.is_dir():
+        candidates.extend(sorted(partials_dir.glob("*.md")))
     out: list[Path] = []
-    for path in sorted(proceed_dir.glob("phase*.md")):
+    for path in candidates:
         try:
             resolved = path.resolve()
             resolved.relative_to(root_resolved)

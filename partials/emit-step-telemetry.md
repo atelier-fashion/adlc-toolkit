@@ -13,7 +13,7 @@ vars were empty across the fence boundary), and de-branded the identifiers.
 
 ## Sourcing the partial
 
-Use a two-level fallback so the macro works in consumer projects that
+Use the guarded two-level source (conventions.md "Bash in skills") so the macro works in consumer projects that
 haven't re-run `/init` since the toolkit shipped the partial:
 
 ```sh
@@ -23,7 +23,7 @@ if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step
 `.` (dot) is POSIX; do NOT use `source` (bash-only).
 
 This partial **self-sources** `partials/delegate-tools-path.sh` (with the same
-two-level fallback) as its first executable line, before defining the
+guarded two-level source) as its first executable line, before defining the
 function. Call sites therefore do **NOT** need to source the
 `delegate-tools-path` resolver themselves — sourcing this partial both
 resolves/exports `$DELEGATE_TOOLS` and defines the function in one step. The
