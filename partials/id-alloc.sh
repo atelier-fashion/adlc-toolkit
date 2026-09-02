@@ -410,6 +410,7 @@ adlc_remote_high() {
 
   adlc_rh_max=0
   adlc_rh_saw_remote=0
+  adlc_rh_scanned=0
   adlc_rh_degraded=0
   adlc_rh_unreachable=""
 
@@ -439,6 +440,7 @@ adlc_remote_high() {
     adlc_rh_url=$(git -C "$adlc_rh_repo" remote get-url origin 2>/dev/null) || continue
     [ -n "$adlc_rh_url" ] || continue
     adlc_rh_saw_remote=1
+    adlc_rh_scanned=$(( adlc_rh_scanned + 1 ))
 
     # --- SOURCE 1: pushed branch names (req/bug) via ls-remote on the REMOTE ---------
     # A failure here is recorded as degraded but does NOT skip SOURCE 2 (BR-1 — the two
@@ -492,6 +494,26 @@ adlc_remote_high() {
       adlc_rh_degraded=1
     fi
   done
+
+  # --- scope visibility (BUG-210 second half / LESSON-620) ----------------------------
+  # BUG-210's fix corrected the ONE input that was silently wrong. It did not close the
+  # class: `degraded` keys on a source FAILING, so a namespace that was narrowed rather
+  # than broken still reports healthy. A mis-set ADLC_REPOS_ROOT, a moved repos dir, or a
+  # future caller resolving the root some third way would all produce a confident wrong
+  # answer with every source "succeeding".
+  #
+  # The remedy is the one LESSON-620 names: make the SCOPE observable instead of judging
+  # it. This emits the count and the root on every derivation — no threshold, no heuristic,
+  # nothing to tune. A collapse shows up as "1 participating repo" next to an answer the
+  # caller can sanity-check, which is exactly what nobody could see on 2026-08-31.
+  #
+  # Deliberately a note, not a degradation: one participating repo is legitimate on a
+  # fresh single-repo machine, and flagging it degraded would cry wolf on every such
+  # install. Zero participants is already degraded above (adlc_rh_saw_remote).
+  echo "note: $adlc_rh_prefix high-water derived from $adlc_rh_scanned participating repo(s) under '$adlc_rh_root'." >&2
+  if [ "$adlc_rh_kind" != assume ] && [ "$adlc_rh_scanned" -eq 1 ]; then
+    echo "note: $adlc_rh_prefix is a MACHINE-GLOBAL id namespace but only one repo was scanned — expected on a single-repo machine, otherwise check ADLC_REPOS_ROOT (BUG-210)." >&2
+  fi
 
   if [ -n "$adlc_rh_unreachable" ]; then
     echo "WARNING: remote(s) unreachable during $adlc_rh_prefix branch high-water derivation:$adlc_rh_unreachable" >&2
