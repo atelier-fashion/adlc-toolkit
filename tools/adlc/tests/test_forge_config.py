@@ -15,13 +15,20 @@ import pytest
 
 import forge_config as fc
 
-# On sys.path because forge_config inserted <repo>/tools/delegate when it was
-# imported (REQ-609 ADR-1). Imported here to assert the OTHER consumer's verdict
-# on the very same file — the whole point of BR-8 is that there is one verdict.
-import _common
-import _machine_config
-
 _ADLC_DIR = os.path.dirname(os.path.abspath(fc.__file__))
+_DELEGATE_DIR = os.path.join(os.path.dirname(_ADLC_DIR), "delegate")
+
+# Put on sys.path HERE, by this test, on purpose. `forge_config` used to do it
+# as an import side effect, which is what REQ-609's verify pass removed: a
+# HOME-derived directory at `sys.path[0]` shadows every later import in the
+# process, `import yaml` included. The two delegate modules are imported to
+# assert the OTHER consumer's verdict on the very same file — the whole point
+# of BR-8 is that there is one verdict.
+if _DELEGATE_DIR not in sys.path:
+    sys.path.insert(0, _DELEGATE_DIR)
+
+import _common            # noqa: E402  (path set immediately above)
+import _machine_config    # noqa: E402
 
 
 def _write(tmp_path, text, name="config.yml"):
@@ -147,7 +154,7 @@ def test_reads_section_through_load_machine_config(tmp_path, monkeypatch):
         seen.append(path)
         return real(path)
 
-    monkeypatch.setattr(fc._machine_config, "load_machine_config", spy)
+    monkeypatch.setattr(fc._loader(), "load_machine_config", spy)
     assert fc.parse_forge_config(cfg) == {"provider": "azure-devops", "auth": "ADO_PAT"}
     assert seen == [cfg], "parse_forge_config must read through load_machine_config"
 
@@ -446,3 +453,106 @@ def test_cli_validate_auth_rejects_key():
     # main returns 2 on a key-shaped value, with an actionable stderr message.
     assert out.returncode == 2
     assert "SOURCE name" in out.stderr or "never a key" in out.stderr
+
+
+# --- the loader is loaded, not path-injected (REQ-609 verify B5) -----------
+
+def test_import_injects_nothing_into_sys_path_and_shadows_nothing(tmp_path):
+    """Importing forge_config must not put a directory on `sys.path`.
+
+    The retired form inserted a `HOME`-derived directory at `sys.path[0]` as an
+    import side effect. That is a process-wide shadow: every later import — the
+    lazy `import yaml` the loader itself depends on included — resolves out of
+    a directory chosen by `$HOME` before it resolves out of the standard path.
+    A module placed there (by a stale vendored copy, a shared checkout, anyone
+    who can write that tree) is then executed by every tool that imports this
+    one.
+
+    The vendored layout is the sharp case, so it is the one under test: a
+    project that vendors `tools/adlc/forge_config.py` with its sibling
+    `tools/delegate/`, and a `yaml` package planted beside the loader. The
+    module must load the loader by explicit file path, leave `sys.path` exactly
+    as it found it, and leave `import yaml` resolving to the real package.
+    """
+    pytest.importorskip("yaml")
+    vend = tmp_path / "vend"
+    (vend / "tools" / "adlc").mkdir(parents=True)
+    (vend / "tools" / "delegate" / "yaml").mkdir(parents=True)
+    (vend / "tools" / "adlc" / "forge_config.py").write_text(
+        open(fc.__file__, encoding="utf-8").read())
+    (vend / "tools" / "delegate" / "_machine_config.py").write_text(
+        open(_machine_config.__file__, encoding="utf-8").read())
+    (vend / "tools" / "delegate" / "yaml" / "__init__.py").write_text(
+        "PLANTED = True\n"
+        "def safe_load(*a, **k):\n"
+        "    raise RuntimeError('planted yaml executed')\n")
+    cfg = _write(tmp_path, "forge:\n  provider: github\n", name="plain.yml")
+
+    code = (
+        "import sys\n"
+        "vend = sys.argv[1]\n"
+        "before = list(sys.path)\n"
+        "sys.path.insert(0, vend)\n"
+        "import forge_config as fc\n"
+        "print('RESULT', fc.parse_forge_config(sys.argv[2]))\n"
+        "added = [p for p in sys.path if p not in before and p != vend]\n"
+        "print('ADDED', added)\n"
+        "print('LEAKED', hasattr(fc, '_candidate'))\n"
+        "import yaml\n"
+        "print('PLANTED', getattr(yaml, 'PLANTED', False))\n"
+    )
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    out = subprocess.run(
+        [sys.executable, "-c", code, str(vend / "tools" / "adlc"), cfg],
+        capture_output=True, text=True, env=env,
+    )
+    assert out.returncode == 0, out.stderr
+    # Non-vacuity: the vendored copy really did find and use its sibling loader.
+    assert "RESULT {'provider': 'github'}" in out.stdout, out.stdout
+    assert "ADDED []" in out.stdout, out.stdout
+    assert "LEAKED False" in out.stdout, out.stdout
+    assert "PLANTED False" in out.stdout, out.stdout
+
+
+def test_loader_module_is_resolved_once_and_cached(tmp_path):
+    """The loader is exec'd once per process, not once per config read.
+
+    `resolve_provider` parses two configs on one call; re-executing the module
+    each time would also reset its once-per-process stderr dedupe, which is the
+    mechanism BR-9's "one line" rests on.
+    """
+    assert fc._loader() is fc._loader()
+
+
+# --- refusal messages are single-line, printable text (REQ-609 verify B6) --
+
+def test_refusal_message_strips_control_characters(tmp_path):
+    """The path is caller-controlled text and lands verbatim on a terminal.
+
+    `partials/forge.sh` stopped swallowing this stderr, so a newline in
+    `$ADLC_CONFIG` (or in a repo path) could forge a second diagnostic line and
+    an ESC byte could repaint the operator's terminal. Same treatment
+    `_common._clean_report_value` gives every value in the delegation report;
+    the helper is copied rather than imported because `forge_config` must not
+    pull in `_common`.
+    """
+    weird = tmp_path / "weird"
+    weird.mkdir()
+    top_level_list = weird / "ev\nil\x1b[31m.yml"
+    top_level_list.write_text("- a\n- b\n")
+    bad_section = weird / "sec\ntion\x1b[0m.yml"
+    bad_section.write_text("forge:\n  - a\n  - b\n")
+
+    for path, needle in ((top_level_list, "not-a-mapping"),
+                         (bad_section, "not-a-mapping")):
+        with pytest.raises(fc.MalformedConfigError) as exc:
+            fc.parse_forge_config(str(path))
+        msg = str(exc.value)
+        assert "\n" not in msg, repr(msg)
+        assert "\x1b" not in msg, repr(msg)
+        assert needle in msg
+    # Collapsed, not deleted: the operator still gets to recognise the file.
+    with pytest.raises(fc.MalformedConfigError) as exc:
+        fc.parse_forge_config(str(top_level_list))
+    assert "ev il" in str(exc.value)

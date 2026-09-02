@@ -53,7 +53,7 @@ and re-run doctor; it should turn green.
 | `forge` | resolved forge provider's backend CLI present + auth valid + read-only API probe (github: `gh auth status`; azure-devops: `az account show` or PAT env var). **Supersedes the former `gh-auth` check** (REQ-520). | provider-specific (`gh auth login`; `az login` / set the PAT env var; or install `az`) | repo has no git remote |
 | `git-identity` | `user.name` and `user.email` set | `git config --global user.email …` | — |
 | `delegate-gate` | delegation enabled and reachable | (see below) | delegation not opted in (default) |
-| `pyyaml` | PyYAML imports in the interpreter `adlc` runs under — the one that parses `~/.claude/adlc/config.yml` (REQ-609) | `<root>/install.sh --with-delegation`, or `python3 -m pip install --user 'pyyaml>=6.0'` | never — the config is parsed on every machine, delegation or not |
+| `pyyaml` | PyYAML imports in the interpreter `adlc` runs under — the one that parses `~/.claude/adlc/config.yml` (REQ-609). Says so when the delegate venv is being bypassed because it has no PyYAML of its own | `<root>/install.sh --with-delegation` (creates/refreshes the venv, which pins the version); for a venv that exists without PyYAML, `~/.claude/delegate-venv/bin/pip install -r <root>/tools/delegate/requirements.txt` | no venv **and** no config at either path — nothing to parse yet |
 | `counters` | each `~/.claude/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
 | `launchctl` | (macOS) delegate setenv LaunchAgent loaded *when delegation is on* | `launchctl bootstrap gui/$(id -u) <plist>` | Linux (macOS-only); delegation off |
 | `template-version` | project `.adlc/` scaffold present | run `/template-drift` to compare | run outside a consumer project |
@@ -85,12 +85,34 @@ Mapping:
 The ADLC config is parsed with PyYAML behind a strict schema
 ([`tools/delegate/_machine_config.py`](../delegate/_machine_config.py)), and both
 consumers — the delegation opt-in and `forge_config.py` — read it through that one
-loader. So *which* interpreter runs `adlc` matters: the `adlc` shim written by the
-root `install.sh` `exec`s `~/.claude/delegate-venv/bin/python3` when that file is
-executable (the venv is where the installer pins PyYAML) and falls back to `python3`
-from `$PATH` otherwise, because the venv exists only after `--with-delegation`.
-`checks._delegate_interpreter()` makes the same choice for the two config probes,
-and the `pyyaml` check reports on that interpreter — no other one is being used.
+loader. So *which* interpreter runs it matters, and there is exactly **one rule**:
+
+> Prefer `$HOME/.claude/delegate-venv/bin/python3` when it is a regular
+> executable file **and** that venv carries a `yaml` package directory under
+> `lib/python*/site-packages/`; otherwise `python3` from `$PATH`.
+
+Both halves earn their place. The venv exists only after `--with-delegation`, and
+a shim that `exec`s a missing interpreter would break `adlc doctor` on exactly the
+machine that most needs it (LESSON-395) — hence the fallback. And a venv created
+*before* REQ-609 carries `openai` and no PyYAML, while a plain `./install.sh`
+rewrites the shim and refreshes no venv — so "the file exists" is not enough:
+preferring such a venv points every config read at the one interpreter on the
+machine that cannot parse the file, and `forge_config.py`'s `dependency-missing`
+carve-out then silently overrides a written `forge.provider` with origin-URL
+auto-detection.
+
+The rule is written out at **three** sites, because a shell partial cannot import
+Python and a Python module cannot be sourced by `sh`. Change one, change all three:
+
+| Site | What it selects for |
+|------|---------------------|
+| `ensure_adlc_shim` in the root [`install.sh`](../../install.sh) | every `adlc` invocation |
+| `checks._delegate_interpreter()` | the two config probes and the `pyyaml` check |
+| `_adlc_forge_python` in [`partials/forge.sh`](../../partials/forge.sh) | every `/proceed` PR operation |
+
+`install.sh` also reports, on every run, whether an existing venv has PyYAML, and
+prints the one-line fix when it does not — it never installs into a venv the
+operator did not ask to touch, and never aborts over it.
 
 Where PyYAML is missing there, the loader returns `malformed / dependency-missing`:
 the delegation consumer refuses (fail-closed, REQ-609 BR-9) and `forge_config.py`

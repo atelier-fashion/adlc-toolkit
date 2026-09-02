@@ -217,6 +217,69 @@ check "project config overrides remote" "azure-devops" \
   "$(ADLC_FORGE_REPO="$cfg_repo" adlc_forge_provider "$cfg_repo" 2>/dev/null)"
 
 # ===========================================================================
+# 6b. THE ONE INTERPRETER RULE (REQ-609 BR-8, ADR-2)
+# ===========================================================================
+# This partial is the path /proceed actually takes for every PR operation, and
+# it used to run a bare `python3` while the `adlc` shim preferred the delegate
+# venv — two interpreters answering one question. The rule has two halves and
+# both are asserted here: a regular EXECUTABLE bin/python3, and a `yaml`
+# package directory in that venv. A venv created before REQ-609 satisfies the
+# first and not the second, and preferring it points every config read at the
+# one interpreter on the machine that cannot parse the file.
+FAKEHOME="$SBX/fakehome"
+FAKEVENV="$FAKEHOME/.claude/delegate-venv"
+mkdir -p "$FAKEVENV/bin" "$FAKEVENV/lib/python3.9/site-packages/yaml"
+printf '#!/bin/sh\nexit 0\n' > "$FAKEVENV/bin/python3"
+chmod +x "$FAKEVENV/bin/python3"
+REALHOME=$HOME
+HOME=$FAKEHOME; export HOME
+check "interpreter rule: venv WITH PyYAML is preferred" \
+  "$FAKEVENV/bin/python3" "$(_adlc_forge_python)"
+rm -rf "$FAKEVENV/lib/python3.9/site-packages/yaml"
+check "interpreter rule: venv WITHOUT PyYAML falls back to PATH python3" \
+  "python3" "$(_adlc_forge_python)"
+mkdir -p "$FAKEVENV/lib/python3.9/site-packages/yaml"
+chmod -x "$FAKEVENV/bin/python3"
+check "interpreter rule: non-executable venv python3 falls back" \
+  "python3" "$(_adlc_forge_python)"
+rm -rf "$FAKEVENV"
+check "interpreter rule: no venv at all falls back" "python3" "$(_adlc_forge_python)"
+HOME=$REALHOME; export HOME
+
+# ===========================================================================
+# 6c. The resolver's stderr is never swallowed (REQ-609 BR-4/BR-9, verify B2)
+# ===========================================================================
+# With no PyYAML reachable, forge_config takes the ADR-2 `dependency-missing`
+# carve-out: it proceeds UNCONFIGURED, so the `forge.provider: azure-devops`
+# written below is NOT honoured and the provider is auto-detected from the
+# github origin instead. That override is only tolerable if the operator is
+# told, and the one line that tells them was going to /dev/null.
+poison_repo=$(mk_repo "https://github.com/o/r.git")
+mkdir -p "$poison_repo/.adlc" "$poison_repo/tools/adlc" "$poison_repo/tools/delegate"
+cp "$ROOT/tools/adlc/forge_config.py" "$poison_repo/tools/adlc/"
+cp "$ROOT/tools/delegate/_machine_config.py" "$poison_repo/tools/delegate/"
+printf 'forge:\n  provider: azure-devops\n' > "$poison_repo/.adlc/config.yml"
+POISON="$SBX/poison"; mkdir -p "$POISON/yaml"
+printf "raise ImportError('no module named yaml (test poison)')\n" \
+  > "$POISON/yaml/__init__.py"
+OLDPP=${PYTHONPATH:-}
+PYTHONPATH="$POISON"; export PYTHONPATH
+pout=$(adlc_forge_provider "$poison_repo" 2>"$SBX/poison.err"); prc=$?
+perr=$(cat "$SBX/poison.err")
+if [ -n "$OLDPP" ]; then PYTHONPATH=$OLDPP; export PYTHONPATH; else unset PYTHONPATH; fi
+check "no-PyYAML: the resolver still answers" "0" "$prc"
+check "no-PyYAML: falls back to origin auto-detect" "github" "$pout"
+contains "no-PyYAML: the dependency line reaches stderr" "PyYAML" "$perr"
+# Benign twin: the same repo with PyYAML reachable honours the written provider,
+# and says nothing on stderr.
+cout=$(adlc_forge_provider "$poison_repo" 2>"$SBX/clean.err"); crc=$?
+cerr=$(cat "$SBX/clean.err")
+check "with PyYAML: the written provider wins" "azure-devops" "$cout"
+check "with PyYAML: rc 0" "0" "$crc"
+check "with PyYAML: stderr is empty" "" "$cerr"
+unset ADLC_FORGE_PROVIDER
+
+# ===========================================================================
 # 7. GitHub byte-compat: recording gh shim asserts exact argv (BR-3)
 # ===========================================================================
 SHIM="$SBX/bin"; mkdir -p "$SHIM"

@@ -39,6 +39,37 @@ def _poisoned_yaml(tmp_path):
     return str(tmp_path / "poison")
 
 
+def _venv(tmp_path, monkeypatch, with_pyyaml):
+    """A sandbox HOME carrying a delegate venv; returns (home, interpreter path).
+
+    ``with_pyyaml`` creates the ``lib/python*/site-packages/yaml`` package
+    directory the ONE interpreter rule tests for (REQ-609 BR-8, ADR-2). The
+    directory is the whole signal on purpose: the rule must be answerable
+    without spawning an interpreter, because the two other sites that carry it
+    are shell (`install.sh`'s shim text and `partials/forge.sh`).
+    """
+    home = _home(tmp_path, monkeypatch)
+    exe = _script(home / ".claude" / "delegate-venv" / "bin" / "python3",
+                  '#!/bin/sh\nexec "%s" "$@"\n' % sys.executable)
+    if with_pyyaml:
+        (home / ".claude" / "delegate-venv" / "lib" / "python3.9"
+         / "site-packages" / "yaml").mkdir(parents=True)
+    return home, exe
+
+
+def _machine_cfg(home, monkeypatch, text="delegate:\n  enabled: false\n"):
+    """Write a machine config into the sandbox HOME and clear $ADLC_CONFIG.
+
+    The `pyyaml` check SKIPs when there is nothing to parse, so every case that
+    asserts PASS/FAIL has to put a config on the machine first.
+    """
+    monkeypatch.delenv("ADLC_CONFIG", raising=False)
+    p = home / ".claude" / "adlc" / "config.yml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    return p
+
+
 def _interpreter_without_pyyaml(tmp_path):
     """A REAL interpreter that genuinely cannot import yaml.
 
@@ -277,10 +308,23 @@ def test_delegate_gate_probe_failure_fails_loudly(tmp_path, monkeypatch):
 # --- interpreter selection + the pyyaml check (REQ-609 BR-8, ADR-2) --------
 
 def test_delegate_interpreter_prefers_venv(tmp_path, monkeypatch):
-    home = _home(tmp_path, monkeypatch)
-    venv = _script(home / ".claude" / "delegate-venv" / "bin" / "python3",
-                   '#!/bin/sh\nexec "%s" "$@"\n' % sys.executable)
-    assert checks._delegate_interpreter() == venv
+    """A venv that actually carries PyYAML is the interpreter (the ONE rule)."""
+    _home_dir, exe = _venv(tmp_path, monkeypatch, with_pyyaml=True)
+    assert checks._delegate_interpreter() == exe
+
+
+def test_delegate_interpreter_falls_back_when_venv_lacks_pyyaml(tmp_path, monkeypatch):
+    """A venv WITHOUT PyYAML is NOT preferred — the half the rule was missing.
+
+    A venv created before REQ-609 carries `openai` and no PyYAML. Preferring it
+    on the strength of `bin/python3` alone points every config read at the one
+    interpreter on the machine that cannot parse the file: the loader answers
+    `dependency-missing`, the forge consumer takes its ADR-2 carve-out, and a
+    written `forge.provider` is silently overridden by origin-URL auto-detection.
+    """
+    _home_dir, exe = _venv(tmp_path, monkeypatch, with_pyyaml=False)
+    assert os.access(exe, os.X_OK)   # non-vacuity: the venv IS runnable
+    assert checks._delegate_interpreter() == sys.executable
 
 
 def test_delegate_interpreter_falls_back_when_venv_absent(tmp_path, monkeypatch):
@@ -288,18 +332,23 @@ def test_delegate_interpreter_falls_back_when_venv_absent(tmp_path, monkeypatch)
 
     A shim that `exec`s a missing interpreter would break doctor on exactly the
     machine that most needs it (LESSON-395), so absence is a fallback, never an
-    error.
+    error. `sys.executable` IS `python3` from `$PATH` when `adlc` was started by
+    the shim's fallback arm — the shell sites spell the same rule as `python3`
+    because a shell cannot ask "the interpreter running us".
     """
     _home(tmp_path, monkeypatch)
     assert checks._delegate_interpreter() == sys.executable
 
 
 def test_delegate_interpreter_ignores_non_executable_venv(tmp_path, monkeypatch):
+    """The executable half of the rule still bites, PyYAML present or not."""
     home = _home(tmp_path, monkeypatch)
     target = home / ".claude" / "delegate-venv" / "bin" / "python3"
     target.parent.mkdir(parents=True)
     target.write_text("not executable\n")
     target.chmod(0o644)
+    (home / ".claude" / "delegate-venv" / "lib" / "python3.9"
+     / "site-packages" / "yaml").mkdir(parents=True)
     assert checks._delegate_interpreter() == sys.executable
 
 
@@ -327,6 +376,33 @@ def test_config_probes_run_in_the_selected_interpreter(tmp_path, monkeypatch, pr
     assert seen and seen[0][0] == "/sentinel/python3", seen
 
 
+def test_every_config_probe_is_bounded_by_a_timeout(tmp_path, monkeypatch):
+    """Nothing doctor runs to read the config may hang it (REQ-609 verify B4).
+
+    A venv on a stalled network mount, or an interpreter whose site
+    customization blocks, would otherwise hang `adlc doctor` with no output —
+    the one thing a bootstrap diagnostic may never do.
+    """
+    home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=True)
+    _machine_cfg(home, monkeypatch)
+    (tmp_path / "tools" / "delegate").mkdir(parents=True)
+    (tmp_path / "tools" / "delegate" / "_common.py").write_text("")
+    (tmp_path / "tools" / "adlc").mkdir(parents=True)
+    (tmp_path / "tools" / "adlc" / "forge_config.py").write_text("")
+    seen = []
+
+    def fake_run(argv, *a, **k):
+        seen.append(k.get("timeout"))
+        return _fake_proc(1)
+
+    monkeypatch.setattr(checks.subprocess, "run", fake_run)
+    checks._config_enabled(_profile(tmp_path))
+    checks._forge_pat_status(_profile(tmp_path))
+    checks.check_pyyaml(_profile(tmp_path))
+    assert len(seen) == 3, seen
+    assert all(isinstance(t, (int, float)) and t > 0 for t in seen), seen
+
+
 def test_pyyaml_check_reports_fix_when_missing(tmp_path, monkeypatch):
     """No PyYAML in the interpreter adlc runs under -> FAIL with the fix.
 
@@ -334,19 +410,70 @@ def test_pyyaml_check_reports_fix_when_missing(tmp_path, monkeypatch):
     the venv may have PyYAML while $PATH's python3 does not, and "PyYAML is
     missing" without saying *where* sends the operator to install it into the
     wrong one.
+
+    The fix is the installer, and ONLY the installer: `pip install --user
+    'pyyaml>=6.0'` was refused outright inside a venv and, outside one, bypassed
+    the `==6.0.3` pin `install.sh` writes — a remediation that either errors or
+    installs a different version than the toolkit tests against is not
+    copy-pasteable (BR-5).
     """
+    home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=True)
+    _machine_cfg(home, monkeypatch)
     interp = _interpreter_without_pyyaml(tmp_path)
     monkeypatch.setattr(checks, "_delegate_interpreter", lambda: interp)
     result, detail, remediation = checks.check_pyyaml(_profile(tmp_path))
     assert result is Result.FAIL
-    assert interp in detail and "PyYAML" in detail
-    assert "install.sh --with-delegation" in remediation
-    assert "pyyaml>=6.0" in remediation
+    assert interp in detail and "PyYAML is not importable" in detail
+    assert remediation == "%s --with-delegation" % os.path.join(str(tmp_path), "install.sh")
+    assert "--user" not in remediation and "pyyaml>=6.0" not in remediation
+
+
+def test_pyyaml_check_offers_the_venv_pip_when_the_venv_lacks_it(tmp_path, monkeypatch):
+    """A venv that exists without PyYAML gets the fix for THAT machine.
+
+    `install.sh --with-delegation` also fixes it, but the narrow one names the
+    venv the operator already has and the pinned requirements file, so the
+    version that lands is the version the toolkit tests against.
+    """
+    home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=False)
+    _machine_cfg(home, monkeypatch)
+    interp = _interpreter_without_pyyaml(tmp_path)
+    monkeypatch.setattr(checks, "_delegate_interpreter", lambda: interp)
+    result, detail, remediation = checks.check_pyyaml(_profile(tmp_path))
+    assert result is Result.FAIL
+    venv = str(home / ".claude" / "delegate-venv")
+    assert os.path.join(venv, "bin", "pip") in remediation
+    assert os.path.join(str(tmp_path), "tools", "delegate", "requirements.txt") in remediation
+    # And the detail says WHY a venv is installed yet not being used.
+    assert venv in detail and "no PyYAML" in detail
+
+
+def test_pyyaml_check_notes_the_fallback_on_pass(tmp_path, monkeypatch):
+    """PASS, but the operator is told the venv is being bypassed and why.
+
+    Silence here is how "adlc quietly runs a different python3 than you think"
+    survives: the config parses fine under $PATH's python3 while every delegate
+    CLI, which `exec`s the venv unconditionally, cannot parse it at all.
+    """
+    pytest.importorskip("yaml")
+    home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=False)
+    _machine_cfg(home, monkeypatch)
+    monkeypatch.setattr(checks, "_delegate_interpreter", lambda: sys.executable)
+    result, detail, remediation = checks.check_pyyaml(_profile(tmp_path))
+    assert result is Result.PASS
+    venv = str(home / ".claude" / "delegate-venv")
+    assert venv in detail and "no PyYAML" in detail
+    # `format_report` prints `remediation` only on FAIL, so a PASS that still
+    # needs an action has to carry it in the DETAIL or the operator never sees it.
+    assert os.path.join(venv, "bin", "pip") in detail
+    assert remediation != ""
 
 
 def test_pyyaml_check_passes_naming_the_interpreter(tmp_path, monkeypatch):
     """Benign twin: an interpreter that HAS PyYAML passes, with the version."""
     yaml = pytest.importorskip("yaml")
+    home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=True)
+    _machine_cfg(home, monkeypatch)
     monkeypatch.setattr(checks, "_delegate_interpreter", lambda: sys.executable)
     result, detail, remediation = checks.check_pyyaml(_profile(tmp_path))
     assert result is Result.PASS
@@ -354,17 +481,73 @@ def test_pyyaml_check_passes_naming_the_interpreter(tmp_path, monkeypatch):
     assert remediation == ""
 
 
-def test_pyyaml_check_never_skips_and_never_crashes(tmp_path, monkeypatch):
-    """SKIP is not a valid outcome, and an unrunnable interpreter still reports.
+def test_pyyaml_check_skips_when_there_is_nothing_to_parse(tmp_path, monkeypatch):
+    """No venv and no config anywhere -> SKIP with a notice, not FAIL.
 
-    Every machine parses the config, delegation opted into or not, so there is
-    no "not applicable" branch to hide behind.
+    A machine that has never opted into delegation and has never written a
+    config has nothing for PyYAML to read. FAILing it makes `adlc doctor` red
+    on a correctly installed machine, which trains operators to ignore the
+    verdict — and the check's own remediation would install a parser for a file
+    that does not exist.
     """
+    _home(tmp_path, monkeypatch)
+    monkeypatch.delenv("ADLC_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    result, detail, remediation = checks.check_pyyaml(_profile(tmp_path))
+    assert result is Result.SKIP
+    assert detail and "config" in detail
+    assert remediation == ""
+
+
+def test_pyyaml_check_does_not_skip_once_a_config_exists(tmp_path, monkeypatch):
+    """The SKIP is about "nothing to parse", so a written config ends it.
+
+    Either config path counts — the machine one and the project one — because
+    either is a file whose contents the operator expects to be honoured.
+    """
+    home = _home(tmp_path, monkeypatch)
+    monkeypatch.delenv("ADLC_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    interp = _interpreter_without_pyyaml(tmp_path)
+    monkeypatch.setattr(checks, "_delegate_interpreter", lambda: interp)
+    assert checks.check_pyyaml(_profile(tmp_path))[0] is Result.SKIP
+
+    proj = tmp_path / ".adlc" / "config.yml"
+    proj.parent.mkdir(parents=True, exist_ok=True)
+    proj.write_text("forge:\n  provider: github\n")
+    assert checks.check_pyyaml(_profile(tmp_path))[0] is Result.FAIL
+
+    proj.unlink()
+    assert checks.check_pyyaml(_profile(tmp_path))[0] is Result.SKIP
+    _machine_cfg(home, monkeypatch)
+    assert checks.check_pyyaml(_profile(tmp_path))[0] is Result.FAIL
+
+
+def test_pyyaml_check_never_crashes_on_an_unrunnable_interpreter(tmp_path, monkeypatch):
+    """An interpreter that cannot be executed still REPORTS (LESSON-395)."""
+    home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=True)
+    _machine_cfg(home, monkeypatch)
     monkeypatch.setattr(checks, "_delegate_interpreter",
                         lambda: str(tmp_path / "no-such-python3"))
     result, detail, remediation = checks.check_pyyaml(_profile(tmp_path))
     assert result is Result.FAIL
     assert remediation and "no-such-python3" in detail
+
+
+def test_pyyaml_check_reports_a_hung_interpreter_instead_of_hanging(tmp_path, monkeypatch):
+    """A probe that times out is a FAIL, not a doctor that never returns."""
+    home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=True)
+    _machine_cfg(home, monkeypatch)
+    hung = _script(tmp_path / "hung" / "python3", "#!/bin/sh\nsleep 120\n")
+    monkeypatch.setattr(checks, "_delegate_interpreter", lambda: hung)
+
+    def fake_run(argv, *a, **k):
+        raise subprocess.TimeoutExpired(argv, k.get("timeout", 1))
+
+    monkeypatch.setattr(checks.subprocess, "run", fake_run)
+    result, detail, remediation = checks.check_pyyaml(_profile(tmp_path))
+    assert result is Result.FAIL
+    assert hung in detail and remediation
 
 
 def test_checks_import_pulls_in_no_yaml(repo_root):
@@ -405,7 +588,10 @@ def test_doctor_reports_pyyaml_fail_on_a_bare_machine(tmp_path, repo_root):
     symlink, config, forge and counter paths, all of which run without PyYAML.
     """
     home = tmp_path / "home"
-    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "adlc").mkdir(parents=True)
+    # A written config is what makes the missing parser a defect rather than a
+    # non-event: the operator has said something the machine cannot read.
+    (home / ".claude" / "adlc" / "config.yml").write_text("delegate:\n  enabled: false\n")
     workdir = tmp_path / "elsewhere"          # not a git repo -> forge SKIPs
     workdir.mkdir()
     env = dict(os.environ, HOME=str(home), PYTHONPATH=_poisoned_yaml(tmp_path))
@@ -425,6 +611,32 @@ def test_doctor_reports_pyyaml_fail_on_a_bare_machine(tmp_path, repo_root):
     assert "install.sh --with-delegation" in out.stdout
     assert "verdict: FAILED" in out.stdout
     assert out.returncode == 1
+
+
+def test_doctor_skips_pyyaml_when_there_is_no_config_and_no_venv(tmp_path, repo_root):
+    """The same bare machine with NOTHING written: pyyaml SKIPs, doctor is calm.
+
+    Benign twin of the test above, and the reason the SKIP exists: a fresh
+    machine that never opted into delegation and never wrote a config has no
+    file for PyYAML to read, so a red row there is noise that teaches operators
+    to ignore the verdict.
+    """
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    workdir = tmp_path / "elsewhere"
+    workdir.mkdir()
+    env = dict(os.environ, HOME=str(home), PYTHONPATH=_poisoned_yaml(tmp_path))
+    env.pop("ADLC_CONFIG", None)
+    out = subprocess.run(
+        [sys.executable, os.path.join(repo_root, "tools", "adlc", "adlc.py"),
+         "doctor", "--checks", "pyyaml"],
+        capture_output=True, text=True, cwd=str(workdir), env=env,
+    )
+    assert "Traceback" not in out.stderr, out.stderr
+    rows = [ln for ln in out.stdout.splitlines() if " pyyaml " in ln]
+    assert len(rows) == 1, out.stdout
+    assert rows[0].startswith("[SKIP] pyyaml"), out.stdout
+    assert out.returncode == 0, out.stdout
 
 
 # --- claude-code is report-only (never FAIL) -------------------------------

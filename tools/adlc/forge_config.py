@@ -36,6 +36,7 @@ they are policy, not parsing, and the delegate module's copies answer a differen
 question (an API key vs. a PAT source name).
 """
 
+import importlib.util
 import os
 import re
 import subprocess
@@ -74,9 +75,9 @@ class UnknownForgeError(Exception):
     """``auto`` resolution hit an unrecognized remote host."""
 
 
-# --- the one loader (REQ-609 ADR-1) ----------------------------------------
+# --- the one loader (REQ-609 ADR-1), loaded by PATH not by sys.path --------
 
-def _delegate_dirs():
+def _loader_candidates():
     """Where ``_machine_config.py`` may live, most-local first.
 
     Two levels, mirroring how ``partials/forge.sh`` locates *this* file (project
@@ -94,27 +95,67 @@ def _delegate_dirs():
     script-relative resolution survives the wrapper indirection.
     """
     tools = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    dirs = [os.path.join(tools, "delegate")]
-    home = os.environ.get("HOME") or os.path.expanduser("~")
+    cands = [os.path.join(tools, "delegate", "_machine_config.py")]
+    home = os.path.expanduser("~")
     if home and home != "~":
-        dirs.append(os.path.join(home, ".claude", "skills", "tools", "delegate"))
-    return dirs
+        cands.append(os.path.join(
+            home, ".claude", "skills", "tools", "delegate", "_machine_config.py"))
+    return cands
 
 
-for _candidate in _delegate_dirs():
-    if os.path.isfile(os.path.join(_candidate, "_machine_config.py")):
-        if _candidate not in sys.path:
-            sys.path.insert(0, _candidate)
+#: Distinguishes "not looked for yet" from "looked for and not found", so a
+#: machine without the loader pays the search once rather than on every read.
+_LOADER_UNRESOLVED = object()
+_loader_module = _LOADER_UNRESOLVED
+
+
+def _loader():
+    """The loader module, executed from an explicit path, or ``None``.
+
+    **Why not an import.** This module used to reach its loader by inserting a
+    candidate directory at ``sys.path[0]`` at import time and then ``import
+    _machine_config``. One of those candidates is derived from ``$HOME``, and
+    ``sys.path[0]`` shadows the standard path for *every* later import in the
+    process — including the lazy ``import yaml`` the loader itself depends on,
+    and every import made afterwards by whatever tool imported this module. A
+    module dropped into that directory (a stale vendored tree, a shared
+    checkout, anyone who can write there) would be executed in preference to
+    the real one. Loading a named file by explicit path answers the same
+    question and shadows nothing.
+
+    The module is deliberately NOT registered in ``sys.modules``: registering
+    it would make this consumer's copy depend on import order relative to
+    ``_common``'s ordinary ``import _machine_config``, and the point of loading
+    by path is to be independent of what else the process has imported.
+
+    Resolved once and cached — ``resolve_provider`` parses two configs on one
+    call, and re-executing the module each time would also reset its
+    once-per-process stderr dedupe (BR-9's "one line").
+    """
+    global _loader_module
+    if _loader_module is not _LOADER_UNRESOLVED:
+        return _loader_module
+    _loader_module = None
+    for path in _loader_candidates():
+        if not os.path.isfile(path):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("_machine_config", path)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except Exception:
+            # A loader that will not execute is the same install-defect CLASS
+            # as one that is not there (and as an interpreter without PyYAML):
+            # the machine cannot parse the file, which says nothing about the
+            # file. Broad on purpose — an exec_module failure may be anything —
+            # and it degrades to the `dependency-missing` behaviour below, one
+            # named stderr line included, never to a silent success.
+            continue
+        _loader_module = module
         break
-
-try:
-    import _machine_config
-except ImportError:  # exercised by test_missing_loader_is_unconfigured_with_stderr
-    # A checkout without `tools/delegate/` (skills-only vendoring) is the same
-    # install-defect CLASS as an interpreter without PyYAML: the machine cannot
-    # parse the file, which says nothing about the file. Treated as
-    # `dependency-missing` below, with the same one stderr line.
-    _machine_config = None
+    return _loader_module
 
 
 _dependency_notice_emitted = False
@@ -130,15 +171,40 @@ def _note_dependency_missing():
     standing (REQ-609 BR-9).
     """
     global _dependency_notice_emitted
-    if _machine_config is not None:
-        _machine_config._emit_dependency_notice()
+    loader = _loader()
+    if loader is not None:
+        loader._emit_dependency_notice()
         return
     if _dependency_notice_emitted:
         return
     _dependency_notice_emitted = True
     sys.stderr.write(
         "adlc: the ADLC config loader (tools/delegate/_machine_config.py) was not "
-        "found in %s; run install.sh\n" % " or ".join(_delegate_dirs()))
+        "found at %s; run install.sh\n" % " or ".join(_loader_candidates()))
+
+
+# --- refusal-message sanitising (copied from _common._clean_report_value) --
+
+#: Copied, not imported: `forge_config` must not pull `_common` into its import
+#: closure (it has to load on a machine with no delegation install at all), and
+#: two lines of regex are a smaller cost than that coupling. Keep the two in
+#: step — the origin is `tools/delegate/_common._clean_report_value`.
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _clean_report_value(v):
+    """Flatten ``v`` to a single line of printable text.
+
+    Every value interpolated into a refusal comes from the environment
+    (``$ADLC_CONFIG``), a repo path, or the loader's own reason string — all
+    caller-controlled — and the refusal is printed straight onto a terminal by
+    `partials/forge.sh`, which since REQ-609's verify pass no longer swallows
+    this stderr. A newline in a path would let one refusal forge a second
+    diagnostic line; an ESC byte would let it repaint the terminal. Whitespace
+    of every kind collapses to single spaces; anything still in the control
+    range is dropped.
+    """
+    return _CONTROL_CHARS_RE.sub("", " ".join(str(v).split()))
 
 
 # --- config file paths -----------------------------------------------------
@@ -150,8 +216,9 @@ def _machine_config_path():
     about which file they are reading (REQ-609 BR-8); the inline fallback is
     only for the no-loader sentinel.
     """
-    if _machine_config is not None:
-        return _machine_config.default_config_path()
+    loader = _loader()
+    if loader is not None:
+        return loader.default_config_path()
     override = os.environ.get("ADLC_CONFIG")
     if override:
         return override
@@ -195,21 +262,23 @@ def parse_forge_config(path=None):
     if path is None:
         path = _machine_config_path()
 
-    if _machine_config is None:
+    loader = _loader()
+    if loader is None:
         _note_dependency_missing()
         return {}
 
-    outcome = _machine_config.load_machine_config(path)
-    if outcome.kind == _machine_config.KIND_ABSENT:
+    outcome = loader.load_machine_config(path)
+    if outcome.kind == loader.KIND_ABSENT:
         return {}
-    if outcome.kind == _machine_config.KIND_MALFORMED:
+    if outcome.kind == loader.KIND_MALFORMED:
         if outcome.reason_class == _TOLERATED_REASON:
             _note_dependency_missing()
             return {}
         raise MalformedConfigError(
             "the ADLC config at %s cannot be read (%s). Fix the file — the "
             "forge provider cannot be resolved from a config that does not "
-            "parse." % (outcome.path, outcome.reason))
+            "parse." % (_clean_report_value(outcome.path),
+                        _clean_report_value(outcome.reason)))
     return _forge_section(outcome.document, outcome.path)
 
 
@@ -231,7 +300,8 @@ def _forge_section(document, path):
     if not isinstance(section, dict):
         raise MalformedConfigError(
             "the ADLC config at %s cannot be read (not-a-mapping: the 'forge' "
-            "section is not a mapping). Fix the file." % (path,))
+            "section is not a mapping). Fix the file."
+            % (_clean_report_value(path),))
     out = {}
     for key in FORGE_KEYS:
         if key not in section:
@@ -244,7 +314,8 @@ def _forge_section(document, path):
         if not isinstance(value, str):
             raise MalformedConfigError(
                 "the ADLC config at %s cannot be read (not-a-string: "
-                "'forge.%s' must be a string). Fix the file." % (path, key))
+                "'forge.%s' must be a string). Fix the file."
+                % (_clean_report_value(path), key))
         out[key] = value
     return out
 

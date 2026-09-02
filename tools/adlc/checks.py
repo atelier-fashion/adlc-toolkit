@@ -19,6 +19,7 @@ report on a machine where PyYAML is missing, and a check that cannot load
 without the thing it diagnoses cannot report it.
 """
 
+import glob
 import os
 import shutil
 import subprocess
@@ -33,6 +34,12 @@ from doctor import Check, Profile, Result
 _STALE_LOCK_SECONDS = 15 * 60
 
 _COUNTERS = (".global-next-req", ".global-next-bug", ".global-next-lesson")
+
+#: Every subprocess doctor uses to read the config is bounded. An interpreter
+#: on a stalled network mount, or one whose site customization blocks, would
+#: otherwise hang `adlc doctor` with no output — the one thing a bootstrap
+#: diagnostic may never do. 20s is far beyond a real `import yaml`.
+_PROBE_TIMEOUT_SECONDS = 20
 
 
 # --- helpers ---------------------------------------------------------------
@@ -56,23 +63,77 @@ def _resolves_into_checkout(link_path: str) -> bool:
     ).returncode == 0
 
 
+# --- the ONE interpreter rule (REQ-609 BR-8, ADR-2) ------------------------
+#
+# THE RULE: prefer `$HOME/.claude/delegate-venv/bin/python3` when it is a
+# regular executable file AND that venv carries a `yaml` package directory
+# under `lib/python*/site-packages/`; otherwise `python3` from `$PATH`.
+#
+# It is written out at THREE sites, because a shell partial cannot import
+# Python and a Python module cannot be sourced by `sh`. The other two:
+#
+#   * `ensure_adlc_shim` in the root `install.sh` — the `adlc` shim's own text
+#   * `_adlc_forge_python` in `partials/forge.sh` — the path `/proceed` takes
+#     for every PR operation
+#
+# Change one, change all three.
+#
+# Why the second half is not optional: a venv created before REQ-609 carries
+# `openai` and no PyYAML, and a plain `./install.sh` rewrites the shim without
+# refreshing any venv. Preferring such a venv points every config read at the
+# one interpreter on the machine that cannot parse the file — the loader
+# answers `dependency-missing`, the forge consumer takes its ADR-2 carve-out,
+# and a written `forge.provider` is silently overridden by origin-URL
+# auto-detection. The venv directory is tested, never an interpreter spawned,
+# so the two shell sites can ask the identical question.
+
+def _delegate_venv() -> str:
+    return os.path.join(_claude_home(), "delegate-venv")
+
+
+def _venv_has_pyyaml(venv: str) -> bool:
+    """True if ``venv`` carries a PyYAML package directory. No subprocess."""
+    pattern = os.path.join(venv, "lib", "python*", "site-packages", "yaml")
+    return any(os.path.isdir(p) for p in glob.glob(pattern))
+
+
+def _venv_state() -> str:
+    """``ready`` | ``no-pyyaml`` | ``absent`` for the delegate venv."""
+    venv = _delegate_venv()
+    exe = os.path.join(venv, "bin", "python3")
+    if not (os.path.isfile(exe) and os.access(exe, os.X_OK)):
+        return "absent"
+    return "ready" if _venv_has_pyyaml(venv) else "no-pyyaml"
+
+
 def _delegate_interpreter() -> str:
-    """The interpreter ``adlc`` runs under (REQ-609 BR-8, ADR-2).
+    """The interpreter ``adlc`` runs under, per THE RULE above.
 
-    The delegate venv's ``python3`` when it exists and is executable, else the
-    interpreter running us. This is exactly the selection the ``adlc`` shim
-    written by the root ``install.sh`` makes, and it is one helper on purpose:
-    the doctor's ``pyyaml`` check must report on the SAME interpreter the config
-    probes below run in, or it reports on a machine nobody is using (LESSON-392).
+    One helper on purpose: the doctor's ``pyyaml`` check must report on the
+    SAME interpreter the config probes below run in, or it reports on a machine
+    nobody is using (LESSON-392).
 
-    Not unconditional: the venv only exists after ``install.sh
-    --with-delegation``, and a probe that `exec`s a missing interpreter breaks
-    doctor on exactly the machine that most needs it (LESSON-395).
+    The fallback is spelled ``sys.executable`` rather than a `$PATH` lookup
+    because that IS `$PATH`'s `python3` when `adlc` was started by the shim's
+    fallback arm, and it is the honest answer when it was not (a developer
+    running `python3.11 tools/adlc/adlc.py doctor` wants a report about the
+    interpreter they used). The shell sites cannot ask that question, so they
+    spell the same rule as `python3`.
     """
-    venv = os.path.join(_claude_home(), "delegate-venv", "bin", "python3")
-    if os.path.isfile(venv) and os.access(venv, os.X_OK):
-        return venv
+    if _venv_state() == "ready":
+        return os.path.join(_delegate_venv(), "bin", "python3")
     return sys.executable
+
+
+def _machine_config_path() -> str:
+    """The machine config path, spelled as ``_machine_config.default_config_path``.
+
+    Inlined rather than imported: this module must load on a machine that has
+    no delegation install at all (LESSON-395), which is exactly the machine the
+    `pyyaml` check exists to report on.
+    """
+    return os.environ.get("ADLC_CONFIG") or os.path.join(
+        _claude_home(), "adlc", "config.yml")
 
 
 def _partial_path(profile: Profile, name: str) -> str:
@@ -314,10 +375,15 @@ def _forge_pat_status(profile: Profile):
         "import sys; sys.path.insert(0, sys.argv[1]); import forge_config as fc; "
         "d = fc.parse_forge_config(sys.argv[2]); print(d.get('auth', ''))"
     )
-    out = subprocess.run(
-        [_delegate_interpreter(), "-c", code, os.path.dirname(reader), cfg_proj],
-        capture_output=True, text=True,
-    )
+    try:
+        out = subprocess.run(
+            [_delegate_interpreter(), "-c", code, os.path.dirname(reader), cfg_proj],
+            capture_output=True, text=True, timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        # An interpreter that will not run, or will not finish, is "no PAT var"
+        # here; the `pyyaml` check reports the real cause.
+        return "", False
     auth = out.stdout.strip() if out.returncode == 0 else ""
     # 'gh'/'az' are CLI-login sources, not PAT var names.
     if not auth or auth in ("gh", "az"):
@@ -492,10 +558,13 @@ def _config_enabled(profile: Profile):
         "import sys; sys.path.insert(0, sys.argv[1]); import _common; "
         "print('1' if _common.parse_delegate_config().get('enabled') else '0')"
     )
-    out = subprocess.run(
-        [_delegate_interpreter(), "-c", code, common_dir],
-        capture_output=True, text=True,
-    )
+    try:
+        out = subprocess.run(
+            [_delegate_interpreter(), "-c", code, common_dir],
+            capture_output=True, text=True, timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
     return out.returncode == 0 and out.stdout.strip() == "1"
 
 
@@ -507,38 +576,89 @@ def check_pyyaml(profile: Profile):
     Since REQ-609 the machine config is parsed by ``yaml.safe_load`` behind a
     strict schema, and a missing PyYAML is not a silent degradation: the
     delegate consumer refuses outright, and the forge consumer proceeds
-    unconfigured after a stderr line. Either way the operator's config is not
-    being read, so doctor says so with the fix.
+    unconfigured after a stderr line — silently overriding a written
+    `forge.provider` with origin-URL auto-detection. So doctor reports the
+    interpreter THE RULE selects, and says when the venv is being bypassed
+    because it has no PyYAML of its own.
 
-    There is no SKIP: the check is meaningful on every machine, delegation
-    opted into or not. The probe is a subprocess, never an import here — this
-    module must load on a machine that has no PyYAML at all (LESSON-395).
+    **SKIP has one shape only**: no delegate venv *and* no config file at
+    either path — there is nothing on this machine for PyYAML to read, and a
+    red row for a parser that would parse nothing teaches operators to ignore
+    the verdict. The moment a config exists, or a venv does, the check is live
+    again.
+
+    The probe is a subprocess, never an import here — this module must load on
+    a machine that has no PyYAML at all (LESSON-395) — and it is bounded, so a
+    stalled interpreter is a FAIL rather than a doctor that never returns.
     """
     interp = _delegate_interpreter()
-    fix = (
-        f"{os.path.join(profile.repo_root, 'install.sh')} --with-delegation"
-        "   # or: python3 -m pip install --user 'pyyaml>=6.0'"
-    )
+    venv = _delegate_venv()
+    state = _venv_state()
+    machine_cfg = _machine_config_path()
+    project_cfg = os.path.join(os.getcwd(), ".adlc", "config.yml")
+    configs = [p for p in (machine_cfg, project_cfg) if os.path.isfile(p)]
+
+    if state == "absent" and not configs:
+        return (
+            Result.SKIP,
+            "no delegate venv and no ADLC config to parse yet (looked at "
+            f"{machine_cfg} and {project_cfg})",
+            "",
+        )
+
+    # The fix has to be correct for the CASE (BR-5). `install.sh
+    # --with-delegation` creates or refreshes the venv, which is what pins
+    # PyYAML at the version the toolkit tests against. The retired alternative,
+    # `python3 -m pip install --user 'pyyaml>=6.0'`, was neither: pip refuses
+    # `--user` inside a venv, and outside one it bypasses the `==6.0.3` pin.
+    installer = os.path.join(profile.repo_root, "install.sh") + " --with-delegation"
+    if state == "no-pyyaml":
+        pip_fix = "%s install -r %s" % (
+            os.path.join(venv, "bin", "pip"),
+            os.path.join(profile.repo_root, "tools", "delegate", "requirements.txt"),
+        )
+        fix = "%s   # or: %s" % (pip_fix, installer)
+        note = (" (falling back from %s, which has no PyYAML — a venv created "
+                "before REQ-609 carries openai only)" % (venv,))
+        # On a PASS the fix goes in the DETAIL too, because `format_report`
+        # prints `remediation` on FAIL only — and the interesting case here IS a
+        # PASS: the config parses fine under $PATH's python3 while every
+        # delegate CLI, which `exec`s the venv unconditionally, cannot parse it
+        # at all. On a FAIL the remediation line carries it, so repeating it in
+        # the detail would only make a long line longer.
+        pass_note = "%s; fix: %s)" % (note[:-1], pip_fix)
+    else:
+        fix = installer
+        note = ""
+        pass_note = ""
+
     try:
         probe = subprocess.run(
             [interp, "-c", "import yaml; print(yaml.__version__)"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            Result.FAIL,
+            f"{interp} did not answer the PyYAML probe within "
+            f"{_PROBE_TIMEOUT_SECONDS}s{note}",
+            fix,
         )
     except OSError as exc:
         # The selected interpreter could not be executed at all. Still a FAIL
         # with the same fix — doctor reports, it never crashes.
         return (
             Result.FAIL,
-            f"could not run {interp} to check PyYAML ({exc.strerror or exc})",
+            f"could not run {interp} to check PyYAML ({exc.strerror or exc}){note}",
             fix,
         )
     version = probe.stdout.strip()
     if probe.returncode == 0 and version:
-        return Result.PASS, f"PyYAML {version} in {interp}", ""
+        return Result.PASS, f"PyYAML {version} in {interp}{pass_note}", (fix if note else "")
     return (
         Result.FAIL,
-        f"PyYAML is not importable in {interp} — the ADLC config "
-        f"(~/.claude/adlc/config.yml) cannot be parsed there",
+        f"PyYAML is not importable in {interp}{note} — the ADLC config "
+        f"({', '.join(configs) or machine_cfg}) cannot be parsed there",
         fix,
     )
 
