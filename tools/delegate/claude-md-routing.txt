@@ -48,7 +48,7 @@ config file stores `api_key_env` (a variable NAME), never a key value.
 - Delegation is **disabled by default**. It is enabled only by `enabled: true`
   in the config file, `ADLC_DELEGATE_ENABLED=1` in the environment, or an
   already-set legacy `KIMI_API_KEY`/`MOONSHOT_API_KEY` (key continuity for
-  existing installs). `ADLC_DISABLE_DELEGATE=1` forces it off.
+  existing installs). `export ADLC_DISABLE_DELEGATE=1` forces it off — it must be exported: the shell gate sees an unexported shell variable, but the CLIs run as child processes and cannot.
 - Only the **basename** of each path is embedded in the corpus block — full
   local paths stay on your machine.
 - Every run prints a one-line `delegate: ...` notice on stderr; silence it with

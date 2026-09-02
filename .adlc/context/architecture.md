@@ -124,3 +124,28 @@ Skills retrieve relevant prior knowledge at context-loading time. The current im
 - **Incident attribution (REQ-593)**: `partials/attribution.sh` derives "which REQ introduced this defect" from history the repo already carries — blame the root-cause line range, read each blamed commit's **subject and body** (`git log -1 --format='%s%n%b'`; blame's porcelain `summary` is subject-only and loses roughly half the available attributions), extract an attested REQ id in one of three forms (bracketed `[REQ-xxx]`/`[TASK-xxx]`, a `REQ-xxx:` subject prefix, a `<type>(REQ-xxx)` scope — a `<type>(BUG-xxx)` scope is a prior fix, not an introduction), and validate it against the **primary** repo's `.adlc/specs/` (spec dirs exist only in the primary, so cross-repo blame still validates centrally). `TASK-xxx` resolution is scoped to the REQ named in the same commit, never globbed, because TASK ids are per-REQ rather than global. `/bugfix` Phase 2 writes the forward edge onto the bug (`introduced_by`, `attribution` — optional, additive); the **reverse** edge is derived at read time by `/status` scanning `.adlc/bugs/` frontmatter and is never stored in a spec (the same derive-don't-store posture as `/manifest`, for the same anti-rot reason). Multi-candidate derivations refuse and ask rather than guessing. Cross-shell behavior is pinned by `partials/tests/attribution.test.sh` under bash, zsh, and sh.
 - **Unstructured-source intake (REQ-594)**: `/spec` Step 1.4 turns raw human input — a transcript, meeting notes, a ticket dump — into a draft REQ plus an explicit **gap list** naming what the source does not answer, checked section by section against the requirement template. It converts Step 1's "ask clarifying questions" prose into a structured artifact with a gate (LESSON-012). Activation is narrow by design (`partials/intake.sh`'s `adlc_intake_detect`: an explicit `--intake` flag, a file-path argument, or input over 25 lines), so the ordinary one-line request path is untouched. Gaps are classified `blocking` (a faithful spec cannot be written without the answer — halts interactively, becomes an Open Question in a subagent) or `assumption` (proceeds as a stated assumption); both land in the spec, with the full classified table in an intake-only `## Provenance` section. The source is **segmented before delegation** and the delegate's response **reconciled against those segments** — the same coverage check Step 1.6 applies to its top-15 docs — because a silently-truncated read yields zero gaps precisely when the unread remainder matters most. Over the 8000-line / 40-segment budget the step refuses, naming the size; it never truncates.
 - **Forge adapter (REQ-520)**: `partials/forge.sh` is the single home of `gh`/`az` PR-lifecycle commands — a sourceable partial exposing `adlc_forge_pr_{create,ready,edit,view,list,merge,comment}` with GitHub (`gh`) and Azure DevOps (`az repos`) backends and an `ADLC_FORGE_MOCK=1` offline fixture backend. Provider resolution (per-project `.adlc/config.yml` `forge.provider` > machine config > `auto` origin-URL detection, fail-loud on unrecognized host) and the key-shaped-`auth` refusal live in `tools/adlc/forge_config.py` (a thin flat-YAML reader mirroring `parse_delegate_config` — no shell YAML parsing, REQ-515 ADR-3). Every PR-lifecycle call site in `/proceed`, `/architect`, `/manifest`, `/bugfix`, `/wrapup`, `/sprint`, and the sprint workflow routes through the adapter; `tools/lint-skills`'s `forge-direct-gh` check rejects new direct `gh pr <op>` in skill fences. The GitHub backend is byte-compatible with the prior direct calls (zero change for GitHub installs). `adlc doctor`'s `forge` check (in `tools/adlc/checks.py`) **supersedes** the former standalone `gh-auth` check — it resolves the provider and probes the right backend's CLI + auth + a read-only API probe, SKIP-with-reason on a remote-less repo. `gh pr diff`/`gh pr checks` (CI polling is out of scope) and the REQ-518 `id-alloc`/`id-recheck` `gh api` tree reads (BR-8 pure-git merged-artifact scan, not a PR op) stay direct.
+
+## Delegation opt-in: the gate may veto, only Python may authorize
+
+The delegation opt-in predicate has exactly **one** implementation —
+`_common.resolve_gate_verdict()`. `partials/delegate-gate.sh` may *withhold*
+delegation (`no-binary`, and the `ADLC_DISABLE_DELEGATE` veto) but may never
+*grant* it.
+
+The distinction is not stylistic. A **veto** arm can only return *disabled*, so
+duplicating one across layers is redundancy — the copies agree or abstain, never
+contradict. An **authorizing** arm can return *enabled*, so a stale copy grants
+what the real resolver would refuse. `delegate-gate.sh` is vendored per repo,
+which makes it the wrong home for any authorizing decision.
+
+That invariant has already been violated from both directions:
+
+- **BUG-205** — the config arm was a shell fast path; correct for `enabled: true`,
+  wrong for `enabled: false`, and an operator's written opt-out was silently
+  overridden while file contents were transmitted.
+- **BUG-209** — `ADLC_DISABLE_DELEGATE` existed in shell and nowhere in Python, so
+  both CLIs ignored the documented emergency stop entirely.
+
+REQ-603 consolidated the authorizing arms and kept the veto duplicated under a
+stated condition: Python must recognise at least every input the shell does,
+enforced by `tools/delegate/tests/test_cross_layer_veto.py`.

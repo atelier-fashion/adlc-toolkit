@@ -389,3 +389,124 @@ def test_require_delegation_names_the_kill_switch(clean_env, monkeypatch):
     msg = str(exc.value)
     assert "ADLC_DISABLE_DELEGATE" in msg
     assert "delegate.enabled: true" not in msg
+
+
+# --- REQ-603 TASK-091: cascade coverage relocated from the shell harness ----
+# These assert WHICH ARM WINS. They live here, not in
+# partials/tests/delegate-gate.test.sh, because the gate no longer decides —
+# it dispatches. Keeping them in shell would preserve the exact condition
+# REQ-603 removes: a green shell assertion standing in for coverage of the real
+# resolver, which is how BUG-209 survived.
+
+def test_gate_verdict_enabled_false_plus_legacy_key(clean_env, monkeypatch):
+    """AC-7 / BUG-205's case. An explicit `false` outranks key continuity."""
+    cfg = _write_config(clean_env, "delegate:\n  enabled: false\n")
+    monkeypatch.setenv("ADLC_CONFIG", cfg)
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    assert _common.resolve_gate_verdict() == (False, "disabled-via-config")
+
+
+def test_gate_verdict_no_config_plus_legacy_key(clean_env, monkeypatch):
+    """AC-8 / REQ-515 BR-11 continuity, reached only when NO config file exists."""
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    enabled, reason = _common.resolve_gate_verdict()
+    assert (enabled, reason) == (True, "ok")
+
+
+def test_gate_verdict_no_config_no_key_is_not_opted_in(clean_env):
+    """BR-11 fresh-install posture: delegation is OFF by default."""
+    assert _common.resolve_gate_verdict() == (False, "not-opted-in")
+
+
+def test_removing_env_arm_changes_gate_verdict(clean_env, monkeypatch):
+    """AC-5. An install whose ONLY opt-in signal is ADLC_DELEGATE_ENABLED.
+
+    Revert method (BR-9): delete the `ADLC_DELEGATE_ENABLED` arm from
+    delegation_enabled() and this fails — proving the gate no longer decides it
+    and that the arm is genuinely load-bearing rather than shadowed by another.
+    """
+    # A legacy key must NOT be set here: it is the arm that shadows this one, and
+    # its presence made the original version of this test pass with the env arm
+    # deleted — the opposite of what its docstring claimed. The key is supplied
+    # via a custom api_key_env so resolve_key succeeds without a legacy key
+    # satisfying the opt-in cascade.
+    monkeypatch.setenv("ADLC_DELEGATE_API_KEY_ENV", "MY_PROVIDER_KEY")
+    monkeypatch.setenv("MY_PROVIDER_KEY", "sk-t")
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    assert _common.resolve_gate_verdict() == (True, "ok")
+    # ...and with the ONLY opt-in signal removed, the same install is off.
+    monkeypatch.delenv("ADLC_DELEGATE_ENABLED")
+    assert _common.resolve_gate_verdict()[0] is False
+
+
+def test_removing_veto_stops_cli_refusing(clean_env, monkeypatch):
+    """AC-6 — the BUG-209 regression, asserted WITHOUT transmitting.
+
+    The criterion is the guard's refusal, not an actual transmission. Verifying
+    "it would transmit" by transmitting would put the governance violation inside
+    the suite that exists to prevent it, and would break the hermetic-test
+    posture besides (that was /validate W-1 on this REQ).
+
+    Revert method: delete the veto arm from delegation_enabled() and
+    require_delegation_enabled() stops raising here, while the shell gate's own
+    veto still holds — each layer's responsibility asserted in its own suite.
+    """
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    with pytest.raises(SystemExit) as exc:
+        _common.require_delegation_enabled("adlc-read")
+    assert "ADLC_DISABLE_DELEGATE" in str(exc.value)
+
+
+def test_per_arm_revert_enumeration(clean_env, monkeypatch):
+    """AC-14 / BR-9. Each of the four arms is independently load-bearing.
+
+    Enumerated rather than asserted in aggregate: a single "coverage did not
+    decrease" claim is unmeasurable, which is what /validate W-2 flagged. Each
+    row below is an input that ONLY that arm can decide, so deleting the arm
+    changes this result.
+    """
+    results = {}
+
+    # The key comes from a CUSTOM api_key_env, never MOONSHOT_API_KEY. Using the
+    # legacy var here satisfied the legacy-key continuity arm as a side effect,
+    # so the "veto" and "env-opt-in" rows passed with their arms DELETED — the
+    # same shadowing defect this file's sibling test documents fixing, left
+    # unfixed here. Each row must isolate the arm it names.
+    monkeypatch.setenv("ADLC_DELEGATE_API_KEY_ENV", "MY_PROVIDER_KEY")
+    monkeypatch.setenv("MY_PROVIDER_KEY", "sk-t")
+    monkeypatch.setenv("ADLC_DISABLE_DELEGATE", "1")
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    results["veto"] = _common.resolve_gate_verdict()
+    monkeypatch.delenv("ADLC_DISABLE_DELEGATE")
+
+    results["env-opt-in"] = _common.resolve_gate_verdict()
+    monkeypatch.delenv("ADLC_DELEGATE_ENABLED")
+
+    monkeypatch.setenv("ADLC_CONFIG", _write_config(clean_env, "delegate:\n  enabled: false\n"))
+    results["config"] = _common.resolve_gate_verdict()
+    monkeypatch.delenv("ADLC_CONFIG")
+
+    # Only now introduce the legacy key, for the row that is actually about it.
+    monkeypatch.delenv("ADLC_DELEGATE_API_KEY_ENV")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    results["legacy-key"] = _common.resolve_gate_verdict()
+
+    assert results == {
+        "veto": (False, "disabled-via-env"),
+        "env-opt-in": (True, "ok"),
+        "config": (False, "disabled-via-config"),
+        "legacy-key": (True, "ok"),
+    }
+
+
+def test_covered_arm_reports_no_false_gap(clean_env, monkeypatch):
+    """BR-9 benign path. A correctly-covered arm must not report as a gap.
+
+    A coverage check that flags everything is indistinguishable from one that
+    works, and would train the next reader to ignore it.
+    """
+    monkeypatch.setenv("ADLC_DELEGATE_ENABLED", "1")
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-t")
+    enabled, reason = _common.resolve_gate_verdict()
+    assert enabled is True and reason == "ok"

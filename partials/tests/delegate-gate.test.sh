@@ -1,6 +1,19 @@
 #!/bin/sh
-# partials/tests/delegate-gate.test.sh — arm ordering and reason strings for
-# partials/delegate-gate.sh (REQ-515 BR-11, BUG-205).
+# partials/tests/delegate-gate.test.sh — the gate's OWN responsibilities
+# (REQ-603 BR-8). Cascade semantics — which authorizing arm wins — are asserted
+# once, in tools/delegate/tests/, because the gate no longer decides them.
+#
+# Keeping the cascade cases here would preserve the exact condition REQ-603
+# removes: a green shell assertion standing in for coverage of the real
+# resolver. That is how BUG-209 survived — this harness asserted
+# "ADLC_DISABLE_DELEGATE=1 beats everything" and passed while both CLIs ignored
+# the variable entirely.
+#
+# What belongs here, and only this:
+#   (a) the gate returns what the probe said
+#   (b) it fails closed on a broken probe
+#   (c) no-binary returns 2 without probing
+#   (d) the veto short-circuits with zero probes
 #
 # Fully offline. `adlc-read` is replaced by a scripted stub on PATH: the Python
 # resolver's own correctness is covered by tools/delegate/tests/test_resolve_provider.py,
@@ -30,6 +43,7 @@ trap 'rm -rf "$SANDBOX"' EXIT INT TERM
 
 BIN="$SANDBOX/bin"; mkdir -p "$BIN"
 FAKEHOME="$SANDBOX/home"; mkdir -p "$FAKEHOME"
+mkdir -p "$SANDBOX/empty"
 
 # --- the stub ---------------------------------------------------------------
 # Prints whatever $STUB_OUT holds and exits $STUB_RC, and appends a line to
@@ -44,7 +58,6 @@ STUB
 chmod +x "$BIN/adlc-read"
 
 CFG_TRUE="$SANDBOX/true.yml";   printf 'delegate:\n  enabled: true\n'  > "$CFG_TRUE"
-CFG_FALSE="$SANDBOX/false.yml"; printf 'delegate:\n  enabled: false\n' > "$CFG_FALSE"
 
 # run_gate <cfg-path-or-empty> <key-or-empty> <envopt-or-empty> <stub_out> <stub_rc>
 # Echoes "<rc> <reason> <forked:yes|no>".
@@ -64,63 +77,169 @@ run_gate() {
   if [ -s "$SANDBOX/calls" ]; then printf ' yes\n'; else printf ' no\n'; fi
 }
 
-echo "=== BUG-205: an explicit \`enabled: false\` outranks legacy key continuity ==="
+echo "=== (a) pass-through: the gate returns what the probe said ==="
 
-# The regression itself. Before the fix the legacy-key arm was tested first, so
-# this returned "0 ok" and a live call followed.
-check "config false + legacy key -> disabled, config named as the cause" \
-  "1 disabled-via-config yes" "$(run_gate "$CFG_FALSE" sk-legacy "" 0 0)"
+check "probe '1 ok' -> delegated" \
+  "0 ok yes" "$(run_gate "" "" "" "1 ok" 0)"
 
-check "config false, no key -> disabled (fresh-install wording, both true)" \
-  "1 not-opted-in yes" "$(run_gate "$CFG_FALSE" "" "" 0 0)"
+check "probe '0 disabled-via-env' -> passed through verbatim" \
+  "1 disabled-via-env yes" "$(run_gate "" "" "" "0 disabled-via-env" 0)"
 
-check "config true + legacy key -> enabled" \
-  "0 ok yes" "$(run_gate "$CFG_TRUE" sk-legacy "" 1 0)"
+check "probe '0 disabled-via-config' -> passed through verbatim" \
+  "1 disabled-via-config yes" "$(run_gate "" "" "" "0 disabled-via-config" 0)"
 
-echo "=== continuity preserved: absence still yields (BR-11's actual case) ==="
+check "probe '0 not-opted-in' -> passed through verbatim" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "0 not-opted-in" 0)"
 
-# The other side of the fix. If this flips, the fix over-reached and broke every
-# pre-config install — the exact population BR-11's exception exists for.
-check "NO config file + legacy key -> enabled, and never forks" \
-  "0 ok no" "$(run_gate "" sk-legacy "" 0 0)"
+# REQ-603 AC-19/AC-21: every reason the probe can emit survives the gate
+# unchanged. The gate must not re-derive, re-label, or collapse any of them —
+# that re-derivation is what ADR-4 found to be wrong in the pre-REQ heuristic.
+echo "=== (a2) reason fidelity: no probe reason is altered in transit ==="
+for _r in ok disabled-via-env disabled-via-config not-opted-in; do
+  if [ "$_r" = "ok" ]; then _v=1; _want="0 ok yes"; else _v=0; _want="1 $_r yes"; fi
+  check "reason '$_r' round-trips unaltered" "$_want" "$(run_gate "" "" "" "$_v $_r" 0)"
+done
 
-check "NO config file, no key -> not opted in, and never forks" \
-  "1 not-opted-in no" "$(run_gate "" "" "" 0 0)"
+echo "=== (b) fail-closed on a broken probe ==="
 
-echo "=== precedence: ADLC_DELEGATE_ENABLED (rank 2) outranks the config (rank 3) ==="
+# Printed a valid verdict and THEN failed. Command substitution discards the
+# exit code, so without the immediate `_probe_rc=$?` this reads as consent —
+# the shape BUG-205 was.
+check "probe prints '1 ok' then exits non-zero -> NOT delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "1 ok" 3)"
 
-# The documented escape hatch for someone who wants delegation on despite the
-# config. It must keep working, and must not pay for a fork to do it.
-check "env opt-in beats config false, without forking" \
-  "0 ok no" "$(run_gate "$CFG_FALSE" sk-legacy 1 0 0)"
+check "probe exits non-zero -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "" 1)"
 
-echo "=== fail-closed: an unusable probe is never read as consent ==="
+check "probe prints nothing -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" __none__ 0)"
 
-# A gate that cannot establish consent must not assume it. Each of these would
-# have been "enabled" under the old ordering, since a legacy key is present.
-check "probe exits non-zero -> disabled" \
-  "1 disabled-via-config yes" "$(run_gate "$CFG_FALSE" sk-legacy "" 1 3)"
+check "probe prints garbage -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "yes definitely" 0)"
 
-check "probe prints nothing -> disabled" \
-  "1 disabled-via-config yes" "$(run_gate "$CFG_FALSE" sk-legacy "" __none__ 0)"
+check "probe names a reason outside the frozen enum -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "1 totally-fine" 0)"
 
-check "probe prints garbage -> disabled" \
-  "1 disabled-via-config yes" "$(run_gate "$CFG_FALSE" sk-legacy "" yes-please 0)"
+# The (verdict, reason) PAIR cases. Reverting the pair validation to the
+# reason-only form previously passed this whole harness — the fix was asserted,
+# not tested. "0 ok" is the one the commit message cites: it exported reason=ok
+# alongside rc=1, so a WITHHELD run was logged as ok in telemetry and forwarded
+# verbatim to agents/delegate-pre-pass.md.
+check "probe '0 ok' (inconsistent pair) -> not delegated, reason NOT ok" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "0 ok" 0)"
 
-echo "=== unchanged contract: the force-off escape hatch still short-circuits ==="
+check "probe '1 disabled-via-config' (inconsistent pair) -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "1 disabled-via-config" 0)"
 
-_disable=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
-  PATH="$BIN:$PATH" HOME="$FAKEHOME" STUB_CALLS="$SANDBOX/calls" STUB_OUT=1 STUB_RC=0 \
-  ADLC_DISABLE_DELEGATE=1 ADLC_CONFIG="$CFG_TRUE" MOONSHOT_API_KEY=sk-legacy \
-  sh -c '. "$1/delegate-gate.sh"
-         adlc_delegate_gate_check
-         printf "%s %s" "$?" "$ADLC_DELEGATE_GATE_REASON"' _ "$PARTIALS")
-check "ADLC_DISABLE_DELEGATE=1 beats everything" "1 disabled-via-env" "$_disable"
+check "probe '1 not-opted-in' (inconsistent pair) -> not delegated" \
+  "1 not-opted-in yes" "$(run_gate "" "" "" "1 not-opted-in" 0)"
+
+echo "=== (b2) a failed probe is VISIBLE, not silent (pass-3 M9) ==="
+# Every probe failure collapses to not-opted-in, byte-identical to "never opted
+# in" — a stale ~/bin/adlc-read silently stopped every skill delegating. One
+# stderr line is the difference. Captured with stdout discarded.
+_notice=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+              -u ADLC_DISABLE_DELEGATE PATH="$BIN:$PATH" HOME="$FAKEHOME" \
+              STUB_CALLS="$SANDBOX/calls" STUB_OUT="" STUB_RC=3 \
+          sh -c '. "$1/delegate-gate.sh"; adlc_delegate_gate_check' _ "$PARTIALS" 2>&1 >/dev/null)
+case "$_notice" in
+  *"probe exited 3"*) pass "non-zero probe emits a stderr notice naming the exit code" ;;
+  *) fail "non-zero probe emits a stderr notice naming the exit code (got: '$_notice')" ;;
+esac
+_quiet=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+             -u ADLC_DISABLE_DELEGATE PATH="$BIN:$PATH" HOME="$FAKEHOME" \
+             STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
+         sh -c '. "$1/delegate-gate.sh"; adlc_delegate_gate_check' _ "$PARTIALS" 2>&1 >/dev/null)
+check "a healthy probe emits NO notice (benign path)" "" "$_quiet"
+
+echo "=== (c) no-binary: return 2 WITHOUT probing (REQ-603 BR-5) ==="
+
+_nobin=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED \
+             -u ADLC_CONFIG -u ADLC_DISABLE_DELEGATE \
+             PATH="$SANDBOX/empty" HOME="$FAKEHOME" \
+         /bin/sh -c '. "$1/delegate-gate.sh"
+                adlc_delegate_gate_check
+                printf "%s %s" "$?" "$ADLC_DELEGATE_GATE_REASON"' _ "$PARTIALS")
+check "no binary -> 2 no-binary" "2 no-binary" "$_nobin"
+
+# Binary missing AND the veto set: the pre-REQ order resolved the binary first,
+# so this is 2, not 1. BR-5 pins that ordering; inverting it would silently
+# break the return-code guarantee on a path no other rule covers.
+_nobin_veto=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+                  ADLC_DISABLE_DELEGATE=1 PATH="$SANDBOX/empty" HOME="$FAKEHOME" \
+              /bin/sh -c '. "$1/delegate-gate.sh"
+                     adlc_delegate_gate_check
+                     printf "%s %s" "$?" "$ADLC_DELEGATE_GATE_REASON"' _ "$PARTIALS")
+check "no binary + veto -> still 2 no-binary (binary resolves first)" \
+  "2 no-binary" "$_nobin_veto"
+
+echo "=== (d) the veto short-circuits with ZERO probes (REQ-603 BR-2, AC-4) ==="
+
+# The emergency stop must stay fork-free. It is the control most likely to be
+# reached when something has already gone wrong.
+: > "$SANDBOX/calls"
+_veto=$(env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+            ADLC_DISABLE_DELEGATE=1 PATH="$BIN:$PATH" HOME="$FAKEHOME" \
+            STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
+        sh -c '. "$1/delegate-gate.sh"
+               adlc_delegate_gate_check
+               printf "%s %s" "$?" "$ADLC_DELEGATE_GATE_REASON"' _ "$PARTIALS")
+if [ -s "$SANDBOX/calls" ]; then _veto="$_veto yes"; else _veto="$_veto no"; fi
+check "veto -> 1 disabled-via-env, zero probes" "1 disabled-via-env no" "$_veto"
+
+# AC-4: the veto outranks every authorizing signal at once.
+: > "$SANDBOX/calls"
+_veto_all=$(env ADLC_DISABLE_DELEGATE=1 ADLC_DELEGATE_ENABLED=1 MOONSHOT_API_KEY=sk-legacy \
+                ADLC_CONFIG="$CFG_TRUE" PATH="$BIN:$PATH" HOME="$FAKEHOME" \
+                STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
+            sh -c '. "$1/delegate-gate.sh"
+                   adlc_delegate_gate_check
+                   printf "%s %s" "$?" "$ADLC_DELEGATE_GATE_REASON"' _ "$PARTIALS")
+if [ -s "$SANDBOX/calls" ]; then _veto_all="$_veto_all yes"; else _veto_all="$_veto_all no"; fi
+check "veto beats env opt-in + config true + legacy key, zero probes" \
+  "1 disabled-via-env no" "$_veto_all"
+
+echo "=== (e) at most ONE probe per gate call (REQ-603 BR-7, AC-11) ==="
+
+: > "$SANDBOX/calls"
+env -u MOONSHOT_API_KEY -u KIMI_API_KEY -u ADLC_DELEGATE_ENABLED -u ADLC_CONFIG \
+    -u ADLC_DISABLE_DELEGATE PATH="$BIN:$PATH" HOME="$FAKEHOME" \
+    STUB_CALLS="$SANDBOX/calls" STUB_OUT="1 ok" STUB_RC=0 \
+  sh -c '. "$1/delegate-gate.sh"; adlc_delegate_gate_check' _ "$PARTIALS" >/dev/null 2>&1
+check "delegated path forks exactly once" "1" "$(wc -l < "$SANDBOX/calls" | tr -d " ")"
+
+echo "=== (h) AC-1 must also catch an arm hoisted through a temp variable (pass-3 m2) ==="
+# `_optin="${ADLC_DELEGATE_ENABLED:-}"; if [ "$_optin" = "1" ]` is the natural
+# shape of a re-added fast path, and a conditional-only grep is blind to it.
+_hoist=$(grep -nE 'ADLC_DELEGATE_ENABLED|MOONSHOT_API_KEY|KIMI_API_KEY' "$PARTIALS/delegate-gate.sh" \
+         | grep -vE '^[0-9]+:[[:space:]]*#' | grep -E '=|\$\{' | wc -l | tr -d " ")
+check "no non-comment line READS an authorizing variable at all" "0" "$_hoist"
+
+echo "=== (f) BR-1: the gate contains no AUTHORIZING arm (AC-1) ==="
+
+# Decision sites only — a mention in a comment is documentation, not a branch.
+# grep -E without \b (BSD grep on macOS does not honor it — LESSON-013).
+_auth=$(grep -nE '^[[:space:]]*(if|elif|case|\[)' "$PARTIALS/delegate-gate.sh" \
+        | grep -E 'ADLC_DELEGATE_ENABLED|MOONSHOT_API_KEY|KIMI_API_KEY' | wc -l | tr -d " ")
+check "no conditional branches on an authorizing variable" "0" "$_auth"
+
+_cfgread=$(grep -nE '^[[:space:]]*[^#]*ADLC_CONFIG|config\.yml' "$PARTIALS/delegate-gate.sh" \
+           | grep -vE '^[[:space:]]*[0-9]+:[[:space:]]*#' | wc -l | tr -d " ")
+check "gate does not read the config file path" "0" "$_cfgread"
+
+# AC-2: the veto IS present, and positioned after binary resolution.
+_veto_line=$(grep -n 'ADLC_DISABLE_DELEGATE' "$PARTIALS/delegate-gate.sh" | grep -E ':[[:space:]]*if' | head -1 | cut -d: -f1)
+_bin_line=$(grep -n 'ADLC_READ_BIN="\$(_adlc_resolve_read_bin)"' "$PARTIALS/delegate-gate.sh" | head -1 | cut -d: -f1)
+if [ -n "$_veto_line" ] && [ -n "$_bin_line" ] && [ "$_veto_line" -gt "$_bin_line" ]; then
+  pass "veto present and positioned after binary resolution (AC-2)"
+else
+  fail "veto present and positioned after binary resolution (AC-2) (veto=$_veto_line bin=$_bin_line)"
+fi
 
 echo
 if [ "$FAILS" -eq 0 ]; then
   echo "delegate-gate.test.sh: all cases passed"
-else
-  echo "delegate-gate.test.sh: $FAILS case(s) failed"
+  exit 0
 fi
-exit $([ "$FAILS" -eq 0 ] && echo 0 || echo 1)
+echo "delegate-gate.test.sh: $FAILS case(s) failed"
+exit 1
