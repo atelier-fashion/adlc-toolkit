@@ -133,6 +133,40 @@ attributed, print `No attributed incidents yet.` rather than an empty table or a
 This section reads `.adlc/bugs/` only. It **modifies no file**, and in particular opens
 nothing under `.adlc/specs/**`.
 
+#### Conflict Resolutions
+Which pipeline runs resolved a merge or rebase conflict mid-run, and whether the
+resolution was verified (BUG-212). Read from each spec's `pipeline-state.json`
+`conflictsResolved` array — the record written at the moment of resolution, not the
+runner's narrative. Strictly read-only; a state file without the key is simply a run
+that resolved nothing.
+
+```bash
+# One row per recorded resolution. `conflictsResolved` is optional and additive:
+# a state file without it parses unchanged (absent == none resolved).
+for f in .adlc/specs/REQ-*/pipeline-state.json; do
+  [ -f "$f" ] || continue
+  python3 - "$f" <<'PYEOF'
+import json, sys, os
+p = sys.argv[1]; req = os.path.basename(os.path.dirname(p)).split("-", 2)[:2]
+try:
+    s = json.load(open(p))
+except (OSError, ValueError):
+    sys.exit(0)  # unreadable state is /status Step 1's concern, not this section's
+for e in s.get("conflictsResolved") or []:
+    print("\t".join(["-".join(req), str(e.get("phase", "?")), ",".join(e.get("files") or []),
+                     str(e.get("resolvedBy", "?")), str(e.get("strategy", "?")),
+                     "yes" if e.get("verified") else "no", str(e.get("resolvedAt", "?"))]))
+PYEOF
+done
+```
+
+| REQ | Phase | Files | Resolved by | Strategy | Verified | When |
+|-----|-------|-------|-------------|----------|----------|------|
+
+When no run has a recorded resolution, print `No recorded conflict resolutions.` rather
+than an empty table. An entry with `verified: no` is not an error — it is the honest
+value the record exists to surface.
+
 #### Recently Completed
 List artifacts completed in the last 7 days (by `updated` date).
 

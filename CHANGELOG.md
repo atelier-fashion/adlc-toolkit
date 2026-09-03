@@ -345,6 +345,29 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **A conflict resolved mid-run is now on the record (BUG-212).** When a pipeline run
+  encountered a merge or rebase conflict and resolved it, nothing durable said so — not
+  `pipeline-state.json`, not the PR, not the merge record. The only trace was the runner's
+  closing narrative, written at its discretion. On the 2026-08-31 three-REQ sprint two
+  runners resolved append-point conflicts and volunteered it; a runner that said nothing
+  would have left a batch indistinguishable from one that hit no conflicts. And the failure
+  mode is silent: one of those conflicts was a both-sides-append on `partials/tests/run.sh`'s
+  harness list, where taking one side would have retired a whole test harness with every
+  downstream check still green — a harness that is no longer enumerated does not fail, it
+  ceases to exist.
+
+  `pipeline-state.json` gains an additive, optional `conflictsResolved` array, appended
+  **at the moment of resolution, before the pipeline continues** — not in the close-out,
+  so a runner that crashes after resolving still leaves the record. Each entry carries the
+  phase, files, who resolved it (`runner` \| `user` \| `orchestrator`), the strategy
+  (`both-sides-append` when that is literally what happened), and an honest `verified`
+  flag with how. Nothing reads it for control flow — which is exactly why it was never
+  written. `/status` gains a **Conflict Resolutions** section over every spec's state
+  file. The `/sprint` unblock pass appends nothing, because it never resolves (REQ-485
+  BR-4); a clean auto-rebase is not a resolution. Deliberately **not** a gate on whether a
+  runner may resolve — that is BUG-207's question; this only guarantees that if it did, it
+  is on the record, which is what makes that decision measurable.
+
 - **The delegate CLIs no longer return — or write — a truncated completion as a whole
   one (BUG-213).** ⚠️ **Both `--max-tokens` defaults changed, and a run that hits the cap
   now exits non-zero.** `adlc-read` defaulted to 8192 and `adlc-write` to 16384, set
@@ -795,6 +818,13 @@ recorded at the time; PR numbers are `atelier-fashion/adlc-toolkit`.
 
 ### Knowledge
 
+- **LESSON-625 — a completion cap on a reasoning model is a probability, not a ceiling.**
+  Read `finish_reason`; never infer completeness from the content that came back — a
+  `length` finish *with* content is the dangerous case, because nothing downstream can
+  detect it. An identical request drew 7880–14706 reasoning tokens across three runs, so
+  no fixed cap clears every draw. And a numeric default is a claim about the model
+  generation it was set under: re-pinning the model expires it silently unless the re-pin's
+  acceptance criteria re-derive it (BUG-213).
 - **LESSON-575 — a squash merge destroys the second parent a promotion depends on.** A
   `staging → main` promotion in `admin-api` was merged with the reflexive
   `--squash --delete-branch` idiom. `deploy.yml` resolves the staging image tag via

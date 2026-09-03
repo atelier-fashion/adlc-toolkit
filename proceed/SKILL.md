@@ -139,7 +139,8 @@ Execute these phases in order. Each phase has a validation gate — if validatio
     "currentTask": null,
     "completedTasks": [],
     "failedTasks": []
-  }
+  },
+  "conflictsResolved": []
 }
 ```
 
@@ -148,6 +149,8 @@ The `repos` block is the canonical registry for this pipeline run. Every cd/comm
 **Single-repo mode**: `repos` contains exactly one entry with `primary: true, touched: true`, and `mergeOrder` is `[that-one-id]`. All phase logic still reads from `repos` — there is no separate code path.
 
 The `phase4` block tracks task-level progress during implementation so that a mid-Phase-4 context compression can resume from the exact task in progress rather than restarting the phase. `currentTask` holds the TASK-xxx ID being worked on right now; `completedTasks` holds IDs of tasks whose status is `complete` and whose commit has landed; `failedTasks` holds IDs that hit unrecoverable errors and were surfaced to the user. Other phases do not need sub-state.
+
+The `conflictsResolved` array is the audit record for every merge or rebase conflict that was **resolved** during this run — by the runner, by the user on a halt, or by anyone else — one entry per event, appended **at the moment of resolution, before the pipeline continues** (BUG-212). It is not a control-flow input: nothing reads it to decide what to do next, which is exactly why it was never written before — the only record of a mid-run resolution was the runner's closing narrative, and a runner that said nothing left no trace. Entry schema is in `agents/pipeline-runner.md` ("Conflict resolution record"). **Additive and optional**: a state file without the key parses and processes unchanged, and absent reads as "no conflicts were resolved", never as a missing value. A *clean* auto-rebase is not a resolution and appends nothing; a `blocked` halt that was never resumed appends nothing either — the entry records that a conflict was *resolved*, not that one occurred (`blockers` already records that).
 
 The `snapshotBranch` and `snapshotPR` fields on each `repos.<id>` entry are **deprecated as of REQ-380**. The skill no longer writes them; they remain in the schema for read-back compatibility with state files written between REQ-362 and REQ-380. A missing or null value is the expected state on all new runs. Snapshot promotion (the `staging → main` PR creation that previously ran in Phase 8a) is now handled out-of-band by a per-project workflow on staging-tip CI greenness; consult the project's CI configuration.
 
@@ -527,7 +530,7 @@ merge and the close-out. Merge conflicts are legitimate halt #3.
 - **Missing context files**: If `.adlc/context/` files don't exist in the primary repo, stop and tell the user to run `/init` first. Do not proceed without context files.
 - **Missing sibling repo**: If `.adlc/config.yml` references a sibling whose path doesn't exist or isn't a git repo, stop at Step 0 and list the missing repos. The user must clone or fix paths before retrying.
 - **Task with unknown `repo:` value**: If a task frontmatter names a repo id not in the registry, stop Phase 4 and surface the mismatch — either the config or the task is wrong.
-- **Merge conflicts**: If any feature branch has conflicts with its base branch — during Phase 7 rebase or Phase 8 merge — stop and ask the user how to resolve. In cross-repo mode, state which repo conflicted; earlier repos in `mergeOrder` may have already merged (see `repos[<id>].merged`), so the user can resume mid-sequence rather than re-doing completed merges.
+- **Merge conflicts**: If any feature branch has conflicts with its base branch — during Phase 7 rebase or Phase 8 merge — stop and ask the user how to resolve. In cross-repo mode, state which repo conflicted; earlier repos in `mergeOrder` may have already merged (see `repos[<id>].merged`), so the user can resume mid-sequence rather than re-doing completed merges. **Whoever resolves it** — you after the user answers, or the user directly in the worktree — append a `conflictsResolved` entry to `pipeline-state.json` before continuing (schema in `agents/pipeline-runner.md`, BUG-212). The narrative report is not the record; the state file is.
 - **Partial merge recovery**: If the pipeline is interrupted mid-Phase-8, resume by reading `pipeline-state.json` — the merge loop walks `mergeOrder` and skips any repo where `merged: true`.
 
 ## Prerequisites

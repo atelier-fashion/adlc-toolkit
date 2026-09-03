@@ -121,14 +121,47 @@ run, alongside the Incident Attribution section REQ-593 added.
 **Deliberately not in scope:** any gate that blocks or reverses a runner's resolution. That
 would presume an answer to BUG-207, which is exactly what this artifact avoids doing.
 
+## Resolution
+
+`pipeline-state.json` gains `conflictsResolved: []` — additive, optional, absent reads as
+"none resolved". One entry per resolution: `phase`, `files`, `resolvedBy` (`runner` |
+`user` | `orchestrator`), `strategy` (`both-sides-append` when literally true, else
+described), `verified` + `verifiedHow`, `resolvedAt`, optional `note`. The two properties
+the Proposed Direction named are the contract:
+
+1. **Additive and optional** — mirrors `introduced_by`/`attribution` on the bug template.
+2. **Written at the moment of resolution, before continuing** — stated in every place a
+   resolution can happen: the runner's own Phase 7/8 (`agents/pipeline-runner.md`, the
+   `/proceed` Error Handling line), and the post-halt resume where a human resolved a
+   materialized conflict (`proceed/phases-6-8-ship.md` clear-on-resolve write,
+   `sprint/SKILL.md` step 6). The `/sprint` unblock pass appends nothing, because it never
+   resolves (REQ-485 BR-4); a clean auto-rebase is not a resolution.
+
+`/status` gains a **Conflict Resolutions** section reading every spec's state file,
+printing `No recorded conflict resolutions.` when none. `verified: no` is surfaced as the
+honest value it is, not an error. `.adlc/context/architecture.md` records the layer.
+
+Deliberately **not** done, as filed: any gate on whether a runner may resolve. That is
+BUG-207's question; this guarantees that if it did, the record exists — which is what
+makes BUG-207's eventual bound measurable.
+
+Verification is structural (markdown-only surface, per conventions): `tools/lint-skills`
+clean over the changed skills, and the field name present in each of the six surfaces.
+
 ## Files Changed
 
-(filled after fix)
-
-- `agents/pipeline-runner.md` — terminal-state contract, conflict-resolution recording
-- `proceed/phases-6-8-ship.md` — Phase 7/8 conflict handling writes the entry
-- `proceed/SKILL.md` — `pipeline-state.json` schema
-- `status/SKILL.md` — surface recorded conflict events
+- `proceed/SKILL.md` — schema gains `conflictsResolved`; paragraph defining it; Error
+  Handling "Merge conflicts" requires the write before continuing
+- `agents/pipeline-runner.md` — "Conflict resolution record (BUG-212)": entry schema table
+  and the write-at-resolution rule
+- `proceed/phases-6-8-ship.md` — clear-on-resolve write appends the entry after a
+  human-resolved re-halt; a runner's own resolution appends at that moment
+- `sprint/SKILL.md` — step 6 and the Scope paragraph name the record; the pass itself
+  never writes it
+- `status/SKILL.md` — new Conflict Resolutions section
+- `.adlc/context/architecture.md` — one sentence on the audit layer
+- `CHANGELOG.md` — Fixed entry; also carries the LESSON-625 Knowledge line that #161
+  missed (anchor mismatch)
 
 ## Related
 
