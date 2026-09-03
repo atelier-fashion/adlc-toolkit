@@ -103,11 +103,16 @@ workflow uses (`--spec ... --context <reference> --target <file>`):
 | 16384 | sh test harness from a 550-line reference | `stop` | 15570 | 13544 | 212 lines | complete — **95% of budget** |
 | 16384 | pytest module from a 517-line reference | **`length`** | 16384 | 14706 | 188 lines, ends in a bare `assert` | **truncated; would be written to disk** |
 | 20000 | same pytest module | `stop` | 14169 | 12591 | 181 lines | complete |
+| 32768 | same pytest module | `stop` | 9017 | 7880 | 143 lines | complete — uncapped, and used *less* than at 20000 |
 
-Code generation reasons **harder** than reading does — 12.5k–14.7k reasoning tokens on the
-same task across runs, against 6.9k–9.1k for the exhaustive read. The write path's margin
-at any given cap is therefore thinner, and its reasoning cost varies more between identical
-requests.
+Code generation reasons **harder** than reading does — against 6.9k–9.1k for the exhaustive
+read — and, more importantly, its cost is **not a function of the task**. The three pytest
+runs are the same reference, same spec, same model: reasoning drew **14706, 12591, and
+7880** tokens — a **~2x spread on an identical request**. The uncapped run was the cheapest.
+So there is no "ceiling" to measure and set a cap above; the reasoning cost is a wide random
+draw, and any fixed cap will eventually meet a draw that exceeds it. That is the strongest
+argument in this bug for item 2 below: a cap can only shift how *often* the write path
+truncates, never whether it *can*.
 
 To reproduce the user-visible failure through the CLI:
 
@@ -181,7 +186,9 @@ answer that came back non-empty was an answer that came back whole.
    with thinner margin (~30% on the heaviest completed run, less on a worse reasoning draw)
    than the read path enjoys. That is recorded here deliberately: 20000 is *sufficient on the
    evidence*, not *generous*, for the write path, and the two defaults should be set from one
-   constant so they cannot drift apart a second time.
+   constant so they cannot drift apart a second time. Given the ~2x reasoning variance on
+   identical requests, 20000 clears every draw observed (worst 14706 + ~2.3k content) — it
+   does not clear every draw *possible*, and no fixed number does.
 2. **Read `finish_reason` in `complete()`.** Raise on `'length'` whether or not content is
    empty, and say so — a truncated answer must fail loudly. For a non-`length` finish with
    empty content, name the reason the API returned instead of asserting `--max-tokens`.
