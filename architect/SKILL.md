@@ -209,16 +209,22 @@ zero attributable files is skipped with a note — never publish an empty block 
 # byte-identical (BR-3).
 if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
 
-# Scope to THIS REQ's spec dir. $REQ is the REQ id (e.g. REQ-484) the skill is operating on;
-# fall back to the lone pipeline-state.json if $REQ is unset (resolve to its spec dir either way).
+# Scope to THIS REQ's spec dir. $REQ is the REQ id (e.g. REQ-484) the skill is operating on.
+# When $REQ is set, ONLY its own spec dir is consulted: a REQ with no pipeline-state.json is a
+# standalone /architect run and skips here. It must NOT fall through to the any-REQ search below —
+# that resolved a standalone REQ-611 run to REQ-544's state and would have published REQ-611's
+# footprint into REQ-544's draft PR. The any-REQ fallback (the lone pipeline-state.json) is
+# reached only when $REQ is unset.
 # find, not ls globs: zsh errors on unmatched globs ("no matches found") instead of
 # passing the pattern through, so a glob here breaks sh/bash/zsh parity.
 state=""
 if [ -n "$REQ" ]; then
   state=$(find .adlc/specs -type f -path "*/${REQ}-*/pipeline-state.json" 2>/dev/null | sort | head -1)
+  [ -n "$state" ] || { echo "architect: no pipeline-state.json for $REQ — standalone run, skipping footprint publish"; exit 0; }
+else
+  state=$(find .adlc/specs -type f -path "*/REQ-*/pipeline-state.json" 2>/dev/null | sort | head -1)
+  [ -n "$state" ] || { echo "architect: no pipeline-state.json — standalone run, skipping footprint publish"; exit 0; }
 fi
-[ -n "$state" ] || state=$(find .adlc/specs -type f -path "*/REQ-*/pipeline-state.json" 2>/dev/null | sort | head -1)
-[ -n "$state" ] || { echo "architect: no pipeline-state.json — standalone run, skipping footprint publish"; exit 0; }
 specdir=$(dirname "$state")   # THIS REQ's spec dir — task glob is scoped here, not all specs.
 tick=$(printf '\140\140\140')
 tab=$(printf '\t')
