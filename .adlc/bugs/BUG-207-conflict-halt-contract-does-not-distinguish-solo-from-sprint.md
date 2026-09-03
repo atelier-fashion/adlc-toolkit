@@ -1,7 +1,7 @@
 ---
 id: BUG-207
 title: "The conflict-halt contract does not distinguish solo /proceed from an unattended /sprint"
-status: open
+status: resolved
 severity: low
 created: 2026-08-31
 updated: 2026-09-03
@@ -169,6 +169,16 @@ orchestrator's unblock pass, which still never resolves. Not done, as filed: any
 gate that stops a runner resolving — the bound plus the BUG-212 record make the behavior
 auditable and any future restriction measurable, without hardening a rule whose scope was
 the question.
+
+## Deployment
+
+- Merged: [#164](https://github.com/atelier-fashion/adlc-toolkit/pull/164), squash, 2026-09-03.
+  Verified `state=MERGED`, `branch_deleted=1`.
+- Staging / production: n/a — no deploy targets in this repo; symlink install, live in every
+  session started after the merge. Consumer projects receive `partials/conflict-bound.sh`
+  on their next `/init` partial re-sync; `/template-drift` will report it `missing` until
+  then.
+- Lesson: LESSON-626 (joint with BUG-212).
 
 ## Files Changed
 
