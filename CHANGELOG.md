@@ -32,6 +32,22 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [5.2.0] — 2026-09-03
+
+The **governance drop** — the toolkit stops trusting itself. Delegation opt-in resolves
+in one place and fails closed (REQ-603, REQ-609, BUG-205/206/208/209/213); ids are
+reserved on the remote before they are handed out and the namespace survives a worktree
+(REQ-545, REQ-546, BUG-210); the pipeline specifies the tests that prove each rule, a bug
+names the requirement that shipped it, and `/spec` takes a transcript (REQ-593/594/595);
+the merge adapter verifies outcomes instead of trusting exit codes (BUG-150/195/201);
+partial sourcing survives POSIX `sh` (REQ-610); and an unattended runner's permission to
+resolve a conflict is bounded to what a machine can check, and recorded (BUG-207, BUG-212).
+Ten REQs and seventeen bugs, 2026-07-23 → 2026-09-03; every bug filed in the range is
+resolved. `v5.1.0` was tagged retroactively the same day at its drop's last commit
+(`df5e747`, 2026-06-12) — see that section, reconciled below to match the tag.
+
 ### Added
 
 - **BR→verification obligations (REQ-595).** The pipeline audited tests but never
@@ -631,38 +647,6 @@ PRs (`atelier-fashion/adlc-toolkit`).
   walker also satisfies. Both now stage a real in-root skill, so exclusion is
   proven with a demonstrably working walker.
 
-### Removed
-
-- **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the
-  `atelier-map` Obsidian vault and was hardcoded to the `atelier-map` repo and the
-  Atelier sibling repos under `~/Documents/GitHub` — a project-specific skill that
-  has no meaning for any other adopter and violated the "skills must work for any
-  consumer project" rule in a stack-agnostic distribution. It was undisclosed in the
-  README catalog and reached `~/.claude/skills/` only because `install.sh` symlinks
-  the whole repo root.
-
-  **Migration / tombstone:** `/map`'s functionality is not deleted, only un-distributed.
-  Relocate it to the atelier project's own skill directory (or a personal
-  `~/.claude/skills/` entry outside this repo). The full `map/SKILL.md` body is
-  recoverable from git history at the REQ-526 removal commit. No consumer project
-  references `/map` by name in its own automation, so the removal is non-breaking for
-  the distribution.
-
-### Fixed (context-doc truth pass, REQ-526)
-
-- Corrected every "five principles" claim in `architecture.md`, `conventions.md`, and
-  `project-overview.md` — ETHOS.md has seven principles; rephrased to a count-free
-  "the ETHOS principles".
-- Rewrote `project-overview.md` to describe the current tree truthfully (the toolkit
-  tracks its own lessons and bugs; numbering is remote-derived per REQ-518; the 4.x
-  and 5.0 epochs exist).
-- Reordered this changelog's epoch summary list to read 1→5 in source order (the `4.x`
-  and `5.x` bullets had been transposed).
-- Completed the template enumerations in `README.md` and `architecture.md`
-  (`taxonomy-template.md` was missing) and documented the `id-alloc.sh`/`id-recheck.sh`
-  partials in `partials/README.md`, dropping its stale "partial drift detection not yet
-  implemented" claim.
-
 ### Fixed (post-5.1.0 defect sweep)
 
 Backfilled 2026-08-30. These landed between 2026-06-12 and 2026-08-28 and were not
@@ -808,11 +792,6 @@ recorded at the time; PR numbers are `atelier-fashion/adlc-toolkit`.
   on the shared artifact scan. Missing ledger data degrades to the historical collision
   halt — the safe direction.
 
-- **`run.sh`'s harness list did not survive zsh (BUG-118, #97).** Iterates harnesses via
-  positional parameters instead of an unquoted `$TESTS` string, and re-execs `run.sh`
-  under each shell so its own zsh invocation is exercised on every run. Same class as
-  BUG-116 (LESSON-329/335 zsh executor, LESSON-399 single-element masking).
-
 - **`adlc-read` was unreachable from GUI-launched sessions (#111).** GUI-launched Claude
   Code sessions inherit a `PATH` without `~/bin` (only `.zshrc` adds it), so the gate's
   bare `command -v adlc-read` returned no-binary on machines where `~/bin/adlc-read` is
@@ -829,18 +808,6 @@ recorded at the time; PR numbers are `atelier-fashion/adlc-toolkit`.
   yield a duration of `-` instead of crashing `/spec` Step 1.6. `skill-flag.sh` uses a
   full-path `mktemp` template instead of `-t <name>`: BSD `mktemp` treats the `-t`
   argument as a literal prefix and never expands its `X`s.
-
-- **Boundary-free artifact-id matching sweep (#99, REQ-524 follow-up).** Fixes the
-  `/sprint` eligibility example, whose bare `grep REQ-xxx` matched prefix siblings, and
-  documents why `id-alloc`/`id-recheck` extraction plus exact-compare is already
-  prefix-sibling safe.
-
-- **Test portability off GitHub and outside the delegate venv (#100).**
-  `test_cli_resolve_provider` asserted `github` against the checkout's own `origin`,
-  failing on Azure DevOps and mirror clones; it now resolves against a synthetic repo with
-  a GitHub remote, with `ADLC_CONFIG` neutralized so a machine config cannot override. The
-  two `test_get_client_*` tests `importorskip("openai")` so they skip with a reason rather
-  than erroring when the delegate venv deps are absent.
 
 ### Knowledge
 
@@ -914,7 +881,9 @@ recorded at the time; PR numbers are `atelier-fashion/adlc-toolkit`.
 ## [5.1.0] — 2026-06-12
 
 The **de-brand drop** — completes REQ-515's genericization so a fresh adopter installs
-nothing Kimi-named, and fixes the inert delegation telemetry:
+nothing Kimi-named, fixes the inert delegation telemetry, and lands the four sibling REQs
+and two zsh fixes of the same 12-June sprint. Tagged retroactively on 2026-09-03 at the
+drop's last commit, `df5e747` (#100):
 
 - **REQ-522** De-brand the delegation surface + single-fence-safe telemetry:
   - `tools/kimi/` → `tools/delegate/`; the legacy `kimi-gate.sh` / `kimi-tools-path.sh`
@@ -953,6 +922,71 @@ nothing Kimi-named, and fixes the inert delegation telemetry:
   | `com.adlc-toolkit.kimi-setenv` | `com.adlc-toolkit.delegate-setenv` |
   | `~/.claude/kimi-venv` | `~/.claude/delegate-venv` |
   | `KIMI_API_KEY` / `MOONSHOT_API_KEY` | unchanged (key continuity, data) |
+
+- **REQ-523** Id-alloc remote-derivation integrity: the remote high-water is derived from
+  independent sources, the degraded signal actually fires when the remote is unreachable
+  (instead of silently allocating from local alone), and the artifact scan is forge-aware.
+- **REQ-524** `adlc renumber` is id-boundary-safe — `REQ-12` no longer rewrites `REQ-123`;
+  the same-day follow-up audit (#99, below) removed the last bare `grep REQ-xxx` in `/sprint`.
+- **REQ-525** `/template-drift` covers every vendored sync surface: `ETHOS.md` and the
+  workflow runtime join templates and partials, so a stale principle or engine is reported
+  rather than assumed synced.
+- **REQ-526** Context-doc truth pass and `/map` disposition — the *Removed* and *Fixed*
+  subsections below.
+- **BUG-116** (#88) zsh-safe candidate-list iteration in the id allocator's remote
+  high-water — the first of two same-class word-splitting defects fixed in this drop.
+
+- **`run.sh`'s harness list did not survive zsh (BUG-118, #97).** Iterates harnesses via
+  positional parameters instead of an unquoted `$TESTS` string, and re-execs `run.sh`
+  under each shell so its own zsh invocation is exercised on every run. Same class as
+  BUG-116 (LESSON-329/335 zsh executor, LESSON-399 single-element masking).
+
+
+- **Boundary-free artifact-id matching sweep (#99, REQ-524 follow-up).** Fixes the
+  `/sprint` eligibility example, whose bare `grep REQ-xxx` matched prefix siblings, and
+  documents why `id-alloc`/`id-recheck` extraction plus exact-compare is already
+  prefix-sibling safe.
+
+
+- **Test portability off GitHub and outside the delegate venv (#100).**
+  `test_cli_resolve_provider` asserted `github` against the checkout's own `origin`,
+  failing on Azure DevOps and mirror clones; it now resolves against a synthetic repo with
+  a GitHub remote, with `ADLC_CONFIG` neutralized so a machine config cannot override. The
+  two `test_get_client_*` tests `importorskip("openai")` so they skip with a reason rather
+  than erroring when the delegate venv deps are absent.
+
+
+### Removed
+
+- **`/map` skill removed from the distribution (REQ-526).** `/map` regenerated the
+  `atelier-map` Obsidian vault and was hardcoded to the `atelier-map` repo and the
+  Atelier sibling repos under `~/Documents/GitHub` — a project-specific skill that
+  has no meaning for any other adopter and violated the "skills must work for any
+  consumer project" rule in a stack-agnostic distribution. It was undisclosed in the
+  README catalog and reached `~/.claude/skills/` only because `install.sh` symlinks
+  the whole repo root.
+
+  **Migration / tombstone:** `/map`'s functionality is not deleted, only un-distributed.
+  Relocate it to the atelier project's own skill directory (or a personal
+  `~/.claude/skills/` entry outside this repo). The full `map/SKILL.md` body is
+  recoverable from git history at the REQ-526 removal commit. No consumer project
+  references `/map` by name in its own automation, so the removal is non-breaking for
+  the distribution.
+
+### Fixed (context-doc truth pass, REQ-526)
+
+- Corrected every "five principles" claim in `architecture.md`, `conventions.md`, and
+  `project-overview.md` — ETHOS.md has seven principles; rephrased to a count-free
+  "the ETHOS principles".
+- Rewrote `project-overview.md` to describe the current tree truthfully (the toolkit
+  tracks its own lessons and bugs; numbering is remote-derived per REQ-518; the 4.x
+  and 5.0 epochs exist).
+- Reordered this changelog's epoch summary list to read 1→5 in source order (the `4.x`
+  and `5.x` bullets had been transposed).
+- Completed the template enumerations in `README.md` and `architecture.md`
+  (`taxonomy-template.md` was missing) and documented the `id-alloc.sh`/`id-recheck.sh`
+  partials in `partials/README.md`, dropping its stale "partial drift detection not yet
+  implemented" claim.
 
 ## [5.0.0] — 2026-06-12
 
