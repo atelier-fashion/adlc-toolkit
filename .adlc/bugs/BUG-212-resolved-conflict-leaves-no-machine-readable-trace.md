@@ -1,7 +1,7 @@
 ---
 id: BUG-212
 title: "A conflict resolved during a pipeline run leaves no machine-readable trace — the only record is the runner's closing narrative"
-status: open
+status: resolved
 severity: medium
 created: 2026-09-03
 updated: 2026-09-03
@@ -147,6 +147,16 @@ makes BUG-207's eventual bound measurable.
 
 Verification is structural (markdown-only surface, per conventions): `tools/lint-skills`
 clean over the changed skills, and the field name present in each of the six surfaces.
+
+## Deployment
+
+- Merged: [#162](https://github.com/atelier-fashion/adlc-toolkit/pull/162), squash, 2026-09-03.
+  Verified `state=MERGED`, `branch_deleted=1`.
+- Staging / production: n/a — no deploy targets in this repo; symlink install, live in every
+  session started after the merge. Consumer projects see the contract on their next
+  `/template-drift` + re-sync of the affected skills.
+- Lesson: captured jointly with BUG-207 at its close-out — the two halves of the original
+  BUG-207 share one finding, and two near-duplicate lessons would be worse than one.
 
 ## Files Changed
 
