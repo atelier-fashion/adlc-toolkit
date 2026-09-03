@@ -76,7 +76,7 @@ After running all checklists, fix Critical and Major issues inline. Commit fixes
 
 The merge actor depends on REQ topology, decided from `pipeline-state.json.repos`:
 
-- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; forge-neutral per REQ-520) from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`. **The merge is not the end of the phase** — continue to the close-out below.
+- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → under `/sprint`, first try the bounded keep-both path in "Bounded resolution (BUG-207)" below — if the bound holds, resolve, verify, record, push, and re-run this gate; if it does not (or you are solo), report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; forge-neutral per REQ-520) from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`. **The merge is not the end of the phase** — continue to the close-out below.
 
 - **Cross-repo REQ** (more than one touched repo): **STOP after Phase 7.** Do NOT attempt to merge — the orchestrator sequences merges per `mergeOrder`. Your terminal claim is `pr-ready`.
 
@@ -158,7 +158,34 @@ If you encounter a blocker that genuinely requires human input:
 | `resolvedAt` | ISO-8601 timestamp. |
 | `note` | optional free text — the blocker id it was materialized against, anything the next reader needs. |
 
-Do **not** append an entry for a conflict that halted and was never resumed — `blockers` already holds it. Do **not** treat this record as permission: whether you may resolve at all is the contract's question (BUG-207); this only guarantees that if you did, it is on the record.
+Do **not** append an entry for a conflict that halted and was never resumed — `blockers` already holds it. Whether you may resolve at all is the rule below; this record is what makes that rule auditable.
+
+### Bounded resolution (BUG-207)
+
+Two contract lines used to bear on a runner's own Phase 7/8 conflict, written for different actors: `/proceed`'s "stop and ask the user" (the solo rule — a human is at the keyboard) and REQ-485 BR-4's "always human-resolved" (written about the orchestrator's unblock pass, in the paragraph about that pass). Neither settled the case that actually occurs: a runner in an **unattended `/sprint`** whose sibling merged mid-batch, colliding at an append point in `CHANGELOG.md` or `partials/tests/run.sh`. Two of three runners hit one in a single three-REQ sprint. The rule is now explicit, and it turns on **who is present**, not on how the conflict looks:
+
+- **Solo `/proceed`** (not under `/sprint`): halt and ask, unchanged. The human is present (REQ-485 BR-1).
+- **Under `/sprint`** (you were dispatched by the orchestrator): you MAY resolve the conflict yourself **if and only if** it is an append-point collision — at every conflicted hunk both sides purely add lines at the same point and neither changed or removed anything that was there. That is a checkable property, not a judgment: with diff3 markers it is "every hunk's base section is empty", and `partials/conflict-bound.sh` checks it. "Looked mechanical" is not the test and never qualifies. When the bound holds you keep **both** sides (ours, then theirs), **verify** that every line each side contributed survived, and **record** it in `conflictsResolved` before doing anything else. When it does not hold — a modified line, a deletion, a rename — abort and report `blocked` exactly as before.
+
+```sh
+if [ -f .adlc/partials/conflict-bound.sh ]; then . .adlc/partials/conflict-bound.sh; else . ~/.claude/skills/partials/conflict-bound.sh; fi
+wt=<repos[<id>].worktree>
+# Materialize the conflict the (non-mutating) trial-merge reported, then classify it.
+git -C "$wt" merge --no-ff --no-commit origin/<integrationBranch> >/dev/null 2>&1
+offenders=$(adlc_conflict_append_only "$wt"); rc=$?
+if [ "$rc" -eq 0 ] && adlc_conflict_keep_both "$wt" >/dev/null && adlc_conflict_verify_kept "$wt"; then
+  git -C "$wt" commit -qm "merge: keep-both resolution of append-point conflict with origin/<integrationBranch> [REQ-xxx]"
+  # NOW append the conflictsResolved entry (resolvedBy: runner, strategy: both-sides-append,
+  # verified: true, verifiedHow: adlc_conflict_verify_kept) — before the push, before anything else.
+  git -C "$wt" push
+  # then re-run the trial-merge gate; it must now return rc=0 before you merge.
+else
+  git -C "$wt" merge --abort
+  # -> `blocked`, exactly as before; put $offenders (or every conflicted file when rc != 1) in conflictFiles.
+fi
+```
+
+The reason the bound is this narrow: one of REQ-594's conflicts on 2026-08-31 was a both-sides-append on `run.sh`'s harness list. Had the resolution taken one side, a whole test harness would have stopped running with every downstream check still green — a harness that is no longer enumerated does not fail, it ceases to exist. Keep-both with verification is the only resolution that cannot do that; anything needing judgment about *which* side is right is a human's call. The `/sprint` orchestrator's own unblock pass is unchanged and still never resolves (BR-4) — this rule is about **your** branch in **your** Phase 7/8, and nothing else.
 
 ## Input
 

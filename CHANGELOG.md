@@ -345,6 +345,32 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **The conflict-halt contract now says who may resolve, and bounds it to what a machine can
+  check (BUG-207).** Two contract lines bore on a runner's own Phase 7/8 conflict, written for
+  different actors: `/proceed`'s "stop and ask the user" (solo — a human is present) and REQ-485
+  BR-4's "always human-resolved" (written about the orchestrator's unblock pass, inside the
+  paragraph about that pass). Neither settled the case that actually occurs — a runner in an
+  unattended `/sprint` whose sibling merged mid-batch, colliding at an append point in
+  `CHANGELOG.md` or `partials/tests/run.sh`. Two of three runners hit one in a single sprint
+  and resolved it; a rule that halts on every one turns an unattended batch into a
+  babysitting job, which is what REQ-485 exists to prevent.
+
+  The rule now turns on **who is present**, not how the conflict looks. Solo `/proceed`:
+  halt and ask, unchanged. Under `/sprint`: the runner may resolve **if and only if** every
+  conflicted hunk is both sides purely adding lines at the same point — a checkable property
+  (with diff3 markers, every base section is empty), not a judgment; "looked mechanical"
+  never qualifies. New `partials/conflict-bound.sh` checks it (`adlc_conflict_append_only`),
+  resolves keep-both (`adlc_conflict_keep_both`, which re-checks and refuses otherwise), and
+  **verifies** every contributed line survived against a sidecar it does not trust itself to
+  have written correctly (`adlc_conflict_verify_kept`). Anything else — a modified line, a
+  deletion — aborts and halts `blocked` as before. The resolution is recorded in
+  `conflictsResolved` (BUG-212) before anything else happens, so the bound is auditable and
+  a future decision to tighten it is measurable. `partials/tests/conflict-bound.test.sh`
+  proves the classifier on positive, negative, mixed, and no-conflict fixtures under bash,
+  zsh, `/bin/sh` and dash — including the exact `run.sh` harness-list collision that
+  motivated the bound, where keep-both is the only resolution that cannot silently retire a
+  test harness. The orchestrator's unblock pass is unchanged and still never resolves (BR-4).
+
 - **A conflict resolved mid-run is now on the record (BUG-212).** When a pipeline run
   encountered a merge or rebase conflict and resolved it, nothing durable said so — not
   `pipeline-state.json`, not the PR, not the merge record. The only trace was the runner's
