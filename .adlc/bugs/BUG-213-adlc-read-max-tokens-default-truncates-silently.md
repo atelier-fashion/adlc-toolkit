@@ -210,16 +210,42 @@ sets the severity: a truncated file is *persisted* under a `wrote:` success line
 `--force` it *replaces* a good one. BUG-208 — a silent fallback that lost the cheap tier
 and no data — is filed `high`; this loses data.
 
+## Resolution
+
+Both halves of the Proposed Direction, as one change:
+
+1. **One default, 20000, in `_common.DEFAULT_MAX_TOKENS`**, read by both CLIs' parsers.
+   The constant's comment carries the measurements and the reason the number is not the
+   fix. The two defaults had been set independently and had drifted once; a parser
+   default that is the *same object* as the constant is pinned by test so it cannot
+   happen silently again.
+
+2. **`complete()` reads `finish_reason`.** A `length` finish raises `SystemExit` whether
+   or not content was emitted — the partial output is **discarded, not printed and not
+   returned**, so the write path cannot persist it. The message names the cap, how many
+   characters were emitted before the cutoff (so the operator knows it was partial rather
+   than empty), and the provider's `reasoning_tokens` when reported. An empty result with
+   any *other* finish names that reason and says explicitly that raising `--max-tokens`
+   will not help — the old message asserted the opposite for every cause.
+
+Deliberately **not** done: an automatic retry at a higher cap. That would restore the
+property this bug is about — the caller could not tell a whole answer from a patched-up
+one. Fail, name the cap, let the caller raise it.
+
+`tools/delegate/tests/test_complete.py` pins fourteen cases. The one that matters is
+`test_length_with_content_raises` — the regression that produced the 188-line file ending
+in a bare `assert`.
+
 ## Files Changed
 
-(filled after fix)
-
-- `tools/delegate/adlc-read` — `--max-tokens` default
-- `tools/delegate/adlc-write` — `--max-tokens` default, from the same constant
-- `tools/delegate/_common.py` — `complete()` reads `finish_reason`; message accuracy; the
-  shared default constant
-- `tools/delegate/tests/` — coverage for a `length` finish with non-empty content
-- `tools/delegate/README.md` — document the default and the truncation failure mode
+- `tools/delegate/_common.py` — `DEFAULT_MAX_TOKENS`; `complete()` reads `finish_reason`,
+  discards on `length`, names the real reason otherwise; `_reasoning_tokens` helper
+- `tools/delegate/adlc-read` — `--max-tokens` default from the shared constant, help text
+- `tools/delegate/adlc-write` — same
+- `tools/delegate/tests/test_complete.py` — new; every finish_reason case, the shared
+  default, and both CLIs' parser defaults being the same object
+- `tools/delegate/README.md` — "Output budget (`--max-tokens`)" section
+- `CHANGELOG.md` — Fixed entry
 
 ## Related
 

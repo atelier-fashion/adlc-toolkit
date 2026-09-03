@@ -53,7 +53,12 @@ def _build_parser():
         help="print '<enabled> <reason>' and exit — the gate's full verdict "
              "(REQ-603); no spec or target required, no network call",
     )
-    parser.add_argument("--max-tokens", type=int, default=16384)
+    parser.add_argument(
+        "--max-tokens", type=int, default=_common.DEFAULT_MAX_TOKENS,
+        help="completion budget; on reasoning models this covers reasoning AND output "
+             f"together (default {_common.DEFAULT_MAX_TOKENS}, shared by both CLIs — BUG-213). "
+             "A run that hits it fails loudly rather than returning a truncated answer.",
+    )
     parser.add_argument("--model", default=None, help="override the resolved model")
     parser.add_argument("--base-url", default=None, help="override the resolved base URL")
     parser.add_argument(

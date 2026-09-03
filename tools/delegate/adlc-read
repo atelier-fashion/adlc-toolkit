@@ -56,7 +56,12 @@ def _build_parser():
     )
     parser.add_argument("--paths", nargs="+", help="files to read")
     parser.add_argument("--question", help="question to answer")
-    parser.add_argument("--max-tokens", type=int, default=8192)
+    parser.add_argument(
+        "--max-tokens", type=int, default=_common.DEFAULT_MAX_TOKENS,
+        help="completion budget; on reasoning models this covers reasoning AND output "
+             f"together (default {_common.DEFAULT_MAX_TOKENS}, shared by both CLIs — BUG-213). "
+             "A run that hits it fails loudly rather than returning a truncated answer.",
+    )
     parser.add_argument("--model", default=None, help="override the resolved model")
     parser.add_argument("--base-url", default=None, help="override the resolved base URL")
     parser.add_argument(

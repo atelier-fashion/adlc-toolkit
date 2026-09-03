@@ -304,6 +304,30 @@ adlc-write --spec "..." --context ref.py --target out.py --force   # overwrite a
 extract-chat ~/.claude/projects/<proj>/<session>.jsonl -o /tmp/chat.txt
 ```
 
+### Output budget (`--max-tokens`)
+
+Both delegate CLIs default `--max-tokens` to **20000**, from one shared constant
+(`_common.DEFAULT_MAX_TOKENS`) so the two cannot drift apart again. On reasoning
+models the cap covers **reasoning and output together** — `kimi-k2.6` spends most
+of it thinking before the first output token — and the reasoning cost of an
+*identical* request varies roughly 2x between runs. So no fixed number is enough
+every time, and the CLIs do not pretend otherwise:
+
+- A response that stops because it hit the cap (`finish_reason=length`) is a
+  **failure**, whether or not output had already been emitted. The partial output
+  is discarded, not printed and not written to `--target`. The message names the
+  cap, how much was emitted before the cutoff, and the reasoning-token count when
+  the provider reports one. Re-run with a higher `--max-tokens`.
+- A response that finishes for any *other* reason with nothing to return names
+  that reason (`stop`, `content_filter`, …) instead of blaming `--max-tokens`.
+
+Before BUG-213, `adlc-read` defaulted to 8192 and `adlc-write` to 16384, both set
+for a non-reasoning model; a run that hit the cap with output already emitted was
+returned as if complete — and on the write path, written to disk under `wrote:`,
+replacing a good file under `--force`. If a script depended on the old defaults
+it will only notice by getting a whole answer where it previously got a partial
+one.
+
 ### Version & resolved provider (`--version`)
 
 All three CLIs accept `--version` (or `-V`). It is scanned out of the arguments
