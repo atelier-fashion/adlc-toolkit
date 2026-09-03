@@ -139,13 +139,51 @@ rather than a confident 0 when it scanned zero files. A cheap adjunct here, thou
 this bug's scope: assert the expected harness count in `run.sh` so a dropped entry fails
 loudly instead of vanishing.
 
+## Resolution
+
+Direction chosen by the operator on 2026-09-03: **bounded resolution**. The rule turns on
+*who is present*, not on how the conflict looks:
+
+- **Solo `/proceed`**: halt and ask — unchanged; the human is present (REQ-485 BR-1).
+- **Under `/sprint`**: the runner may resolve its own Phase 7/8 conflict **if and only if**
+  it is an append-point collision — every conflicted hunk is both sides purely adding lines
+  at the same point. It keeps both sides, verifies every contributed line survived, records
+  the event in `conflictsResolved` (BUG-212) before anything else, pushes, and re-runs the
+  trial-merge gate. Anything else aborts and halts `blocked` exactly as before.
+
+The bound is a **checkable property**, not a judgment — the bug's own caution was that
+"looked mechanical" is not one. With diff3 conflict markers, "both sides only add lines" is
+exactly "every hunk's base section is empty"; proven with positive and negative fixtures
+before it was written into the contract. It lives in `partials/conflict-bound.sh` as three
+functions: `adlc_conflict_append_only` (classify; rc 0/1/2, and *nothing to classify* is rc
+2 — a caller bug, never a pass), `adlc_conflict_keep_both` (resolve; re-checks the bound and
+refuses otherwise, touches nothing on refusal), `adlc_conflict_verify_kept` (prove both
+sides survived, against a sidecar rather than trusting the resolution step). The harness
+runs the exact `run.sh` harness-list collision from the description end to end and asserts
+both added harnesses are enumerated and the file still parses — keep-both is the only
+resolution that cannot silently retire a harness, which is why the permission is bounded to
+it.
+
+BR-4 ("always human-resolved") stands, now stated as what it always was: a rule about the
+orchestrator's unblock pass, which still never resolves. Not done, as filed: any enforcement
+gate that stops a runner resolving — the bound plus the BUG-212 record make the behavior
+auditable and any future restriction measurable, without hardening a rule whose scope was
+the question.
+
 ## Files Changed
 
-(filled after fix)
-
-- `proceed/SKILL.md` — Phase 7/8 conflict handling, solo vs unattended
-- `sprint/SKILL.md` — REQ-485 scope paragraph
-- `agents/pipeline-runner.md` — terminal-state contract
+- `partials/conflict-bound.sh` — new: `adlc_conflict_append_only`, `adlc_conflict_keep_both`,
+  `adlc_conflict_verify_kept`
+- `partials/tests/conflict-bound.test.sh` — new: ten cases incl. the benign path and the
+  `run.sh` collision; `partials/tests/run.sh` enumerates it
+- `partials/README.md` — entry
+- `agents/pipeline-runner.md` — "Bounded resolution (BUG-207)": the rule and the fence; Phase 8
+  rc=1 routes through it under `/sprint`
+- `proceed/SKILL.md` — Error Handling "Merge conflicts" states the solo rule and the sprint bound
+- `proceed/phases-6-8-ship.md` — Phase 8 gate: solo halts, sprint tries the bound then halts
+- `sprint/SKILL.md` — Scope: BR-4 binds the unblock pass; the runner's own rebase is settled
+- `.adlc/context/architecture.md` — ordering summary names the bounded exception
+- `CHANGELOG.md` — Fixed entry
 
 ## Related
 
