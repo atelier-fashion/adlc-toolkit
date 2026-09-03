@@ -141,6 +141,25 @@ If you encounter a blocker that genuinely requires human input:
 | `rebaseAttempts` | conflicting-rebase attempt count, capped at the retry bound (default 1, config `auto_rebase_max_attempts`); at the bound the orchestrator marks `needs-manual-rebase` and stops auto-retrying (REQ-485 BR-10). |
 | `resolvedBlocker` | the now-merged blocker id, preserved for human context after a post-merge materialized conflict (REQ-485 OQ-6). |
 
+### Conflict resolution record (BUG-212)
+
+`blockers` records that a conflict **occurred**. `pipeline-state.json.conflictsResolved` records that one was **resolved** — by you, by the user on a halt, or by anyone else — so the event is auditable without relying on the resolver having chosen to mention it. On the 2026-08-31 batch two runners resolved conflicts and volunteered it in their final narrative; a runner that said nothing would have left no trace, and the batch would have looked identical to one that hit no conflicts.
+
+**Append one entry per resolution, at the moment of resolution, before the pipeline continues.** Not in the close-out, not in the report: a runner that crashes after resolving but before finishing must still leave the record, and an entry written at the end is the same discretionary narrative in JSON clothing. The array is additive and optional — absent reads as "none resolved" — and nothing reads it for control flow.
+
+| Field | Meaning |
+|---|---|
+| `phase` | the phase in which the conflict was resolved (`7` or `8` for a runner's own rebase/merge; the resumed phase for a post-halt resolution). |
+| `files` | the conflicting paths, as reported by git. |
+| `resolvedBy` | `runner` \| `user` \| `orchestrator`. `orchestrator` is reserved — the `/sprint` unblock pass never resolves (REQ-485 BR-4), so today it is never written; a clean auto-rebase is not a resolution and appends nothing. |
+| `strategy` | how it was resolved. Use `both-sides-append` when every hunk was two sides adding lines at one point and both were kept; otherwise describe it (`manual`, `took-ours`, …). This is what makes a later decision to restrict runner resolution *measurable*. |
+| `verified` | `true` only if the resolution was checked after the fact — e.g. both sides' additions present in the result, the file parses/executes, the harness list still enumerates every harness. `false` is a valid, honest value. |
+| `verifiedHow` | one line on what the check was. Required when `verified` is `true`. |
+| `resolvedAt` | ISO-8601 timestamp. |
+| `note` | optional free text — the blocker id it was materialized against, anything the next reader needs. |
+
+Do **not** append an entry for a conflict that halted and was never resumed — `blockers` already holds it. Do **not** treat this record as permission: whether you may resolve at all is the contract's question (BUG-207); this only guarantees that if you did, it is on the record.
+
 ## Input
 
 You will receive:
