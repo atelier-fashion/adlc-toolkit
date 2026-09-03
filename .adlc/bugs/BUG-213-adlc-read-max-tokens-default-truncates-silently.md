@@ -1,7 +1,7 @@
 ---
 id: BUG-213
 title: "The delegate CLIs' max-tokens defaults truncate silently — adlc-read returns a partial answer, adlc-write persists a partial file — and complete() reports a cause it never checked"
-status: open
+status: resolved
 severity: high
 created: 2026-09-03
 updated: 2026-09-03
@@ -235,6 +235,14 @@ one. Fail, name the cap, let the caller raise it.
 `tools/delegate/tests/test_complete.py` pins fourteen cases. The one that matters is
 `test_length_with_content_raises` — the regression that produced the 188-line file ending
 in a bare `assert`.
+
+## Deployment
+
+- Merged: [#160](https://github.com/atelier-fashion/adlc-toolkit/pull/160), squash `9f54afb`,
+  2026-09-03. Verified `state=MERGED`, `branch_deleted=1`.
+- Staging / production: n/a — this repo has no Cloud Run or iOS deploy targets; the toolkit
+  is symlink-installed, so the fix is live in every session that starts after the merge.
+  Delegation installs pick up the new defaults on the next `adlc-read`/`adlc-write` call.
 
 ## Files Changed
 
