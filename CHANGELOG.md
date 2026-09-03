@@ -844,6 +844,13 @@ recorded at the time; PR numbers are `atelier-fashion/adlc-toolkit`.
 
 ### Knowledge
 
+- **LESSON-626 — a rule written about one actor does not settle the case for another.**
+  Ask *whose action* each contract sentence binds, and whether a human is present. A
+  permission granted to a machine must be bounded by a property a machine can check —
+  fixture-proven, with a benign path — and verified against evidence the resolving step did
+  not produce. An audit record is written by the actor at the moment of the event, additive
+  and optional, and read by nothing for control flow; it is what makes the permission
+  measurable (BUG-207, BUG-212).
 - **LESSON-625 — a completion cap on a reasoning model is a probability, not a ceiling.**
   Read `finish_reason`; never infer completeness from the content that came back — a
   `length` finish *with* content is the dangerous case, because nothing downstream can
