@@ -1014,10 +1014,43 @@ def _api_error_message(exc, model):
     return f"delegate endpoint returned {status or 'an error'}: {exc}"
 
 
+# One default for both CLIs. They were set independently (adlc-read 8192 under
+# REQ-515, adlc-write 16384 under REQ-412) for a model whose whole budget was
+# output, and both expired unnoticed when the default model became a reasoning
+# model: on this endpoint ``max_tokens`` budgets reasoning AND content together,
+# and kimi-k2.6 spends most of it reasoning before emitting any content
+# (BUG-213). Measured 2026-09-03 on the heaviest realistic runs: 11532 total for
+# an exhaustive adlc-read, 14169 for an adlc-write test-module generation whose
+# reasoning alone drew 14706 on another try of the identical request. 20000
+# clears every draw observed. It does not clear every draw possible — reasoning
+# cost on an identical request varied ~2x (7880..14706) — which is why
+# ``complete()`` below treats a ``length`` finish as a failure rather than
+# trusting any number here to be enough.
+DEFAULT_MAX_TOKENS = 20000
+
+
+def _reasoning_tokens(resp):
+    """Best-effort ``usage.completion_tokens_details.reasoning_tokens``, else None.
+
+    Every level is optional across OpenAI-compatible providers; a missing one is
+    "unknown", never an error — this only decorates a message.
+    """
+    usage = getattr(resp, "usage", None)
+    details = getattr(usage, "completion_tokens_details", None)
+    return getattr(details, "reasoning_tokens", None)
+
+
 def complete(client, model, messages, max_tokens):
     """Call ``chat.completions.create`` and return the content string.
 
-    Raises ``SystemExit`` if the model returns empty/whitespace content.
+    Raises ``SystemExit`` when the response cannot be trusted as a whole answer:
+    the model stopped because it hit ``max_tokens`` (``finish_reason ==
+    "length"``) — **whether or not** it had already emitted content — or it
+    finished for any other reason with nothing to return. A ``length`` finish
+    with content is the dangerous case: a plausible, well-formed, *partial*
+    answer that the caller cannot tell from a whole one, and that ``adlc-write``
+    would otherwise persist to ``--target`` under a success line (BUG-213). The
+    message names the reason the API actually reported, not a guessed cause.
     """
     # openai is already in sys.modules — get_client() imported it to build the
     # client we were handed. Keep the import local anyway so this module stays
@@ -1039,7 +1072,35 @@ def complete(client, model, messages, max_tokens):
         ) from None
     if not getattr(resp, "choices", None):
         raise SystemExit("API returned no choices — check the model id and your account quota")
-    content = resp.choices[0].message.content
-    if not content or not content.strip():
-        raise SystemExit("empty completion — increase --max-tokens")
+    choice = resp.choices[0]
+    content = getattr(choice.message, "content", None) or ""
+    finish_reason = getattr(choice, "finish_reason", None)
+
+    if finish_reason == "length":
+        # Truncated. Discard rather than return: on the write path this content
+        # would be written to disk as a file, and under --force it would
+        # replace a good one. The partial output is deliberately not printed —
+        # a caller that wants to salvage it re-runs with a higher cap.
+        reasoning = _reasoning_tokens(resp)
+        emitted = len(content.strip())
+        detail = (
+            f"{emitted} characters of output were emitted before the cutoff and have been discarded"
+            if emitted
+            else "no output was emitted before the cutoff"
+        )
+        if reasoning is not None:
+            detail += f"; the model spent {reasoning} tokens reasoning within that budget"
+        raise SystemExit(
+            f"completion truncated: the model hit --max-tokens ({max_tokens}) "
+            f"(finish_reason=length) — {detail}. Re-run with a higher --max-tokens; "
+            "on this endpoint the cap covers reasoning and output together, and the "
+            "reasoning cost of an identical request varies widely between runs."
+        )
+    if not content.strip():
+        shown = finish_reason if finish_reason is not None else "unknown"
+        raise SystemExit(
+            f"empty completion (finish_reason={shown}) — the model returned no output "
+            "without hitting --max-tokens. Check the model id and, for content_filter, "
+            "the request contents; raising --max-tokens will not help here."
+        )
     return content

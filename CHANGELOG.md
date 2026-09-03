@@ -345,6 +345,29 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **The delegate CLIs no longer return — or write — a truncated completion as a whole
+  one (BUG-213).** ⚠️ **Both `--max-tokens` defaults changed, and a run that hits the cap
+  now exits non-zero.** `adlc-read` defaulted to 8192 and `adlc-write` to 16384, set
+  independently for a model whose whole budget was output. On the current default model
+  `max_tokens` covers reasoning *and* output, and `kimi-k2.6` spends most of it reasoning
+  first — measured 2026-09-03, an exhaustive read spent 6885 of 8192 reasoning and a
+  test-module generation spent 14706 of 16384. `complete()` raised only on *empty*
+  content and never read `finish_reason`, so a run that hit the cap with output already
+  emitted was returned as complete: a plausible, well-formed, partial answer the caller
+  could not tell from a whole one. On the write path that partial file was written to
+  `--target` under `wrote:`, and under `--force` it replaced a good file.
+
+  Both defaults are now **20000**, from one constant (`_common.DEFAULT_MAX_TOKENS`).
+  That clears every draw measured — but the reasoning cost of an identical request varied
+  ~2x across runs (7880–14706 tokens), so no fixed number clears every draw possible, and
+  the number is not what fixes this. `complete()` now reads `finish_reason`: a `length`
+  finish is a **failure** whether or not content was emitted — the partial output is
+  discarded, and the message names the cap, the characters emitted before the cutoff, and
+  the reasoning-token count when reported. Any other finish with empty content names the
+  reason the API returned instead of asserting `increase --max-tokens`, which the old
+  message did for every cause. `tools/delegate/tests/test_complete.py` pins each case,
+  including the one that matters: `length` **with** content must raise.
+
 - **Partial sourcing is guarded — an absent repo-local copy no longer kills the block
   under POSIX `sh` (REQ-610).** ⚠️ **Re-sync `.adlc/partials/` per file: `/template-drift`
   will report six vendored partials as `stale`, and two of them carry executable fixes.**
