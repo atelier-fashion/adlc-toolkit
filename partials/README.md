@@ -54,17 +54,26 @@ behavior. Examples:
   `$DELEGATE_TOOLS` and defines the function.
 - `conflict-bound.sh` — the checkable bound on runner conflict resolution
   (BUG-207). Defines `adlc_conflict_append_only <worktree>` (0 = every
-  conflicted file is an append-point collision: with diff3 markers, every
-  hunk's base section is empty; 1 = not, offenders on stdout; 2 = nothing to
-  classify or not a worktree — a caller bug, never a pass),
-  `adlc_conflict_keep_both <worktree>` (resolves by keeping both sides in
-  order, re-checks the bound first and refuses otherwise, stages the result,
-  records each side's lines in a sidecar), and
-  `adlc_conflict_verify_kept <worktree> [<sidecar>]` (proves every
-  contributed line survived — the resolution is verified against the sidecar,
-  not trusted). Proven against positive, negative, mixed, and the
-  `run.sh`-harness-list fixtures in `tests/conflict-bound.test.sh`; the
-  contract lives in `agents/pipeline-runner.md` "Bounded resolution".
+  conflicted file is an append-point collision of self-contained blocks: with
+  diff3 markers, every hunk's base section is empty AND each side is
+  independently `{}`/`[]`/`()`-balanced; 1 = not, offenders on stdout with one
+  reason each on stderr; 2 = nothing to classify or not a worktree — a caller
+  bug, never a pass), `adlc_conflict_sides_balanced <file>` (the balance half
+  on one diff3-marked file, no git needed), `adlc_conflict_keep_both
+  <worktree>` (resolves by keeping both sides in order, re-checks the bound
+  first and refuses otherwise, stages the result, records each side's lines in
+  a sidecar), and `adlc_conflict_verify_kept <worktree> [<sidecar>]` (proves
+  every contributed line survived — the resolution is verified against the
+  sidecar, not trusted; it is a line-preservation proof, not a syntactic one).
+  The balance check exists because an empty base section does not make git's
+  region a whole syntactic unit — it can end mid-construct with the shared
+  `}` after `>>>>>>>`, and keep-both then leaves the first side's block open
+  with every contributed line still present (LESSON-646, teton-code). The
+  bound still does not prove the result compiles; the project's build does.
+  Proven against positive, negative, mixed, the `run.sh`-harness-list, the
+  mid-construct/slid/bracket, and the wrap-in-block fixtures in
+  `tests/conflict-bound.test.sh`; the contract lives in
+  `agents/pipeline-runner.md` "Bounded resolution".
 - `id-alloc.sh` — collision-safe id allocation with the **remote** as source of
   truth (REQ-518). Defines `adlc_alloc_id <kind>` (prints `max(local,remote)+1`
   and fast-forwards the local counter — which is a cache, not an authority),
