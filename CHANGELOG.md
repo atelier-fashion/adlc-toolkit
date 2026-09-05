@@ -32,7 +32,27 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The keep-both bound checks that each side is a whole block, not just that both
+  sides only added (BUG-207 follow-up, LESSON-646 in teton-code).** "Every hunk's
+  base section is empty" proved both sides purely appended; it did not prove git's
+  conflict region was a whole syntactic unit. REQ-614's Phase-7 rebase showed the
+  gap live: two REQs each added a method pair before the same following method in
+  `harness/tools/mod.rs`, the region ended mid-construct with the shared `    }`
+  after `>>>>>>>` as common context, and a keep-both closed only the second side's
+  method. `adlc_conflict_verify_kept` would have passed — every contributed line
+  *was* present. Line preservation and syntactic validity are different properties.
+  `partials/conflict-bound.sh` now refuses the bound at any hunk where a side leaves
+  a `{`/`[`/`(` open or closes one it did not open (`adlc_conflict_sides_balanced`,
+  folded into `adlc_conflict_append_only`; offending paths still on stdout, and now
+  one reason per path on stderr). The contract comment and `agents/pipeline-runner.md`
+  "Bounded resolution" say what the bound proves — concatenation cannot change
+  nesting — and what it does not: that the result compiles. That remains the
+  project build's job on the pushed tip. Fixtures: the mid-construct shape, the
+  slid-onto-closing-line shape, brackets, a stray `=======` outside a hunk, and a
+  real git merge where one side wraps existing lines in a new block (base-empty,
+  so the old bound would have moved the other side's line inside the wrap).
 
 ## [5.2.0] — 2026-09-03
 

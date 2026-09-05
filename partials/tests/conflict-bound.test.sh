@@ -21,6 +21,22 @@
 #   harness_list_survives    — the run.sh-shaped append-point collision, end to end:
 #                              two branches each add a harness to a positional list
 #                              line; resolved file enumerates BOTH (BUG-207's caution)
+#   sides_balanced_*         — LESSON-646 (teton-code): an empty base section does not
+#                              make the region a whole syntactic unit. The condition-2
+#                              check on hand-built diff3 files:
+#                                clean      — both sides self-contained            -> rc 0
+#                                open       — git ended the region mid-construct,
+#                                             the shared `    }` after `>>>>>>>`   -> rc 1, reason names `{`
+#                                slid       — git slid the region onto the previous
+#                                             block's closing line                 -> rc 1, "closes"
+#                                brackets   — `[`/`(` count too, and a balanced
+#                                             `} else {` on one line is not a dip  -> rc 0 / 1
+#                                stray_sep  — a `=======` outside any hunk is text  -> rc 0
+#   keep_both_refuses_unbalanced — a REAL git merge where one side wraps existing
+#                              lines in a new block: base empty at the collision, so
+#                              condition 1 holds, but keep-both would silently move the
+#                              other side's line inside the wrap. Refused: path printed,
+#                              reason on stderr, nothing touched, nothing staged.
 #
 # Runs under whatever shell run.sh hands it ($ADLC_TEST_SHELL) — the partial must
 # behave identically under bash, zsh, /bin/sh and dash.
@@ -162,6 +178,165 @@ adlc_conflict_verify_kept "$R" >/dev/null; check "harness_list_survives: verify 
 check "harness_list_survives: BOTH added harnesses enumerated" 2 "$(grep -c 'c.test.sh\|d.test.sh' "$R/run.sh")"
 check "harness_list_survives: original harnesses still enumerated" 1 "$(grep -c 'a.test.sh.*b.test.sh' "$R/run.sh")"
 check "harness_list_survives: resolved file still parses as sh" 0 "$($SUT -n "$R/run.sh" 2>/dev/null; echo $?)"
+unset ADLC_CONFLICT_SIDECAR
+
+# --- sides_balanced_* (LESSON-646: line preservation is not syntactic validity) ---
+D="$SANDBOX/sides"; mkdir -p "$D"
+# clean: what git produced for the real mod.rs when rebuilt from its three versions —
+# each side is a whole method pair, closing brace and trailing blank inside the side.
+cat > "$D/clean.rs" <<'EOF'
+impl Ctx {
+    pub fn prior(&self) -> u8 {
+        self.prior
+    }
+
+<<<<<<< ours
+    #[must_use]
+    pub fn known_projects(&self) -> &[String] {
+        &self.known_projects
+    }
+
+||||||| base
+=======
+    #[must_use]
+    pub fn boundaries(&self) -> &[Boundary] {
+        &self.boundaries
+    }
+
+>>>>>>> theirs
+    pub fn walk(&self) -> u8 {
+        self.walk
+    }
+}
+EOF
+adlc_conflict_sides_balanced "$D/clean.rs" 2>/dev/null; check "sides_balanced_clean: rc" 0 "$?"
+
+# open: the LESSON-646 shape — the body ends at `&self.x`, the shared `    }` is
+# common context after `>>>>>>>`. Keep-both would close only theirs' method.
+cat > "$D/open.rs" <<'EOF'
+impl Ctx {
+<<<<<<< ours
+    pub fn known_projects(&self) -> &[String] {
+        &self.known_projects
+||||||| base
+=======
+    pub fn boundaries(&self) -> &[Boundary] {
+        &self.boundaries
+>>>>>>> theirs
+    }
+
+    pub fn walk(&self) -> u8 {
+        self.walk
+    }
+}
+EOF
+why=$(adlc_conflict_sides_balanced "$D/open.rs" 2>&1 >/dev/null); rc=$?
+check "sides_balanced_open: rc" 1 "$rc"
+check "sides_balanced_open: both sides named, delimiter named" 2 "$(printf '%s\n' "$why" | grep -c 'leaves `{` unbalanced (+1)')"
+check "sides_balanced_open: ours side reported on hunk 1" 1 "$(printf '%s\n' "$why" | grep -c 'hunk 1, ours side')"
+# ...and the resolution the old bound would have shipped really is broken: brace-count it.
+kb=$(awk '/^<<<<<<< /||/^\|\|\|\|\|\|\| /||/^=======$/||/^>>>>>>> /{next}{print}' "$D/open.rs")
+check "sides_balanced_open: naive keep-both leaves one brace open" 1 "$(printf '%s' "$kb" | awk '{o+=gsub(/\{/,"");c+=gsub(/\}/,"")}END{print o-c}')"
+
+# slid: git aligned the region to start on the previous block's closing line.
+cat > "$D/slid.rs" <<'EOF'
+impl Ctx {
+    pub fn prior(&self) -> u8 {
+        self.prior
+<<<<<<< ours
+    }
+
+    pub fn known_projects(&self) -> &[String] {
+        &self.known_projects
+||||||| base
+=======
+    }
+
+    pub fn boundaries(&self) -> &[Boundary] {
+        &self.boundaries
+>>>>>>> theirs
+    }
+}
+EOF
+why=$(adlc_conflict_sides_balanced "$D/slid.rs" 2>&1 >/dev/null); rc=$?
+check "sides_balanced_slid: rc" 1 "$rc"
+check "sides_balanced_slid: reason says the side closes what it did not open" 2 "$(printf '%s\n' "$why" | grep -c 'closes a `}` it did not open')"
+
+# brackets: `[` and `(` are checked too; a one-line `} else {` inside an opened block is fine.
+cat > "$D/brackets.json" <<'EOF'
+{
+<<<<<<< ours
+  "ours": [1, 2, (3)],
+  "f": "if (a) { b } else { c }",
+||||||| base
+=======
+  "theirs": [4, 5],
+>>>>>>> theirs
+  "tail": true
+}
+EOF
+adlc_conflict_sides_balanced "$D/brackets.json" 2>/dev/null; check "sides_balanced_brackets: balanced [ ( { pass" 0 "$?"
+cat > "$D/brackets-bad.json" <<'EOF'
+{
+<<<<<<< ours
+  "ours": [1, 2,
+||||||| base
+=======
+  "theirs": [4, 5],
+>>>>>>> theirs
+  3],
+}
+EOF
+why=$(adlc_conflict_sides_balanced "$D/brackets-bad.json" 2>&1 >/dev/null); rc=$?
+check "sides_balanced_brackets: unclosed [ refused" 1 "$rc"
+check "sides_balanced_brackets: only ours, only [" "1 0" "$(printf '%s\n' "$why" | grep -c 'ours side leaves `\[`') $(printf '%s\n' "$why" | grep -c 'theirs side')"
+
+# stray_sep: a `=======` outside a hunk (a markdown setext underline) is content, not a marker.
+cat > "$D/stray.md" <<'EOF'
+Title
+=======
+<<<<<<< ours
+- ours (BUG-207)
+||||||| base
+=======
+- theirs [LESSON-646]
+>>>>>>> theirs
+Trailer {
+EOF
+adlc_conflict_sides_balanced "$D/stray.md" 2>/dev/null; check "sides_balanced_stray_sep: rc" 0 "$?"
+
+# --- keep_both_refuses_unbalanced (a real git merge, base empty, one side unbalanced) ---
+WBASE='fn f() {
+    a();
+    b();
+}
+'
+WOURS='fn f() {
+    if x {
+    a();
+    b();
+    }
+}
+'
+WTHEIRS='fn f() {
+    log();
+    a();
+    b();
+}
+'
+R="$SANDBOX/wrap"; mkrepo "$R" "$WBASE" "$WOURS" "$WTHEIRS" f.rs
+git -C "$R" checkout --conflict=diff3 -- f.rs >/dev/null 2>&1
+check "keep_both_refuses_unbalanced: fixture is base-empty (condition 1 alone would pass)" 1 "$(adlc_conflict_base_nonempty "$R/f.rs"; echo $?)"
+why=$(adlc_conflict_append_only "$R" 2>&1 >"$SANDBOX/wrap.out"); rc=$?
+check "keep_both_refuses_unbalanced: append_only rc" 1 "$rc"
+check "keep_both_refuses_unbalanced: offending path on stdout" "f.rs" "$(cat "$SANDBOX/wrap.out")"
+check "keep_both_refuses_unbalanced: reason on stderr names ours and {" 1 "$(printf '%s\n' "$why" | grep -c 'f.rs: hunk 1, ours side leaves `{` unbalanced (+1)')"
+before=$(cat "$R/f.rs")
+ADLC_CONFLICT_SIDECAR="$SANDBOX/wrap-side"; mkdir -p "$ADLC_CONFLICT_SIDECAR"; export ADLC_CONFLICT_SIDECAR
+adlc_conflict_keep_both "$R" >/dev/null 2>&1; check "keep_both_refuses_unbalanced: keep_both rc" 1 "$?"
+check "keep_both_refuses_unbalanced: file untouched" "$before" "$(cat "$R/f.rs")"
+check "keep_both_refuses_unbalanced: still unmerged" "f.rs" "$(git -C "$R" diff --name-only --diff-filter=U)"
+check "keep_both_refuses_unbalanced: no sidecar files written" 0 "$(ls "$ADLC_CONFLICT_SIDECAR" | wc -l | tr -d ' ')"
 unset ADLC_CONFLICT_SIDECAR
 
 # ===========================================================================
