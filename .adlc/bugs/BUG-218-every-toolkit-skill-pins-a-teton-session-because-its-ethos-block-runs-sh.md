@@ -1,10 +1,11 @@
 ---
 id: BUG-218
 title: "Every toolkit skill pins a Teton Code session to the local tier, because its ethos block runs the partial under sh"
-status: open
+status: resolved
 severity: medium
 created: 2026-09-06
 updated: 2026-09-06
+resolved: 2026-09-06
 component: "adlc/skills"
 domain: "skills"
 stack: ["markdown", "sh"]
@@ -57,7 +58,7 @@ classifier would need to run.
 
 ## Resolution
 
-(open) The block becomes
+The block becomes
 `` !`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init …"` ``
 in all seventeen skills: the REQ-416 H1 fallthrough on an empty project copy
 kept, no interpreter, and no path outside the session root — a first draft kept
@@ -69,6 +70,10 @@ vendored skill copies that predate the line. `conventions.md` and
 `partials/README.md` record why a text-only partial should be `cat`'d at the
 call site. Teton Code's classifier learns `test` as a name-only verb in the same
 change set (teton-code side).
+
+## Deployment
+
+- Merged as 31cd83f (PR #168), 2026-09-06. Consumers pick it up on their next toolkit sync; the daemon side (`test` as a name-only verb) is teton-code PR #308.
 
 ## Files Changed
 
