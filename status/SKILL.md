@@ -10,7 +10,7 @@ You are generating a status report of all ADLC work in the current project.
 
 ## Ethos
 
-!`sh .adlc/partials/ethos-include.sh 2>/dev/null || sh ~/.claude/skills/partials/ethos-include.sh`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
 
 > **See also `/manifest`** — `/status` reads this **local** checkout; `/manifest` derives in-flight work across **all sessions** from the remote (open PRs + pushed `feat/REQ-*` branches), with an advisory overlap report. Use `/manifest` to see what other people are working on before you start.
 

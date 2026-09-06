@@ -34,6 +34,23 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **The ethos block reads only the project's vendored `ETHOS.md`, with no
+  interpreter (BUG-218).** Every skill opened with
+  `` !`sh .adlc/partials/ethos-include.sh … || sh ~/.claude/skills/partials/ethos-include.sh` ``.
+  Under a host that classifies what a preamble could have read — Teton Code's
+  REQ-614/619 grammar — `sh <file>` is opaque by verb and a `~/…` fallback is an
+  out-of-root path it cannot prove, so typing *any* toolkit skill pinned the session
+  to the local tier (liftably since REQ-619, permanently and silently before
+  BUG-214). The block is now
+  `` !`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init …"` ``:
+  the REQ-416 H1 empty-file fallthrough kept, every token in reach, and the
+  toolkit-copy fallback dropped — `/init` has vendored `.adlc/ETHOS.md` since
+  REQ-416 and `/template-drift` keeps it current, so the fallback only ever served
+  a project that had not been initialised, which no skill supports anyway.
+  `partials/ethos-include.sh` stays for vendored skill copies that predate the
+  line; `conventions.md` and `partials/README.md` say why neither it nor a `~/`
+  path may return to a call site.
+
 - **The keep-both bound checks that each side is a whole block, not just that both
   sides only added (BUG-207 follow-up, LESSON-646 in teton-code).** "Every hunk's
   base section is empty" proved both sides purely appended; it did not prove git's
