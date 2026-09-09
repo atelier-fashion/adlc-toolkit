@@ -10,15 +10,15 @@ You are generating a status report of all ADLC work in the current project.
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 > **See also `/manifest`** — `/status` reads this **local** checkout; `/manifest` derives in-flight work across **all sessions** from the remote (open PRs + pushed `feat/REQ-*` branches), with an advisory overlap report. Use `/manifest` to see what other people are working on before you start.
 
 ## Context
 
-- Specs directory: !`ls .adlc/specs/ 2>/dev/null || echo "No specs found"`
-- Bugs directory: !`ls .adlc/bugs/ 2>/dev/null || echo "No bugs found"`
-- Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
+- Specs directory: !`ls .adlc/specs/ || echo No specs found`
+- Bugs directory: !`ls .adlc/bugs/ || echo No bugs found`
+- Current branch: !`git branch --show-current || echo Not a git repo`
 
 ## Input
 

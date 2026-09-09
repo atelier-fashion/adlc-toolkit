@@ -10,12 +10,12 @@ You are deploying code through a canary process: deploy a zero-traffic revision,
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
 - Current directory: !`pwd`
-- Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
+- Current branch: !`git branch --show-current || echo Not a git repo`
 - GCP project: !`gcloud config get-value project 2>/dev/null || echo "No GCP project configured"`
 - Active Cloud Run services: !`gcloud run services list --format="table(SERVICE,REGION,URL)" 2>/dev/null || echo "gcloud not configured"`
 

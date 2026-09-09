@@ -12,12 +12,13 @@ This skill is the **pre-push ADLC review gate**. It runs 5 specialized review ag
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
-- Current branch: !`git branch --show-current 2>/dev/null || echo "Not a git repo"`
-- Recent changes: !`git diff main --stat 2>/dev/null || echo "No diff available"`
+- Current branch: !`git branch --show-current || echo Not a git repo`
+- Committed changes vs main: !`git diff-tree --stat -r main HEAD || echo No diff available`
+- Uncommitted changes: !`git status --short`
 
 **Context files loaded on demand**: `.adlc/context/conventions.md` and recent lessons are loaded by Step 1 below — **skip the Reads if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads `conventions.md` at Phase 0).
 

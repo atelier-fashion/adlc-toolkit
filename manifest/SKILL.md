@@ -14,13 +14,13 @@ Unlike `/status`, which reconstructs its view from the **local** `.adlc/` checko
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
-- Current branch: !`git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "(not a git repo)"`
-- Local origin `feat/REQ-*` refs: !`git branch -r --list 'origin/feat/REQ-*' 2>/dev/null | grep -c . || echo 0`
-- gh CLI: !`command -v gh >/dev/null 2>&1 && echo "installed (auth + network checked at run)" || echo "not installed — branch-only"`
+- Current branch: !`git rev-parse --abbrev-ref HEAD || echo not a git repo`
+- Local `origin/feat/*` refs (empty when none are fetched): !`git for-each-ref refs/remotes/origin/feat`
+- gh CLI: !`which gh && echo installed - auth and network checked at run || echo not installed — branch-only`
 
 ## Input
 

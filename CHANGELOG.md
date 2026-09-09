@@ -34,6 +34,25 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **Every context preamble stays inside Teton Code's shell grammar (BUG-220).**
+  BUG-218 took the interpreter out of the ethos line, and the line still pinned
+  the session — with every other `## Context` preamble in every skill — because
+  the REQ-614 grammar rejects a command before it looks at the verb when it
+  contains quoting, redirection, a glob, `$`, or a brace: `|| echo "…"`,
+  `2>/dev/null`, `.adlc/specs/*/requirement.md` and `--format="…"` were each
+  enough. All seventeen skills' preambles are rewritten inside the grammar —
+  bare `echo` messages, no redirects, no globs, no `~/` template fallbacks
+  (`/init` vendors `.adlc/templates`), no `| head`/`| tail`/`| grep` (a reader
+  with no file is scored as a read of the whole root), `git diff-tree --stat`
+  plus `git status --short` in place of `git diff main --stat`,
+  `git for-each-ref` in place of a counted `git branch --list` glob, `which gh`
+  in place of `command -v`, and sprint reading each `pipeline-state.json` it
+  lists instead of `cat`ing them in a `while` loop. `conventions.md` now states
+  the grammar. `/canary`'s `gcloud` lines and `/template-drift`'s toolkit
+  listing are the documented exceptions: those pin by nature. Teton Code learns
+  `git worktree` and `git for-each-ref` as name-only verbs in the same change
+  set.
+
 - **The ethos block reads only the project's vendored `ETHOS.md`, with no
   interpreter (BUG-218).** Every skill opened with
   `` !`sh .adlc/partials/ethos-include.sh … || sh ~/.claude/skills/partials/ethos-include.sh` ``.

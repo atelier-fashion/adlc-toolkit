@@ -10,12 +10,12 @@ You are designing architecture and breaking a requirement into implementable tas
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
-- Task template: !`cat .adlc/templates/task-template.md 2>/dev/null || cat ~/.claude/skills/templates/task-template.md 2>/dev/null || echo "No task template found"`
-- Active specs: !`grep -rl 'status: draft\|status: approved\|status: in-progress' .adlc/specs/*/requirement.md 2>/dev/null | head -20 || echo "No active specs"`
+- Task template: !`cat .adlc/templates/task-template.md || echo No task template found — run /init to vendor .adlc/templates`
+- Active specs: !`grep -rl -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs || echo No active specs`
 
 **Context files loaded on demand**: `.adlc/context/architecture.md` and `.adlc/context/conventions.md` are loaded by Step 1 below — **skip the Read if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads them at Phase 0).
 

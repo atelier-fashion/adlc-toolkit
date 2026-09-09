@@ -28,16 +28,16 @@ Adding a new vendored surface to `/init` without adding a check here is a silent
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
 This skill checks five vendored sync surfaces (see "Vendored sync surfaces" below): templates, partials, ethos, workflow-runtime, and the workflow-test landmine.
 
-- Project templates dir: !`ls .adlc/templates/ 2>/dev/null || echo "No .adlc/templates/ directory — run /init first"`
-- Toolkit templates dir: !`ls ~/.claude/skills/templates/ 2>/dev/null || echo "Toolkit templates not found at ~/.claude/skills/templates/"`
-- Project ETHOS: !`test -f .adlc/ETHOS.md && echo "present" || echo "absent — run /init"`
-- Project workflow runtime: !`ls .adlc/workflows/*.workflow.js 2>/dev/null || echo "no .adlc/workflows/ runtime — run /init"`
+- Project templates dir: !`ls .adlc/templates/ || echo No .adlc/templates/ directory — run /init first`
+- Toolkit templates dir: !`ls ~/.claude/skills/templates/ || echo Toolkit templates not found at ~/.claude/skills/templates/`
+- Project ETHOS: !`test -f .adlc/ETHOS.md && echo present || echo absent — run /init`
+- Project workflow runtime: !`ls .adlc/workflows/ || echo no .adlc/workflows/ runtime — run /init`
 - Current directory: !`pwd`
 
 ## Input

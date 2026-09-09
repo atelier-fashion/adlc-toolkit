@@ -10,14 +10,14 @@ You are fixing a bug using a streamlined workflow that skips the full spec cerem
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
-- Project config: !`cat .adlc/config.yml 2>/dev/null || echo "No config — single-repo legacy mode"`
-- Bug template: !`cat .adlc/templates/bug-template.md 2>/dev/null || cat ~/.claude/skills/templates/bug-template.md 2>/dev/null || echo "No bug template found"`
-- Conventions: !`cat .adlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
-- Existing bugs: !`ls .adlc/bugs/ 2>/dev/null || echo "No bugs directory found"`
+- Project config: !`test -s .adlc/config.yml && echo present — read .adlc/config.yml before Step 1 || echo none — single-repo legacy mode`
+- Bug template: !`cat .adlc/templates/bug-template.md || echo No bug template found — run /init to vendor .adlc/templates`
+- Conventions: !`cat .adlc/context/conventions.md || echo No conventions found`
+- Existing bugs: !`ls .adlc/bugs/ || echo No bugs directory found`
 
 ## Input
 

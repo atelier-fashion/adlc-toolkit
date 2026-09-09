@@ -10,13 +10,13 @@ You are writing a requirement spec following the spec-driven ADLC process.
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
-- ADLC context: !`cat .adlc/context/project-overview.md 2>/dev/null || echo "No project overview found"`
-- Requirement template: !`cat .adlc/templates/requirement-template.md 2>/dev/null || cat ~/.claude/skills/templates/requirement-template.md 2>/dev/null || echo "No requirement template found"`
-- Taxonomy: !`cat .adlc/context/taxonomy.md 2>/dev/null || echo "No taxonomy found — consider running /init to scaffold one"`
+- ADLC context: !`cat .adlc/context/project-overview.md || echo No project overview found`
+- Requirement template: !`cat .adlc/templates/requirement-template.md || echo No requirement template found — run /init to vendor .adlc/templates`
+- Taxonomy: !`cat .adlc/context/taxonomy.md || echo No taxonomy found — consider running /init to scaffold one`
 
 ## Input
 

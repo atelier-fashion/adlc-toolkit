@@ -37,6 +37,31 @@ Every skill begins with:
 
 The line reads the **project's vendored copy only**: `/init` writes `.adlc/ETHOS.md` into every consumer project and `/template-drift` keeps it current, and the `test -s` is REQ-416 H1 — an empty copy must fall through to the notice, not swallow the ethos. It deliberately names **no path outside the session root and runs no interpreter** (BUG-218): a host that classifies what a skill preamble could have read — Teton Code's REQ-614/619 grammar is the one that bit — treats `sh <file>` as opaque and an out-of-root path such as `~/.claude/skills/ETHOS.md` as unprovable, and either one pins the session to its local tier for every skill that carries the line. `test`, `cat` and `echo` over an in-root file are provably in reach. `partials/ethos-include.sh` still exists for consumer projects whose vendored skills predate this line; do not reintroduce it, or a `~/` fallback, at a call site. Never hardcode the ethos body inside a skill.
 
+**Every `!`…`` preamble stays inside the same grammar (BUG-220).** The ethos line
+was the first fix; the other context lines pinned the session just the same,
+because the classifier rejects a command *before* it looks at the verb when the
+command contains any of `' " ` $ \ > < { } ! * ? [` — so `2>/dev/null`, a
+quoted `echo "…"`, a `--format="…"` and a `*.md` glob are each enough. A
+preamble that has to pass is written with: no quoting, no redirection, no globs,
+no `$`, no parentheses or `;` (segment breaks); only recognised verbs (`test`,
+`cat`, `ls`, `find` without `-exec`, `grep`, `echo`, `pwd`, `which`, and
+`git status|log|branch|remote|tag|rev-parse|diff-tree|worktree|for-each-ref`);
+paths inside the session root only — a `~/…` fallback in *any* segment makes the
+whole line unprovable even when it never runs, so the toolkit-copy fallbacks
+went with the ethos one; and no `| head`, `| tail` or `| grep` after a
+producer, because a content-reading verb with no file argument is scored as a
+read of the whole root and that scan is bounded by entry count (a Rust `target/`
+is enough to exhaust it) — and a content-reading verb whose file argument does
+**not exist** is scored the same way, because the classifier cannot tell
+`cat missing` from `grep -r pattern`; so on a project that has not run `/init`
+the `cat .adlc/context/…` lines pin until it does, while a `test -s` or `ls`
+probe of an absent path never does (name-only verbs scan nothing). `echo` takes its message unquoted: em dashes and
+slashes are fine, `(`, `)` and `;` are not. `grep` over a directory scopes the
+scan to that directory (`--include requirement.md`, with a space, keeps `=` out
+of the line). `/canary`'s `gcloud` lines and `/template-drift`'s toolkit
+listing are the known exceptions: those verbs and paths are outside the grammar
+by nature, and those two skills pin a Teton session by design.
+
 ## Delegation pattern (provider-agnostic)
 
 Skills that delegate bulk reads or drafting to the configured delegate (`adlc-read` /

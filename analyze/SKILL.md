@@ -10,12 +10,12 @@ You are performing a comprehensive codebase health audit for the current project
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
 
 ## Context
 
-- Architecture: !`cat .adlc/context/architecture.md 2>/dev/null || echo "No architecture context found"`
-- Conventions: !`cat .adlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
+- Architecture: !`cat .adlc/context/architecture.md || echo No architecture context found`
+- Conventions: !`cat .adlc/context/conventions.md || echo No conventions found`
 
 ## Input
 
