@@ -97,7 +97,7 @@ Those two skills pin a Teton session by design; `/shell allow` lifts it.
 
 ## Deployment
 
-- Pending merge. Consumers pick it up on their next toolkit sync; `~/.claude/skills` is a symlink to the toolkit checkout, so a local install sees it at once. The two new git verbs need teton-code ≥ the release carrying its BUG-219.
+- Merged as 87312d1 (PR #170), 2026-09-09. LESSON-657. Consumers pick it up on their next toolkit sync; `~/.claude/skills` is a symlink to the toolkit checkout, so a local install sees it at once. The two new git verbs need teton-code ≥ the release carrying its BUG-219.
 
 ## Files Changed
 
