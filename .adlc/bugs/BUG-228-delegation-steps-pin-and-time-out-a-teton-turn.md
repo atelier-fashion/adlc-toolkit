@@ -1,7 +1,7 @@
 ---
 id: BUG-228
 title: "The delegation steps pin a Teton Code session and time out its shell call, killing the turn"
-status: in-review
+status: resolved
 severity: high
 created: 2026-09-26
 updated: 2026-09-26
@@ -161,3 +161,22 @@ not host.
 - `tools/lint-skills/README.md`: check 10
 - `tools/lint-skills/tests/test_check.py` and `tests/fixtures/harness-skip-{ok,missing,in-fence,too-far}.md`: a clean case plus three cases that must fire
 - `tools/lint-skills/tests/fixtures/{canonical-via-partial-skill,delegate-gate-ok,missing-resolver-source}.md`: the line added so these fixtures keep testing only what they were written for
+
+## Deployment
+
+Merged in atelier-fashion/adlc-toolkit#173 (`f91810d`), 2026-09-26. Deployed
+by pulling the symlinked checkout (`~/.claude/skills` → `~/GitHub/adlc-toolkit`).
+
+Verified in Teton Code v0.1.36, session `sess-cy6w6jagfw5b0tynjda7x150t8`
+(transcript `20260926T134736Z-…jsonl`), `/analyze` in teton-code:
+
+- all three preambles `rooted`; turn routed `design` → kimi on the `window`
+  bound (remote), and no later route decision
+- the model said, in its reply, that it was skipping Steps 1.5/1.6 because
+  the harness classifies shell reach, then used `glob`/`read` only — **zero
+  `shell` calls**
+- **no `session_pinned`, no `privacy_block`, no timeout**. The turn ended
+  `EndTurn` on the remote route.
+
+The run was piped (unattended), so `/permissions full` was sent first. That
+changes tool prompting only and does not affect privacy boundaries.
