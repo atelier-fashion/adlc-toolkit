@@ -38,6 +38,8 @@ Before launching the audit agents, produce a one-paragraph "project shape" summa
 
 **Shared telemetry-resolve helper** — `_adlc_emit_step_telemetry` is sourced from `partials/emit-step-telemetry.sh` at each emit point (Step 1.5 and Step 1.6), immediately before the call, in the same fenced block. It is deliberately **not** defined inline here: SKILL.md fenced shell blocks do not share shell state across steps, so a function defined in one block is undefined when called from another (see `.adlc/context/conventions.md` "Bash in skills" and the `lint-skills` `cross-fence-fn` check that enforces this). The helper derives ALL of its state (`start_s`, `invoked`, `exit`, `reason`) from the flag-file sidecar that the steps below `mark`, never from caller shell vars (single-fence-safe telemetry, REQ-522 BR-4). The partial self-sources `delegate-tools-path.sh`, so call sites do not separately source the resolver. A future change to mode-resolution logic or the `emit-step-telemetry.sh` signature is applied in that one partial.
 
+**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
+
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
@@ -93,6 +95,8 @@ _adlc_emit_step_telemetry analyze Step-1.5
 ### Step 1.6: Optional audit candidate-list pre-pass via adlc-read
 
 Before launching the audit agents, optionally produce a per-dimension candidate-findings list to pass as advisory context to each agent in Step 2.
+
+**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
 
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 

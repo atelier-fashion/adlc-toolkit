@@ -350,6 +350,8 @@ log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 
 **Optional verify candidate-list pre-pass via `adlc-read`** (added by REQ-417): for each touched repo, run an advisory delegate pre-pass before the Step A 6-agent dispatch. The pre-pass produces a per-dimension candidate-findings list (correctness, quality, architecture, test-coverage, security) that is passed only to the 5 reviewer agents — **the reflector receives no advisory block** (reflector's value is independent self-assessment of Claude's own work, which advisory candidates would compromise).
 
+**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
+
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh

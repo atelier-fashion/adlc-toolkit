@@ -11,6 +11,8 @@ findings (post-restructure shape is clean). Without that partial → exactly **o
 missing-canonical finding for the emit-telemetry literal (proves the partial is what
 satisfies it — ADR-4 is genuinely load-bearing, not vacuous).
 
+**Provenance-classifying harness (BUG-228):** on such a harness, skip this step's shell and take the fallback path.
+
 ```sh
 if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi

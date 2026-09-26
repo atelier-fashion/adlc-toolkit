@@ -149,6 +149,24 @@ never via shell variables, because fenced blocks do not share shell state (REQ-5
 The shared resolver `_adlc_emit_step_telemetry <skill> <step>` in
 `partials/emit-step-telemetry.sh` reads those marks back and emits one telemetry record.
 
+**A delegating step never runs its shell under a provenance-classifying harness
+(BUG-228).** The preamble grammar above cannot be stretched to cover these
+blocks. `adlc-read` is not a recognised verb (it reads files and sends them to a
+third party, which is exactly what Teton Code's classifier exists to refuse).
+The partials and `skill-flag.sh` run by path, and a program named by path is
+`Unknown` by design, so a vendored "one script, plain args" wrapper pins exactly
+the same way. Teton's shell children get an allowlisted environment, so no
+script can detect the harness either. The rule therefore lives in the skill
+text: every delegating step carries the line `**Provenance-classifying harness
+(BUG-228):**` just before its "Before the gate check" block, telling the model
+to skip all of the step's shell and take the fallback path with its own
+file-read tool. That step writes no telemetry record on such a harness, and on
+every other harness the REQ-424/REQ-522 contract is unchanged. `lint-skills`'
+`harness-skip` check requires the line within 30 lines above every
+`adlc_delegate_gate_check` fence. Where the delegated path does run, give the
+`adlc-read` call a shell timeout of at least 120 s (Claude Code's Bash default).
+Teton's 30 s default killed the call that surfaced this bug.
+
 See `partials/delegate-gate.md` for the full protocol — return-code contract, the
 canonical stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4
 one-line-per-invocation rule. Per-skill stderr messages and fallback bodies stay inline at
