@@ -5,6 +5,8 @@ flag-file-derived telemetry (start_s marked to the sidecar, the shared resolver
 call, and the emit-telemetry exec in the partial). The canonical check must
 accept these spellings with zero findings.
 
+**Provenance-classifying harness (BUG-228):** on such a harness, skip this step's shell and take the fallback path.
+
 ```sh
 if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi

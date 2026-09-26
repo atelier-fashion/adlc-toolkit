@@ -297,6 +297,12 @@ FORGE_DIRECT_GH_RE = re.compile(
 # parameter-expansion operator, so ANY default is flagged, not just the bare
 # name; same structural posture as `forge-direct-gh` (LESSON-012 — prose in a
 # skill is the honor system, only a check keeps this from rotting back).
+# BUG-228: the line every delegating step carries so a provenance-classifying
+# harness (Teton Code) skips the step's shell instead of pinning the session.
+HARNESS_SKIP_LITERAL = "**Provenance-classifying harness (BUG-228):**"
+HARNESS_SKIP_WINDOW = 30
+HARNESS_SKIP_GATE_RE = re.compile(r"^\s*adlc_delegate_gate_check\b")
+
 READ_BIN_FALLBACK_LITERAL = "ADLC_READ_BIN:-"
 
 # REQ-609 (verify C1/C2): the other two halves of the same call-site contract.
@@ -1141,6 +1147,56 @@ def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def check_harness_skip(text: str, rel: str) -> list[Finding]:
+    """BUG-228: every delegating step tells a provenance-classifying harness to skip it.
+
+    No spelling of a delegating step's shell passes Teton Code's REQ-614/619
+    classifier — ``adlc-read`` is an unrecognised verb and the partials run by
+    path, both ``Unknown`` by design — and one ``Unknown`` pins the session to
+    its local tier, killing the turn. The only pin-free outcome is for the model
+    not to run those blocks, and the only place that can say so is the skill
+    text: Teton hands shell children an allowlisted environment, so no script
+    can detect the harness.
+
+    So every fence that calls ``adlc_delegate_gate_check`` must have
+    ``HARNESS_SKIP_LITERAL`` on a **prose** line within ``HARNESS_SKIP_WINDOW``
+    lines above its opening. A copy inside a fence is not read as an
+    instruction and does not count, and a commented-out gate call is not a call.
+    """
+    fence_lines: set[int] = set()
+    gate_fences: list[int] = []
+    for _lang, _idx, body_start, body in _iter_fences(text):
+        opening = body_start - 1
+        fence_lines.add(opening)
+        fence_lines.update(lineno for lineno, _ in body)
+        fence_lines.add((body[-1][0] if body else opening) + 1)
+        if any(
+            HARNESS_SKIP_GATE_RE.match(line)
+            for _, line in body
+            if not line.lstrip().startswith("#")
+        ):
+            gate_fences.append(opening)
+    lines = text.splitlines()
+    findings: list[Finding] = []
+    for opening in gate_fences:
+        lo = max(1, opening - HARNESS_SKIP_WINDOW)
+        if not any(
+            HARNESS_SKIP_LITERAL in lines[n - 1]
+            for n in range(lo, opening)
+            if n not in fence_lines
+        ):
+            findings.append(
+                Finding(
+                    rel, opening, "harness-skip",
+                    "delegation-gate fence without the provenance-classifying "
+                    "harness line in the %d lines above it — add '%s' before the "
+                    "step's 'Before the gate check' block (see "
+                    "partials/delegate-gate.md)" % (HARNESS_SKIP_WINDOW, HARNESS_SKIP_LITERAL),
+                )
+            )
+    return findings
+
+
 def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> list[Finding]:
     """REQ-610 BR-3/BR-5 (ADR-2): a partial must be sourced with the ``[ -f ]``
     guard, and the retired two-level spelling must appear nowhere in the file.
@@ -1562,6 +1618,7 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_cross_fence_var(text, rel))
         findings.extend(check_forge_direct_gh(text, rel))
         findings.extend(check_read_bin_fallback(text, rel))
+        findings.extend(check_harness_skip(text, rel))
         findings.extend(check_unguarded_source(text, rel))
     # REQ-609: `check_read_bin_fallback` also walks `agents/*.md`, and REQ-610
     # adds `check_unguarded_source` to the same walk (`agents/delegate-pre-pass.md`
