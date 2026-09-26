@@ -6,6 +6,8 @@ absent while a `"$DELEGATE_TOOLS"/…` invocation remains. Exactly one
 `canonical-helper` finding expected (the missing resolver-source literal) —
 this is the precise REQ-433 corruption vector the linter must catch.
 
+**Provenance-classifying harness (BUG-228):** on such a harness, skip this step's shell and take the fallback path.
+
 ```sh
 if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
 flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)

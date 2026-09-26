@@ -237,6 +237,17 @@ a general markdown linter and NOT a general shell linter.
    lived in all three families. Like the agents walk, neither extra walk feeds
    the `scanned N SKILL.md file(s)` count, so a companion file can never mask a
    dead skill walk (REQ-595 BR-5).
+10. **Harness skip (`harness-skip`)**: every fence that calls
+    `adlc_delegate_gate_check` must have the literal
+    `**Provenance-classifying harness (BUG-228):**` on a **prose** line within
+    the 30 lines above its opening. That line tells the model not to run the
+    step's shell on a harness that pins a session on an unclassifiable command
+    (Teton Code), and to take the fallback path instead. No spelling of those
+    blocks passes such a classifier (`adlc-read` is an unrecognised verb, the
+    partials run by path), and the harness cannot be detected from a script, so
+    the skill text is the only place the rule can live (see
+    `partials/delegate-gate.md`). A copy inside a fence does not count, and a
+    commented-out gate call is not a call. SKILL.md files only.
 
 ## Usage
 

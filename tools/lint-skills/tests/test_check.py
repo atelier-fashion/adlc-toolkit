@@ -1365,3 +1365,29 @@ def test_new_walks_skip_symlinks_that_escape_root(tmp_path):
     assert "partials/real.sh:2: unguarded-source" in out, out
     assert "escaped" not in out, out
     assert result.returncode == 2, out + result.stderr
+
+
+def test_harness_skip_clean_when_line_present(tmp_path):
+    """BUG-228: the provenance-classifying-harness line in prose above the gate
+    fence satisfies the check, and a commented-out gate call is not a call."""
+    root = _stage(tmp_path, "harness-skip-ok")
+    result = _run(root)
+    assert " harness-skip:" not in result.stdout, result.stdout
+    assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.parametrize(
+    "fixture", ["harness-skip-missing", "harness-skip-in-fence", "harness-skip-too-far"]
+)
+def test_harness_skip_fires(tmp_path, fixture):
+    """BUG-228: a gate fence without the line, with it only inside a fence, or
+    with it outside the 30-line window draws exactly one `harness-skip` finding
+    on the gate fence's opening line."""
+    root = _stage(tmp_path, fixture)
+    result = _run(root)
+    hs = [ln for ln in result.stdout.splitlines() if " harness-skip:" in ln]
+    assert len(hs) == 1, result.stdout
+    lines = (FIXTURES / f"{fixture}.md").read_text().splitlines()
+    gate = next(i for i, ln in enumerate(lines) if ln.startswith("adlc_delegate_gate_check"))
+    opening = max(i for i in range(gate) if lines[i].startswith("```sh")) + 1
+    assert hs[0].startswith(f"{fixture}/SKILL.md:{opening}: harness-skip:"), hs[0]

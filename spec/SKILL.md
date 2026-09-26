@@ -85,6 +85,8 @@ The gap list is the point. A spec written from a transcript will always contain 
 
 3. **Read the source body — gated delegation, hard fallback (BR-5).**
 
+   **Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
+
    **Before the gate check**, create the telemetry flag and capture the start time:
 
    ```sh
@@ -339,6 +341,8 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 6. **Take the top 15 globally** across all corpora. There are no per-corpus quotas (no minimum-lesson floor, no maximum-bug cap). If fewer than 15 candidates survive filtering, take what is available.
 
 7. **Body-read of top-15 docs** — gated delegation, hard fallback.
+
+   **Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
 
    **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
