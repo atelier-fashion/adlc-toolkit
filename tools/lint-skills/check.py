@@ -313,7 +313,9 @@ HARNESS_SKIP_GATE_RE = re.compile(r"^\s*adlc_delegate_gate_check\b")
 PROVENANCE_SAFE_MARKER = "# provenance-safe"
 PROVENANCE_SAFE_FORBIDDEN = set("'\"`$\\><{}!*?[]=();|&")
 PROVENANCE_SAFE_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][A-Za-z0-9_-]*>")
-PROVENANCE_SAFE_VERBS = {"test", "cat", "ls", "find", "grep", "echo", "pwd", "which"}
+# `wc` is on Teton's READS_CONTENT table: with explicit in-root files it is
+# `rooted` (observed in a live `/analyze` turn, 2026-09-28).
+PROVENANCE_SAFE_VERBS = {"test", "cat", "ls", "find", "grep", "echo", "pwd", "which", "wc"}
 PROVENANCE_SAFE_GIT = {
     "status", "log", "branch", "remote", "tag", "rev-parse", "diff-tree",
     "worktree", "for-each-ref",
