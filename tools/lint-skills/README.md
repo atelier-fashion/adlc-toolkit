@@ -248,6 +248,19 @@ a general markdown linter and NOT a general shell linter.
     the skill text is the only place the rule can live (see
     `partials/delegate-gate.md`). A copy inside a fence does not count, and a
     commented-out gate call is not a call. SKILL.md files only.
+11. **Provenance-safe fence (`provenance-safe-fence`)**: a shell fence whose
+    first body line is `# provenance-safe` promises that a harness classifying
+    shell reach (Teton Code) can prove every line of it in reach. So each
+    non-comment line must avoid every character that grammar refuses
+    (`' " ` $ \ > < { } ! * ? [ ] ( ) ; | &`) and `=` (read as an environment
+    assignment). Its verb must also be one the grammar recognises: `test`,
+    `cat`, `ls`, `find` without `-exec`, `grep`, `echo`, `pwd`, `which`, or
+    `git status|log|branch|remote|tag|rev-parse|diff-tree|worktree|for-each-ref`.
+    A program named by path is a finding. `<placeholder>` tokens are stripped
+    first, because the model substitutes them before running the line.
+    Unmarked fences are not read. `/analyze` Step 2a is the first user
+    (BUG-230), and every spelling in it was run through Teton's real
+    classifier.
 
 ## Usage
 

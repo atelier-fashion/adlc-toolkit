@@ -303,6 +303,22 @@ HARNESS_SKIP_LITERAL = "**Provenance-classifying harness (BUG-228):**"
 HARNESS_SKIP_WINDOW = 30
 HARNESS_SKIP_GATE_RE = re.compile(r"^\s*adlc_delegate_gate_check\b")
 
+# BUG-230: a shell fence whose first body line is this marker is one a
+# provenance-classifying harness (Teton Code) must be able to prove in reach, so
+# every line of it stays inside that grammar: no unmodelled character, no `=`
+# (read as an env assignment), no segment separator, no program named by path,
+# and only verbs the classifier recognises. The verb set is the one
+# conventions.md's preamble paragraph states (BUG-220), not a copy of Teton's
+# tables: a narrower allowlist can only refuse more.
+PROVENANCE_SAFE_MARKER = "# provenance-safe"
+PROVENANCE_SAFE_FORBIDDEN = set("'\"`$\\><{}!*?[]=();|&")
+PROVENANCE_SAFE_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][A-Za-z0-9_-]*>")
+PROVENANCE_SAFE_VERBS = {"test", "cat", "ls", "find", "grep", "echo", "pwd", "which"}
+PROVENANCE_SAFE_GIT = {
+    "status", "log", "branch", "remote", "tag", "rev-parse", "diff-tree",
+    "worktree", "for-each-ref",
+}
+
 READ_BIN_FALLBACK_LITERAL = "ADLC_READ_BIN:-"
 
 # REQ-609 (verify C1/C2): the other two halves of the same call-site contract.
@@ -1197,6 +1213,58 @@ def check_harness_skip(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def check_provenance_safe_fence(text: str, rel: str) -> list[Finding]:
+    """BUG-230: a fence marked ``# provenance-safe`` stays provably in reach.
+
+    Such a fence is one the skill promises will not pin a session on a harness
+    that classifies what a shell command could read (Teton Code). The grammar
+    that promise depends on refuses a whole command on any quote, ``$``,
+    redirect, glob or brace, reads any ``=`` as an environment assignment, and
+    returns ``Unknown`` for a program named by path or a verb it does not
+    recognise. A later edit that "tidies" a hygiene check back to
+    ``$(date …)`` or ``--format=…`` pins every Teton ``/analyze`` again, and
+    nothing but this check would notice.
+
+    ``<placeholder>`` tokens are stripped first: the model substitutes them
+    before running the line. Comment lines are skipped.
+    """
+    findings: list[Finding] = []
+    for _lang, _idx, _start, body in _iter_fences(text):
+        first = next((ln for _, ln in body if ln.strip()), "")
+        if not first.strip().startswith(PROVENANCE_SAFE_MARKER):
+            continue
+        for lineno, line in body:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            probe = PROVENANCE_SAFE_PLACEHOLDER_RE.sub("x", stripped)
+            bad = sorted(set(probe) & PROVENANCE_SAFE_FORBIDDEN)
+            words = probe.split()
+            verb = words[0]
+            if bad:
+                why = "uses %s, which the classifier refuses" % " ".join(repr(c) for c in bad)
+            elif "/" in verb:
+                why = "names its program by path"
+            elif verb == "git":
+                sub = words[1] if len(words) > 1 else ""
+                why = "" if sub in PROVENANCE_SAFE_GIT else "runs 'git %s', not a name-only subcommand" % sub
+            elif verb not in PROVENANCE_SAFE_VERBS:
+                why = "runs '%s', a verb outside the recognised set" % verb
+            else:
+                why = ""
+            if verb == "find" and "-exec" in words:
+                why = "runs 'find -exec'"
+            if why:
+                findings.append(
+                    Finding(
+                        rel, lineno, "provenance-safe-fence",
+                        "line in a '# provenance-safe' fence %s — keep it inside "
+                        "the preamble grammar (conventions.md, BUG-220/BUG-230)" % why,
+                    )
+                )
+    return findings
+
+
 def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> list[Finding]:
     """REQ-610 BR-3/BR-5 (ADR-2): a partial must be sourced with the ``[ -f ]``
     guard, and the retired two-level spelling must appear nowhere in the file.
@@ -1619,6 +1687,7 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_forge_direct_gh(text, rel))
         findings.extend(check_read_bin_fallback(text, rel))
         findings.extend(check_harness_skip(text, rel))
+        findings.extend(check_provenance_safe_fence(text, rel))
         findings.extend(check_unguarded_source(text, rel))
     # REQ-609: `check_read_bin_fallback` also walks `agents/*.md`, and REQ-610
     # adds `check_unguarded_source` to the same walk (`agents/delegate-pre-pass.md`
