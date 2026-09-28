@@ -1,7 +1,7 @@
 ---
 id: BUG-230
 title: "/analyze Step 2 assumes an agent-dispatch tool Teton Code does not have, and Step 2a's hygiene shell would pin"
-status: in-review
+status: resolved
 severity: medium
 created: 2026-09-26
 updated: 2026-09-28
@@ -147,3 +147,31 @@ on 2026-09-28).
 - `tools/lint-skills/README.md`: check 11
 - `tools/lint-skills/tests/test_check.py` and `tests/fixtures/provenance-safe-{ok,bad}.md`: one clean case, and five lines that must each fire
 - `.adlc/context/conventions.md`: the fence rule and the no-agent-tool obligation, added to the preamble-grammar paragraph
+
+## Deployment
+
+Merged in atelier-fashion/adlc-toolkit#176 (fix), #177 (read-only audit) and
+#178 (shell allowlist), 2026-09-28. Deployed by pulling the symlinked checkout
+to `02db3c2`.
+
+Verified in Teton Code v0.1.36, session `sess-qfm78erqhdnq7xj4bwvb6cshz8`
+(`20260928T221525Z-…jsonl`), `/analyze` in teton-code:
+
+- 24 tool calls: 11 `grep`, 3 `glob`, 2 `read`, and 8 `shell`. Every shell call
+  was a line from a `# provenance-safe` fence: four `wc -l <explicit paths>`,
+  then `git rev-parse --abbrev-ref origin/HEAD`,
+  `git log --no-walk --branches --decorate --date short`,
+  `git branch --merged main` and the `git diff-tree` empty-tree listing.
+- **No `session_pinned`, no `privacy_block`, no failed call or timeout.**
+  All three route decisions were on the remote `window` bound.
+- The model worked through the code-quality, convention, security and test
+  dimensions in its own context and reported the Steps 1.5/1.6/1.8/1.9 skips.
+
+Observation, not part of this fix: the turn ended (`EndTurn`) before the
+Step 3 report. The last call was a 117-token reply ("Now let me look at the
+biggest file…") with no tool call, so it was neither the BUG-229 1,024-token
+cap nor a pin.
+
+Earlier verification rounds (`sess-ya02n239sw6gkf69w8c5kbc9wr` and
+`sess-sky9ega0jgnnf2vahky9xypsyc`) each pinned on a command the model
+improvised. They are what drove #177 and #178; see LESSON-663.
