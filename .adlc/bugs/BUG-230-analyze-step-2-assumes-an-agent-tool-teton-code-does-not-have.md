@@ -127,6 +127,19 @@ read-only. The no-agent path now forbids test runners, build tools, package
 managers and interpreters, and says to report run-dependent findings as
 candidates with the command for the user.
 
+**Second follow-up (verification finding, 2026-09-28).** With #177 in place,
+the next run (`sess-sky9ega0jgnnf2vahky9xypsyc`) correctly announced every
+Teton skip. But while sizing the audit scope it wrote
+`find crates -name '*.rs' | xargs wc -l | sort -rn`, and that pinned it.
+Forbidding commands one at a time is whack-a-mole, so `/analyze` now carries
+one skill-wide rule at the top of its Instructions. On a
+provenance-classifying harness, the only shell allowed is the lines of the
+skill's `# provenance-safe` fences, and everything else goes through the
+harness's `glob`/`grep`/`read`. Step 1 gains a `wc -l <file> …` fence for
+scope sizing, and `lint-skills` adds `wc` to the provenance-safe verb set
+(Teton's `READS_CONTENT` table; `rooted` with explicit files, observed live
+on 2026-09-28).
+
 ## Files Changed
 
 - `analyze/SKILL.md`: Step 1.8/1.9 harness skip, Step 2's no-agent path and condensed checklist, Step 2a rewritten provenance-safe, Step 1.7 → 1.6
