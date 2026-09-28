@@ -254,7 +254,7 @@ a general markdown linter and NOT a general shell linter.
     non-comment line must avoid every character that grammar refuses
     (`' " ` $ \ > < { } ! * ? [ ] ( ) ; | &`) and `=` (read as an environment
     assignment). Its verb must also be one the grammar recognises: `test`,
-    `cat`, `ls`, `find` without `-exec`, `grep`, `echo`, `pwd`, `which`, or
+    `cat`, `ls`, `find` without `-exec`, `grep`, `echo`, `pwd`, `which`, `wc`, or
     `git status|log|branch|remote|tag|rev-parse|diff-tree|worktree|for-each-ref`.
     A program named by path is a finding. `<placeholder>` tokens are stripped
     first, because the model substitutes them before running the line.

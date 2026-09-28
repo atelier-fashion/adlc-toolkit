@@ -27,10 +27,18 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 
 ## Instructions
 
+**Shell on a provenance-classifying harness (BUG-230).** If your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it (Teton Code's `shell` does), the only shell commands you may run in this whole skill are the lines of its `# provenance-safe` fences, with their `<placeholders>` filled in. Do everything else (finding files, searching, reading, counting) with your harness's own `glob`, `grep` and `read` tools. Never write your own `find … -name '…'`, `xargs`, `awk`, `$(…)`, quoted argument or `--flag=value`, and never run a build tool, test runner, package manager or interpreter: each is unclassifiable, and one pins the rest of the turn. Verification runs on 2026-09-28 pinned on exactly two improvised commands, `cargo test --workspace` and `find crates -name '*.rs' | xargs wc -l`. Every command this skill prescribes stayed in reach.
+
 ### Step 1: Determine Scope
 1. If given a specific directory or area, focus the audit there
 2. If given a focus area (e.g., "security", "testing", "performance"), prioritize that dimension
 3. If no argument, audit the entire project
+
+To size the scope, list files with your harness's `glob` tool, then count lines over the paths it returned, named explicitly (never a glob or a pipe):
+```bash
+# provenance-safe (BUG-230)
+wc -l <file> <file>
+```
 
 ### Step 1.5: Optional pre-read via adlc-read
 
