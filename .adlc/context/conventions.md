@@ -58,7 +58,16 @@ the `cat .adlc/context/…` lines pin until it does, while a `test -s` or `ls`
 probe of an absent path never does (name-only verbs scan nothing). `echo` takes its message unquoted: em dashes and
 slashes are fine, `(`, `)` and `;` are not. `grep` over a directory scopes the
 scan to that directory (`--include requirement.md`, with a space, keeps `=` out
-of the line). `/canary`'s `gcloud` lines and `/template-drift`'s toolkit
+of the line). The same grammar governs any **fence** a skill expects a Teton model to run:
+mark it `# provenance-safe` on its first line and `lint-skills`'
+`provenance-safe-fence` check holds every line to these rules (BUG-230,
+`/analyze` Step 2a). Date arithmetic, grouping and filtering move out of
+`awk`/`$(…)` and into the model: `git log --no-walk --branches --decorate
+--date short` instead of `for-each-ref --format=…`, and a `git diff-tree`
+from the empty tree instead of `cksum | awk` for duplicate detection. A
+skill step that needs agent dispatch must also say what to do without it,
+since Teton has no agent tool and its `read` is jailed to the session root,
+so `~/.claude/agents/*.md` is unreachable there. `/canary`'s `gcloud` lines and `/template-drift`'s toolkit
 listing are the known exceptions: those verbs and paths are outside the grammar
 by nature, and those two skills pin a Teton session by design.
 

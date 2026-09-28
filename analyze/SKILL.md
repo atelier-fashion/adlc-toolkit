@@ -160,6 +160,8 @@ _adlc_emit_step_telemetry analyze Step-1.6
 
 ### Step 1.8: Delegation-fidelity audit
 
+**Provenance-classifying harness (BUG-230):** on a harness that pins the session on a shell command it cannot classify (Teton Code), skip this step — its shell expands `$DELEGATE_TOOLS` and runs a helper by path, both unclassifiable — and put `/analyze: delegation-fidelity audit unavailable on this harness` in the report.
+
 Self-check the ADLC skill telemetry log for ghost-skips (gate passed but `adlc-read` was not actually invoked). This audits delegation behavior across all skills, not the codebase. Runs in addition to the 4 standard dimensions (code-quality, convention, security, test) and surfaces findings under a new `delegation-fidelity` dimension.
 
 **Gate (silent skip on older installs):**
@@ -212,6 +214,8 @@ Append the resulting `delegation-fidelity` block to the audit report alongside t
 
 ### Step 1.9: SKILL.md corruption audit
 
+**Provenance-classifying harness (BUG-230):** on a harness that pins the session on a shell command it cannot classify (Teton Code), skip this step — `tools/lint-skills/check.sh` is a program named by path, which such a classifier refuses by design — and put `/analyze: skill-md-corruption audit unavailable on this harness` in the report.
+
 Run the `tools/lint-skills/` linter over the repo's `SKILL.md` files to surface findings under a new `skill-md-corruption` audit dimension. Defends against the REQ-424 failure class — literal-but-broken shell constructs that escape verify because review is prose-only.
 
 **Gate (silent skip on older installs):**
@@ -255,39 +259,46 @@ In a single message, launch the 4 audit agents AND run the repo hygiene bash che
 4. **test-auditor** agent — provide the audit scope
 5. **Repo Hygiene** (inline bash, not an agent) — see Step 2a below
 
-If Step 1.7's delegated path ran, include the relevant per-dimension candidates as an advisory block in each agent's dispatch prompt.
+If Step 1.6's delegated path ran, include the relevant per-dimension candidates as an advisory block in each agent's dispatch prompt.
 
 Each agent returns structured findings with severity, file paths, and descriptions.
+
+**No agent-dispatch tool (BUG-230).** When your harness cannot launch agents — Teton Code has no such tool, and subagent mode forbids it — run the four audits yourself, one dimension at a time, in your own context, over the Step 1 scope. Do not stop the turn after the scope reads; Step 2 is where the audit happens. Use each agent definition's full checklist when your file tool can reach it (`agents/<name>.md` in the toolkit, `~/.claude/agents/<name>.md` in a consumer project); a harness whose read tool is jailed to the session root — Teton's is — cannot reach the second, so work from the condensed checklist below. Search with your harness's own `grep`/`glob` tools rather than shell (the test auditor's `find … -name '…'` probe would pin a provenance-classifying harness). Produce the same per-dimension findings (severity, file path, description) the agents would.
+
+- **Code quality**: dead code (unused exports, unreachable branches, commented-out blocks); duplication (copy-pasted logic, near-duplicate functions); complexity (3+ nesting levels, functions over ~50 lines, files over ~300 lines or with unrelated responsibilities); inconsistent patterns (same operation done different ways, mixed error handling); maintenance markers (TODO/FIXME/HACK with no ticket).
+- **Convention** — against `conventions.md` only, never rules from another project: naming, logging through the project logger, configuration (hardcoded URLs/ports/limits, magic numbers, secrets in source), API response shape, error handling (empty catches, swallowed errors), import/export style.
+- **Security**: input validation at boundaries; authentication and authorization (missing checks, ownership, token expiry); data exposure (PII in logs, sensitive fields in responses, stack traces to clients); rate limiting on expensive or auth endpoints; error-message leakage; dependency vulnerabilities (name the audit command for the stack; run it only where your harness allows).
+- **Test**: coverage gaps (no test file — check every layout the project uses before reporting — untested error paths, untested routes); mock completeness; test quality (implementation-detail assertions, vacuous tests, real network or database calls); determinism (timing, clock, unseeded randomness); integration coverage.
 
 ### Step 2a: Repo Hygiene Checks
 Run these bash checks directly (do not spawn an agent). Adapt the commands to the repo — skip remote checks if no `origin`, pick the correct default branch (`main` or `master`), etc.
 
-**Stale branches (local and remote, no commits in 90+ days):**
+Every command below is written to be **provably in reach** for a harness that classifies shell provenance (BUG-230): only `git` subcommands that print names or metadata, no `=`, no quotes, no `$`, no redirects, no pipes, no parentheses. It runs unchanged on every harness — do the date arithmetic and grouping yourself from the output rather than adding `awk`, `$(…)` or `--format=…` back, each of which pins a Teton session (`lint-skills`' `provenance-safe-fence` check holds these fences to that). Substitute `<default>` with the branch the first command names (without `origin/`); skip the `origin` commands when the repo has no `origin`.
+
+**Default branch:**
 ```bash
-# Portable cutoff date (GNU vs BSD date)
-CUTOFF=$(date -d '90 days ago' +%Y-%m-%d 2>/dev/null || date -v-90d +%Y-%m-%d)
-
-# Local stale branches
-git for-each-ref --sort=committerdate refs/heads/ \
-  --format='%(committerdate:short) %(refname:short) %(authorname)' \
-  | awk -v c="$CUTOFF" '$(1) < c'
-
-# Remote stale branches (origin)
-git for-each-ref --sort=committerdate refs/remotes/origin/ \
-  --format='%(committerdate:short) %(refname:short) %(authorname)' \
-  | awk -v c="$CUTOFF" '$(1) < c && $(2) !~ /HEAD/'
-
-# Branches already merged into the default branch (safe to delete)
-DEFAULT=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || echo main)
-git branch --merged "$DEFAULT" | grep -vE "^\*|^  ($DEFAULT|master)$"
-git branch -r --merged "origin/$DEFAULT" | grep -vE "origin/(HEAD|$DEFAULT|master)"
+# provenance-safe (BUG-230)
+git rev-parse --abbrev-ref origin/HEAD
 ```
 
-**Duplicate files (identical content):**
+**Stale branches (local and remote, no commits in 90+ days)** — each tip prints with its `Date:` and refs; report the ones older than 90 days before today:
 ```bash
-# Hash every tracked file and group by identical content (POSIX: cksum)
-git ls-files -z | tr '\0' '\n' | xargs cksum 2>/dev/null \
-  | sort | awk '{k=$(1) OFS $(2); $(1)=""; $(2)=""; sub(/^  /,""); map[k]=map[k] ORS $(0); count[k]++} END {for (k in count) if (count[k]>1) print "== "k" =="map[k]}'
+# provenance-safe (BUG-230)
+git log --no-walk --branches --decorate --date short
+git log --no-walk --remotes --decorate --date short
+```
+
+**Branches already merged into the default branch (safe to delete)** — drop `<default>` itself, `master`, `HEAD` and the checked-out branch from the list:
+```bash
+# provenance-safe (BUG-230)
+git branch --merged <default>
+git branch -r --merged origin/<default>
+```
+
+**Duplicate files (identical content)** — the diff from git's empty tree to `HEAD` lists every tracked file with its blob hash (fourth column); files sharing a hash are identical:
+```bash
+# provenance-safe (BUG-230)
+git diff-tree -r --no-commit-id 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD
 ```
 
 **Unreferenced files (candidates — require judgment before acting):**
