@@ -1391,3 +1391,27 @@ def test_harness_skip_fires(tmp_path, fixture):
     gate = next(i for i, ln in enumerate(lines) if ln.startswith("adlc_delegate_gate_check"))
     opening = max(i for i in range(gate) if lines[i].startswith("```sh")) + 1
     assert hs[0].startswith(f"{fixture}/SKILL.md:{opening}: harness-skip:"), hs[0]
+
+
+def test_provenance_safe_fence_clean(tmp_path):
+    """BUG-230: a marked fence inside the grammar (placeholders allowed) and an
+    unmarked fence full of shell syntax draw no `provenance-safe-fence` finding."""
+    root = _stage(tmp_path, "provenance-safe-ok")
+    result = _run(root)
+    assert " provenance-safe-fence:" not in result.stdout, result.stdout
+    assert result.returncode == 0, result.stdout
+
+
+def test_provenance_safe_fence_fires_per_line(tmp_path):
+    """BUG-230: `=`, `$(`, a by-path program, an unrecognised verb and a
+    content-reading git subcommand each draw one finding on their own line; the
+    in-grammar `git status` beside them draws none."""
+    root = _stage(tmp_path, "provenance-safe-bad")
+    result = _run(root)
+    got = [ln for ln in result.stdout.splitlines() if " provenance-safe-fence:" in ln]
+    expected = [
+        _line_of("provenance-safe-bad", needle)
+        for needle in ("--format=%cs", "CUTOFF=", "tools/lint-skills/check.sh", "awk ", "git show")
+    ]
+    assert [int(ln.split(":")[1]) for ln in got] == expected, result.stdout
+    assert f":{_line_of('provenance-safe-bad', 'git status')}:" not in result.stdout

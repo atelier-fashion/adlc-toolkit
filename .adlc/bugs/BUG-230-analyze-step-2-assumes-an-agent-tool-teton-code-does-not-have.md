@@ -1,10 +1,10 @@
 ---
 id: BUG-230
 title: "/analyze Step 2 assumes an agent-dispatch tool Teton Code does not have, and Step 2a's hygiene shell would pin"
-status: open
+status: in-review
 severity: medium
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-28
 component: "adlc/analyze"
 domain: "skills"
 stack: ["markdown", "sh"]
@@ -58,13 +58,65 @@ Step 2a's shell would pin.
 
 ## Root Cause
 
-(to confirm during investigation) The skill assumes Claude Code's harness: an
-`Agent` tool plus `~/.claude/agents/`, and a shell that runs unclassified.
+`/analyze` from Step 1.8 onward assumes Claude Code's harness in three ways.
+
+1. **Agent dispatch.** Step 2 names four agents and gives no alternative. The
+   obvious fallback, "read the checklists from the agent definitions" (what
+   `/proceed`'s subagent mode says), does not work on Teton either: `read.rs`
+   jails every read to the session root, so `~/.claude/agents/*.md` is
+   refused in any consumer project.
+2. **Unclassifiable hygiene shell.** Step 2a used `CUTOFF=$(date …)`,
+   `--format='%(…)'`, `awk` programs, pipes and `2>/dev/null ||` chains. Run
+   through Teton's real classifier (a scratch test in `shell_provenance.rs`),
+   `CUTOFF=$(…)` is `Unknown` ("command substitution"), and even the
+   quote-free `--format=%cs` is `Unknown` ("sets an environment variable",
+   because any `=` counts as an assignment).
+3. **Steps 1.8 and 1.9** expand `$DELEGATE_TOOLS` and run
+   `tools/lint-skills/check.sh` by path. Both are `Unknown` by design (the
+   probe confirmed `names its program by path`).
+
+Steps 1.8 and 1.9 were not in the original report. They are the same class in
+the same skill, so they are fixed here too.
+
+`git blame` over Step 2/2a returns REQ-417 and REQ-427. Neither is recorded:
+two candidates means the operator chooses (REQ-593 BR-3), and neither REQ
+introduced a Teton-specific defect.
 
 ## Resolution
 
-(filled after fix)
+- **Step 2** gains a "No agent-dispatch tool" path. The model runs the four
+  audits itself, one dimension at a time, and is told not to end the turn
+  after the scope reads. It uses the agent files where it can reach them and
+  a condensed four-dimension checklist inline where it can't. It searches with
+  the harness's own `grep`/`glob` tools, not the test auditor's `find -name
+  '…'`, which would pin.
+- **Step 2a** is rewritten, for every harness, in spellings the real
+  classifier returns `rooted` for. The probe ran each one against Teton's
+  `classify` with the built-in boundaries:
+  - `git rev-parse --abbrev-ref origin/HEAD` for the default branch
+  - `git log --no-walk --branches|--remotes --decorate --date short` for
+    stale branches, with the model doing the 90-day comparison
+  - `git branch [-r] --merged <default>` for merged branches
+  - `git diff-tree -r --no-commit-id <empty-tree> HEAD` for duplicates, with
+    the model grouping by blob hash (the old `git ls-files | xargs cksum`
+    grouping)
+
+  The three old spellings came back `unknown` in the same run, which shows the
+  probe distinguishes the two.
+- **Steps 1.8 and 1.9** skip on a provenance-classifying harness and report
+  the dimension as "unavailable on this harness".
+- Step 2's stale reference to "Step 1.7" now names Step 1.6, the candidate
+  pre-pass it means.
+- New `lint-skills` check `provenance-safe-fence`: a fence whose first line
+  is `# provenance-safe` must keep every line inside the grammar (no refused
+  characters, no `=`, no by-path program, recognised verbs only; placeholders
+  like `<default>` allowed). Putting `--format=%cs` back into the real
+  `/analyze` produces exactly one finding (`analyze/SKILL.md:287`).
 
 ## Files Changed
 
-(filled after fix)
+- `analyze/SKILL.md`: Step 1.8/1.9 harness skip, Step 2's no-agent path and condensed checklist, Step 2a rewritten provenance-safe, Step 1.7 → 1.6
+- `tools/lint-skills/check.py`: `check_provenance_safe_fence`
+- `tools/lint-skills/README.md`: check 11
+- `tools/lint-skills/tests/test_check.py` and `tests/fixtures/provenance-safe-{ok,bad}.md`: one clean case, and five lines that must each fire
+- `.adlc/context/conventions.md`: the fence rule and the no-agent-tool obligation, added to the preamble-grammar paragraph
