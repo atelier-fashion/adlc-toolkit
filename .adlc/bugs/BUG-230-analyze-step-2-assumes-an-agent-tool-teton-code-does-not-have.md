@@ -113,6 +113,20 @@ introduced a Teton-specific defect.
   like `<default>` allowed). Putting `--format=%cs` back into the real
   `/analyze` produces exactly one finding (`analyze/SKILL.md:287`).
 
+**Follow-up (verification finding, 2026-09-28).** The first Teton run after
+#176 (`sess-ya02n239sw6gkf69w8c5kbc9wr`) reached Step 2 and ran the audit in
+context through `glob`/`grep`/`read`. It ran Step 2a's new commands verbatim
+(`rev-parse`, `log --no-walk --branches|--remotes`, `branch --merged main`),
+and none of them pinned. Its own ad-hoc
+`… 2>&1 | grep Date: | sort -u | head -40` did not pin either. Then it
+improvised `cargo test --workspace`, which is opaque (`session_pinned`: "runs
+an interpreter, build tool or network client") and hit the 30 s timeout.
+Claude Code's audit agents are bounded by their tool restrictions, but a model
+auditing in its own context is not, and the path never said the audit was
+read-only. The no-agent path now forbids test runners, build tools, package
+managers and interpreters, and says to report run-dependent findings as
+candidates with the command for the user.
+
 ## Files Changed
 
 - `analyze/SKILL.md`: Step 1.8/1.9 harness skip, Step 2's no-agent path and condensed checklist, Step 2a rewritten provenance-safe, Step 1.7 → 1.6
