@@ -111,17 +111,21 @@ Resolve the branch set once, here, and reuse it for every surface:
    ```bash
    git fetch --prune origin
    ```
-2. **Determine the integration branch** using the *same* signals as `/proceed` step 4 —
-   do not invent a second detection rule. Any one signal is sufficient:
-   - `.adlc/config.yml` declares `gcp.staging_project` (or otherwise indicates a
-     staging-first deploy), OR
-   - a `.github/workflows/*` enforces a `verify-head-ref` / branch-protection head-ref
-     check, OR
-   - `CLAUDE.md` describes a "two-branch" / "staging-first" / "staging → main promotion"
-     pipeline.
+2. **Determine the integration branch** using the *same* rule as `/proceed` step 4 —
+   do not invent a second detection rule:
+   1. If `.adlc/config.yml` declares `branches.integration`, that value is the
+      integration branch outright (a `dev` → `staging` → `main` repo names `dev` here;
+      the signals below would wrongly pick `staging`). Stop here.
+   2. Otherwise detect the branch model from signals; any one is sufficient:
+      - `.adlc/config.yml` declares `gcp.staging_project` (or otherwise indicates a
+        staging-first deploy), OR
+      - a `.github/workflows/*` enforces a `verify-head-ref` / branch-protection head-ref
+        check, OR
+      - `CLAUDE.md` describes a "two-branch" / "staging-first" / "staging → main promotion"
+        pipeline.
 
-   If any signal is present the integration branch is `staging` (unless the project names
-   another); otherwise it is the default branch.
+      If any signal is present the integration branch is `staging` (unless the project
+      names another); otherwise it is the default branch.
 3. **Enumerate the long-lived branches that actually exist on the remote.** Do not assume
    the full triad — `teton-code` has only `main`, `admin-api` has `staging` + `main`,
    `atelier-fashion` has all three:

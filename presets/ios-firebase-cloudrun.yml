@@ -47,6 +47,13 @@ merge_order:
   - web
   - mobile
 
+# Feature branches are cut from, and PRs merge into, `staging`; CI promotes
+# staging → main. Declaring it here is what /proceed step 4 reads first — the
+# gcp.staging_project signal below would detect the same answer, but a repo
+# that later grows a `dev` branch only has to change this one line.
+branches:
+  integration: staging
+
 # GCP projects for the staging-first deploy gate. The CI/CD pipeline is
 # expected to deploy on PR merge and auto-promote staging → production.
 # /bugfix and /wrapup query both projects after merge to confirm the new
