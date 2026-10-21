@@ -228,10 +228,13 @@ The toolkit's workflow is stack-agnostic. Skills that need to do stack-specific 
 
 | Capability | Where the skill checks | What you fill in |
 |---|---|---|
+| Integration branch (`/proceed`, `/sprint`, `/bugfix`, `/wrapup`, `/template-drift`) | `branches.integration` | the branch feature branches are cut from and PRs target — `dev`, `staging`, `main`, … |
 | Deploy confirmation (`/bugfix`, `/wrapup`) | `stack.backends` includes `cloud-run` | `gcp.staging_project`, `gcp.production_project` |
 | Canary deploys (`/canary`) | `services:` block | service name, region, image path per repo |
 | iOS device deploys (`/bugfix`, `/wrapup`) | `stack.frontends` includes `ios` | `ios.deploy_targets`, `ios.deploy_command` |
 | Convention checking (`/review`, `/reflect`) | `.adlc/context/conventions.md` | declare your project's naming, logging, and API conventions |
+
+`branches.integration` is optional. When it is declared, `/proceed` step 4 takes it as the integration branch outright; when it is absent, the skills detect the branch model as before — a declared `gcp.staging_project`, a `verify-head-ref` workflow, or staging-first wording in `CLAUDE.md` means `staging`, otherwise `main`. Set it whenever that detection would pick the wrong branch, e.g. a `dev` → `staging` → `main` promotion pipeline, where feature work integrates into `dev` although a staging project is declared. Repos without the key behave exactly as before.
 
 If you want to add support for a new stack (e.g., AWS Lambda backends, Android device deploys), edit the relevant skill to handle the new `stack.*` value and document it in [`templates/config-template.yml`](templates/config-template.yml). PRs welcome.
 

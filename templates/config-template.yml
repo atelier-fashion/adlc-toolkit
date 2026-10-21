@@ -99,6 +99,33 @@ merge_order:
   - mobile
 
 # ---------------------------------------------------------------------------
+# branches: Where feature work integrates.
+# ---------------------------------------------------------------------------
+# `integration` names the branch that feature branches are cut from and that
+# PRs are opened against and merged into — the `<integration-branch>` of
+# `/proceed` Phase 0 step 4, and the base `/sprint`, `/bugfix`, `/wrapup` and
+# `/template-drift` use. Any branch name works: `dev`, `staging`, `main`, ...
+#
+# When this key is present it IS the integration branch — the skills read it
+# and look no further. When it is absent (or this whole section is omitted),
+# the skills fall back to detecting the branch model from signals: a declared
+# `gcp.staging_project`, a `verify-head-ref` workflow under `.github/workflows/`,
+# or "staging-first" / "staging → main promotion" wording in CLAUDE.md means
+# `staging`; no signal means `main`. That detection cannot tell a two-branch
+# repo (`staging` → `main`) from a three-branch one (`dev` → `staging` → `main`)
+# — both declare a staging project — so set this key whenever feature work
+# integrates anywhere other than the branch the signals would pick.
+#
+# A branch NAME only, never a ref: the skills still `git fetch origin` and base
+# on `origin/<integration>`, never on a stale local ref (LESSON-036).
+#
+# Repos whose detected branch is already right can leave this section out —
+# nothing changes for them.
+
+# branches:
+#   integration: dev
+
+# ---------------------------------------------------------------------------
 # gcp: GCP-specific deploy config. Only relevant if `stack.backends` includes
 # `cloud-run` or your CI/CD targets GCP.
 # ---------------------------------------------------------------------------

@@ -53,8 +53,8 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 4. Push the branch to remote with `git -C <worktree> push -u origin <branch>`
 5. If no PR exists for this branch, create one using `adlc_forge_pr_create` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; from inside the worktree, or with `-R <owner/repo>`) with a summary of what shipped — PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1)
 6. If CI checks exist, monitor the pipeline with `gh run watch` and report the result
-7. **Rebase onto current main before merging** — in a sprint or long-running pipeline, upstream `main` may have advanced since the branch was cut. Run `git -C <worktree> fetch origin main` and check whether the branch is behind: `git -C <worktree> merge-base --is-ancestor origin/main HEAD`. If that command fails (exit 1), the branch is behind main and must be updated:
-   - `git -C <worktree> rebase origin/main`
+7. **Rebase onto the current integration branch before merging** — in a sprint or long-running pipeline, the integration branch may have advanced since the feature branch was cut. `<integration-branch>` is the PR's base: `pipeline-state.json`'s `integrationBranch` when a pipeline state exists, otherwise `/proceed` step 4's rule (`branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`) — never a hardcoded `main` (LESSON-036). Run `git -C <worktree> fetch origin <integration-branch>` and check whether the branch is behind: `git -C <worktree> merge-base --is-ancestor origin/<integration-branch> HEAD`. If that command fails (exit 1), the branch is behind the integration branch and must be updated:
+   - `git -C <worktree> rebase origin/<integration-branch>`
    - If there are conflicts, STOP and surface them to the user — do not try to resolve semantic conflicts blindly
    - On clean rebase, force-push with lease: `git -C <worktree> push --force-with-lease`
    - Re-run `gh pr checks <prUrl>` and wait for CI to re-pass before merging
