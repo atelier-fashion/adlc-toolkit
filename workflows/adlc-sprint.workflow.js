@@ -871,7 +871,10 @@ const REBASE_RESULT_SCHEMA = {
 // entrypoint. `args` carries the input object (System Model: WorkflowArgs):
 //   args.reqs              — string[] of REQ ids to sprint.
 //   args.integrationBranch — resolved integration branch hint (per repo the
-//                            Phase-0 agent re-resolves; never hardcode 'main').
+//                            Phase-0 agent re-resolves by /proceed step 4's rule:
+//                            branches.integration from .adlc/config.yml when
+//                            declared, else two-branch → 'staging', else 'main';
+//                            never hardcode 'main').
 //   args.answers           — map<reqId,string>; {} on first run, carries user
 //                            replies to halts on resume (ADR-6 / BR-5).
 //   args.blockerCleared    — map<reqId,blockerId>; {} on first run. The ORCHESTRATOR
@@ -1186,9 +1189,10 @@ function preflightPrompt(reqs) {
     '    later) AND it has a tasks directory AND it is not already fully merged.',
     '  - reason: a short human-readable reason when NOT eligible.',
     '  - integrationBranch: the resolved integration branch for the primary',
-    '    repo — "staging" in a two-branch repo, else "main". NEVER hardcode',
-    '    "main"; resolve it from the repo. Worktrees later base on',
-    '    origin/<integrationBranch>. (BUG-060, LESSON-036)',
+    '    repo, by /proceed step 4\'s rule: branches.integration from',
+    '    .adlc/config.yml when declared, else "staging" in a two-branch repo,',
+    '    else "main". NEVER hardcode "main"; resolve it from the repo. Worktrees',
+    '    later base on origin/<integrationBranch>. (BUG-060, LESSON-036)',
     '  - touchedRepos: the repo ids this REQ touches (for later cross-repo',
     '    merge sequencing).',
     '',
@@ -1204,8 +1208,10 @@ function phase0Prompt(id) {
     'Phases 0–8 (BR-2); do not use per-agent ephemeral worktrees.',
     '',
     'Steps:',
-    `  1. Resolve the integration branch for each repo ${id} touches (two-branch`,
-    '     repo → "staging", else "main"). NEVER hardcode "main". (BUG-060)',
+    `  1. Resolve the integration branch for each repo ${id} touches by /proceed`,
+    '     step 4\'s rule: branches.integration from that repo\'s .adlc/config.yml',
+    '     when declared, else two-branch repo → "staging", else "main". NEVER',
+    '     hardcode "main". (BUG-060)',
     '  2. git fetch origin, then for each touched repo create the worktree at',
     `     <repoRoot>/.worktrees/${id} based on origin/<integrationBranch>`,
     '     (e.g. `git worktree add <abs-path> -b feat/<id>-... origin/<branch>`).',
@@ -1454,8 +1460,9 @@ function openPRsPrompt(id, repos) {
   return [
     `Phase 6 for ${id}: open the pull request(s) for this REQ. One PR per touched`,
     'repo, each based on that repo\'s RESOLVED integration branch — NEVER hardcode',
-    '"main"; use the integrationBranch recorded in the repo record (two-branch repo',
-    '→ "staging", else "main"). (BUG-060, LESSON-036)',
+    '"main"; use the integrationBranch recorded in the repo record (resolved at',
+    'Phase 0 by /proceed step 4\'s rule: branches.integration from .adlc/config.yml',
+    'when declared, else two-branch repo → "staging", else "main"). (BUG-060, LESSON-036)',
     '',
     'For EACH touched repo (repo @ absolute-worktree, base branch shown):',
     `  ${repoList || '(none)'}`,
@@ -2327,8 +2334,9 @@ function rebasePrompt(h) {
     '      non-mutating — BR-4), then report clean=false with conflictFiles = the',
     '      paths that conflicted. NEVER resolve, -X force, or "merge anyway".',
     '',
-    'Resolve <integrationBranch> from the worktree\'s repo (two-branch → staging,',
-    'else main; NEVER hardcode main — LESSON-036). Return ONLY the schema object.',
+    'Resolve <integrationBranch> from the worktree\'s repo by /proceed step 4\'s rule',
+    '(branches.integration from .adlc/config.yml when declared, else two-branch →',
+    'staging, else main; NEVER hardcode main — LESSON-036). Return ONLY the schema object.',
   ].join('\n');
 }
 

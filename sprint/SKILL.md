@@ -59,7 +59,7 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
      scriptPath: <resolved path from step 1>,
      args: {
        reqs: <normalized REQ-id list from $ARGUMENTS, with --workflow stripped>,
-       integrationBranch: <resolved integration branch for the primary repo: "staging" in two-branch repos, else "main">,
+       integrationBranch: <resolved integration branch for the primary repo, by /proceed step 4's rule: branches.integration from .adlc/config.yml when declared, else "staging" in two-branch repos, else "main">,
        answers: {}
      }
    })
@@ -105,7 +105,7 @@ If no eligible REQs found, report "No eligible REQs for sprint" and stop.
 
 ### Step 2: Validate Sprint Eligibility
 
-**Precondition (LESSON-036):** each pipeline-runner branches its worktree from the integration branch (`origin/<integration-branch>` — `staging` in two-branch repos, else `main`), so a spec that exists only on an unmerged PR/feature branch is invisible to the pipeline even though it's on disk locally. `git fetch origin` first, then run the eligibility checks **against `origin/<integration-branch>`** (e.g. `git ls-tree -r --name-only origin/<integration-branch> | grep -E '(^|[^A-Za-z0-9])REQ-xxx([^0-9]|$)'` — the boundary anchors are load-bearing: a bare `grep REQ-120` also matches `REQ-1200`, marking a REQ eligible on the strength of a prefix-sibling's spec (REQ-524 / LESSON-016)), not just the local working tree. If a freshly-`/spec`'d REQ isn't on the integration branch yet, mark it ineligible with issue `spec not on <integration-branch> — land its spec PR first`.
+**Precondition (LESSON-036):** each pipeline-runner branches its worktree from the integration branch (`origin/<integration-branch>`, resolved by `/proceed` step 4's rule — `branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`), so a spec that exists only on an unmerged PR/feature branch is invisible to the pipeline even though it's on disk locally. `git fetch origin` first, then run the eligibility checks **against `origin/<integration-branch>`** (e.g. `git ls-tree -r --name-only origin/<integration-branch> | grep -E '(^|[^A-Za-z0-9])REQ-xxx([^0-9]|$)'` — the boundary anchors are load-bearing: a bare `grep REQ-120` also matches `REQ-1200`, marking a REQ eligible on the strength of a prefix-sibling's spec (REQ-524 / LESSON-016)), not just the local working tree. If a freshly-`/spec`'d REQ isn't on the integration branch yet, mark it ineligible with issue `spec not on <integration-branch> — land its spec PR first`.
 
 For each REQ, verify (against `origin/<integration-branch>` per the precondition above):
 1. The spec file exists at `.adlc/specs/REQ-xxx-*/requirement.md`

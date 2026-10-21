@@ -186,12 +186,16 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - If tasks already exist under `.adlc/specs/REQ-xxx-*/tasks/`, read each task's `repo:` field to compute the touched set.
    - If tasks don't exist yet (fresh pipeline), assume every configured repo is potentially touched and create worktrees in all of them. Post-Phase-2, untouched repos will be marked `touched: false` and their worktrees removed.
    - The primary is always touched (even if no primary tasks — it hosts the spec and state file).
-4. **Determine the integration branch, then fetch it in each touched repo.** The base for feature branches is NOT always `main` (LESSON-036 — sprinted runners that hardcoded `main` in a staging-first repo paid a mid-pipeline rebase + PR-retarget every time). Detect the repo's branch model; **any one** signal is sufficient:
-   - `.adlc/config.yml` declares a `gcp.staging_project` (or otherwise indicates a staging-first deploy), OR
-   - a `.github/workflows/*` enforces a `verify-head-ref` / branch-protection head-ref check, OR
-   - `CLAUDE.md` describes a "two-branch" / "staging-first" / "staging → main promotion" pipeline.
+4. **Determine the integration branch, then fetch it in each touched repo.** The base for feature branches is NOT always `main` (LESSON-036 — sprinted runners that hardcoded `main` in a staging-first repo paid a mid-pipeline rebase + PR-retarget every time). Resolve `<integration-branch>` in this order — the first rule that applies wins, and every other skill that needs the integration branch (`/sprint`, `/bugfix`, `/wrapup`, `/template-drift`, the `pipeline-runner` agent) uses this same rule rather than inventing a second one:
+   1. **The config names it.** Read `.adlc/config.yml`. If it declares `branches.integration`, that value (a branch name such as `dev`, `staging` or `main`) is `<integration-branch>` outright — do **not** consult the signals in rule 2. This is how a repo whose model the signals cannot express tells the pipeline where feature work integrates: a `dev` → `staging` → `main` promotion pipeline declares a `gcp.staging_project` like any staging-first repo, but its PRs must target `dev`, and its head-ref check will refuse a PR into `staging`. In cross-repo mode read each touched repo's own `.adlc/config.yml`; a sibling with no config or no key falls through to rule 2 for that repo alone.
+   2. **Otherwise detect the branch model from signals**; **any one** signal is sufficient:
+      - `.adlc/config.yml` declares a `gcp.staging_project` (or otherwise indicates a staging-first deploy), OR
+      - a `.github/workflows/*` enforces a `verify-head-ref` / branch-protection head-ref check, OR
+      - `CLAUDE.md` describes a "two-branch" / "staging-first" / "staging → main promotion" pipeline.
 
-   If any signal is present, `<integration-branch>` is the project's integration branch (`staging` unless the project names another); otherwise `<integration-branch>` is `main`. **Always fetch before reasoning about any ref or spec presence** (never trust a stale local ref — LESSON-036):
+      If any signal is present, `<integration-branch>` is the project's integration branch (`staging` unless the project names another); otherwise `<integration-branch>` is `main`.
+
+   **Always fetch before reasoning about any ref or spec presence** (never trust a stale local ref — LESSON-036):
    ```bash
    git -C <repo-path> fetch origin
    ```
@@ -261,7 +265,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    ```bash
    git -C <repo-path> worktree add -b <branch-name> <worktree-path> origin/<integration-branch>
    ```
-   - The new feature branch is cut from `origin/<integration-branch>` (the ref resolved in step 4 — `staging` in two-branch repos, `main` otherwise), NOT from local `main`/`HEAD` (LESSON-036). The `-b` creates the branch; the explicit `origin/<integration-branch>` start-point makes the base deterministic regardless of what is checked out in the repo path.
+   - The new feature branch is cut from `origin/<integration-branch>` (the ref resolved in step 4 — `branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`), NOT from local `main`/`HEAD` (LESSON-036). The `-b` creates the branch; the explicit `origin/<integration-branch>` start-point makes the base deterministic regardless of what is checked out in the repo path.
    - `<worktree-path>` is the **absolute** path resolved in 4a (`<primary-worktree-path>` for primary, `<sibling-worktree-path[s]>` for each sibling) — do **NOT** substitute a relative `.worktrees/REQ-xxx` here, even though the convention happens to produce an equivalent location. The whole point of the contract is that the orchestrator-declared absolute path is honored verbatim.
    - `<branch-name>` is `<expected-branch-ref>` from 4b with the `refs/heads/` prefix stripped — i.e., literally `feat/REQ-xxx-<slug>`. Pass the bare branch name (not the full ref) to `git worktree add -b`. (On a same-branch resume, step 4b already skipped this add — the existing worktree/branch is reused as-is.)
 

@@ -32,6 +32,22 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+### Added
+
+- **`branches.integration` names the integration branch.** `.adlc/config.yml` gains an
+  optional `branches:` section whose `integration` key names the branch feature branches
+  are cut from and PRs target (`dev`, `staging`, `main`, …). `/proceed` Phase 0 step 4
+  reads it first and takes it outright; only when it is absent does the existing
+  signal-based detection run (`gcp.staging_project`, a `verify-head-ref` workflow,
+  staging-first wording in `CLAUDE.md` → `staging`, else `main`). `/sprint`, the
+  `pipeline-runner` agent, the `adlc-sprint` workflow prompts, `/template-drift`, and
+  the pre-merge rebases in `/wrapup` and `/bugfix` (which hardcoded `origin/main`) all
+  route through the same rule. Motivated by a `dev` → `staging` → `main` promotion
+  pipeline: it declares a staging project like any staging-first repo, so detection
+  picked `staging` and the repo's head-ref check refused every PR. Repos without the key
+  behave exactly as before; `tools/lint-skills/tests/test_integration_branch_key.py`
+  pins every resolution site to the key.
+
 ### Fixed
 
 - **Every context preamble stays inside Teton Code's shell grammar (BUG-220).**

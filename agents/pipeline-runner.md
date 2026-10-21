@@ -121,7 +121,7 @@ Format your report's first line as: `Terminal state: <tag>` followed by the stan
 
 ## Blocker Handling
 
-**Before declaring `blocked` for a missing/absent artifact** (spec not found, "no REQ directory", expected file absent), you MUST first `git fetch origin` and re-check against `origin/<integration-branch>` (the integration branch resolved in `/proceed` Phase 0 step 4 — `staging` in two-branch repos, else `main`). A stale local ref produces a false "no spec exists" negative (LESSON-036 — this exact false-block cost an orchestrator recovery cycle in the REQ-442/443/444 sprint). Only after a fresh fetch confirms the artifact is genuinely absent on the integration branch may you proceed to the blocked steps below.
+**Before declaring `blocked` for a missing/absent artifact** (spec not found, "no REQ directory", expected file absent), you MUST first `git fetch origin` and re-check against `origin/<integration-branch>` (the integration branch resolved in `/proceed` Phase 0 step 4 — `branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`; read it back from `pipeline-state.json`'s `integrationBranch`, never re-derive it as `main`). A stale local ref produces a false "no spec exists" negative (LESSON-036 — this exact false-block cost an orchestrator recovery cycle in the REQ-442/443/444 sprint). Only after a fresh fetch confirms the artifact is genuinely absent on the integration branch may you proceed to the blocked steps below.
 
 If you encounter a blocker that genuinely requires human input:
 1. Update `pipeline-state.json` with blocker details (`blockers` array — schema below)
