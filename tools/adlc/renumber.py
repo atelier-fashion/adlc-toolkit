@@ -11,6 +11,9 @@ Safety posture (LESSON-008 strict id validation; LESSON-006 fail-loud + atomic):
 - both ids must match the strict per-kind regex — no traversal, no garbage;
 - it refuses to run if the NEW id itself collides on the remote (shells out to
   ``partials/id-recheck.sh`` so there is one collision authority — BR-9);
+- it refuses to run if the NEW id already names a local artifact, and the rename
+  never replaces an existing path — the remote check fails open, so it cannot be
+  the only guard against overwriting a local file (BUG-245);
 - it shows a dry-run unified diff and requires explicit approval before mutating;
 - mutation is atomic per file (write temp + ``os.replace``), never a partial write.
 
@@ -19,6 +22,7 @@ Pure standard library — must run on a machine that never opted into delegation
 
 import argparse
 import difflib
+import errno
 import os
 import re
 import subprocess
@@ -256,6 +260,32 @@ def _renamed_path(old_path, old_id, new_id):
     return os.path.join(parent, new_base)
 
 
+def _rename_no_clobber(src, dst):
+    """``os.rename`` that refuses to replace an existing ``dst`` (BUG-245).
+
+    POSIX ``rename(2)`` silently replaces a destination file, so a bare
+    ``os.rename`` turns a missed collision into data loss. A file is moved with
+    ``os.link`` + ``os.unlink``: ``link`` fails with ``EEXIST`` if ``dst`` exists,
+    with no check-then-act window. A filesystem without hard links falls back to
+    the ``lexists`` check below. A directory needs no link: ``rename`` onto a
+    non-empty directory already fails, and the ``lexists`` check covers an empty one.
+    Raises ``FileExistsError`` when ``dst`` exists.
+    """
+    if os.path.lexists(dst):
+        raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), dst)
+    if not os.path.isdir(src):
+        try:
+            os.link(src, dst)
+        except FileExistsError:
+            raise
+        except OSError:
+            pass  # no hard links here (EPERM / ENOTSUP / EXDEV) — fall back to rename
+        else:
+            os.unlink(src)
+            return
+    os.rename(src, dst)
+
+
 def _grep_references(root, old_id):
     """Files under root that contain old_id at an id boundary, excluding .git.
 
@@ -423,6 +453,21 @@ def main(argv=None):
         )
         return 1
 
+    # 3b. Refuse if the NEW id already names a local artifact (BUG-245). The remote
+    #     check above fails open (offline, no helper, or an artifact not pushed yet),
+    #     so it cannot be the only guard: renaming onto an existing file overwrites it,
+    #     and a different slug leaves two artifacts with one id.
+    existing, _ = _locate_old(root, new_id)
+    if existing is None and os.path.lexists(p["new_path"]):
+        existing = p["new_path"]
+    if existing is not None:
+        sys.stderr.write(
+            f"adlc renumber: refusing — new id '{new_id}' already exists locally at "
+            f"{os.path.relpath(existing, root)}. Pick an id that is free both locally "
+            "and on the remote.\n"
+        )
+        return 1
+
     apply_change = args.yes
 
     # 4. Dry-run diff (always shown). Path rename + frontmatter/reference rewrites.
@@ -462,8 +507,16 @@ def main(argv=None):
     # 'won' and 'unavailable' both proceed (unavailable = id-alloc.sh not resolvable).
 
     # 5. Apply atomically. Rename the path first, then rewrite the moved artifact's
-    #    own content and every external reference.
-    os.rename(p["old_path"], p["new_path"])
+    #    own content and every external reference. The rename never replaces an
+    #    existing path, so a destination created since step 3b is not overwritten (BUG-245).
+    try:
+        _rename_no_clobber(p["old_path"], p["new_path"])
+    except FileExistsError:
+        sys.stderr.write(
+            f"adlc renumber: refusing — {os.path.relpath(p['new_path'], root)} appeared "
+            "after the plan was built. Nothing was changed.\n"
+        )
+        return 1
     # Rewrite content inside the moved artifact.
     if p["is_dir"]:
         for dirpath, _dirs, files in os.walk(p["new_path"]):
