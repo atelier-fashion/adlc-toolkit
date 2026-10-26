@@ -29,9 +29,18 @@ they made a "no news" answer authorize data loss.
   **cannot** fail open: here, the local tree, which is authoritative for local
   files.
 - Don't make the destructive primitive trust the planner either. `os.rename`,
-  `shutil.move` and `mv` all clobber. Use a no-clobber move (`os.link` +
-  `os.unlink` for files, which fails with `EEXIST` with no check-then-act
-  window) so a destination that appears after planning is refused, not replaced.
+  `shutil.move` and `mv` all clobber. Use a no-clobber move so a destination
+  that appears after planning is refused, not replaced. For files, `os.link` +
+  `os.unlink` fails with `EEXIST` and has no check-then-act window. For
+  directories, or a filesystem without hard links, Python's standard library
+  only offers a check just before `rename`, so state the window that leaves
+  rather than claiming "never". Closing it needs `renameat2(RENAME_NOREPLACE)`
+  or `renamex_np(RENAME_EXCL)`.
+- Key the backup check on the same identity the primary uses. Here the remote
+  checks compare decimal numbers, so a string-keyed local check let `BUG-0010`
+  duplicate `BUG-010` (the BUG-245 follow-up). Prove the guard's code path is
+  reachable: a test whose earlier check catches the case first never exercises
+  the guard it claims to test.
 - Refuse before any outward side effect (here, the remote id reservation), so a
   refusal costs nothing.
 
