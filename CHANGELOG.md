@@ -32,6 +32,20 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+## [5.3.0] — 2026-10-26
+
+The **harness-portability drop**: the skills run on a harness that classifies what
+its shell can reach (Teton Code) without pinning the session. The ethos line and every
+`## Context` preamble stay inside the classifier's grammar (BUG-218, BUG-220). Delegating
+steps skip their shell there and fall back to the harness's own file reads (BUG-228).
+`/analyze` audits without an agent-dispatch tool and runs only its `# provenance-safe`
+fences (BUG-230). Two new `lint-skills` checks, `harness-skip` and `provenance-safe-fence`,
+hold those lines. Alongside them: `branches.integration` names the integration branch
+instead of guessing it, `adlc renumber` can no longer overwrite a local artifact
+(BUG-245), and the keep-both conflict bound checks for whole blocks (BUG-207 follow-up).
+One feature and six bug fixes, 2026-09-03 → 2026-10-26. BUG-224 (a stale sentence in
+`conventions.md`) was filed in the range and is still open.
+
 ### Added
 
 - **`branches.integration` names the integration branch.** `.adlc/config.yml` gains an
@@ -59,6 +73,26 @@ PRs (`atelier-fashion/adlc-toolkit`).
   already names a local artifact under any slug, and it moves the artifact with
   a no-clobber rename (`link` + `unlink` for files), so a destination that
   appears after planning is never replaced. Reported by Perch Scan.
+
+- **`/analyze` runs its audit without an agent-dispatch tool (BUG-230).** Step 2
+  assumed it could launch four audit agents, which Teton Code cannot do, and Step 2a's
+  hygiene shell would have pinned the session. Step 2 gains a no-agent path: the model
+  runs the four audits itself, read-only (no test runner, build tool, package manager or
+  interpreter), searching with the harness's `grep`/`glob`/`read`. Step 2a is rewritten in
+  spellings the classifier accepts (`git log --no-walk --branches --decorate --date short`,
+  `git diff-tree` from the empty tree for duplicates), and the model does the date
+  arithmetic and grouping. On a provenance-classifying harness the only shell `/analyze`
+  may run is the lines of its `# provenance-safe` fences. The new `lint-skills` check
+  `provenance-safe-fence` holds every such line to the grammar.
+
+- **Delegating steps skip their shell under a provenance-classifying harness
+  (BUG-228).** `adlc-read`, the partials and `skill-flag.sh` are programs named by
+  path, which Teton classifies as unknown. So every delegating step pinned the session,
+  and the `adlc-read` call then hit Teton's 30 s shell timeout. Each delegating step now
+  carries a `**Provenance-classifying harness (BUG-228):**` line telling the model to
+  take the fallback path with its own file-read tool. Other harnesses are unchanged, and
+  `adlc-read` calls get a shell timeout of at least 120 s. The new `lint-skills` check
+  `harness-skip` requires the line above every `adlc_delegate_gate_check` fence.
 
 - **Every context preamble stays inside Teton Code's shell grammar (BUG-220).**
   BUG-218 took the interpreter out of the ethos line, and the line still pinned
@@ -115,6 +149,20 @@ PRs (`atelier-fashion/adlc-toolkit`).
   slid-onto-closing-line shape, brackets, a stray `=======` outside a hunk, and a
   real git merge where one side wraps existing lines in a new block (base-empty,
   so the old bound would have moved the other side's line inside the wrap).
+
+### Knowledge
+
+- **LESSON-707: a check that fails open cannot be the only guard in front of a
+  destructive local operation.** Add a guard that can't fail open, and use a no-clobber
+  primitive (BUG-245).
+- **LESSON-663: to keep a model's shell inside a classifier's grammar, allowlist what it
+  may run.** Forbidding commands one at a time never converges (BUG-230).
+- **LESSON-662: some shell cannot be respelled past a provenance classifier.** The skill
+  text has to route around it (BUG-228).
+- **LESSON-657: a static shell classifier rejects on characters before it reads the
+  verb,** and a reader with no file argument scans the whole root (BUG-220).
+- **LESSON-655: a statically classified preamble is judged on every branch it could
+  take,** not the one that runs (BUG-218).
 
 ## [5.2.0] — 2026-09-03
 
