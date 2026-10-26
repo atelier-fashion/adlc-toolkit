@@ -11,9 +11,13 @@ Safety posture (LESSON-008 strict id validation; LESSON-006 fail-loud + atomic):
 - both ids must match the strict per-kind regex — no traversal, no garbage;
 - it refuses to run if the NEW id itself collides on the remote (shells out to
   ``partials/id-recheck.sh`` so there is one collision authority — BR-9);
-- it refuses to run if the NEW id already names a local artifact, and the rename
-  never replaces an existing path — the remote check fails open, so it cannot be
-  the only guard against overwriting a local file (BUG-245);
+- it refuses to run if a local artifact already carries the NEW id's number
+  (zero padding ignored, as the remote checks ignore it), and the rename refuses
+  an existing destination — the remote check fails open, so it cannot be the
+  only guard against overwriting a local file (BUG-245). For a file the refusal
+  is atomic (hard link); for a directory, or a filesystem without hard links, it
+  is a check made immediately before ``rename``, which leaves a window of
+  microseconds;
 - it shows a dry-run unified diff and requires explicit approval before mutating;
 - mutation is atomic per file (write temp + ``os.replace``), never a partial write.
 
@@ -64,6 +68,15 @@ def _validate_id(artifact_id):
     if kind is None:
         return False
     return bool(KIND_PATTERNS[kind].match(artifact_id))
+
+
+def _id_number(artifact_id):
+    """The decimal number of a validated id: ``BUG-0010`` and ``BUG-010`` are both 10.
+
+    This is the identity the remote checks use (``reserve_new_id``'s ``str(int(...))``,
+    ``id-recheck.sh``'s ``adlc_id_dec``), so local collision checks must use it too.
+    """
+    return int(artifact_id.split("-", 1)[1])
 
 
 # --- id-boundary matching (REQ-524) -------------------------------------------------
@@ -245,6 +258,31 @@ def _locate_old(root, old_id):
     return None, is_dir
 
 
+def _locate_by_number(root, artifact_id):
+    """Find a local artifact of artifact_id's kind with the same decimal number.
+
+    Unlike ``_locate_old`` (an exact-string lookup for the artifact being moved),
+    this ignores zero padding: ``BUG-0010-x.md`` and ``BUG-010-y.md`` are the same
+    id to every remote check, so either one blocks renumbering onto the other
+    (BUG-245). ``BUG-0100-z.md`` is a different number and does not. Returns the
+    path or None.
+    """
+    kind = _kind_of(artifact_id)
+    base, is_dir = _artifact_path(root, artifact_id)
+    if not os.path.isdir(base):
+        return None
+    want = _id_number(artifact_id)
+    name_re = re.compile(rf"^{kind}-([0-9]{{3,}})(?=-|\.md$|$)")
+    for name in sorted(os.listdir(base)):
+        m = name_re.match(name)
+        if not m or int(m.group(1)) != want:
+            continue
+        full = os.path.join(base, name)
+        if (os.path.isdir(full) if is_dir else os.path.isfile(full)):
+            return full
+    return None
+
+
 def _renamed_path(old_path, old_id, new_id):
     """Compute the new path by swapping the id token in the basename (boundary-anchored).
 
@@ -264,11 +302,19 @@ def _rename_no_clobber(src, dst):
     """``os.rename`` that refuses to replace an existing ``dst`` (BUG-245).
 
     POSIX ``rename(2)`` silently replaces a destination file, so a bare
-    ``os.rename`` turns a missed collision into data loss. A file is moved with
-    ``os.link`` + ``os.unlink``: ``link`` fails with ``EEXIST`` if ``dst`` exists,
-    with no check-then-act window. A filesystem without hard links falls back to
-    the ``lexists`` check below. A directory needs no link: ``rename`` onto a
-    non-empty directory already fails, and the ``lexists`` check covers an empty one.
+    ``os.rename`` turns a missed collision into data loss. The ``lexists`` check at
+    the top refuses an existing ``dst`` up front. After it:
+
+    - a file is moved with ``os.link`` + ``os.unlink``. ``link`` fails with
+      ``EEXIST`` if ``dst`` appeared since the check, so this path has no
+      check-then-act window;
+    - on a filesystem without hard links (``link`` raises another ``OSError``), and
+      for a directory, the move is a plain ``rename`` guarded only by that check.
+      A ``dst`` created in the microseconds between the two can still be replaced
+      (for a directory, only an empty one: ``rename`` onto a non-empty directory
+      fails). Closing that needs ``renameat2(RENAME_NOREPLACE)`` /
+      ``renamex_np(RENAME_EXCL)``, which the standard library does not expose.
+
     Raises ``FileExistsError`` when ``dst`` exists.
     """
     if os.path.lexists(dst):
@@ -434,6 +480,12 @@ def main(argv=None):
     if old_id == new_id:
         sys.stderr.write("adlc renumber: old and new ids are identical\n")
         return 2
+    if _id_number(old_id) == _id_number(new_id):
+        sys.stderr.write(
+            f"adlc renumber: '{old_id}' and '{new_id}' are the same number — "
+            "zero padding does not make a new id\n"
+        )
+        return 2
 
     # 2. Refuse if the NEW id collides on the remote (BR-9).
     if remote_collision(new_id):
@@ -456,8 +508,9 @@ def main(argv=None):
     # 3b. Refuse if the NEW id already names a local artifact (BUG-245). The remote
     #     check above fails open (offline, no helper, or an artifact not pushed yet),
     #     so it cannot be the only guard: renaming onto an existing file overwrites it,
-    #     and a different slug leaves two artifacts with one id.
-    existing, _ = _locate_old(root, new_id)
+    #     and a different slug leaves two artifacts with one id. Matched by number,
+    #     not string, so BUG-0010 collides with an existing BUG-010.
+    existing = _locate_by_number(root, new_id)
     if existing is None and os.path.lexists(p["new_path"]):
         existing = p["new_path"]
     if existing is not None:
@@ -507,8 +560,10 @@ def main(argv=None):
     # 'won' and 'unavailable' both proceed (unavailable = id-alloc.sh not resolvable).
 
     # 5. Apply atomically. Rename the path first, then rewrite the moved artifact's
-    #    own content and every external reference. The rename never replaces an
-    #    existing path, so a destination created since step 3b is not overwritten (BUG-245).
+    #    own content and every external reference. The rename refuses a destination
+    #    created since step 3b (BUG-245) — atomically for a file; for a directory or a
+    #    filesystem without hard links, by a check just before rename (see
+    #    _rename_no_clobber for the remaining microsecond window).
     try:
         _rename_no_clobber(p["old_path"], p["new_path"])
     except FileExistsError:

@@ -32,6 +32,23 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+## [5.3.1] — 2026-10-26
+
+A patch to 5.3.0's BUG-245 fix, from an `/adversary` review of that release.
+
+### Fixed
+
+- **`adlc renumber` matches the local collision check by number, not string
+  (BUG-245 follow-up).** The 5.3.0 check compared ids as text, while the remote
+  checks (`id-recheck.sh`, `reserve_new_id`) strip zero padding. So `renumber
+  BUG-005 BUG-0010 --yes` beside a local `BUG-010-other.md` still produced two
+  bugs numbered 10. The local check now ignores zero padding (`BUG-0100` is still
+  a different number), and renumbering to the same number with different padding
+  is refused with exit 2. New tests make the hard link the guard (the up-front
+  check bypassed) and cover the fallback for filesystems without hard links. The
+  5.3.0 no-clobber wording is corrected to state the microsecond window that
+  remains for directories and that fallback. Found by an `/adversary` review.
+
 ## [5.3.0] — 2026-10-26
 
 The **harness-portability drop**: the skills run on a harness that classifies what
@@ -71,8 +88,13 @@ One feature and six bug fixes, 2026-09-03 → 2026-10-26. BUG-224 (a stale sente
   BUG-010 --yes` with a local `BUG-010-crash.md` replaced it, printed `Applied.`
   and exited 0. Renumber now refuses (exit 1, dry run included) when the new id
   already names a local artifact under any slug, and it moves the artifact with
-  a no-clobber rename (`link` + `unlink` for files), so a destination that
-  appears after planning is never replaced. Reported by Perch Scan.
+  a no-clobber rename. For a file that is `link` + `unlink`, which refuses a
+  destination that appears after planning with no window. For a directory, or a
+  filesystem without hard links, it is a check immediately before `rename`,
+  which leaves a window of microseconds. (This sentence originally said "never
+  replaced" without that qualification; corrected after the 5.3.0 release.)
+  Zero-padded ids still got past the 5.3.0 check; fixed in 5.3.1. Reported
+  by Perch Scan.
 
 - **`/analyze` runs its audit without an agent-dispatch tool (BUG-230).** Step 2
   assumed it could launch four audit agents, which Teton Code cannot do, and Step 2a's

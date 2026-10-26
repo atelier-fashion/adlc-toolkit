@@ -111,3 +111,21 @@ reproduction now exits 1 and leaves `BUG-010-crash.md` intact.
 ## Deployment
 
 - Merged to `main` in atelier-fashion/adlc-toolkit#181 on 2026-10-26. The toolkit is a symlink install, so `main` is live as soon as it merges. There is no Cloud Run or iOS target.
+
+## Follow-up (adversary review, 2026-10-26)
+
+An `/adversary` review of #181 found three gaps, fixed in one follow-up PR:
+
+1. **Zero-padded ids got past the local check.** It compared ids as text, but
+   the remote checks compare decimal numbers. So `renumber BUG-005 BUG-0010 --yes`
+   beside `BUG-010-other.md` still produced two bugs numbered 10. Step 3b now uses
+   `_locate_by_number`. A renumber to the same number with different padding is
+   refused with exit 2.
+2. **"Never replaced" overstated the guarantee.** Only the hard-link path for
+   files has no window. Directories, and filesystems without hard links, rely on
+   a check just before `rename`. The docstrings, CHANGELOG and LESSON-707 now
+   say so.
+3. **No test reached the hard-link guard.** The existing race test was caught by
+   the up-front check, and disabling the link branch left every test green. New
+   tests bypass the up-front check so `link` has to refuse, and cover the
+   fallback for filesystems without hard links in both directions.
