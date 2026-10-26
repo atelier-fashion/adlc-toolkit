@@ -1,7 +1,7 @@
 ---
 id: BUG-245
 title: "adlc renumber overwrites an existing local artifact when the new id is already taken locally"
-status: open
+status: resolved
 severity: high
 created: 2026-10-26
 updated: 2026-10-26
@@ -107,3 +107,7 @@ reproduction now exits 1 and leaves `BUG-010-crash.md` intact.
   REQ dir, a destination that appears after planning, and `_rename_no_clobber`
   in both directions.
 - `CHANGELOG.md`: `[Unreleased]` → Fixed entry.
+
+## Deployment
+
+- Merged to `main` in atelier-fashion/adlc-toolkit#181 on 2026-10-26. The toolkit is a symlink install, so `main` is live as soon as it merges. There is no Cloud Run or iOS target.
