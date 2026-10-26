@@ -397,3 +397,120 @@ def test_apply_aborts_when_new_id_reserved_mid_flight(tmp_path, monkeypatch):
     # The rename must NOT have happened.
     assert (repo / ".adlc" / "specs" / "REQ-600-demo").is_dir()
     assert not (repo / ".adlc" / "specs" / "REQ-700-demo").exists()
+
+
+# --- local-collision refusal (BUG-245) --------------------------------------------
+
+def _init_bug_repo(tmp_path, files):
+    """A repo whose .adlc/bugs holds `files` ({name: content}), committed, no origin."""
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    bugs = repo / ".adlc" / "bugs"
+    bugs.mkdir(parents=True)
+    for name, content in files.items():
+        (bugs / name).write_text(content, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=repo, check=True)
+    return repo, bugs
+
+
+def _remote_checks_unavailable(monkeypatch):
+    """Both remote checks degrade to 'proceed', as they do offline (BR-3)."""
+    monkeypatch.setattr(renumber, "remote_collision", lambda _id: False)
+    monkeypatch.setattr(renumber, "reserve_new_id", lambda _id: "degraded")
+
+
+def test_apply_refuses_to_overwrite_existing_local_bug(tmp_path, monkeypatch, capsys):
+    repo, bugs = _init_bug_repo(tmp_path, {
+        "BUG-005-crash.md": "id: BUG-005\nold bug\n",
+        "BUG-010-crash.md": "id: BUG-010\nexisting bug\n",
+    })
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    rc = renumber.main(["BUG-005", "BUG-010", "--yes"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "already exists locally" in err
+    assert ".adlc/bugs/BUG-010-crash.md" in err
+    # Nothing mutated: the destination keeps its own content, the source is untouched.
+    assert (bugs / "BUG-010-crash.md").read_text() == "id: BUG-010\nexisting bug\n"
+    assert (bugs / "BUG-005-crash.md").read_text() == "id: BUG-005\nold bug\n"
+
+
+def test_apply_refuses_duplicate_id_with_different_slug(tmp_path, monkeypatch, capsys):
+    repo, bugs = _init_bug_repo(tmp_path, {
+        "BUG-005-crash.md": "id: BUG-005\n",
+        "BUG-010-other.md": "id: BUG-010\n",
+    })
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    rc = renumber.main(["BUG-005", "BUG-010", "--yes"])
+    assert rc == 1
+    assert "BUG-010-other.md" in capsys.readouterr().err
+    assert (bugs / "BUG-005-crash.md").is_file()
+    assert not (bugs / "BUG-010-crash.md").exists()
+
+
+def test_dry_run_also_refuses_local_collision(tmp_path, monkeypatch, capsys):
+    repo, _bugs = _init_bug_repo(tmp_path, {
+        "BUG-005-crash.md": "id: BUG-005\n",
+        "BUG-010-crash.md": "id: BUG-010\n",
+    })
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    rc = renumber.main(["BUG-005", "BUG-010"])
+    assert rc == 1
+    assert "DRY RUN" not in capsys.readouterr().out
+
+
+def test_apply_refuses_existing_req_dir_even_if_empty(tmp_path, monkeypatch, capsys):
+    repo = _init_repo(tmp_path)
+    (repo / ".adlc" / "specs" / "REQ-700-demo").mkdir()
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    rc = renumber.main(["REQ-600", "REQ-700", "--yes"])
+    assert rc == 1
+    assert "already exists locally" in capsys.readouterr().err
+    assert (repo / ".adlc" / "specs" / "REQ-600-demo" / "requirement.md").is_file()
+
+
+def test_apply_refuses_when_destination_appears_after_plan(tmp_path, monkeypatch, capsys):
+    repo, bugs = _init_bug_repo(tmp_path, {"BUG-005-crash.md": "id: BUG-005\n"})
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(renumber, "remote_collision", lambda _id: False)
+
+    def _reserve_while_another_writer_lands(_id):
+        (bugs / "BUG-010-crash.md").write_text("racer\n", encoding="utf-8")
+        return "won"
+
+    monkeypatch.setattr(renumber, "reserve_new_id", _reserve_while_another_writer_lands)
+    rc = renumber.main(["BUG-005", "BUG-010", "--yes"])
+    assert rc == 1
+    assert "appeared after the plan" in capsys.readouterr().err
+    assert (bugs / "BUG-010-crash.md").read_text() == "racer\n"
+    assert (bugs / "BUG-005-crash.md").read_text() == "id: BUG-005\n"
+
+
+def test_rename_no_clobber_raises_on_existing_file(tmp_path):
+    src, dst = tmp_path / "a.md", tmp_path / "b.md"
+    src.write_text("a", encoding="utf-8")
+    dst.write_text("b", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        renumber._rename_no_clobber(str(src), str(dst))
+    assert src.read_text() == "a" and dst.read_text() == "b"
+
+
+@pytest.mark.parametrize("is_dir", [False, True])
+def test_rename_no_clobber_moves_when_destination_is_free(tmp_path, is_dir):
+    src, dst = tmp_path / "a", tmp_path / "b"
+    if is_dir:
+        src.mkdir()
+        (src / "f.md").write_text("x", encoding="utf-8")
+    else:
+        src.write_text("x", encoding="utf-8")
+    renumber._rename_no_clobber(str(src), str(dst))
+    assert not src.exists()
+    assert (dst / "f.md" if is_dir else dst).read_text() == "x"

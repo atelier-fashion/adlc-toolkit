@@ -50,6 +50,16 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Fixed
 
+- **`adlc renumber` no longer overwrites an existing local artifact (BUG-245).**
+  The only check on whether the new id was taken was the remote recheck, which
+  fails open (offline, no helper, or an artifact not pushed yet), and the rename
+  was a bare `os.rename`, which replaces an existing file. So `renumber BUG-005
+  BUG-010 --yes` with a local `BUG-010-crash.md` replaced it, printed `Applied.`
+  and exited 0. Renumber now refuses (exit 1, dry run included) when the new id
+  already names a local artifact under any slug, and it moves the artifact with
+  a no-clobber rename (`link` + `unlink` for files), so a destination that
+  appears after planning is never replaced. Reported by Perch Scan.
+
 - **Every context preamble stays inside Teton Code's shell grammar (BUG-220).**
   BUG-218 took the interpreter out of the ethos line, and the line still pinned
   the session — with every other `## Context` preamble in every skill — because
