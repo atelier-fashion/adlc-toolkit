@@ -3,6 +3,7 @@
 Offline: a sandbox git repo under tmp_path, no network, no real ~/.claude mutation.
 The remote-collision shell-out is monkeypatched so these tests never touch a remote.
 """
+import errno
 import os
 import subprocess
 
@@ -514,3 +515,88 @@ def test_rename_no_clobber_moves_when_destination_is_free(tmp_path, is_dir):
     renumber._rename_no_clobber(str(src), str(dst))
     assert not src.exists()
     assert (dst / "f.md" if is_dir else dst).read_text() == "x"
+
+
+# --- number-keyed collision + link-path guard (BUG-245 follow-up) -------------------
+
+def test_apply_refuses_zero_padded_duplicate(tmp_path, monkeypatch, capsys):
+    repo, bugs = _init_bug_repo(tmp_path, {
+        "BUG-005-crash.md": "id: BUG-005\n",
+        "BUG-010-other.md": "id: BUG-010\n",
+    })
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    rc = renumber.main(["BUG-005", "BUG-0010", "--yes"])
+    assert rc == 1
+    assert "BUG-010-other.md" in capsys.readouterr().err
+    assert sorted(os.listdir(bugs)) == ["BUG-005-crash.md", "BUG-010-other.md"]
+
+
+def test_apply_refuses_zero_padded_req_dir(tmp_path, monkeypatch, capsys):
+    repo = _init_repo(tmp_path)
+    (repo / ".adlc" / "specs" / "REQ-700-other").mkdir()
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    assert renumber.main(["REQ-600", "REQ-0700", "--yes"]) == 1
+    assert "REQ-700-other" in capsys.readouterr().err
+    assert (repo / ".adlc" / "specs" / "REQ-600-demo").is_dir()
+
+
+def test_same_number_with_different_padding_is_rejected(tmp_path, monkeypatch, capsys):
+    repo, bugs = _init_bug_repo(tmp_path, {"BUG-005-crash.md": "id: BUG-005\n"})
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    assert renumber.main(["BUG-005", "BUG-0005", "--yes"]) == 2
+    assert "same number" in capsys.readouterr().err
+    assert (bugs / "BUG-005-crash.md").is_file()
+
+
+def test_different_number_sharing_a_prefix_is_not_a_collision(tmp_path, monkeypatch):
+    # Benign path: BUG-0100 is 100, not 10, so a local BUG-010 must not block it.
+    repo, bugs = _init_bug_repo(tmp_path, {
+        "BUG-005-crash.md": "id: BUG-005\n",
+        "BUG-010-other.md": "id: BUG-010\n",
+    })
+    monkeypatch.chdir(repo)
+    _remote_checks_unavailable(monkeypatch)
+    assert renumber.main(["BUG-005", "BUG-0100", "--yes"]) == 0
+    assert (bugs / "BUG-0100-crash.md").read_text() == "id: BUG-0100\n"
+    assert (bugs / "BUG-010-other.md").read_text() == "id: BUG-010\n"
+
+
+def test_rename_no_clobber_link_refuses_when_precheck_misses(tmp_path, monkeypatch):
+    # Bypass the up-front lexists check so the hard link is the only guard: this is
+    # the race where dst appears between the check and the move.
+    src, dst = tmp_path / "a.md", tmp_path / "b.md"
+    src.write_text("mine", encoding="utf-8")
+    dst.write_text("racer", encoding="utf-8")
+    monkeypatch.setattr(renumber.os.path, "lexists", lambda _p: False)
+    with pytest.raises(FileExistsError):
+        renumber._rename_no_clobber(str(src), str(dst))
+    assert dst.read_text() == "racer"
+    assert src.read_text() == "mine"
+
+
+def _no_hard_links(monkeypatch):
+    def _link(_src, _dst):
+        raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+    monkeypatch.setattr(renumber.os, "link", _link)
+
+
+def test_rename_no_clobber_falls_back_without_hard_links(tmp_path, monkeypatch):
+    src, dst = tmp_path / "a.md", tmp_path / "b.md"
+    src.write_text("x", encoding="utf-8")
+    _no_hard_links(monkeypatch)
+    renumber._rename_no_clobber(str(src), str(dst))
+    assert not src.exists()
+    assert dst.read_text() == "x"
+
+
+def test_rename_no_clobber_fallback_still_refuses_existing_dst(tmp_path, monkeypatch):
+    src, dst = tmp_path / "a.md", tmp_path / "b.md"
+    src.write_text("a", encoding="utf-8")
+    dst.write_text("b", encoding="utf-8")
+    _no_hard_links(monkeypatch)
+    with pytest.raises(FileExistsError):
+        renumber._rename_no_clobber(str(src), str(dst))
+    assert src.read_text() == "a" and dst.read_text() == "b"
