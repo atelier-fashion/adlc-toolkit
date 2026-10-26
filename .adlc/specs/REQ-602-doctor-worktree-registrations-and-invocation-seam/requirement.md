@@ -1,10 +1,10 @@
 ---
 id: REQ-602
 title: "Doctor: worktree-registration check, and an invocation seam that runs doctor before someone suspects a problem"
-status: draft
+status: cancelled
 deployable: false
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-10-26
 component: "adlc/doctor"
 domain: "adlc"
 stack: ["python", "bash", "git"]
