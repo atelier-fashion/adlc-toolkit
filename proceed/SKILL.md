@@ -140,9 +140,16 @@ Execute these phases in order. Each phase has a validation gate — if validatio
     "completedTasks": [],
     "failedTasks": []
   },
-  "conflictsResolved": []
+  "conflictsResolved": [],
+  "closeOut": { "status": "ok", "at": "2026-03-27T10:45:00Z" }
 }
 ```
+
+`closeOut` is optional and additive (BUG-249): written by the Step 8b close-out
+actor — `/wrapup --close-out` writes `status: "ok"`; the orchestrator that invoked it
+writes `status: "failed", reason: "<why>"` when the mode exits non-zero. Absent means
+"close-out not recorded"; nothing reads it for control flow. `/status` reports
+`failed` under its Stale Pipeline State heading.
 
 The `repos` block is the canonical registry for this pipeline run. Every cd/commit/push/PR/merge operation reads the target repo's `path` or `worktree` from here — never from cwd inference. `touched: true` means at least one task targets this repo; untouched repos skip Phases 4–8. `mergeOrder` is the list of touched repo ids in the order Phase 8 will merge them (primary is always a member).
 

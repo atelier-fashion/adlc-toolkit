@@ -50,7 +50,85 @@ const {
   sharesRepo,
   terminalValue,
   TERMINAL,
+  // BUG-249 Step-8b close-out helpers.
+  closeOutEvidenceStatus,
+  closeOutDigest,
+  repoRootFromWorktree,
+  groupMergedByRepo,
 } = helpers;
+
+// ===========================================================================
+// BUG-249 — Step-8b close-out pass helpers + the TERMINAL `closeOut` contract.
+// ===========================================================================
+
+test('closeOutEvidenceStatus: "none" with no findings and no reports, "present" with either', () => {
+  assert.equal(closeOutEvidenceStatus(undefined), 'none');
+  assert.equal(closeOutEvidenceStatus({ repos: [], tasks: [], findings: null, reports: [] }), 'none');
+  assert.equal(closeOutEvidenceStatus({ findings: [{ severity: 'Minor', file: 'a', title: 't' }], reports: [] }), 'present');
+  assert.equal(closeOutEvidenceStatus({ findings: [], reports: [{ taskId: 'TASK-1', text: 'done' }] }), 'present');
+});
+
+test('closeOutDigest: bounded (30 findings, 1500 chars per report), deterministic, and says "(none)" for empty sections', () => {
+  const ev = {
+    tasks: [{ id: 'TASK-1', title: 'Do a thing' }, { id: 'TASK-2' }],
+    findings: Array.from({ length: 35 }, (_, i) => ({
+      severity: i === 0 ? 'Major' : 'Minor', file: `f${i}.js`, line: i, title: `finding ${i}`, lessonId: i === 0 ? 'LESSON-404' : undefined, mustFix: i === 0,
+    })),
+    reports: [{ taskId: 'TASK-1', text: 'x'.repeat(2000) }],
+  };
+  const d1 = closeOutDigest(ev);
+  const d2 = closeOutDigest(ev);
+  assert.equal(d1, d2, 'digest must be deterministic for byte-identical replay prompts');
+  assert.ok(d1.includes('Tasks (2): TASK-1 — Do a thing; TASK-2'));
+  assert.ok(d1.includes('Phase-5 consolidated findings (35, first 30 shown):'));
+  assert.ok(d1.includes('  - [Major] f0.js:0 — finding 0 (lesson LESSON-404) [must-fix]'));
+  assert.ok(d1.includes('finding 29'));
+  assert.ok(!d1.includes('finding 30'), 'the 31st finding must be cut');
+  assert.ok(d1.includes('[…truncated]'));
+  assert.ok(!d1.includes('x'.repeat(1501)), 'a report must be cut at 1500 chars');
+  const empty = closeOutDigest({ tasks: [], findings: [], reports: [] });
+  assert.ok(empty.includes('Tasks (0): none'));
+  assert.ok(empty.includes('Phase-5 consolidated findings (0):\n  (none)'));
+  assert.ok(empty.includes('Implementer reports (0):\n  (none)'));
+});
+
+test('repoRootFromWorktree: recovers <repoRoot> from the engine\'s `<root>/.worktrees/<id>` convention, null otherwise', () => {
+  assert.equal(repoRootFromWorktree('/abs/repo/.worktrees/REQ-7', 'REQ-7'), '/abs/repo');
+  assert.equal(repoRootFromWorktree('/abs/repo/.worktrees/REQ-7', 'REQ-8'), null);
+  assert.equal(repoRootFromWorktree('/abs/repo', 'REQ-7'), null);
+  assert.equal(repoRootFromWorktree('/.worktrees/REQ-7', 'REQ-7'), null, 'an empty root is not a root');
+  assert.equal(repoRootFromWorktree(undefined, 'REQ-7'), null);
+});
+
+test('groupMergedByRepo: only merged terminals, grouped by primary repo, serial within a group, deterministic order', () => {
+  const terminals = [
+    { state: 'merged', id: 'REQ-3' },
+    { state: 'pr-ready', id: 'REQ-2' },
+    { state: 'merged', id: 'REQ-1' },
+    { state: 'blocked', id: 'REQ-4' },
+    null,
+    { state: 'merged', id: 'REQ-5' },
+  ];
+  const groups = groupMergedByRepo(terminals, { 'REQ-1': 'web', 'REQ-3': 'web', 'REQ-5': 'api' });
+  assert.deepEqual(groups, [['REQ-5'], ['REQ-1', 'REQ-3']]);
+  assert.deepEqual(groupMergedByRepo([{ state: 'blocked', id: 'REQ-9' }], {}), []);
+  assert.deepEqual(groupMergedByRepo([{ state: 'merged', id: 'REQ-9' }], {}), [['REQ-9']], 'an unknown repo still closes out, in its own group');
+});
+
+// The TERMINAL closed schema must admit a merged-with-closeOut value: the
+// close-out pass stamps `closeOut` + `closeOutDetail` beside state:'merged'
+// (never instead of it), so every key of that value has to be declared or the
+// runtime rejects the terminal (additionalProperties:false — the LESSON-331
+// closed-schema-rot class).
+test('TERMINAL: declares closeOut (ok|failed|skipped) and closeOutDetail beside state:"merged"', () => {
+  const t = { state: 'merged', id: 'REQ-1', prs: [{ repo: 'web', url: 'https://x/pull/1' }], closeOut: 'failed', closeOutDetail: 'chore PR blocked by policy' };
+  const declared = Object.keys(TERMINAL.properties);
+  for (const k of Object.keys(t)) {
+    assert.ok(declared.includes(k), `TERMINAL must declare "${k}" (additionalProperties:false)`);
+  }
+  assert.deepEqual(TERMINAL.properties.closeOut.enum, ['ok', 'failed', 'skipped']);
+  assert.deepEqual(TERMINAL.properties.state.enum, ['merged', 'pr-ready', 'blocked', 'failed'], 'closeOut is never encoded in state');
+});
 
 // ===========================================================================
 // validateCitations — the LESSON-008 security boundary. The MANDATORY cases

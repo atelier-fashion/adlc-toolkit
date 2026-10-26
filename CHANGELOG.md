@@ -32,6 +32,32 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Both sprint engines now run the Step 8b close-out after an orchestrator-owned
+  merge (BUG-249).** The workflow engine's Phase 8 merged, re-verified with
+  `gh pr view`, and returned; the legacy orchestrator's Step 5 merged a cross-repo
+  or fallback REQ and moved on. Neither ran `/wrapup`, so a REQ shipped on those
+  paths captured no lessons, kept `status: approved`, and never wrote the terminal
+  state record — Step 8b had been added by BUG-193 to the solo path and the
+  runner's self-merge only. Fix: `/wrapup REQ-xxx --close-out`, a close-out-only
+  mode (Steps 1, 3, 4, 5 + a squash-merged `chore(REQ-xxx): close-out` PR; never
+  the feature merge, never a deploy) that refuses unless the feature PR is
+  `MERGED`, runs in a dedicated serialized `.worktrees/REQ-xxx-close-out`, writes
+  all five terminal-record fields plus `closeOut:{status}` to the primary-path
+  `pipeline-state.json`, and drafts knowledge from supplied run evidence —
+  `NO_ENTRY: close-out had no run evidence` when there is none. The workflow
+  engine adds a post-terminal close-out pass over every `merged` REQ (after the
+  unblock pass; parallel across repos, serial within), keeps the in-memory run
+  evidence its leaves used to discard, and stamps `closeOut: ok|failed|skipped`
+  beside — never instead of — `state:"merged"`, so a held REQ is still released
+  by a merged blocker whose close-out failed. The legacy orchestrator's Step 5
+  gains the same close-out; `/status` reports `closeOut.status: failed` as a
+  stale-state signature; `/wrapup` Step 2 skips its merge sequence when the PR is
+  already `MERGED`; the ship summary gains a `### Lessons captured` slot. Four
+  new pure helpers and a closed-schema check for `closeOut` under `node:test`
+  (50 tests).
+
 ## [5.3.1] — 2026-10-26
 
 A patch to 5.3.0's BUG-245 fix, from an `/adversary` review of that release.

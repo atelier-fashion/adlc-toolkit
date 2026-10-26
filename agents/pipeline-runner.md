@@ -94,7 +94,10 @@ state file still reads `completed:false` is the defect BUG-193 records; it made
 
 **When you claim `pr-ready`** (cross-repo, or an orchestrator override telling
 you not to merge): append to `pipeline-state.json.notes` that the orchestrator
-owns the merge *and* the Step 8b close-out. You are exiting with
+owns the merge *and* the Step 8b close-out (which it runs as
+`/wrapup REQ-xxx --close-out` after its merge — BUG-249), and put your Phase-5
+findings, task list and PR URLs in your final report: that report is the run
+evidence the orchestrator's close-out drafts knowledge from. You are exiting with
 `completed:false` on purpose; say so in state so the record is not mistaken for
 an abandoned run.
 
