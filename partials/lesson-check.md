@@ -280,4 +280,16 @@ reaching the summary (`lesson-check.test.sh: aborted before summary`), and
 `harness_aborts_without_summary` proves it end to end by running a copy of the harness
 cut before the summary. No case skips.
 
+## Executor shell (LESSON-717)
+
+Every `grep` in the partial is spelled `LC_ALL=C command grep`. The Claude Code Bash
+tool — the shell the capture fences actually run in — defines `grep` as a function
+routed to the CLI's own matcher, whose `-vq` exits 0 on empty input where grep exits
+1. On the first real `/wrapup` through this fence that flipped `_alc_ids_ok` and
+rejected the template's own `supersedes: []`, while the four-shell harness, which
+resolves the real binary, stayed green. `command` bypasses functions and aliases in
+sh, bash, zsh and dash. `executor_grep_wrapper_keeps_accept` /
+`executor_grep_wrapper_keeps_reject` define an always-0 `grep` function around the
+call and assert neither verdict moves; dropping one `command` prefix fails the first.
+
 Used by: `/wrapup` Step 4, `/bugfix` Phase 6 Step 4.

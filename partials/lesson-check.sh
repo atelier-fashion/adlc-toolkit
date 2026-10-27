@@ -69,11 +69,15 @@
 # violation: a YAML reader would drop or misread the whole lesson silently (/spec Step
 # 1.6 discards a document it cannot parse), and a one-line reader never sees the rest.
 #
+# Every grep is `command grep`: the Claude Code executor shell defines grep as a
+# function that routes to its own matcher, whose `-vq` returns 0 on empty input where
+# grep returns 1 — that flipped _alc_ids_ok on `[]` in the first real /wrapup run
+# (LESSON-717). `command` bypasses functions and aliases in sh, bash, zsh and dash.
 # POSIX sh only; must behave identically under bash, zsh, /bin/sh and dash
 # (partials/tests/run.sh, LESSON-405), and under a caller's `set -e`:
 #   * no `local` — the `_alc_`-prefixed globals stand in; no double-bracket tests, no
 #     arrays, no `function` keyword, no GNU-only flags
-#   * `grep -E` only, and no backslash-b word boundary in any regex — BSD grep ignores
+#   * `command grep -E` only, and no backslash-b word boundary in any regex — BSD grep ignores
 #     it (LESSON-013); delimiters are explicit `[^...]` classes instead
 #   * bracket expressions that need whitespace open on a literal space before the
 #     [:space:] class, so this file never holds a doubled open-bracket
@@ -81,7 +85,7 @@
 #   * no variable named `status` or `path` — reserved in zsh (LESSON-329)
 #   * every path quoted, no word-splitting of lists (LESSON-335); awk reads the file on
 #     stdin, so a path shaped like `name=value` is never taken as an awk assignment
-#   * a count from `grep -c` carries `|| true` inside its substitution, and a status is
+#   * a count from `command grep -c` carries `|| true` inside its substitution, and a status is
 #     captured with `|| _alc_rc=$?`, so a `set -e` caller never dies on a zero count
 #   * `case` guards a value before it reaches arithmetic
 #   * no temp files — nothing to clean up, nothing predictable to race (LESSON-008)
@@ -99,7 +103,7 @@ _alc_violation() {
 _alc_report() {
   if [ -n "$1" ]; then
     printf '%s\n' "$1" >&2
-    _alc_c=$(printf '%s\n' "$1" | LC_ALL=C grep -c . || true)
+    _alc_c=$(printf '%s\n' "$1" | LC_ALL=C command grep -c . || true)
     case "$_alc_c" in
       ''|*[!0-9]*) _alc_c=1 ;;
     esac
@@ -114,7 +118,7 @@ _alc_report() {
 # line is scanned — unknown keys and `#` comment lines too (BR-12, BR-13): whatever
 # sits in the block is committed.
 _alc_scan() {
-  _alc_hits=$(printf '%s\n' "$_alc_fm" | LC_ALL=C grep -nE -e "$1" \
+  _alc_hits=$(printf '%s\n' "$_alc_fm" | LC_ALL=C command grep -nE -e "$1" \
     | LC_ALL=C sed -e 's/:.*//' | LC_ALL=C tr '\n' ',')
   if [ -z "$_alc_hits" ]; then
     return 0
@@ -137,14 +141,14 @@ _alc_scan() {
 # one every reader agrees on: `supersedes:[x]`, `kind:process`, `evidence : x` and
 # `"evidence": x` each set the key for one reader and nothing for another.
 _alc_misspelt() {
-  printf '%s\n' "$_alc_fm" | LC_ALL=C grep -E "^[\"']?$1[\"']?[ [:space:]]*:" \
-    | LC_ALL=C grep -qvE "^$1:([ [:space:]]|\$)"
+  printf '%s\n' "$_alc_fm" | LC_ALL=C command grep -E "^[\"']?$1[\"']?[ [:space:]]*:" \
+    | LC_ALL=C command grep -qvE "^$1:([ [:space:]]|\$)"
 }
 
 # _alc_lines <key> — the text after `<key>:` on every frontmatter line that sets <key>,
 # as written (trailing comment kept).
 _alc_lines() {
-  printf '%s\n' "$_alc_fm" | LC_ALL=C grep -E "^$1:([ [:space:]]|\$)" \
+  printf '%s\n' "$_alc_fm" | LC_ALL=C command grep -E "^$1:([ [:space:]]|\$)" \
     | LC_ALL=C sed -e 's/^[^:]*://'
 }
 
@@ -154,7 +158,7 @@ _alc_lines() {
 #   _alc_v    the parsed value (quote layer removed / trailing comment dropped)
 #   _alc_err  empty when the value parses, else the reason it does not
 _alc_field() {
-  _alc_n=$(printf '%s\n' "$_alc_fm" | LC_ALL=C grep -cE "^$1:([ [:space:]]|\$)" || true)
+  _alc_n=$(printf '%s\n' "$_alc_fm" | LC_ALL=C command grep -cE "^$1:([ [:space:]]|\$)" || true)
   case "$_alc_n" in
     ''|*[!0-9]*) _alc_n=0 ;;
   esac
@@ -173,14 +177,14 @@ _alc_field() {
   _alc_raw=$(_alc_lines "$1" | LC_ALL=C sed -e 's/^[ [:space:]]*//')
   case "$_alc_raw" in
     \"*)
-      if printf '%s\n' "$_alc_raw" | LC_ALL=C grep -qE '^"([^"\\]|\\.)*"'; then
+      if printf '%s\n' "$_alc_raw" | LC_ALL=C command grep -qE '^"([^"\\]|\\.)*"'; then
         _alc_v=$(printf '%s\n' "$_alc_raw" | LC_ALL=C sed -E 's/^"(([^"\\]|\\.)*)".*$/\1/')
       else
         _alc_err="opening double quote is never closed on the key's line"
       fi
       ;;
     \'*)
-      if printf '%s\n' "$_alc_raw" | LC_ALL=C grep -qE "^'([^']|'')*'"; then
+      if printf '%s\n' "$_alc_raw" | LC_ALL=C command grep -qE "^'([^']|'')*'"; then
         _alc_v=$(printf '%s\n' "$_alc_raw" \
           | LC_ALL=C sed -E -e "s/^'(([^']|'')*)'.*\$/\\1/" -e "s/''/'/g")
       else
@@ -262,12 +266,12 @@ _alc_present() {
 #             which either has an extension or is extensionless with a `/` in it or a
 #             capitalised basename (Makefile:12, tools/run:5)
 _alc_cites() {
-  if printf '%s\n' "$1" | LC_ALL=C grep -qE '(^|[^A-Za-z0-9])(BUG|REQ|LESSON|TASK)-[0-9]{3,6}([^0-9]|$)|(^|[^A-Za-z0-9_])[Tt]est[A-Z_][A-Za-z0-9_]*|\.test\.'; then
+  if printf '%s\n' "$1" | LC_ALL=C command grep -qE '(^|[^A-Za-z0-9])(BUG|REQ|LESSON|TASK)-[0-9]{3,6}([^0-9]|$)|(^|[^A-Za-z0-9_])[Tt]est[A-Z_][A-Za-z0-9_]*|\.test\.'; then
     return 0
   fi
   if printf '%s\n' "$1" | LC_ALL=C tr -c '0-9a-fA-F' '\n' \
-       | LC_ALL=C grep -E '^[0-9a-f]{7,40}$' | LC_ALL=C grep '[0-9]' \
-       | LC_ALL=C grep -q '[a-f]'; then
+       | LC_ALL=C command grep -E '^[0-9a-f]{7,40}$' | LC_ALL=C command grep '[0-9]' \
+       | LC_ALL=C command grep -q '[a-f]'; then
     return 0
   fi
   if printf '%s\n' "$1" | LC_ALL=C awk '
@@ -301,7 +305,7 @@ _alc_cites() {
 # _alc_ids_ok <list-value> — 0 when every entry is LESSON-nnn after stripping [ ] " ' ,
 _alc_ids_ok() {
   if printf '%s\n' "$1" | LC_ALL=C sed -e "s/[][\"',]/ /g" | LC_ALL=C tr -s ' \t' '\n\n' \
-       | LC_ALL=C grep -v '^$' | LC_ALL=C grep -vqE '^LESSON-[0-9]{3,6}$'; then
+       | LC_ALL=C command grep -v '^$' | LC_ALL=C command grep -vqE '^LESSON-[0-9]{3,6}$'; then
     return 1
   fi
   return 0
@@ -471,9 +475,9 @@ adlc_lesson_check() {
 
   _alc_field enforcement
   if _alc_present enforcement 0; then
-    if ! printf '%s\n' "$_alc_v" | LC_ALL=C grep -qE '^(none|lint:[A-Za-z0-9_.-]+|test:[A-Za-z0-9_./-]+|script:[A-Za-z0-9_./-]+|hook:[A-Za-z0-9_.-]+)$'; then
+    if ! printf '%s\n' "$_alc_v" | LC_ALL=C command grep -qE '^(none|lint:[A-Za-z0-9_.-]+|test:[A-Za-z0-9_./-]+|script:[A-Za-z0-9_./-]+|hook:[A-Za-z0-9_.-]+)$'; then
       _alc_violation enforcement "must be none, lint:<check-id>, test:<path>, script:<path> or hook:<name>"
-    elif printf '%s\n' "$_alc_v" | LC_ALL=C grep -qE '^(test|script):(/|(.*/)?\.\.(/|$))'; then
+    elif printf '%s\n' "$_alc_v" | LC_ALL=C command grep -qE '^(test|script):(/|(.*/)?\.\.(/|$))'; then
       _alc_violation enforcement "a test:/script: path must be repo-relative — no leading / and no .. segment"
     fi
   fi
