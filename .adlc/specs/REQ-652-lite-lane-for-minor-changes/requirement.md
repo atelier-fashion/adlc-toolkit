@@ -41,7 +41,7 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 | `pipeline-state.json` | `lane` | object `{ initial, current, escalations: [] }` | `initial` and `current` are `lite` \| `full`. Additive and optional: a state file without the key reads as `full`. |
 | `pipeline-state.json` | `lane.escalations[]` | object `{ at, phase, trigger, detail, actor }` | Appended when the escalation happens, before the pipeline continues (informed by BUG-212). `actor` is `solo` \| `sprint-runner` \| `operator`. |
 | Lane check result | per-rule fields | normalized `key=value` lines, e.g. `lane_check=escalate`, `trigger=blocked-path`, `detail=packages/domain/src/page.ts` | Machine-consumed, one field per fact, no prose remediation (informed by LESSON-572). |
-| `.adlc/config.yml` | `lanes.lite` | object | Optional project overrides: `max_files`, `max_lines`, `blocked_paths` (globs), `deployables` (glob → deployable id). Absent means toolkit defaults. |
+| `.adlc/config.yml` | `lanes.lite` | object | Optional project overrides: `max_files`, `blocked_paths` (globs), `deployables` (glob → deployable id). Absent means toolkit defaults. |
 
 ### Events
 
@@ -63,12 +63,12 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 ## Business Rules
 
 - [ ] BR-1: `/spec` assigns every new REQ exactly one lane and writes `lane` and `lane_reason` to its frontmatter. The operator is never asked to choose.
-- [ ] BR-2: A request qualifies for the lite lane only if triage predicts **all** of the following:
+- [ ] BR-2: A request goes to the full lane if triage finds evidence that **any** of the following fails; otherwise it qualifies for the lite lane:
   - no change to a domain schema, API contract, validator or data model
   - no change to auth, security, secrets, deploy, CI or infrastructure
   - exactly one deployable and one repo (cross-repo REQs are always `full`)
   - no new or upgraded dependency
-  - a footprint within `max_files` / `max_lines` (defaults: 3 files, 100 changed lines, not counting tests and the REQ's own `.adlc/` files)
+  - a footprint of at most `max_files` source files (default 3). Tests and the REQ's own `.adlc/` files do not count, and changed lines are not counted at all
   - no reversal of a decision recorded in an existing REQ or lesson for the same component, judged against Step 1.6's retrieved context
 - [ ] BR-3: When triage cannot tell whether a criterion in BR-2 holds, it chooses `lite` and says so in `lane_reason`. A wrong lite start is caught by BR-6 at the cost of one escalation; a wrong full start costs the whole full pipeline.
 - [ ] BR-4: `--lite` and `--full` at `/spec` override triage and set `lane_forced: true`. They are mutually exclusive; passing both is an error before any REQ id is allocated.
@@ -77,17 +77,17 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
   - a fresh retrieval for the surfaces about to be touched (informed by LESSON-604)
   - implementation straight from the spec's acceptance criteria, with no task files
   - the project's build, lint and test gates
-  - the lane check (BR-6)
-  - one review pass covering correctness, quality, test coverage, security, acceptance-criteria coverage, and any reversal of a decision in the REQs and lessons that the fresh retrieval returned
+  - one review pass covering correctness, quality, test coverage, security, acceptance-criteria coverage, and any reversal of a decision in the REQs and lessons that the fresh retrieval returned, with its findings fixed in one consolidated pass as in Phase 5
+  - the lane check (BR-6), on the diff as it stands after those fixes
   - PR, cleanup and CI
   - wrapup
 
   It skips Phase 1 (spec validation), Phase 2 (architect and tasks), Phase 3 (architecture validation), the reflector and the five-agent panel.
-- [ ] BR-6: Before the PR, the lite lane runs a **mechanical** check of the actual diff against the integration branch. Every rule is decided by a property a machine can check, not by judgment (informed by LESSON-626):
+- [ ] BR-6: Before the PR leaves draft, the lite lane runs a **mechanical** check of the final diff against the integration branch, and runs it again before merge if commits landed after it (for example CI fixes in Phase 7). Every rule is decided by a property a machine can check, not by judgment (informed by LESSON-626):
   - changed paths against `blocked_paths`
   - lockfile and manifest dependency changes
   - the number of deployables touched, when `deployables` is declared
-  - files and lines changed against the limits
+  - the number of changed source files against `max_files`
 
   It emits one normalized field per rule. Any failing rule means the change crossed a line.
 - [ ] BR-7: When BR-6 finds a crossed line on a lite REQ whose lane was **triaged**, `/proceed` escalates automatically and continues without asking.
@@ -114,7 +114,8 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 - [ ] AC-1: A request triaged as lite produces a spec with `lane: lite` and a `lane_reason`. A request that names a schema or API change produces `lane: full` with a reason naming that criterion.
 - [ ] AC-2: `/spec --lite <request>` writes `lane: lite` and `lane_forced: true` even for a request triage would call full. `/spec --full` does the reverse. `/spec --lite --full` errors without allocating a REQ id.
 - [ ] AC-3: `/proceed` on a lite REQ completes without writing task files and without running Phases 1–3, the reflector or the five-agent panel. `pipeline-state.json` records `lane.initial: lite` and the phases it actually ran.
-- [ ] AC-4: On a lite REQ, the lane check reports one normalized field per rule. A diff touching a `blocked_paths` glob, a lockfile, or more than the limits reports `lane_check=escalate` with the trigger, with fixture coverage of both a passing and a failing diff for each rule.
+- [ ] AC-4: On a lite REQ, the lane check reports one normalized field per rule. A diff touching a `blocked_paths` glob, a lockfile, or more source files than `max_files` reports `lane_check=escalate` with the trigger, with fixture coverage of both a passing and a failing diff for each rule.
+- [ ] AC-5a: The lane check runs after the review pass's fixes are committed, and runs again before merge when Phase 7 adds commits. A review fix or CI fix that touches a blocked path escalates the REQ.
 - [ ] AC-5: A triaged-lite REQ whose diff fails the lane check escalates without asking: spec `lane: full` plus `lane_escalated`, an entry in `lane.escalations`, and `/proceed` resumes at Phase 1 on the same branch and PR with the implementation still present.
 - [ ] AC-6: A forced-lite REQ whose diff fails the lane check halts in a solo run with the failing rules listed as a numbered question, and escalates without halting under a sprint runner.
 - [ ] AC-7: `/proceed --full` on a lite REQ escalates and records `actor: operator`.
@@ -125,25 +126,25 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 - [ ] AC-12: `/status` shows the lane for each in-flight REQ.
 - [ ] AC-13: The `/sprint` workflow engine runs a lite REQ on the full lane and logs that it did.
 - [ ] AC-14: A `tools/lint-skills` check fails on any `lane` value outside `lite` and `full` written or read by a skill, and passes on the shipped skills.
-- [ ] AC-15: `.adlc/config.yml` `lanes.lite` overrides for `max_files`, `max_lines`, `blocked_paths` and `deployables` take effect. With the block absent, the toolkit defaults apply. `templates/config-template.yml` documents the block.
+- [ ] AC-15: `.adlc/config.yml` `lanes.lite` overrides for `max_files`, `blocked_paths` and `deployables` take effect. With the block absent, the toolkit defaults apply. `templates/config-template.yml` documents the block.
 
 ## External Dependencies
 
-- None. The lane check is shell over `git diff`, in the style of the existing partials.
+- None.
 
 ## Assumptions
 
 - Most of a full run's cost on a small change is in Phases 1–3 and the six-agent verify. This has not been measured. REQ-648 (per-run outcome telemetry, draft) would let it be measured, and the lite lane should report its savings once that exists.
 - Triage from the request text plus the codebase predicts the footprint well enough that escalations are the exception. BR-14's lessons are how this gets checked.
 - A full-lane architect can design around code already written without discarding it. This is how escalation stays lossless (BR-10).
-- Default limits of 3 files and 100 changed lines (not counting tests and `.adlc/`) are a starting point and will be tuned by BR-14's lessons.
+- A default of 3 source files is a starting point and will be tuned by BR-14's lessons. Line counts are deliberately not checked: a copy edit can touch many lines and stay trivial, while a one-line change to a blocked path is already caught by `blocked_paths`.
 - REQ-647 (lessons reach every pipeline phase, draft) will need to cover the lite lane's phases as well. Whichever lands second adapts to the other.
 
 ## Open Questions
 
-- [ ] OQ-1: Should a forced `--lite` stay subject to the diff check at all? This spec's answer is yes: solo halts and asks (BR-8), and a sprint runner escalates. The alternative is that `--lite` is absolute and the check only logs. That would repeat the REQ-641 failure whenever the force was wrong.
-- [ ] OQ-2: Should the lite lane keep one cheap spec validation (Phase 1 only) before implementing? This spec's answer is no; the review pass checks acceptance-criteria coverage instead.
-- [ ] OQ-3: Are 3 files and 100 lines the right defaults, or should the default count only non-test source files and ignore lines?
+- [x] OQ-1: Should a forced `--lite` stay subject to the diff check at all? — Resolved 2026-10-27 (Brett): yes. A solo run halts and asks (BR-8); a sprint runner escalates.
+- [x] OQ-2: Should the lite lane keep one cheap spec validation (Phase 1 only) before implementing? — Resolved 2026-10-27 (Brett): no. The review pass checks acceptance-criteria coverage instead (BR-5).
+- [x] OQ-3: Are 3 files and 100 lines the right defaults? — Resolved 2026-10-27 (Brett): check files only. The limit is 3 source files, not counting tests or `.adlc/`, and lines are not counted (BR-2, BR-6).
 
 ## Out of Scope
 
