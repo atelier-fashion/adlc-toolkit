@@ -1,7 +1,7 @@
 ---
 id: REQ-652
 title: "A lite lane for minor changes: /spec triages every request, /proceed runs a short pipeline for small ones and escalates when the diff says otherwise"
-status: draft
+status: approved
 deployable: false
 created: 2026-10-27
 updated: 2026-10-27
@@ -37,11 +37,12 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 | Requirement frontmatter | `lane` | enum `lite` \| `full` | Written by `/spec`. Absent means `full`, so every existing spec keeps its behavior. |
 | Requirement frontmatter | `lane_reason` | string | One line: why triage chose the lane, or `forced by --lite` / `forced by --full`. |
 | Requirement frontmatter | `lane_forced` | boolean | `true` when the lane came from a flag rather than triage. Absent means `false`. |
-| Requirement frontmatter | `lane_escalated` | string | Set only on escalation: `<ISO date> — <trigger>: <detail>`. `lane` is rewritten to `full` at the same time. |
-| `pipeline-state.json` | `lane` | object `{ initial, current, escalations: [] }` | `initial` and `current` are `lite` \| `full`. Additive and optional: a state file without the key reads as `full`. |
+| Requirement frontmatter | `lane_escalated` | string | Set only on escalation: `<ISO date> — <trigger>: <detail>`. `lane` is rewritten to `full` at the same time. Every lane string value is quoted, because unquoted `: ` makes the frontmatter unparseable and drops the spec from retrieval. |
+| `pipeline-state.json` | `lane` | object `{ initial, current, forced, skippedPhases: [], escalations: [], overrides: [] }` | `initial` and `current` are `lite` \| `full`. `skippedPhases` lists the phases a lite run did not run (AC-3). Additive and optional: a state file without the key reads as `full`. |
+| `pipeline-state.json` | `lane.overrides[]` | object `{ at, phase, triggers: [], actor }` | Appended when the operator answers BR-8's halt with "keep lite". A later lane check whose failing triggers are all already overridden does not halt again. |
 | `pipeline-state.json` | `lane.escalations[]` | object `{ at, phase, trigger, detail, actor }` | Appended when the escalation happens, before the pipeline continues (informed by BUG-212). `actor` is `solo` \| `sprint-runner` \| `operator`. |
 | Lane check result | per-rule fields | normalized `key=value` lines, e.g. `lane_check=escalate`, `trigger=blocked-path`, `detail=packages/domain/src/page.ts` | Machine-consumed, one field per fact, no prose remediation (informed by LESSON-572). |
-| `.adlc/config.yml` | `lanes.lite` | object | Optional project overrides: `max_files`, `blocked_paths` (globs), `deployables` (glob → deployable id). Absent means toolkit defaults. |
+| `.adlc/config.yml` | `lanes.lite` | object | Optional project overrides: `max_files`, `blocked_paths` (globs), `count_exclude` (globs not counted toward `max_files`), `deploy_units` (glob → unit id). Named `deploy_units` so it is not confused with the existing `deployable` frontmatter boolean. Absent means toolkit defaults. |
 
 ### Events
 
@@ -86,7 +87,7 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 - [ ] BR-6: Before the PR leaves draft, the lite lane runs a **mechanical** check of the final diff against the integration branch, and runs it again before merge if commits landed after it (for example CI fixes in Phase 7). Every rule is decided by a property a machine can check, not by judgment (informed by LESSON-626):
   - changed paths against `blocked_paths`
   - lockfile and manifest dependency changes
-  - the number of deployables touched, when `deployables` is declared
+  - the number of deploy units touched, when `deploy_units` is declared
   - the number of changed source files against `max_files`
 
   It emits one normalized field per rule. Any failing rule means the change crossed a line.
@@ -108,6 +109,7 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 - [ ] BR-15: `/status` shows each in-flight REQ's current lane and whether it escalated.
 - [ ] BR-16: The `/sprint` legacy engine inherits the lite lane through `/proceed`. The `/sprint` workflow engine runs a lite REQ on the full lane and logs one line saying so, until it has a lite path of its own.
 - [ ] BR-17: The lane vocabulary (`lite`, `full`) is defined once. Every writer and reader of `lane` uses only those values (`/spec`, `/proceed`, `/wrapup`, `/status`, `/sprint`), enforced by a `tools/lint-skills` check rather than by prose (informed by LESSON-019, LESSON-571).
+- [ ] BR-18: `/proceed` writes `status: approved` on a lite REQ at Step 0, because the phases that normally write it (Phase 1 and `/architect`) do not run. A lite REQ must not stay `draft`, which would hide it from `/sprint` and from `/spec` retrieval.
 
 ## Acceptance Criteria
 
@@ -119,13 +121,13 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 - [ ] AC-6: A forced-lite REQ whose diff fails the lane check halts in a solo run with the failing rules listed as a numbered question, and escalates without halting under a sprint runner.
 - [ ] AC-7: `/proceed --full` on a lite REQ escalates and records `actor: operator`.
 - [ ] AC-8: An existing spec with no `lane` field runs the full pipeline with no change in behavior.
-- [ ] AC-9: The lite review pass is handed the REQs and lessons from a retrieval run at implementation time (not only the spec's frozen Retrieved Context), and a finding that the change reverses a recorded decision blocks the PR until it is resolved or the REQ escalates.
+- [ ] AC-9: The lite review pass is handed the REQs and lessons from a retrieval run at implementation time (not only the spec's frozen Retrieved Context), and a finding that the change reverses a recorded decision escalates the REQ (trigger `reversal`).
 - [ ] AC-10: The lite PR body carries the lane and its reason.
 - [ ] AC-11: `/wrapup` on an escalated REQ writes a lesson naming the trigger and the triage rule to change. On a REQ that stayed lite, it writes no escalation lesson.
 - [ ] AC-12: `/status` shows the lane for each in-flight REQ.
 - [ ] AC-13: The `/sprint` workflow engine runs a lite REQ on the full lane and logs that it did.
 - [ ] AC-14: A `tools/lint-skills` check fails on any `lane` value outside `lite` and `full` written or read by a skill, and passes on the shipped skills.
-- [ ] AC-15: `.adlc/config.yml` `lanes.lite` overrides for `max_files`, `blocked_paths` and `deployables` take effect. With the block absent, the toolkit defaults apply. `templates/config-template.yml` documents the block.
+- [ ] AC-15: `.adlc/config.yml` `lanes.lite` overrides for `max_files`, `blocked_paths`, `count_exclude` and `deploy_units` take effect. With the block absent, the toolkit defaults apply. `templates/config-template.yml` documents the block.
 - [ ] AC-16: The lane check runs after the review pass's fixes are committed, and runs again before merge when Phase 7 adds commits. A review fix or CI fix that touches a blocked path escalates the REQ.
 
 ## External Dependencies
