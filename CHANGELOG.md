@@ -69,7 +69,12 @@ PRs (`atelier-fashion/adlc-toolkit`).
   runs over the historical corpus: the file a capture step just wrote is new by
   construction. The partial is POSIX `sh`. `partials/lesson-check.md` holds the contract and the rule table, and
   `partials/tests/lesson-check.test.sh` (run under bash, zsh, `/bin/sh` and dash
-  through `run.sh`) prints its executed-case count and fails on zero.
+  through `run.sh`) prints its executed-case count and fails on zero. Every `grep`
+  in the partial is `command grep`: the Claude Code Bash tool defines `grep` as a
+  shell function whose `-vq` exits 0 on empty input, which rejected the template's
+  own `supersedes: []` on the first real `/wrapup` through the fence while the
+  harness stayed green (LESSON-717); two cases now run the check under an always-0
+  `grep` wrapper and assert neither verdict moves.
 - **`lesson-check-order` lint.** `tools/lint-skills` check 12 reads
   `wrapup/SKILL.md` and `bugfix/SKILL.md` and requires, in file order, an own-line
   `lesson-write-point` marker, a fence calling `adlc_lesson_check`, and a fence
