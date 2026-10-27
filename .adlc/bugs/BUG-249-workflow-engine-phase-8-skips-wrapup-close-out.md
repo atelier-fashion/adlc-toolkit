@@ -1,10 +1,10 @@
 ---
 id: BUG-249
 title: "Neither sprint engine's orchestrator-owned Phase 8 runs the Step 8b close-out: the workflow engine never does, and the legacy orchestrator skips it for cross-repo and fallback merges — no lessons, status stays approved, terminal record never written"
-status: open
+status: resolved
 severity: high
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-10-27
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["javascript", "markdown", "claude-skills"]
@@ -188,6 +188,19 @@ Expected Behavior contract:
 
 Not changed: `unblockHeldReqs`'s predicate (already `state`-only), `/proceed` solo Step
 8b (a human is present; full `/wrapup` with the new already-merged guard).
+
+**Merged** in [#187](https://github.com/atelier-fashion/adlc-toolkit/pull/187) as
+`2702e94` on 2026-10-27. Lesson: LESSON-712.
+
+## Deployment
+
+- Symlink install — live for every Claude Code session on the machine at merge; no
+  staging/production revision (no `.adlc/config.yml` deploy targets).
+- iOS: n/a — toolkit-only change.
+- Verification: `node --test` (50/50), `lint-skills` clean, `pytest tools/lint-skills`
+  (133/133). The first `/sprint --workflow` run that reaches `merged` is the dogfood
+  probe: expect `status: complete`, `completed: true`, `closeOut.status: ok`, and a
+  lesson or `NO_ENTRY` line.
 
 ## Files Changed
 
