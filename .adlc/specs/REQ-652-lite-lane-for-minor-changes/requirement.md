@@ -115,7 +115,6 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 - [ ] AC-2: `/spec --lite <request>` writes `lane: lite` and `lane_forced: true` even for a request triage would call full. `/spec --full` does the reverse. `/spec --lite --full` errors without allocating a REQ id.
 - [ ] AC-3: `/proceed` on a lite REQ completes without writing task files and without running Phases 1–3, the reflector or the five-agent panel. `pipeline-state.json` records `lane.initial: lite` and the phases it actually ran.
 - [ ] AC-4: On a lite REQ, the lane check reports one normalized field per rule. A diff touching a `blocked_paths` glob, a lockfile, or more source files than `max_files` reports `lane_check=escalate` with the trigger, with fixture coverage of both a passing and a failing diff for each rule.
-- [ ] AC-5a: The lane check runs after the review pass's fixes are committed, and runs again before merge when Phase 7 adds commits. A review fix or CI fix that touches a blocked path escalates the REQ.
 - [ ] AC-5: A triaged-lite REQ whose diff fails the lane check escalates without asking: spec `lane: full` plus `lane_escalated`, an entry in `lane.escalations`, and `/proceed` resumes at Phase 1 on the same branch and PR with the implementation still present.
 - [ ] AC-6: A forced-lite REQ whose diff fails the lane check halts in a solo run with the failing rules listed as a numbered question, and escalates without halting under a sprint runner.
 - [ ] AC-7: `/proceed --full` on a lite REQ escalates and records `actor: operator`.
@@ -127,6 +126,7 @@ This REQ adds a **lite lane** with a single entry point, so the operator never h
 - [ ] AC-13: The `/sprint` workflow engine runs a lite REQ on the full lane and logs that it did.
 - [ ] AC-14: A `tools/lint-skills` check fails on any `lane` value outside `lite` and `full` written or read by a skill, and passes on the shipped skills.
 - [ ] AC-15: `.adlc/config.yml` `lanes.lite` overrides for `max_files`, `blocked_paths` and `deployables` take effect. With the block absent, the toolkit defaults apply. `templates/config-template.yml` documents the block.
+- [ ] AC-16: The lane check runs after the review pass's fixes are committed, and runs again before merge when Phase 7 adds commits. A review fix or CI fix that touches a blocked path escalates the REQ.
 
 ## External Dependencies
 
