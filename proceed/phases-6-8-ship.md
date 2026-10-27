@@ -169,7 +169,10 @@ human on a user-reserved merge. `completed:false` is correct at that moment and
 becomes wrong the instant the PR lands, so the run MUST record who closes it —
 append to `pipeline-state.json.notes`: `terminal pr-ready; <orchestrator |
 user> owns the merge and the Step 8b close-out`. Whoever performs that merge
-owns Step 8b in full. Without this the state file is stranded permanently:
-nothing else in the pipeline revisits a REQ once the run has exited.
+owns Step 8b in full, and runs it as `/wrapup REQ-xxx --close-out` (BUG-249):
+the close-out-only mode, in a dedicated `.worktrees/REQ-xxx-close-out`
+worktree, because that actor did not implement the REQ and must not re-merge or
+deploy. Without this the state file is stranded permanently: nothing else in the
+pipeline revisits a REQ once the run has exited.
 
 **End-of-phase log**: Emit the ship summary from wrapup including per-repo merge confirmations and deployment status. Pipeline complete.

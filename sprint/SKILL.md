@@ -67,6 +67,7 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
    `args.reqs` is the same REQ-id list the legacy Step 1 would normalize (`REQ-xxx` form; expand `all` to every eligible spec). `args.integrationBranch` is a hint — the workflow's Phase-0 agent re-resolves it per repo against `origin/<branch>` and never hardcodes `main`. `args.answers` is `{}` on a first run.
 3. **The run returns `{results}` — one TERMINAL value per REQ.** Each result carries a `state` discriminant: `merged`, `pr-ready`, `blocked`, or `failed` (the workflow never throws on a halt — a halt is a *returned* `{state:'blocked', …}` value, so the run completes and the other REQs are unaffected). Inspect every result:
    - **`merged` / `pr-ready` / `failed`** — report them as-is. A `failed` REQ has no user-answerable question; surface its `reason`/`detail` and move on (do not attempt a resume).
+   - **`merged` also carries `closeOut`** (BUG-249): the engine's post-terminal close-out pass ran `/wrapup --close-out` for every merged REQ (spec status → `complete`, the five-field terminal record, knowledge capture, a squash-merged `chore(REQ-xxx): close-out` PR, worktree teardown). `closeOut: "ok"` — report the lessons from `closeOutDetail` under Knowledge Captured. `closeOut: "failed"` — the REQ **is merged**; report `close-out: failed — <closeOutDetail>` and, if the detail names an open chore PR, surface its URL. A user reply under `args.answers[<REQ-id>]` on resume retries that REQ's close-out (the prompt diverges only for it). `closeOut: "skipped"` or absent — the pass had no evidence or did not run; say so.
    - **`blocked`** — this is a halt awaiting a human answer (a 3×-failed validation, a reflector `userFacing` question, or a merge conflict). Surface it to the user and **WAIT** for a reply — same "blocked → surface → re-engage" flow as the legacy engine's Step 4.6, but driven off the returned value rather than a state file. For each blocked REQ, print its `reason` and its `detail.questions` (when present) as a numbered list, e.g.:
      ```
      BLOCKER: REQ-091 is blocked (reflector-questions). The pipeline needs your answer before it can advance:
@@ -225,7 +226,12 @@ Completed: 0/3 | Blocked: 0 | Running: 3
 The sequential flow when the orchestrator is the merge actor (cross-repo, or single-repo fallback after a failed agent merge):
 1. Merge the PR: `adlc_forge_pr_merge --squash --delete-branch` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence)
 2. Pull main: `git checkout main && git pull`
-3. Move on — other pipelines keep running in the background
+3. **Close out — you merged, so you own Step 8b (BUG-249, `/proceed` Step 8c: "whoever performs that merge owns Step 8b in full").** The runner exited at `pr-ready` with `completed:false` on purpose and recorded in `pipeline-state.json.notes` that the orchestrator owns the close-out; nothing else revisits the REQ. Run it now, serialized per repo (never two close-outs in one repo at once, and never in your live checkout):
+   - `git -C <repo-root> fetch origin <integrationBranch>`, then `git -C <repo-root> worktree add "<repo-root>/.worktrees/REQ-xxx-close-out" -b chore/REQ-xxx-close-out origin/<integrationBranch>` (reuse it if it already exists).
+   - Run `/wrapup REQ-xxx --close-out` with `WORKTREE PATH (mandatory): <repo-root>/.worktrees/REQ-xxx-close-out`, handing it the runner's final report (its Phase-5 findings, task list, PR URLs) as the run evidence. The mode writes the five-field terminal record plus `closeOut:{status:"ok"}` to the **primary repo path's** `pipeline-state.json`, captures knowledge, and commits + squash-merges its own `chore(REQ-xxx): close-out` PR. With no run evidence it records `NO_ENTRY: close-out had no run evidence` rather than inventing a lesson.
+   - Remove the close-out worktree and the REQ's feature worktree(s) by the absolute paths recorded in state; `git fetch --prune`.
+   - If the close-out fails, write `closeOut:{status:"failed", reason:"<why>"}` into the same state file, surface `close-out: failed — <why>` in the dashboard and summary, and move on — the merge stands.
+4. Move on — other pipelines keep running in the background
 
 **Post-merge unblock pass (REQ-485 — self-healing serialization).** REQ-483 holds a REQ with a `blocked` terminal when its pre-merge trial-merge conflicts (rc=1) against an ahead REQ. Today that held REQ is surfaced for a human to rebase + resume. For an unattended `/sprint` batch, **immediately after the orchestrator confirms REQ-A merged** (the merge above landed AND `repos[A].merged = true` was written), run an unblock pass so the batch self-heals — in place of parking the held REQ for a human:
 
@@ -284,6 +290,16 @@ After all pipelines complete (or are stopped), produce a sprint summary:
 - LESSON-048: [title from REQ-091 wrapup]
 - LESSON-049: [title from REQ-091 wrapup]
 - LESSON-050: [title from REQ-093 wrapup]
+- REQ-094: NO_ENTRY: close-out had no run evidence
+
+### Close-out
+| REQ | Close-out | Detail |
+|-----|-----------|--------|
+| REQ-091 | ok | LESSON-048, LESSON-049 |
+| REQ-093 | ok | LESSON-050 |
+| REQ-094 | failed | chore PR #47 blocked by branch policy — merge stands; resolve and re-run `/wrapup REQ-094 --close-out` |
+
+(Both engines: the workflow engine reads `closeOut`/`closeOutDetail` off each `merged` terminal; the legacy orchestrator records what its Step 5 close-out did. A `failed` row is a merged REQ whose spec/state/knowledge were not finalized — never report it as unmerged.)
 
 ### Metrics
 - Total duration: 32 minutes

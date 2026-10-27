@@ -23,9 +23,27 @@ You are closing out a completed feature after it has been merged. This skill ens
 
 Target: $ARGUMENTS
 
+`$ARGUMENTS` is a REQ id, optionally followed by `--close-out`. Strip the flag before any REQ-id parsing; its meaning is defined under **Close-out mode** below.
+
 ## Prerequisites
 
 Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/conventions.md` exist. If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+
+## Close-out mode (`--close-out`)
+
+Close-out mode exists for the actor that **performed a merge it did not implement**: the `/sprint` orchestrator after a cross-repo or fallback merge, or the workflow engine's close-out leaf (BUG-249). `/proceed` Step 8c's rule is "whoever performs the merge owns the Step 8b close-out", and that actor has neither the implementing session's transcript nor the authority to deploy — so running the full skill from a post-merge leaf would push, open a PR, re-merge, delete branches and deploy to every listed device. This mode runs exactly the close-out half.
+
+**What runs:** Step 1 (identify), Step 3 (artifact statuses + the terminal record), Step 4 (knowledge capture, with the input rule below), Step 5 (ship summary), then the **close-out commit** below.
+**What is skipped:** Step 2 (the feature merge), Step 6 (deploy), Step 7 (cleanup), Step 8 (next steps). Deploy and cleanup belong to the orchestrator that invoked this mode, which reports what it did not do.
+
+Rules:
+
+1. **Precondition — the feature PR is already merged.** Before anything else, confirm every touched repo's PR reports `MERGED` (`adlc_forge_pr_view <prUrl> --fields state,mergedAt`, sourcing `partials/forge.sh` in the same fence). If any is not, **stop** with `close-out refused: <repo> PR <url> is <state>, not MERGED` — this mode never merges a feature PR.
+2. **Where it runs.** In a dedicated close-out worktree the caller declares (`WORKTREE PATH (mandatory): <abs>` — the REQ-263 contract), on branch `chore/REQ-xxx-close-out` cut from `origin/<integration-branch>`. Never in the caller's live checkout, and never concurrently with another REQ's close-out in the same repo: the caller serializes close-outs per repo the way it serializes merges.
+3. **Step 3 item 5 targets the primary repo path's copy** of `pipeline-state.json` (`<repos[primary].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json`, the Step 8b target) — the close-out worktree has no state file (it is gitignored, per-worktree). Write all five fields, and additionally `"closeOut": { "status": "ok", "at": "<ISO timestamp>" }`. The caller writes `"status": "failed", "reason": "<why>"` to the same key if this mode exits non-zero, so `/status` can show a merged-but-not-closed REQ as exactly that.
+4. **Step 4 draws on supplied evidence, not a transcript.** REQ-423 transcript discovery is skipped (`JSONL` stays empty; the delegate is not invoked, which the resolver records as `fallback`/`gate=fail`, not a ghost-skip — the same case (b) the delegated-drafting rule already allows). The lesson is drafted from what the caller's prompt supplies: the REQ's consolidated Phase-5 findings (severity, title, fixed/not), the implementer and reviewer reports, the task list, the merged PR's file list, and `pipeline-state.json` (`phaseHistory`, `blockers`, `conflictsResolved`). If the prompt supplies **none** of the findings or reports, write no lesson and put `NO_ENTRY: close-out had no run evidence` in the summary's `### Lessons captured` section — a lesson invented without run evidence is worse than none.
+5. **Close-out commit.** After Steps 3–5, in the close-out worktree: `git add` the spec, task files and any new `ASSUME-*`/`LESSON-*` files; commit `chore(REQ-xxx): close-out — spec complete[, LESSON-nnn]`; push; open a PR through `adlc_forge_pr_create` titled the same; merge it with `adlc_forge_pr_merge <url> --squash --delete-branch` and check `branch_deleted` (BUG-195). Lesson ids were allocated and rechecked in Step 4, so this push is collision-safe. The caller removes the close-out worktree afterwards. If the chore PR cannot be merged (policy, conflict), leave it open, report its URL, and exit non-zero so the caller records `closeOut.status: failed`.
+6. **Output.** The Step 5 summary, with `### Lessons captured` filled, is the mode's return value; the caller carries it into the sprint summary.
 
 ## Instructions
 
@@ -41,6 +59,8 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 - **Single-repo mode**: operate on the current repo only. Skip to the single-repo steps below.
 - **Cross-repo mode from `/proceed`**: `pipeline-state.json` already lists touched repos; each `repos[<id>].merged` reflects whether `/proceed` Phase 8 already merged that PR. Walk `mergeOrder` and for each repo either confirm it's merged (no-op) or run the single-repo merge sequence inside that repo's worktree.
 - **Cross-repo mode standalone**: no `pipeline-state.json` — fall back to detecting touched repos from the config and checking for feature branches/open PRs in each. Proceed with the single-repo merge sequence in each repo that has pending work, in `merge_order` from the config.
+
+**Already merged?** Before the sequence below, check the branch's PR with `adlc_forge_pr_view <prUrl> --fields state,mergedAt` (source `partials/forge.sh` in the same fence). If it reports `MERGED` — the normal state when `/proceed` Phase 8 or a `/sprint` orchestrator merged before invoking `/wrapup` — skip items 1–9 and continue at item 10 (cleanup). Re-running the merge sequence against a merged PR pushes, re-creates and re-merges nothing useful and can delete branches twice. In **close-out mode** Step 2 is skipped entirely (see Close-out mode).
 
 **Single-repo merge sequence** — run this block inside each target repo's worktree (same mechanics as before):
 
@@ -101,6 +121,14 @@ spec retrieval go silently empty (BUG-194).
    `merged:false` is the failure this list exists to prevent. Re-read the file
    after writing and confirm all five.
 
+   In **close-out mode** the file to write is the primary repo path's copy
+   (`<repos[primary].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json`), never the
+   close-out worktree's, and the record also carries
+   `"closeOut": { "status": "ok", "at": "<ISO timestamp>" }` (BUG-249). The key is
+   additive and optional: a state file without it is read as "close-out not
+   recorded", and `/status` reports `closeOut.status: failed` under its Stale
+   Pipeline State heading.
+
 ### Step 4: Capture Knowledge
 Evaluate whether any decisions, patterns, or lessons should be persisted:
 
@@ -156,6 +184,8 @@ esac
 **Delegated drafting** (gate passes — `adlc-read` is on PATH and `ADLC_DISABLE_DELEGATE` is not `1`):
 
 **MANDATORY — no agent discretion.** When the gate passes AND step 1 resolved a transcript, invoking `adlc-read` to draft the lessons is required, not optional. Exactly two non-delegated outcomes are acceptable on the gate-pass path: (a) `adlc-read` was actually invoked and exited non-zero (→ `api-error` fallback), or (b) step 1's discovery legitimately produced no transcript — no candidates at all, or no candidate mentioning the REQ id — so there was nothing to delegate. Case (b) never reaches the call site, so `invoked` is never marked and the resolver records `fallback`/`gate=fail`; it is therefore NOT rewritten into a `ghost-skip` (that rewrite keys on `gate=pass`). Drafting the lessons-learned yourself from a transcript you *did* resolve, *instead of* calling `adlc-read` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+
+   **Close-out mode (BUG-249):** skip this step — do not run the discovery block. Mark the sidecar's `jsonl` empty (`"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl ""`, in a fence that re-sources `partials/delegate-tools-path.sh`) so step 2 falls through to **Fallback drafting**, and draft there from the evidence the caller supplied (Close-out mode rule 4).
 
 1. Locate the Claude Code session JSONL whose recent content mentions the active REQ — **content-anchored discovery** (REQ-423). The original heuristic ("newest JSONL under the repo-root-encoded path") silently picked the wrong transcript when a session was opened at a parent directory and later navigated into the repo. The walk starts at the current working tree and climbs to (and including) `$HOME`, collects candidate JSONLs at each level, and picks the one whose last 200 lines contain a word-boundary match for the active REQ id. Emits exactly one stderr line per invocation stating which JSONL was chosen and why.
 
@@ -351,6 +381,7 @@ esac
   - Any surprises during implementation?
   - Approaches that didn't work and why?
   - Things that worked particularly well?
+- **In close-out mode** there is no conversation memory of the implementation: draft only from the findings, reports, task list and PR file list the caller supplied, cite them, and when none were supplied write no lesson and record `NO_ENTRY: close-out had no run evidence` in the summary (Close-out mode rule 4).
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work
 - Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
@@ -416,6 +447,10 @@ Create a concise summary suitable for sharing with the team. In cross-repo mode,
 
 ### Follow-up needed
 - Any remaining work, monitoring, or verification required
+
+### Lessons captured
+- LESSON-xxx — one-line hook (one line per lesson written in Step 4)
+  (or exactly one line: `NO_ENTRY: <reason>` — e.g. `NO_ENTRY: close-out had no run evidence`)
 ```
 
 **Cross-repo template** (replace the single `PR`/`Branch` lines with a Repos table):
@@ -439,7 +474,10 @@ Create a concise summary suitable for sharing with the team. In cross-repo mode,
 ### Metrics (aggregate across repos)
 ### Deferred items
 ### Follow-up needed
+### Lessons captured
 ```
+
+In close-out mode the summary is the mode's return value and the skill ends after the close-out commit (Close-out mode rules 5–6); Steps 6–8 below do not run.
 
 ### Step 6: Deploy
 Walk the touched repos and deploy each deployable component. Read `.adlc/config.yml` for stack and deploy config — every step below is conditional on what the project actually declares.
