@@ -261,6 +261,59 @@ a general markdown linter and NOT a general shell linter.
     Unmarked fences are not read. `/analyze` Step 2a is the first user
     (BUG-230), and every spelling in it was run through Teton's real
     classifier.
+12. **Lesson check order (`lesson-check-order`)**: the two lesson-capture steps
+    (`/wrapup` Step 4, `/bugfix` Phase 6 Step 4) write the lesson, then validate
+    it, then recheck its id, in that file order (REQ-646 ADR-5). Runs on
+    `wrapup/SKILL.md` and `bugfix/SKILL.md` only, keyed on the directory name.
+    A marker counts only on a line that is the marker and nothing else, outside
+    every fenced block (```` ``` ```` or `~~~`, any language): a backticked or
+    prose mention, or a copy inside an example fence, is a decoy (LESSON-404).
+    The harness line likewise counts only on a prose line. Fences nest
+    length-aware: a fence closes only on a line of its own character (backtick
+    or tilde), at least as long as its opening run, with nothing else on it,
+    and an unclosed fence runs to EOF — so a ```` ````markdown ```` fence holds
+    ```` ``` ```` lines as body. Calls are read only from **top-level** shell
+    fences (`sh`/`bash`/`shell`, behind ```` ``` ```` or `~~~`): a
+    ```` ```sh ```` example nested inside an outer non-shell fence
+    (```` ````markdown ````, `~~~text`, …) calls nothing. Both calls are found
+    in command position — at the line start, after `;` `&` `|` `!` `(` `{`, or
+    after `if`/`then`/`else`/`elif`/`do`/`while`/`until` — because both skills
+    spell the recheck `if ! adlc_recheck_id lesson "$LESSON_ID"; then`. They
+    are searched in the line's code only: a `#` comment, whole-line or
+    trailing (`: # adlc_recheck_id lesson L`), and a quoted string
+    (`echo "adlc_lesson_check x"`) call nothing — so spell the call in command
+    position, not inside a `"$(…)"`. `adlc_lesson_check_x`,
+    `adlc_recheck_idx` and `adlc_recheck_id lessons` are different calls. One
+    write point above the first check call anchors every check. In `/wrapup`
+    the delegated question is the double-quoted `--question "…"` argument on
+    the top-level shell-fence line whose code runs `command "$ADLC_READ_BIN"`;
+    it ends at the first unescaped `"` (a `\"` does not end it). A question
+    wrapped over several source lines is read as written, NOT joined: it may
+    break between rule lines, but a rule line split across a break (even by a
+    `\` continuation) is `rules-line-not-in-question`, with a message naming
+    the wrap — keep each rule on one source line. Each finding message starts
+    with one of these ids (they ride in the message, under the one check name):
+
+    | Finding id | Fires when |
+    |---|---|
+    | `missing-write-point` | no own-line `<!-- lesson-write-point -->` outside a fenced block |
+    | `missing-check-fence` | no top-level shell fence calls `adlc_lesson_check` in a line's code (comments and quoted strings excluded) |
+    | `missing-recheck-fence` | no top-level shell fence calls `adlc_recheck_id lesson` in a line's code (comments and quoted strings excluded) |
+    | `check-before-write-point` | no write point sits above the first `adlc_lesson_check` call (reported on each check fence above the first write point) |
+    | `recheck-before-check` | an `adlc_recheck_id lesson` call sits above the first `adlc_lesson_check` call, in another fence or the same one |
+    | `missing-harness-line` | `**Provenance-classifying harness (BUG-228):**` is not on a prose line in the 30 lines above a check fence (BR-15; same literal and window as `harness-skip`) |
+    | `rules-block-missing` | no own-line `<!-- lesson-capture-rules -->` … `<!-- /lesson-capture-rules -->` block outside a fenced block, or it is unclosed or holds only blank lines |
+    | `rules-block-missing-granularity` | the block has no line starting `Granularity:` |
+    | `rules-block-mismatch` | the two files' blocks differ byte-for-byte (reported once, on `bugfix/SKILL.md`, at the first differing line — including a line one copy has and the other lacks) |
+    | `rules-line-not-in-question` | `wrapup` only: a non-empty block line (stripped) is not in the `--question` argument, or occurs there only before the previous rule line's match, or only wrapped across a line break — the rules must appear verbatim and in block order. Reported once, on the first such line; with no `--question` line at all, on the block's first rule line |
+    | `rules-line-unsafe-in-question` | `wrapup` only: a block line holds `"`, `$`, a backtick or `\` — inside the double-quoted argument it would end the string, substitute, or escape, so the delegate would not receive it as written |
+
+    `templates/` and `.adlc/` are not read. The block comparison is a per-root
+    check: it reads `<root>/wrapup/SKILL.md` and `<root>/bugfix/SKILL.md`
+    (decoded from bytes, so a CRLF difference counts) and yields nothing when
+    either is absent or resolves outside the root. A missing, unclosed or blank
+    block is already `rules-block-missing` on its own file, so it is not also a
+    mismatch.
 
 ## Usage
 

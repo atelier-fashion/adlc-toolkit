@@ -1,10 +1,10 @@
 ---
 id: REQ-646
 title: "Lesson schema v2: evidence, confidence, kind, enforcement — and reflector-style capture prompts"
-status: draft
+status: complete
 deployable: true
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-10-27
 component: "adlc/wrapup"
 domain: "adlc"
 stack: [markdown, bash, claude-skills]
@@ -94,7 +94,7 @@ _Permissions: not applicable — no runtime actors or roles._
 - [ ] BR-11: `.adlc/context/architecture.md`'s "Knowledge retrieval" paragraph and the `Template anatomy` row for `lesson-template.md` are updated to name the new fields and the `NO_ENTRY` contract (the paragraph currently still describes the pre-REQ-258 3-tier grep).
 - [ ] BR-12: `evidence` carries no **home-directory path**. The rule is scoped to what leaks identity: a whitespace- or backtick-delimited token beginning `/Users/`, `/home/`, `/root/`, `$HOME/`, or `~<name>/` is rejected; `/dev/null`, `/bin/sh`, `/tmp/…`, `~/.claude/…`, `~/Library/…`, `https://…` and repo-relative `partials/forge.sh:42` all pass. The capture prompts tell the drafter to replace the home prefix with `~/` rather than drop the citation (informed by REQ-594 BR-7 — basename only; LESSON-007 — privacy of paths). The corpus today cites `/dev/null` in 11 lessons and `~/.claude/…` in 13; those are legitimate evidence and must not be rejected.
 - [ ] BR-13: `evidence` (and every other new string field) must not match the REQ-415 five-pattern credential chain (`sk-…`, `AKIA…`, `ghp_…`, `Bearer …`, `*_API_KEY=`/`*_TOKEN=`). `adlc_lesson_check` rejects a match, naming the field. The field solicits verbatim transcript quotes, and the `/bugfix` path and the `/wrapup` fallback path have no redaction step at all; the delegated path redacts only the delegate's *input* (informed by REQ-415, REQ-413).
-- [ ] BR-14: the **summary slot**. `/wrapup` Step 5's single-repo and cross-repo summary templates gain a `### Lessons captured` section whose content is either one `LESSON-xxx — <title>` line per lesson or exactly one `NO_ENTRY: <reason>` line; `/bugfix` Step 6's template replaces `(or "None — fix was straightforward and revealed no new pattern")` with the same `NO_ENTRY: <reason>` form. The `NO_ENTRY` literal has a defined home in both skills; today neither template has a lessons slot.
+- [ ] BR-14: the **summary slot**. `/wrapup` Step 5's single-repo and cross-repo summary templates already carry a `### Lessons captured` section (added by BUG-249, with `NO_ENTRY: close-out had no run evidence` as its first defined reason); this REQ keeps that shape — one `LESSON-xxx — <title>` line per lesson or exactly one `NO_ENTRY: <reason>` line — and brings `/bugfix` Step 6's template to it, replacing `(or "None — fix was straightforward and revealed no new pattern")` with the same `NO_ENTRY: <reason>` form. The `NO_ENTRY` literal then has a defined home in both skills.
 - [ ] BR-15: on a provenance-classifying harness (BUG-228/BUG-230 class, e.g. Teton Code) the partial cannot run without pinning the session. There, the drafter validates the draft **in-model** against the same rule list and the summary slot states `lesson check: in-model (provenance-classifying harness)`. This is honor-system enforcement on that harness and the spec says so rather than claiming structural coverage it does not have.
 
 ## Acceptance Criteria

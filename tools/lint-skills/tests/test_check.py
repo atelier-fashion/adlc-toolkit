@@ -1415,3 +1415,843 @@ def test_provenance_safe_fence_fires_per_line(tmp_path):
     ]
     assert [int(ln.split(":")[1]) for ln in got] == expected, result.stdout
     assert f":{_line_of('provenance-safe-bad', 'git status')}:" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# REQ-646 ADR-5: lesson-check-order — /wrapup and /bugfix lesson capture order
+# ---------------------------------------------------------------------------
+
+LCO_FIXTURES = FIXTURES / "lesson-check-order"
+
+
+def _stage_lesson_pair(tmp_path: Path, wrapup: str, bugfix: str) -> Path:
+    """Stage two fixtures as `wrapup/SKILL.md` and `bugfix/SKILL.md` — the check
+    is keyed on those directory names, so the per-name `_stage` cannot reach it."""
+    for skill, name in (("wrapup", wrapup), ("bugfix", bugfix)):
+        (tmp_path / skill).mkdir()
+        shutil.copyfile(LCO_FIXTURES / f"{name}.md", tmp_path / skill / "SKILL.md")
+    return tmp_path
+
+
+def _lco(result) -> list[tuple[str, int, str]]:
+    """`(file, line, finding-id)` for every lesson-check-order finding."""
+    out = []
+    for ln in result.stdout.splitlines():
+        if " lesson-check-order: " not in ln:
+            continue
+        file, line, rest = ln.split(":", 2)
+        fid = rest.split(" lesson-check-order: ", 1)[1].split(":", 1)[0]
+        out.append((file, int(line), fid))
+    return out
+
+
+def _lco_text(name: str) -> str:
+    return (LCO_FIXTURES / f"{name}.md").read_text(encoding="utf-8")
+
+
+def _fence_span(lines: list[str], needle: str) -> tuple[int, int]:
+    """0-based (opening, closing) of the fenced block whose body holds `needle`."""
+    hit = next(i for i, ln in enumerate(lines) if needle in ln)
+    opening = max(i for i in range(hit) if lines[i].lstrip().startswith("```"))
+    closing = next(i for i in range(hit + 1, len(lines)) if lines[i].strip() == "```")
+    return opening, closing
+
+
+def _lco_fence_opening(name: str, needle: str) -> int:
+    """1-based opening line of the fixture fence whose body holds `needle`."""
+    return _fence_span(_lco_text(name).splitlines(), needle)[0] + 1
+
+
+def _rules_block(text: str) -> str:
+    lines = text.splitlines(keepends=True)
+    start = lines.index("<!-- lesson-capture-rules -->\n")
+    end = lines.index("<!-- /lesson-capture-rules -->\n")
+    return "".join(lines[start + 1:end])
+
+
+def test_lesson_check_order_good_pair_passes(tmp_path):
+    """BR-3/AC-4 benign path: the good pair draws no finding at all — the
+    recheck call is found mid-line (`if ! adlc_recheck_id lesson …`), every rule
+    line is in the question, and the blocks are byte-equal. A third skill dir
+    carrying the reordered shape is not read: the check is keyed on the two
+    directory names, so nothing else is held to the lesson-capture contract."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-good")
+    (tmp_path / "notes").mkdir()
+    shutil.copyfile(
+        LCO_FIXTURES / "bugfix-recheck-before-check.md", tmp_path / "notes" / "SKILL.md"
+    )
+    result = _run(root)
+    assert _lco(result) == [], result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "scanned 3 SKILL.md file(s)" in result.stderr, result.stderr
+
+
+def test_lesson_check_order_recheck_before_check_fails(tmp_path):
+    """BR-3: a recheck fence above the check fence is exactly one
+    `recheck-before-check`, on the recheck fence's opening line."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-recheck-before-check")
+    result = _run(root)
+    opening = _lco_fence_opening("bugfix-recheck-before-check", "adlc_recheck_id lesson")
+    assert _lco(result) == [("bugfix/SKILL.md", opening, "recheck-before-check")], result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_lesson_check_order_backtick_marker_is_decoy(tmp_path):
+    """BR-3 / LESSON-404: the marker in backticks, and the marker with prose on
+    its line, both sit above the check fence and neither is a write point —
+    the only finding is `missing-write-point`."""
+    text = _lco_text("bugfix-backtick-marker")
+    # The decoys must really be there, or this test proves nothing.
+    assert "`<!-- lesson-write-point -->`" in text
+    assert "<!-- lesson-write-point --> **Write the lesson**" in text
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-backtick-marker")
+    result = _run(root)
+    assert _lco(result) == [("bugfix/SKILL.md", 1, "missing-write-point")], result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_lesson_check_order_rules_block_mismatch_fails(tmp_path):
+    """BR-4/AC-6: rules blocks one byte apart are one `rules-block-mismatch`,
+    reported once (on the /bugfix copy) at the differing line."""
+    good = _rules_block(_lco_text("bugfix-good"))
+    bad = _rules_block(_lco_text("bugfix-rules-mismatch"))
+    assert good == _rules_block(_lco_text("wrapup-good"))
+    assert len(good) == len(bad) and sum(a != b for a, b in zip(good, bad)) == 1
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-rules-mismatch")
+    result = _run(root)
+    differing = _line_of("lesson-check-order/bugfix-rules-mismatch", "never pad!")
+    assert _lco(result) == [("bugfix/SKILL.md", differing, "rules-block-mismatch")], result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_lesson_check_order_missing_harness_line_fails(tmp_path):
+    """BR-15: the harness line BELOW the check fence does not count — one
+    `missing-harness-line` on the check fence's opening line."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-no-harness-line")
+    result = _run(root)
+    opening = _lco_fence_opening("bugfix-no-harness-line", "adlc_lesson_check ")
+    assert _lco(result) == [("bugfix/SKILL.md", opening, "missing-harness-line")], result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_lesson_check_order_rule_line_absent_from_question_fails(tmp_path):
+    """BR-4: a rule line the `--question` string does not carry is one
+    `rules-line-not-in-question`, on that line of the /wrapup block."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-question-missing-rule", "bugfix-good")
+    result = _run(root)
+    rule2 = _line_of("lesson-check-order/wrapup-question-missing-rule", "2. Declare the contrast")
+    assert _lco(result) == [("wrapup/SKILL.md", rule2, "rules-line-not-in-question")], result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+HARNESS_LITERAL = "**Provenance-classifying harness (BUG-228):**"
+CHECK_CALL = "adlc_lesson_check .adlc/knowledge/lessons/LESSON-<id>-<slug>.md"
+
+
+def _write_lco(root: Path, skill: str, lines: list[str]) -> None:
+    (root / skill / "SKILL.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _mutated_run(tmp_path: Path, skill: str, mutate) -> subprocess.CompletedProcess:
+    """Stage the good pair, apply `mutate` to `skill`'s copy alone, and run."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-good")
+    _write_lco(root, skill, mutate(_lco_text(f"{skill}-good").splitlines()))
+    return _run(root)
+
+
+def _rewrite(needle, change):
+    """Mutation: replace the first line containing `needle` with `change(line)`."""
+    def mutate(lines):
+        i = next(i for i, ln in enumerate(lines) if needle in ln)
+        return lines[:i] + [change(lines[i])] + lines[i + 1:]
+    return mutate
+
+
+def _drop_fence(needle):
+    def mutate(lines):
+        o, c = _fence_span(lines, needle)
+        return lines[:o] + lines[c + 1:]
+    return mutate
+
+
+def _write_point_below_check(lines):
+    lines = [ln for ln in lines if ln != "<!-- lesson-write-point -->"]
+    _o, c = _fence_span(lines, "adlc_lesson_check ")
+    return lines[:c + 1] + ["<!-- lesson-write-point -->"] + lines[c + 1:]
+
+
+def _drop_harness_line(lines):
+    return [ln for ln in lines if HARNESS_LITERAL not in ln]
+
+
+def _drop_rules_block(lines):
+    o = lines.index("<!-- lesson-capture-rules -->")
+    c = lines.index("<!-- /lesson-capture-rules -->")
+    return lines[:o] + lines[c + 1:]
+
+
+def _unclose_rules_block(lines):
+    return [ln for ln in lines if ln != "<!-- /lesson-capture-rules -->"]
+
+
+def _blank_rules_block(lines):
+    """Both markers kept, every line between them blank."""
+    o = lines.index("<!-- lesson-capture-rules -->")
+    c = lines.index("<!-- /lesson-capture-rules -->")
+    return lines[:o + 1] + [""] * (c - o - 1) + lines[c:]
+
+
+@pytest.mark.parametrize("skill", ["wrapup", "bugfix"])
+@pytest.mark.parametrize(
+    "mutate, finding_id",
+    [
+        (_drop_fence("adlc_lesson_check "), "missing-check-fence"),
+        (_drop_fence("adlc_recheck_id lesson"), "missing-recheck-fence"),
+        (_write_point_below_check, "check-before-write-point"),
+        (_drop_harness_line, "missing-harness-line"),
+        (_drop_rules_block, "rules-block-missing"),
+        (_unclose_rules_block, "rules-block-missing"),
+        (_blank_rules_block, "rules-block-missing"),
+    ],
+    ids=[
+        "no-check", "no-recheck", "check-before-wp", "no-harness-line",
+        "no-block", "unclosed-block", "blank-block",
+    ],
+)
+def test_lesson_check_order_remaining_ids_fire(tmp_path, skill, mutate, finding_id):
+    """Every other documented finding id fires, alone, on a one-edit mutation of
+    EITHER good fixture, so neither side is checked less than the other. A
+    missing, unclosed or blank block is not ALSO a mismatch (the parity
+    comparison skips it) nor, on /wrapup, a question-coverage finding."""
+    result = _mutated_run(tmp_path, skill, mutate)
+    assert [fid for _f, _l, fid in _lco(result)] == [finding_id], result.stdout
+    assert all(f == f"{skill}/SKILL.md" for f, _l, _id in _lco(result)), result.stdout
+
+
+@pytest.mark.parametrize(
+    "mutate, expected",
+    [
+        (_rewrite(CHECK_CALL, lambda ln: "true && " + ln), []),
+        (_rewrite(CHECK_CALL, lambda ln: "# true && " + ln), ["missing-check-fence"]),
+        (_rewrite("adlc_recheck_id lesson", lambda ln: "# " + ln), ["missing-recheck-fence"]),
+        (
+            _rewrite(CHECK_CALL, lambda ln: ln.replace("adlc_lesson_check ", "adlc_lesson_check_x ")),
+            ["missing-check-fence"],
+        ),
+    ],
+    ids=["mid-line-call", "commented-check", "commented-recheck", "longer-name"],
+)
+def test_lesson_check_order_call_detection(tmp_path, mutate, expected):
+    """A call behind `&&` is a call (command position, not just line start); the
+    SAME line commented out is not, so the only check call being a comment is
+    `missing-check-fence` (likewise the recheck); and `adlc_lesson_check_x` is a
+    different function, not a call of `adlc_lesson_check`."""
+    result = _mutated_run(tmp_path, "bugfix", mutate)
+    assert [fid for _f, _l, fid in _lco(result)] == expected, result.stdout
+
+
+def _recheck_into_check_fence(lines):
+    """Move the recheck fence's body into the check fence, above the check call."""
+    ro, rc = _fence_span(lines, "adlc_recheck_id lesson")
+    body = lines[ro + 1:rc]
+    rest = lines[:ro] + lines[rc + 1:]
+    call = rest.index(CHECK_CALL)
+    return rest[:call] + body + rest[call:]
+
+
+def _extra_check_fence_above_write_point(lines):
+    """A second check fence, harness line and all, added above the write point."""
+    wp = lines.index("<!-- lesson-write-point -->")
+    co, cc = _fence_span(lines, "adlc_lesson_check ")
+    return lines[:wp] + [HARNESS_LITERAL + " run none of it.", ""] + lines[co:cc + 1] + [""] + lines[wp:]
+
+
+def _extra_check_fence_far_below(lines):
+    """A second check fence appended more than 30 lines below every harness line."""
+    co, cc = _fence_span(lines, "adlc_lesson_check ")
+    return lines + [""] + ["Filler prose."] * 31 + [""] + lines[co:cc + 1]
+
+
+def _extra_rules_line(lines):
+    c = lines.index("<!-- /lesson-capture-rules -->")
+    return lines[:c] + ["4. One rule too many."] + lines[c:]
+
+
+def _last_check_opening(lines):
+    return max(i for i, ln in enumerate(lines) if ln.startswith("```sh")) + 1
+
+
+@pytest.mark.parametrize(
+    "mutate, finding_id, where",
+    [
+        (_recheck_into_check_fence, "recheck-before-check",
+         lambda ls: _fence_span(ls, "adlc_lesson_check ")[0] + 1),
+        (_extra_check_fence_above_write_point, "check-before-write-point",
+         lambda ls: _fence_span(ls, "adlc_lesson_check ")[0] + 1),
+        (_extra_check_fence_far_below, "missing-harness-line", _last_check_opening),
+        (_extra_rules_line, "rules-block-mismatch",
+         lambda ls: ls.index("4. One rule too many.") + 1),
+    ],
+    ids=["same-fence-recheck-first", "second-check-above-wp", "second-check-no-harness",
+         "extra-trailing-rule"],
+)
+def test_lesson_check_order_sub_branches(tmp_path, mutate, finding_id, where):
+    """The branches a one-fence-each fixture never reaches: a check and a recheck
+    in ONE fence are still ordered by their call lines; with two check fences,
+    only the one above the write point, or only the one without a harness line,
+    is reported; and a /bugfix block equal to /wrapup's plus one trailing line is
+    a mismatch at that line (the zip of the two bodies runs out before it)."""
+    lines = mutate(_lco_text("bugfix-good").splitlines())
+    result = _mutated_run(tmp_path, "bugfix", lambda _ls: lines)
+    assert _lco(result) == [("bugfix/SKILL.md", where(lines), finding_id)], result.stdout
+
+
+def _rules_marker_decoys_above_block(lines):
+    o = lines.index("<!-- lesson-capture-rules -->")
+    return lines[:o] + [
+        "The rules sit between `<!-- lesson-capture-rules -->` and its closer.",
+        "<!-- lesson-capture-rules --> with prose after it opens nothing.",
+        "",
+    ] + lines[o:]
+
+
+def _fenced_rules_example_above_block(lines):
+    o = lines.index("<!-- lesson-capture-rules -->")
+    return lines[:o] + [
+        "```markdown",
+        "<!-- lesson-capture-rules -->",
+        "An example rule.",
+        "<!-- /lesson-capture-rules -->",
+        "```",
+        "",
+    ] + lines[o:]
+
+
+def _second_write_point_below_check(lines):
+    _o, c = _fence_span(lines, "adlc_lesson_check ")
+    return lines[:c + 1] + ["", "<!-- lesson-write-point -->"] + lines[c + 1:]
+
+
+@pytest.mark.parametrize("skill", ["wrapup", "bugfix"])
+@pytest.mark.parametrize(
+    "mutate",
+    [_rules_marker_decoys_above_block, _fenced_rules_example_above_block,
+     _second_write_point_below_check],
+    ids=["backticked-rules-marker", "fenced-rules-example", "second-write-point-below"],
+)
+def test_lesson_check_order_benign_shapes_pass(tmp_path, skill, mutate):
+    """A backticked or prose-trailed `<!-- lesson-capture-rules -->` opens no
+    block, nor does one inside an example fence — either would make the parsed
+    block differ; and a second write point BELOW the check does not move the
+    anchor (one write point above the first check call is enough)."""
+    result = _mutated_run(tmp_path, skill, mutate)
+    assert _lco(result) == [], result.stdout
+
+
+@pytest.mark.parametrize(
+    "fixture, finding_id",
+    [
+        ("bugfix-fenced-write-point", "check-before-write-point"),
+        ("bugfix-fenced-harness-line", "missing-harness-line"),
+    ],
+)
+def test_lesson_check_order_fenced_decoys_do_not_count(tmp_path, fixture, finding_id):
+    """LESSON-404: a write-point marker inside a ```markdown fence, or the harness
+    line inside a ~~~text fence, sits above the check fence and would satisfy
+    the check if fenced lines counted — the only finding is the one the real
+    shape earns, on the check fence's opening line."""
+    text = _lco_text(fixture)
+    # The decoys must really be there, or this test proves nothing.
+    assert ("```markdown\n<!-- lesson-write-point -->\n" in text
+            or "~~~text\n" + HARNESS_LITERAL in text)
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", fixture)
+    result = _run(root)
+    opening = _lco_fence_opening(fixture, "adlc_lesson_check ")
+    assert _lco(result) == [("bugfix/SKILL.md", opening, finding_id)], result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+GRANULARITY_RULE = "Granularity: aim between."
+
+
+@pytest.mark.parametrize(
+    "edits",
+    [
+        [("\n" + GRANULARITY_RULE + "\n", "\n"), (" " + GRANULARITY_RULE, "")],
+        [(GRANULARITY_RULE, "Note on the rule. " + GRANULARITY_RULE)],
+    ],
+    ids=["dropped", "not-at-line-start"],
+)
+def test_lesson_check_order_rules_block_needs_granularity_line(tmp_path, edits):
+    """BR-4: a rules block with no line STARTING `Granularity:` is one
+    `rules-block-missing-granularity` per file, on its opening marker. Every
+    copy — both blocks and /wrapup's question — is edited alike, so neither the
+    parity comparison nor question coverage has anything to say."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-good")
+    expected = []
+    for skill in ("wrapup", "bugfix"):
+        text = _lco_text(f"{skill}-good")
+        assert edits[0][0] in text  # the block line itself is always edited
+        for old, new in edits:
+            text = text.replace(old, new)
+        lines = text.splitlines()
+        _write_lco(root, skill, lines)
+        opening = lines.index("<!-- lesson-capture-rules -->") + 1
+        expected.append((f"{skill}/SKILL.md", opening, "rules-block-missing-granularity"))
+    result = _run(root)
+    assert sorted(_lco(result)) == sorted(expected), result.stdout
+
+
+def test_lesson_check_order_shipped_tree_is_clean():
+    """AC-4/AC-14: the real wrapup/SKILL.md and bugfix/SKILL.md satisfy the check
+    (`test_shipped_toolkit_tree_is_clean` covers only the retrieval-status
+    parity check, so this is the real-tree assertion for this one)."""
+    result = _run(REPO_ROOT)
+    assert _lco(result) == [], result.stdout
+
+
+def test_lesson_check_order_real_bugfix_reordered_fails(tmp_path):
+    """AC-4: the REAL bugfix/SKILL.md with its lesson recheck fence moved above
+    its check fence draws `recheck-before-check` — the check reads the shipped
+    spelling, not just the fixture's."""
+    (tmp_path / "wrapup").mkdir()
+    (tmp_path / "bugfix").mkdir()
+    shutil.copyfile(REPO_ROOT / "wrapup" / "SKILL.md", tmp_path / "wrapup" / "SKILL.md")
+    lines = (REPO_ROOT / "bugfix" / "SKILL.md").read_text(encoding="utf-8").splitlines()
+    ro, rc = _fence_span(lines, "adlc_recheck_id lesson")
+    fence = lines[ro:rc + 1]
+    rest = lines[:ro] + lines[rc + 1:]
+    co, _cc = _fence_span(rest, "adlc_lesson_check ")
+    moved = rest[:co] + fence + rest[co:]
+    (tmp_path / "bugfix" / "SKILL.md").write_text("\n".join(moved) + "\n", encoding="utf-8")
+    result = _run(tmp_path)
+    assert _lco(result) == [("bugfix/SKILL.md", co + 1, "recheck-before-check")], result.stdout
+
+
+# ---------------------------------------------------------------------------
+# REQ-646 BR-4: /wrapup's delegated --question carries every rule line, in order
+# ---------------------------------------------------------------------------
+
+QUESTION_CALL = 'command "$ADLC_READ_BIN"'
+RULE_1 = "1. Cite the moment: put it in evidence."
+RULE_2 = "2. Declare the contrast: high, medium or low."
+
+
+def _rule_line(fixture: str, rule: str) -> int:
+    """1-based line of `rule` inside the fixture's capture-rules block."""
+    lines = _lco_text(fixture).splitlines()
+    return lines.index(rule, lines.index("<!-- lesson-capture-rules -->")) + 1
+
+
+def test_lesson_question_coverage_ignores_prose_copies(tmp_path):
+    """The rule line missing from the question also appears in prose elsewhere,
+    so it occurs twice in the file — a count-based check passes that; the check
+    reads the question argument itself, so it still fires on that block line."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-question-missing-rule", "bugfix-good")
+    lines = _lco_text("wrapup-question-missing-rule").splitlines()
+    _write_lco(root, "wrapup", lines + ["", "Rule two again, in prose:", RULE_2])
+    result = _run(root)
+    rule2 = _rule_line("wrapup-question-missing-rule", RULE_2)
+    assert _lco(result) == [("wrapup/SKILL.md", rule2, "rules-line-not-in-question")], result.stdout
+
+
+def test_lesson_question_coverage_requires_block_order(tmp_path):
+    """Rules 1 and 2 swapped inside the question: each is present, but rule 2 is
+    found only before rule 1's match, so it is one out-of-order finding on rule
+    2's block line (and the lines after it are not judged)."""
+    swap = _rewrite(
+        QUESTION_CALL,
+        lambda ln: ln.replace(RULE_1 + " " + RULE_2, RULE_2 + " " + RULE_1),
+    )
+    lines = swap(_lco_text("wrapup-good").splitlines())
+    assert RULE_2 + " " + RULE_1 in "\n".join(lines)
+    result = _mutated_run(tmp_path, "wrapup", lambda _ls: lines)
+    rule2 = _rule_line("wrapup-good", RULE_2)
+    assert _lco(result) == [("wrapup/SKILL.md", rule2, "rules-line-not-in-question")], result.stdout
+    assert "only before the previous rule line" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        _drop_fence(QUESTION_CALL),
+        _rewrite(QUESTION_CALL, lambda ln: "# " + ln),
+        _rewrite(QUESTION_CALL, lambda ln: ln.replace('--question "', "--question ")),
+    ],
+    ids=["no-call", "commented-call", "unquoted-question"],
+)
+def test_lesson_question_coverage_without_a_question_fails(tmp_path, mutate):
+    """No live `command "$ADLC_READ_BIN" … --question "…"` line means no rule
+    reaches the delegate: one `rules-line-not-in-question`, on the block's first
+    rule line. A rules block in prose elsewhere in the file does not stand in."""
+    lines = mutate(_lco_text("wrapup-good").splitlines())
+    result = _mutated_run(tmp_path, "wrapup", lambda _ls: lines)
+    first = lines.index("<!-- lesson-capture-rules -->") + 2
+    assert _lco(result) == [("wrapup/SKILL.md", first, "rules-line-not-in-question")], result.stdout
+
+
+@pytest.mark.parametrize(
+    "replacement, ids",
+    [
+        ('put it in "evidence".', ["rules-line-unsafe-in-question", "rules-line-not-in-question"]),
+        ("put it in $HOME evidence.", ["rules-line-unsafe-in-question"]),
+        ("put it in `evidence`.", ["rules-line-unsafe-in-question"]),
+        ("put it in evidence \\ here.", ["rules-line-unsafe-in-question"]),
+    ],
+    ids=["double-quote", "dollar", "backtick", "backslash"],
+)
+def test_lesson_question_coverage_unsafe_characters(tmp_path, replacement, ids):
+    """A rule line holding `"`, `$`, a backtick or `\\` is
+    `rules-line-unsafe-in-question` even when pasted into the question verbatim:
+    the shell would not hand it to the delegate as written. A `"` also ends the
+    argument early, so that line is missing from the question too. Both copies
+    of the block are edited alike, so parity stays quiet."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-good")
+    for skill in ("wrapup", "bugfix"):
+        text = _lco_text(f"{skill}-good")
+        assert "put it in evidence." in text
+        _write_lco(root, skill, text.replace("put it in evidence.", replacement).splitlines())
+    result = _run(root)
+    rule1 = _rule_line("wrapup-good", RULE_1)
+    assert _lco(result) == [("wrapup/SKILL.md", rule1, fid) for fid in ids], result.stdout
+
+
+def test_lesson_question_coverage_real_wrapup_missing_rule_fails(tmp_path):
+    """The REAL wrapup/SKILL.md with one capture-rules line cut out of its
+    delegated `--question` draws `rules-line-not-in-question` on that block line
+    — the check reads the shipped call, not just the fixture's."""
+    (tmp_path / "wrapup").mkdir()
+    (tmp_path / "bugfix").mkdir()
+    shutil.copyfile(REPO_ROOT / "bugfix" / "SKILL.md", tmp_path / "bugfix" / "SKILL.md")
+    lines = (REPO_ROOT / "wrapup" / "SKILL.md").read_text(encoding="utf-8").splitlines()
+    o = lines.index("<!-- lesson-capture-rules -->")
+    c = lines.index("<!-- /lesson-capture-rules -->", o)
+    target = [i for i in range(o + 1, c) if lines[i].strip()][1]
+    rule = lines[target].strip()
+    q = next(
+        i for i, ln in enumerate(lines)
+        if QUESTION_CALL in ln and '--question "' in ln and not ln.lstrip().startswith("#")
+    )
+    assert lines[q].count(rule) == 1, "the real question must carry the rule exactly once"
+    lines[q] = lines[q].replace(rule, "")
+    _write_lco(tmp_path, "wrapup", lines)
+    result = _run(tmp_path)
+    assert _lco(result) == [("wrapup/SKILL.md", target + 1, "rules-line-not-in-question")], result.stdout
+
+
+# ---------------------------------------------------------------------------
+# REQ-646 verify residuals: nested and tilde fences, call position, fence
+# edges, parity and question behaviours, the harness window and a second
+# recheck
+# ---------------------------------------------------------------------------
+
+RECHECK_CALL = 'if ! adlc_recheck_id lesson "$LESSON_ID"; then'
+WRITE_POINT = "<!-- lesson-write-point -->"
+
+
+def _wrap_fence(needle, opener, closer):
+    """Mutation: put the fence whose body holds `needle` inside an outer fence."""
+    def mutate(lines):
+        o, c = _fence_span(lines, needle)
+        return lines[:o] + [opener] + lines[o:c + 1] + [closer] + lines[c + 1:]
+    return mutate
+
+
+def _respell_fence(needle, opener, closer):
+    """Mutation: respell the opening and closing lines of the fence holding `needle`."""
+    def mutate(lines):
+        o, c = _fence_span(lines, needle)
+        return lines[:o] + [opener] + lines[o + 1:c] + [closer] + lines[c + 1:]
+    return mutate
+
+
+def _nested_example_above_write_point(needle):
+    """Mutation: a copy of the fence holding `needle`, shown inside a
+    ````markdown example above the write point — above every real call."""
+    def mutate(lines):
+        o, c = _fence_span(lines, needle)
+        wp = lines.index(WRITE_POINT)
+        return lines[:wp] + ["````markdown"] + lines[o:c + 1] + ["````", ""] + lines[wp:]
+    return mutate
+
+
+def _check_fence_into_unclosed_outer(lines):
+    """The check fence moved to EOF, inside a ````markdown fence never closed."""
+    o, c = _fence_span(lines, CHECK_CALL)
+    return lines[:o] + lines[c + 1:] + ["", "````markdown"] + lines[o:c + 1]
+
+
+def _unclose_last_fence(lines):
+    """Drop the final ``` (the recheck fence's): that fence now runs to EOF."""
+    assert lines[-1] == "```"
+    return lines[:-1]
+
+
+def _unclosed_tilde_above_write_point(lines):
+    wp = lines.index(WRITE_POINT)
+    return lines[:wp] + ["~~~text"] + lines[wp:]
+
+
+def _write_point_after_inner_backticks(lines):
+    """The write point moved into a ````markdown example, after a bare ``` line
+    that would close a 3-backtick fence but not this 4-backtick one."""
+    lines = [ln for ln in lines if ln != WRITE_POINT]
+    h = next(i for i, ln in enumerate(lines) if HARNESS_LITERAL in ln)
+    return lines[:h] + [
+        "````markdown", "```sh", "echo example", "```", WRITE_POINT, "````", "",
+    ] + lines[h:]
+
+
+@pytest.mark.parametrize("skill", ["wrapup", "bugfix"])
+@pytest.mark.parametrize(
+    "mutate, expected",
+    [
+        (_wrap_fence(CHECK_CALL, "````markdown", "````"), ["missing-check-fence"]),
+        (_wrap_fence(CHECK_CALL, "~~~markdown", "~~~"), ["missing-check-fence"]),
+        (_wrap_fence("adlc_recheck_id lesson", "````text", "````"), ["missing-recheck-fence"]),
+        (_respell_fence(CHECK_CALL, "~~~sh", "~~~"), []),
+        (_respell_fence("adlc_recheck_id lesson", "~~~~bash", "~~~~"), []),
+        (_nested_example_above_write_point(CHECK_CALL), []),
+        (_nested_example_above_write_point("adlc_recheck_id lesson"), []),
+        (_check_fence_into_unclosed_outer, ["missing-check-fence"]),
+        (_unclose_last_fence, []),
+        (_unclosed_tilde_above_write_point,
+         ["missing-check-fence", "missing-recheck-fence", "missing-write-point"]),
+        (_write_point_after_inner_backticks, ["missing-write-point"]),
+    ],
+    ids=[
+        "check-in-4-backtick-outer", "check-in-tilde-outer", "recheck-in-4-backtick-outer",
+        "tilde-check-fence", "tilde-recheck-fence", "nested-check-example-above-wp",
+        "nested-recheck-example-above-wp", "check-in-unclosed-outer-at-eof",
+        "unclosed-recheck-fence-to-eof", "unclosed-tilde-swallows-rest",
+        "4-backtick-holds-3-backtick-line",
+    ],
+)
+def test_lesson_check_order_nested_and_tilde_fences(tmp_path, skill, mutate, expected):
+    """m6/L8: fences nest length-aware and only TOP-LEVEL shell fences carry
+    calls. A ```sh fence shown inside an outer ````markdown or ~~~markdown
+    fence calls nothing — so the only check (or recheck) being such an example
+    is `missing-check-fence` (`missing-recheck-fence`), and an example placed
+    above the write point is no `check-before-write-point` or
+    `recheck-before-check`. `~~~sh` and `~~~~bash` fences are walked like
+    backtick ones. An unclosed fence runs to EOF: a shell one keeps its call, a
+    non-shell one swallows every marker and call after it. A bare ``` inside a
+    ````markdown fence does not close it, so a write point after that line is
+    still fenced."""
+    result = _mutated_run(tmp_path, skill, mutate)
+    assert sorted(fid for _f, _l, fid in _lco(result)) == expected, result.stdout
+    assert all(f == f"{skill}/SKILL.md" for f, _l, _id in _lco(result)), result.stdout
+
+
+@pytest.mark.parametrize(
+    "mutate, expected",
+    [
+        (_rewrite(CHECK_CALL, lambda ln: 'echo "' + ln + '"'), ["missing-check-fence"]),
+        (_rewrite(CHECK_CALL, lambda ln: "echo " + ln), ["missing-check-fence"]),
+        (_rewrite(CHECK_CALL, lambda ln: 'echo "x; ' + ln + '"'), ["missing-check-fence"]),
+        (_rewrite(CHECK_CALL, lambda ln: "echo 'x && " + ln + "'"), ["missing-check-fence"]),
+        (_rewrite(CHECK_CALL, lambda ln: "true # ; " + ln), ["missing-check-fence"]),
+        (_rewrite(CHECK_CALL, lambda ln: "true;# " + ln), ["missing-check-fence"]),
+        (_rewrite(CHECK_CALL, lambda ln: "if " + ln + "; then :; fi"), []),
+        (_rewrite(CHECK_CALL, lambda ln: ln + "  # validate the draft"), []),
+        (_rewrite(CHECK_CALL, lambda ln: 'echo "a #b"; ' + ln), []),
+        (_rewrite(CHECK_CALL, lambda ln: "echo it\\'s; " + ln), []),
+        (_rewrite(CHECK_CALL, lambda ln: "echo don't\n" + ln), []),
+        (_rewrite(RECHECK_CALL, lambda _ln: ": # adlc_recheck_id lesson L"),
+         ["missing-recheck-fence"]),
+        (_rewrite(RECHECK_CALL, lambda ln: ln.replace(
+            '! adlc_recheck_id lesson "$LESSON_ID"', '! echo "adlc_recheck_id lesson $LESSON_ID"')),
+         ["missing-recheck-fence"]),
+        (_rewrite(RECHECK_CALL, lambda ln: ln.replace("! adlc_recheck_id", "! echo adlc_recheck_id")),
+         ["missing-recheck-fence"]),
+        (_rewrite(RECHECK_CALL, lambda ln: ln.replace("adlc_recheck_id ", "adlc_recheck_idx ")),
+         ["missing-recheck-fence"]),
+        (_rewrite(RECHECK_CALL, lambda ln: ln.replace("adlc_recheck_id ", "my_adlc_recheck_id ")),
+         ["missing-recheck-fence"]),
+        (_rewrite(RECHECK_CALL, lambda ln: ln.replace(" lesson ", " lessons ")),
+         ["missing-recheck-fence"]),
+        (_rewrite(RECHECK_CALL, lambda ln: ln.replace("if ! ", "if ")), []),
+    ],
+    ids=[
+        "check-in-double-quotes", "check-as-echo-argument", "separator-inside-quotes",
+        "separator-inside-single-quotes", "trailing-comment-hides-separator",
+        "comment-right-after-separator", "if-check-then", "call-with-trailing-comment",
+        "hash-inside-quotes-is-not-a-comment", "escaped-apostrophe",
+        "apostrophe-on-line-above", "recheck-in-comment", "recheck-in-double-quotes",
+        "recheck-as-echo-argument", "recheck-name-longer", "recheck-name-prefixed",
+        "recheck-kind-longer", "if-recheck-then",
+    ],
+)
+def test_lesson_check_order_call_position_and_comments(tmp_path, mutate, expected):
+    """L7: a call is a call only in a line's code and in command position. A
+    mention inside a quoted string or as an `echo` argument is not a call —
+    nor is a separator inside quotes a command position — and a trailing `#`
+    comment is cut before matching, so `true # ; adlc_lesson_check x` and
+    `: # adlc_recheck_id lesson L` call nothing. `if adlc_lesson_check x; then`
+    IS a call, a call keeps a trailing comment, a `#` inside quotes opens no
+    comment, and an apostrophe on one line does not quote the next. The name
+    is pinned at both ends: `adlc_recheck_idx`, `my_adlc_recheck_id` and
+    `adlc_recheck_id lessons` are not the recheck."""
+    result = _mutated_run(tmp_path, "bugfix", mutate)
+    assert [fid for _f, _l, fid in _lco(result)] == expected, result.stdout
+
+
+def _fenced_closer_inside_block(lines):
+    o = lines.index("<!-- lesson-capture-rules -->")
+    return lines[:o + 1] + ["```text", "<!-- /lesson-capture-rules -->", "```"] + lines[o + 1:]
+
+
+def test_lesson_check_order_fenced_closer_does_not_close_block(tmp_path):
+    """L8: a `<!-- /lesson-capture-rules -->` inside a fence in the block closes
+    nothing: the block runs on to the real closer, so it still holds its
+    `Granularity:` line and the only finding is the parity mismatch at the
+    inserted fence. Had the fenced closer closed the block, its body would be
+    the one ```text line — a `rules-block-missing-granularity` as well."""
+    lines = _fenced_closer_inside_block(_lco_text("bugfix-good").splitlines())
+    result = _mutated_run(tmp_path, "bugfix", lambda _ls: lines)
+    first_body = lines.index("<!-- lesson-capture-rules -->") + 2
+    assert _lco(result) == [("bugfix/SKILL.md", first_body, "rules-block-mismatch")], result.stdout
+
+
+@pytest.mark.parametrize("skill", ["wrapup", "bugfix"])
+def test_lesson_check_order_prose_trailed_closer_is_not_a_closer(tmp_path, skill):
+    """L8: `<!-- /lesson-capture-rules -->` with prose after it on its line is
+    not a closing marker, so the block is never closed — one
+    `rules-block-missing` on the opening marker (and, being unclosed, neither
+    a parity mismatch nor a question-coverage finding)."""
+    mutate = _rewrite("<!-- /lesson-capture-rules -->", lambda ln: ln + " (end of the rules)")
+    result = _mutated_run(tmp_path, skill, mutate)
+    opening = _lco_text(f"{skill}-good").splitlines().index("<!-- lesson-capture-rules -->") + 1
+    assert _lco(result) == [(f"{skill}/SKILL.md", opening, "rules-block-missing")], result.stdout
+
+
+@pytest.mark.parametrize("scope", ["whole-file", "one-line"])
+def test_lesson_rules_parity_crlf_is_a_mismatch(tmp_path, scope):
+    """L9: the parity check decodes bytes, so a /bugfix copy with CRLF line
+    endings — throughout, or on one rule line — is one `rules-block-mismatch`
+    at the first CRLF line of its block, though the per-file checks (which read
+    in text mode) see an identical file."""
+    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-good")
+    text = _lco_text("bugfix-good")
+    lines = text.splitlines()
+    if scope == "whole-file":
+        data = text.replace("\n", "\r\n")
+        line = lines.index("<!-- lesson-capture-rules -->") + 2
+    else:
+        assert text.count(RULE_1 + "\n") == 1
+        data = text.replace(RULE_1 + "\n", RULE_1 + "\r\n")
+        line = lines.index(RULE_1) + 1
+    (root / "bugfix" / "SKILL.md").write_bytes(data.encode("utf-8"))
+    result = _run(root)
+    assert _lco(result) == [("bugfix/SKILL.md", line, "rules-block-mismatch")], result.stdout
+
+
+@pytest.mark.parametrize("escaping", ["wrapup", "bugfix"])
+def test_lesson_rules_parity_skips_symlink_escaping_root(tmp_path, escaping):
+    """L9: a SKILL.md that is a symlink to a file OUTSIDE the scan root is not
+    compared: the blocks one byte apart draw no `rules-block-mismatch` (nor any
+    per-file finding — the walk skips the escaping file too). The control, the
+    same content as a real in-root file, does draw the mismatch."""
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    sources = {"wrapup": "wrapup-good", "bugfix": "bugfix-rules-mismatch"}
+    for skill, name in sources.items():
+        (root / skill).mkdir()
+        if skill == escaping:
+            shutil.copyfile(LCO_FIXTURES / f"{name}.md", outside / f"{skill}.md")
+            (root / skill / "SKILL.md").symlink_to(outside / f"{skill}.md")
+        else:
+            shutil.copyfile(LCO_FIXTURES / f"{name}.md", root / skill / "SKILL.md")
+    result = _run(root)
+    assert _lco(result) == [], result.stdout
+    # Control: the same file, really in the root, is compared.
+    (root / escaping / "SKILL.md").unlink()
+    shutil.copyfile(outside / f"{escaping}.md", root / escaping / "SKILL.md")
+    result = _run(root)
+    assert [fid for _f, _l, fid in _lco(result)] == ["rules-block-mismatch"], result.stdout
+
+
+@pytest.mark.parametrize(
+    "old, new, flagged",
+    [
+        (" " + RULE_1, "\n    " + RULE_1, False),
+        (RULE_1, "1. Cite the moment:\n    put it in evidence.", True),
+        (RULE_1, "1. Cite the moment: \\\n    put it in evidence.", True),
+        (RULE_1, "1. Cite the moment: \\\nput it in evidence.", True),
+    ],
+    ids=["break-between-rules", "rule-split-by-newline", "rule-split-by-continuation",
+         "rule-split-by-unindented-continuation"],
+)
+def test_lesson_question_coverage_wrapped_question(tmp_path, old, new, flagged):
+    """L9 (documented decision): a `--question` wrapped over several source
+    lines is read as written, NOT joined. Breaking BETWEEN rule lines passes —
+    every rule is still in the argument verbatim. A rule line split across a
+    break is one `rules-line-not-in-question` on that block line, with a
+    message naming the wrap — even a `\\` continuation that would hand the
+    delegate the words intact: one rule per source line is the contract."""
+    lines = _lco_text("wrapup-good").splitlines()
+    q = next(i for i, ln in enumerate(lines) if QUESTION_CALL in ln)
+    assert lines[q].count(old) == 1
+    lines[q] = lines[q].replace(old, new)
+    result = _mutated_run(tmp_path, "wrapup", lambda _ls: lines)
+    if not flagged:
+        assert _lco(result) == [], result.stdout
+        return
+    written = "\n".join(lines).splitlines()  # the wrap moved every later line down
+    rule1 = written.index(RULE_1, written.index("<!-- lesson-capture-rules -->")) + 1
+    assert _lco(result) == [("wrapup/SKILL.md", rule1, "rules-line-not-in-question")], result.stdout
+    assert "wrapped across a line break" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize(
+    "new, flagged",
+    [('Propose a \\"lesson\\" draft.', False), ('Propose a "lesson" draft.', True)],
+    ids=["escaped-quote", "unescaped-quote"],
+)
+def test_lesson_question_coverage_escaped_quote(tmp_path, new, flagged):
+    """L9: an escaped `\\"` inside the question does not end the argument, so
+    every rule after it is still found. The control — the same quotes
+    unescaped — ends the argument at `"Propose a "`, so the block's first rule
+    line is not in the question."""
+    lines = _lco_text("wrapup-good").splitlines()
+    q = next(i for i, ln in enumerate(lines) if QUESTION_CALL in ln)
+    assert lines[q].count("Propose a lesson draft.") == 1
+    lines[q] = lines[q].replace("Propose a lesson draft.", new)
+    result = _mutated_run(tmp_path, "wrapup", lambda _ls: lines)
+    if not flagged:
+        assert _lco(result) == [], result.stdout
+        return
+    first = lines.index("<!-- lesson-capture-rules -->") + 2
+    assert _lco(result) == [("wrapup/SKILL.md", first, "rules-line-not-in-question")], result.stdout
+    assert "is not in the question" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize("distance, expected", [(30, []), (31, ["missing-harness-line"])])
+def test_lesson_check_order_harness_window_edge(tmp_path, distance, expected):
+    """L10: the harness line counts exactly `HARNESS_SKIP_WINDOW` (30) lines
+    above the check fence's opening and not one line further."""
+    lines = _lco_text("bugfix-good").splitlines()
+    h = next(i for i, ln in enumerate(lines) if HARNESS_LITERAL in ln)
+    co = _fence_span(lines, CHECK_CALL)[0]
+    lines = lines[:h + 1] + ["Filler prose."] * (distance - (co - h)) + lines[h + 1:]
+    opening = _fence_span(lines, CHECK_CALL)[0] + 1
+    harness = next(i for i, ln in enumerate(lines) if HARNESS_LITERAL in ln) + 1
+    assert opening - harness == distance
+    result = _mutated_run(tmp_path, "bugfix", lambda _ls: lines)
+    assert _lco(result) == [("bugfix/SKILL.md", opening, fid) for fid in expected], result.stdout
+
+
+@pytest.mark.parametrize("skill", ["wrapup", "bugfix"])
+def test_lesson_check_order_second_recheck_before_check_fails(tmp_path, skill):
+    """L10: a SECOND recheck fence, placed between the write point and the
+    check fence while the original stays below the check, is one
+    `recheck-before-check` on the early fence alone."""
+    lines = _lco_text(f"{skill}-good").splitlines()
+    ro, rc = _fence_span(lines, "adlc_recheck_id lesson")
+    h = next(i for i, ln in enumerate(lines) if HARNESS_LITERAL in ln)
+    assert lines.index(WRITE_POINT) < h < ro
+    lines = lines[:h] + lines[ro:rc + 1] + [""] + lines[h:]
+    result = _mutated_run(tmp_path, skill, lambda _ls: lines)
+    assert _lco(result) == [(f"{skill}/SKILL.md", h + 1, "recheck-before-check")], result.stdout
