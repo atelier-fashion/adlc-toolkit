@@ -221,10 +221,23 @@ If `stack.frontends` doesn't include `ios`, skip this section entirely.
 **Step 4 — Capture knowledge** (NEVER skip — per memory `feedback_wrapup_knowledge_capture.md`).
 
 Evaluate honestly: did this bug reveal something a future implementer should know?
+
+<!-- lesson-capture-rules -->
+Lesson capture rules (REQ-646):
+0. Declare kind: process if the lesson is about how a skill, agent, partial or pipeline phase behaves; domain if it is about the codebase or stack the implementer works in.
+1. Cite the moment: a lesson you cannot trace to a specific commit, finding, bug, test or transcript line is speculation; put that moment in evidence (a commit sha, a BUG-/REQ-/LESSON-/TASK- id, a path:line, or a test name). Never a home-directory path: write ~/ for the home prefix rather than dropping the citation.
+2. Declare the contrast: confidence is decided by whether the evidence contains a contrast - a bug reproduced then fixed, a test failing then passing, a Phase-5 finding confirmed by its fix and re-verify, or two approaches or runs compared. high = a contrast was observed and the evidence names the mechanism (a specific line, command or finding); medium = a contrast was observed but the mechanism is inferred; low = a single observation with no contrast. An invented attribution poisons retrieval for every later REQ.
+3. NO_ENTRY is a valid answer: if nothing transferable survived, write NO_ENTRY: <reason> in the summary slot; never pad.
+Granularity: too generic never changes behaviour (be thorough); too specific never fires again (the fee rose on Jan 1) - aim between.
+<!-- /lesson-capture-rules -->
+
+Ask of this bug:
 - A surprising failure mode (race condition, schema mismatch, mocked-vs-real divergence, etc.)?
 - A pattern or anti-pattern worth recording?
 - A check that would have caught this earlier?
 - An assumption from a prior REQ that turned out false?
+
+A reproduce-then-fix sequence is a contrast (rule 2); name it in `evidence`.
 
 If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the **global** atomic counter `~/.claude/.global-next-lesson` (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock (`~/.claude/.global-next-lesson.lock.d`, shared with `/wrapup` so concurrent `/bugfix` and `/wrapup` runs mutually exclude). Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its LESSON-014 symlink pre-check live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
 ```bash
@@ -236,6 +249,20 @@ LESSON_NUM=$(adlc_alloc_id lesson)
 ```
 `adlc_alloc_id lesson` handles the absent-counter bootstrap scan internally (highest `LESSON-xxx` under `$ADLC_REPOS_ROOT`; lessons are `.md` files so the scan uses `-type f`), the shared `mkdir` lock, and the remote high-water max. Single-machine behavior is unchanged when the remote has no higher allocation (BR-7). Note: the legacy per-repo `.adlc/.next-lesson` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
 
+<!-- lesson-write-point -->
+**Write the lesson** now — before the schema check below, which reads the file, and the pre-push recheck, which checks its id against the remote. Use the lesson template (`.adlc/templates/lesson-template.md`, fall back to `~/.claude/skills/templates/lesson-template.md`). Filename format is `LESSON-xxx-slug.md` only — no date prefixes, no bare-numeric prefixes — so the file is `.adlc/knowledge/lessons/LESSON-<id>-<slug>.md`, `<id>` being the number just allocated, zero-padded to three digits. Include `domain`, `component`, and `tags` so future runs of `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance, and `kind`, `evidence`, and `confidence` per the capture rules above (rules 0–2); `## Lesson` and `## Applies When` must both be non-empty. Write a **new** file only — never edit an existing lesson: a refinement of LESSON-A is a new lesson carrying `generalizes: [LESSON-A]` or `supersedes: [LESSON-A]` (BR-2). `enforcement` stays `none` unless a lint, test, script or hook actually enforces the lesson. Every `generalizes` / `supersedes` id must match `^LESSON-[0-9]{3,6}$` and exist — `find .adlc/knowledge/lessons -maxdepth 1 -type f -name '<id>-*' | head -1` must print a path (a `find`, not a bare glob — zsh aborts on an unmatched glob, LESSON-335); drop any id that fails (a list left empty is written `[]`).
+
+**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of the fence below. Validate the draft in-model against the rule table in `partials/lesson-check.md` instead, apply the same repair loop described below (at most 2 repairs, then `NO_ENTRY`), and write `lesson check: in-model (provenance-classifying harness)` in the `### Lessons captured` summary slot (Step 6).
+
+**Schema check (REQ-646 BR-3).** Validate the file you just wrote. Source `partials/lesson-check.sh` and call it **in the same fenced block**; the return codes and the rule table live in `partials/lesson-check.md`:
+```sh
+if [ -f .adlc/partials/lesson-check.sh ]; then . .adlc/partials/lesson-check.sh; else . ~/.claude/skills/partials/lesson-check.sh; fi
+# <path> is the LITERAL path of the file you just wrote — thread it in; fenced
+# blocks share no shell state and LESSON_ID is not a sanctioned cross-fence var.
+adlc_lesson_check .adlc/knowledge/lessons/LESSON-<id>-<slug>.md
+```
+**Repair loop.** rc 0 → go on to the pre-push recheck. rc 1 → stderr carries one `<field>: <reason>` line per violation; repair only what is named — the named frontmatter field(s), or, when the `<field>` is `## Lesson` or `## Applies When`, add that one missing or empty section — never regenerate any other section, and run the fence again. A key written without a blank after its colon (`supersedes:[…]`, `kind:process`) is a frontmatter violation on that key, repaired like any other named field. Repair **at most 2** times: after the third failure, delete the draft file and write `NO_ENTRY: schema check failed — <field>` in the `### Lessons captured` summary slot (Step 6); with no file left, skip the pre-push recheck. The id allocated for the draft stays spent — a gap in the counter, never a reuse. You keep the count; the fence does not. This is **not** a halt — Steps 5 and 6 run regardless. rc 2 is a usage error (wrong path, unreadable file, no frontmatter block, a symlink, or a basename that is not `LESSON-<digits>-<slug>.md`): fix the path and re-run; never treat it as a pass.
+
 **Pre-push recheck (BR-4, BR-8).** Before the lesson file is committed on a branch for push, re-verify `LESSON-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
 ```bash
 if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
@@ -246,9 +273,7 @@ if ! adlc_recheck_id lesson "$LESSON_ID"; then
 fi
 ```
 
-Use the lesson template (`.adlc/templates/lesson-template.md`, fall back to `~/.claude/skills/templates/lesson-template.md`). Filename format is `LESSON-xxx-slug.md` only — no date prefixes, no bare-numeric prefixes. Include `domain`, `component`, and `tags` so future runs of `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance.
-
-If the bug genuinely produced no useful lesson (one-line typo, etc.), say so explicitly in the final summary — don't silently skip.
+If nothing transferable survived, the summary's `### Lessons captured` carries exactly one line `NO_ENTRY: <reason>` — never a silent skip.
 
 **Step 5 — Clean up.**
 1. Switch the local checkout to main and pull: `git -C <main-worktree> checkout main && git -C <main-worktree> pull`
@@ -278,7 +303,7 @@ If the bug genuinely produced no useful lesson (one-line typo, etc.), say so exp
 
 ### Lessons captured
 - `.adlc/knowledge/lessons/LESSON-xxx-slug.md` — one-line hook
-  (or "None — fix was straightforward and revealed no new pattern")
+  (or exactly one line: NO_ENTRY: <reason>)
 ```
 
 ## Branch Naming

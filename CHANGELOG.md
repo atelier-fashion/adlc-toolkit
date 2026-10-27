@@ -32,6 +32,114 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+### Added
+
+- **Lesson schema v2: a captured lesson names its evidence, its confidence and its
+  kind (REQ-646).** Every lesson was written from one pipeline run and presented as
+  fact. Nothing in it said what it rested on, how sure its author was, whether it was
+  about the pipeline or the codebase, or whether anything enforced it.
+  `templates/lesson-template.md` gains six fields after `updated:`, each with an
+  inline comment, and the frontmatter still closes by line 25, so `/spec` Step 1.6's
+  30-line read sees all of them. `kind` (`process` | `domain`), `evidence` and
+  `confidence` (`high` | `medium` | `low`) are required on every lesson a capture step
+  writes. `evidence` must hold a citation token: a commit sha, a `BUG-`/`REQ-`/
+  `LESSON-`/`TASK-` id, a `path:line`, or a test name. `enforcement`, `generalizes`
+  and `supersedes` are optional. `templates/taxonomy-template.md` documents the three
+  enums. The change is additive: no existing field moves, every lesson on disk parses
+  unchanged, and none is backfilled. `confidence` and `supersedes` have readers (see
+  Changed). `kind` is meant to get one in REQ-647. `enforcement` and `generalizes`
+  have none yet.
+- **`partials/lesson-check.sh` checks the lesson a capture step just wrote.**
+  `adlc_lesson_check <path>` returns 0 (pass), 1 (one `<field>: <reason>` line per
+  violation on stderr) or 2 (usage). It checks the required keys and enums, the
+  lesson-id lists, the citation token in `evidence`, and that `## Lesson` and
+  `## Applies When` are present and non-empty. Asking in prose did not hold: 25
+  lessons on disk have no `## Applies When`. It rejects a home-directory path in
+  `evidence` (`/Users/…`, `/home/…`, `$HOME/…`, `${HOME}/…`, `~user/…`; `~/…`,
+  `/dev/null` and `/tmp/…` pass) and a credential-shaped string in the title or any
+  new field.
+  The credential family is the REQ-415 chain widened to the AWS key-id prefixes,
+  GitHub and Slack tokens, Google API keys, JWTs, PEM private-key headers, and an
+  env-var arm that matches only a `NAME=value` assignment. It rejects a key given
+  twice, a key not spelled exactly `key:` and a blank (`supersedes:[…]` fails
+  closed), an opening quote that is never closed, and a value continued onto the
+  next line (a block list, or a flow `[` or `{` left unclosed), because the one-line
+  readers downstream would silently read something else. It rejects rather than
+  redacts, and a rejected value is never echoed. It takes no date cutoff and never
+  runs over the historical corpus: the file a capture step just wrote is new by
+  construction. The partial is POSIX `sh`. `partials/lesson-check.md` holds the contract and the rule table, and
+  `partials/tests/lesson-check.test.sh` (run under bash, zsh, `/bin/sh` and dash
+  through `run.sh`) prints its executed-case count and fails on zero.
+- **`lesson-check-order` lint.** `tools/lint-skills` check 12 reads
+  `wrapup/SKILL.md` and `bugfix/SKILL.md` and requires, in file order, an own-line
+  `lesson-write-point` marker, a fence calling `adlc_lesson_check`, and a fence
+  calling `adlc_recheck_id lesson`. A harness cannot see that ordering. The check also
+  requires the BUG-228 provenance-harness line above the check fence. Checks 12 and
+  13, with a per-root parity check, fail when the two skills' capture-rule blocks
+  differ by a byte, when the block lacks its granularity line, and when a rule line
+  is missing from `/wrapup`'s delegated `--question` or carries a character that
+  cannot ride inside it. A backticked or prose mention of the marker does not count
+  (LESSON-404). Fixtures cover each finding.
+
+### Changed
+
+- **Both lesson capture steps carry the same four rules (REQ-646).** `/wrapup` Step 4
+  asked "any surprises?" and `/bugfix` Phase 6 asked whether the bug revealed
+  something. Neither asked the author to name the moment that proves the claim, and
+  `/wrapup` had no explicit "no lesson this time" answer. `/wrapup`'s delegated
+  `--question`, its fallback drafting bullets, and `/bugfix` Step 4 now carry one
+  rules block, byte-identical in both skills:
+  - declare `kind`;
+  - cite the moment in `evidence`;
+  - choose `confidence` by contrast: `high` when a contrast was observed (a bug
+    reproduced then fixed, a test failing then passing, a Phase-5 finding confirmed
+    by its fix) and the mechanism is named, `medium` when the mechanism is inferred,
+    `low` for a single observation;
+  - `NO_ENTRY` is a valid answer, so never pad.
+
+  The block ends with a granularity line: a lesson too generic never changes
+  behaviour, and one too specific never fires again. Outside the block, `/wrapup`
+  adds that its lessons have a contrast only when a Phase-5 finding or a failing test
+  backs it, and `/bugfix` notes that a reproduce-then-fix sequence is one. Each step
+  then writes the file, runs `adlc_lesson_check`, and repairs only what the check
+  named (a frontmatter field, or one missing or empty section), at most twice. After
+  a third failure it deletes the draft and records
+  `NO_ENTRY: schema check failed — <field>`. That is not a pipeline halt, and
+  `/wrapup` Steps 5–8 run regardless. On a provenance-classifying harness (BUG-228)
+  the check runs in-model and the summary says so. `/wrapup` checks a delegate
+  draft's citations before writing: each token in `evidence` (a `path:line`'s file,
+  a cited id's spec, lesson, bug or task file, a sha's commit) and each
+  `generalizes` and `supersedes` id must exist, a `supersedes` id must be justified
+  by the evidence, and the log records the ids proposed and the ids kept.
+- **`/review` no longer escalates on a `confidence: low` or superseded lesson.**
+  Step 4 raised a finding's severity by one level whenever it matched a known
+  lesson. It now skips that when the lesson is `confidence: low` or is named in
+  another lesson's `supersedes`. The report still cites it, as
+  `(matched LESSON-xxx, confidence low — not escalated)` or
+  `(matched LESSON-xxx, superseded by LESSON-yyy — not escalated)`. A legacy lesson
+  with no `confidence`, or with any value other than `low`, escalates as before. A
+  lesson backed by a reproduce-and-fix or a finding-and-fix is rated `medium` or
+  `high` under the contrast rule, so it still escalates. The superseded lookup runs
+  only for a lesson a finding matched. A lesson file that the diff under review adds
+  or modifies carries no standing, so a change cannot switch off its own escalation,
+  and the report says when that is why a match escalated.
+- **`/spec` annotates a superseded lesson.** Step 1.6 marks a retrieved lesson that
+  another lesson supersedes as `(lesson, score N, superseded by LESSON-yyy)` in its
+  retrieval summary and in `## Retrieved Context`. Scoring, rank and the top-15 cut
+  are unchanged. Like `/review`, it finds the superseding lesson with one corpus-wide
+  `find … -exec awk` lookup per lesson, because that lesson is usually not in the
+  retrieved set. The lookup reads only frontmatter, and a `case` guard checks the id
+  before it is used.
+- **`/bugfix` Phase 6 writes the lesson before it rechecks the id.** The
+  `adlc_recheck_id lesson` fence used to come before the instruction that writes the
+  file. The order is now write, check, recheck, as in `/wrapup`, and
+  `lesson-check-order` enforces it.
+- **`NO_ENTRY` has one form in both skills.** The two `/wrapup` Step 5 templates
+  now show the format of the `### Lessons captured` slot: one `LESSON-xxx`
+  line per lesson, or exactly one `NO_ENTRY: <reason>` line. `/bugfix` Step 6
+  replaces "None — fix was straightforward and revealed no new pattern" with the
+  same `NO_ENTRY: <reason>` line.
+
 ### Fixed
 
 - **Both sprint engines now run the Step 8b close-out after an orchestrator-owned

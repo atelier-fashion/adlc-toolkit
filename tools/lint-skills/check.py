@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
-(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609).
+(REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609,
+BUG-228, BUG-230, REQ-646).
 
 Run from the repo root:
 
@@ -11,11 +12,15 @@ Exit code: 0 on clean, ``min(num_findings, 254)`` when findings exist, and
 exits 0 having done no work is a failure, not a pass — the count is also
 printed to stderr on every run so a caller can read the work done directly).
 
-Two checks run once per scan root rather than per SKILL.md:
-``check_agent_model_drift`` (REQ-516 — on-disk ``model:`` vs the config render)
-and ``check_sync_surface_parity`` (REQ-525 AC4 — ``/init``'s vendored-surface
-copy list vs ``/template-drift``'s checked-surface list must agree). Both
-degrade to zero findings (never a crash) when run outside the toolkit checkout.
+Four checks run once per scan root rather than per SKILL.md:
+``check_agent_model_drift`` (REQ-516 — on-disk ``model:`` vs the config render),
+``check_sync_surface_parity`` (REQ-525 AC4 — ``/init``'s vendored-surface
+copy list vs ``/template-drift``'s checked-surface list must agree),
+``check_retrieval_status_parity`` (BUG-194 — no REQ status a lifecycle skill
+writes is excluded from ``/spec`` retrieval) and ``check_lesson_rules_parity``
+(REQ-646 BR-4 — ``/wrapup``'s and ``/bugfix``'s capture-rules blocks are
+byte-equal). All four degrade to zero findings (never a crash) when run outside
+the toolkit checkout.
 
 The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
 ``find_skill_files``, the one structural exception):
@@ -103,6 +108,25 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    runs ``sh <file>`` as an ordinary command (exit 127 on absence, never fatal).
    This check walks ``agents/*.md`` and ``proceed/phase*.md`` as well (see
    ``find_phase_files``); neither extra walk feeds the scanned count.
+10. ``check_harness_skip`` — every shell fence that calls
+    ``adlc_delegate_gate_check`` needs ``HARNESS_SKIP_LITERAL`` on a prose line
+    within ``HARNESS_SKIP_WINDOW`` lines above it (BUG-228), telling a
+    provenance-classifying harness (Teton Code) to skip the step's shell
+    rather than pin the session on an unclassifiable command.
+11. ``check_provenance_safe_fence`` — a shell fence whose first body line is
+    ``# provenance-safe`` keeps every line inside the grammar such a harness
+    can prove in reach: no unmodelled character, no ``=``, no program named by
+    path, and only recognised verbs (BUG-230).
+12. ``check_lesson_check_order`` — ``wrapup/SKILL.md`` and ``bugfix/SKILL.md``
+    only (REQ-646 ADR-5): the lesson write point, the ``adlc_lesson_check``
+    fence and the ``adlc_recheck_id lesson`` fence come in that file order,
+    each check fence has the harness line above it, and the file carries a
+    non-empty capture-rules block with a ``Granularity:`` line. Markers count
+    only on their own line outside every fenced block (LESSON-404).
+13. ``check_lesson_question_coverage`` — ``wrapup/SKILL.md`` only (REQ-646
+    BR-4): every capture-rules line occurs, verbatim and in block order, in the
+    double-quoted ``--question`` of the ``command "$ADLC_READ_BIN"`` call, and
+    none holds a character that double quotes would interpret.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
 deferred follow-up; LESSON-019 #2): the ``SKIP_DIR_PARTS`` membership test is
@@ -455,6 +479,58 @@ LIFECYCLE_WRITE_SITES = (
 )
 # The single reader whose exclusion list must not swallow any written status.
 RETRIEVAL_READER_SITE = "spec/SKILL.md"
+
+# REQ-646 ADR-5: `lesson-check-order`. The two lesson-capture steps (`/wrapup`
+# Step 4, `/bugfix` Phase 6 Step 4) must, in file order, anchor the write
+# instruction, validate the written file, then recheck its id against the remote
+# — a check that runs before the write reads nothing, and a recheck before the
+# check pushes an id for a file that may yet be deleted by the repair loop. Keyed
+# on the skill's directory name, so no other SKILL.md is read by this check.
+LESSON_CHECK_ORDER_SKILLS = ("wrapup", "bugfix")
+# The per-root rules-block comparison reads these two files under the scan root,
+# the reference copy (`/wrapup`, also checked against its `--question`) first.
+LESSON_RULES_PARITY_SITES = ("wrapup/SKILL.md", "bugfix/SKILL.md")
+# Markers are valid only when the line, stripped, IS the marker: a backticked
+# or prose mention of the marker is a decoy, not an anchor (LESSON-404 — the
+# toolkit's own docs mention it in prose). A marker line inside ANY fenced
+# block (``` or ~~~, any info string) is an example, not an anchor, either.
+LESSON_WRITE_POINT_RE = re.compile(r"^\s*<!-- lesson-write-point -->\s*$")
+LESSON_RULES_OPEN_RE = re.compile(r"^\s*<!-- lesson-capture-rules -->\s*$")
+LESSON_RULES_CLOSE_RE = re.compile(r"^\s*<!-- /lesson-capture-rules -->\s*$")
+# Any CommonMark fence opening — backticks or tildes, any info string. The
+# lesson checks walk fences with `_walk_fences` (length-aware, top-level only);
+# `_iter_fences` stays the ```-only shell-fence walk of the older checks.
+ANY_FENCE_OPEN_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+# A top-level fence is a shell fence when its info string starts with one of
+# these words (the languages `_iter_fences` reads, behind ``` or ~~~).
+LESSON_SHELL_INFO_RE = re.compile(r"(?:sh|bash|shell)\b")
+# Both calls are searched in a shell-fence line's CODE — the line with its
+# unquoted `#` comment cut off and every quoted span emptied
+# (`_shell_line_code`) — in command position: the line start, a separator /
+# `!` / `(` / `{`, or a compound-command keyword. So `if ! adlc_recheck_id
+# lesson "$LESSON_ID"; then` (how both skills spell the recheck),
+# `if adlc_lesson_check x; then` and `true && adlc_lesson_check x` are calls,
+# while `echo adlc_lesson_check x`, `echo "x; adlc_lesson_check y"` and
+# `: # adlc_recheck_id lesson L` are not. The trailing `\s` keeps
+# `adlc_lesson_check_x` and `adlc_recheck_idx` from being calls, and the
+# trailing `\b` keeps `lessons` from being `lesson`. `\b` is fine in Python
+# `re`; the LESSON-013 ban is for BSD `grep -E`.
+LESSON_CALL_POSITION = r"(?:^|[;&|!({]|\b(?:if|then|else|elif|do|while|until)\s)\s*"
+LESSON_CHECK_CALL_RE = re.compile(LESSON_CALL_POSITION + r"adlc_lesson_check\s")
+LESSON_RECHECK_CALL_RE = re.compile(LESSON_CALL_POSITION + r"adlc_recheck_id\s+lesson\b")
+# Characters that end a shell word: a `#` right after one (or at the line
+# start) opens a comment; anywhere else (`$#`, `${#x}`, `a#b`) it does not.
+SHELL_WORD_BREAK = frozenset(" \t;&|()<>")
+# `/wrapup`'s delegated call: the one line that hands the corpus to the delegate
+# (the only invocation spelling `read-bin-fallback` accepts) and opens a
+# double-quoted `--question` argument. Every capture-rules line must sit inside
+# that argument, so none may carry a character a double-quoted shell word
+# interprets: `"` ends it, `$` and a backtick substitute, `\` escapes.
+LESSON_QUESTION_CALL = 'command "$ADLC_READ_BIN"'
+LESSON_QUESTION_OPEN = '--question "'
+LESSON_QUESTION_UNSAFE = frozenset('"$`\\')
+LESSON_GRANULARITY_PREFIX = "Granularity:"
+LESSON_CHECK_ORDER = "lesson-check-order"
 
 
 class Finding(NamedTuple):
@@ -1165,6 +1241,132 @@ def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def _shell_fence_line_numbers(fences) -> set[int]:
+    """Every line a shell fence occupies — opening, body and closing line.
+
+    ``fences`` is a materialised ``_iter_fences`` result. ``harness-skip``
+    passes it to ``_harness_line_above`` so a copy of the line inside a shell
+    fence does not count; ``lesson-check-order`` passes the wider
+    ``_any_fence_line_numbers`` instead.
+    """
+    out: set[int] = set()
+    for _lang, _idx, body_start, body in fences:
+        opening = body_start - 1
+        out.add(opening)
+        out.update(lineno for lineno, _ in body)
+        out.add((body[-1][0] if body else opening) + 1)
+    return out
+
+
+def _walk_fences(lines: list[str]):
+    """Yield ``(opening, info, body, closing)`` for each TOP-LEVEL fenced block
+    — backticks or tildes, any info string (``markdown``, ``text``, none).
+
+    ``opening`` and ``closing`` are 1-based lines (``closing`` is ``None`` for
+    an unclosed fence, which runs to EOF); ``info`` is the stripped text after
+    the opening run; ``body`` is ``[(lineno, line), ...]``. A fence closes only
+    on a line of its own character, at least as long as its opening run, with
+    nothing else on it — so a ```` ````markdown ```` fence holds ```` ```sh ````
+    and ```` ``` ```` lines as body, and a ``~~~`` fence holds any backtick
+    line. A fence nested inside another is body, never yielded on its own.
+    """
+    i = 0
+    while i < len(lines):
+        m = ANY_FENCE_OPEN_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        run = m.group(1)
+        close_re = re.compile(r"^\s*" + re.escape(run[0]) + "{%d,}\\s*$" % len(run))
+        opening = i + 1
+        info = lines[i][m.end():].strip()
+        body: list[tuple[int, str]] = []
+        i += 1
+        while i < len(lines) and not close_re.match(lines[i]):
+            body.append((i + 1, lines[i]))
+            i += 1
+        yield opening, info, body, (i + 1 if i < len(lines) else None)
+        i += 1
+
+
+def _any_fence_line_numbers(lines: list[str]) -> set[int]:
+    """Every 1-based line inside ANY fenced block (``_walk_fences``), opening
+    and closing included. Used by ``lesson-check-order`` so a marker or the
+    harness line shown inside an example block is never read as the real
+    anchor (LESSON-404).
+    """
+    out: set[int] = set()
+    for opening, _info, body, closing in _walk_fences(lines):
+        out.add(opening)
+        out.update(lineno for lineno, _ in body)
+        if closing is not None:
+            out.add(closing)
+    return out
+
+
+def _lesson_shell_fences(lines: list[str]):
+    """Yield ``(opening, body)`` for each top-level shell fence (``_walk_fences``
+    with an ``sh``/``bash``/``shell`` info string, behind ```` ``` ```` or
+    ``~~~``). A shell fence shown as an example inside an outer non-shell fence
+    is that fence's body, so its lines are never read as calls."""
+    for opening, info, body, _closing in _walk_fences(lines):
+        if LESSON_SHELL_INFO_RE.match(info):
+            yield opening, body
+
+
+def _shell_line_code(line: str) -> tuple[str, str]:
+    """``(code, masked)`` for one shell line, quote state starting fresh.
+
+    ``code`` is ``line`` up to its comment: a ``#`` outside quotes at the start
+    of a word (``SHELL_WORD_BREAK``), so ``: # adlc_recheck_id lesson L`` keeps
+    only ``: `` and ``echo "a #b"`` keeps everything. ``masked`` is ``code``
+    with every quoted span's contents dropped (the quotes kept) and every
+    backslash-escaped character turned into ``_`` — the text a call is
+    searched in, so a call spelled inside a string is not a call. Quote state
+    does not carry across lines: a heredoc's stray apostrophe cannot hide the
+    lines after it.
+    """
+    masked: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 2
+                continue
+            if c == quote:
+                quote = ""
+                masked.append(c)
+            i += 1
+            continue
+        if c == "\\":
+            masked.append("_")
+            i += 2
+            continue
+        if c == "#" and (i == 0 or line[i - 1] in SHELL_WORD_BREAK):
+            return line[:i], "".join(masked)
+        if c in "'\"":
+            quote = c
+        masked.append(c)
+        i += 1
+    return line, "".join(masked)
+
+
+def _harness_line_above(lines: list[str], fence_lines: set[int], opening: int) -> bool:
+    """True when ``HARNESS_SKIP_LITERAL`` sits on a prose line within
+    ``HARNESS_SKIP_WINDOW`` lines above the fence opening at ``opening``
+    (1-based). One window, one literal, for every check that needs it (BUG-228).
+    ``fence_lines`` names the lines that are not prose.
+    """
+    lo = max(1, opening - HARNESS_SKIP_WINDOW)
+    return any(
+        HARNESS_SKIP_LITERAL in lines[n - 1]
+        for n in range(lo, opening)
+        if n not in fence_lines
+    )
+
+
 def check_harness_skip(text: str, rel: str) -> list[Finding]:
     """BUG-228: every delegating step tells a provenance-classifying harness to skip it.
 
@@ -1181,28 +1383,21 @@ def check_harness_skip(text: str, rel: str) -> list[Finding]:
     lines above its opening. A copy inside a fence is not read as an
     instruction and does not count, and a commented-out gate call is not a call.
     """
-    fence_lines: set[int] = set()
-    gate_fences: list[int] = []
-    for _lang, _idx, body_start, body in _iter_fences(text):
-        opening = body_start - 1
-        fence_lines.add(opening)
-        fence_lines.update(lineno for lineno, _ in body)
-        fence_lines.add((body[-1][0] if body else opening) + 1)
+    fences = list(_iter_fences(text))
+    fence_lines = _shell_fence_line_numbers(fences)
+    gate_fences = [
+        body_start - 1
+        for _lang, _idx, body_start, body in fences
         if any(
             HARNESS_SKIP_GATE_RE.match(line)
             for _, line in body
             if not line.lstrip().startswith("#")
-        ):
-            gate_fences.append(opening)
+        )
+    ]
     lines = text.splitlines()
     findings: list[Finding] = []
     for opening in gate_fences:
-        lo = max(1, opening - HARNESS_SKIP_WINDOW)
-        if not any(
-            HARNESS_SKIP_LITERAL in lines[n - 1]
-            for n in range(lo, opening)
-            if n not in fence_lines
-        ):
+        if not _harness_line_above(lines, fence_lines, opening):
             findings.append(
                 Finding(
                     rel, opening, "harness-skip",
@@ -1213,6 +1408,377 @@ def check_harness_skip(text: str, rel: str) -> list[Finding]:
                 )
             )
     return findings
+
+
+class LessonRulesBlock(NamedTuple):
+    """The ``<!-- lesson-capture-rules -->`` block of one file.
+
+    ``open_line`` is the 1-based line of the opening marker; ``close_line`` is
+    that of the closing marker, or ``None`` when the block is never closed.
+    ``body`` holds the raw lines between the markers WITH their line endings,
+    so two blocks compare byte-for-byte rather than modulo line terminators.
+    """
+    open_line: int
+    close_line: int | None
+    body: list[str]
+
+
+def parse_lesson_rules_block(text: str) -> LessonRulesBlock | None:
+    """The first own-line ``lesson-capture-rules`` block, or ``None`` if absent.
+
+    Only own-line markers OUTSIDE every fenced block count
+    (``LESSON_RULES_OPEN_RE``/``_CLOSE_RE``, ``_any_fence_line_numbers``): a
+    backticked mention in prose, or a block shown inside an example fence,
+    opens and closes nothing.
+    """
+    raw = text.splitlines(keepends=True)
+    fenced = _any_fence_line_numbers(raw)
+    for i, line in enumerate(raw):
+        if i + 1 in fenced or not LESSON_RULES_OPEN_RE.match(line):
+            continue
+        for j in range(i + 1, len(raw)):
+            if j + 1 not in fenced and LESSON_RULES_CLOSE_RE.match(raw[j]):
+                return LessonRulesBlock(i + 1, j + 1, raw[i + 1:j])
+        return LessonRulesBlock(i + 1, None, raw[i + 1:])
+    return None
+
+
+def _lesson_skill(rel: str) -> str | None:
+    """The lesson-capture skill ``rel`` belongs to — its directory name, one of
+    ``LESSON_CHECK_ORDER_SKILLS`` — or ``None``. Every per-file lesson check
+    opens with this gate, so no other SKILL.md is held to the contract."""
+    skill = Path(rel).parent.name
+    return skill if skill in LESSON_CHECK_ORDER_SKILLS else None
+
+
+# Finding ids ride at the front of the message (`<id>: …`), not in `check`.
+def _lesson_finding(rel: str, line: int, finding_id: str, message: str) -> Finding:
+    return Finding(rel, line, LESSON_CHECK_ORDER, f"{finding_id}: {message}")
+
+
+def check_lesson_check_order(text: str, rel: str) -> list[Finding]:
+    """REQ-646 BR-3/BR-4/BR-15 (ADR-5): one lesson-capture step's structure.
+
+    Runs only on ``wrapup/SKILL.md`` and ``bugfix/SKILL.md`` (the skill is the
+    directory name in ``rel``; any other file gets no finding). In file order
+    the file must carry:
+
+    1. an own-line ``<!-- lesson-write-point -->`` outside every fenced block —
+       the write instruction's anchor (``missing-write-point``). A backticked
+       or prose mention, or a copy inside an example fence of any language, is
+       a decoy and does not count (LESSON-404);
+    2. a shell fence with a line calling ``adlc_lesson_check`` in command
+       position (``missing-check-fence``), after the write point
+       (``check-before-write-point``) — the check reads the file just written.
+       Several write points are fine so long as one sits above the first
+       check call, so a stray marker lower down never moves the anchor;
+    3. a shell fence with a line calling ``adlc_recheck_id lesson``
+       (``missing-recheck-fence``), after the first check call
+       (``recheck-before-check``) — the repair loop may still delete the draft.
+
+    Shell fences are the TOP-LEVEL ones ``_lesson_shell_fences`` yields —
+    ```` ``` ```` or ``~~~``, nesting length-aware — so a ```` ```sh ````
+    example inside an outer ```` ````markdown ```` fence calls nothing. A call
+    is searched in the line's code only (``_shell_line_code``): a ``#``
+    comment, whole-line or trailing, and a quoted string call nothing.
+
+    Every check fence also needs ``HARNESS_SKIP_LITERAL`` on a prose line — not
+    inside any fenced block — in the ``HARNESS_SKIP_WINDOW`` lines above it
+    (``missing-harness-line``, BR-15): the fence runs a partial by path and
+    would pin a provenance-classifying harness.
+
+    The file must carry a non-empty ``<!-- lesson-capture-rules -->`` block
+    (``rules-block-missing``) holding a line that starts ``Granularity:``
+    (``rules-block-missing-granularity``). ``/wrapup``'s ``--question``
+    coverage is ``check_lesson_question_coverage``; the blocks' equality across
+    the two files is the per-root ``check_lesson_rules_parity``.
+
+    Ordering compares the CALL lines, so a check and a recheck sharing one
+    fence are still ordered; findings point at the offending fence's opening.
+    """
+    if _lesson_skill(rel) is None:
+        return []
+    lines = text.splitlines()
+    fenced = _any_fence_line_numbers(lines)
+    findings: list[Finding] = []
+
+    write_points = [
+        n for n, line in enumerate(lines, start=1)
+        if n not in fenced and LESSON_WRITE_POINT_RE.match(line)
+    ]
+    checks: list[tuple[int, int]] = []    # (fence opening, call line)
+    rechecks: list[tuple[int, int]] = []
+    for opening, body in _lesson_shell_fences(lines):
+        # A comment or a quoted string calls nothing, whatever it spells.
+        live = [(n, _shell_line_code(line)[1]) for n, line in body]
+        call = next((n for n, code in live if LESSON_CHECK_CALL_RE.search(code)), None)
+        if call is not None:
+            checks.append((opening, call))
+        call = next((n for n, code in live if LESSON_RECHECK_CALL_RE.search(code)), None)
+        if call is not None:
+            rechecks.append((opening, call))
+
+    if not write_points:
+        findings.append(_lesson_finding(
+            rel, 1, "missing-write-point",
+            "no line that is exactly `<!-- lesson-write-point -->` outside a "
+            "fenced block — anchor the instruction that writes the lesson file "
+            "with it on a line of its own; a backticked, prose or fenced "
+            "mention does not count (REQ-646 ADR-5)",
+        ))
+    if not checks:
+        findings.append(_lesson_finding(
+            rel, 1, "missing-check-fence",
+            "no shell fence calls `adlc_lesson_check` — the lesson the capture "
+            "step writes must be validated before it is pushed (REQ-646 BR-3)",
+        ))
+    if not rechecks:
+        findings.append(_lesson_finding(
+            rel, 1, "missing-recheck-fence",
+            "no shell fence calls `adlc_recheck_id lesson` — the lesson id must be "
+            "rechecked against the remote before push (REQ-646 ADR-5)",
+        ))
+    if checks:
+        first_check = min(call for _opening, call in checks)
+        # One write point above the first check call anchors every check; with
+        # none above it, each check call above the first write point is early.
+        if write_points and not any(n < first_check for n in write_points):
+            anchor = write_points[0]
+            for opening, call in checks:
+                if call < anchor:
+                    findings.append(_lesson_finding(
+                        rel, opening, "check-before-write-point",
+                        f"the `adlc_lesson_check` fence comes before the write "
+                        f"point (line {anchor}) — it would validate a file not "
+                        "yet written; move it below the write instruction "
+                        "(REQ-646 BR-3)",
+                    ))
+        for opening, call in rechecks:
+            if call < first_check:
+                findings.append(_lesson_finding(
+                    rel, opening, "recheck-before-check",
+                    f"the `adlc_recheck_id lesson` fence comes before the "
+                    f"`adlc_lesson_check` call (line {first_check}) — the repair "
+                    "loop can still delete the draft, so recheck only a lesson "
+                    "that passed the check (REQ-646 BR-3)",
+                ))
+
+    for opening, _call in checks:
+        if not _harness_line_above(lines, fenced, opening):
+            findings.append(_lesson_finding(
+                rel, opening, "missing-harness-line",
+                f"`adlc_lesson_check` fence without '{HARNESS_SKIP_LITERAL}' on a "
+                f"prose line in the {HARNESS_SKIP_WINDOW} lines above it — the "
+                "fence runs a partial by path and would pin a "
+                "provenance-classifying harness; say how to validate in-model "
+                "there (REQ-646 BR-15)",
+            ))
+
+    block = parse_lesson_rules_block(text)
+    if block is None:
+        findings.append(_lesson_finding(
+            rel, 1, "rules-block-missing",
+            "no own-line `<!-- lesson-capture-rules -->` … "
+            "`<!-- /lesson-capture-rules -->` block outside a fenced block — "
+            "both capture steps carry the same capture rules inside it "
+            "(REQ-646 BR-4)",
+        ))
+    elif block.close_line is None:
+        findings.append(_lesson_finding(
+            rel, block.open_line, "rules-block-missing",
+            "`<!-- lesson-capture-rules -->` is never closed by an own-line "
+            "`<!-- /lesson-capture-rules -->` (REQ-646 BR-4)",
+        ))
+    elif not any(line.strip() for line in block.body):
+        findings.append(_lesson_finding(
+            rel, block.open_line, "rules-block-missing",
+            "the `<!-- lesson-capture-rules -->` block is empty (REQ-646 BR-4)",
+        ))
+    elif not any(line.strip().startswith(LESSON_GRANULARITY_PREFIX) for line in block.body):
+        findings.append(_lesson_finding(
+            rel, block.open_line, "rules-block-missing-granularity",
+            f"the `<!-- lesson-capture-rules -->` block has no line starting "
+            f"`{LESSON_GRANULARITY_PREFIX}` — the rule that keeps a lesson "
+            "between too generic to change behaviour and too specific to fire "
+            "again (REQ-646 BR-4)",
+        ))
+    return findings
+
+
+def _delegated_question(text: str) -> tuple[int, str] | None:
+    """``(line, argument)`` of ``/wrapup``'s delegated ``--question``, or ``None``.
+
+    The call is the first top-level shell-fence line (``_lesson_shell_fences``)
+    whose code — the line before its ``#`` comment (``_shell_line_code``) —
+    carries ``LESSON_QUESTION_CALL`` and, after it, ``LESSON_QUESTION_OPEN``.
+    The argument runs from there to the first unescaped ``"`` (an escaped
+    ``\\"`` does not end it) — across later lines of the same fence if the
+    string spans them, to the fence's end if it is never closed. It is
+    returned as written, line breaks and escapes not undone: a rule line that
+    would need an escape is already ``rules-line-unsafe-in-question``, and one
+    wrapped across lines is reported by ``check_lesson_question_coverage``.
+    """
+    for _opening, body in _lesson_shell_fences(text.splitlines()):
+        for k, (lineno, line) in enumerate(body):
+            code = _shell_line_code(line)[0]
+            call = code.find(LESSON_QUESTION_CALL)
+            if call == -1:
+                continue
+            opened = code.find(LESSON_QUESTION_OPEN, call)
+            if opened == -1:
+                continue
+            tail = "\n".join(
+                [line[opened + len(LESSON_QUESTION_OPEN):]]
+                + [later for _n, later in body[k + 1:]]
+            )
+            end = 0
+            while end < len(tail) and tail[end] != '"':
+                end += 2 if tail[end] == "\\" else 1
+            return lineno, tail[:end]
+    return None
+
+
+def check_lesson_question_coverage(text: str, rel: str) -> list[Finding]:
+    """REQ-646 BR-4: ``/wrapup``'s delegated ``--question`` carries the rules.
+
+    ``wrapup/SKILL.md`` only — ``/bugfix`` delegates no draft, so its block is
+    its only copy of the rules. The question is the double-quoted argument
+    ``_delegated_question`` extracts. Every non-empty line of the capture-rules
+    block, stripped, must occur in it verbatim AND in block order, each match
+    starting after the previous one ends (``rules-line-not-in-question``,
+    reported once, on the first line missing or out of order: the lines after
+    it are not judged against a sequence already broken). A question that
+    cannot be found is reported the same way, on the block's first rule line.
+
+    Independently, a rule line holding ``"``, ``$``, a backtick or ``\\`` is
+    ``rules-line-unsafe-in-question``, one finding per line: inside the
+    double-quoted argument the character would end the string, substitute a
+    command or variable, or escape, so the delegate would not receive the line
+    the block states.
+
+    A ``--question`` string wrapped over several source lines is read as
+    written, line breaks included, and continuation lines are NOT joined: the
+    shell hands the delegate the newline and the next line's indentation (or,
+    after a ``\\`` continuation, the indentation alone), not the rule as the
+    block states it. So a question may break BETWEEN rule lines, but a rule
+    line split across a break is ``rules-line-not-in-question``, with a
+    message naming the wrap — even a ``\\`` continuation that happens to
+    deliver the words intact, since one rule per source line is the simpler
+    contract to read and to keep.
+
+    A missing, unclosed or empty block is already ``rules-block-missing``, so
+    it is skipped here rather than reported twice.
+    """
+    if _lesson_skill(rel) != "wrapup":
+        return []
+    block = parse_lesson_rules_block(text)
+    if block is None or block.close_line is None:
+        return []
+    rules = [
+        (block.open_line + offset, line.strip())
+        for offset, line in enumerate(block.body, start=1)
+        if line.strip()
+    ]
+    if not rules:
+        return []
+    findings: list[Finding] = []
+    for n, rule in rules:
+        unsafe = sorted(LESSON_QUESTION_UNSAFE.intersection(rule))
+        if unsafe:
+            findings.append(_lesson_finding(
+                rel, n, "rules-line-unsafe-in-question",
+                f"this capture-rules line holds {', '.join(repr(c) for c in unsafe)} "
+                f"— inside the double-quoted `{LESSON_QUESTION_OPEN}…\"` argument "
+                "it would end the string, substitute, or escape, so the "
+                "delegate would not receive the rule as written; reword it "
+                "without the character (REQ-646 BR-4)",
+            ))
+    found = _delegated_question(text)
+    if found is None:
+        findings.append(_lesson_finding(
+            rel, rules[0][0], "rules-line-not-in-question",
+            f"no non-comment shell-fence line runs `{LESSON_QUESTION_CALL}` "
+            f"with a `{LESSON_QUESTION_OPEN}…\"` argument, so no capture-rules "
+            "line reaches the delegate — the delegated question must carry "
+            "every rule line verbatim and in block order (REQ-646 BR-4)",
+        ))
+        return sorted(findings, key=lambda f: f.line)
+    q_line, question = found
+    pos = 0
+    for n, rule in rules:
+        at = question.find(rule, pos)
+        if at != -1:
+            pos = at + len(rule)
+            continue
+        if rule in question:
+            why = "occurs in the question only before the previous rule line's match"
+        elif " ".join(rule.split()) in " ".join(question.replace("\\\n", " ").split()):
+            why = (
+                "is in the question only wrapped across a line break or with "
+                "its spacing changed — keep each rule line on one source line "
+                "of the argument, so the delegate receives it exactly as the "
+                "block states it"
+            )
+        else:
+            why = "is not in the question"
+        findings.append(_lesson_finding(
+            rel, n, "rules-line-not-in-question",
+            f"this capture-rules line {why} (the `--question` at line {q_line}) "
+            "— the delegated question must carry every rule line verbatim and "
+            "in block order (REQ-646 BR-4)",
+        ))
+        break
+    return sorted(findings, key=lambda f: f.line)
+
+
+def check_lesson_rules_parity(root: Path) -> list[Finding]:
+    """REQ-646 BR-4 / AC-6: the two capture-rules blocks are byte-equal.
+
+    Per-root check (mirrors ``check_sync_surface_parity``): reads the two
+    ``LESSON_RULES_PARITY_SITES`` under ``root`` and degrades to zero findings
+    when either is absent, unreadable, or resolves outside ``root`` (the
+    symlink defence ``find_skill_files`` carries). The files are decoded from
+    bytes, not read in text mode, so a CRLF in one copy is a difference rather
+    than being normalised away. A missing, unclosed or empty block is already a
+    per-file ``rules-block-missing`` finding, so it is skipped here rather than
+    reported twice. One finding per mismatch, on the ``bugfix`` side:
+    ``/wrapup``'s copy is the one also checked against its ``--question``
+    string, so it is the reference the other copy follows.
+    """
+    root_resolved = root.resolve()
+    texts: list[str] = []
+    for site in LESSON_RULES_PARITY_SITES:
+        path = root / site
+        try:
+            path.resolve().relative_to(root_resolved)
+            if not path.is_file():
+                return []  # not the toolkit checkout — skip.
+            texts.append(path.read_bytes().decode("utf-8", errors="replace"))
+        except (OSError, ValueError):
+            return []
+    (w_rel, b_rel), (w_text, b_text) = LESSON_RULES_PARITY_SITES, texts
+    w_block = parse_lesson_rules_block(w_text)
+    b_block = parse_lesson_rules_block(b_text)
+    if w_block is None or b_block is None:
+        return []
+    if w_block.close_line is None or b_block.close_line is None:
+        return []
+    if not all(any(line.strip() for line in blk.body) for blk in (w_block, b_block)):
+        return []
+    if w_block.body == b_block.body:
+        return []
+    k = next(
+        (i for i, (w, b) in enumerate(zip(w_block.body, b_block.body)) if w != b),
+        min(len(w_block.body), len(b_block.body)),
+    )
+    w_line = w_block.open_line + 1 + k
+    b_line = b_block.open_line + 1 + k
+    return [_lesson_finding(
+        b_rel, b_line, "rules-block-mismatch",
+        f"the `<!-- lesson-capture-rules -->` block differs from {w_rel}'s "
+        f"(first difference: {b_rel}:{b_line} vs {w_rel}:{w_line}) — the two "
+        "capture steps carry the same rules byte-for-byte (REQ-646 BR-4)",
+    )]
 
 
 def check_provenance_safe_fence(text: str, rel: str) -> list[Finding]:
@@ -1691,6 +2257,9 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_harness_skip(text, rel))
         findings.extend(check_provenance_safe_fence(text, rel))
         findings.extend(check_unguarded_source(text, rel))
+        # REQ-646 ADR-5: both gate on `rel`'s directory name (wrapup / bugfix).
+        findings.extend(check_lesson_check_order(text, rel))
+        findings.extend(check_lesson_question_coverage(text, rel))
     # REQ-609: `check_read_bin_fallback` also walks `agents/*.md`, and REQ-610
     # adds `check_unguarded_source` to the same walk (`agents/delegate-pre-pass.md`
     # carries both a corpus handover and a partial source line) — see
@@ -1741,6 +2310,8 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_sync_surface_parity(root))
     # Per-root (BUG-194): lifecycle status writes vs /spec's retrieval exclusion list.
     findings.extend(check_retrieval_status_parity(root))
+    # Per-root (REQ-646 BR-4): /wrapup's and /bugfix's capture-rules blocks agree.
+    findings.extend(check_lesson_rules_parity(root))
     return findings, scanned
 
 

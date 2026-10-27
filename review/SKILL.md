@@ -41,10 +41,11 @@ Before proceeding, verify that `.adlc/context/conventions.md` exists. If it does
 6. **Conventions**: if `.adlc/context/conventions.md` is NOT already in your conversation context, Read it now. Otherwise skip — it's already loaded.
 7. **Relevant lessons** (mirrors the spirit of `llm-review.yml`, but relevance-ranked instead of time-ranked):
    a. Derive the set of touched **components** from the diff. Components are inferred from file paths — e.g. `api/auth/*` → `API/auth`, `app/Sources/Views/*.swift` → `iOS/SwiftUI`, `infrastructure/terraform/*` → `infra/terraform`. Produce a short list of plausible `component` values and a broader list of `domain` values (e.g. `API`, `iOS`, `infra`).
-   b. Glob `.adlc/knowledge/lessons/*.md` and read each file's frontmatter (`domain`, `component`, `tags`). Keep lessons where `component` matches any touched component exactly, OR where `domain` matches any touched domain AND `component` is a prefix of a touched component, OR where any tag matches a touched component/domain. This is the **relevance set**.
+   b. Glob `.adlc/knowledge/lessons/*.md` and read each file's frontmatter (`domain`, `component`, `tags`, `confidence`, `supersedes`). Keep lessons where `component` matches any touched component exactly, OR where `domain` matches any touched domain AND `component` is a prefix of a touched component, OR where any tag matches a touched component/domain. This is the **relevance set**. `confidence` and `supersedes` play no part in relevance — record them next to each lesson's id for Step 4. A lesson's own `supersedes` names what *it* replaces; whether *it* has been replaced is Step 4's reverse lookup, run only for lessons a finding matched.
    c. If the relevance set has fewer than 5 entries, top it up with the most recently modified lessons from `.adlc/knowledge/lessons/` (the previous time-based heuristic) until the set has up to 10 entries. This keeps small or cross-cutting diffs from losing context entirely.
    d. Cap the final list at 15 lessons. Read their bodies in full.
    e. Pass the content of every selected lesson as context to every review agent in Step 3. When a finding later matches one of these lessons, cite its `id` explicitly (Step 4 uses this to elevate severity).
+   f. **Lesson files this diff changes.** From the item 5 diff, list the `.adlc/knowledge/lessons/LESSON-*.md` paths it adds or modifies (`--name-only` on the same diff, plus untracked lesson files when the scope includes uncommitted changes). Step 4 ignores the `confidence` and `supersedes` those files carry: a change under review must not switch off its own escalation.
    **Fallback**: if any lesson has no `component` / `domain` / `tags` frontmatter (legacy file), fall back to reading its title + first paragraph and include it only if the title contains any touched domain or component substring. Do not skip it silently — it may be load-bearing.
 
 ### Step 2: Read All Changed Files
@@ -72,6 +73,26 @@ Each agent returns structured findings with severity (Critical/Major/Minor/Nit),
    - **Minor**: Nice to fix (style, naming, minor improvements)
    - **Nit**: Optional suggestions
 4. Cross-reference findings against the loaded recent lessons — if a finding matches a known pitfall, escalate its severity by one level (e.g., a Minor finding that matches a prior LESSON becomes a Major). Flag this explicitly in the report.
+   **Escalation is gated on the matched lesson's standing** (REQ-646 BR-6). It fires unless the matched lesson has `confidence: low` or another lesson supersedes it (the lookup below). Only the value `low` counts: `medium`, `high`, an empty value and any value outside the enum all behave as absent. A matched lesson with absent `confidence` escalates as today — legacy lessons predate the field, and absence is not `low`. Otherwise the finding keeps its severity, still cites the lesson id, and the report carries the matching annotation verbatim:
+   - `confidence: low` → `(matched LESSON-xxx, confidence low — not escalated)`
+   - named in another lesson's `supersedes` → `(matched LESSON-xxx, superseded by LESSON-yyy — not escalated)`
+
+   When both apply, use the superseded annotation — it names the lesson to read instead. This does not switch escalation off wholesale: a lesson backed by a finding-plus-fix or a reproduce-plus-fix is `medium`/`high` and still escalates (the capture prompt's contrast rule, REQ-646 BR-4).
+
+   **Superseded lookup** (REQ-646 ADR-6) — run it here, lazily: only for a lesson a finding matched, never for all 15 selected in Step 1. The superseding lesson is usually *not* in the selected set, so loaded frontmatter cannot answer this; run one corpus-wide reverse lookup per matched lesson. Substitute the lesson's id for `<id>` only after it matches `^LESSON-[0-9]{3,6}$` — an id that does not match is skipped, never substituted — and the `case` re-checks it before anything uses it:
+
+   ```sh
+   ID='<id>'
+   case "$ID" in
+     LESSON-[0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9][0-9][0-9])
+       find .adlc/knowledge/lessons -maxdepth 1 -type f -name 'LESSON-*.md' -exec awk -v id="$ID" 'FNR==1{s=0;skip=0;c=0;sub(/^\357\273\277/,"")} {sub(/\r$/,"")} skip{next} s==0&&/^[ \t]*$/{next} s==0&&/^<!--/{c=1} c{ if(/-->/){c=0}; next } s==0&&!/^---$/{skip=1;next} s<2&&/^---$/{s++;next} s==1&&$(0)~("^supersedes:[ \t][^#]*" id "([^0-9]|$)"){print FILENAME;skip=1}' {} + 2>/dev/null ;;
+     *) echo "superseded lookup: $ID is not a LESSON-nnn id — skipped" >&2 ;;
+   esac
+   ```
+
+   Each printed path is a superseding lesson; its id is the `LESSON-<digits>` prefix of the basename. Ignore a hit on the lesson's own file, and a hit on a file Step 1 item 7f listed. Every remaining hit is a `superseded by` id, comma-separated; no output means not superseded. The id reaches `awk` as data (`-v`), so the `case` guards the only place it is substituted. The program is single-quoted and reads only the frontmatter block, found the way `adlc_lesson_check` finds it: a leading BOM and each line's trailing CR are dropped, blank lines and HTML comments are skipped, and the block opens only when the first other line is `---` — a file that opens with anything else, such as a legacy lesson whose `---` lines are horizontal rules in its body, is skipped whole. The match needs a blank after `supersedes:` (the one key spelling the check accepts), and `[^#]*` stops at a trailing `# comment`, so neither a body line nor a comment that mentions the id is a hit. `2>/dev/null` keeps a missing lessons directory quiet — no output, so not superseded. `-exec … {} +` runs nothing when no file matches, where GNU `xargs` would run its command once on empty input; the quoted `-name` never hands the shell an unmatched glob (zsh aborts on one — LESSON-335); and `([^0-9]|$)` stops `LESSON-40` matching `LESSON-404` without a word-boundary escape, which BSD tools silently ignore (LESSON-013). On a provenance-classifying harness (BUG-228), use Claude's own Grep tool with the regex `^supersedes:[ \t][^#]*LESSON-<id>([^0-9]|$)`, `<id>` there being the digits alone (path `.adlc/knowledge/lessons`, glob `LESSON-*.md`, with line numbers), and keep only the hits inside their file's frontmatter block — the block that opens at the file's first non-blank, non-comment line.
+
+   **A lesson file this diff changes carries no standing** (Step 1 item 7f). If the matched lesson's own file is on that list, treat its `confidence` as absent; a superseding hit on that list does not count. When that is what kept an exemption from applying, the finding escalates as today and the report says so: `(matched LESSON-xxx, exemption ignored — lesson changed in this diff)`.
 
 ### Step 5: Present Review
 Display findings organized by file, then by severity within each file. Include a dimension summary at the top so the user can see which of the 5 dimensions have issues at a glance:
@@ -102,5 +123,5 @@ Display findings organized by file, then by severity within each file. Include a
 1. Overall gate: PASS (ready to merge) / FAIL (fix criticals first) / RESHAPE (significant rework needed)
 2. Count of issues by severity and by dimension
 3. Top 3 most important things to address
-4. Any findings that matched recent lessons (elevated-severity items)
+4. Any findings that matched recent lessons (elevated-severity items), and the matches Step 4 did not escalate, each with its `(matched LESSON-xxx, … — not escalated)` annotation, plus any match whose exemption Step 4 ignored because the diff changes the lesson file, with its `(matched LESSON-xxx, exemption ignored — lesson changed in this diff)` annotation
 5. If changes look good, say so clearly — an empty review is a valid result for small, well-scoped changes

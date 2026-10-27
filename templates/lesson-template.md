@@ -16,6 +16,12 @@ tags: []            # free-form keywords, e.g., ["timer-cleanup", "snapshot-test
 req: REQ-xxx
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
+kind: ""            # process | domain — how a skill/agent/pipeline works vs what an implementer must know
+evidence: ""        # the moment: a commit sha, BUG-/REQ-/LESSON-/TASK-nnn, path:line, or test name. No home paths.
+confidence: ""      # high | medium | low — see the contrast rule in the capture prompt
+enforcement: none   # none | lint:<check-id> | test:<path> | script:<path> | hook:<name>
+generalizes: []     # LESSON ids this one generalizes
+supersedes: []      # LESSON ids this one replaces
 ---
 
 ## What Happened
@@ -33,3 +39,4 @@ Impact if ignored: what goes wrong, how much time it costs, etc.
 ## Applies When
 
 Conditions under which this lesson is relevant (so consuming skills can filter).
+This is the cue — required on every lesson the capture steps write.
