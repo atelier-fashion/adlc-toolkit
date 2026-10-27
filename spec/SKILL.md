@@ -320,7 +320,7 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    was filtered out" — the failure mode BUG-194 hid behind for four months
    (LESSON-012: a silent path needs a structural signal, not a prose promise).
 
-2. **Read the frontmatter of every candidate** using Read with `limit: 30` (enough to cover full frontmatter block including any leading HTML comments, e.g., the lesson template's naming-convention comment). Parse these fields: `component`, `domain`, `stack`, `concerns`, `tags`, `updated`, `created`, `status`. If the frontmatter is malformed (missing `---` delimiters, unparseable YAML), skip that doc and continue — do not crash.
+2. **Read the frontmatter of every candidate** using Read with `limit: 30` (enough to cover full frontmatter block including any leading HTML comments, e.g., the lesson template's naming-convention comment). Parse these fields: `component`, `domain`, `stack`, `concerns`, `tags`, `updated`, `created`, `status`, `supersedes`. `supersedes` is parsed for presentation only — sub-steps 3–6 never read it (REQ-646 BR-7). `confidence` is not parsed: nothing in this step presents or scores it. If the frontmatter is malformed (missing `---` delimiters, unparseable YAML), skip that doc and continue — do not crash.
 
 3. **Compute a weighted score per candidate** using the following rule:
    - `+3` if `doc.component == query.component`
@@ -417,14 +417,66 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    _adlc_emit_step_telemetry spec Step-1.6
    ```
 
+7a. **Superseded annotation (REQ-646 BR-7, ADR-6 — presentation only).** For each
+   retrieved **lesson** in the top 15 (specs and bugs carry no `supersedes`; skip
+   this sub-step when no lesson was retrieved), ask whether another lesson names it
+   in `supersedes`. The superseding lesson is usually *not* in the top 15, so the
+   `supersedes` parsed in sub-step 2 cannot answer this — run one corpus-wide
+   reverse lookup per retrieved lesson. Substitute the lesson's id for `<id>` only
+   after it matches `^LESSON-[0-9]{3,6}$` — an id that does not match is skipped,
+   never substituted — and the `case` re-checks it before anything uses it:
+
+   ```sh
+   ID='<id>'
+   case "$ID" in
+     LESSON-[0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9][0-9][0-9])
+       find .adlc/knowledge/lessons -maxdepth 1 -type f -name 'LESSON-*.md' -exec awk -v id="$ID" 'FNR==1{s=0;skip=0;c=0;sub(/^\357\273\277/,"")} {sub(/\r$/,"")} skip{next} s==0&&/^[ \t]*$/{next} s==0&&/^<!--/{c=1} c{ if(/-->/){c=0}; next } s==0&&!/^---$/{skip=1;next} s<2&&/^---$/{s++;next} s==1&&$(0)~("^supersedes:[ \t][^#]*" id "([^0-9]|$)"){print FILENAME;skip=1}' {} + 2>/dev/null ;;
+     *) echo "superseded lookup: $ID is not a LESSON-nnn id — skipped" >&2 ;;
+   esac
+   ```
+
+   Each printed path is a superseding lesson; its id is the `LESSON-<digits>`
+   prefix of the basename (ignore a hit on the lesson's own file). Record
+   `superseded by LESSON-yyy` next to the retrieved lesson — every hit,
+   comma-separated. No output means not superseded. The id reaches `awk` as data
+   (`-v`), so the `case` guards the only place it is substituted. The program is
+   single-quoted and reads only the frontmatter block, found the way
+   `adlc_lesson_check` finds it: a leading BOM and each line's trailing CR are
+   dropped, blank lines and HTML comments are skipped, and the block opens only
+   when the first other line is `---` — a file that opens with anything else, such
+   as a legacy lesson whose `---` lines are horizontal rules in its body, is
+   skipped whole. The match needs a blank after `supersedes:` (the one key
+   spelling the check accepts), and `[^#]*` stops at a trailing `# comment`, so
+   neither a body line nor a comment that mentions the id is a hit. `2>/dev/null`
+   keeps a missing lessons directory quiet — no output, so not superseded.
+   `-exec … {} +` runs nothing when no file matches, where GNU `xargs` would run
+   its command once on empty input; the quoted `-name` never hands the shell an
+   unmatched glob (zsh aborts on one — LESSON-335); and `([^0-9]|$)` stops
+   `LESSON-40` matching `LESSON-404` without a word-boundary escape, which BSD
+   tools silently ignore (LESSON-013). On a provenance-classifying harness
+   (BUG-228), where the shell form would pin the session, use Claude's own Grep
+   tool with the regex `^supersedes:[ \t][^#]*LESSON-<id>([^0-9]|$)`, `<id>` there
+   being the digits alone (path `.adlc/knowledge/lessons`, glob `LESSON-*.md`,
+   with line numbers), and keep only the hits inside their file's frontmatter
+   block — the block that opens at the file's first non-blank, non-comment line.
+
+   **This changes nothing about retrieval.** A superseded lesson keeps its score,
+   its rank, and its place in the top 15; sub-steps 3–6 are not re-run, and neither
+   `supersedes` nor `confidence` feeds the score. Weighting or filtering by either
+   is deferred until the corpus carries the fields (LESSON-571: a scoring change
+   must be designed against the writer vocabulary it reads).
+
 8. **Surface the retrieval summary** to the user before authoring continues. This is always shown — there is no verbose flag gate:
    ```
    Retrieved context for this REQ:
-     LESSON-034 (lesson, score 5): Silent failure remediation
+     LESSON-034 (lesson, score 5, superseded by LESSON-040): Silent failure remediation
      BUG-012    (bug,    score 5): Auth rate-limit bypass
      REQ-019    (spec,   score 3): Prior login redesign
      ... (etc.)
    ```
+   The `, superseded by LESSON-yyy` suffix appears only on a lesson sub-step 7a
+   found superseded; every other line keeps the plain `(corpus, score)` form. The
+   score shown is the one sub-steps 3–6 computed — the annotation never changes it.
 
 9. **Cold-start path**: if every corpus is empty, or all candidates filter out to zero, skip retrieval and record this explicitly when Step 3 writes the `## Retrieved Context` section. Proceed to authoring without retrieved bodies. **A true cold start requires the corpora to be empty or every candidate to lose on *score*.** If the spec corpus had files on disk and lost them all to the *status filter*, that is the BUG-194 mismatch, not a cold start — sub-step 1a's warning fires and Step 3 records the suppressed-corpus line instead of the cold-start line.
 
@@ -456,7 +508,7 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    - **Assumptions**: Things assumed to be true that could affect the design. **If Step 1.4 ran**, every `assumption`-severity gap is written here — see sub-step 5.
    - **Open Questions**: Questions that need answers before implementation. **If Step 1.4 ran in non-interactive mode**, every unanswered `blocking` gap is written here — see sub-step 5.
    - **Out of Scope**: Items explicitly excluded to prevent scope creep
-   - **Retrieved Context** (NEW, always present): append a `## Retrieved Context` section at the end of the spec listing every retrieved source from the retrieval summary produced in Step 1.6 in the form `ID (corpus, score): title`. If no context was retrieved (cold-start path — either the corpus is empty or no documents scored above zero), write exactly: `No prior context retrieved — no tagged documents matched this area.` If instead Step 1.6 sub-step 1a fired (spec files existed on disk but none survived the status filter), write exactly: `Spec corpus suppressed by status filter — see stderr warning (BUG-194).` and, when lessons or bugs still matched, list them beneath it. Never emit the cold-start line for a status-filter suppression — collapsing the two is the defect BUG-194 fixed.
+   - **Retrieved Context** (NEW, always present): append a `## Retrieved Context` section at the end of the spec listing every retrieved source from the retrieval summary produced in Step 1.6 in the form `ID (corpus, score): title` — a lesson Step 1.6 sub-step 7a found superseded carries the same parenthetical as the summary, `ID (corpus, score, superseded by LESSON-yyy): title` (e.g. `LESSON-034 (lesson, score 5, superseded by LESSON-040): Silent failure remediation`), with its score unchanged. If no context was retrieved (cold-start path — either the corpus is empty or no documents scored above zero), write exactly: `No prior context retrieved — no tagged documents matched this area.` If instead Step 1.6 sub-step 1a fired (spec files existed on disk but none survived the status filter), write exactly: `Spec corpus suppressed by status filter — see stderr warning (BUG-194).` and, when lessons or bugs still matched, list them beneath it. Never emit the cold-start line for a status-filter suppression — collapsing the two is the defect BUG-194 fixed.
 4. **Inline citations**: when a retrieved doc directly informed a Business Rule, Assumption, or Acceptance Criterion, add an inline citation in the form `(informed by BUG-012)` or `(informed by REQ-019, LESSON-034)` at the end of that line. Citations are required when the retrieved doc is load-bearing for the rule; optional when the doc was background reading only.
 
 5. **Persist the intake result — ONLY if Step 1.4 ran** (REQ-594). If intake did not activate, skip this sub-step entirely: write no `## Provenance` heading, no placeholder, and no empty section. A spec written without intake is exactly the shape it is today (BR-8, BR-11).

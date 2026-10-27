@@ -138,6 +138,14 @@ behavior. Examples:
 
   Contract in the header comment. Tested by `tests/intake.test.sh` under both
   bash and zsh.
+- `lesson-check.sh` — the structural guard on lesson capture (REQ-646). Defines
+  `adlc_lesson_check <lesson-file>`, run by `/wrapup` Step 4 and `/bugfix` Phase 6
+  Step 4 on the v2 lesson file the capture step **just wrote**. It returns **0** when
+  the file passes, **1** on a violation (one `<field>: <reason>` line per violation
+  on stderr), or **2** on a usage error. The rules, the repair loop, the
+  provenance-classifying-harness (BUG-228) fallback and the deviations from ADR-3
+  are in the companion `lesson-check.md`. Tested by `tests/lesson-check.test.sh`
+  under bash, zsh, sh and dash.
 
 Skills invoke a model-2 partial like:
 

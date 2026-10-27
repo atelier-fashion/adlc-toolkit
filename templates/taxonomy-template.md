@@ -65,6 +65,37 @@ Examples:
 - `developer-experience`
 - `cost`
 
+## kind (lesson scope)
+
+Single string. Fixed vocabulary — `adlc_lesson_check` rejects any other value; not project-extensible.
+
+Required on every lesson the capture steps write; absent on legacy lessons.
+
+Values:
+- `process` — how a skill, agent, partial or pipeline phase behaves
+- `domain` — what an implementer must know about the codebase or stack
+
+## confidence (lesson evidence strength)
+
+Single string. Fixed vocabulary — `adlc_lesson_check` rejects any other value; not project-extensible.
+
+Required on every lesson the capture steps write; absent on legacy lessons (absent is "not stated", never `low`).
+
+Decided by whether `evidence` holds a *contrast* — a bug reproduced then fixed, a test failing then passing, a Phase-5 finding confirmed by its fix and re-verify, or two approaches/runs compared:
+- `high` — a contrast was observed **and** the evidence names the mechanism (a specific line, command or finding)
+- `medium` — a contrast was observed but the mechanism is inferred
+- `low` — a single observation with no contrast
+
+## enforcement (lesson structural guard)
+
+Single string. Fixed vocabulary — `adlc_lesson_check` rejects any other value; not project-extensible.
+
+Optional; absent means `none`. Either `none` (honor-system — nothing structural guards the lesson) or one of four patterns naming the guard:
+- `lint:<check-id>` — a lint check catches a violation
+- `test:<path>` — a test at that path fails on a violation
+- `script:<path>` — a script at that path refuses a violation
+- `hook:<name>` — a harness hook with that name blocks a violation
+
 ## tags (free-form)
 
 Array of any keywords. Intentionally NOT enumerated — authors add whatever feels descriptive. Examples: `password-reset`, `rate-limiting`, `snapshot-testing`, `canary-deploy`.
