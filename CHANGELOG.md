@@ -32,6 +32,13 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+## [5.4.0] — 2026-10-27
+
+Two features adapted from Google's Harness² research note, and the close-out gap
+both sprint engines had: lesson schema v2 with a writer-side structural check
+(REQ-646), a lite lane that lets a minor change skip the full pipeline (REQ-652),
+and the `/wrapup --close-out` mode an orchestrator-owned merge now runs (BUG-249).
+
 ### Added
 
 - **A lite lane for minor changes (REQ-652).** A small change request that is not a
