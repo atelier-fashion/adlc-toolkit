@@ -252,6 +252,14 @@ const PRS = {
 // engine's `blocked()`/`failed()` constructors and the Phase-8 merged/pr-ready
 // returns all stamp it — so the closed schema must admit it (don't silently drop
 // the REQ identity past validation). (ADR-12, ADR-7)
+//
+// `closeOut` (BUG-249): a `merged` terminal stays `merged` even when its Step-8b
+// close-out (/wrapup --close-out: spec status, terminal record, knowledge
+// capture) failed — the merge is a fact the forge confirmed, and the unblock
+// pass keys on `state` alone, so a held REQ is released by a merged blocker
+// regardless of close-out. The close-out outcome rides beside it: `ok`,
+// `failed` (reason in `closeOutDetail`), or `skipped` (no Phase-0 evidence in
+// memory for this REQ). Absent means the close-out pass has not run.
 const TERMINAL = {
   type: 'object',
   additionalProperties: false,
@@ -273,6 +281,10 @@ const TERMINAL = {
       },
     },
     reason: { type: 'string' },
+    // BUG-249: Step-8b close-out outcome, stamped by the post-terminal close-out
+    // pass on `merged` terminals only. Never encoded in `state`.
+    closeOut: { type: 'string', enum: ['ok', 'failed', 'skipped'] },
+    closeOutDetail: { type: 'string' },
     // Halt-specific payload. Closed shape (additionalProperties:false) with the
     // known halt sub-fields — e.g. the reflector-question halt carries
     // `questions[]`; a REQ-485 self-healing rebase halt carries the BlockHold
@@ -698,6 +710,88 @@ function sharesRepo(a, b) {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// BUG-249 — Step-8b close-out helpers (pure JS; the IO lives in the leaf).
+// ---------------------------------------------------------------------------
+
+// closeOutEvidenceStatus — pure JS: 'present' when the in-memory evidence for a
+// REQ holds at least one Phase-5 finding or one implementer report, else 'none'.
+// 'none' is what makes the close-out leaf write NO lesson and record
+// `NO_ENTRY: close-out had no run evidence` — a lesson invented without run
+// evidence is worse than none (REQ-646 BR-4 rule 3; LESSON-626).
+function closeOutEvidenceStatus(ev) {
+  const findings = ev && Array.isArray(ev.findings) ? ev.findings : [];
+  const reports = ev && Array.isArray(ev.reports) ? ev.reports : [];
+  return findings.length === 0 && reports.length === 0 ? 'none' : 'present';
+}
+
+// closeOutDigest — pure JS: the bounded, deterministic evidence block the
+// close-out leaf drafts from. Bounded so the prompt stays a prompt (default:
+// 30 findings, 1500 chars per report); deterministic so a replayed run builds
+// byte-identical prompt text from the journal's cached leaf outputs.
+function closeOutDigest(ev, limits) {
+  const maxFindings = (limits && limits.maxFindings) || 30;
+  const maxReportChars = (limits && limits.maxReportChars) || 1500;
+  const tasks = (ev && ev.tasks) || [];
+  const findings = (ev && ev.findings) || [];
+  const reports = (ev && ev.reports) || [];
+  const lines = [];
+  lines.push(
+    `Tasks (${tasks.length}): `
+    + (tasks.map((t) => t.id + (t.title ? ` — ${t.title}` : '')).join('; ') || 'none'),
+  );
+  lines.push(
+    `Phase-5 consolidated findings (${findings.length}`
+    + (findings.length > maxFindings ? `, first ${maxFindings} shown` : '') + '):',
+  );
+  for (const f of findings.slice(0, maxFindings)) {
+    lines.push(
+      `  - [${f.severity}] ${f.file}${typeof f.line === 'number' ? `:${f.line}` : ''} — ${f.title}`
+      + (f.lessonId ? ` (lesson ${f.lessonId})` : '') + (f.mustFix ? ' [must-fix]' : ''),
+    );
+  }
+  if (findings.length === 0) lines.push('  (none)');
+  lines.push(`Implementer reports (${reports.length}):`);
+  for (const r of reports) {
+    const text = String(r.text || '');
+    lines.push(
+      `  - ${r.taskId}: `
+      + (text.length > maxReportChars ? `${text.slice(0, maxReportChars)} […truncated]` : text),
+    );
+  }
+  if (reports.length === 0) lines.push('  (none)');
+  return lines.join('\n');
+}
+
+// repoRootFromWorktree — pure JS: the engine's own worktree convention is
+// `<repoRoot>/.worktrees/<id>` (phase0Prompt), so the repo root is recoverable
+// from the recorded absolute path. Returns null when the path does not follow
+// the convention (the leaf then derives it from `git worktree list`).
+function repoRootFromWorktree(worktree, id) {
+  if (typeof worktree !== 'string' || !id) return null;
+  const suffix = `/.worktrees/${id}`;
+  return worktree.endsWith(suffix) && worktree.length > suffix.length
+    ? worktree.slice(0, -suffix.length)
+    : null;
+}
+
+// groupMergedByRepo — pure JS: partition the `merged` terminals into groups
+// keyed by primary repo id, ids sorted within a group and groups in repo-id
+// order. Close-outs run in PARALLEL across groups and SERIALLY within one: two
+// close-outs in the same repo would otherwise commit, open and merge chore PRs
+// against one integration tip at the same time (BUG-249 contract 4 — the same
+// one-writer-per-repo rule the ADR-12 merge barrier enforces). Non-merged
+// terminals are not grouped (nothing to close out).
+function groupMergedByRepo(terminals, primaryRepoById) {
+  const groups = {};
+  for (const t of terminals || []) {
+    if (!t || t.state !== 'merged') continue;
+    const repo = (primaryRepoById && primaryRepoById[t.id]) || '<unknown>';
+    (groups[repo] = groups[repo] || []).push(t.id);
+  }
+  return Object.keys(groups).sort().map((k) => groups[k].slice().sort());
+}
+
 // Guarded export — load-bearing (see the BEGIN PURE banner): in the Workflow
 // runtime `module` is undefined so this line is SKIPPED (a bare module.exports
 // would throw); under the test loader `module` is defined so the pure logic is
@@ -711,6 +805,7 @@ if (typeof module !== 'undefined') module.exports = {
   reflectorQuestions, fixedPairs, mergeReverified, panelMembers,
   allMerged, stripVerifyMarkers,
   groupCrossRepoReqs, sharesRepo,
+  closeOutEvidenceStatus, closeOutDigest, repoRootFromWorktree, groupMergedByRepo,
 };
 // ==== END PURE ====
 
@@ -724,6 +819,19 @@ const MAX_GATE_ITERATIONS = 3; // ≤3 validate→fix loop per gate (BR-4)
 // may override via .adlc/config.yml `auto_rebase_max_attempts` (the unblock-pass
 // find-leaf reads that config and reports each held REQ's prior rebaseAttempts).
 const AUTO_REBASE_MAX_ATTEMPTS = 1;
+
+// EVIDENCE — per-REQ run evidence the Step-8b close-out drafts from (BUG-249
+// contract 3). The script has no filesystem, and the leaves that produced this
+// data (Phase-0 repos, Phase-2 tasks, Phase-4 implementer reports, Phase-5
+// consolidated findings) used to discard it; it is kept HERE, in memory, keyed
+// by REQ id. On a `resumeFromRunId` replay every cached agent() call returns its
+// recorded value and `runReq` re-executes, so the map is rebuilt identically —
+// except for Phase-4 tasks skipped via phase4.completedTasks, which are never
+// re-dispatched and so contribute no report (the digest says so by omission).
+// `ans` is copied in from runReq, the ONE sanctioned read site of args.answers,
+// so the close-out prompt can carry a user's retry guidance without a second
+// read site. Declared above the top-level await for the TDZ reason below.
+const EVIDENCE = new Map();
 
 // ELIGIBILITY_SCHEMA — the Preflight agent's structured return. Declared here,
 // ABOVE the top-level Preflight block, because the module body runs top-to-
@@ -813,6 +921,23 @@ const COMPLETED_TASKS_SCHEMA = {
   required: ['completedTasks'],
   properties: {
     completedTasks: { type: 'array', items: { type: 'string' } },
+  },
+};
+
+// CLOSE_OUT_RESULT_SCHEMA — the Step-8b close-out leaf's structured return
+// (BUG-249). `closeOut` is copied onto the merged TERMINAL; `detail` carries the
+// lessons written, the `NO_ENTRY: …` line, or the failure reason; `chorePr` is
+// the close-out bookkeeping PR when one was opened. Declared here (above the
+// top-level await) for the same TDZ reason as the schemas above. LOCAL to the
+// engine's control flow; pure literal; additionalProperties:false.
+const CLOSE_OUT_RESULT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['closeOut'],
+  properties: {
+    closeOut: { type: 'string', enum: ['ok', 'failed', 'skipped'] },
+    detail: { type: 'string' },
+    chorePr: { type: 'string' },
   },
 };
 
@@ -959,7 +1084,18 @@ const sequenced = await sequenceCrossRepoMerges(results, todo);
 // REQ's own worktree (BR-5) via leaf agents (the script owns control flow only).
 const healed = await unblockHeldReqs(sequenced, todo);
 
-return { results: healed };
+// Step-8b close-out (BUG-249). Every `merged` terminal — single-repo self-merge,
+// barrier-merged cross-repo, or a held REQ the unblock pass just resumed — now
+// gets the close-out half of Phase 8 that `/proceed` Step 8b requires of
+// whoever performed the merge (Step 8c): `/wrapup --close-out` in a dedicated
+// worktree (spec status → complete, the five-field terminal record, knowledge
+// capture from the in-memory run evidence, a squash-merged chore PR), then
+// worktree teardown. Runs AFTER the unblock pass so a close-out can never delay
+// a release, serially per repo, and stamps `closeOut` beside — never instead
+// of — `state:'merged'`.
+const closed = await closeOutMerged(healed, todo);
+
+return { results: closed };
 
 // ===========================================================================
 // runReq(id) — the per-REQ chain. Phases 0–3 land here (TASK-057), Phase 4–5 in
@@ -1020,6 +1156,11 @@ async function runReq(id) {
   const primary = repos.find((r) => r.primary) || repos[0];
   const worktree = primary.worktree;
 
+  // Start this REQ's close-out evidence record (BUG-249). `ans` is copied here
+  // — the one sanctioned read site of args.answers — so the close-out prompt
+  // can carry retry guidance on a resume without a second read site.
+  EVIDENCE.set(id, { repos, tasks: [], findings: null, reports: [], ans });
+
   // -------------------------------------------------------------------------
   // Phase 1 — validate the spec. `gate()` runs the ≤3 validate→fix loop and
   // returns a boolean; 3× failure → RETURN blocked (never throw). (BR-4)
@@ -1066,6 +1207,7 @@ async function runReq(id) {
     // an inline-prompted generalist, not the legacy 'pipeline-runner'. (ethos #6)
   });
   const tasks = TASK_PLAN.tasks || [];
+  if (EVIDENCE.has(id)) EVIDENCE.get(id).tasks = tasks; // BUG-249 evidence
 
   // -------------------------------------------------------------------------
   // Phase 3 — validate the architecture + tasks. Same ≤3 gate as Phase 1.
@@ -1626,11 +1768,20 @@ async function implement(id, P, worktree, tasks) {
     // ONE writer: await each task-implementer before dispatching the next. Using
     // a serial for-loop (NOT parallel()) is what prevents git-index contention
     // in the shared worktree. task-implementer is the unchanged specialist.
-    await agent(implementPrompt(id, worktree, task), {
+    const report = await agent(implementPrompt(id, worktree, task), {
       ...P,
       label: `${id} phase4-${task.id}`,
       agentType: 'task-implementer',
     });
+    // Keep the implementer's report as close-out evidence (BUG-249). Same
+    // prompt bytes as before — capturing the return changes nothing the journal
+    // keys on. Unschema'd leaves return text; anything else is stringified.
+    if (EVIDENCE.has(id)) {
+      EVIDENCE.get(id).reports.push({
+        taskId: task.id,
+        text: typeof report === 'string' ? report : JSON.stringify(report ?? ''),
+      });
+    }
 
     // Record this task as completed in pipeline-state.json.phase4 via an IO
     // agent (the script cannot touch the filesystem). Done per-task so a resume
@@ -1844,6 +1995,10 @@ async function verify(id, P, worktree, repos, ans) {
     `${id} Phase 5: ${consolidated.findings.length} consolidated finding(s) `
     + `across ${repos.length} repo(s); blocks=${consolidated.blocks}.`,
   );
+  // Keep the consolidated findings as close-out evidence (BUG-249) — this data
+  // used to be discarded here, which left the Step-8b lesson with nothing to
+  // cite. The return contract (`true` | blocked) is unchanged.
+  if (EVIDENCE.has(id)) EVIDENCE.get(id).findings = consolidated.findings;
   return true;
 }
 
@@ -2341,3 +2496,138 @@ function rebasePrompt(h) {
 }
 
 // groupCrossRepoReqs(), sharesRepo() — inlined in the PURE block above (pure; unit-tested via node:test). (REQ-474, ADR-10)
+
+// ===========================================================================
+// Step-8b close-out pass (BUG-249). Runs ONCE, after the unblock pass, over the
+// final terminals: every `merged` REQ gets the close-out half of Phase 8 that
+// `/proceed` Step 8b requires of whoever performed the merge (Step 8c) —
+// `/wrapup --close-out` in a dedicated `<repoRoot>/.worktrees/<id>-close-out`
+// worktree: spec status → complete, the five-field terminal record plus
+// `closeOut` in the PRIMARY-PATH pipeline-state.json, knowledge capture from the
+// in-memory EVIDENCE, a squash-merged `chore(<id>): close-out` PR, then teardown
+// of the close-out AND feature worktrees. Groups run in parallel across primary
+// repos and serially within one (one writer per repo — contract 4). The result
+// keeps `state:'merged'` and stamps `closeOut` (+ `closeOutDetail`) beside it;
+// the unblock pass already ran, so a failed close-out can never delay a release.
+// A leaf drop or throw is caught → closeOut:'failed' (never a thrown pipeline
+// item, never a downgraded state). (BUG-249 contracts 2–5)
+// ===========================================================================
+async function closeOutMerged(results, todo) {
+  const all = results || [];
+  const primaryRepoById = {};
+  for (const t of all) {
+    if (!t) continue;
+    const ev = EVIDENCE.get(t.id);
+    const repos = (ev && ev.repos) || [];
+    const primary = repos.find((r) => r.primary) || repos[0];
+    primaryRepoById[t.id] = primary ? primary.repo : '<unknown>';
+  }
+  const groups = groupMergedByRepo(all, primaryRepoById);
+  if (groups.length === 0) return all;
+
+  const byId = {};
+  for (const t of all) if (t) byId[t.id] = t;
+  await parallel(groups.map((ids) => async () => {
+    for (const id of ids) byId[id] = await closeOutOneReq(id, byId[id]);
+  }));
+  // `todo` is accepted for symmetry with the sibling passes; the grouping keys
+  // on EVIDENCE (Phase-0 repo records), which is the engine's own trusted data.
+  void todo;
+  return all.map((t) => (t && byId[t.id]) || t);
+}
+
+async function closeOutOneReq(id, term) {
+  const P = { phase: id };
+  const ev = EVIDENCE.get(id);
+  if (!ev || !ev.repos || ev.repos.length === 0) {
+    // No Phase-0 record in memory (an unblock-resumed REQ whose runReq dropped
+    // before Phase 0 recorded repos) — nothing to close out from; say so.
+    return { ...term, closeOut: 'skipped', closeOutDetail: 'no Phase-0 repo records in memory for this REQ' };
+  }
+  try {
+    const result = await agent(closeOutPrompt(id, ev, term), {
+      ...P,
+      label: `${id} phase8-close-out`,
+      schema: CLOSE_OUT_RESULT_SCHEMA,
+      // Default workflow subagent (no agentType) — a generic git/gh/skill IO
+      // worker driven by the inline prompt. (ethos #6)
+    });
+    if (!result || !result.closeOut) {
+      return { ...term, closeOut: 'failed', closeOutDetail: 'close-out leaf returned no result' };
+    }
+    const out = { ...term, closeOut: result.closeOut };
+    if (result.detail) out.closeOutDetail = result.detail;
+    return out;
+  } catch (e) {
+    return { ...term, closeOut: 'failed', closeOutDetail: `close-out leaf threw: ${e && e.message ? e.message : String(e)}` };
+  }
+}
+
+// closeOutPrompt — the Step-8b close-out IO leaf. Byte-identical on a cache
+// replay (the digest is built from cached leaf outputs); diverges only when the
+// user answered a close-out failure (`ev.ans`, copied from runReq's single read
+// of args.answers) so a resume RETRIES instead of replaying the failure.
+function closeOutPrompt(id, ev, term) {
+  const repos = ev.repos || [];
+  const primary = repos.find((r) => r.primary) || repos[0];
+  const ib = primary.integrationBranch || '<integrationBranch-unresolved>';
+  const root = repoRootFromWorktree(primary.worktree, id);
+  const rootText = root || '<the parent of the `.worktrees` directory that holds the recorded worktree — read it from `git worktree list --porcelain`>';
+  const closeOutWt = root ? `${root}/.worktrees/${id}-close-out` : `<repoRoot>/.worktrees/${id}-close-out`;
+  const prs = ((term && term.prs) || []).map((p) => `${p.repo}: ${p.url}`).join('; ') || '<none recorded>';
+  const featureWts = repos.map((r) => `${r.repo}: ${r.worktree}`).join('; ');
+  const status = closeOutEvidenceStatus(ev);
+  const guidance = ev.ans ? ` — user guidance: ${ev.ans}` : '';
+  return [
+    `Phase 8 close-out for ${id} (BUG-249): the feature PR(s) are MERGED — ${prs}.`,
+    'This is /proceed Step 8b, owed by whoever performed the merge (Step 8c). Run it',
+    'as the wrapup skill\'s CLOSE-OUT MODE (wrapup/SKILL.md "Close-out mode"), which',
+    'never merges a feature PR, never deploys, and drafts knowledge ONLY from the',
+    'run evidence supplied below.',
+    '',
+    `Primary repo: ${primary.repo}. Repo root: ${rootText}. Integration branch: ${ib}.`,
+    `Recorded feature worktree(s): ${featureWts}.`,
+    `Close-out worktree: ${closeOutWt} on branch chore/${id}-close-out.`,
+    '',
+    'Steps (use `git -C <path>` form, quote every path; PR ops are forge-neutral —',
+    'source `partials/forge.sh` in the same fence, then call the adapter):',
+    `  1. git -C "<repoRoot>" fetch origin ${ib}; then create the close-out worktree`,
+    `     IDEMPOTENTLY (reuse it if it already exists — resume): git -C "<repoRoot>"`,
+    `     worktree add "${closeOutWt}" -b chore/${id}-close-out origin/${ib}.`,
+    `  2. Run \`/wrapup ${id} --close-out\` with the line`,
+    `     \`WORKTREE PATH (mandatory): ${closeOutWt}\` and hand it the run evidence`,
+    '     below VERBATIM. If your harness cannot invoke a skill, perform the mode\'s',
+    '     steps exactly as wrapup/SKILL.md "Close-out mode" writes them: its Step 1,',
+    '     Step 3 (artifact statuses + the terminal record), Step 4 (knowledge),',
+    '     Step 5 (summary), then the close-out commit. The mode:',
+    '       - confirms the feature PR(s) are MERGED first (refuses otherwise);',
+    `       - writes ALL FIVE terminal-record fields to the PRIMARY-PATH state file`,
+    `         <repoRoot>/.adlc/specs/${id}-*/pipeline-state.json — completed:true,`,
+    '         currentPhase:8, 8 appended to completedPhases, a phase-8 phaseHistory',
+    '         entry naming the merge commit, repos[<id>].merged:true for every touched',
+    '         repo — plus closeOut:{status:"ok", at:<ISO timestamp>} (BUG-193 list);',
+    `       - commits \`chore(${id}): close-out — spec complete[, LESSON-nnn]\`, pushes,`,
+    '         opens a PR with adlc_forge_pr_create and squash-merges it with',
+    '         adlc_forge_pr_merge <url> --squash --delete-branch (check branch_deleted —',
+    '         BUG-195); its summary ends with a `### Lessons captured` section.',
+    '  3. After the mode returns: remove the close-out worktree AND every recorded',
+    '     feature worktree by absolute path (git -C "<repoRoot>" worktree remove',
+    '     "<path>"), then git -C "<repoRoot>" branch -D the feature branch if the',
+    '     squash-merge left it behind, and git -C "<repoRoot>" fetch --prune.',
+    '  4. If ANY step fails: write closeOut:{status:"failed", reason:"<why>"} into the',
+    '     same primary-path state file (change nothing else), do NOT retry or force',
+    '     any merge, leave an unmergeable chore PR open and report its URL, and',
+    '     report closeOut=failed with the reason.',
+    '',
+    `Run evidence for ${id} (evidence status: ${status}):`,
+    closeOutDigest(ev),
+    status === 'none'
+      ? 'No findings or reports were captured for this REQ: the mode must write NO lesson and record `NO_ENTRY: close-out had no run evidence` in the summary.'
+      : 'Any lesson written must cite one of these findings/reports (or the task files / merged PR file list the mode reads itself) — never invent an attribution.',
+    `pipeline-state.json for ${id} (primary path) carries phaseHistory, blockers and conflictsResolved — read it there; the close-out worktree has no state file.`,
+    '',
+    'Report ONLY the schema object: closeOut (ok | failed | skipped), detail (the',
+    'lesson ids written, the NO_ENTRY line, or the failure reason), chorePr (the',
+    `close-out PR url when one was opened).${guidance}`,
+  ].join('\n');
+}

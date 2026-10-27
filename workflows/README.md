@@ -33,7 +33,15 @@ So the engine is **ONE self-contained file** — there are no sibling `schemas.j
    scope, so the orchestration below the sentinels references them directly (no
    import).
 3. Everything below `// ==== END PURE ====` is the orchestration (Preflight +
-   the per-REQ Phase 0–8 chain) using `agent()` / `parallel()` / `pipeline()`.
+   the per-REQ Phase 0–8 chain) using `agent()` / `parallel()` / `pipeline()`,
+   followed by three post-pipeline passes: the ADR-12 cross-repo merge barrier,
+   the REQ-485 unblock pass, and the **BUG-249 Step-8b close-out pass** — every
+   `merged` REQ gets `/wrapup --close-out` in a dedicated
+   `<repoRoot>/.worktrees/<id>-close-out` worktree (spec status, the five-field
+   terminal record, knowledge capture from the run evidence the engine keeps in
+   memory, a squash-merged `chore(<id>): close-out` PR, worktree teardown),
+   serially per repo. The terminal stays `state:"merged"` and carries
+   `closeOut: ok|failed|skipped` beside it.
 
 The toolkit forbids a build step, so the pure logic stays **inline** and is
 unit-tested via a shared `vm` loader (`tests/_load-pure.js`) that evaluates just

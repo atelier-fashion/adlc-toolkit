@@ -11,15 +11,18 @@ stack: ["javascript", "markdown", "claude-skills"]
 concerns: ["knowledge-compounding", "process-compliance", "silent-failure", "orchestration"]
 tags: ["workflow-engine", "legacy-engine", "wrapup", "phase-8", "step-8b", "knowledge-capture", "pipeline-state", "ethos-2", "harness2", "bug-193", "REQ-647"]
 introduced_by: ["REQ-474"]
-attribution: manual
+attribution: derived
 related: ["BUG-193"]
 ---
 
 <!--
-introduced_by is set manually and names who AUTHORED `wrapupAndMerge` (REQ-474,
-commit 7995100, 2026-05-30). It is not a claim that REQ-474 dropped an existing rule:
-Step 8b did not exist yet (see Root Cause). /bugfix Phase 2 should confirm via blame
-per REQ-593 BR-2.
+introduced_by: /bugfix Phase 2 blamed the root-cause ranges (wrapupAndMerge
+L1960–2025, mergePrompt L1523–1560, sprint/SKILL.md Step 5 L230–237) via
+partials/attribution.sh and got three candidates — REQ-474, REQ-485, REQ-520. The
+operator selected REQ-474 (it AUTHORED wrapupAndMerge, commit 7995100, 2026-05-30);
+REQ-485 and REQ-520 only re-touched those lines for the unblock pass and the forge
+adapter. It is not a claim that REQ-474 dropped an existing rule: Step 8b did not
+exist yet (see Root Cause).
 -->
 
 ## Description
@@ -152,11 +155,55 @@ that isn't load-bearing for control flow doesn't get built" shape as BUG-212.
 
 ## Resolution
 
-To be fixed through `/bugfix` as its own PR covering **both engines** per the Expected
-Behavior contract. **REQ-647** (lessons reach every pipeline phase) depends on this fix
-for its workflow-engine *capture* path and states so in its BR-9; **REQ-648**'s
-post-terminal emit leaf is independent of it.
+Fixed via `/bugfix` on `fix/bug-249-step-8b-close-out`, covering both engines per the
+Expected Behavior contract:
+
+1. **`/wrapup --close-out`** — a new mode section in `wrapup/SKILL.md`: runs Steps 1,
+   3, 4, 5 and a close-out commit (squash-merged `chore(REQ-xxx): close-out` PR);
+   skips Step 2 and Steps 6–8; refuses unless every feature PR is `MERGED`; runs in a
+   caller-declared `.worktrees/REQ-xxx-close-out` worktree; writes the five-field
+   terminal record **plus** `closeOut:{status,at}` to the primary-path state file;
+   Step 4 skips REQ-423 transcript discovery and drafts from the caller's run
+   evidence, writing `NO_ENTRY: close-out had no run evidence` when none. Step 2 also
+   gains an already-`MERGED` guard for every caller, and the ship summary a
+   `### Lessons captured` slot.
+2. **Workflow engine** — `closeOutMerged()` post-terminal pass after `unblockHeldReqs`
+   over every `merged` terminal, grouped by primary repo (parallel across, serial
+   within); a per-REQ `EVIDENCE` map filled by `runReq` (repos, tasks, `ans`),
+   `implement()` (implementer reports, previously discarded) and `verify()`
+   (consolidated findings, previously discarded); `closeOutPrompt()` carries a bounded,
+   deterministic digest and the user's resume guidance; `TERMINAL` gains
+   `closeOut: ok|failed|skipped` + `closeOutDetail` beside `state:"merged"` (the
+   unblock pass keys on `state` alone, so release is unaffected); a leaf drop or throw
+   becomes `closeOut: failed`, never a downgraded state. Four pure helpers
+   (`closeOutEvidenceStatus`, `closeOutDigest`, `repoRootFromWorktree`,
+   `groupMergedByRepo`) with `node:test` coverage and a closed-schema check.
+3. **Legacy orchestrator** — `sprint/SKILL.md` Step 5 gains the close-out after an
+   orchestrator-performed merge (same mode, same worktree rule); the sprint summary
+   gains a Close-out table; `agents/pipeline-runner.md` tells a `pr-ready` runner to
+   put its findings/tasks/PRs in its report as the close-out's evidence.
+4. **Visibility** — `/status` treats `closeOut.status: failed` as a stale-state
+   signature; `proceed/SKILL.md` documents the optional `closeOut` state key;
+   `proceed/phases-6-8-ship.md` Step 8c names the mode.
+
+Not changed: `unblockHeldReqs`'s predicate (already `state`-only), `/proceed` solo Step
+8b (a human is present; full `/wrapup` with the new already-merged guard).
 
 ## Files Changed
 
-- (pending)
+- `wrapup/SKILL.md` — Close-out mode section, Step 2 already-merged guard, Step 3
+  close-out target + `closeOut` key, Step 4 close-out input rule, Step 5
+  `### Lessons captured`
+- `workflows/adlc-sprint.workflow.js` — `TERMINAL.closeOut`/`closeOutDetail`, four pure
+  helpers + export, `EVIDENCE` map, `CLOSE_OUT_RESULT_SCHEMA`, evidence capture in
+  `runReq`/`implement`/`verify`, `closeOutMerged`/`closeOutOneReq`/`closeOutPrompt`,
+  top-level pass
+- `workflows/tests/helpers.test.js` — 5 new tests (50 total); `workflows/tests/README.md`,
+  `workflows/README.md` — coverage table, count, Phase-8 description
+- `sprint/SKILL.md` — workflow-branch `closeOut` handling, Step 5 close-out, Close-out
+  summary table
+- `agents/pipeline-runner.md` — `pr-ready` report carries close-out evidence
+- `proceed/phases-6-8-ship.md` — Step 8c names `--close-out`
+- `proceed/SKILL.md` — `closeOut` in the state schema
+- `status/SKILL.md` — `closeOut.status: failed` stale signature
+- `CHANGELOG.md` — `[Unreleased]` entry

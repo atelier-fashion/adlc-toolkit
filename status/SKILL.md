@@ -84,6 +84,7 @@ heading instead, with the reconciliation as the recommended action:
 | `completed:false`, `currentPhase:8`, `7 ∈ completedPhases` | reached the final phase and stopped — verify the PR, then close |
 | `completed:true` but `8 ∉ completedPhases`, or `currentPhase ≠ 8`, or a touched repo still `merged:false` | closed with a partial record |
 | the requirement's frontmatter says `status: complete` | the REQ is done; a `completed:false` state file contradicts it |
+| `closeOut.status: "failed"` (BUG-249) | merged, but the Step 8b close-out failed — show `closeOut.reason`; the fix is `/wrapup REQ-xxx --close-out` in a fresh close-out worktree, never a re-merge |
 
 Confirm against the forge before reconciling — `gh pr view <prNumber> --json
 state,mergedAt` — and write the real merge commit and timestamp into the
