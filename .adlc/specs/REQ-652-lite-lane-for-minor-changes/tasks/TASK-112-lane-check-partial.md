@@ -1,7 +1,7 @@
 ---
 id: TASK-112
 title: "partials/lane-check.sh: adlc_lane_check wrapper, companion doc and vocabulary block"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27

@@ -41,7 +41,7 @@ Rules:
 1. **Precondition — the feature PR is already merged.** Before anything else, confirm every touched repo's PR reports `MERGED` (`adlc_forge_pr_view <prUrl> --fields state,mergedAt`, sourcing `partials/forge.sh` in the same fence). If any is not, **stop** with `close-out refused: <repo> PR <url> is <state>, not MERGED` — this mode never merges a feature PR.
 2. **Where it runs.** In a dedicated close-out worktree the caller declares (`WORKTREE PATH (mandatory): <abs>` — the REQ-263 contract), on branch `chore/REQ-xxx-close-out` cut from `origin/<integration-branch>`. Never in the caller's live checkout, and never concurrently with another REQ's close-out in the same repo: the caller serializes close-outs per repo the way it serializes merges.
 3. **Step 3 item 5 targets the primary repo path's copy** of `pipeline-state.json` (`<repos[primary].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json`, the Step 8b target) — the close-out worktree has no state file (it is gitignored, per-worktree). Write all five fields, and additionally `"closeOut": { "status": "ok", "at": "<ISO timestamp>" }`. The caller writes `"status": "failed", "reason": "<why>"` to the same key if this mode exits non-zero, so `/status` can show a merged-but-not-closed REQ as exactly that.
-4. **Step 4 draws on supplied evidence, not a transcript.** REQ-423 transcript discovery is skipped (`JSONL` stays empty; the delegate is not invoked, which the resolver records as `fallback`/`gate=fail`, not a ghost-skip — the same case (b) the delegated-drafting rule already allows). The lesson is drafted from what the caller's prompt supplies: the REQ's consolidated Phase-5 findings (severity, title, fixed/not), the implementer and reviewer reports, the task list, the merged PR's file list, and `pipeline-state.json` (`phaseHistory`, `blockers`, `conflictsResolved`), and validated with `adlc_lesson_check` like any other write (Step 4 **Write and check**). If the prompt supplies **none** of the findings or reports, write no lesson and put `NO_ENTRY: close-out had no run evidence` in the summary's `### Lessons captured` section — a lesson invented without run evidence is worse than none.
+4. **Step 4 draws on supplied evidence, not a transcript.** REQ-423 transcript discovery is skipped (`JSONL` stays empty; the delegate is not invoked, which the resolver records as `fallback`/`gate=fail`, not a ghost-skip — the same case (b) the delegated-drafting rule already allows). The lesson is drafted from what the caller's prompt supplies: the REQ's consolidated Phase-5 findings (severity, title, fixed/not), the implementer and reviewer reports, the task list, the merged PR's file list, and `pipeline-state.json` (`phaseHistory`, `blockers`, `conflictsResolved`, `lane.escalations`) plus the spec's `lane_escalated` frontmatter, and validated with `adlc_lesson_check` like any other write (Step 4 **Write and check**). A non-empty `lane.escalations`, or a `lane_escalated` in the spec, is run evidence for the escalation lesson in Step 4 **Lane escalations** on its own. If the prompt supplies **none** of the findings or reports, and there is no escalation, write no lesson and put `NO_ENTRY: close-out had no run evidence` in the summary's `### Lessons captured` section — a lesson invented without run evidence is worse than none.
 5. **Close-out commit.** After Steps 3–5, in the close-out worktree: `git add` the spec, task files and any new `ASSUME-*`/`LESSON-*` files; commit `chore(REQ-xxx): close-out — spec complete[, LESSON-nnn]`; push; open a PR through `adlc_forge_pr_create` titled the same; merge it with `adlc_forge_pr_merge <url> --squash --delete-branch` and check `branch_deleted` (BUG-195). Lesson ids were allocated and rechecked in Step 4, so this push is collision-safe. The caller removes the close-out worktree afterwards. If the chore PR cannot be merged (policy, conflict), leave it open, report its URL, and exit non-zero so the caller records `closeOut.status: failed`.
 6. **Output.** The Step 5 summary, with `### Lessons captured` filled, is the mode's return value; the caller carries it into the sprint summary.
 
@@ -454,6 +454,23 @@ if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step
 _adlc_emit_step_telemetry wrapup Step-4-Lessons-Learned
 ```
 
+#### Lane escalations (REQ-652)
+
+A REQ that started on the lite lane and escalated to the full lane owes one lesson per escalation, so triage is tuned from evidence rather than guesswork (BR-14). Read the escalations from `pipeline-state.json` `lane.escalations`. When state is unavailable (another machine, or a close-out with no state file), read the spec's `lane_escalated` frontmatter instead, which records the last one.
+
+- **No escalation, no lesson.** A REQ whose state has no `lane` object, or an empty `lane.escalations`, and whose spec has no `lane_escalated` gets no escalation lesson. That covers a REQ that stayed on the lite lane and a REQ that was always full; a missing `lane` means `full`.
+- **Each escalation is one lesson**, written exactly like the lessons above: allocate the id with the allocation fence in **Fallback drafting**, write it at **Write and check**, run `adlc_lesson_check` and its repair loop, then the pre-push recheck. Fill it as follows:
+  - `kind: process`, because the lesson is about how triage behaves.
+  - `evidence` cites the escalation: the `lane.escalations` entry (its `at`, `phase`, `trigger`, `detail` and `actor`) or the `lane_escalated` value, plus the REQ id, which is the citation token.
+  - `confidence: high` when the trigger is a failed lane-check rule (`blocked-path`, `dependency`, `deploy-units`, `max-files`: the triage said lite and the diff then crossed a named line, which is a contrast with a named mechanism). Use `medium` for an `implementer` or `reversal` trigger, where the mechanism is a judgment.
+  - `## Lesson` names the trigger, the spec's `lane_reason` (the triage reason that turned out wrong), and the triage rule in `/spec` Step 1.7, or the `lanes.lite` default or project setting, that should change so a request like this one is triaged `full`.
+  - `## Applies When` describes the kind of request that should have been triaged `full`.
+- **Not every escalation shows that triage was wrong.** For these, write no triage lesson and put one `NO_ENTRY: <reason>` line for the escalation in `### Lessons captured` instead (a lesson about the real cause may still be written like any other):
+  - trigger `check-error`: the check could not run (a dirty tree, a failed fetch, a broken config). That is an environment fault, not a triage miss.
+  - trigger `operator`: someone escalated by hand. Write a triage lesson only if the operator's reason, when stated, names what triage missed, with `confidence: medium`.
+  - a **forced** lane (`lane_forced: true`): triage made no call. If the escalation shows the flag was wrong, the lesson is about when to force `--lite`, not about Step 1.7.
+- List each one in Step 5's `### Lessons captured` like any other lesson.
+
 #### Convention Updates
 - Were any new conventions established? Propose updates to `.adlc/context/conventions.md`
 - Were any existing conventions found to be problematic?
@@ -469,6 +486,7 @@ Create a concise summary suitable for sharing with the team. In cross-repo mode,
 **Branch**: agent/REQ-xxx-slug
 **PR**: #nn
 **Merged**: YYYY-MM-DD
+**Lane**: full | lite | full, escalated from lite (<trigger>) — omit when the spec has no `lane` key
 
 ### What shipped
 - Bullet points of user-facing or developer-facing changes

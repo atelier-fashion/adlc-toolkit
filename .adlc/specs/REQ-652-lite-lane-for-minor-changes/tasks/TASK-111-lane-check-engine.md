@@ -1,7 +1,7 @@
 ---
 id: TASK-111
 title: "Lane check engine: tools/adlc/lane_check.py, its config section and defaults"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27

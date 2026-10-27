@@ -237,3 +237,51 @@ This repo has no CI. "The gates" means running these from the worktree root:
 - Phase 5's existing `git diff main...HEAD` sites (`proceed/SKILL.md` ~L360, ~L394, ~L430) contradict LESSON-391 on the full lane too. File as a bug.
 - Extract the Python-interpreter resolver out of `forge.sh` into its own partial (ADR-3).
 - Add embolden-website's `lanes.lite` block (`packages/domain/**`, API schemas, `deploy/**`) when its issue skill is built.
+
+## Implementation notes (Phase 5 verify, 2026-10-27)
+
+The verify panel found gaps the ADRs left open. The implementation closes them as
+follows; each is stricter than or consistent with the ADR it refines.
+
+- **ADR-3, trust boundary.** The engine runs only from the installed toolkit
+  (`~/.claude/skills/tools/adlc/lane_check.py`), never from the tree under check, and
+  reads `.adlc/config.yml` from the base ref rather than the disk. The calling fence
+  refuses to run when the branch edits `.adlc/partials` or `.adlc/tools`, or when the
+  local `HEAD` is not the pushed head the PR will merge. Patterns are normalized
+  (`./x`, `x/`, a bare directory), blocked paths and dependency names match
+  case-insensitively, submodule and symlink changes are caught by mode, an empty diff
+  is an error, and whole-line comments do not count as a `lanes` key.
+- **ADR-3, defaults.** Widened well beyond the list above (agent and hook config,
+  more CI, deploy, data, secret and dependency files). `partials/lane-check.md` is
+  authoritative, and a test keeps it equal to the engine's constants.
+- **ADR-9, override scope.** An override covers the exact `<trigger>: <detail>` pairs
+  the operator saw (`lane.overrides[].pairs`), so a new file under a blocked path
+  halts again, and a `check-error` is never overridable. Raised with Brett as a
+  question; this is the default applied.
+- **ADR-7, reviewer output.** `lite-reviewer` adds `out_of_lane:` (escalates, trigger
+  `implementer`) and `questions:` (halt #2) beside `reversals:`.
+- **ADR-4 / ADR-11, eligibility.** Both `/sprint` engines treat a `draft` lite REQ as
+  eligible, since a lite REQ skips spec validation by design.
+- **Single repo.** A lite Step 0 marks every sibling repo untouched, because Phase 2's
+  reconcile step, which normally prunes them, does not run.
+- **Resume.** Step 0's lane read is resume-safe: `lane.current` in state wins over the
+  spec, and `approved` and the skipped-phase bookkeeping are written on a fresh run
+  only.
+- **Confirmation pass.** The lane-check fence also requires running from the worktree
+  itself on a clean tree, matches `.adlc/partials` and `.adlc/tools` case-insensitively
+  (a macOS filesystem resolves `.ADLC/…`), and pins each override to the commit it was
+  granted at (`sha`), so a later change to an overridden file halts again. The wrapper
+  refuses a relative `HOME` and runs the engine with `python -E`. A symlinked `.adlc`
+  at the base is an error, and `.` / `..` segments in a pattern are a schema error.
+
+**Known follow-ups (not this REQ):**
+
+- Phase 8 merges with `adlc_forge_pr_merge`, which cannot yet pin the head commit the
+  lane check certified (`gh pr merge --match-head-commit`). The fence's
+  `HEAD == origin/<branch>` guard runs immediately before the merge, which narrows the
+  window to a push landing in between.
+- `may_carry_lanes` skips whole-line comments; a flow-style mapping whose quoted
+  string spans a line starting with `#` can hide a real `lanes` key from that
+  pre-check. Exploiting it needs a crafted config already committed to the
+  integration branch.
+- The full lane's Phase 5 `git diff main...HEAD` sites (listed above).

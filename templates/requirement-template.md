@@ -10,6 +10,13 @@ domain: ""          # broad area, e.g., "auth", "payments", "ui"
 stack: []           # tech layers touched, e.g., ["express", "firestore"]
 concerns: []        # cross-cutting dimensions, e.g., ["security", "performance", "a11y"]
 tags: []            # free-form keywords, e.g., ["password-reset", "tokens"]
+# Lane fields (REQ-652). /spec Step 1.7 writes the first three; no default here,
+# because a spec with no lane field runs the full lane. Quote every string value:
+# an unquoted ": " inside lane_reason makes this frontmatter unparseable.
+# lane: "full"                  # "lite" or "full" only
+# lane_reason: "forced by --full"   # one line: why triage chose the lane, or the flag that forced it
+# lane_forced: true             # true when --lite or --full chose the lane; false when triaged
+# lane_escalated: 'YYYY-MM-DD — <trigger>: <detail>'   # set only by /proceed on escalation (single-quoted); lane is rewritten to "full" at the same time
 ---
 
 ## Description

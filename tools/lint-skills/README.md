@@ -315,6 +315,28 @@ a general markdown linter and NOT a general shell linter.
     block is already `rules-block-missing` on its own file, so it is not also a
     mismatch.
 
+13. **Lane vocabulary (`lane-vocabulary`)** (REQ-652 BR-17, ADR-13): the lite
+    lane's closed sets (lane `lite`/`full`, the escalation triggers, the actors,
+    and the lane check's `pass`/`escalate`/`error`) are defined once, in the
+    `<!-- lane-vocabulary -->` block of `partials/lane-check.md`. The block's
+    open marker must start a line (LESSON-404), so a prose mention of it is not
+    read as the definition. The check then scans every writer and reader of a
+    lane value, the explicit `LANE_SITES` tuple (`spec`, `proceed` and every
+    `proceed/phase*.md` companion, `wrapup`, `status`, `sprint`,
+    `agents/pipeline-runner.md`, `workflows/adlc-sprint.workflow.js` and
+    `templates/requirement-template.md`), and reports any value outside its set
+    written as `lane: "…"`, `"lane": "…"`, `trigger=…`, `trigger: …`,
+    `actor: …`, `lane_check=…`, or in prose as ``trigger `…` `` or
+    ``actor `…` ``. A value is a quoted string or a bare lowercase token, so a
+    placeholder such as `trigger=<t>` or a structure such as `lane: {` is not
+    read as one. A missing, empty or incomplete vocabulary block is a finding,
+    and so is a `LANE_SITES` file that no longer exists. The check is per-root
+    and inert unless `partials/lane-check.md` or `proceed/phases-lite.md`
+    exists; either one arms it, so deleting the vocabulary file alone does not
+    disarm it. The same change adds `proceed/SKILL.md` to the
+    `retrieval-status-parity` check's `LIFECYCLE_WRITE_SITES`, because a lite
+    REQ gets `status: approved` from `/proceed` Step 0 (BR-18).
+
 ## Usage
 
 ```sh

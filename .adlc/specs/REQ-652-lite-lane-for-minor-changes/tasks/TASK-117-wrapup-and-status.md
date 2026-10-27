@@ -1,7 +1,7 @@
 ---
 id: TASK-117
 title: "/wrapup escalation lesson and /status lane columns"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27
