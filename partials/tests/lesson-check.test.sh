@@ -1465,4 +1465,30 @@ else
 fi
 
 # ===========================================================================
+# ===========================================================================
+# 13. Executor-shell wrapper (LESSON-717). The Claude Code Bash tool defines `grep`
+# as a shell function routed to its own matcher; its `-vq` returns 0 on empty input
+# where grep returns 1, which made _alc_ids_ok reject the template's `[]` in the
+# first real /wrapup run. The partial calls `command grep`, so a wrapper that
+# returns 0 for everything must change no verdict: a well-formed lesson still
+# passes and a bad list entry is still rejected.
+# ===========================================================================
+lesson wrapok "$(six process "$EV_OK" high none '[]' '[]')"
+lesson wrapbad "$(six process "$EV_OK" high none '[]' '[LESSON-7]')"
+# The wrapper lives in a subshell so no later case inherits it. It runs the real grep
+# for its output and then discards its status — exactly the executor's behaviour on
+# empty input, applied to every call.
+_wrap_rc_ok=$( grep() { command grep "$@"; return 0; }; adlc_lesson_check "$(fx wrapok)" >/dev/null 2>&1; echo $? )
+_wrap_rc_bad=$( grep() { command grep "$@"; return 0; }; adlc_lesson_check "$(fx wrapbad)" >/dev/null 2>&1; echo $? )
+if [ "$_wrap_rc_ok" = 0 ]; then
+  pass "executor_grep_wrapper_keeps_accept: well-formed lesson still rc 0 under an always-0 grep wrapper"
+else
+  fail "executor_grep_wrapper_keeps_accept: expected rc 0 under an always-0 grep wrapper, got rc $_wrap_rc_ok (a grep site is not 'command grep' — LESSON-717)"
+fi
+if [ "$_wrap_rc_bad" = 1 ]; then
+  pass "executor_grep_wrapper_keeps_reject: bad supersedes entry still rc 1 under an always-0 grep wrapper"
+else
+  fail "executor_grep_wrapper_keeps_reject: expected rc 1 under an always-0 grep wrapper, got rc $_wrap_rc_bad (a grep site is not 'command grep' — LESSON-717)"
+fi
+
 lc_summary
