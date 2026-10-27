@@ -1,7 +1,7 @@
 ---
 id: TASK-114
 title: "/spec: strip --lite/--full, Step 1.7 triage, lane frontmatter"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27

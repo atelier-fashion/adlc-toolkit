@@ -11,6 +11,13 @@ configured order, deploy, and capture knowledge via `/wrapup`. SKILL.md
 keeps a one-paragraph summary of each; the per-step PR body templates,
 merge sequencing, and terminal-state contract live here.
 
+**Lite lane (REQ-652):** these phases run on a lite REQ too, with three
+differences, all detailed in `proceed/phases-lite.md`: Phase 6 uses the lite PR
+body (a `## Lane` section, no Tasks, Architecture or Reflection sections); Phase
+7 re-runs the lane check if it added commits; Phase 8 re-runs the lane check
+immediately before the trial-merge gate. A failed check escalates (or, for a
+forced-lite REQ in a solo run, is legitimate halt #4).
+
 ---
 
 ### Phase 6: Create Pull Request(s)
@@ -49,6 +56,8 @@ merge sequencing, and terminal-state contract live here.
      ## Requirement
      REQ-xxx: [requirement title]
      Primary repo: <primary-repo-id>
+     [Only on a REQ that escalated from the lite lane:
+      Lane: full, escalated from lite — <lane_escalated>]
 
      ## Related PRs (cross-repo)
      [Populated for siblings and also in the primary once its PR is created last.
@@ -98,6 +107,7 @@ Do all the steps below **for every touched repo's PR**:
    - Fix inside the owning repo's worktree, commit with message: `fix(scope): PR cleanup [REQ-xxx]`
    - Push that worktree's branch: `git -C <worktree> push`
 4. If CI checks are configured, verify each PR passes: `gh pr checks <prUrl>`. Wait for in-flight checks before moving on.
+5. **Lite lane:** if steps 3–4 added any commit, re-run the lane check (`proceed/phases-lite.md` "The lane check") before leaving this phase (REQ-652 AC-16).
 
 **End-of-phase log**: Emit one line per PR — "<repo-id>: clean, CI green" — followed by an aggregate "All N PRs ready for merge" or list any remaining concerns. Continue to Phase 8 immediately.
 
@@ -120,7 +130,9 @@ Do all the steps below **for every touched repo's PR**:
 
 A vague "Pipeline complete" claim without one of these tags is a protocol violation. When dispatched by `/sprint`, the orchestrator will reject untagged claims and treat them as `blocked`.
 
-**Pre-merge trial-merge gate (REQ-483, BR-9/BR-16 — authoritative).** Before merging, first **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** — the gate MUST test the *current* tip; a stale local ref gives a false pass (LESSON-036). Then source `partials/trial-merge.sh` (the guarded spelling from conventions.md "Bash in skills") and run `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`, branching on the return code: **rc=1** (real conflict, files on stdout) → **solo:** do NOT merge: return the `blocked` terminal, populate `pipeline-state.json.blockers` with `{blockedBy, conflictFiles, unblockCondition}` ("resume after <blocker> merges, then rebase") — legitimate halt #3. **Under `/sprint`:** first run the bounded keep-both path (`agents/pipeline-runner.md` "Bounded resolution (BUG-207)", `partials/conflict-bound.sh`): if every conflicted file is an append-point collision, resolve keep-both, verify, append the `conflictsResolved` entry, push, and **re-run this gate** — it must return rc=0 before you merge; otherwise abort and halt `blocked` as in solo. **rc=0** → proceed to the merge below. **rc=2/3** (uncommitted worktree / unfetched-or-bad ref) → surface as `failed`, NOT `blocked` (it is a setup error, not a conflict). A footprint overlap alone never blocks — only rc=1 does (resolution is rebase, never a "merge anyway" — ethos #6).
+**Lite lane — lane check first (REQ-652 BR-6).** On a REQ still on the lite lane, run the lane check (`proceed/phases-lite.md` "The lane check") immediately before the trial-merge gate below. A failure escalates, or is legitimate halt #4 for a forced-lite REQ in a solo run; either way do not merge.
+
+**Pre-merge trial-merge gate (REQ-483, BR-9/BR-16 — authoritative).** Before merging, first **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** — the gate MUST test the *current* tip; a stale local ref gives a false pass (LESSON-036). Then source `partials/trial-merge.sh` (the guarded spelling from conventions.md "Bash in skills") and run `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`, branching on the return code: **rc=1** (real conflict, files on stdout) → **solo:** do NOT merge: return the `blocked` terminal, populate `pipeline-state.json.blockers` with `{blockedBy, conflictFiles, unblockCondition}` ("resume after <blocker> merges, then rebase") — legitimate halt #3. **Under `/sprint`:** first run the bounded keep-both path (`agents/pipeline-runner.md` "Bounded resolution (BUG-207)", `partials/conflict-bound.sh`): if every conflicted file is an append-point collision, resolve keep-both, verify, append the `conflictsResolved` entry, push, and **re-run this gate** — it must return rc=0 before you merge, and on a lite REQ re-run the lane check too, since the resolution commit changed the diff; otherwise abort and halt `blocked` as in solo. **rc=0** → proceed to the merge below. **rc=2/3** (uncommitted worktree / unfetched-or-bad ref) → surface as `failed`, NOT `blocked` (it is a setup error, not a conflict). A footprint overlap alone never blocks — only rc=1 does (resolution is rebase, never a "merge anyway" — ethos #6).
 
 **`blockers` entry shape (REQ-485 additions).** The entry written on rc=1 carries, beyond `{blockedBy, conflictFiles, unblockCondition}`, three fields the `/sprint` orchestrator's auto-rebase/resume pass reads and updates: `holdState` (`held` \| `rebasing` \| `resumed` \| `re-halted` \| `needs-manual-rebase`), `rebaseAttempts` (capped at the retry bound — default 1, config `auto_rebase_max_attempts`), and `resolvedBlocker` (the now-merged blocker id after a post-merge materialized conflict). On a rc=1 halt set `holdState: "held"` and `rebaseAttempts: 0`. See `agents/pipeline-runner.md` "Blocker Handling" for the full table.
 

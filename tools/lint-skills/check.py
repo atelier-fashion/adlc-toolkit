@@ -476,9 +476,67 @@ LIFECYCLE_WRITE_SITES = (
     "architect/SKILL.md",
     "wrapup/SKILL.md",
     "proceed/phases-6-8-ship.md",
+    # REQ-652 ADR-4: a lite REQ skips Phase 1 and /architect, the two normal
+    # writers of `approved`, so /proceed Step 0 writes it instead.
+    "proceed/SKILL.md",
 )
 # The single reader whose exclusion list must not swallow any written status.
 RETRIEVAL_READER_SITE = "spec/SKILL.md"
+
+# REQ-652 ADR-13: `lane-vocabulary`. The lane, trigger, actor and lane-check
+# values are closed sets defined ONCE, in a `<!-- lane-vocabulary -->` block in
+# this file. The block's open marker must start a line (LESSON-404), so a prose
+# mention of the marker is not mistaken for the definition.
+LANE_VOCAB_SITE = "partials/lane-check.md"
+LANE_VOCAB_OPEN_RE = re.compile(r"^<!--\s*lane-vocabulary\s*-->\s*$")
+LANE_VOCAB_CLOSE_RE = re.compile(r"^<!--\s*/lane-vocabulary\s*-->\s*$")
+LANE_VOCAB_ITEM_RE = re.compile(r"^\s*-\s+([a-z_]+):\s*(.*)$")
+LANE_VOCAB_SETS = ("lane", "trigger", "actor", "lane_check")
+# Every writer and reader of a lane value. Explicit rather than discovered, so
+# deleting a site — or its declaration of what it reads — is a finding instead of
+# a silent pass (the LIFECYCLE_WRITE_SITES precedent, LESSON-019). Any other
+# `proceed/phase*.md` companion is scanned too, by glob.
+LANE_SITES = (
+    "spec/SKILL.md",
+    "proceed/SKILL.md",
+    "proceed/phases-lite.md",
+    "proceed/phases-1-3-validation.md",
+    "proceed/phase-4-implementation.md",
+    "proceed/phases-6-8-ship.md",
+    "wrapup/SKILL.md",
+    "status/SKILL.md",
+    "sprint/SKILL.md",
+    "agents/pipeline-runner.md",
+    "workflows/adlc-sprint.workflow.js",
+    "templates/requirement-template.md",
+    "agents/lite-reviewer.md",
+    "architect/SKILL.md",
+)
+# A value is a quoted string or a bare lowercase token. Anything else after the
+# key (`{`, `<`, a backtick) is a placeholder or a structure, not a value, and is
+# deliberately not matched: the regexes stay narrow so prose does not trip them.
+# Case-insensitive bare token, so `lane: Lite` is read (and rejected) rather than
+# skipped; a backticked value is read too, the form skills use in prose.
+_LANE_VALUE = r"""(?:"([^"\n]*)"|'([^'\n]*)'|`([A-Za-z][A-Za-z0-9_-]*)`|([A-Za-z][A-Za-z0-9_-]*))"""
+# Preceded by nothing that would make `lane` part of a longer name
+# (`lane.current:`, `lane_check:`, `Lane**:`, `swimlane:`).
+_LANE_KEY_LEAD = r"(?<![A-Za-z0-9_.*-])"
+LANE_VALUE_PATTERNS = (
+    # set, regex — `lane: "lite"`, `"lane": "full"`, `lane: 'lite'`
+    ("lane", re.compile(_LANE_KEY_LEAD + r"""["']?lane["']?[ \t]*:[ \t]*""" + _LANE_VALUE)),
+    # `trigger=max-files`, `trigger: reversal`, `"trigger": "dependency"`
+    ("trigger", re.compile(_LANE_KEY_LEAD + r"""["']?trigger["']?[ \t]*[=:][ \t]*""" + _LANE_VALUE)),
+    # prose: trigger `reversal`
+    ("trigger", re.compile(_LANE_KEY_LEAD + r"trigger[ \t]+`([a-z][a-z0-9_-]*)`")),
+    ("actor", re.compile(_LANE_KEY_LEAD + r"""["']?actor["']?[ \t]*[=:][ \t]*""" + _LANE_VALUE)),
+    ("actor", re.compile(_LANE_KEY_LEAD + r"actor[ \t]+`([a-z][a-z0-9_-]*)`")),
+    ("lane_check", re.compile(_LANE_KEY_LEAD + r"lane_check[ \t]*=[ \t]*" + _LANE_VALUE)),
+    # the workflow script's comparisons: `r.lane === 'lite'`, `lane !== "full"`
+    ("lane", re.compile(r"""\blane[ \t]*[!=]==?[ \t]*(?:"([^"\n]*)"|'([^'\n]*)')""")),
+    # and its schema enum: `lane: { type: 'string', enum: ['lite', 'full'] }`
+    ("lane", re.compile(r"""\blane[ \t]*:[ \t]*\{[^}\n]*\benum[ \t]*:[ \t]*\[[ \t]*'([^'\n]*)'""")),
+    ("lane", re.compile(r"""\blane[ \t]*:[ \t]*\{[^}\n]*\benum[ \t]*:[ \t]*\[[^\]\n]*,[ \t]*'([^'\n]*)'[ \t]*\]""")),
+)
 
 # REQ-646 ADR-5: `lesson-check-order`. The two lesson-capture steps (`/wrapup`
 # Step 4, `/bugfix` Phase 6 Step 4) must, in file order, anchor the write
@@ -2208,6 +2266,119 @@ def check_retrieval_status_parity(root: Path) -> list[Finding]:
     return findings
 
 
+def parse_lane_vocab_block(text: str) -> dict[str, set[str]] | None:
+    """Return ``{set_name: {values}}`` from the ``<!-- lane-vocabulary -->`` block.
+
+    ``None`` when no line-start open marker exists (absent), and an empty dict
+    when the block is present but lists nothing (gutted) — the caller reports
+    both, as ``check_retrieval_status_parity`` does. Each item line is
+    ``- <set>: `v1`, `v2```; only backticked values count.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not LANE_VOCAB_OPEN_RE.match(line):
+            continue
+        vocab: dict[str, set[str]] = {}
+        for item in lines[i + 1:]:
+            if LANE_VOCAB_CLOSE_RE.match(item):
+                break
+            m = LANE_VOCAB_ITEM_RE.match(item)
+            if m:
+                values = set(re.findall(r"`([^`]+)`", m.group(2)))
+                if values:
+                    vocab.setdefault(m.group(1), set()).update(values)
+        return vocab
+    return None
+
+
+def check_lane_vocabulary(root: Path) -> list[Finding]:
+    """REQ-652 BR-17: every lane value at every writer and reader is in the vocabulary.
+
+    Per-root check. Gate: inert unless ``partials/lane-check.md`` or
+    ``proceed/phases-lite.md`` exists, so a checkout that predates the lite lane
+    (or a test root built for another check) produces no finding. Either file
+    existing arms it, so deleting the vocabulary file alone does not disarm it.
+
+    Rules:
+      1. The vocabulary file and its line-start block must exist, be non-empty,
+         and define all of ``LANE_VOCAB_SETS``.
+      2. Every site in ``LANE_SITES`` must exist (deleting one is a finding).
+      3. Every ``lane:``, ``trigger=``/``trigger:``, ``actor:`` and
+         ``lane_check=`` value written at a site — and every prose
+         ``trigger `x``` / ``actor `x``` — must be in its set.
+    """
+    if not (root / LANE_VOCAB_SITE).is_file() and not (root / "proceed/phases-lite.md").is_file():
+        return []
+    findings: list[Finding] = []
+    vocab_path = root / LANE_VOCAB_SITE
+    vocab: dict[str, set[str]] | None = None
+    if not vocab_path.is_file():
+        findings.append(Finding(
+            LANE_VOCAB_SITE, 1, "lane-vocabulary",
+            "the lane vocabulary file is missing — the lite lane's closed sets "
+            "(lane, trigger, actor, lane_check) are defined nowhere (REQ-652 BR-17)",
+        ))
+    else:
+        try:
+            vocab = parse_lane_vocab_block(vocab_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            vocab = None
+        if vocab is None:
+            findings.append(Finding(
+                LANE_VOCAB_SITE, 1, "lane-vocabulary",
+                "no line-start `<!-- lane-vocabulary -->` block — the lane values "
+                "cannot be checked against a definition (REQ-652 BR-17)",
+            ))
+        elif not vocab:
+            findings.append(Finding(
+                LANE_VOCAB_SITE, 1, "lane-vocabulary",
+                "the `lane-vocabulary` block is present but empty (REQ-652 BR-17)",
+            ))
+            vocab = None
+        else:
+            for name in LANE_VOCAB_SETS:
+                if name not in vocab:
+                    findings.append(Finding(
+                        LANE_VOCAB_SITE, 1, "lane-vocabulary",
+                        f"the `lane-vocabulary` block does not define the `{name}` set",
+                    ))
+    sites = list(LANE_SITES)
+    proceed_dir = root / "proceed"
+    if proceed_dir.is_dir():
+        for extra in sorted(proceed_dir.glob("phase*.md")):
+            rel = extra.relative_to(root).as_posix()
+            if rel not in sites:
+                sites.append(rel)
+    for rel in sites:
+        site_path = root / rel
+        if not site_path.is_file():
+            findings.append(Finding(
+                rel, 1, "lane-vocabulary",
+                "lane writer/reader site is missing — if it moved, update LANE_SITES "
+                "in tools/lint-skills/check.py in the same change (REQ-652 ADR-13)",
+            ))
+            continue
+        if vocab is None:
+            continue
+        try:
+            text = site_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for set_name, pattern in LANE_VALUE_PATTERNS:
+                allowed = vocab.get(set_name, set())
+                for m in pattern.finditer(line):
+                    value = next((g for g in m.groups() if g is not None), "")
+                    if value not in allowed:
+                        findings.append(Finding(
+                            rel, lineno, "lane-vocabulary",
+                            f"`{set_name}` value `{value}` is not in the lane vocabulary "
+                            f"({', '.join(sorted(allowed)) or 'empty'}) — "
+                            f"defined in {LANE_VOCAB_SITE} (REQ-652 BR-17)",
+                        ))
+    return findings
+
+
 def run(root: Path) -> tuple[list[Finding], int]:
     """Scan ``root`` and return ``(findings, scanned_count)``.
 
@@ -2312,6 +2483,8 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_retrieval_status_parity(root))
     # Per-root (REQ-646 BR-4): /wrapup's and /bugfix's capture-rules blocks agree.
     findings.extend(check_lesson_rules_parity(root))
+    # Per-root (REQ-652 BR-17): lane values at every writer/reader are in the vocabulary.
+    findings.extend(check_lane_vocabulary(root))
     return findings, scanned
 
 

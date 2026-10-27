@@ -372,6 +372,20 @@ function selectEligible(reqs, max) {
   return { todo, dropped, ineligible };
 }
 
+// liteFallbackNotice — pure JS: one log line per REQ whose spec is on the lite
+// lane. This engine's phases are a fixed script with no lite path yet, so it
+// runs a lite REQ on the full lane and says so, once per REQ (REQ-652 BR-16,
+// AC-13). A record without `lane`, or with `lane: 'full'`, yields nothing:
+// absent means full (BR-12). The engine writes no `lane` object to state, so
+// /status's Active Pipelines column reports these runs as full, which is what
+// actually ran (its Requirements Summary still shows the spec's lane).
+function liteFallbackNotice(reqs) {
+  return (reqs || [])
+    .filter((r) => r && r.lane === 'lite')
+    .map((r) => `Lite lane: ${r.id} runs on the full lane under the workflow engine `
+      + '(it has no lite path yet); run it with the legacy engine to use its lite lane.');
+}
+
 // orderByTier — pure JS stable tier sort. Tasks without an explicit `tier` are
 // treated as tier 0 (a flat plan keeps its array order). Stable so tasks within
 // the same tier preserve the architect's intra-tier ordering. (ADR-5)
@@ -799,7 +813,7 @@ function groupMergedByRepo(terminals, primaryRepoById) {
 if (typeof module !== 'undefined') module.exports = {
   REPOS, VERDICT, TASKS, FINDINGS, CANDIDATES, PRS, TERMINAL, REVIEWER_DIMENSIONS, PANEL_DIMENSIONS,
   blocked, failed, terminalValue,
-  selectEligible, orderByTier,
+  selectEligible, liteFallbackNotice, orderByTier,
   dedupeAndRank, dedupeKey, cmp,
   validateCitations, sanitizeDescription, candidatesByDimension,
   reflectorQuestions, fixedPairs, mergeReverified, panelMembers,
@@ -857,6 +871,8 @@ const ELIGIBILITY_SCHEMA = {
           reason: { type: 'string' },
           integrationBranch: { type: 'string' },
           touchedRepos: { type: 'array', items: { type: 'string' } },
+          // REQ-652: the spec's lane. Optional; absent means full.
+          lane: { type: 'string', enum: ['lite', 'full'] },
         },
       },
     },
@@ -1055,6 +1071,9 @@ if (dropped.length > 0) {
 for (const r of ineligible) {
   log(`Preflight: skipping ${r.id} — ineligible (${r.reason || 'no reason given'}).`);
 }
+
+// REQ-652 BR-16: a lite REQ runs on the full lane here; say so once per REQ.
+for (const line of liteFallbackNotice(todo)) log(line);
 
 // Per-REQ pipeline: each REQ flows through `runReq` independently (no cross-REQ
 // barrier inside the pipeline). Single-repo REQs self-merge in Phase 8; cross-repo
@@ -1329,6 +1348,9 @@ function preflightPrompt(reqs) {
     '  - id: the REQ id.',
     '  - eligible: true ONLY if its requirement.md status is "approved" (or',
     '    later) AND it has a tasks directory AND it is not already fully merged.',
+    '    A lite REQ (frontmatter `lane: "lite"`) is the exception on both counts:',
+    '    status "draft" is eligible, because a lite REQ skips spec validation by',
+    '    design, and it has no tasks directory. (REQ-652 BR-16)',
     '  - reason: a short human-readable reason when NOT eligible.',
     '  - integrationBranch: the resolved integration branch for the primary',
     '    repo, by /proceed step 4\'s rule: branches.integration from',
@@ -1337,6 +1359,10 @@ function preflightPrompt(reqs) {
     '    later base on origin/<integrationBranch>. (BUG-060, LESSON-036)',
     '  - touchedRepos: the repo ids this REQ touches (for later cross-repo',
     '    merge sequencing).',
+    '  - lane (optional): "lite" or "full", copied from the `lane` key in',
+    '    requirement.md frontmatter. Omit it when the key is absent (absent means',
+    '    full). This engine runs a lite REQ on the full lane, whose Phase 1',
+    '    validates it and whose Phase 2 writes the tasks. (REQ-652 BR-16)',
     '',
     'Rank eligible REQs in a sensible order (e.g. fewest blockers first). Return',
     'ONLY the schema object — do not create worktrees or modify anything here.',

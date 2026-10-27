@@ -10,6 +10,13 @@ spec, derive an architecture and task graph, then validate that breakdown
 before any implementation begins. SKILL.md keeps a one-paragraph summary of
 each; this file holds the step-by-step.
 
+**Lite lane (REQ-652):** none of these three phases runs on a lite run: one whose
+state says `lane.current` is `lite`, or, before the state has a `lane` object, whose
+spec says `lane: "lite"`. Step 0 records each one as skipped (`"skipped": "lite"`
+in `phaseHistory`, and in `lane.skippedPhases`), so the Gate Protocol still
+holds at Phase 4. They run in full after an escalation, which resumes at Phase 1.
+See `proceed/phases-lite.md`.
+
 ---
 
 ### Phase 1: Validate the Requirement Spec
@@ -39,6 +46,8 @@ each; this file holds the step-by-step.
    - For each configured repo with no tasks (and not primary), set `touched: false` and remove its worktree using the absolute path recorded in state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`.
    - Rebuild `mergeOrder` filtered to touched repos, preserving the configured order.
 4. **Backfill missing `repo:` fields**: if any task omits `repo:`, default it to the primary repo id and write the field into its frontmatter. In single-repo mode this is the only valid value and can be set silently.
+
+5. **After an escalation from the lite lane**, the branch already carries the lite implementation. `/architect` treats that code as the baseline to design around, not something to discard (REQ-652 BR-10).
 
 **End-of-phase log**: Emit a one-paragraph summary of the architecture approach, the task dependency graph, and the final touched-repo set with task counts per repo. Continue to Phase 3 immediately.
 

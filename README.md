@@ -9,18 +9,18 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | Skill | Description |
 |-------|-------------|
 | `/init` | Bootstrap `.adlc/` structure in a new repo |
-| `/spec` | Write requirement specs from feature requests. Pass `--intake` (or a source file path, or over 25 lines of input) to run **intake** on unstructured material — a transcript, meeting notes, a ticket dump — producing a draft REQ plus an explicit gap list naming what the source does not answer (REQ-594) |
+| `/spec` | Write requirement specs from feature requests. Pass `--intake` (or a source file path, or over 25 lines of input) to run **intake** on unstructured material — a transcript, meeting notes, a ticket dump — producing a draft REQ plus an explicit gap list naming what the source does not answer (REQ-594). Triages every request into the **lite** or **full** lane and records why; `--lite` / `--full` force it (REQ-652) |
 | `/architect` | Design architecture and break requirements into tasks |
 | `/validate` | Validate any ADLC phase output before advancing |
-| `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup. Opens a draft PR early and trial-merge-gates the merge to enforce ordering (REQ-483) |
-| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback |
+| `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup. Opens a draft PR early and trial-merge-gates the merge to enforce ordering (REQ-483). On a **lite** REQ it skips validation, architecture and tasks, reviews with one `lite-reviewer` pass, and runs a mechanical lane check of the diff that escalates to the full lane when the change crosses a line; `--full` escalates by hand (REQ-652) |
+| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback. The workflow engine runs lite-lane REQs on the full lane and logs that it did |
 | `/reflect` | Post-implementation self-review before formal review |
 | `/review` | Multi-agent code review (correctness, quality, architecture, tests, security) |
 | `/adversary` | Adversarial review of any artifact (spec, plan, diff/PR, README, or prose claim) — assumes it is wrong and tries to prove it, then reports only findings that survive self-refutation. Read-only; hunts omissions, not just bugs in what was written |
 | `/canary` | Canary deployment with smoke tests — deploy zero-traffic revision and promote on success |
 | `/wrapup` | Close out a feature — commit, merge, deploy, update artifacts |
 | `/bugfix` | Streamlined bug fix workflow |
-| `/status` | Show current state of all ADLC work |
+| `/status` | Show current state of all ADLC work, including each REQ's lane and any escalations |
 | `/manifest` | Remote-derived view of all in-flight ADLC work — open PRs + pushed `feat/REQ-*` branches, with advisory component/domain + file-footprint overlap and a deterministic merge order (REQ-483) |
 | `/analyze` | Codebase health audit |
 | `/optimize` | API cost & performance scanner |
@@ -233,6 +233,7 @@ The toolkit's workflow is stack-agnostic. Skills that need to do stack-specific 
 | Canary deploys (`/canary`) | `services:` block | service name, region, image path per repo |
 | iOS device deploys (`/bugfix`, `/wrapup`) | `stack.frontends` includes `ios` | `ios.deploy_targets`, `ios.deploy_command` |
 | Convention checking (`/review`, `/reflect`) | `.adlc/context/conventions.md` | declare your project's naming, logging, and API conventions |
+| Lite-lane limits (`/proceed`, `/spec`) | `lanes.lite` | `max_files`; globs added to the default `blocked_paths` and `count_exclude`; and a `deploy_units` glob → unit map, for the lane check (`partials/lane-check.md`) |
 
 `branches.integration` is optional. When it is declared, `/proceed` step 4 takes it as the integration branch outright; when it is absent, the skills detect the branch model as before — a declared `gcp.staging_project`, a `verify-head-ref` workflow, or staging-first wording in `CLAUDE.md` means `staging`, otherwise `main`. Set it whenever that detection would pick the wrong branch, e.g. a `dev` → `staging` → `main` promotion pipeline, where feature work integrates into `dev` although a staging project is declared. Repos without the key behave exactly as before.
 

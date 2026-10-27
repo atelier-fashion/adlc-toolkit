@@ -29,10 +29,13 @@ import sys
 # authority (ADR-1): the ``reviewer`` class spans both opus and sonnet today, so
 # a class->one-model collapse would change behavior and violate BR-3. The class
 # map exists only as the adopter's override lever; with no config every agent
-# resolves to its individually-shipped value below.
+# resolves to its individually-shipped value below. Agents added after REQ-516
+# take an existing agent's tier and model: ``lite-reviewer`` (REQ-652 ADR-7)
+# matches ``correctness-reviewer``.
 _SHIPPED_DEFAULTS = {
     "adversary": ("reviewer", "opus"),
     "correctness-reviewer": ("reviewer", "opus"),
+    "lite-reviewer": ("reviewer", "opus"),
     "reflector": ("reviewer", "opus"),
     "security-auditor": ("reviewer", "opus"),
     "architecture-reviewer": ("reviewer", "sonnet"),

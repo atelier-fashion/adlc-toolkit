@@ -1,7 +1,7 @@
 ---
 id: TASK-116
 title: "pipeline-runner and /sprint: lite under the legacy engine, full under the workflow engine"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27

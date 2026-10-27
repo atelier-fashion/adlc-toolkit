@@ -127,7 +127,7 @@ Every agent in [`agents/`](../../agents) declares a stable **tier class** in its
 frontmatter (`tier:`); the `model:` line is **rendered output**, not hand-edited
 (each agent carries a `<!-- ... do not hand-edit -->` comment saying so). This
 command stamps the resolved `model:` into each agent file so an adopter can
-re-tier every agent from one config block instead of editing 18 files (whose
+re-tier every agent from one config block instead of editing 19 files (whose
 edits a toolkit pull would clobber).
 
 ```bash
@@ -222,6 +222,147 @@ fail-loud on an unrecognized host), and refuses a key-shaped `forge.auth` value
 ```bash
 python3 tools/adlc/forge_config.py resolve-provider [<repo-dir>]   # prints github|azure-devops
 python3 tools/adlc/forge_config.py validate-auth <value>           # exit 2 if key-shaped
+```
+
+## `lane_check.py` (REQ-652)
+
+The lite lane's mechanical check (REQ-652 BR-6, architecture ADR-3). It is a
+helper module, not a subcommand. `partials/lane-check.sh` (`adlc_lane_check
+<worktree> <base-ref>`) is the entry point the skills call. It runs this file by
+path, and only the installed toolkit's copy
+(`~/.claude/skills/tools/adlc/lane_check.py`), never one in the tree under
+check:
+
+```bash
+python3 tools/adlc/lane_check.py --worktree <path> --base origin/<integration-branch>
+```
+
+The caller fetches the base first. The check diffs
+`git diff --raw -z --no-renames --ignore-submodules=none <base>...HEAD` in the
+worktree (which must be a worktree's top level) and evaluates every rule on the
+changed files and their file modes.
+
+| Exit | `lane_check=` | Meaning |
+|------|---------------|---------|
+| 0 | `pass` | no rule failed |
+| 1 | `escalate` | at least one rule failed; the REQ leaves the lite lane |
+| 2 | `error` | the check could not decide. Callers treat this as an escalation, never a pass (LESSON-581) |
+
+Stdout has one fact per line:
+
+```
+lane_check=escalate
+files_counted=4
+trigger=blocked-path
+detail=infra/main.tf
+trigger=max-files
+detail=4 > 3
+```
+
+- `files_counted` is printed on `pass` and `escalate`. It is omitted on `error`,
+  because no count was made and a `0` would read as a fact about the diff.
+- Each failing fact is one `trigger=` / `detail=` pair. Every rule is evaluated,
+  and each blocked or dependency path gets its own pair.
+- A `detail` is always one line that `str.splitlines()` cannot split. A
+  backslash is written `\\`. Control characters, the Unicode line and paragraph
+  separators (U+2028, U+2029), zero-width and bidi marks (U+200B-U+200F, U+061C,
+  U+202A-U+202E, U+2066-U+2069), the BOM and undecodable bytes are written as
+  `\xNN` / `\uNNNN` escapes.
+- An error prints exactly `lane_check=error`, `trigger=check-error` and
+  `detail=<reason>`.
+
+These all produce an error:
+
+- a dirty worktree (tracked changes or untracked files)
+- a base ref that does not resolve to a commit, or that starts with `-`
+- an empty diff against the base (`detail=empty diff against <base>`): a lite REQ
+  always has commits, so the base is wrong
+- any git failure
+- a worktree path that is not a worktree's top level
+- a config at the base that cannot be read or fails the schema
+- bad arguments. There is no `--help`, because an exit 0 that printed usage would
+  read as a pass.
+- any exception the module did not plan for
+
+| Trigger | Fails when |
+|---------|------------|
+| `blocked-path` | a changed file matches `blocked_paths`, case-insensitively. Files excluded from the count are checked too. Also any change whose old or new mode is a symlink (`120000`), as `detail=symlink: <path>`. |
+| `dependency` | a changed file's basename is a lockfile or manifest, case-insensitively, anywhere in the tree (`apps/web/package.json`, `requirements-dev.txt`, `build.gradle.kts`). Also any change whose old or new mode is a submodule (`160000`), as `detail=submodule: <path>`. |
+| `deploy-units` | the counted files fall in more than one `deploy_units` unit. Each file takes the first glob it matches, and files matching none are ignored. Evaluated only when `deploy_units` is declared. |
+| `max-files` | more files are counted than `max_files`. Files matching `count_exclude` are not counted. |
+
+A rename is two changed files, the deletion and the addition. Both are checked
+and both are counted. With rename detection on, a move out of a blocked
+directory would list only the new path. `--ignore-submodules=none` overrides a
+`.gitmodules` `ignore = all`, which would otherwise hide a gitlink change from
+the diff.
+
+**Globs** are repo-relative POSIX paths, anchored at the root:
+
+- `*`, `?` and `[...]` stay within one path segment
+- `**/` matches zero or more directories
+- a trailing `/**` matches everything beneath that directory
+- every pattern (defaults and project, all three lists and the `deploy_units`
+  keys) is normalized first by `normalize_pattern()`: a leading `./` or `/` is
+  dropped, runs of `/` collapse, a trailing `/` becomes `/**`, and a pattern with
+  no glob character also matches everything beneath it (`infra` is `infra` or
+  `infra/**`). An empty pattern is a schema error.
+- `blocked_paths` and the dependency names match case-insensitively;
+  `count_exclude` and `deploy_units` are case-sensitive
+
+`fnmatch` alone lets `*` cross `/`, so `glob_match()` matches segment by segment.
+
+**Defaults.** `DEFAULT_BLOCKED_PATHS`, `DEPENDENCY_LOCKFILES`,
+`DEPENDENCY_MANIFESTS`, `DEFAULT_COUNT_EXCLUDE` and `DEFAULT_MAX_FILES` are the
+source of truth. `partials/lane-check.md` lists them between
+`<!-- lane-defaults <name> -->` markers, and a test fails when the two disagree.
+
+**Config.** The check reads `lanes.lite` from `.adlc/config.yml` **as committed
+at the base ref** (`git ls-tree` / `git cat-file`), never from the worktree's
+disk, so the branch under check cannot loosen its own limits, by a commit,
+`skip-worktree`, or a gitignored local copy. The shape is documented in
+[`templates/config-template.yml`](../../templates/config-template.yml) and
+`partials/lane-check.md`.
+
+- Absent at the base, the defaults apply. A symlink, a directory or a submodule
+  in its place, or a file over 64 KiB, is an error.
+- A file whose bytes contain no `lanes` (nor a backslash or NUL, through which a
+  YAML escape or a UTF-16 encoding could spell it) is never parsed, so the
+  defaults apply even on an interpreter without PyYAML. Mentions on whole-line
+  comments are skipped, so a copy of the config template, whose example block is
+  commented out, is not parsed either. Every other file is parsed.
+- Parsing goes through the shared loader,
+  [`load_machine_config()`](../delegate/_machine_config.py), located and executed
+  by path the way `forge_config.py` does it, and handed the bytes in a private
+  temporary file. That loader refuses duplicate keys, aliases and merge keys
+  anywhere in the document.
+- Every loader refusal is an error here, `dependency-missing` included. Unlike
+  `forge_config.py`, the lane check does not treat a missing PyYAML as
+  "unconfigured".
+- The section is then checked against a closed schema. `max_files` must be an
+  integer >= 1 (a boolean is refused). `blocked_paths` and `count_exclude` must
+  be lists of strings. `deploy_units` must map strings to strings. An unknown
+  key, a wrong type or an empty pattern is an error.
+- A key written with no value counts as unwritten, the same rule the forge reader
+  follows.
+- `blocked_paths` and `count_exclude` extend the defaults. `max_files` replaces
+  the default.
+
+**Git hardening.** Every git run drops `GIT_DIR`, `GIT_WORK_TREE`,
+`GIT_INDEX_FILE` and the other repository-redirecting variables, the
+config-injecting ones (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`,
+`GIT_CONFIG_KEY_*`, `GIT_CONFIG_VALUE_*`, `GIT_CONFIG_GLOBAL`,
+`GIT_CONFIG_SYSTEM`) and the history-rewriting ones (`GIT_GRAFT_FILE`,
+`GIT_SHALLOW_FILE`, `GIT_REPLACE_REF_BASE`). It sets `GIT_NO_REPLACE_OBJECTS=1`
+and passes `--no-replace-objects`, `--no-optional-locks` and
+`-c core.fsmonitor=false`.
+
+**Tests.** `tools/adlc/tests/test_lane_check.py`. The config cases need PyYAML
+and skip without it, so the authoritative run is under the delegate venv, with
+`ADLC_REQUIRE_PYYAML=1` turning any such skip into a failure:
+
+```bash
+ADLC_REQUIRE_PYYAML=1 ~/.claude/delegate-venv/bin/python3 -m pytest tools/adlc/tests/test_lane_check.py
 ```
 
 ## Running the tests

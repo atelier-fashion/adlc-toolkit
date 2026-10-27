@@ -65,9 +65,89 @@ def test_no_config_render_is_noop_on_real_agents(repo_root, tmp_path):
     after = {p.name: p.read_bytes() for p in dst.iterdir()}
     assert before == after, "no-config render must be byte-for-byte identical (BR-3)"
     assert all(not changed for *_x, changed in report)
-    # And the resolved value equals the on-disk value for all 18.
+    # And the resolved value equals the on-disk value for every shipped agent.
     drift = agents_render.check_drift(str(tmp_path), {"classes": {}, "overrides": {}})
     assert drift == []
+
+
+def _frontmatter_value(text, key):
+    """The value of a top-level ``key:`` line inside the frontmatter, or None."""
+    fm = text.split("---", 2)[1]
+    for line in fm.splitlines():
+        if line.startswith(f"{key}:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def test_every_agent_file_is_registered(repo_root):
+    """Each ``agents/*.md`` has a ``_SHIPPED_DEFAULTS`` entry, and vice versa.
+
+    ``_iter_agents`` walks the map, not the directory, so an agent file missing
+    from the map is never rendered and never drift-checked — silently. This test
+    is the enumeration that makes a new agent's registration mandatory.
+    """
+    adir = os.path.join(repo_root, "agents")
+    on_disk = {n[:-3] for n in os.listdir(adir) if n.endswith(".md")}
+    assert on_disk == set(agents_render._SHIPPED_DEFAULTS)
+    # The frontmatter tier: matches the shipped tier for every agent.
+    for name, (tier, _model) in agents_render._SHIPPED_DEFAULTS.items():
+        with open(os.path.join(adir, name + ".md"), encoding="utf-8") as fh:
+            assert _frontmatter_value(fh.read(), "tier") == tier, name
+
+
+# --- REQ-652 BR-5 / ADR-7: the lite lane's single review agent --------------
+def test_lite_reviewer_resolves_a_model(repo_root, tmp_path):
+    """``lite-reviewer`` is registered at correctness-reviewer's tier and model,
+    resolves a model with and without config, and its committed file renders
+    with no change."""
+    shipped = agents_render._SHIPPED_DEFAULTS
+    assert shipped["lite-reviewer"] == shipped["correctness-reviewer"] == ("reviewer", "opus")
+
+    empty = {"classes": {}, "overrides": {}}
+    assert agents_render.resolve_model("lite-reviewer", empty) == "opus"
+    # It follows its tier class like every other reviewer.
+    cfg = agents_render.parse_agents_config(
+        _cfg(tmp_path, "agents:\n  classes:\n    reviewer: sonnet\n"))
+    assert agents_render.resolve_model("lite-reviewer", cfg) == "sonnet"
+
+    path = os.path.join(repo_root, "agents", "lite-reviewer.md")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert _frontmatter_value(text, "name") == "lite-reviewer"
+    assert _frontmatter_value(text, "tier") == "reviewer"
+    assert _frontmatter_value(text, "tools") == "Read, Grep, Glob, Bash"
+    assert agents_render._current_model(text) == "opus"
+    # The committed file is a render fixed point (read-only render, no write).
+    report = {name: (new, changed)
+              for name, _old, new, changed in agents_render.render(repo_root, empty, write=False)}
+    assert report["lite-reviewer"] == ("opus", False)
+
+
+def test_lite_reviewer_output_contract(repo_root):
+    """The sections /proceed branches on are named in the agent's instructions:
+    a row per numbered BR/AC (LESSON-330), an always-present ``reversals:``
+    whose non-empty form escalates with trigger ``reversal`` (AC-9), and the
+    ``out_of_lane:`` (escalates, BR-9) and ``questions:`` (halt #2) sections."""
+    with open(os.path.join(repo_root, "agents", "lite-reviewer.md"), encoding="utf-8") as fh:
+        body = fh.read().split("---", 2)[2]
+    for needle in (
+        "Report findings only. Do not apply fixes.",
+        "\nfindings:\n",
+        "\ncoverage:\n",
+        "\nreversals: none\n",
+        "one row for every numbered `BR-n` and every `AC-n`",
+        "LESSON-330",
+        "`reversals:`, `out_of_lane:` and `questions:` are always present",
+        "\nout_of_lane: none\n",
+        "\nquestions: none\n",
+        "the orchestrator escalates on any entry (trigger `implementer`)",
+        "escalates the REQ to the full lane (trigger `reversal`)",
+        "Do not run your own retrieval.",
+        "origin/<integrationBranch>",
+    ):
+        assert needle in body, needle
+    for dimension in ("Correctness", "Quality", "Architecture", "Test coverage", "Security"):
+        assert f"\n### {dimension}\n" in body, dimension
 
 
 # --- AC-1: a class change touches only that class --------------------------

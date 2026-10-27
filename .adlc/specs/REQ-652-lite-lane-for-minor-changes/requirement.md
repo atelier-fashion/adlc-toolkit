@@ -1,7 +1,7 @@
 ---
 id: REQ-652
 title: "A lite lane for minor changes: /spec triages every request, /proceed runs a short pipeline for small ones and escalates when the diff says otherwise"
-status: approved
+status: complete
 deployable: false
 created: 2026-10-27
 updated: 2026-10-27

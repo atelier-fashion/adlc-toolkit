@@ -1,7 +1,7 @@
 ---
 id: TASK-115
 title: "/proceed: the lite branch, escalation, --full and the fourth halt"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27

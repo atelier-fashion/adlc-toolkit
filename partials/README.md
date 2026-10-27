@@ -146,6 +146,20 @@ behavior. Examples:
   provenance-classifying-harness (BUG-228) fallback and the deviations from ADR-3
   are in the companion `lesson-check.md`. Tested by `tests/lesson-check.test.sh`
   under bash, zsh, sh and dash.
+- `lane-check.sh` — the lite lane's mechanical diff check (REQ-652). Defines
+  `adlc_lane_check <worktree> <base-ref>`, run by `/proceed` on a lite REQ after
+  the review fixes, after any Phase 7 commit, and before merge. It runs
+  `tools/adlc/lane_check.py` and passes its normalized stdout (`lane_check=`,
+  `files_counted=`, then `trigger=`/`detail=` pairs) and exit code through
+  unchanged: **0** pass, **1** escalate, **2** error, which is never a pass. A
+  run that breaks that contract (any other exit code, or a first line that does
+  not match the code) becomes the three-line error output and rc 2. The engine
+  always comes from the installed toolkit, never the tree under check. It
+  resolves the interpreter with `forge.sh`'s `_adlc_forge_python`, a documented
+  coupling. The companion `lane-check.md` holds the rule table, the defaults, the
+  `lanes.lite` config block, and the `<!-- lane-vocabulary -->` block that
+  `tools/lint-skills`' `lane-vocabulary` check reads. Tested by
+  `tests/lane-check.test.sh` under bash, zsh, sh and dash.
 
 Skills invoke a model-2 partial like:
 
