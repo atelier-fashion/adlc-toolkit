@@ -1,7 +1,7 @@
 ---
 id: TASK-113
 title: "lite-reviewer agent: one read-only pass covering five dimensions, AC/BR coverage and reversals"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27

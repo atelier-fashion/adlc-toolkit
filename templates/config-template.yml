@@ -99,6 +99,58 @@ merge_order:
   - mobile
 
 # ---------------------------------------------------------------------------
+# lanes: Limits for the lite lane. Optional.
+# ---------------------------------------------------------------------------
+# A REQ that `/spec` triages as `lite` skips architecture and the review
+# panel. Before its PR leaves draft, `/proceed` runs a mechanical lane check
+# of the diff against the integration branch (tools/adlc/lane_check.py), and
+# any failing rule escalates the REQ to the full lane:
+#   - blocked_paths  a changed file matching one of these globs, or a symlink
+#   - dependencies   a changed lockfile or manifest, or a submodule (a fixed
+#                    list, no key here)
+#   - deploy_units   files in more than one unit (only when this is declared)
+#   - max_files      more counted files than this; files matching
+#                    `count_exclude` are not counted, but are still checked
+#                    against the blocked paths and the dependency files
+#
+# Absent, the toolkit defaults apply: `max_files` 3; CI, deploy, infra,
+# containers, migrations/SQL/proto/OpenAPI/schema, auth/security, `.env*`,
+# keys and certificates, agent config (`.claude/**`, `CLAUDE.md`), git hooks,
+# package-manager config and pipeline config paths blocked; tests, `.adlc/**`
+# and `CHANGELOG*` not counted. The full lists are in partials/lane-check.md.
+#
+# `blocked_paths` and `count_exclude` EXTEND the defaults — they are added to
+# the toolkit's lists and never replace them, so a project cannot unblock
+# `.github/**` by declaring a list of its own. `max_files` replaces the
+# default. `deploy_units` maps a glob to a unit name, and each counted file
+# belongs to the first glob it matches.
+#
+# Globs are repo-relative: `*` stays within one directory, `**/` is zero or
+# more directories, and a trailing `/**` is everything beneath. A trailing `/`
+# means `/**`, and a plain path with no glob character also covers everything
+# beneath it. `blocked_paths` match case-insensitively. An unknown key, a wrong
+# type or an empty pattern makes every lane check report an error, which
+# escalates; nothing here is silently skipped.
+#
+# The check reads this file as committed on the integration branch, never the
+# copy in the branch under check, and this file is itself a blocked path. It
+# is parsed only when `lanes` appears outside a whole-line comment, so this
+# commented example costs nothing; once uncommented, parsing needs PyYAML in
+# the interpreter the check runs under (the delegate venv).
+
+# lanes:
+#   lite:
+#     max_files: 3
+#     blocked_paths:
+#       - "packages/domain/**"
+#       - "services/api/src/schemas/**"
+#     count_exclude:
+#       - "content/**"
+#     deploy_units:
+#       "apps/website/**": website
+#       "apps/admin/**": admin
+
+# ---------------------------------------------------------------------------
 # branches: Where feature work integrates.
 # ---------------------------------------------------------------------------
 # `integration` names the branch that feature branches are cut from and that

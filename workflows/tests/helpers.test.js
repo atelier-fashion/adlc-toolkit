@@ -37,6 +37,7 @@ const {
   candidatesByDimension,
   dedupeAndRank,
   selectEligible,
+  liteFallbackNotice,
   orderByTier,
   groupCrossRepoReqs,
   blocked,
@@ -437,6 +438,33 @@ test('selectEligible: ineligible REQs never count against the max-5 bound', () =
 test('selectEligible: empty input yields empty selection (never throws)', () => {
   assert.deepEqual(selectEligible([], 5), { todo: [], dropped: [], ineligible: [] });
   assert.deepEqual(selectEligible(null, 5), { todo: [], dropped: [], ineligible: [] });
+});
+
+// ===========================================================================
+// liteFallbackNotice — REQ-652 BR-16 / AC-13: the workflow engine runs a lite
+// REQ on the full lane and logs one line per lite REQ; nothing for full or
+// lane-less REQs (absent means full).
+// ===========================================================================
+
+test('liteFallbackNotice: one line per lite REQ, naming it, in input order (BR-16)', () => {
+  const lines = liteFallbackNotice([
+    { id: 'REQ-101', eligible: true, lane: 'lite' },
+    { id: 'REQ-102', eligible: true, lane: 'full' },
+    { id: 'REQ-103', eligible: true },
+    { id: 'REQ-104', eligible: true, lane: 'lite' },
+  ]);
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /^Lite lane: REQ-101 runs on the full lane/);
+  assert.match(lines[1], /^Lite lane: REQ-104 runs on the full lane/);
+});
+
+test('liteFallbackNotice: no notice when every REQ is full or has no lane (AC-13)', () => {
+  assert.deepEqual(liteFallbackNotice([
+    { id: 'REQ-201', eligible: true, lane: 'full' },
+    { id: 'REQ-202', eligible: true },
+  ]), []);
+  assert.deepEqual(liteFallbackNotice([]), []);
+  assert.deepEqual(liteFallbackNotice(null), []);
 });
 
 // ===========================================================================

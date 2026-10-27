@@ -1,6 +1,7 @@
 ---
 name: proceed
 description: End-to-end ADLC pipeline that takes a requirement from spec through to deployed. Takes a REQ number as argument and runs validate → fix → architect → fix → implement → verify (reflect + review) → create PR → wrapup (merge, deploy, knowledge capture). Use when the user says "proceed", "proceed with REQ-xxx", "run the pipeline", "take REQ-xxx to completion", "implement REQ-xxx end to end", or wants to advance a drafted requirement all the way through to deployment in one shot.
+argument-hint: REQ-xxx ID, optionally followed by --full to move a lite REQ to the full lane
 ---
 
 # Proceed — Full ADLC Pipeline
@@ -18,11 +19,12 @@ You are in subagent mode if you were explicitly told so in your launch prompt.
 
 ## Autonomous Execution Contract
 
-`/proceed` is an **autonomous orchestrator**. It is designed to run end-to-end without human input. The skill has exactly **three** legitimate halt points; every other instruction below is a log step, not a pause:
+`/proceed` is an **autonomous orchestrator**. It is designed to run end-to-end without human input. The skill has exactly **four** legitimate halt points; every other instruction below is a log step, not a pause:
 
 1. **Validation fails 3 times at any gate** (Phase 1 or Phase 3) — surface blockers.
-2. **Reflector surfaces user-facing questions** (Phase 5, Step C item 4) — surface as a numbered list and wait.
+2. **Reflector surfaces user-facing questions** (Phase 5, Step C item 4), or on the lite lane a non-empty `questions:` section from `lite-reviewer` — surface as a numbered list and wait.
 3. **Merge conflicts during rebase** (Phase 8 / wrapup) — surface conflicts and wait.
+4. **The lane check fails on a forced-lite REQ in a solo run** (lite lane, `proceed/phases-lite.md` "The lane check") — list the failing rules as a numbered question: escalate, or keep lite. In subagent mode (a `/sprint` runner, with no operator present) the same failure escalates instead and never halts (REQ-652 BR-8).
 
 For everything else — including every **End-of-phase log** block below, every agent dispatch, every commit, every PR creation, every CI wait — you **continue immediately** to the next step without asking the user. Prompt only for tool-level permissions on truly destructive operations (these are governed by `.claude/settings.json`, not this skill).
 
@@ -36,9 +38,14 @@ For everything else — including every **End-of-phase log** block below, every 
 
 The user provides a requirement ID, e.g., `/proceed REQ-023` or `/proceed 23`.
 
+- Strip a `--full` flag from `$ARGUMENTS` before any REQ-id parsing (the `/wrapup --close-out` precedent). On a lite REQ it escalates to the full lane with `actor: operator` before Phase 4, or at the point of a resume; on a full REQ it logs one line and does nothing (REQ-652 BR-11, `proceed/phases-lite.md` "Step 0 additions").
 - Normalize to `REQ-xxx` format (zero-pad to 3 digits if needed)
 - Locate the spec at `.adlc/specs/REQ-xxx-*/requirement.md`
 - If the spec doesn't exist, stop and tell the user to run `/spec` first
+
+## Lanes (REQ-652)
+
+The spec's frontmatter `lane` says which lane a REQ runs on: `lite` or `full`. A spec with no `lane` key is on the **full** lane, and every reader treats absent as `full`, so a spec written before REQ-652 runs exactly as before. The full lane is everything below. The lite lane is the same pipeline with the lane value branching it: Step 0 records Phases 1–3 as skipped, Phase 4 implements straight from the acceptance criteria with no task files, Phase 5 runs one `lite-reviewer` pass instead of the reflector and the five-agent panel, and a mechanical **lane check** of the diff runs before the PR leaves draft and again before merge. Any crossed line escalates the REQ to the full lane, keeping the spec, branch, worktree, PR and code, and resumes at Phase 1. The full procedure is in `proceed/phases-lite.md`; the closed lane vocabulary is in `partials/lane-check.md`.
 
 ## Repository Configuration (single-repo vs cross-repo)
 
@@ -141,9 +148,19 @@ Execute these phases in order. Each phase has a validation gate — if validatio
     "failedTasks": []
   },
   "conflictsResolved": [],
-  "closeOut": { "status": "ok", "at": "2026-03-27T10:45:00Z" }
+  "closeOut": { "status": "ok", "at": "2026-03-27T10:45:00Z" },
+  "lane": {
+    "initial": "lite",
+    "current": "full",
+    "forced": false,
+    "skippedPhases": [1, 2, 3],
+    "escalations": [ { "at": "2026-03-27T10:30:00Z", "phase": 5, "trigger": "blocked-path", "detail": "packages/domain/src/page.ts", "actor": "solo" } ],
+    "overrides": []
+  }
 }
 ```
+
+`lane` is optional and additive (REQ-652): written at Step 0 only when the spec carries a `lane` key. Absent means the full lane, and a state file without it parses and runs unchanged. `initial` and `current` are the lane the run started on and the one it is on now; `skippedPhases` lists the phases a lite run recorded as skipped; `escalations` gets one entry per escalation, appended before the pipeline continues; `overrides` gets one entry, `{ at, phase, sha, triggers, pairs, actor }`, each time the operator answers halt #4 with "keep lite", where `pairs` are the exact `<trigger>: <detail>` strings the operator saw and `sha` the commit they saw them at; a later check halts again on any pair not listed or whose file changed since, and a `check-error` is never overridden. The spec frontmatter is the authority on the lane when a run starts, because state files are gitignored and machine-local; once the object exists, `lane.current` decides every lane branch of that run (each phase's "Lite lane" note included), so a lost escalation commit cannot put an escalated REQ back on the lite lane.
 
 `closeOut` is optional and additive (BUG-249): written by the Step 8b close-out
 actor — `/wrapup --close-out` writes `status: "ok"`; the orchestrator that invoked it
@@ -166,9 +183,10 @@ The `snapshotBranch` and `snapshotPR` fields on each `repos.<id>` entry are **de
 1. **Initialize** the state file at the start of Step 0 with `currentPhase: 0, completedPhases: [], completed: false, repos: {...resolved from config...}, mergeOrder: [...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`
 2. **Before starting any phase**: read `pipeline-state.json`. Verify `currentPhase` equals the phase you're about to start AND the previous phase is in `completedPhases`. If either check fails, **STOP** — you skipped a phase. Go back and complete it.
 3. **After completing any phase**: append the phase number to `completedPhases`, append an entry to `phaseHistory` with the completion timestamp, set `currentPhase` to the next phase number.
+3a. **Skipped phases still pass through the gate (REQ-652 ADR-5)**: a lite run appends `1`, `2` and `3` to `completedPhases` at Step 0, each with a `phaseHistory` entry carrying `"skipped": "lite"`, so rule 2 holds unchanged at Phase 4. An escalation appends an `{ "event": "escalated" }` history entry, trims `completedPhases` to `[0]` and sets `currentPhase` to `1`; `phaseHistory` stays append-only.
 4. **Phase 4 task-level writes**: When starting a task, set `phase4.currentTask` to its TASK-xxx ID. When its commit lands (in the task's target-repo worktree), append the ID to `phase4.completedTasks` and clear `currentTask`. On unrecoverable failure surfaced to the user, append to `phase4.failedTasks` instead.
 5. **Worktree paths are immutable post-Step-0**: once Step 0 records `repos[<id>].worktree`, every subsequent phase (1–8) MUST read the path from state and MUST NOT re-derive it from cwd, the REQ id, or any naming convention. This applies on the happy path, not just on resume. (Step 0 itself reads cwd exactly once — at item 2 of Step 0 — to initialize the registry, then freezes the path into state; the prohibition starts from the moment Step 0 completes.)
-5b. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`. Trust `repos` as the source of truth for worktree paths. If `currentPhase` is 4 and `phase4.currentTask` is non-null, resume that specific task (re-read its file, use `repos[<task.repo>].worktree` for every git/file operation, re-check whether its commit already landed, continue or restart as appropriate) before moving to the next task in the dependency graph. Never replay tasks already in `completedTasks`.
+5b. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`. Step 0's lane read still runs first (it is resume-safe): it reads `lane.current` from state rather than the spec, and it handles a `--full` passed on this invocation before the next phase starts. Trust `repos` as the source of truth for worktree paths. If `currentPhase` is 4 and `phase4.currentTask` is non-null, resume that specific task (re-read its file, use `repos[<task.repo>].worktree` for every git/file operation, re-check whether its commit already landed, continue or restart as appropriate) before moving to the next task in the dependency graph. Never replay tasks already in `completedTasks`.
 6. **If context has been compressed**: re-read `pipeline-state.json` before doing anything and treat it as the source of truth for `currentPhase`, `repos`, and `phase4`. Do not rely on memory of which phase, task, or repo you're in.
 7. **Per-repo writes during Phases 6–8**: when a PR is created, write its URL to `repos[id].prUrl`. When a PR merges, set `repos[id].merged = true`. These writes let a mid-Phase-8 interruption resume merges in order without double-merging.
 8. **On completion**: After Phase 8 (Wrapup) finishes, set `"completed": true` in the state file.
@@ -208,9 +226,9 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    ```
    Do NOT `git checkout <integration-branch>` in `<repo-path>` — it may be checked out in another worktree and fail. The worktree (step 5) is created directly from `origin/<integration-branch>`. Feature branches and the Phase 6 PR base MUST use `<integration-branch>`, never a hardcoded `main`.
 
-   **Step 4 advisory — in-flight manifest (non-blocking, REQ-482).** With `origin` now fetched and **before** the worktree is created, surface what else is in flight across sessions so you can spot overlaps before starting. **In subagent mode (`/sprint` pipeline-runner): SKIP this** — `/sprint` already built the manifest once for the batch in its pre-flight. Otherwise invoke `/manifest`, prefixing the same shell call with the hand-off vars so it reuses this fetch and marks the current REQ as self: `MANIFEST_SELF="REQ-xxx" MANIFEST_SKIP_FETCH=1` (substitute the concrete REQ id). Display the in-flight table and any coarse `component`/`domain` overlap involving the current REQ. This is **purely advisory**: it MUST NOT block, halt, reorder, or gate the pipeline; it is NOT one of the three legitimate halt points; a manifest-build failure is ignored with a one-line note and the pipeline continues (BR-7, BR-8, BR-9). The worktree-collision gate (step 4b) is unchanged.
+   **Step 4 advisory — in-flight manifest (non-blocking, REQ-482).** With `origin` now fetched and **before** the worktree is created, surface what else is in flight across sessions so you can spot overlaps before starting. **In subagent mode (`/sprint` pipeline-runner): SKIP this** — `/sprint` already built the manifest once for the batch in its pre-flight. Otherwise invoke `/manifest`, prefixing the same shell call with the hand-off vars so it reuses this fetch and marks the current REQ as self: `MANIFEST_SELF="REQ-xxx" MANIFEST_SKIP_FETCH=1` (substitute the concrete REQ id). Display the in-flight table and any coarse `component`/`domain` overlap involving the current REQ. This is **purely advisory**: it MUST NOT block, halt, reorder, or gate the pipeline; it is NOT one of the four legitimate halt points; a manifest-build failure is ignored with a one-line note and the pipeline continues (BR-7, BR-8, BR-9). The worktree-collision gate (step 4b) is unchanged.
 
-   **Step 4 pre-push REQ-id recheck (REQ-545 — closes the REQ-518 BR-4 gap for the REQ kind).** With `origin` now fetched and **before** any worktree, branch, or push is created, re-verify this REQ's id against the remote. The id was allocated by `/spec`; between allocation and this branch push, a colleague on another machine may have pushed the same `feat/REQ-xxx` — catching it here is far cheaper than at PR/merge time. **Unlike the manifest advisory above, this runs identically in solo `/proceed` and in `/sprint` pipeline-runner subagent mode (BR-5) — do NOT skip it in subagent mode.** A collision halts with the partial's renumber instruction; this is classified alongside the worktree-collision gate (step 4b) — a **pre-flight precondition halt, NOT one of the three legitimate mid-pipeline halt points**. Source `partials/id-recheck.sh` (the guarded spelling from conventions.md "Bash in skills") and call `adlc_recheck_id` **in the same fenced block** (LESSON-329 — a function sourced in one fence is undefined in the next). See `partials/id-recheck.sh` for the exact-id probe + degraded short-circuit contract:
+   **Step 4 pre-push REQ-id recheck (REQ-545 — closes the REQ-518 BR-4 gap for the REQ kind).** With `origin` now fetched and **before** any worktree, branch, or push is created, re-verify this REQ's id against the remote. The id was allocated by `/spec`; between allocation and this branch push, a colleague on another machine may have pushed the same `feat/REQ-xxx` — catching it here is far cheaper than at PR/merge time. **Unlike the manifest advisory above, this runs identically in solo `/proceed` and in `/sprint` pipeline-runner subagent mode (BR-5) — do NOT skip it in subagent mode.** A collision halts with the partial's renumber instruction; this is classified alongside the worktree-collision gate (step 4b) — a **pre-flight precondition halt, NOT one of the four legitimate mid-pipeline halt points**. Source `partials/id-recheck.sh` (the guarded spelling from conventions.md "Bash in skills") and call `adlc_recheck_id` **in the same fenced block** (LESSON-329 — a function sourced in one fence is undefined in the next). See `partials/id-recheck.sh` for the exact-id probe + degraded short-circuit contract:
    ```bash
    # WHY (REQ-518 BR-4): re-verify an allocated id against the remote at every point it is
    # about to become a remote footprint. `/proceed` creating feat/REQ-xxx is exactly such a
@@ -267,7 +285,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
      Then retry.
      ```
-     This is a fail-loud halt and is a **precondition error** — it does **NOT** count toward the three legitimate halt points listed in the Autonomous Execution Contract. The three-halt quota begins counting only once the pipeline is past Step 0. The same error format applies whether the colliding repo is primary or sibling.
+     This is a fail-loud halt and is a **precondition error** — it does **NOT** count toward the four legitimate halt points listed in the Autonomous Execution Contract. The four-halt quota begins counting only once the pipeline is past Step 0. The same error format applies whether the colliding repo is primary or sibling.
 5. Create a worktree in each touched repo on the same branch name (skip any repo where step 4b classified the registration as a same-branch resume):
    ```bash
    git -C <repo-path> worktree add -b <branch-name> <worktree-path> origin/<integration-branch>
@@ -285,6 +303,14 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - `.adlc/specs/REQ-xxx-*/requirement.md`
    - `.adlc/config.yml` (if present)
 8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, integrationBranch: <integration-branch>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. `integrationBranch` is the value resolved in step 4 — Phase 6 (PR base) and Phase 8 (merge target) MUST read it from state, never re-derive or assume `main`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
+
+   **Then read the lane (REQ-652), before item 8a.** Run `proceed/phases-lite.md` "Step 0 additions": read `lane` from the spec in the primary worktree (absent ⇒ `full`), record the `lane` object in state when the spec has the key (on a resume, the existing object's `lane.current` wins over the spec), handle `--full`, and, while `lane.current` is `lite` and `3` is not yet in `completedPhases` (a fresh run, or a resume of an interrupted Step 0), write `status: approved`, commit it, and record Phases 1–3 as skipped. A lite REQ skips both normal writers of `approved` (Phase 1 and `/architect`), and one left `draft` is invisible to `/spec` retrieval (BR-18):
+
+   <!-- retrieval-status: lifecycle-write -->
+   - `approved` — written here on a lite REQ
+   <!-- /retrieval-status -->
+
+   Declared for `tools/lint-skills`'s `retrieval-status-parity` check (BUG-194). That commit is also the lite branch's first, which is what lets item 8a's draft PR open (LESSON-390).
 8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR through the forge adapter (so the step works on GitHub or Azure DevOps — REQ-520), making this REQ's intent — and, after `/architect`, its footprint — visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
    ```bash
    if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
@@ -299,7 +325,7 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
 **Preflight verified** — when you invoke subskills in later phases, they may skip their own prerequisite checks (already validated here) AND they may skip re-reading `architecture.md` / `conventions.md` / `project-overview.md` (already in context). Treat the Step 0 loads as authoritative for the rest of the pipeline.
 
-**After completing Step 0**: Update `pipeline-state.json` — add `0` to `completedPhases`, add Step 0 to `phaseHistory`, set `currentPhase` to `1`.
+**After completing Step 0**: Update `pipeline-state.json` — add `0` to `completedPhases`, add Step 0 to `phaseHistory`, set `currentPhase` to `1`. **On a lite run** the lane read in item 8 has already done this update and gone further: `completedPhases` is `[0, 1, 2, 3]` and `currentPhase` is `4`. Do not reset it to `1`.
 
 ---
 
@@ -311,6 +337,8 @@ Run `/validate` against the REQ spec. APPROVED → mark `approved`, advance.
 NEEDS REVISION → fix FAILs and re-validate (up to 3 loops); remaining
 blockers are legitimate halt #1. End-of-phase log: "Spec validated and
 approved." Full step list in companion.
+
+**Lite lane:** skipped, and recorded as skipped at Step 0 (`proceed/phases-lite.md`).
 
 ---
 
@@ -324,6 +352,9 @@ touched/untouched repos, prune untouched-sibling worktrees, rebuild
 `mergeOrder`, backfill missing `repo:` to primary. End-of-phase log:
 one-paragraph architecture + task-graph + per-repo task counts.
 
+**Lite lane:** skipped, and recorded as skipped at Step 0. After an escalation
+this phase runs, and `/architect` designs around the code already on the branch.
+
 ---
 
 ### Phase 3: Validate Architecture & Tasks
@@ -333,6 +364,8 @@ one-paragraph architecture + task-graph + per-repo task counts.
 Re-invoke `/validate` (it auto-detects the architecture+tasks phase). Same
 3-loop fix protocol as Phase 1; unresolved blockers are legitimate halt #1.
 End-of-phase log: "Architecture and tasks validated."
+
+**Lite lane:** skipped, and recorded as skipped at Step 0.
 
 ---
 
@@ -349,6 +382,12 @@ Main mode dispatches `task-implementer` agents in dependency tiers (parallel
 within a tier); subagent mode runs tasks sequentially in-context. End-of-phase
 log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 
+**Lite lane:** no task files and no `task-implementer` dispatch. Run a fresh
+retrieval for the surfaces about to be touched, implement from the spec's
+acceptance criteria in your own context, commit with `[REQ-xxx]`, and run the
+project's gates. A finding that the change needs what the lite lane excludes
+escalates (trigger `implementer`). See `proceed/phases-lite.md` "Phase 4 (lite)".
+
 ---
 
 ### Phase 5: Verify (Reflect + Review in Parallel)
@@ -356,6 +395,8 @@ log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 **Gate**: `currentPhase` must be `5`. After completion: append `5`, set `currentPhase=6`.
 
 **Goal**: Self-assess AND multi-agent review the implementation, then fix all findings in a single consolidated pass.
+
+**Lite lane:** none of the rest of this phase runs: no delegate pre-pass, no skill flag or telemetry, no reflector, no panel. Run `proceed/phases-lite.md` "Phase 5 (lite)" instead: one `lite-reviewer` pass over the diff against `origin/<integrationBranch>` with the fresh retrieval set, one fix pass, then the lane check on the fixed, pushed diff. A non-empty `reversals:` section escalates (trigger `reversal`), and so does a non-empty `out_of_lane:` (trigger `implementer`); `unmet` and `partial` rows in `coverage` are must-fix findings; a non-empty `questions:` is legitimate halt #2.
 
 **Gather diffs per repo** (prerequisite): for each touched repo, compute the diff inside its worktree (`git -C <worktree> diff main...HEAD` plus the list of changed files). The reviewers receive per-repo diffs + file lists, plus the cross-repo architecture.md so they can reason about contracts spanning repos.
 
@@ -503,7 +544,9 @@ replace only the human sections), and drop the `[WIP]` title prefix via `adlc_fo
 All PR ops route through `partials/forge.sh` (source it in the same fence) — never direct `gh`.
 Cross-repo: ready primary's PR last and back-fill sibling bodies. Mark requirement
 `complete` in primary frontmatter; `prUrl` is already in state from Step 0. Report URLs
-grouped by repo in `mergeOrder` sequence. Full detail in companion.
+grouped by repo in `mergeOrder` sequence. Full detail in companion. **Lite lane:** the PR
+body carries a `## Lane` section with the lane and `lane_reason` and has no Tasks,
+Architecture or Reflection sections (`proceed/phases-lite.md`, BR-13).
 
 ---
 
@@ -515,7 +558,8 @@ Lightweight per-PR sanity check — review already ran in Phase 5, do NOT
 re-run `/review`. For every PR: review diff, catch stray debug/TODO/secret
 content, verify cross-repo contract consistency, push fixups in the owning
 worktree if needed, wait for `gh pr checks` to go green. End-of-phase log:
-one line per PR, then "All N PRs ready for merge".
+one line per PR, then "All N PRs ready for merge". **Lite lane:** if this phase
+added commits, re-run the lane check before leaving it.
 
 ---
 
@@ -532,7 +576,8 @@ close-out runs** — a single-repo REQ owes the same close-out as a cross-repo
 one (BUG-193). Terminal claim MUST be tagged exactly one of
 `{merged, pr-ready, blocked, failed}` — untagged claims are a protocol
 violation `/sprint` rejects. On `pr-ready`, record in `notes` who owns the
-merge and the close-out. Merge conflicts are legitimate halt #3.
+merge and the close-out. Merge conflicts are legitimate halt #3. **Lite
+lane:** re-run the lane check immediately before the pre-merge trial-merge gate.
 
 ---
 

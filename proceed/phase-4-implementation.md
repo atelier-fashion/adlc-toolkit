@@ -11,6 +11,11 @@ in parallel tiers (main mode) or running tasks sequentially (subagent mode).
 SKILL.md keeps a one-paragraph summary; the gate-protocol details and
 tier orchestration steps live here.
 
+**Lite lane (REQ-652):** a lite REQ has no task files, so nothing below
+applies to it. It implements in the orchestrator's own context from the spec's
+acceptance criteria, after a fresh retrieval: `proceed/phases-lite.md`
+"Phase 4 (lite)".
+
 ---
 
 ### Phase 4: Implement

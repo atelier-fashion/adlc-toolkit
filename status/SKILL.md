@@ -40,7 +40,7 @@ Before proceeding, verify that the `.adlc/specs/` directory exists (this skill r
    `attribution` frontmatter, which supplies the Incident Attribution section below
 4. Read all `pipeline-state.json` files under `.adlc/specs/REQ-*/` for live pipeline progress
 5. Also check for nested `.adlc/` directories (e.g., `api/.adlc/`)
-6. Extract frontmatter (id, title, status, updated) from each artifact
+6. Extract frontmatter (id, title, status, updated) from each artifact, plus a requirement's `lane` and `lane_escalated` (REQ-652). A missing `lane` means `full`.
 
 **Cross-repo scan** (only in cross-repo mode): for every sibling declared in `.adlc/config.yml`:
 - Resolve the sibling's absolute path from `repos[<id>].path`
@@ -53,18 +53,22 @@ Cross-repo scan is read-only — `/status` never modifies sibling repos.
 Organize the report as follows:
 
 #### Requirements Summary Table
-| ID | Title | Status | Tasks | Progress |
-|----|-------|--------|-------|----------|
+| ID | Title | Status | Lane | Escalated | Tasks | Progress |
+|----|-------|--------|------|-----------|-------|----------|
 
 For each requirement:
 - Count total tasks and completed tasks
 - Calculate progress percentage
 - Show status from frontmatter
+- **Lane** (REQ-652 BR-15): the spec's `lane`, `lite` or `full`; print `full` when the key is absent. A lite REQ has no task files by design, so show its Tasks cell as `—` rather than `0/0`.
+- **Escalated**: the date and trigger from `lane_escalated` (the part before the detail), or blank when the spec has none
 
 #### Active Pipelines
 If any `pipeline-state.json` files exist with `"completed": false`, show:
-| REQ | Primary | Branch | Current Phase | Started | Last Phase Completed | Touched Repos |
-|-----|---------|--------|---------------|---------|----------------------|---------------|
+| REQ | Primary | Branch | Lane | Current Phase | Started | Last Phase Completed | Touched Repos |
+|-----|---------|--------|------|---------------|---------|----------------------|---------------|
+
+- **Lane** column: the state file's `lane.current`, marked `(escalated)` when `lane.escalations` is non-empty. A state file without a `lane` object is a full-lane run: print `full`. A lite run's Phases 1–3 appear in `completedPhases` with `"skipped": "lite"` history entries; report them as skipped, not as run.
 
 - **Primary** column: which repo the REQ originates from (the repo holding the state file). In single-repo mode this is always the current repo; omit the column if no cross-repo config exists.
 - **Touched Repos** column: only populated in cross-repo mode — list every repo id from the state file's `repos` block where `touched: true`, with a ✓ for merged and a clock for in-progress.
@@ -168,6 +172,44 @@ When no run has a recorded resolution, print `No recorded conflict resolutions.`
 than an empty table. An entry with `verified: no` is not an error — it is the honest
 value the record exists to surface.
 
+#### Escalations
+Which REQs started on the lite lane and escalated to the full lane, and why (REQ-652).
+Read from each spec's `pipeline-state.json` `lane.escalations` array, which is written
+at the moment of escalation. Strictly read-only; a state file without a `lane` object is
+a full-lane run and contributes nothing.
+
+```bash
+# One row per recorded escalation. `lane` is optional and additive:
+# a state file without it parses unchanged (absent == full lane, nothing escalated).
+# `find`, not a bare glob: zsh aborts on an unmatched glob (LESSON-335). `-I` keeps
+# a stray json.py in the project root off sys.path.
+find .adlc/specs -mindepth 2 -maxdepth 2 -name pipeline-state.json -type f 2>/dev/null | sort | while IFS= read -r f; do
+  command python3 -I - "$f" <<'PYEOF'
+import json, sys, os
+p = sys.argv[1]; req = os.path.basename(os.path.dirname(p)).split("-", 2)[:2]
+try:
+    s = json.load(open(p))
+except (OSError, ValueError):
+    sys.exit(0)  # unreadable state is /status Step 1's concern, not this section's
+lane = s.get("lane") if isinstance(s, dict) else None
+esc = lane.get("escalations") if isinstance(lane, dict) else None
+def cell(v):
+    return " ".join(str(v).split())  # one line, no tabs: free-text details stay in their column
+for e in esc if isinstance(esc, list) else []:
+    if not isinstance(e, dict):
+        continue
+    print("\t".join(["-".join(req)] + [cell(e.get(k, "?")) for k in ("phase", "trigger", "detail", "actor", "at")]))
+PYEOF
+done
+```
+
+| REQ | Phase | Trigger | Detail | Actor | When |
+|-----|-------|---------|--------|-------|------|
+
+When no run has a recorded escalation, print `No recorded lane escalations.` rather than
+an empty table. A spec with `lane_escalated` but no state file (another machine, or a
+torn-down worktree) still shows in the Requirements Summary's Escalated column.
+
 #### Recently Completed
 List artifacts completed in the last 7 days (by `updated` date).
 
@@ -179,7 +221,7 @@ List artifacts completed in the last 7 days (by `updated` date).
 
 ### Step 4: Highlight Action Items
 At the bottom, list recommended next actions:
-- Specs that are `draft` and need validation
-- Approved specs that need architecture/tasks
+- Specs that are `draft` and need validation (not lite-lane specs, which run from `draft`: those need `/proceed`)
+- Approved specs that need architecture/tasks (not lite-lane specs, which have none by design: those need `/proceed`)
 - Tasks that are ready to implement (dependencies met)
 - Bugs that are `open` and unassigned

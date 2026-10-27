@@ -1,7 +1,7 @@
 ---
 id: TASK-118
 title: "tools/lint-skills: lane-vocabulary check and the proceed lifecycle-write site"
-status: draft
+status: complete
 parent: REQ-652
 created: 2026-10-27
 updated: 2026-10-27

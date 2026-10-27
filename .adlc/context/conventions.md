@@ -285,6 +285,8 @@ follow-up REQ, taken once the corpus carries obligations.
 
 Skills that span multiple phases (`/proceed`) write a `pipeline-state.json` next to the REQ spec. This lets a long-running pipeline resume from interruption without replaying phases. Every phase update writes the state file atomically.
 
+New state keys are **additive and optional**, and each one defines what its absence means, so an older state file parses and runs unchanged (`conflictsResolved`: none resolved; `closeOut`: not recorded). The `lane` object (REQ-652) follows the same rule: it is written only when the spec carries a `lane` key, and a state file without it is a full-lane run. The spec frontmatter, not the state file, is the authority on a REQ's lane.
+
 ## Commits and branches
 
 - Branch naming: `feat/REQ-xxx-short-description` for features, `fix/bug-xxx-short-description` for bugs

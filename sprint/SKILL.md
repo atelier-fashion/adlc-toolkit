@@ -64,7 +64,7 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
      }
    })
    ```
-   `args.reqs` is the same REQ-id list the legacy Step 1 would normalize (`REQ-xxx` form; expand `all` to every eligible spec). `args.integrationBranch` is a hint — the workflow's Phase-0 agent re-resolves it per repo against `origin/<branch>` and never hardcodes `main`. `args.answers` is `{}` on a first run.
+   `args.reqs` is the same REQ-id list the legacy Step 1 would normalize (`REQ-xxx` form; expand `all` to every eligible spec). **Lite REQs run on the full lane here (REQ-652 BR-16).** The engine's phases are a fixed script with no lite path yet, so a REQ whose spec says `lane: "lite"` runs the full pipeline under this engine, and the run logs one line per such REQ (`liteFallbackNotice`). The engine writes no `lane` object to `pipeline-state.json`, so `/status`'s Active Pipelines column shows those runs as full, while its Requirements Summary still shows the spec's `lite`. The preflight treats a `draft` lite REQ as eligible, as the legacy engine does. Use the legacy engine to run a lite REQ on its lite lane. `args.integrationBranch` is a hint — the workflow's Phase-0 agent re-resolves it per repo against `origin/<branch>` and never hardcodes `main`. `args.answers` is `{}` on a first run.
 3. **The run returns `{results}` — one TERMINAL value per REQ.** Each result carries a `state` discriminant: `merged`, `pr-ready`, `blocked`, or `failed` (the workflow never throws on a halt — a halt is a *returned* `{state:'blocked', …}` value, so the run completes and the other REQs are unaffected). Inspect every result:
    - **`merged` / `pr-ready` / `failed`** — report them as-is. A `failed` REQ has no user-answerable question; surface its `reason`/`detail` and move on (do not attempt a resume).
    - **`merged` also carries `closeOut`** (BUG-249): the engine's post-terminal close-out pass ran `/wrapup --close-out` for every merged REQ (spec status → `complete`, the five-field terminal record, knowledge capture, a squash-merged `chore(REQ-xxx): close-out` PR, worktree teardown). `closeOut: "ok"` — report the lessons from `closeOutDetail` under Knowledge Captured. `closeOut: "failed"` — the REQ **is merged**; report `close-out: failed — <closeOutDetail>` and, if the detail names an open chore PR, surface its URL. A user reply under `args.answers[<REQ-id>]` on resume retries that REQ's close-out (the prompt diverges only for it). `closeOut: "skipped"` or absent — the pass had no evidence or did not run; say so.
@@ -98,7 +98,7 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
 
 1. If given specific REQ IDs (e.g., `REQ-091 REQ-092`), normalize each to `REQ-xxx` format
 2. If given `all`, scan `.adlc/specs/REQ-*/requirement.md` for all specs with `status: approved` or `status: draft`
-3. If no argument, scan for all `status: approved` specs
+3. If no argument, scan for all `status: approved` specs, plus `status: draft` specs whose frontmatter says `lane: "lite"` (REQ-652). A lite REQ skips spec validation by design, so it is never approved before it runs: `/proceed` Step 0 writes its `approved`. A `draft` spec without `lane: "lite"` still needs `/validate` and stays out.
 4. Exclude any REQ that already has `pipeline-state.json` with `"completed": true`
 5. Exclude any REQ that already has an active pipeline-runner — i.e., a worktree on its `feat/REQ-xxx-...` branch AND a `pipeline-state.json` whose `completed` is `false` and whose phase has advanced recently. (A stale same-branch worktree from a crashed prior run is **not** an active pipeline; it falls through to Step 2 item 4 below, which surfaces it with a cleanup recipe rather than silently excluding the REQ.)
 
@@ -127,6 +127,7 @@ Report a pre-flight checklist:
 |-----|-------|--------|----------|-------|
 | REQ-091 | Feature A | approved | Yes | — |
 | REQ-092 | Feature B | draft | No | Status is draft, not approved |
+| REQ-095 | Copy fix | draft (lite) | Yes | — (a lite REQ runs from draft) |
 | REQ-093 | Feature C | approved | Yes | — |
 | REQ-094 | Feature D | approved | No | worktree path in use by branch feat/REQ-094-old-attempt |
 ```
@@ -137,7 +138,7 @@ Remove ineligible REQs. If no REQs remain, stop.
 
 **Max concurrent pipelines**: 5. If more than 5 are eligible, prioritize by:
 1. REQs explicitly listed in arguments (first priority)
-2. REQs with `status: approved` over `status: draft`
+2. REQs with `status: approved` over `status: draft` (a lite `draft` counts as approved here)
 3. Lower REQ numbers first (older specs)
 
 Ask the user to confirm the sprint lineup before proceeding.
@@ -155,6 +156,7 @@ WORKTREE PATH (mandatory): <absolute-path>
 
 Run the /proceed skill for REQ-xxx in the repository at [current repo path].
 You are in SUBAGENT MODE — execute all phases sequentially, do not dispatch sub-agents.
+You are UNATTENDED — no operator is present to answer a question. On a lite-lane REQ a failed lane check escalates to the full lane (actor sprint-runner), including on a forced-lite REQ; it never ends the run blocked.
 This is part of a parallel sprint — other REQs are running concurrently in separate worktrees.
 Use the WORKTREE PATH above verbatim for `git worktree add` in Phase 0. All later phases MUST read the worktree path from `pipeline-state.json.repos[<id>].worktree` (set by Phase 0 from this contract line) — do not re-derive it. The only sanctioned operation against the parent repo path is `gh pr merge` in Phase 8 single-repo topology; every other read/write/cd belongs inside the worktree. (See `agents/pipeline-runner.md` "Worktree Isolation" section for the canonical rules.)
 Follow all /proceed phases (0-8) exactly as documented.
@@ -166,6 +168,7 @@ The `WORKTREE PATH (mandatory): <absolute-path>` line is a contract fixed in REQ
 
 Launch all agents in a single message to maximize parallelism. Each pipeline-runner agent:
 - Runs in subagent mode (all phases sequential, no nested sub-agent dispatch)
+- Is unattended, so it follows a lite REQ's lite lane and escalates instead of halting when that REQ's lane check fails (REQ-652 BR-8, `agents/pipeline-runner.md` "Lite lane")
 - Works in its own worktree (the absolute path declared in the `WORKTREE PATH (mandatory):` line — typically `<repo-path>/.worktrees/REQ-xxx` by convention) — isolation is handled by `/proceed` Phase 0
 - Maintains its own `pipeline-state.json`
 - Operates independently — failure in one does not affect others
@@ -228,7 +231,7 @@ The sequential flow when the orchestrator is the merge actor (cross-repo, or sin
 2. Pull main: `git checkout main && git pull`
 3. **Close out — you merged, so you own Step 8b (BUG-249, `/proceed` Step 8c: "whoever performs that merge owns Step 8b in full").** The runner exited at `pr-ready` with `completed:false` on purpose and recorded in `pipeline-state.json.notes` that the orchestrator owns the close-out; nothing else revisits the REQ. Run it now, serialized per repo (never two close-outs in one repo at once, and never in your live checkout):
    - `git -C <repo-root> fetch origin <integrationBranch>`, then `git -C <repo-root> worktree add "<repo-root>/.worktrees/REQ-xxx-close-out" -b chore/REQ-xxx-close-out origin/<integrationBranch>` (reuse it if it already exists).
-   - Run `/wrapup REQ-xxx --close-out` with `WORKTREE PATH (mandatory): <repo-root>/.worktrees/REQ-xxx-close-out`, handing it the runner's final report (its Phase-5 findings, task list, PR URLs) as the run evidence. The mode writes the five-field terminal record plus `closeOut:{status:"ok"}` to the **primary repo path's** `pipeline-state.json`, captures knowledge, and commits + squash-merges its own `chore(REQ-xxx): close-out` PR. With no run evidence it records `NO_ENTRY: close-out had no run evidence` rather than inventing a lesson.
+   - Run `/wrapup REQ-xxx --close-out` with `WORKTREE PATH (mandatory): <repo-root>/.worktrees/REQ-xxx-close-out`, handing it the runner's final report (its Phase-5 findings, task list, PR URLs, and its `Lane:` line with every `lane.escalations` entry) as the run evidence. The mode writes the five-field terminal record plus `closeOut:{status:"ok"}` to the **primary repo path's** `pipeline-state.json`, captures knowledge, and commits + squash-merges its own `chore(REQ-xxx): close-out` PR. With no run evidence it records `NO_ENTRY: close-out had no run evidence` rather than inventing a lesson.
    - Remove the close-out worktree and the REQ's feature worktree(s) by the absolute paths recorded in state; `git fetch --prune`.
    - If the close-out fails, write `closeOut:{status:"failed", reason:"<why>"}` into the same state file, surface `close-out: failed — <why>` in the dashboard and summary, and move on — the merge stands.
 4. Move on — other pipelines keep running in the background

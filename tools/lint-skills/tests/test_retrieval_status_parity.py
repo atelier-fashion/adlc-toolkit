@@ -2,7 +2,7 @@
 
 `check_retrieval_status_parity` compares the REQ `status:` values the lifecycle
 skills WRITE (`architect/SKILL.md`, `wrapup/SKILL.md`,
-`proceed/phases-6-8-ship.md`) against the values `/spec` Step 1.6 EXCLUDES from
+`proceed/phases-6-8-ship.md`, and since REQ-652 `proceed/SKILL.md`) against the values `/spec` Step 1.6 EXCLUDES from
 spec-corpus retrieval (`spec/SKILL.md`). Before BUG-194 the reader used an
 allowlist of `approved` | `in-progress` | `deployed` while the writers emitted
 `approved` and `complete`, so spec retrieval returned ~0 of 543 specs
@@ -59,6 +59,7 @@ ALL_SITES_CLEAN = {
     "architect/SKILL.md": ["approved"],
     "wrapup/SKILL.md": ["complete"],
     "proceed/phases-6-8-ship.md": ["complete"],
+    "proceed/SKILL.md": ["approved"],  # REQ-652 BR-18: lite REQs, Step 0
 }
 
 
@@ -246,3 +247,12 @@ def test_shipped_write_sites_all_declare():
             path.read_text(encoding="utf-8"), "lifecycle-write"
         )
         assert written, f"{rel} must declare the status it writes"
+
+
+def test_proceed_is_a_lifecycle_write_site():
+    """REQ-652 BR-18 / ADR-4: a lite REQ skips Phase 1 and /architect, so
+    /proceed Step 0 writes `approved` itself. That new writer must be covered by
+    the BUG-194 parity guard, and its declaration must name `approved`."""
+    assert "proceed/SKILL.md" in check.LIFECYCLE_WRITE_SITES
+    text = (REPO_ROOT / "proceed" / "SKILL.md").read_text(encoding="utf-8")
+    assert check.parse_retrieval_status_block(text, "lifecycle-write") == {"approved"}

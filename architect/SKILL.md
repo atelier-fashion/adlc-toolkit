@@ -55,6 +55,11 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 > publish step MUST run once those files exist — not here during codebase exploration. The
 > mapper output is retained (item 3) only as the BR-4 fallback.
 
+4. **Escalated from the lite lane (REQ-652 BR-10)?** If the spec carries `lane_escalated`, the
+   branch already holds the lite implementation. Read it (`git diff origin/<integrationBranch>...HEAD`
+   in the worktree) and treat it as the baseline to design around: tasks extend or correct that code
+   rather than discard it, and the escalation's trigger names the line it crossed.
+
 ### Step 3: Design Architecture (if needed)
 1. If the requirement involves new architectural decisions, create `.adlc/specs/REQ-xxx-*/architecture.md`
 2. Document:

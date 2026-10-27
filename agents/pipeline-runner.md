@@ -39,6 +39,18 @@ Execute these phases in order, maintaining `pipeline-state.json` throughout:
 7. **PR Cleanup**: Sanity check the PR diff
 8. **Wrapup and Merge**: See "Phase 8 — Wrapup and Merge" below for the topology rule
 
+### Lite lane (REQ-652)
+
+Read the spec's frontmatter `lane` at Step 0. A missing `lane` means `full`: run the phases above unchanged. On `lane: "lite"`, `/proceed` runs its lite branch (`proceed/phases-lite.md`), and you run it like this:
+
+- **Step 0**: as above, plus the lane read: record the `lane` object in state, write `status: approved`, record Phases 1–3 as skipped (`"skipped": "lite"`), and mark any sibling repo untouched (a lite REQ is single-repo).
+- **Phases 1–3**: skipped, recorded at Step 0, not run.
+- **Phase 4, Implement**: a fresh retrieval for the surfaces about to be touched, then implement straight from the spec's acceptance criteria (no task files), commit with `[REQ-xxx]`, and run the project's gates.
+- **Phase 5, Verify**: run the `agents/lite-reviewer.md` checklist inline (you cannot dispatch it) over the diff against `origin/<integrationBranch>`, the spec, and the fresh retrieval set. A non-empty `reversals:` section escalates (trigger `reversal`), and so does a non-empty `out_of_lane:` (trigger `implementer`). A non-empty `questions:` needs an operator you do not have: report `blocked` with the questions, as for a reflector question. Fix the rest in one pass (`unmet` and `partial` rows in `coverage` are must-fix), push, then run the lane check.
+- **Phases 6–8**: as above, with the lite PR body, a lane check at the end of Phase 7 if it committed, a lane check immediately before the Phase 8 trial merge, and another after any bounded keep-both resolution commit.
+
+**You are unattended.** No operator is present to answer a question, so a failed lane check **escalates** — on a triaged-lite REQ and on a forced-lite REQ alike — with actor `sprint-runner`. A forced-lite failure, which halts a solo `/proceed` (its legitimate halt #4), **never** ends your run as `blocked` (BUG-207, LESSON-626). Escalation follows `proceed/phases-lite.md` "Escalation": spec `lane: "full"` plus `lane_escalated`, a `lane.escalations` entry, `completedPhases` trimmed to `[0]`, and you continue at Phase 1 of the full lane on the same branch, worktree and PR.
+
 ## Phase 5 Inline Review Checklists
 
 Since you cannot dispatch review agents, run these checklists yourself:
@@ -72,11 +84,13 @@ Since you cannot dispatch review agents, run these checklists yourself:
 
 After running all checklists, fix Critical and Major issues inline. Commit fixes with `fix(scope): address verify finding [REQ-xxx]`.
 
+**On the lite lane** none of the checklists above run. Run the single checklist in `agents/lite-reviewer.md` instead: five dimensions, a met / partial / unmet row for every BR and AC in the spec, and a `reversals:` section. Then run the lane check (`proceed/phases-lite.md` "The lane check").
+
 ## Phase 8 — Wrapup and Merge
 
 The merge actor depends on REQ topology, decided from `pipeline-state.json.repos`:
 
-- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** First run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → under `/sprint`, first try the bounded keep-both path in "Bounded resolution (BUG-207)" below — if the bound holds, resolve, verify, record, push, and re-run this gate; if it does not (or you are solo), report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; forge-neutral per REQ-520) from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`. **The merge is not the end of the phase** — continue to the close-out below.
+- **Single-repo REQ** (exactly one entry in `repos` with `touched: true`): **YOU own the merge.** On a REQ still on the lite lane, first run the lane check (`proceed/phases-lite.md` "The lane check"); a failure escalates and you do not merge on this pass. Then run the trial-merge gate (REQ-483): **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** (test the current tip — a stale ref is a false pass, LESSON-036), source `partials/trial-merge.sh`, then `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`. **rc=1** (real conflict) → under `/sprint`, first try the bounded keep-both path in "Bounded resolution (BUG-207)" below — if the bound holds, resolve, verify, record, push, and re-run this gate; if it does not (or you are solo), report `blocked` (do NOT merge), populating `pipeline-state.json.blockers` (schema below); **rc=2/3** → `failed` (setup error); **rc=0** → run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; forge-neutral per REQ-520) from the **parent repo path** (`repos[<id>].path`), NOT from your worktree (`repos[<id>].worktree`). Git will refuse to delete a branch that's checked out in another worktree. After successful merge, set `repos[<id>].merged = true` in `pipeline-state.json` immediately. **If this merge is a resume of a previously-held REQ** (the orchestrator auto-rebased it after its blocker merged — REQ-485 BR-11), also **clear this REQ's `pipeline-state.json.blockers` entry** in the same write so a later blocker-merged event does not re-process an already-merged REQ. Setting `repos[<id>].merged = true` and clearing `blockers` are *distinct* writes — historically only the former was done; REQ-485 adds the latter. Your terminal claim is `merged`. **The merge is not the end of the phase** — continue to the close-out below.
 
 - **Cross-repo REQ** (more than one touched repo): **STOP after Phase 7.** Do NOT attempt to merge — the orchestrator sequences merges per `mergeOrder`. Your terminal claim is `pr-ready`.
 
@@ -198,12 +212,13 @@ The reason the bound is this narrow: one of REQ-594's conflicts on 2026-08-31 wa
 You will receive:
 - REQ ID
 - Repository path
-- Instruction confirming subagent mode
+- Instruction confirming subagent mode, which also means you are unattended (no operator to answer a lite-lane halt)
 
 ## Output
 
 Report (first line MUST be `Terminal state: <tag>`):
 - Final pipeline state (completed / blocked at phase N)
+- Lane: the lane the REQ started on and the one it finished on, and every `lane.escalations` entry (trigger and detail), so the orchestrator's close-out can draft the escalation lesson
 - PR URL (if applicable)
 - Any blockers or concerns
 - Lessons learned candidates

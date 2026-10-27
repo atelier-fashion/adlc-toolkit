@@ -1,7 +1,7 @@
 ---
 name: spec
 description: Write requirement specs from feature requests
-argument-hint: Feature description or request
+argument-hint: Feature description or request [--lite|--full]
 ---
 
 # /spec — Requirement Specification
@@ -22,6 +22,14 @@ You are writing a requirement spec following the spec-driven ADLC process.
 
 Feature request: $ARGUMENTS
 
+**Lane flags — read and strip these before anything else** (REQ-652 BR-4). The argument may carry `--lite` or `--full`, each a standalone token, to force the REQ's lane instead of letting Step 1.7 triage it. Read them from the argument above and remove every occurrence of both tokens, before the Prerequisites check and before Step 1.4's intake gate:
+
+- **Both present** — stop with `/spec: --lite and --full are mutually exclusive — pass at most one` and do nothing else: no intake, no retrieval, and no Step 2. An id allocated for a request that then errors is burned, because `adlc_alloc_id` advances a machine-global counter and pushes a remote reservation ref.
+- **One present** — remember which. Step 1.7 records it instead of triaging.
+- **Neither** — Step 1.7 triages.
+
+From here on, "the feature request" means the argument with those tokens removed, and every fence below that passes the argument receives the stripped text: where the argument appears inline in a fence, delete the flag tokens from it before running the fence. `adlc_intake_detect` reads its argument raw, so a leftover flag would count as request text, and `--lite notes.txt` would no longer resolve as a readable file path. `--intake` is not a lane flag; it stays. This is the model reading the argument, as with `/sprint --workflow` and `/wrapup --close-out` — no shell parses the lane flags, and `partials/intake.sh` knows nothing about them.
+
 ## Prerequisites
 
 Before proceeding, verify that `.adlc/context/project-overview.md` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
@@ -41,7 +49,7 @@ The gap list is the point. A spec written from a transcript will always contain 
 
 **This step runs before Step 1.5** because Step 1.5 derives the retrieval query from the request, and a distilled statement is better tag input than a raw transcript. It runs **before Step 2** because an interactive blocking-gap halt must not burn a REQ id — `adlc_alloc_id` mutates a shared machine-global counter and pushes a remote reservation ref.
 
-1. **Activation gate (BR-1).** Intake activates only when the input is unstructured. Source the partial and call the detector in the same fenced block (BR-10 — the `cross-fence-fn` rule):
+1. **Activation gate (BR-1).** Intake activates only when the input is unstructured. Source the partial and call the detector in the same fenced block (BR-10 — the `cross-fence-fn` rule). The detector gets the feature request with `--lite` and `--full` already stripped (**Input**), here and in step 2's fence:
 
    ```sh
    if [ -f .adlc/partials/intake.sh ]; then . .adlc/partials/intake.sh; else . ~/.claude/skills/partials/intake.sh; fi
@@ -480,6 +488,32 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 
 9. **Cold-start path**: if every corpus is empty, or all candidates filter out to zero, skip retrieval and record this explicitly when Step 3 writes the `## Retrieved Context` section. Proceed to authoring without retrieved bodies. **A true cold start requires the corpora to be empty or every candidate to lose on *score*.** If the spec corpus had files on disk and lost them all to the *status filter*, that is the BUG-194 mismatch, not a cold start — sub-step 1a's warning fires and Step 3 records the suppressed-corpus line instead of the cold-start line.
 
+### Step 1.7: Triage the Lane
+
+Every new REQ gets exactly one lane, `lite` or `full`, which Step 3 writes to its frontmatter (REQ-652 BR-1). `/proceed` reads it. A lite REQ skips spec validation, architecture, task breakdown, architecture validation, the reflector and the five-agent panel; it gets one review pass instead, plus a mechanical lane check of the real diff before the PR. **Never ask the operator to choose**, in interactive or non-interactive mode. The lane is triage's call, or the flag's.
+
+This step runs after Step 1.6 because the last criterion below is judged against what retrieval returned, and before Step 2 so a lane is settled before any id is allocated (REQ-652 ADR-2). Triage reads the feature request, or Step 1.4's distilled request when intake ran.
+
+1. **Forced lane.** If **Input** found `--lite` or `--full`, skip the judgment. The lane is the flag's, `lane_reason` is `"forced by --lite"` or `"forced by --full"`, and `lane_forced` is `true`. Go to Step 2. A forced lite REQ is still subject to `/proceed`'s lane check: a solo run halts there and asks the operator, and an unattended sprint runner escalates.
+
+2. **Otherwise, triage against REQ-652 BR-2.** The REQ goes to the full lane if triage finds evidence that **any** of these full-lane triggers holds:
+   1. it changes a domain schema, an API contract, a validator or a data model
+   2. it changes auth, security, secrets, deploy, CI or infrastructure
+   3. it touches more than one deployable or more than one repo. A cross-repo REQ is always full
+   4. it adds or upgrades a dependency
+   5. its footprint is more than `max_files` source files. `max_files` is 3 unless `.adlc/config.yml` sets `lanes.lite.max_files`; read that file with the Read tool when it exists, never with a shell YAML parse. Files the lane check does not count (tests, `.adlc/`, `CHANGELOG*`, and any `lanes.lite.count_exclude` glob; the full list is in the toolkit's `partials/lane-check.md`) do not count here either. Changed lines are not counted at all
+   6. it reverses a decision recorded in an existing REQ or lesson for the same component, judged against the context Step 1.6 retrieved
+
+   When none holds, the lane is `lite`. Name the files the change will most likely touch before judging criteria 1, 2 and 5. A project's `lanes.lite.blocked_paths` in `.adlc/config.yml` lists where its schemas, contracts and infrastructure live, so a likely file under one of those globs is evidence for criterion 1 or 2.
+
+3. **Uncertain means lite** (REQ-652 BR-3). When you cannot tell whether a criterion holds, choose `lite` and say so in `lane_reason`, naming the criterion you could not settle. A wrong lite start costs one escalation: `/proceed`'s lane check reads the real diff, and a change that crossed a line escalates to the full lane with the spec and the code kept. A wrong full start costs the whole full pipeline.
+
+4. **Write the reason.** `lane_reason` is one line. For `full`, it names the criterion that fired and the evidence, e.g. `"adds a field to the Page data model in packages/domain"`. For `lite`, it says why none fired, e.g. `"one component, copy only: no schema, config or dependency change"`, and says which criterion was uncertain when one was. `lane_forced` is `false`. When an escalation later shows the triage was wrong, `/wrapup` writes a lesson naming this reason (REQ-652 BR-14), so make it specific enough to be tuned from.
+
+Retain the lane, `lane_reason` and `lane_forced` for Step 3 and Step 4.
+
+**A missing `lane` means `full`** (REQ-652 BR-12). Every reader treats a spec without the field as a full-lane REQ, so every spec written before this step existed keeps its behavior. Only `lite` and `full` are lane values; never write the field empty.
+
 ### Step 2: Determine the Next REQ ID
 1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs) — but the counter is now a **cache, not the authority**: the remote is the source of truth (REQ-518). Allocation derives the remote high-water, takes `max(remote, local)`, allocates `max + 1`, and fast-forwards the local counter — all inside the existing `mkdir` lock with its symlink/TOCTOU guards intact.
 2. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — one parameterized helper replaces the three near-identical inline blocks; the lock block + its REQ-416/LESSON-014 rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
@@ -499,7 +533,13 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 1. Create directory: `.adlc/specs/REQ-xxx-feature-slug/`
 2. Create `requirement.md` using the template from `.adlc/templates/requirement-template.md`
 3. Fill in all sections:
-   - **Frontmatter**: id, title, status (`draft`), `deployable` (carry the template default unless the feature is explicitly non-deployable — e.g., iOS-only or docs-only), created date, updated date, AND the five query tags from Step 1.5 — `component`, `domain`, `stack`, `concerns`, `tags`. This self-tagging makes the new REQ retrievable for future `/spec` invocations (per REQ-258 BR-7).
+   - **Frontmatter**: id, title, status (`draft`), `deployable` (carry the template default unless the feature is explicitly non-deployable — e.g., iOS-only or docs-only), created date, updated date, AND the five query tags from Step 1.5 — `component`, `domain`, `stack`, `concerns`, `tags`. This self-tagging makes the new REQ retrievable for future `/spec` invocations (per REQ-258 BR-7). Then the three lane fields from Step 1.7, after `tags`:
+     ```yaml
+     lane: "lite"
+     lane_reason: "one component, copy only: no schema, config or dependency change"
+     lane_forced: false
+     ```
+     A forced lane reads `lane: "full"`, `lane_reason: "forced by --full"`, `lane_forced: true`. **Quote every lane string value**, even one that looks safe. An unquoted `: ` inside `lane_reason` makes the frontmatter unparseable, and Step 1.6 skips a spec whose frontmatter does not parse, so the REQ silently drops out of retrieval. `lane_forced` is a bare boolean. Do not write `lane_escalated`; `/proceed` sets it when it escalates a REQ.
    - **Description**: What the feature does and why — be specific and grounded in the project context
    - **System Model**: Structured data model — Entities (fields, types, constraints), Events (triggers, payloads), Permissions (actions, roles). Remove sub-sections that don't apply to this feature.
    - **Business Rules**: Explicit, testable constraints governing behavior (e.g., "Only item owner can delete"). Numbered BR-1, BR-2, etc.
@@ -547,8 +587,13 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 
 ### Step 4: Present for Review
 1. Display the full requirement spec to the user
-2. Highlight any assumptions or open questions that need input
-3. Remind the user to run `/validate` before advancing to `/architect`
+2. Show the lane and its reason on one line, and whether triage or a flag chose it:
+   ```
+   Lane: lite (triaged) — one component, copy only: no schema, config or dependency change
+   Lane: full (forced by --full)
+   ```
+3. Highlight any assumptions or open questions that need input
+4. Remind the user of the next step. For a full-lane REQ, run `/validate` before advancing to `/architect`. For a lite-lane REQ, run `/proceed REQ-xxx`, which skips validation and architecture; `/proceed --full REQ-xxx` escalates it by hand.
 
 ## Quality Checklist
 - [ ] Acceptance criteria are specific and testable (not vague)
@@ -557,3 +602,4 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 - [ ] Out of scope items prevent scope creep
 - [ ] No implementation details leaked into the requirement (that's for architecture phase)
 - [ ] Retrieved Context section present
+- [ ] Frontmatter carries a quoted `lane` (`"lite"` or `"full"`), a quoted one-line `lane_reason`, and `lane_forced`, chosen by Step 1.7 without asking the operator

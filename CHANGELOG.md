@@ -34,6 +34,62 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ### Added
 
+- **A lite lane for minor changes (REQ-652).** A small change request that is not a
+  bug (a copy edit, a spacing tweak, a logo turned ten degrees) used to pay for the
+  whole full pipeline: two validation passes, architecture, task breakdown and six
+  review agents. `/spec` now triages every request into `lane: "lite"` or
+  `lane: "full"` (new Step 1.7, after retrieval and before an id is allocated) and
+  writes `lane`, `lane_reason` and `lane_forced` to the spec. Uncertain means lite,
+  because a wrong lite start costs one escalation and a wrong full start costs the
+  whole pipeline. `--lite` and `--full` force the lane; both together is an error
+  before any id is allocated. On a lite REQ, `/proceed` records Phases 1–3 as skipped
+  through the Gate Protocol, writes `status: approved` at Step 0, runs a fresh
+  retrieval, implements straight from the acceptance criteria with no task files,
+  runs the project's gates, and reviews with one new agent, `lite-reviewer`, in place
+  of the reflector and the five-agent panel; it reports `reversals:`,
+  `out_of_lane:` and `questions:` sections that `/proceed` branches on. The lite PR
+  body carries a `## Lane` section. A lite REQ is single-repo, so Step 0 marks any
+  sibling repo untouched. Both `/sprint` engines treat a `draft` lite REQ as
+  eligible, because a lite REQ skips spec validation by design. The procedure is in
+  the new `proceed/phases-lite.md`.
+- **The lane check: `partials/lane-check.sh` and `tools/adlc/lane_check.py`.**
+  `adlc_lane_check <worktree> <base-ref>` checks a lite REQ's real diff against
+  `origin/<integrationBranch>` after the review fixes, after any Phase 7 commit, and
+  before merge. The engine always runs from the installed toolkit and reads the
+  project config from the base ref, so the branch under check cannot replace the
+  checker or loosen its own limits; the calling fence refuses to run when the local
+  `HEAD` is not the pushed head the PR will merge. Every rule is mechanical: changed paths against `blocked_paths` (CI,
+  deploy, infra, migrations and schemas, auth and secrets, pipeline config),
+  lockfiles and dependency manifests, the number of deploy units when
+  `deploy_units` is declared, and more than `max_files` (default 3) changed source
+  files, not counting tests, `.adlc/` or `CHANGELOG*`. Lines are not counted. Output
+  is one fact per line (`lane_check=`, `files_counted=`, `trigger=`/`detail=` pairs);
+  exit 0 pass, 1 escalate, 2 error, and an error is never a pass. A project's
+  `.adlc/config.yml` `lanes.lite` block extends the default lists (it cannot replace
+  them) and may change `max_files`; `templates/config-template.yml` documents it.
+  Tested by `tools/adlc/tests/test_lane_check.py` and `partials/tests/lane-check.test.sh`
+  under bash, zsh, sh and dash.
+- **Escalation keeps the work.** A failed lane check, a `lite-reviewer` finding that
+  the change reverses a recorded decision, an implementer finding that the change
+  needs what the lite lane excludes, or `/proceed --full` on a lite REQ moves it to
+  the full lane: the spec gets `lane: "full"` and a quoted `lane_escalated`, state
+  gets a `lane.escalations` entry, and `/proceed` resumes at Phase 1 on the same
+  branch, worktree and PR, with `/architect` designing around the code already
+  written. A forced-lite REQ whose check fails halts a solo run with a numbered
+  question (escalate, or keep lite, recorded in `lane.overrides` by trigger and
+  detail, so a new file under a blocked path asks again; a `check-error` is never
+  overridable); an unattended `/sprint` runner escalates instead. `/wrapup` writes a `kind: process` lesson for
+  every escalation, naming the trigger, the triage reason that was wrong and the rule
+  to change. `/status` shows each REQ's lane, whether it escalated, and a new
+  Escalations section.
+- **`lane-vocabulary` lint check.** The lane, trigger, actor and lane-check values are
+  closed sets defined once, in the `<!-- lane-vocabulary -->` block of
+  `partials/lane-check.md`. `tools/lint-skills` fails on any value outside them at
+  every writer and reader of the lane (`spec`, `proceed` and its companions,
+  `wrapup`, `status`, `sprint`, `architect`, `agents/pipeline-runner.md`,
+  `agents/lite-reviewer.md`, the sprint workflow, and the requirement template), and
+  on a deleted site or vocabulary block.
+
 - **Lesson schema v2: a captured lesson names its evidence, its confidence and its
   kind (REQ-646).** Every lesson was written from one pipeline run and presented as
   fact. Nothing in it said what it rested on, how sure its author was, whether it was
@@ -87,6 +143,16 @@ PRs (`atelier-fashion/adlc-toolkit`).
   (LESSON-404). Fixtures cover each finding.
 
 ### Changed
+
+- **`/proceed` has four legitimate halt points, not three (REQ-652).** The fourth is a
+  failed lane check on a forced-lite REQ in a solo run. A spec with no `lane` key is
+  on the full lane and runs exactly as before; every reader treats absent as `full`,
+  and the additive `pipeline-state.json` `lane` object is written only when the spec
+  has the key. `/proceed` gains its first flag, `--full`, and an `argument-hint`.
+  `proceed/SKILL.md` joins `retrieval-status-parity`'s `LIFECYCLE_WRITE_SITES`, since
+  it now writes `approved` for a lite REQ. The `/sprint` workflow engine runs a lite
+  REQ on the full lane and logs one line per such REQ (`liteFallbackNotice`); the
+  legacy engine's runners follow the lite lane and are told they are unattended.
 
 - **Both lesson capture steps carry the same four rules (REQ-646).** `/wrapup` Step 4
   asked "any surprises?" and `/bugfix` Phase 6 asked whether the bug revealed
