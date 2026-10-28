@@ -14,7 +14,7 @@ You are validating ADLC artifacts to ensure quality before advancing to the next
 
 ## Context
 
-- Active specs: !`grep -rl -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs || echo No active specs`
+- Active specs: !`grep -rlx -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs || echo No active specs`
 
 ## Input
 
