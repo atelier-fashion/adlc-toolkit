@@ -39,7 +39,8 @@ forced-lite REQ in a solo run, is legitimate halt #4).
 
 3. **Flip each touched repo's draft PR (opened at Step 0, step 8a) to ready** with `adlc_forge_pr_ready <prNumber>` (read `prNumber`/`prUrl` from `pipeline-state.json`) — do **NOT** create a new PR (REQ-483 BR-2). **Fallback (LESSON-004):** if `prNumber` is absent (a pipeline started before draft-PR-early), `adlc_forge_pr_create --base <integrationBranch>` instead (never default base to `main`). Then set the full body **preserving the `adlc-footprint` block** `/architect` published — read the current body, extract the fenced footprint block, and re-append it to the new body, and drop the Step-0 `[WIP]` title prefix:
    ```sh
-   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
    tick=$(printf '\140\140\140')
    tmp=$(mktemp "${TMPDIR:-/tmp}/prbody.XXXXXX"); trap 'rm -f "$tmp"' EXIT
    fp=$(adlc_forge_pr_view "$prNumber" --json body -q .body 2>/dev/null | sed -n "/^${tick}adlc-footprint/,/^${tick}/{ /^${tick}/d; p; }")
@@ -92,7 +93,7 @@ forced-lite REQ in a solo run, is legitimate halt #4).
 
 **Gate**: `currentPhase` must be `7`. After completion: append `7`, set `currentPhase=8`.
 
-**Goal**: Lightweight sanity check on each PR — the full code review already happened in Phase 5. Do NOT re-run `/review`.
+**Goal**: Lightweight sanity check on each PR — the full code review already happened in Phase 5. Do NOT re-run `/review` (`/adlc:review` on the plugin install).
 
 Do all the steps below **for every touched repo's PR**:
 

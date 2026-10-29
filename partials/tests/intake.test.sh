@@ -415,14 +415,28 @@ check "AC-9 omitted segment recovered by direct read" "line 201" \
 # ===========================================================================
 # 9. AC-6 second half — the disabled path degrades, it does not fail closed
 # ===========================================================================
+# The gate answers "no binary" (2) before it reads the veto, so the disabled path is
+# only reachable with an adlc-read to find. A stub on PATH stands in for it, so the
+# case does not depend on whether this machine installed delegation: the stub is
+# never run, because the veto returns before any probe. HOME is a sandbox, so a
+# real ~/bin/adlc-read cannot answer either.
+# The checks run in a subshell; its FAILS is a copy, so the subshell exits with the
+# number it added and the parent adds that back. Without that, a FAIL printed in
+# here was lost and the file still reported ALL PASS.
+mkdir -p "$SANDBOX/ac6-bin" "$SANDBOX/ac6-home"
+printf '#!/bin/sh\necho "adlc-read stub: must not run" >&2\nexit 1\n' > "$SANDBOX/ac6-bin/adlc-read"
+chmod +x "$SANDBOX/ac6-bin/adlc-read"
 . "$PARTIALS/delegate-gate.sh"
+_ac6_before=$FAILS
 ( export ADLC_DISABLE_DELEGATE=1
-  adlc_delegate_gate_check; g=$?
+  PATH="$SANDBOX/ac6-bin:$PATH"; export PATH
+  HOME="$SANDBOX/ac6-home"; export HOME
+  adlc_delegate_gate_check 2>"$SANDBOX/ac6.err"; g=$?
   check "AC-6 ADLC_DISABLE_DELEGATE=1 -> gate=1 (disabled)" "1" "$g"
-  [ -n "$ADLC_DELEGATE_GATE_REASON" ] \
-    && pass "AC-6 disabled reason recorded ($ADLC_DELEGATE_GATE_REASON)" \
-    || fail "AC-6 disabled reason not recorded"
-) || FAILS=$((FAILS + 1))
+  check "AC-6 disabled reason recorded" "disabled-via-env" "$ADLC_DELEGATE_GATE_REASON"
+  check "AC-6 the adlc-read stub was never run" "0" "$(grep -c 'must not run' "$SANDBOX/ac6.err")"
+  exit $((FAILS - _ac6_before))
+) || FAILS=$((FAILS + $?))
 
 # With delegation disabled the intake functions must still work end to end —
 # the source is read directly and the spec is still produced.

@@ -10,11 +10,11 @@ You are designing architecture and breaking a requirement into implementable tas
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
-- Task template: !`cat .adlc/templates/task-template.md || echo No task template found — run /init to vendor .adlc/templates`
+- Task template: !`cat .adlc/templates/task-template.md || echo No task template found — run /init, or /adlc:init on the plugin install, to vendor .adlc/templates`
 - Active specs: !`grep -rlx -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs || echo No active specs`
 
 **Context files loaded on demand**: `.adlc/context/architecture.md` and `.adlc/context/conventions.md` are loaded by Step 1 below — **skip the Read if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads them at Phase 0).
@@ -25,7 +25,7 @@ Requirement: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/conventions.md` exist. If either is missing, stop and tell the user: "The `.adlc/` structure hasn't been fully initialized. Run `/init` first to set up the project context."
+Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/conventions.md` exist. If either is missing, stop and tell the user: "The `.adlc/` structure hasn't been fully initialized. Run `/init` (`/adlc:init` on the plugin install) first to set up the project context."
 
 ## Instructions
 
@@ -38,7 +38,9 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 6. **Lessons — grep first, then read only matches**: use the Grep tool on `.adlc/knowledge/lessons/` with patterns like `component:.*<affected-area>` or `domain:.*<domain>` to identify matching files. Then Read ONLY those matched files. Do NOT read all lessons. Note applicable lessons in your architecture rationale so past mistakes aren't repeated and proven patterns are reused.
 
 ### Step 2: Explore the Codebase
-1. Launch 3 formal exploration agents in parallel using the Agent tool. Each agent is defined in `~/.claude/agents/` with model selection (haiku for fast exploration) and read-only tool restrictions.
+1. Launch 3 formal exploration agents in parallel using the Agent tool. Each agent is defined in `$ADLC_TOOLKIT_ROOT/agents/` with model selection (haiku for fast exploration) and read-only tool restrictions.
+
+   Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
    - **feature-tracer** agent — provide the requirement description and key terms to search for similar existing implementations
    - **architecture-mapper** agent — provide the requirement and current architecture.md to map all files and layers that will be affected
@@ -212,7 +214,8 @@ zero attributable files is skipped with a note — never publish an empty block 
 # pr_view/pr_edit, never direct gh. Sourced in THIS fence (shell state does not
 # cross fences). GitHub backend forwards args verbatim, so the body read/write is
 # byte-identical (BR-3).
-if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
 
 # Scope to THIS REQ's spec dir. $REQ is the REQ id (e.g. REQ-484) the skill is operating on.
 # When $REQ is set, ONLY its own spec dir is consulted: a REQ with no pipeline-state.json is a

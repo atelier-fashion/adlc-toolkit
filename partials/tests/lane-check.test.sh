@@ -16,7 +16,12 @@
 #   passthrough           — wrapper stdout and rc are byte-identical to the engine run directly
 #   recheck_after_commit  — AC-16: a passing branch, then a new commit touching a blocked
 #                           path (a CI fix in Phase 7), re-checked -> rc 1
-#   engine_not_found      — HOME has no .claude/skills                -> rc 2, check-error
+#   engine_not_found      — HOME has no .claude/skills and ADLC_TOOLKIT_ROOT is unset
+#                                                                     -> rc 2, check-error
+#   engine_not_found_root_set — ADLC_TOOLKIT_ROOT names a root with no engine; HOME's
+#                           install is NOT consulted                  -> rc 2, check-error
+#   engine_via_toolkit_root — REQ-669: no .claude/skills at all, ADLC_TOOLKIT_ROOT is the
+#                           checkout (the plugin route)               -> rc 0, pass
 #   branch_engine_ignored — the branch commits tools/adlc/lane_check.py and
 #                           .adlc/tools/adlc/lane_check.py stubs that print a pass;
 #                           the installed engine still runs           -> rc 1, blocked-path
@@ -26,6 +31,15 @@
 #                                                                     -> rc 2, check-error
 #   resolver_undefined    — `_adlc_forge_python` is not defined       -> rc 2, check-error
 #   empty_diff            — no commits on the branch                  -> rc 2, check-error
+#   engine_inside_worktree — LESSON-718: ADLC_TOOLKIT_ROOT is the tree under check (or a
+#                           copy vendored in it), whose planted engine prints a pass;
+#                           refused before it runs, also through a symlinked worktree
+#                           path or root                                -> rc 2, check-error
+#   worktree_inside_toolkit — the benign shape: the worktree sits under the toolkit
+#                           root, as the toolkit's own .claude/worktrees/ do; the
+#                           engine is not inside it and runs           -> rc 0, pass
+#   set_u_home_unset      — sourced by a `set -u` shell with HOME and ADLC_TOOLKIT_ROOT
+#                           unset: no abort, and the call is a check-error
 #
 # Runs under whatever shell run.sh hands it ($ADLC_TEST_SHELL). HOME is pointed
 # at a sandbox whose ~/.claude/skills is THIS toolkit checkout. The wrapper only
@@ -53,6 +67,9 @@ trap 'rm -rf "$SANDBOX"' EXIT INT TERM
 mkdir -p "$SANDBOX/home/.claude" && ln -s "$TOOLKIT" "$SANDBOX/home/.claude/skills"
 HOME="$SANDBOX/home"; export HOME
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+# REQ-669: the symlink route is the default here; the cases that exercise
+# ToolkitRoot set ADLC_TOOLKIT_ROOT themselves.
+unset ADLC_TOOLKIT_ROOT CLAUDE_PLUGIN_ROOT
 
 # forge.sh first, from this checkout, so lane-check.sh finds `_adlc_forge_python`
 # already defined and does not go looking for an installed copy.
@@ -136,14 +153,34 @@ check "recheck_after_commit: re-check after a blocked-path commit escalates" 1 "
 check "recheck_after_commit: trigger" "trigger=blocked-path" "$(printf '%s\n' "$out" | grep '^trigger=' | sed -n 1p)"
 
 # --- engine_not_found -------------------------------------------------------
-# The wrapper looks in the installed toolkit only; a HOME without one is an error.
+# The wrapper looks in the installed toolkit only; a HOME without one, and no
+# ADLC_TOOLKIT_ROOT, is an error.
 R="$SANDBOX/noengine"; mkrepo "$R"; commit_files "$R" src/a.txt
 mkdir -p "$SANDBOX/emptyhome"
-out=$(HOME="$SANDBOX/emptyhome"; export HOME; adlc_lane_check "$R" main 2>/dev/null); rc=$?
+out=$(HOME="$SANDBOX/emptyhome"; export HOME; unset ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main 2>/dev/null); rc=$?
 check "engine_not_found: rc" 2 "$rc"
 check "engine_not_found: first line" "lane_check=error" "$(printf '%s\n' "$out" | sed -n 1p)"
 check "engine_not_found: trigger" "trigger=check-error" "$(printf '%s\n' "$out" | sed -n 2p)"
 check "engine_not_found: detail" "detail=lane_check.py not found in the installed toolkit" "$(printf '%s\n' "$out" | sed -n 3p)"
+# The stderr names both install routes, not install.sh alone.
+err=$(HOME="$SANDBOX/emptyhome"; export HOME; unset ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main 2>&1 >/dev/null)
+check "engine_not_found: stderr names the symlink route" "1" "$(printf '%s\n' "$err" | grep -c 'install.sh')"
+check "engine_not_found: stderr names the plugin route" "1" "$(printf '%s\n' "$err" | grep -c 'claude plugin install adlc@adlc-toolkit')"
+
+# --- engine_not_found_root_set ----------------------------------------------
+# ADLC_TOOLKIT_ROOT is the install. A root without the engine is an error even
+# though HOME's ~/.claude/skills (this checkout) has one: the two never mix.
+mkdir -p "$SANDBOX/emptyroot"
+out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main 2>/dev/null); rc=$?
+check "engine_not_found_root_set: rc" 2 "$rc"
+check "engine_not_found_root_set: detail" "detail=lane_check.py not found in the installed toolkit" "$(printf '%s\n' "$out" | sed -n 3p)"
+
+# --- engine_via_toolkit_root ------------------------------------------------
+# REQ-669 plugin route: no ~/.claude/skills anywhere, the engine is ToolkitRoot's.
+mkdir -p "$SANDBOX/pluginhome/.claude"
+out=$(HOME="$SANDBOX/pluginhome"; export HOME; ADLC_TOOLKIT_ROOT="$TOOLKIT"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main); rc=$?
+check "engine_via_toolkit_root: rc" 0 "$rc"
+check "engine_via_toolkit_root: first line" "lane_check=pass" "$(printf '%s\n' "$out" | sed -n 1p)"
 
 # --- branch_engine_ignored --------------------------------------------------
 # A branch that ships its own checker (at both locations the old lookup tried)
@@ -203,6 +240,64 @@ R="$SANDBOX/relhome"; mkrepo "$R"; commit_files "$R" src/a.txt
 out=$(HOME=. adlc_lane_check "$R" main 2>/dev/null); rc=$?
 check "relative_home: rc" 2 "$rc"
 check "relative_home: first line" "lane_check=error" "$(printf '%s\n' "$out" | sed -n 1p)"
+
+# --- relative_toolkit_root --------------------------------------------------
+# REQ-669: the same refusal for a relative ADLC_TOOLKIT_ROOT.
+out=$(ADLC_TOOLKIT_ROOT=. adlc_lane_check "$R" main 2>/dev/null); rc=$?
+check "relative_toolkit_root: rc" 2 "$rc"
+check "relative_toolkit_root: detail" "detail=ADLC_TOOLKIT_ROOT is not an absolute path" "$(printf '%s\n' "$out" | sed -n 3p)"
+
+# --- engine_inside_worktree -------------------------------------------------
+# LESSON-718: ToolkitRoot pointed at the tree under check (a dev session's
+# --plugin-dir, or a stale pointer) must not run that tree's engine. The planted
+# engine prints a pass and leaves a marker; it must never run.
+R="$SANDBOX/selfload"; mkrepo "$R"
+SELF_RAN="$SANDBOX/selfload-ran"
+for d in "$R/tools/adlc" "$R/.adlc/tools/adlc"; do
+  mkdir -p "$d"
+  printf 'import sys\nopen(%s, "w").close()\nprint("lane_check=pass")\nprint("files_counted=0")\nsys.exit(0)\n' "'$SELF_RAN'" > "$d/lane_check.py"
+done
+commit_files "$R" src/a.txt
+out=$(ADLC_TOOLKIT_ROOT="$R"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main 2>/dev/null); rc=$?
+check "engine_inside_worktree: rc" 2 "$rc"
+check "engine_inside_worktree: output" "lane_check=error
+trigger=check-error
+detail=the engine is inside the worktree under check" "$out"
+err=$(ADLC_TOOLKIT_ROOT="$R"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main 2>&1 >/dev/null)
+check "engine_inside_worktree: stderr says why" "1" "$(printf '%s\n' "$err" | grep -c 'is inside the worktree under check')"
+out=$(ADLC_TOOLKIT_ROOT="$R/.adlc"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main 2>/dev/null); rc=$?
+check "engine_inside_worktree: a copy vendored in the tree: rc" 2 "$rc"
+check "engine_inside_worktree: a copy vendored in the tree: detail" "detail=the engine is inside the worktree under check" "$(printf '%s\n' "$out" | sed -n 3p)"
+ln -s "$R" "$SANDBOX/selfload-link"
+out=$(ADLC_TOOLKIT_ROOT="$R"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$SANDBOX/selfload-link" main 2>/dev/null); rc=$?
+check "engine_inside_worktree: the worktree named through a symlink: rc" 2 "$rc"
+out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/selfload-link"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main 2>/dev/null); rc=$?
+check "engine_inside_worktree: the root named through a symlink: rc" 2 "$rc"
+check "engine_inside_worktree: the planted engine never ran" "no" "$([ -e "$SELF_RAN" ] && echo yes || echo no)"
+
+# --- worktree_inside_toolkit (benign) ---------------------------------------
+# The toolkit's own layout: worktrees under <root>/.claude/worktrees/. The engine
+# is at <root>/tools/adlc, outside the worktree, so it runs. <root>/tools is a
+# symlink to this checkout's tools/, so the engine is the real one.
+TKH="$SANDBOX/tkhost"
+mkdir -p "$TKH/.claude/worktrees" && ln -s "$TOOLKIT/tools" "$TKH/tools"
+R="$TKH/.claude/worktrees/w"; mkrepo "$R"; commit_files "$R" src/a.txt
+out=$(ADLC_TOOLKIT_ROOT="$TKH"; export ADLC_TOOLKIT_ROOT; adlc_lane_check "$R" main); rc=$?
+check "worktree_inside_toolkit: rc" 0 "$rc"
+check "worktree_inside_toolkit: first line" "lane_check=pass" "$(printf '%s\n' "$out" | sed -n 1p)"
+
+# --- set_u_home_unset -------------------------------------------------------
+# The partial's own source of forge.sh reads a bare $HOME in its fallback operand;
+# with HOME and ADLC_TOOLKIT_ROOT unset a `set -u` caller must not abort on it.
+# Native zsh sets HOME itself when it is unset, so zsh runs in sh emulation here.
+SETU="$SANDBOX/setu.sh"
+printf '%s\n' 'set -u' ". '$PARTIALS/lane-check.sh'" 'adlc_lane_check "$1" main; printf "rc=%s\n" "$?"' > "$SETU"
+case "$SUT" in
+  *zsh) setu_out=$(cd "$SANDBOX" && env -u HOME -u ADLC_TOOLKIT_ROOT "$SUT" --emulate sh "$SETU" "$R" 2>/dev/null) ;;
+  *) setu_out=$(cd "$SANDBOX" && env -u HOME -u ADLC_TOOLKIT_ROOT "$SUT" "$SETU" "$R" 2>/dev/null) ;;
+esac
+check "set_u_home_unset: sourced and called without aborting" "rc=2" "$(printf '%s\n' "$setu_out" | tail -n 1)"
+check "set_u_home_unset: the call is a check-error" "trigger=check-error" "$(printf '%s\n' "$setu_out" | sed -n 2p)"
 
 # --- summary ----------------------------------------------------------------
 # Case-count floor: a harness that ran nothing must not read as a pass.

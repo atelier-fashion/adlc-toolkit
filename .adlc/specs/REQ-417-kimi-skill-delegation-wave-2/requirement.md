@@ -191,5 +191,5 @@ isn't worth the added attack surface there.
   recommendation (run `/analyze` after this REQ ships to catch any third-pattern regressions)
 
 REQ-412, REQ-413, REQ-414, REQ-415 are direct ancestors (all `status: complete`).
-REQ-416 (toolkit refactor, `status: draft`) — out of scope here; helper-extraction will
+REQ-416 (toolkit refactor, still a draft when this REQ shipped) — out of scope here; helper-extraction will
 land there.

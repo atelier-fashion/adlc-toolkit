@@ -29,7 +29,8 @@ Only **rc=1** is a merge conflict. Collapsing rc=2/3 into the `blocked`/conflict
 Source the partial and call it **within the same fenced block** (shell state does not cross SKILL.md fences — conventions "Bash in skills"), and **fetch the base ref first** (the helper does not fetch):
 
 ```sh
-if [ -f .adlc/partials/trial-merge.sh ]; then . .adlc/partials/trial-merge.sh; else . ~/.claude/skills/partials/trial-merge.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/trial-merge.sh ]; then . .adlc/partials/trial-merge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/trial-merge.sh"; fi
 git -C "$wt" fetch origin "$integration_branch" >/dev/null 2>&1
 conflicts=$(adlc_trial_merge "$wt" "origin/$integration_branch"); rc=$?
 case $rc in

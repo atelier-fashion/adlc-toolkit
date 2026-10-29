@@ -10,7 +10,7 @@ You are scanning this project's API and infrastructure for cost and performance 
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -23,7 +23,7 @@ Focus: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/project-overview.md` exist. If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/project-overview.md` exist. If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first to set up the project context."
 
 ## Instructions
 
@@ -33,7 +33,9 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 3. Read `.adlc/context/architecture.md` for current caching and optimization patterns
 
 ### Step 2: Launch Scanner Agents
-Launch 3 formal scanner agents in parallel using the Agent tool. Each agent is defined in `~/.claude/agents/` with its full scanning checklist and model selection (sonnet for deep analysis).
+Launch 3 formal scanner agents in parallel using the Agent tool. Each agent is defined in `$ADLC_TOOLKIT_ROOT/agents/` with its full scanning checklist and model selection (sonnet for deep analysis).
+
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
 1. **api-cost-scanner** agent — provide the focus scope and architecture.md for caching context
 2. **db-perf-scanner** agent — provide the focus scope

@@ -183,6 +183,62 @@ def test_real_toolkit_tree_parity_holds():
     assert findings == [], [f.format() for f in findings]
 
 
+def _init_block_bullets(text: str) -> list[str]:
+    lo = text.index("<!-- sync-surfaces: init -->")
+    hi = text.index("<!-- /sync-surfaces -->", lo)
+    return [l for l in text[lo:hi].splitlines() if l.lstrip().startswith("- `")]
+
+
+def _shell_fence_lines(text: str) -> list[str]:
+    lines, out, inside = text.splitlines(), [], False
+    for line in lines:
+        if not inside and check.FENCE_OPEN_RE.match(line):
+            inside = True
+        elif inside and check.FENCE_CLOSE_RE.match(line):
+            inside = False
+        elif inside:
+            out.append(line)
+    return out
+
+
+def test_init_surfaces_match():
+    """REQ-669 BR-8 (TASK-125): after the ToolkitRoot rewrite, /init's copy-surface
+    list is exactly ``INIT_COPIED_SURFACES``, each bullet's copy command reads from
+    ``$ADLC_TOOLKIT_ROOT`` rather than a literal ``~/.claude/skills`` path, and that
+    command is one the init fences actually run. The last clause is what keeps the
+    list honest: a bullet rewritten while its ``cp`` stayed literal, or the other
+    way round, fails here even though the surface names still agree."""
+    text = (REPO_ROOT / "init" / "SKILL.md").read_text(encoding="utf-8")
+    assert check.parse_sync_surface_block(text, "init") == set(check.INIT_COPIED_SURFACES)
+    bullets = _init_block_bullets(text)
+    assert len(bullets) == len(check.INIT_COPIED_SURFACES), bullets
+    fence_lines = _shell_fence_lines(text)
+    assert fence_lines, "init/SKILL.md has no shell fences to copy with"
+    for bullet in bullets:
+        spans = bullet.split("`")[1::2]  # backtick-quoted spans, in order
+        cmds = [s for s in spans if s.startswith("cp ")]
+        assert len(cmds) == 1, f"expected one cp command in {bullet!r}"
+        cmd = cmds[0]
+        assert cmd.startswith('cp "$ADLC_TOOLKIT_ROOT/'), cmd
+        assert ".claude/skills" not in bullet, bullet
+        assert any(cmd in line for line in fence_lines), (
+            f"the bullet's command {cmd!r} is not run by any init fence")
+    # Every copy the fences make from ToolkitRoot into .adlc/ is listed: a new
+    # vendored copy must come with a bullet (and so with a template-drift check).
+    # Not sync surfaces: the taxonomy and config scaffolds (copied once, absent-only,
+    # then the project's own), and workflows/README.md, which the workflow-runtime
+    # bullet names beside the engine.
+    listed = [s for b in bullets for s in b.split("`")[1::2] if s.startswith("cp ")]
+    for line in fence_lines:
+        stripped = line.strip()
+        if (stripped.startswith('cp "$ADLC_TOOLKIT_ROOT/') and " .adlc/" in stripped
+                and not stripped.startswith('cp "$ADLC_TOOLKIT_ROOT/templates/taxonomy')
+                and not stripped.startswith('cp "$ADLC_TOOLKIT_ROOT/templates/config')
+                and "/workflows/README.md" not in stripped):
+            assert any(stripped.startswith(c) for c in listed), (
+                f"init fence copies {stripped!r} into .adlc/ with no sync-surface bullet")
+
+
 # --- REQ-603 BR-13: a stale vendored delegate-gate.sh must be reported ------
 # No new drift-detection machinery is added. `/template-drift` already reports
 # ANY partial diff as `stale` (partials-posture: shared executable code, no

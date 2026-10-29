@@ -2,8 +2,8 @@
 #
 # The SINGLE place gh/az PR commands live (BR-1). Source this partial, then call
 # the adapter functions WITHIN THE SAME fenced block (conventions.md cross-fence
-# rule):
-#   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+# rule), after the fence's ToolkitRoot root line (conventions.md "Bash in skills"):
+#   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
 #   out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 #
 # Provider resolution (BR-2): per-project .adlc/config.yml forge.provider >
@@ -166,6 +166,10 @@ _adlc_forge_python() {
 
 # Locate and invoke forge_config.py with the two-level fallback (project vendored
 # copy first, then toolkit). Args after the repo are passed to the script.
+# The toolkit tier is ToolkitRoot's copy (REQ-669 ADR-2). Its default arm reads a
+# bare $HOME, so with ADLC_TOOLKIT_ROOT and HOME both unset (where a `set -u` caller
+# would abort on it) that tier fails loud with rc 2 instead. Never an empty path:
+# `python3 ''` runs `__main__.py` from the current directory, the tree under check.
 #
 # Every invocation goes through `command` (REQ-609 D5, ADR-3). On the fallback
 # arm `$adlc_fp_py` is the BARE WORD `python3`, and this partial is SOURCED into
@@ -180,13 +184,15 @@ _adlc_forge_py() {
   adlc_fp_py=$(_adlc_forge_python)
   adlc_fp_local="$adlc_fp_repo/tools/adlc/forge_config.py"
   adlc_fp_vend="$adlc_fp_repo/.adlc/tools/adlc/forge_config.py"
-  adlc_fp_glob="${HOME:-}/.claude/skills/tools/adlc/forge_config.py"
   if [ -f "$adlc_fp_local" ]; then
     command "$adlc_fp_py" "$adlc_fp_local" "$@"
   elif [ -f "$adlc_fp_vend" ]; then
     command "$adlc_fp_py" "$adlc_fp_vend" "$@"
+  elif [ -z "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ]; then
+    echo "_adlc_forge_py: forge_config.py not found: no vendored copy, and neither ADLC_TOOLKIT_ROOT nor HOME is set" >&2
+    return 2
   else
-    command "$adlc_fp_py" "$adlc_fp_glob" "$@"
+    command "$adlc_fp_py" "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/adlc/forge_config.py" "$@"
   fi
 }
 

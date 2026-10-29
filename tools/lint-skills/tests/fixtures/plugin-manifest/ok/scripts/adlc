@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fixture stand-in for the plugin CLI shim: executables live under scripts/.
+exit 0

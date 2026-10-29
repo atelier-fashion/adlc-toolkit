@@ -353,13 +353,20 @@ adlc_intake_redact() {
 # intake record itself.
 #
 # Resolution order is repo-local first (LESSON-441): a worktree must read its own
-# template copy, not the global symlink's, or a template change under test is invisible.
+# template copy, not the installed toolkit's, or a template change under test is invisible.
+# The installed copy is ToolkitRoot's (REQ-669 ADR-2). Its default arm reads a bare
+# $HOME, so that candidate is built only when ADLC_TOOLKIT_ROOT or HOME is set: an unset
+# HOME under a `set -u` caller then skips it (`[ -r "" ]` is false) instead of aborting.
 adlc_intake_sections() {
     _ai_tpl=""
+    _ai_root_tpl=""
+    if [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ]; then
+        _ai_root_tpl="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/templates/requirement-template.md"
+    fi
     for _ai_c in \
         ".adlc/templates/requirement-template.md" \
         "templates/requirement-template.md" \
-        "${HOME:-}/.claude/skills/templates/requirement-template.md"
+        "$_ai_root_tpl"
     do
         if [ -r "$_ai_c" ]; then
             _ai_tpl="$_ai_c"
@@ -368,7 +375,7 @@ adlc_intake_sections() {
     done
 
     if [ -z "$_ai_tpl" ]; then
-        echo "adlc_intake_sections: no requirement-template.md found (looked in .adlc/templates, templates, ~/.claude/skills/templates)" >&2
+        echo "adlc_intake_sections: no requirement-template.md found (looked in .adlc/templates, templates, <ToolkitRoot>/templates)" >&2
         return 2
     fi
 

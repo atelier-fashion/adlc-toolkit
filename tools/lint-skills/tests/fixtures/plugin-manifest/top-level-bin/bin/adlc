@@ -1,0 +1,3 @@
+#!/bin/sh
+# A top-level bin/ — the claude.ai sync rejects it.
+exit 0

@@ -1,0 +1,8 @@
+# Preset: fixture
+#
+# Copy this file to .adlc/config.yml, then fill in every placeholder:
+#
+#   cp "$ADLC_TOOLKIT_ROOT/presets/ok.yml" .adlc/config.yml
+#
+project:
+  name: "<Project Display Name>"

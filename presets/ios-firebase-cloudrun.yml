@@ -8,10 +8,14 @@
 #     deploy → smoke tests → auto-promote to production)
 #   - Multi-repo coordination (e.g., a mobile repo, an api repo, a web repo)
 #
-# Copy this file to .adlc/config.yml in the repo where you run /init, then
-# replace every `<placeholder>` with a real value.
+# Copy this file to .adlc/config.yml in the repo where you run
+# /init (/adlc:init on the plugin install), then replace every `<placeholder>`
+# with a real value.
 #
-#   cp ~/.claude/skills/presets/ios-firebase-cloudrun.yml .adlc/config.yml
+#   cp "$ADLC_TOOLKIT_ROOT/presets/ios-firebase-cloudrun.yml" .adlc/config.yml
+#
+# $ADLC_TOOLKIT_ROOT is the installed toolkit on either install route; the
+# presets README has the one-line resolver that sets it in your shell.
 #
 # Skills (especially /bugfix, /wrapup, /canary) read this file at runtime to
 # resolve project IDs, deploy targets, and service names. Nothing is hardcoded

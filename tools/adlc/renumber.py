@@ -35,6 +35,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import toolkit_root  # noqa: E402  (sibling module; path set immediately above)
+
 # Strict per-kind id regexes (LESSON-008). Anchored, 3+ digits, nothing else.
 KIND_PATTERNS = {
     "REQ": re.compile(r"^REQ-[0-9]{3,}$"),
@@ -136,60 +138,90 @@ def _repo_root():
     return os.getcwd()
 
 
-def _toolkit_root():
-    """Root of the TOOLKIT repo (where partials/ lives) — resolved from THIS script's
-    location, independent of the caller's cwd. ``tools/adlc/renumber.py`` -> root is
-    two levels up; prefer git for symlink-correctness."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    try:
-        out = subprocess.run(
-            ["git", "-C", here, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        if out:
-            return out
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
-    return os.path.dirname(os.path.dirname(here))
+class RecheckUnavailableError(RuntimeError):
+    """The id-recheck partial cannot be found or did not give a verdict, so a
+    remote collision cannot be ruled out. Raised rather than read as "no
+    collision" (REQ-669 ADR-2)."""
+
+
+def _project_partial(name):
+    """The caller's project copy of partials/<name> (it may not exist)."""
+    return os.path.join(_repo_root(), ".adlc", "partials", name)
 
 
 def _find_partial(name):
-    """Resolve a partials/<name>. The recheck helper lives in the TOOLKIT repo (and
-    the caller's project copy under .adlc/partials), so check both: caller's project
-    first, then the toolkit checkout, then the installed skills dir."""
-    candidates = [
-        os.path.join(_repo_root(), ".adlc", "partials", name),   # caller's project copy
-        os.path.join(_toolkit_root(), "partials", name),         # toolkit checkout
-        os.path.expanduser(os.path.join("~", ".claude", "skills", "partials", name)),
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-    return None
+    """Resolve a partials/<name>: the caller's project copy under .adlc/partials
+    first, then the toolkit this script runs from. Returns the path, or None.
+
+    The toolkit level is ``toolkit_root.toolkit_file`` (REQ-669 ADR-2), which is
+    realpath-derived and identity-checked. It replaces a ``git rev-parse`` root,
+    which in a plugin cache copy (no ``.git``) names whatever repo encloses it,
+    and the skills-symlink level, which a plugin-only machine does not have.
+    """
+    local = _project_partial(name)
+    if os.path.isfile(local):
+        return local
+    try:
+        return toolkit_root.toolkit_file("partials/" + name)
+    except toolkit_root.ToolkitRootError:
+        return None
+
+
+def _toolkit_partial_hint(name):
+    """Where the toolkit level looked for partials/<name>, for an error message."""
+    try:
+        return os.path.join(toolkit_root.toolkit_root(), "partials", name)
+    except toolkit_root.ToolkitRootError as e:
+        return str(e)
 
 
 def remote_collision(new_id):
     """True iff new_id collides on the remote (shells out to id-recheck.sh — BR-9).
 
-    Returns False (no collision) when the recheck helper is unavailable or the
-    remote is unreachable — the recheck can only FIND a collision, never invent
-    one (BR-3). The caller still benefits from the strict-regex + local-rename
-    safety even when the network probe is degraded.
+    Returns False (no collision) when the remote is unreachable — the recheck can
+    only FIND a collision, never invent one (BR-3). The caller still benefits from
+    the strict-regex + local-rename safety even when the network probe is degraded.
+
+    Raises :class:`RecheckUnavailableError` when the recheck partial itself is
+    missing, or exits with anything but 0 or 1. That is an install defect, not
+    a network state, and reading it as "no collision" let a rename into a
+    remote collision through silently. Under dash, for one, a partial whose
+    fallback ``id-alloc.sh`` is missing exits 2.
+
+    The subprocess gets ``ADLC_TOOLKIT_ROOT`` set to this toolkit, so the
+    partial's own fallback arm (``${ADLC_TOOLKIT_ROOT:-...}/partials/``)
+    finds the toolkit this script runs from on either install route.
     """
     partial = _find_partial("id-recheck.sh")
     if partial is None:
-        return False
+        raise RecheckUnavailableError(
+            "adlc renumber: cannot check the remote for '%s': the recheck partial "
+            "id-recheck.sh was not found at %s or %s. Re-sync the project's "
+            ".adlc/partials/ or reinstall the toolkit."
+            % (new_id, _project_partial("id-recheck.sh"),
+               _toolkit_partial_hint("id-recheck.sh")))
     kind = KIND_RECHECK[_kind_of(new_id)]
+    env = dict(os.environ)
+    try:
+        env["ADLC_TOOLKIT_ROOT"] = toolkit_root.toolkit_root()
+    except toolkit_root.ToolkitRootError:
+        pass  # a project copy was found; it falls back as its own text says
     # adlc_recheck_id returns 1 on collision, 0 otherwise. Source then call in one sh -c.
     script = '. "$1"; adlc_recheck_id "$2" "$3"'
     try:
         proc = subprocess.run(
             ["sh", "-c", script, "sh", partial, kind, new_id],
-            capture_output=True, text=True,
+            capture_output=True, text=True, env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    return proc.returncode == 1
+    if proc.returncode in (0, 1):
+        return proc.returncode == 1
+    last = (proc.stderr or "").strip().splitlines()[-1:] or ["no output"]
+    raise RecheckUnavailableError(
+        "adlc renumber: cannot check the remote for '%s': the recheck partial %s "
+        "exited %d (%s). Re-sync the project's .adlc/partials/ or reinstall the toolkit."
+        % (new_id, partial, proc.returncode, last[0]))
 
 
 def reserve_new_id(new_id):
@@ -487,8 +519,14 @@ def main(argv=None):
         )
         return 2
 
-    # 2. Refuse if the NEW id collides on the remote (BR-9).
-    if remote_collision(new_id):
+    # 2. Refuse if the NEW id collides on the remote (BR-9). A missing recheck
+    #    partial refuses too: it cannot rule a collision out.
+    try:
+        collides = remote_collision(new_id)
+    except RecheckUnavailableError as e:
+        sys.stderr.write(f"{e}\n")
+        return 1
+    if collides:
         sys.stderr.write(
             f"adlc renumber: refusing — new id '{new_id}' also collides on the "
             "remote. Pick a higher id (the recheck above prints the next free one).\n"

@@ -1,0 +1,15 @@
+{
+  "description": "adlc: record the plugin root, scaffold a delegation-off config when none exists, and put scripts/adlc on PATH (REQ-669 ADR-4)",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

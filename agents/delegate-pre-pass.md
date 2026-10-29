@@ -54,11 +54,13 @@ single block is still the safe shape.
 Source `delegate-tools-path.sh` FIRST so `$DELEGATE_TOOLS` exists on EVERY exit path —
 including the gate-fail and api-error telemetry paths (the cross-block-state bug
 class, LESSON-020). Then source the gate predicate. Use the standard two-level
-fallback (`.adlc/partials/…` → `~/.claude/skills/partials/…`):
+fallback (`.adlc/partials/…` → `$ADLC_TOOLKIT_ROOT/partials/…`), after the root
+line that resolves `$ADLC_TOOLKIT_ROOT`:
 
 ```sh
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
 ```
 
 ### 1. Gate + explicit key check
@@ -116,13 +118,13 @@ elif [ -z "$ADLC_READ_BIN" ]; then
   # its contract says it does. Reporting that as "not an absolute path ('')"
   # describes a corrupt setting and sends the operator hunting for a broken
   # value that does not exist, on the single most common non-delegating path.
-  echo "delegate-pre-pass: ADLC_READ_BIN is empty — the resolver returned nothing (delegation not installed); not invoking the delegate; returning the degraded object (run install.sh --with-delegation to install it)" >&2
+  echo "delegate-pre-pass: ADLC_READ_BIN is empty — the resolver returned nothing (delegation not installed); not invoking the delegate; returning the degraded object (run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs) to install it)" >&2
   key_ok=0
 else
   # A NON-EMPTY value that is not an absolute path IS a misconfiguration — the
   # bare name a consumer repo's stale vendored gate still exports on a $PATH
   # hit — so that one keeps the wording that quotes the offending value back.
-  echo "delegate-pre-pass: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2
+  echo "delegate-pre-pass: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2
   key_ok=0
 fi
 
@@ -257,9 +259,9 @@ else
   # reports as `no-binary` (REQ-603 BR-4 freezes the vocabulary), and gate=fail
   # records are left alone by the ghost-skip unmasker.
   if [ -z "$ADLC_READ_BIN" ]; then
-    echo "delegate-pre-pass: ADLC_READ_BIN is empty — the resolver returned nothing (delegation not installed); not invoking the delegate; returning the degraded object (run install.sh --with-delegation to install it)" >&2
+    echo "delegate-pre-pass: ADLC_READ_BIN is empty — the resolver returned nothing (delegation not installed); not invoking the delegate; returning the degraded object (run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs) to install it)" >&2
   else
-    echo "delegate-pre-pass: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2
+    echo "delegate-pre-pass: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — not invoking the delegate; returning the degraded object (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2
   fi
   gate_word=fail; mode=fallback; reason=no-binary; duration_ms=-
   "$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"

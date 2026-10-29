@@ -236,6 +236,8 @@ def test_dependency_missing_is_unconfigured_for_forge_with_stderr(tmp_path):
     pyyaml_lines = [ln for ln in missing.stderr.splitlines() if "PyYAML" in ln]
     assert len(pyyaml_lines) == 1, missing.stderr
     assert "install.sh" in pyyaml_lines[0]
+    # The install.sh hint is qualified to its route (REQ-669 Phase 5 review).
+    assert "(symlink install; the plugin ships no delegation CLIs" in pyyaml_lines[0]
 
     # Benign twin: the same file, the same interpreter, PyYAML importable.
     present = _run_reader(cfg, repeats=2)
@@ -248,10 +250,10 @@ def test_missing_loader_is_unconfigured_with_stderr(tmp_path):
     """A copy with no reachable loader is the same class: `{}` plus one line.
 
     `partials/forge.sh` supports a project that vendors `tools/adlc/forge_config.py`
-    alone. Since REQ-609 that copy needs the loader, which it finds next to
-    itself or in the installed toolkit (`~/.claude/skills`); with neither, the
-    machine cannot parse the config — an install defect, not a file defect — so
-    the same carve-out applies, loudly.
+    alone. Since REQ-609 that copy needs the loader, which it finds under its own
+    toolkit root (REQ-669 ADR-2 retired the `~/.claude/skills` level); without
+    it, the machine cannot parse the config — an install defect, not a file
+    defect — so the same carve-out applies, loudly.
     """
     vendored = tmp_path / "vend" / "tools" / "adlc"
     vendored.mkdir(parents=True)
@@ -271,6 +273,137 @@ def test_missing_loader_is_unconfigured_with_stderr(tmp_path):
     assert out.returncode == 0, out.stderr
     assert "RESULT {}" in out.stdout
     assert "_machine_config.py" in out.stderr and "install.sh" in out.stderr
+
+
+def test_machine_config_loader_from_cache_shaped_tree(cache_shaped_tree):
+    """A plugin cache copy loads ITS OWN `_machine_config.py` (REQ-669 BR-2).
+
+    No `.git` in the copy, no `~/.claude/skills` in the sandbox HOME, and HOME
+    itself is a git repo enclosing the copy: the loader path must come from the
+    copy's toolkit root, through `toolkit_root.toolkit_file`, and nowhere else.
+    """
+    tree = cache_shaped_tree
+    out = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); import forge_config as fc\n"
+         "print('HELPER', fc._toolkit_root_helper() is not None)\n"
+         "print('CANDS', fc._loader_candidates())\n"
+         "print('LOADER', fc._loader().__file__)\n",
+         os.path.join(tree.root, "tools", "adlc")],
+        capture_output=True, text=True, env=tree.env, cwd=tree.home,
+    )
+    assert out.returncode == 0, out.stderr
+    expected = os.path.join(
+        os.path.realpath(tree.root), "tools", "delegate", "_machine_config.py")
+    assert "HELPER True" in out.stdout, out.stdout
+    assert "CANDS %r" % [expected] in out.stdout, out.stdout
+    assert "LOADER %s" % expected in out.stdout, out.stdout
+
+
+# --- $ADLC_TOOLKIT_ROOT: the installed toolkit's loader for a vendored copy --
+
+_TOOLKIT = os.path.dirname(os.path.dirname(_ADLC_DIR))
+_TOOLKIT_LOADER = os.path.join(_TOOLKIT, "tools", "delegate", "_machine_config.py")
+
+
+def _vendored_reader(tmp_path, env_extra):
+    """Run a hand-vendored ``forge_config.py`` (no siblings) on an azure-devops config.
+
+    Prints the parse result, the candidates and the loader used. HOME is an
+    empty directory, so nothing reaches the loader through a home path.
+    """
+    vendored = tmp_path / "proj" / ".adlc" / "tools" / "adlc"
+    vendored.mkdir(parents=True)
+    (vendored / "forge_config.py").write_text(open(fc.__file__, encoding="utf-8").read())
+    (tmp_path / "nohome").mkdir()
+    cfg = _write(tmp_path, "forge:\n  provider: azure-devops\n", name="v.yml")
+    env = dict(os.environ, HOME=str(tmp_path / "nohome"))
+    for key in ("PYTHONPATH", "ADLC_TOOLKIT_ROOT", "CLAUDE_CONFIG_DIR"):
+        env.pop(key, None)
+    env.update(env_extra)
+    return subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); import forge_config as fc\n"
+         "print('RESULT', fc.parse_forge_config(sys.argv[2]))\n"
+         "print('CANDS', fc._loader_candidates())\n"
+         "m = fc._loader(); print('LOADER', m.__file__ if m else None)\n",
+         str(vendored), cfg],
+        capture_output=True, text=True, env=env,
+    )
+
+
+@pytest.mark.parametrize("via", ["clone", "symlink-to-clone"])
+def test_vendored_copy_reads_the_loader_under_adlc_toolkit_root(tmp_path, via):
+    """REQ-669 BR-3: a hand-vendored copy on the symlink route still parses the config.
+
+    The skills' root line exports ADLC_TOOLKIT_ROOT, as the clone or as the
+    symlink that links it. Either way the loader is identity-checked by that
+    root's toolkit_root.py and used. The parse is asserted where this
+    interpreter has PyYAML, put on PYTHONPATH because the empty HOME hides a
+    user-site install; the loader choice is asserted either way.
+    """
+    try:
+        import yaml
+    except ImportError:
+        yaml = None
+    extra = {"PYTHONPATH": os.path.dirname(os.path.dirname(os.path.realpath(
+        yaml.__file__)))} if yaml else {}
+    root = _TOOLKIT
+    if via == "symlink-to-clone":
+        link = tmp_path / "link-home" / ".claude" / "skills"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(_TOOLKIT, target_is_directory=True)
+        root = str(link)
+    out = _vendored_reader(tmp_path, dict(extra, ADLC_TOOLKIT_ROOT=root))
+    assert out.returncode == 0, out.stderr
+    assert "LOADER %s" % _TOOLKIT_LOADER in out.stdout, out.stdout
+    assert "_machine_config.py" not in out.stderr   # the loader is not reported missing
+    if yaml is not None:
+        assert "RESULT {'provider': 'azure-devops'}" in out.stdout, out.stdout
+        assert out.stderr == ""
+
+
+def _decoy_root(tmp_path, shape):
+    """A directory named by ADLC_TOOLKIT_ROOT that must NOT give a loader."""
+    if shape == "relative":
+        return os.path.relpath(_TOOLKIT)
+    decoy = tmp_path / "decoy"
+    (decoy / "tools" / "delegate").mkdir(parents=True)
+    (decoy / "tools" / "delegate" / "_machine_config.py").write_text(
+        open(_TOOLKIT_LOADER, encoding="utf-8").read())
+    if shape == "helper-links-elsewhere":
+        # Its toolkit_root.py derives the real toolkit's root, not this one.
+        (decoy / "tools" / "adlc").mkdir(parents=True)
+        (decoy / "tools" / "adlc" / "toolkit_root.py").symlink_to(
+            os.path.join(_ADLC_DIR, "toolkit_root.py"))
+    return str(decoy)
+
+
+@pytest.mark.parametrize("shape", ["relative", "no-helper", "helper-links-elsewhere"])
+def test_adlc_toolkit_root_that_does_not_check_out_gives_no_loader(tmp_path, shape):
+    out = _vendored_reader(tmp_path, {"ADLC_TOOLKIT_ROOT": _decoy_root(tmp_path, shape)})
+    assert out.returncode == 0, out.stderr
+    assert "RESULT {}" in out.stdout and "LOADER None" in out.stdout, out.stdout
+    assert "_machine_config.py" in out.stderr and "install.sh" in out.stderr
+
+
+def test_missing_loader_hint_on_the_plugin_route_is_a_reinstall(cache_shaped_tree, tmp_path):
+    """install.sh is the symlink route's fix only: on a plugin copy it doubles the install."""
+    tree = cache_shaped_tree
+    os.unlink(os.path.join(tree.root, "tools", "delegate", "_machine_config.py"))
+    cfg = _write(tmp_path, "forge:\n  provider: github\n")
+    out = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); import forge_config as fc\n"
+         "print('RESULT', fc.parse_forge_config(sys.argv[2]))\n",
+         os.path.join(tree.root, "tools", "adlc"), cfg],
+        capture_output=True, text=True, env=tree.env, cwd=tree.home,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "RESULT {}" in out.stdout
+    assert ("reinstall the adlc plugin: claude plugin uninstall adlc@adlc-toolkit && "
+            "claude plugin install adlc@adlc-toolkit") in out.stderr, out.stderr
+    assert "install.sh" not in out.stderr
 
 
 # --- every other malformed reason refuses (BR-2, BR-13) --------------------

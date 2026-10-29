@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
 (REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609,
-BUG-228, BUG-230, REQ-646).
+BUG-228, BUG-230, REQ-646, REQ-652, REQ-669).
 
 Run from the repo root:
 
@@ -12,15 +12,45 @@ Exit code: 0 on clean, ``min(num_findings, 254)`` when findings exist, and
 exits 0 having done no work is a failure, not a pass — the count is also
 printed to stderr on every run so a caller can read the work done directly).
 
-Four checks run once per scan root rather than per SKILL.md:
-``check_agent_model_drift`` (REQ-516 — on-disk ``model:`` vs the config render),
-``check_sync_surface_parity`` (REQ-525 AC4 — ``/init``'s vendored-surface
-copy list vs ``/template-drift``'s checked-surface list must agree),
-``check_retrieval_status_parity`` (BUG-194 — no REQ status a lifecycle skill
-writes is excluded from ``/spec`` retrieval) and ``check_lesson_rules_parity``
-(REQ-646 BR-4 — ``/wrapup``'s and ``/bugfix``'s capture-rules blocks are
-byte-equal). All four degrade to zero findings (never a crash) when run outside
-the toolkit checkout.
+Eight checks run once per scan root rather than per SKILL.md, in ``run()``
+order:
+
+* ``check_agent_model_drift`` (REQ-516) — on-disk ``model:`` vs the config
+  render.
+* ``check_sync_surface_parity`` (REQ-525 AC4) — ``/init``'s vendored-surface
+  copy list vs ``/template-drift``'s checked-surface list must agree.
+* ``check_plugin_manifest`` (REQ-669 BR-12/BR-20) — the plugin and marketplace
+  manifests agree with ``VERSION``, the skill directories, ``agents/`` and each
+  other, the name avoids ``PLUGIN_RESERVED_NAME_PREFIXES``, and there is no
+  top-level ``bin`` of any kind.
+* ``check_toolkit_path`` (REQ-669 BR-13, ADR-9) — no literal toolkit read path
+  (``TOOLKIT_PATH_SPELLINGS``, and in Python ``TOOLKIT_PATH_PY_JOIN_RE``) on
+  the plugin-reachable surface (``TOOLKIT_PATH_SURFACES``) outside
+  ``TOOLKIT_PATH_EXCEPTIONS``, the one exception list REQ-666's
+  ``no-harness-path`` lifts whole. Comment lines are exempt except under
+  ``TOOLKIT_PATH_INSTRUCTION_DIRS`` (``presets/``, ``templates/``), where a
+  comment is the user's instruction.
+* ``check_builtin_collision`` (REQ-669 BR-10, ADR-5) — on toolkit-path's surface
+  plus the e2e audit's extra families and the root ``README.md`` and
+  ``RELEASING.md`` (``BUILTIN_COLLISION_SURFACES``), no instruction-style bare
+  ``/<name>`` for a name in ``BUILTIN_COLLISION_NAMES`` unless the line also
+  carries ``/adlc:<name>``.
+* ``check_retrieval_status_parity`` (BUG-194) — no REQ status a lifecycle skill
+  writes is excluded from ``/spec`` retrieval.
+* ``check_lesson_rules_parity`` (REQ-646 BR-4) — ``/wrapup``'s and
+  ``/bugfix``'s capture-rules blocks are byte-equal.
+* ``check_lane_vocabulary`` (REQ-652 BR-17) — every lane value at every writer
+  and reader is in ``partials/lane-check.md``'s vocabulary.
+
+Each one is gated, so a root it does not apply to yields zero findings, never a
+crash. Model drift, sync-surface, retrieval-status and lesson-rules parity
+degrade to zero findings outside the toolkit checkout. ``check_lane_vocabulary``
+is inert unless ``partials/lane-check.md`` or ``proceed/phases-lite.md`` exists.
+The three REQ-669 checks are inert unless the root is a plugin root
+(``is_plugin_root``: it carries ``.claude-plugin/`` or is a versioned skills
+root); once armed, a missing manifest is a finding, not a skip. Toolkit-path
+and builtin-collision walk their surfaces with one shared walker,
+``_scan_surfaces``.
 
 The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
 ``find_skill_files``, the one structural exception):
@@ -90,7 +120,14 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    (``. <local> 2>/dev/null || . <canonical>``) kills the whole block at its
    first line on any machine with no vendored copy — the ``||`` never runs. The
    one accepted spelling is the ``[ -f ]`` guard (``CANONICAL_SOURCE_RE``,
-   backreferenced so all three ``<name>``s must agree). Two rules: (a) inside a
+   backreferenced so all three ``<name>``s must agree). REQ-669 BR-5 moves its
+   fallback operand to ``"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"``; the REQ-610
+   operand (``RETIRED_REQ610_OPERAND``) was accepted until TASK-124 rewrote the
+   corpus, and is now a finding. Inside a partial alone, the guarded line may
+   instead end in the ADR-2 default-expansion operand
+   ``"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/<name>.sh"``
+   (``PARTIAL_SOURCE_OPERAND``, REQ-669 TASK-123): a partial carries no root
+   line. Two rules: (a) inside a
    shell fence, a statement-position ``.`` whose operand is a
    ``partials/<name>.sh`` path must match that regex exactly; (b) the retired
    literal anywhere in the file — prose, inline code, fence comment — is a
@@ -127,6 +164,23 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
     BR-4): every capture-rules line occurs, verbatim and in block order, in the
     double-quoted ``--question`` of the ``command "$ADLC_READ_BIN"`` call, and
     none holds a character that double quotes would interpret.
+14. ``check_toolkit_root_line`` — REQ-669 ADR-1: a shell fence that reads
+    ``$ADLC_TOOLKIT_ROOT`` carries ``TOOLKIT_ROOT_LINE`` byte-exact before the
+    first read. A read with no root line above it in the same fence (including
+    one that leans on an earlier fence's root line) is a finding, and so is any
+    other line that assigns the variable. Walks the same markdown families as
+    ``check_unguarded_source`` (``SKILL.md``, ``agents/*.md``,
+    ``proceed/phase*.md``, ``partials/*.md``), not ``partials/*.sh``.
+15. ``check_dispatch_fallback`` — REQ-669 ADR-6 / BR-9: a ``##``/``###`` step
+    whose prose dispatches a toolkit agent (``**<name>** agent``, a dispatch
+    verb followed by ``<name> agent``, or ``launch … agents`` beside a toolkit
+    agent name) carries the canonical dispatch sentence, whitespace-normalized.
+    The sentence is read once per run from the scan root's
+    ``.adlc/context/conventions.md`` block (``load_dispatch_sentence``), never
+    pinned here, and the names from ``agents/*.md``. A cross-reference, a
+    negated or time-qualified verb, ``agent's``, a fence and a Claude Code
+    built-in are not dispatches. Walks ``SKILL.md`` plus ``proceed/phase*.md``
+    and ``partials/*.md``.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
 deferred follow-up; LESSON-019 #2): the ``SKIP_DIR_PARTS`` membership test is
@@ -148,6 +202,9 @@ saw.
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -181,6 +238,53 @@ MAX_FINDINGS_EXIT = 254
 # the start-time mark, the shared resolver call, the emit-telemetry exec, and
 # the two delegate-* source lines.
 DELEGATE_GATE_ANCHORS = ("ADLC_DISABLE_DELEGATE",)
+
+# REQ-669 ADR-1: ToolkitRoot, the one directory per running install, resolved
+# by ONE canonical line at the top of every fence that reads it. Four arms, in
+# this order: (1) the braced `${CLAUDE_PLUGIN_ROOT}` token, which Claude Code
+# rewrites to the plugin cache path in skill text before the shell sees it (the
+# default form `${CLAUDE_PLUGIN_ROOT:-…}` is NOT rewritten, verification.md row 1, so it
+# is never written); (2) the symlink install, ahead of the pointer so a doubled
+# machine's symlink-route skill still reads the clone (BR-3); (3) the pointer
+# file the plugin SessionStart hook writes, for text Claude Code did not
+# substitute; (4) the literal default, whose absence fails loudly at the `.`.
+# `toolkit-root-line` pins these bytes (LESSON-012), and conventions.md 'Bash in
+# skills' quotes them; `partials/tests/toolkit-root.test.sh` runs the documented
+# copy under every shell `run.sh` drives.
+TOOLKIT_ROOT_LINE = 'ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"'
+
+# REQ-669 BR-5: the guarded source keeps REQ-610's shape; only the fallback
+# operand changes, to `"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"`.
+GUARDED_SOURCE_TEMPLATE = (
+    "if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; "
+    "else . {operand}; fi"
+)
+GUARDED_SOURCE_OPERAND = '"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"'
+# The ONE operand a fence may use. REQ-669 TASK-122 accepted the REQ-610 operand
+# beside it while TASK-124 rewrote the corpus; TASK-124 retired that acceptance,
+# so the old operand is now an `unguarded-source` finding like any other shape.
+ACCEPTED_SOURCE_OPERANDS = (GUARDED_SOURCE_OPERAND,)
+# RETIRED (REQ-669 TASK-124): the REQ-610 fallback operand. NOT accepted
+# anywhere; it is kept only so a line that is otherwise the guarded spelling
+# gets a finding message that names what changed (RETIRED_OPERAND_SOURCE_RE).
+RETIRED_REQ610_OPERAND = "~/.claude/skills/partials/<name>.sh"
+# REQ-669 ADR-2 (TASK-123): a partial that sources ANOTHER partial carries no
+# root line, and it is also sourced by test harnesses and by older SKILL.md text
+# that never ran one, so its fallback operand reads the variable through the
+# default-expansion spelling. Accepted in `partials/*.sh` ONLY (the `whole_file`
+# walk); in a fence it is still a finding, because a fence has its root line.
+PARTIAL_SOURCE_OPERAND = '"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/<name>.sh"'
+PARTIAL_ACCEPTED_SOURCE_OPERANDS = ACCEPTED_SOURCE_OPERANDS + (PARTIAL_SOURCE_OPERAND,)
+
+
+def guarded_source_line(name: str, operand: str = GUARDED_SOURCE_OPERAND) -> str:
+    """The guarded source line for partial ``name`` with fallback ``operand``."""
+    return GUARDED_SOURCE_TEMPLATE.replace("{operand}", operand).replace("<name>", name)
+
+
+# The canonical spelling as conventions.md quotes it, `<name>` placeholder kept.
+GUARDED_SOURCE_SPELLING = guarded_source_line("<name>")
+
 # Each entry is a tuple of acceptable spellings for one logical literal;
 # satisfied if ANY spelling is present (in the SKILL.md text or a sourced
 # telemetry partial). Single-spelling literals are 1-tuples.
@@ -196,12 +300,11 @@ CANONICAL_LITERALS = (
     # `unguarded-source` finding, so a skill that kept it fails BOTH checks —
     # which is what proves the literal moved rather than being widened
     # (REQ-436 ADR-4 / LESSON-019 #1).
-    (
-        "if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi",
-    ),
-    (
-        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi",
-    ),
+    # REQ-669 BR-5: one spelling per accepted operand, which since TASK-124 is
+    # the ToolkitRoot operand alone. The REQ-610 operand and the retired
+    # `2>/dev/null ||` shape satisfy neither literal, so both fail both checks.
+    tuple(guarded_source_line("delegate-gate", op) for op in ACCEPTED_SOURCE_OPERANDS),
+    tuple(guarded_source_line("delegate-tools-path", op) for op in ACCEPTED_SOURCE_OPERANDS),
 )
 
 # REQ-436 Phase-5 security hardening: the partial-aware canonical rule (ADR-4)
@@ -228,28 +331,53 @@ POSIX_LOCAL_RE = re.compile(r"(?:^|;|&&|\|\||\bthen\b|\bdo\b|\{)\s*local\s+\S")
 # The backreference is load-bearing: all three <name>s must agree, so a line
 # that guards `forge.sh` and then sources `intake.sh` is a finding, not a pass.
 # A trailing shell comment is allowed; nothing else may follow on the line.
-CANONICAL_SOURCE_RE = re.compile(
-    r"^\s*if \[ -f \.adlc/partials/([A-Za-z0-9_-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
-    r"else \. ~/\.claude/skills/partials/\1\.sh; fi\s*(#.*)?$"
-)
+# REQ-669 BR-5: the `else` operand is any of ACCEPTED_SOURCE_OPERANDS, each
+# built from its own spelling so the regex cannot drift from the constant, and
+# each carrying the same `\1` backreference.
+def _operand_re(operand: str) -> str:
+    return re.escape(operand).replace("<name>", r"\1")
+
+
+def _canonical_source_re(operands: tuple[str, ...]) -> re.Pattern[str]:
+    return re.compile(
+        r"^\s*if \[ -f \.adlc/partials/([A-Za-z0-9_-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
+        r"else \. (?:" + "|".join(_operand_re(op) for op in operands) + r"); fi\s*(#.*)?$"
+    )
+
+
+CANONICAL_SOURCE_RE = _canonical_source_re(ACCEPTED_SOURCE_OPERANDS)
+# The `partials/*.sh` walk alone also accepts PARTIAL_SOURCE_OPERAND (REQ-669 ADR-2).
+CANONICAL_PARTIAL_SOURCE_RE = _canonical_source_re(PARTIAL_ACCEPTED_SOURCE_OPERANDS)
+# REQ-669 TASK-124: the guarded REQ-610 spelling. It is a finding (it matches
+# neither regex above); this regex only selects the message that says the
+# operand, not the guard, is what has to change.
+RETIRED_OPERAND_SOURCE_RE = _canonical_source_re((RETIRED_REQ610_OPERAND,))
 # A statement-position `.` (or bash-only `source`, which dash lacks entirely —
 # both arms fail and the functions are silently undefined) whose operand is one
 # of the toolkit's CONVENTION paths: `.adlc/partials/<name>.sh`,
+# `$ADLC_TOOLKIT_ROOT/partials/<name>.sh` (REQ-669, braced or not),
 # `~/.claude/skills/partials/<name>.sh`, or `$HOME/.claude/skills/partials/...`.
 # Same statement positions POSIX_LOCAL_RE uses (start of line, or after `;`,
 # `&&`, `||`, `then`, `do`, `{`). Deliberately NOT any operand containing
 # `partials/`: a consumer's own partial that resolves a sibling through a
 # variable (`. "$D/partials/x.sh"` behind its own `[ -f ]`) is that author's
 # guard to write, and the two-level spelling this check prescribes would point
-# at a `~/.claude/skills/partials/<their-name>.sh` that does not exist. `\b` is
+# at a `$ADLC_TOOLKIT_ROOT/partials/<their-name>.sh` that does not exist. `\b` is
 # fine inside Python `re`; the LESSON-013 ban is for BSD `grep -E`. The
 # `sh <file>` executable-macro form is NOT matched: its command is `sh`.
 # Statement positions include `else`/`elif` and `(` (a subshell), matching
 # READ_BIN_COMMAND_POSITION_RE; the name class admits `_` and uppercase so a
 # partial named outside the current lowercase-hyphen convention cannot slip past.
+# REQ-669 ADR-2: a default-expansion operand (`${ADLC_TOOLKIT_ROOT:-…}/partials/`,
+# `:=` too, any default text) is a convention path as well, so an unguarded
+# source of one is caught; only PARTIAL_SOURCE_OPERAND, guarded, inside a
+# partial, is accepted (CANONICAL_PARTIAL_SOURCE_RE).
+_ROOT_DEFAULT_EXPANSION_RE = r"\$\{ADLC_TOOLKIT_ROOT:?[-=][^\s\"']*?\}"
 DOT_SOURCE_PARTIAL_RE = re.compile(
     r"(?:^|;|&&|\|\||\bthen\b|\belse\b|\belif\b|\bdo\b|\{|\()\s*(?:\.|source)\s+"
-    r"[\"']?(?:\.adlc/partials/|~/\.claude/skills/partials/|\$\{?HOME\}?/\.claude/skills/partials/)"
+    r"[\"']?(?:\.adlc/partials/|\$\{?ADLC_TOOLKIT_ROOT\}?/partials/|"
+    + _ROOT_DEFAULT_EXPANSION_RE + r"/partials/|"
+    r"~/\.claude/skills/partials/|\$\{?HOME\}?/\.claude/skills/partials/)"
     r"[A-Za-z0-9_-]+\.sh"
 )
 # The retired two-level spelling, flagged ANYWHERE in a walked file (ADR-2 rule
@@ -258,10 +386,55 @@ DOT_SOURCE_PARTIAL_RE = re.compile(
 # being live. Whitespace-tolerant around `||` because the corpus really did
 # carry an aligned variant (`delegate-pre-pass.md`). Deliberately excludes the
 # benign `|| sh ~/` macro form. The literal is what the finding message quotes.
-RETIRED_SOURCE_LITERAL = "2>/dev/null || . ~/.claude/skills/partials/"
+# REQ-669: the same `2>/dev/null ||` shape with the ToolkitRoot operand is as
+# fatal as the REQ-610 one, so both operands are recognised here, and so is a
+# default-expansion operand (REQ-669 ADR-2).
+RETIRED_SOURCE_LITERAL = "2>/dev/null || . <fallback>"
 RETIRED_SOURCE_RE = re.compile(
-    r"2>/dev/null\s*\|\|\s*(?:\.|source)\s+[\"']?(?:~|\$\{?HOME\}?)/\.claude/skills/partials/"
+    r"2>/dev/null\s*\|\|\s*(?:\.|source)\s+[\"']?"
+    r"(?:(?:~|\$\{?HOME\}?)/\.claude/skills|\$\{?ADLC_TOOLKIT_ROOT\}?|"
+    + _ROOT_DEFAULT_EXPANSION_RE + r")/partials/"
 )
+
+# REQ-669 ADR-1 `toolkit-root-line`: in a fence, a READ of ADLC_TOOLKIT_ROOT
+# (`$ADLC_TOOLKIT_ROOT`, `${ADLC_TOOLKIT_ROOT}`, `${ADLC_TOOLKIT_ROOT:-…}`) and an
+# ASSIGNMENT of it at statement position (optionally behind `export`/`readonly`).
+# An assignment on any line but the canonical one is a variant of the root line.
+TOOLKIT_ROOT_CHECK = "toolkit-root-line"
+TOOLKIT_ROOT_READ_RE = re.compile(r"\$\{?ADLC_TOOLKIT_ROOT(?![A-Za-z0-9_])")
+TOOLKIT_ROOT_ASSIGN_RE = re.compile(
+    r"(?:^|[;&|({]|\bthen\b|\belse\b|\bdo\b)\s*(?:(?:export|readonly)\s+)?ADLC_TOOLKIT_ROOT="
+)
+
+# REQ-669 ADR-6 / BR-9 `dispatch-fallback`. The canonical dispatch sentence is NOT
+# pinned here: conventions.md 'Agent dispatch patterns' holds the one copy, between
+# these two line-start markers, and the check reads it from there, so the lint and
+# the docs cannot drift apart (LESSON-019). The scan root's own conventions.md is
+# the source whenever the root has one; only a root with none (a fixture root)
+# falls back to the copy in the checkout this lint lives in. The agent names come
+# from `agents/*.md` the same way.
+DISPATCH_FALLBACK_CHECK = "dispatch-fallback"
+DISPATCH_SENTENCE_OPEN_RE = re.compile(r"^<!--\s*dispatch-fallback-sentence\s*-->\s*$")
+DISPATCH_SENTENCE_CLOSE_RE = re.compile(r"^<!--\s*/dispatch-fallback-sentence\s*-->\s*$")
+CONVENTIONS_REL = ".adlc/context/conventions.md"
+LINT_TOOLKIT_ROOT = SCRIPT_DIR.parents[1]
+AGENT_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# Headings outside fences. `#` starts a whole-file region; `##` and `###` each
+# start a step. Deeper headings are parts of the step above them.
+MD_HEADING_RE = re.compile(r"^(#{1,6})\s+\S")
+# A new prose paragraph starts at a list-item marker, as well as after a blank
+# line, a heading or a fence, so one list item's text never runs into the next.
+MD_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+DISPATCH_VERB = r"(?i:\b(?:dispatch(?:es|ed|ing)?|launch(?:es|ed|ing)?|spawn(?:s|ed|ing)?)\b)"
+LAUNCH_VERB = r"(?i:\blaunch(?:es|ed|ing)?\b)"
+# The words just before a verb that make it a negation or a time reference
+# ("do not launch", "before launching"), not an instruction to dispatch.
+DISPATCH_NOT_AN_ORDER_RE = re.compile(
+    r"(?i:(?:\bnot|\bnever|\bcannot|n't|\bwithout|\bbefore|\bafter)\s+(?:[\w-]+\s+){0,2})$"
+)
+# A word that ends an agent mention: `agent` or `agents`, not `agent's`, `agent-…`
+# or `agentic`.
+AGENT_WORD = r"agents?(?![\w'’-])"
 
 # A bare $<digit> — Skill argument templating substitutes $0–$9 (and
 # $ARGUMENTS) across the whole SKILL.md body, clobbering shell positionals and
@@ -536,6 +709,185 @@ LANE_VALUE_PATTERNS = (
     # and its schema enum: `lane: { type: 'string', enum: ['lite', 'full'] }`
     ("lane", re.compile(r"""\blane[ \t]*:[ \t]*\{[^}\n]*\benum[ \t]*:[ \t]*\[[ \t]*'([^'\n]*)'""")),
     ("lane", re.compile(r"""\blane[ \t]*:[ \t]*\{[^}\n]*\benum[ \t]*:[ \t]*\[[^\]\n]*,[ \t]*'([^'\n]*)'[ \t]*\]""")),
+)
+
+# REQ-669 ADR-3: `plugin-manifest`. This repo is both the Claude Code marketplace
+# and the plugin, so the two manifests below sit at the scan root. The check is
+# armed by either the manifest directory or a versioned skills root (`VERSION`
+# plus a root-level `<dir>/SKILL.md`), so deleting `.claude-plugin/` alone does
+# not disarm it — the missing manifests are then the findings (LESSON-019).
+PLUGIN_MANIFEST_DIR = ".claude-plugin"
+PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
+MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json"
+PLUGIN_VERSION_FILE = "VERSION"
+PLUGIN_MANIFEST_CHECK = "plugin-manifest"
+# Claude Code's own plugin-name rule: `claude plugin validate --strict` fails a
+# name that is not kebab-case, because the claude.ai marketplace sync requires it.
+PLUGIN_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# The reserved-prefix rule. Claude Code reserves its official marketplace names
+# (all `claude-*` / `anthropic-*`) and blocks names that lead with `claude` or
+# `anthropic` as impersonation; a plugin name with that prefix would also read as
+# first-party in every `<plugin>:<skill>` spelling. `cc-plugin-` is the third
+# prefix REQ-669's PluginManifest entity forbids (requirement.md, Entities). The
+# toolkit's name must not start with any of them (checked case-insensitively).
+PLUGIN_RESERVED_NAME_PREFIXES = ("claude", "anthropic", "cc-plugin-")
+# `skills` / `agents` entries the loader accepts are `.` or start with `./`
+# (Claude Code 2.1.258 refuses `alpha`); anything else names nothing.
+PLUGIN_PATH_PREFIX = "./"
+
+# REQ-669 ADR-9 / BR-13 `toolkit-path`: no literal toolkit read path on the
+# plugin-reachable surface. Under the plugin route there is no `~/.claude/skills`
+# and no `~/.claude/agents`, so a read through either names a file that is not
+# there, or worse, the clone of a doubled machine. Every read goes through
+# ToolkitRoot instead. REQ-666's `no-harness-path` is a superset of this check
+# and absorbs it, with TOOLKIT_PATH_EXCEPTIONS lifted whole (BR-18).
+TOOLKIT_PATH_CHECK = "toolkit-path"
+# The scanned surface (ADR-9), one entry per family. `scan_toolkit_path` counts
+# the files it read under each entry, so a family that walked nothing is visible
+# rather than a silent green (LESSON-019). `tools/**` means code files only:
+# `.py`, `.sh`, `.js`, and any other non-Markdown file that opens with `#!`.
+# `presets/*` and `templates/*` ship in the plugin and are what a user copies from.
+TOOLKIT_PATH_SURFACES = (
+    "*/SKILL.md",
+    "proceed/phase*.md",
+    "agents/*.md",
+    "partials/*.sh",
+    "partials/*.md",
+    "workflows/*.js",
+    "tools/**",
+    "presets/*",
+    "templates/*",
+)
+TOOLKIT_PATH_CODE_SUFFIXES = (".py", ".sh", ".js")
+# Top-level directories whose comment lines are NOT exempt. In a preset or a
+# template a `#` line is the user's instruction, not a remark about code: the
+# preset header tells the user to `cp …/presets/<x>.yml .adlc/config.yml`, and a
+# literal `~/.claude/skills` there is a path the plugin user does not have. So
+# the `comment` exceptions below never reach a file under these directories.
+TOOLKIT_PATH_INSTRUCTION_DIRS = ("presets", "templates")
+# The flagged spellings: every one the REQ-669 explorers found, and the three
+# `$HOME` forms of `~/.claude/agents` the Phase 5 review added. Plain substring
+# matches, never `\b` (LESSON-013), and no other normalisation, so each is
+# exactly the text a reader would grep for.
+TOOLKIT_PATH_SPELLINGS = (
+    "~/.claude/skills",
+    "$HOME/.claude/skills",
+    "${HOME}/.claude/skills",
+    "${HOME:-}/.claude/skills",
+    "~/.claude/agents",
+    "$HOME/.claude/agents",
+    "${HOME}/.claude/agents",
+    "${HOME:-}/.claude/agents",
+)
+# Python only: a path built from parts rather than spelled whole, such as
+# `os.path.join(home, ".claude", "skills")`, `Path.home() / ".claude" / "agents"`
+# or `".claude/skills"`. A quoted `.claude` followed by a quoted `skills` or
+# `agents` (joined by `,` or `/`), or a quoted `.claude/skills` itself.
+TOOLKIT_PATH_PY_JOIN_RE = re.compile(
+    r"""["']\.claude(?:["']\s*[,/]\s*["']|/)(?:skills|agents)(?![A-Za-z0-9_.-])"""
+)
+
+
+class ToolkitPathException(NamedTuple):
+    """One entry of TOOLKIT_PATH_EXCEPTIONS: how it matches, and its literal."""
+    kind: str   # line | token | file | comment | tree
+    value: str
+
+
+# The ONE exception list for `toolkit-path` (ADR-9). Every literal is matched
+# byte-exact, never as a pattern, so a near-miss variant of an exempt spelling is
+# a finding. The README quotes this constant by name.
+TOOLKIT_PATH_EXCEPTIONS = (
+    # The canonical root line (ADR-1). Its second and fourth arms name the
+    # symlink install on purpose: that directory IS ToolkitRoot on the symlink
+    # route. Exempt only when the line, leading indentation aside, equals
+    # TOOLKIT_ROOT_LINE; a trailing space or comment makes it a variant again.
+    ToolkitPathException("line", TOOLKIT_ROOT_LINE),
+    # The ADR-2 default-expansion spelling, opening quote and trailing slash
+    # included. A partial carries no root line and is also sourced by test
+    # harnesses and older SKILL.md text, so it reads the variable with the
+    # symlink install as its default. Removed from a line before the spellings
+    # are searched, so the rest of the line is still checked; an unquoted or
+    # `${HOME}` variant is not this literal and stays a finding.
+    ToolkitPathException("token", '"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/'),
+    # The symlink installer. It creates and inspects `~/.claude/skills` and
+    # `~/.claude/agents` by definition; the plugin route never runs it.
+    ToolkitPathException("file", "install.sh"),
+    # The doctor's route checks (REQ-669 ADR-7). They report whether the
+    # symlink install exists and where it points, so they name it on purpose.
+    # Whole-file, so a toolkit read anywhere else in it would pass here: the
+    # same file once held `_partial_path`'s `~/.claude/skills` fallback, which
+    # ADR-2 replaced. tests/test_toolkit_path.py therefore holds every symlink
+    # spelling and `.claude`/`skills` join in the committed file to the named
+    # functions that inspect the symlink install (`CHECKS_PY_INSPECTORS`).
+    ToolkitPathException("file", "tools/adlc/checks.py"),
+    # This lint, which holds the rule table: it must spell every pattern it
+    # polices (this list, TOOLKIT_ROOT_LINE, the source operands, the messages)
+    # and it locates its own checkout from `__file__`, never from a home path.
+    ToolkitPathException("file", "tools/lint-skills/check.py"),
+    # Comment lines: `#` in shell, Python and the shell fences of a Markdown
+    # file (never a Markdown heading); `//` and `/* … */` in JavaScript. A
+    # comment is not a read. A trailing comment on a code line is not a comment
+    # line, so the line is still checked. Not under TOOLKIT_PATH_INSTRUCTION_DIRS,
+    # where a comment line is the user's instruction.
+    ToolkitPathException("comment", "#"),
+    ToolkitPathException("comment", "//"),
+    ToolkitPathException("comment", "/*"),
+    # Test and fixture trees: any directory of that name below the scan root.
+    # They plant the spellings on purpose, and the plugin route runs neither.
+    ToolkitPathException("tree", "tests"),
+    ToolkitPathException("tree", "fixtures"),
+)
+# Directories the `tools/**` walk never enters, below the scan root only (the
+# root's own components are never tested, LESSON-019). Hidden directories cover
+# a nested `.claude/worktrees/` or `.worktrees/` checkout and `.git`.
+TOOLKIT_PATH_PRUNE_DIRS = frozenset(SKIP_DIR_PARTS | {"__pycache__"})
+
+# REQ-669 BR-10 / ADR-5 (TASK-133) `builtin-collision`: a skill name Claude Code
+# also owns is never printed bare as an instruction. Claude Code 2.1.258 resolves a
+# bare `/<name>` to the first command whose name is an exact match, so on the
+# plugin install a bare `/init` reaches the built-in CLAUDE.md generator, not
+# `/adlc:init` (verification.md, "Built-in command collision audit"). Every such
+# instruction prints both spellings on the same line; conventions.md "Skill names
+# Claude Code also owns" states the forms.
+BUILTIN_COLLISION_CHECK = "builtin-collision"
+# The watched names: `init` and `status` are built-in commands of the same name,
+# and `review` is an alias of the bundled `code-review` skill, which wins or loses
+# by list order. Re-read on each Claude Code upgrade (`builtin_collision_static`
+# in tools/adlc/tests/e2e/plugin-sandbox.sh reads the installed binary).
+BUILTIN_COLLISION_NAMES = ("init", "status", "review")
+# toolkit-path's surface and walk (which now includes `presets/*` and
+# `templates/*`), plus the shipped families the e2e audit (`builtin_collision_static`,
+# its SHIPPED list) also reads, so a clean lint leaves that audit no bare
+# instruction line to count, plus the two root docs a user or maintainer follows
+# step by step: README.md (install and setup) and RELEASING.md (the release
+# sequence). CHANGELOG.md is not on it: its released entries are a record of what
+# shipped, not instructions. A file two surfaces both yield is counted under each
+# and read once.
+BUILTIN_COLLISION_SURFACES = TOOLKIT_PATH_SURFACES + (
+    "proceed/*.md",
+    "workflows/*.md",
+    "scripts/*",
+    "hooks/*",
+    "ETHOS.md",
+    "tools/delegate/*",
+    "README.md",
+    "RELEASING.md",
+)
+# What makes a mention an instruction rather than a noun: one of these verbs
+# right before the slash token, or one of these phrases right after it. The same
+# lists as the e2e audit, so the two agree on what counts. A heading, a table cell
+# naming the skill, or the skill named as a subject ("the `/x` skill copies") has
+# neither, and does not fire. The name is closed on the right, so a path
+# component (`/x/SKILL.md`) is not a mention.
+BUILTIN_COLLISION_VERB_RE = (
+    r"(?i)\b(?:run|re-run|rerun|re-runs|reruns|running|re-running|invoke|type|"
+    r"recommend(?:s|ing)?(?: running)?|proceed to|ready for|before|note for|use|try)"
+    r"\s+[`\"']?/(%s)(?![A-Za-z0-9_/-])"
+)
+BUILTIN_COLLISION_TAIL_RE = (
+    r"(?<![A-Za-z0-9_./:$~-])/(%s)[`\"']?\s+(?:first|there too|to vendor|to refresh|"
+    r"to scaffold|to set up|if missing|to copy)\b"
 )
 
 # REQ-646 ADR-5: `lesson-check-order`. The two lesson-capture steps (`/wrapup`
@@ -1917,6 +2269,18 @@ def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> lis
     passes it, rule 2's literal is absent from it), and the executable-partial
     macro ``sh <local> 2>/dev/null || sh <canonical>`` — its command is ``sh``,
     not ``.``, so it fails as an ordinary command (exit 127), never fatally.
+
+    REQ-669 BR-5: the canonical spelling's fallback operand is
+    ``"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"``, and both rules know that
+    operand. The REQ-610 operand (``RETIRED_REQ610_OPERAND``) was accepted
+    beside it while TASK-124 rewrote the corpus; since TASK-124 it is a finding,
+    and a line that is otherwise the guarded spelling gets a message saying the
+    ``else`` arm is what has to change. The messages name only the new spelling.
+
+    REQ-669 ADR-2: in a partial (``whole_file``) the guarded line may also carry
+    ``PARTIAL_SOURCE_OPERAND``, the default-expansion operand, because a partial
+    has no root line and is sourced by harnesses that set no ToolkitRoot. In a
+    fence that operand is a finding.
     """
     findings: list[Finding] = []
     flagged: set[int] = set()
@@ -1924,29 +2288,47 @@ def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> lis
         # A partial (`partials/*.sh`) has no fences: every non-comment line is
         # executable, so the whole file is one body (REQ-610, find_partial_files).
         bodies = [list(enumerate(text.splitlines(), start=1))]
+        canonical_re = CANONICAL_PARTIAL_SOURCE_RE
     else:
         bodies = [body for _lang, _idx, _start, body in _iter_fences(text)]
+        canonical_re = CANONICAL_SOURCE_RE
     for body in bodies:
         for lineno, line in body:
             if line.lstrip().startswith("#"):
                 continue
-            if CANONICAL_SOURCE_RE.match(line):
+            if canonical_re.match(line):
                 continue
             if not DOT_SOURCE_PARTIAL_RE.search(line):
                 continue
             flagged.add(lineno)
+            if RETIRED_OPERAND_SOURCE_RE.match(line):
+                if whole_file:
+                    fix = (f"`{guarded_source_line('<name>', PARTIAL_SOURCE_OPERAND)}` "
+                           "(a partial carries no root line, REQ-669 ADR-2)")
+                else:
+                    fix = f"`{GUARDED_SOURCE_SPELLING}`, after the fence's root line"
+                findings.append(
+                    Finding(
+                        rel, lineno, "unguarded-source",
+                        "guards the source but falls back to the retired REQ-610 "
+                        "operand under `~/.claude/skills`, which only the symlink "
+                        "install has, so the plugin install cannot source it; "
+                        f"keep the guard and spell it {fix} "
+                        "(conventions.md 'Bash in skills', REQ-669 BR-5, TASK-124)",
+                    )
+                )
+                continue
             findings.append(
                 Finding(
                     rel, lineno, "unguarded-source",
                     "sources a partial without the guard — `.` is a POSIX "
                     "special built-in, so a failed source EXITS a "
                     "non-interactive `sh` before any `||` can run; spell it "
-                    "`if [ -f .adlc/partials/<name>.sh ]; then "
-                    ". .adlc/partials/<name>.sh; else "
-                    ". ~/.claude/skills/partials/<name>.sh; fi` on ONE line "
+                    f"`{GUARDED_SOURCE_SPELLING}` on ONE line "
                     "(a guard split across lines is not recognised), "
-                    "with the same <name> in all three places "
-                    "(conventions.md 'Bash in skills', REQ-610 BR-3)",
+                    "with the same <name> in all three places, after the "
+                    "fence's root line "
+                    "(conventions.md 'Bash in skills', REQ-610 BR-3, REQ-669 BR-5)",
                 )
             )
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -1956,16 +2338,342 @@ def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> lis
             Finding(
                 rel, lineno, "unguarded-source",
                 "carries the retired two-level source spelling "
-                f"(`. <local> {RETIRED_SOURCE_LITERAL}<name>.sh`) — it is fatal "
+                f"(`. <local> {RETIRED_SOURCE_LITERAL}`) — it is fatal "
                 "under `sh` wherever it runs, and prose that shows it is one "
                 "paste away from being live; replace it with the guarded "
-                "spelling `if [ -f .adlc/partials/<name>.sh ]; then "
-                ". .adlc/partials/<name>.sh; else "
-                ". ~/.claude/skills/partials/<name>.sh; fi` "
-                "(conventions.md 'Bash in skills', REQ-610 BR-5)",
+                f"spelling `{GUARDED_SOURCE_SPELLING}` "
+                "(conventions.md 'Bash in skills', REQ-610 BR-5, REQ-669 BR-5)",
             )
         )
     return sorted(findings, key=lambda f: f.line)
+
+
+def _first_difference(line: str, canonical: str) -> int:
+    """1-based column of the first character where ``line`` and ``canonical``
+    differ (one past the shorter when one is a prefix of the other)."""
+    for i, (a, b) in enumerate(zip(line, canonical)):
+        if a != b:
+            return i + 1
+    return min(len(line), len(canonical)) + 1
+
+
+def check_toolkit_root_line(text: str, rel: str) -> list[Finding]:
+    """REQ-669 ADR-1: a fence that reads ``$ADLC_TOOLKIT_ROOT`` carries the
+    canonical root line, byte-exact, before its first read.
+
+    Per shell fence (``sh``/``bash``/``shell``; ``bash`` is not exempt, for the
+    reason ``check_unguarded_source`` gives), walking non-comment lines in order:
+
+    * a line equal to ``TOOLKIT_ROOT_LINE`` once leading indentation is removed
+      is the root line. Nothing may trail it, not even whitespace or a comment;
+    * any other line that ASSIGNS ``ADLC_TOOLKIT_ROOT`` at statement position is
+      a variant of the root line (or a re-assignment after it), and a finding.
+      Every one-character edit of the root line leaves at least one of its four
+      assignments in place, so every such edit lands here;
+    * a READ of ``ADLC_TOOLKIT_ROOT`` before any root line in the same fence is a
+      finding, whether the fence has no root line at all, has it only after the
+      read, or relies on a root line in an EARLIER fence. Fenced blocks share no
+      shell state, and the root line is per fence by design. ``cross-fence-var``
+      exempts exported names, and the root line exports, so this rule is what
+      catches the cross-fence read.
+
+    One finding per fence: the first offending line. A fence that never names
+    the variable needs no root line. Prose and non-shell fences are not read,
+    and neither are ``partials/*.sh``, which read the variable through the
+    ADR-2 default-expansion spelling instead.
+    """
+    findings: list[Finding] = []
+    for _lang, _idx, _start, body in _iter_fences(text):
+        root_seen = False
+        for lineno, line in body:
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            if stripped == TOOLKIT_ROOT_LINE:
+                root_seen = True
+                continue
+            if TOOLKIT_ROOT_ASSIGN_RE.search(line):
+                if root_seen:
+                    what = ("re-assigns ADLC_TOOLKIT_ROOT after the root line, "
+                            "overriding what it resolved")
+                else:
+                    col = _first_difference(stripped, TOOLKIT_ROOT_LINE)
+                    what = ("assigns ADLC_TOOLKIT_ROOT on a line that is not the "
+                            f"canonical root line (first difference at column {col} "
+                            "after indentation)")
+                findings.append(
+                    Finding(
+                        rel, lineno, TOOLKIT_ROOT_CHECK,
+                        f"{what}; the byte-exact root line, with nothing after "
+                        "it, is the only assignment a fence may make "
+                        "(conventions.md 'Bash in skills', REQ-669 ADR-1)",
+                    )
+                )
+                break
+            if not root_seen and TOOLKIT_ROOT_READ_RE.search(line):
+                findings.append(
+                    Finding(
+                        rel, lineno, TOOLKIT_ROOT_CHECK,
+                        "reads $ADLC_TOOLKIT_ROOT with no root line above it in "
+                        "this fence — fenced blocks share no shell state, so put "
+                        f"`{TOOLKIT_ROOT_LINE}` on its own line before the first "
+                        "use (conventions.md 'Bash in skills', REQ-669 ADR-1)",
+                    )
+                )
+                break
+    return findings
+
+
+def _normalize_ws(text: str) -> str:
+    """Collapse every run of whitespace to one space and trim the ends."""
+    return " ".join(text.split())
+
+
+def parse_dispatch_sentence_block(text: str) -> str | None:
+    """Return the canonical dispatch sentence from conventions.md's
+    ``<!-- dispatch-fallback-sentence -->`` block, whitespace-normalized.
+
+    ``None`` when there is no line-start open marker outside a fence, when the
+    block is never closed (its extent is then undefined), or when it holds no
+    text. A leading ``>`` on a line is dropped, so the copy may be a blockquote.
+    """
+    lines = text.splitlines()
+    fenced = _any_fence_line_numbers(lines)
+    for i, line in enumerate(lines):
+        if (i + 1) in fenced or not DISPATCH_SENTENCE_OPEN_RE.match(line):
+            continue
+        body: list[str] = []
+        for item in lines[i + 1:]:
+            if DISPATCH_SENTENCE_CLOSE_RE.match(item):
+                sentence = _normalize_ws(" ".join(body))
+                return sentence or None
+            body.append(item.strip().lstrip(">"))
+        return None
+    return None
+
+
+def load_dispatch_sentence(root: Path) -> tuple[str | None, str]:
+    """``(sentence, source label)`` for one run.
+
+    The scan root's ``.adlc/context/conventions.md`` is the source whenever it
+    exists, and a missing or gutted block there is ``None``, never a silent
+    fallback, so deleting the block cannot disarm the check (LESSON-019). Only a
+    root with no conventions.md at all (a fixture root) reads the copy in the
+    checkout this lint lives in.
+    """
+    local = root / CONVENTIONS_REL
+    if local.is_file():
+        source, label = local, CONVENTIONS_REL
+    else:
+        source, label = LINT_TOOLKIT_ROOT / CONVENTIONS_REL, f"the lint checkout's {CONVENTIONS_REL}"
+    try:
+        text = source.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, label
+    return parse_dispatch_sentence_block(text), label
+
+
+def load_agent_names(root: Path) -> frozenset[str]:
+    """The toolkit agent names: the stems of ``<root>/agents/*.md``, or of the
+    lint checkout's ``agents/*.md`` when the root has none. Only the names are
+    read, never the files."""
+    for base in (root, LINT_TOOLKIT_ROOT):
+        agents_dir = base / "agents"
+        if not agents_dir.is_dir():
+            continue
+        names = frozenset(p.stem for p in agents_dir.glob("*.md") if AGENT_NAME_RE.match(p.stem))
+        if names:
+            return names
+    return frozenset()
+
+
+class DispatchMention(NamedTuple):
+    line: int      # 1-based line where the mention starts
+    agent: str     # the toolkit agent it names
+    section: int   # index into the file's regions (see _dispatch_regions)
+
+
+def _dispatch_regions(lines: list[str]):
+    """Split a markdown file into regions and their prose paragraphs.
+
+    Returns ``[(kind, paragraphs)]``. Region 0 is the text before the first
+    heading. A ``#`` heading opens a ``file`` region and a ``##`` or ``###``
+    heading opens a ``step`` region; deeper headings stay in the region above
+    them. Headings and lines inside fenced blocks are ignored as boundaries, and
+    fenced lines are not prose. Each paragraph is ``[(lineno, text)]`` with the
+    text stripped of indentation and of a leading ``>``. A heading is a
+    paragraph of its own region.
+    """
+    fenced = _any_fence_line_numbers(lines)
+    regions: list[tuple[str, list[list[tuple[int, str]]]]] = [("file", [])]
+    current: list[tuple[int, str]] = []
+
+    def flush() -> None:
+        nonlocal current
+        if current:
+            regions[-1][1].append(current)
+        current = []
+
+    for idx, raw in enumerate(lines):
+        lineno = idx + 1
+        if lineno in fenced:
+            flush()
+            continue
+        heading = MD_HEADING_RE.match(raw)
+        if heading:
+            flush()
+            level = len(heading.group(1))
+            if level <= 3:
+                regions.append(("file" if level == 1 else "step", []))
+            regions[-1][1].append([(lineno, raw.strip())])
+            continue
+        stripped = raw.strip().lstrip(">").strip()
+        if not stripped:
+            flush()
+            continue
+        if MD_LIST_ITEM_RE.match(raw):
+            flush()
+        current.append((lineno, stripped))
+    flush()
+    return regions
+
+
+def _paragraph_text(paragraph: list[tuple[int, str]]) -> tuple[str, list[tuple[int, int]]]:
+    """Join a paragraph's lines with single spaces. Returns the text and
+    ``[(offset, lineno)]`` so a match offset maps back to its source line."""
+    parts: list[str] = []
+    starts: list[tuple[int, int]] = []
+    offset = 0
+    for lineno, text in paragraph:
+        piece = _normalize_ws(text)
+        starts.append((offset, lineno))
+        parts.append(piece)
+        offset += len(piece) + 1
+    return " ".join(parts), starts
+
+
+def _line_at(starts: list[tuple[int, int]], pos: int) -> int:
+    line = starts[0][1]
+    for offset, lineno in starts:
+        if offset > pos:
+            break
+        line = lineno
+    return line
+
+
+def _dispatch_patterns(names: frozenset[str]):
+    """The three mention shapes for ``names`` (longest name first, so
+    ``architecture-reviewer`` is never read as a shorter name):
+
+    * ``bold``   — ``**<name>** agent``, the list-item form every dispatch list uses;
+    * ``verb``   — a dispatch verb, then within the same clause ``<name> agent``
+      (bare, backticked or bold, optionally ``adlc:``-prefixed);
+    * ``launch`` — ``launch … agents``, which counts only when the same or the
+      next paragraph names a toolkit agent, so "launch Explore agents" (a
+      Claude Code built-in) is not a toolkit dispatch.
+    """
+    alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    name = rf"(?:adlc:)?(?P<name>{alt})"
+    bold = re.compile(rf"\*\*`?{name}`?\*\*\s+{AGENT_WORD}")
+    verb = re.compile(
+        rf"{DISPATCH_VERB}[^.;:!?]{{0,80}}?(?<![\w-])(?:\*\*)?`?{name}`?(?:\*\*)?\s+{AGENT_WORD}"
+    )
+    launch = re.compile(rf"{LAUNCH_VERB}[^.;:!?]{{0,60}}?\bagents\b")
+    word = re.compile(rf"(?<![\w-]){name}(?![\w-])")
+    return bold, verb, launch, word
+
+
+def dispatch_mentions(
+    text: str, names: frozenset[str], sentence: str | None = None,
+) -> tuple[list[DispatchMention], list[tuple[str, str]]]:
+    """Every toolkit-agent dispatch the prose of ``text`` names.
+
+    Returns ``(mentions, regions)`` where ``regions[i]`` is ``(kind, normalized
+    prose)`` for the region a mention's ``section`` indexes. Occurrences of
+    ``sentence`` itself are removed before matching, so the canonical text never
+    reads as a dispatch. Cross-references ("the reflector's checklist in
+    `/reflect`", "(the `reflector` agent)") have no dispatch verb and no bold
+    list form, so they are not mentions; neither is a verb after "not", "never",
+    "without", "before" or "after".
+    """
+    if not names:
+        return [], []
+    bold, verb, launch, word = _dispatch_patterns(names)
+    mentions: list[DispatchMention] = []
+    region_text: list[tuple[str, str]] = []
+    for index, (kind, paragraphs) in enumerate(_dispatch_regions(text.splitlines())):
+        joined = [_paragraph_text(p) for p in paragraphs]
+        region_text.append((kind, " ".join(t for t, _ in joined)))
+        for p_index, (ptext, starts) in enumerate(joined):
+            if sentence:
+                ptext = ptext.replace(sentence, " " * len(sentence))
+            found: list[tuple[int, str]] = []
+            for m in bold.finditer(ptext):
+                found.append((m.start(), m.group("name")))
+            for m in verb.finditer(ptext):
+                if not DISPATCH_NOT_AN_ORDER_RE.search(ptext[:m.start()]):
+                    found.append((m.start(), m.group("name")))
+            for m in launch.finditer(ptext):
+                if DISPATCH_NOT_AN_ORDER_RE.search(ptext[:m.start()]):
+                    continue
+                nearby = ptext[m.start():]
+                if p_index + 1 < len(joined):
+                    nearby += " " + joined[p_index + 1][0]
+                named = word.search(nearby)
+                if named:
+                    found.append((m.start(), named.group("name")))
+            for pos, agent in sorted(found):
+                mentions.append(DispatchMention(_line_at(starts, pos), agent, index))
+    return mentions, region_text
+
+
+def check_dispatch_fallback(
+    text: str, rel: str, sentence: str | None, names: frozenset[str],
+    source: str = CONVENTIONS_REL,
+) -> list[Finding]:
+    """REQ-669 ADR-6 / BR-9: every step that dispatches a toolkit agent carries
+    the canonical dispatch sentence.
+
+    A step is a ``##`` or ``###`` region (``_dispatch_regions``). For each step
+    with at least one ``dispatch_mentions`` hit, the step's prose, whitespace-
+    normalized, must contain ``sentence``; otherwise one finding at the first
+    mention. A mention above the first ``##``/``###`` heading (a file's
+    introduction) is satisfied by the sentence anywhere in the file. When the
+    sentence could not be read (``None``) a file with any mention gets one
+    finding saying so, rather than passing unchecked.
+    """
+    mentions, regions = dispatch_mentions(text, names, sentence)
+    if not mentions:
+        return []
+    if sentence is None:
+        first = mentions[0]
+        return [Finding(
+            rel, first.line, DISPATCH_FALLBACK_CHECK,
+            f"names the `{first.agent}` agent as dispatched, but the canonical "
+            f"dispatch sentence could not be read from {source}: its "
+            "`<!-- dispatch-fallback-sentence -->` block is missing, unclosed or "
+            "empty (conventions.md 'Agent dispatch patterns', REQ-669 ADR-6)",
+        )]
+    whole_file = " ".join(t for _, t in regions)
+    findings: list[Finding] = []
+    reported: set[int] = set()
+    for mention in mentions:
+        if mention.section in reported:
+            continue
+        kind, prose = regions[mention.section]
+        if sentence in (whole_file if kind == "file" else prose):
+            continue
+        reported.add(mention.section)
+        where = "this file" if kind == "file" else "this step"
+        findings.append(Finding(
+            rel, mention.line, DISPATCH_FALLBACK_CHECK,
+            f"{where} dispatches the `{mention.agent}` agent without the canonical "
+            "dispatch sentence, so on the other install route the name can miss and "
+            "silently run a generic agent; copy the sentence from the "
+            f"`<!-- dispatch-fallback-sentence -->` block in {source} into "
+            f"{where} (conventions.md 'Agent dispatch patterns', REQ-669 ADR-6, BR-9)",
+        ))
+    return findings
 
 
 def _safe_label(skill_path: Path, root: Path) -> str:
@@ -2379,6 +3087,645 @@ def check_lane_vocabulary(root: Path) -> list[Finding]:
     return findings
 
 
+class _DuplicateJsonKey(ValueError):
+    """A JSON object repeats a key (LESSON-716)."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__(key)
+        self.key = key
+
+
+class _NonStandardJsonConstant(ValueError):
+    """``NaN`` / ``Infinity`` / ``-Infinity``: Python accepts them, JSON does not."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    """``object_pairs_hook`` that fails closed on a repeated key.
+
+    ``json.loads`` keeps the last of a repeated key silently, and the plugin
+    loader may keep a different one, so a manifest that passes here could load
+    with another value (LESSON-716: parse the way the reader does, or reject).
+    """
+    obj: dict = {}
+    for key, value in pairs:
+        if key in obj:
+            raise _DuplicateJsonKey(key)
+        obj[key] = value
+    return obj
+
+
+def _reject_constant(name: str) -> object:
+    raise _NonStandardJsonConstant(name)
+
+
+def _json_key_line(text: str, key: str, last: bool = False) -> int:
+    """1-based line of the first (or last) ``"key":`` in ``text``; 1 if absent."""
+    pattern = re.compile('"' + re.escape(key) + r'"\s*:')
+    lines = [text.count("\n", 0, m.start()) + 1 for m in pattern.finditer(text)]
+    if not lines:
+        return 1
+    return lines[-1] if last else lines[0]
+
+
+def _manifest_finding(rel: str, line: int, message: str) -> Finding:
+    return Finding(rel, line, PLUGIN_MANIFEST_CHECK, message)
+
+
+def _load_json_manifest(root: Path, rel: str) -> tuple[dict | None, str, list[Finding], bool]:
+    """Read and strictly parse one manifest.
+
+    Returns ``(obj, text, findings, found)``. ``obj`` is ``None`` whenever the file
+    is missing, unreadable, not UTF-8, not JSON, repeats a key, uses a non-JSON
+    constant, or is not a top-level object — each of those is one finding, and the
+    rules that read the manifest are skipped rather than run on a guess. ``found``
+    is True when the file exists, so an unreadable manifest still counts as
+    scanned (the same posture as an unreadable SKILL.md in ``run``).
+    """
+    path = root / rel
+    if not path.is_file():
+        return None, "", [_manifest_finding(
+            rel, 1,
+            f"{rel} is missing — this root is a plugin root, so the manifest must "
+            "exist (REQ-669 BR-12, ADR-3)",
+        )], False
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return None, "", [_manifest_finding(
+            rel, 1, f"could not read: {exc.strerror or 'I/O error'}")], True
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, "", [_manifest_finding(rel, 1, "not valid UTF-8")], True
+    try:
+        obj = json.loads(text, object_pairs_hook=_reject_duplicate_keys,
+                         parse_constant=_reject_constant)
+    except _DuplicateJsonKey as exc:
+        return None, text, [_manifest_finding(
+            rel, _json_key_line(text, exc.key, last=True),
+            f"repeated JSON key {json.dumps(exc.key)} — a JSON reader keeps one of "
+            "the two values and the plugin loader may keep the other, so the "
+            "manifest is not checked until the key appears once (LESSON-716)",
+        )], True
+    except _NonStandardJsonConstant as exc:
+        return None, text, [_manifest_finding(
+            rel, 1, f"{exc.name} is not a JSON value — the plugin loader's parser "
+            "rejects it (LESSON-716)")], True
+    except json.JSONDecodeError as exc:
+        return None, text, [_manifest_finding(
+            rel, exc.lineno, f"not valid JSON: {exc.msg}")], True
+    if not isinstance(obj, dict):
+        return None, text, [_manifest_finding(
+            rel, 1, "the top level must be a JSON object")], True
+    return obj, text, [], True
+
+
+def _plugin_root_skill_dirs(root: Path) -> list[str]:
+    """Root-level directories that directly hold a ``SKILL.md``, sorted.
+
+    The loader's own rule, as the REQ-669 architecture probe observed it: one
+    level only, hidden directories (``.adlc/``, ``.claude/``) excluded, so a
+    ``SKILL.md`` nested deeper (``tools/…``, test fixtures) is not a skill.
+    """
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return []
+    return [p.name for p in entries
+            if not p.name.startswith(".") and p.is_dir() and (p / "SKILL.md").is_file()]
+
+
+def _plugin_path_entries(value: object) -> list[str] | None:
+    """A ``skills`` / ``agents`` value as a list of path strings, or ``None`` if malformed."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return list(value)
+    return None
+
+
+def _normalized_plugin_path(entry: str) -> str | None:
+    """``./alpha/`` -> ``alpha``, ``./`` or ``.`` -> ``.``; ``None`` for an entry the loader refuses."""
+    if entry != "." and not entry.startswith(PLUGIN_PATH_PREFIX):
+        return None
+    return posixpath.normpath(entry)
+
+
+def _check_plugin_fields(root: Path, plugin: dict, text: str) -> list[Finding]:
+    rel = PLUGIN_MANIFEST
+    findings: list[Finding] = []
+
+    # version == VERSION (BR-12, AC-7).
+    version_path = root / PLUGIN_VERSION_FILE
+    try:
+        expected = version_path.read_text(encoding="utf-8").strip() if version_path.is_file() else None
+    except (OSError, UnicodeDecodeError):
+        expected = None
+    actual = plugin.get("version")
+    if expected is None:
+        findings.append(_manifest_finding(
+            PLUGIN_VERSION_FILE, 1,
+            "VERSION is missing or unreadable — plugin.json's `version` has nothing "
+            "to be pinned to (REQ-669 BR-12, ADR-3)",
+        ))
+    elif actual != expected:
+        shown = "absent" if actual is None else json.dumps(actual)
+        findings.append(_manifest_finding(
+            rel, _json_key_line(text, "version"),
+            f"`version` is {shown} but VERSION holds {json.dumps(expected)} — they "
+            "must be equal, so a release moves both (REQ-669 BR-12, ADR-3)",
+        ))
+
+    # name: kebab-case and not a reserved prefix.
+    name = plugin.get("name")
+    name_line = _json_key_line(text, "name")
+    if not isinstance(name, str) or not name:
+        findings.append(_manifest_finding(rel, name_line, "`name` must be a non-empty string"))
+    elif not PLUGIN_NAME_RE.match(name):
+        findings.append(_manifest_finding(
+            rel, name_line,
+            f"plugin name {json.dumps(name)} is not kebab-case (lowercase letters, "
+            "digits and single hyphens) — the claude.ai marketplace sync requires it",
+        ))
+    elif name.lower().startswith(PLUGIN_RESERVED_NAME_PREFIXES):
+        findings.append(_manifest_finding(
+            rel, name_line,
+            f"plugin name {json.dumps(name)} starts with a reserved prefix "
+            f"({', '.join(PLUGIN_RESERVED_NAME_PREFIXES)}) — Claude Code reserves "
+            "those for Anthropic's own marketplaces and plugins",
+        ))
+
+    # Every root-level skill directory is reachable through `skills`.
+    skill_dirs = _plugin_root_skill_dirs(root)
+    skills_line = _json_key_line(text, "skills")
+    if "skills" not in plugin:
+        if skill_dirs:
+            findings.append(_manifest_finding(
+                rel, 1,
+                f"no `skills` field, so the loader scans only `skills/` and none of the "
+                f"{len(skill_dirs)} root-level skill directories is exposed — set "
+                '`"skills": "./"` (REQ-669 BR-12, ADR-3)',
+            ))
+    else:
+        entries = _plugin_path_entries(plugin["skills"])
+        if entries is None:
+            findings.append(_manifest_finding(
+                rel, skills_line, "`skills` must be a path string or an array of path strings"))
+        else:
+            named = {n for n in (_normalized_plugin_path(e) for e in entries) if n is not None}
+            if "." not in named:
+                for skill in skill_dirs:
+                    if skill not in named:
+                        findings.append(_manifest_finding(
+                            rel, skills_line,
+                            f"skill directory `{skill}/` holds a SKILL.md but is not "
+                            f"reachable through `skills` {json.dumps(plugin['skills'])} — "
+                            f'use "./" or list "./{skill}" (REQ-669 BR-12)',
+                        ))
+
+    # No `agents` field, or one that lists every agents/*.md (BR-12). The field
+    # replaces the default `agents/` scan, so a partial list hides agents.
+    if "agents" in plugin:
+        agents_line = _json_key_line(text, "agents")
+        entries = _plugin_path_entries(plugin["agents"])
+        if entries is None:
+            findings.append(_manifest_finding(
+                rel, agents_line, "`agents` must be a path string or an array of path strings"))
+        else:
+            listed = {n for n in (_normalized_plugin_path(e) for e in entries) if n is not None}
+            agents_dir = root / "agents"
+            agent_files = sorted(agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+            for agent in agent_files:
+                agent_rel = f"agents/{agent.name}"
+                if agent_rel not in listed:
+                    findings.append(_manifest_finding(
+                        rel, agents_line,
+                        f"`agents` is present but omits `{agent_rel}` — the field "
+                        "replaces the default `agents/` scan, so that agent would not "
+                        "load; drop the field or list every agent (REQ-669 BR-12, ADR-3)",
+                    ))
+    return findings
+
+
+def _check_marketplace_fields(market: dict, text: str, plugin_name: str | None) -> list[Finding]:
+    rel = MARKETPLACE_MANIFEST
+    plugins = market.get("plugins")
+    plugins_line = _json_key_line(text, "plugins")
+    if not isinstance(plugins, list):
+        return [_manifest_finding(rel, plugins_line, "`plugins` must be an array")]
+    if len(plugins) != 1:
+        return [_manifest_finding(
+            rel, plugins_line,
+            f"`plugins` has {len(plugins)} entries — this repo is both the marketplace "
+            "and the one plugin it lists, so it must have exactly one (REQ-669 BR-1, ADR-3)",
+        )]
+    entry = plugins[0]
+    if not isinstance(entry, dict):
+        return [_manifest_finding(rel, plugins_line, "the `plugins` entry must be an object")]
+    findings: list[Finding] = []
+    entry_name = entry.get("name")
+    if not isinstance(entry_name, str):
+        findings.append(_manifest_finding(
+            rel, plugins_line, "the `plugins` entry has no string `name`"))
+    elif plugin_name is not None and entry_name != plugin_name:
+        findings.append(_manifest_finding(
+            rel, _json_key_line(text, "name", last=True),
+            f"the marketplace entry is named {json.dumps(entry_name)} but plugin.json "
+            f"names the plugin {json.dumps(plugin_name)} — `plugin install` takes the "
+            "entry's name, so they must be equal (REQ-669 BR-1)",
+        ))
+    source = entry.get("source")
+    if not (isinstance(source, str) and _normalized_plugin_path(source) == "."):
+        findings.append(_manifest_finding(
+            rel, _json_key_line(text, "source"),
+            f"the entry's `source` is {json.dumps(source)} — it must be \"./\", because "
+            "the plugin is this repository (REQ-669 BR-1, ADR-3)",
+        ))
+    return findings
+
+
+def scan_plugin_manifest(root: Path) -> tuple[list[Finding], int]:
+    """REQ-669 BR-12 / BR-20: return ``(findings, manifests_scanned)``.
+
+    Inert (``([], 0)``) unless the root carries ``.claude-plugin/`` or is a
+    versioned skills root (``VERSION`` plus a root-level ``<dir>/SKILL.md``). Once
+    armed, both manifests are read, so an armed run that scanned no manifest has
+    produced two "missing" findings — never a silent pass (LESSON-019). The count
+    lets a test prove the scan did real work on every fixture.
+
+    Rules, each reported once per violation:
+      1. each manifest exists and parses as strict JSON — repeated keys and the
+         non-JSON constants are rejected (LESSON-716);
+      2. plugin.json ``version`` is the trimmed content of ``VERSION`` (BR-12);
+      3. the plugin ``name`` is kebab-case and avoids the reserved prefixes;
+      4. every root-level ``<dir>/SKILL.md`` is reachable through ``skills``;
+      5. an ``agents`` field, when present, lists every ``agents/*.md``;
+      6. marketplace.json has exactly one ``plugins`` entry, whose ``name`` is the
+         plugin's name and whose ``source`` is ``./`` (BR-1);
+      7. there is no top-level ``bin`` of any kind: directory, file or symlink
+         (BR-20).
+    """
+    if not is_plugin_root(root):
+        return [], 0
+    findings: list[Finding] = []
+    scanned = 0
+    plugin, plugin_text, loaded, found = _load_json_manifest(root, PLUGIN_MANIFEST)
+    findings.extend(loaded)
+    scanned += int(found)
+    market, market_text, loaded, found = _load_json_manifest(root, MARKETPLACE_MANIFEST)
+    findings.extend(loaded)
+    scanned += int(found)
+
+    plugin_name: str | None = None
+    if plugin is not None:
+        findings.extend(_check_plugin_fields(root, plugin, plugin_text))
+        if isinstance(plugin.get("name"), str):
+            plugin_name = plugin["name"]
+    if market is not None:
+        findings.extend(_check_marketplace_fields(market, market_text, plugin_name))
+
+    # `lexists`, not `is_dir`: a `bin` file, or a symlink (dangling included),
+    # is still a top-level `bin` entry the sync path sees.
+    if os.path.lexists(root / "bin"):
+        findings.append(_manifest_finding(
+            "bin/", 1,
+            "a top-level bin/ exists (a directory, file or symlink named bin) — "
+            "directory listings reach Claude Code users "
+            "through the claude.ai sync path, which rejects a plugin with a top-level "
+            "bin/; put executables under scripts/ (REQ-669 BR-20, ADR-3, ADR-4)",
+        ))
+    return findings, scanned
+
+
+def check_plugin_manifest(root: Path) -> list[Finding]:
+    """Per-root ``plugin-manifest`` findings (see ``scan_plugin_manifest``)."""
+    return scan_plugin_manifest(root)[0]
+
+
+def is_plugin_root(root: Path) -> bool:
+    """Whether ``root`` is a plugin root: it carries ``.claude-plugin/``, or it is
+    a versioned skills root (``VERSION`` plus a root-level ``<dir>/SKILL.md``).
+
+    Arms both ``plugin-manifest`` and ``toolkit-path``, so the two checks cannot
+    disagree about which roots ship as the plugin.
+    """
+    return (root / PLUGIN_MANIFEST_DIR).is_dir() or (
+        (root / PLUGIN_VERSION_FILE).is_file() and bool(_plugin_root_skill_dirs(root)))
+
+
+class ToolkitPathScan(NamedTuple):
+    """What ``scan_toolkit_path`` did: its findings, the files it read under
+    each TOOLKIT_PATH_SURFACES entry, and the walked files a ``file`` exception
+    set aside (root-relative, sorted)."""
+    findings: list[Finding]
+    surfaces: dict[str, int]
+    excepted: tuple[str, ...]
+
+
+def _toolkit_path_exceptions(kind: str) -> tuple[str, ...]:
+    return tuple(e.value for e in TOOLKIT_PATH_EXCEPTIONS if e.kind == kind)
+
+
+def _rel_parts(rel: str) -> tuple[str, ...]:
+    return tuple(p for p in rel.split("/") if p)
+
+
+def _toolkit_path_tree_excepted(rel: str) -> bool:
+    """Whether ``rel`` sits under a ``tree`` exception directory (``tests/``,
+    ``fixtures/``) at any depth below the root. Shared by toolkit-path and
+    builtin-collision: both trees plant their findings on purpose."""
+    trees = _toolkit_path_exceptions("tree")
+    return any(part in trees for part in _rel_parts(rel)[:-1])
+
+
+def toolkit_path_excepted_file(rel: str) -> bool:
+    """Whether the root-relative path ``rel`` is set aside whole: a ``file``
+    exception (byte-exact path) or a file under a ``tree`` exception directory."""
+    if "/".join(_rel_parts(rel)) in _toolkit_path_exceptions("file"):
+        return True
+    return _toolkit_path_tree_excepted(rel)
+
+
+def _toolkit_path_comment_lines(text: str, rel: str) -> set[int]:
+    """1-based numbers of the lines ``rel``'s language treats as comment lines.
+
+    Markdown: ``#`` lines inside a shell fence (a ``#`` outside one is a
+    heading, not a comment). JavaScript: ``//`` lines and every line of a
+    ``/* … */`` block. Everything else on the surface (shell, Python, shebang
+    scripts): ``#`` lines. None at all under TOOLKIT_PATH_INSTRUCTION_DIRS,
+    where a comment line is an instruction the user follows.
+    """
+    parts = _rel_parts(rel)
+    if parts and parts[0] in TOOLKIT_PATH_INSTRUCTION_DIRS:
+        return set()
+    leaders = set(_toolkit_path_exceptions("comment"))
+
+    def led_by(line: str, leader: str) -> bool:
+        return leader in leaders and line.lstrip().startswith(leader)
+
+    lines = text.splitlines()
+    suffix = posixpath.splitext(rel)[1]
+    if suffix == ".md":
+        return {lineno for _lang, _idx, _start, body in _iter_fences(text)
+                for lineno, line in body if led_by(line, "#")}
+    if suffix != ".js":
+        return {i for i, line in enumerate(lines, 1) if led_by(line, "#")}
+    out: set[int] = set()
+    in_block = False
+    for i, line in enumerate(lines, 1):
+        if in_block:
+            out.add(i)
+            in_block = "*/" not in line
+        elif led_by(line, "//"):
+            out.add(i)
+        elif led_by(line, "/*"):
+            out.add(i)
+            in_block = "*/" not in line.lstrip()[2:]
+    return out
+
+
+def toolkit_path_findings(text: str, rel: str) -> list[Finding]:
+    """REQ-669 BR-13: the ``toolkit-path`` findings for one file.
+
+    ``rel`` is the root-relative path: it selects the ``file`` and ``tree``
+    exceptions and the comment syntax. Each remaining line that is not a comment
+    line and not the canonical root line has every default-expansion literal
+    removed, then is searched for each of TOOLKIT_PATH_SPELLINGS as a plain
+    substring and, in a ``.py`` file, for TOOLKIT_PATH_PY_JOIN_RE. One finding
+    per line, naming every spelling the line holds.
+    """
+    if toolkit_path_excepted_file(rel):
+        return []
+    comments = _toolkit_path_comment_lines(text, rel)
+    exact_lines = _toolkit_path_exceptions("line")
+    tokens = _toolkit_path_exceptions("token")
+    python = posixpath.splitext(rel)[1] == ".py"
+    findings: list[Finding] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if lineno in comments or line.lstrip() in exact_lines:
+            continue
+        probe = line
+        for token in tokens:
+            # NUL cannot occur in any spelling, so removal never splices a new one.
+            probe = probe.replace(token, "\0")
+        hits = [s for s in TOOLKIT_PATH_SPELLINGS if s in probe]
+        if python:
+            hits.extend(m.group(0) for m in TOOLKIT_PATH_PY_JOIN_RE.finditer(probe))
+        if not hits:
+            continue
+        named = ", ".join(f"`{h}`" for h in hits)
+        findings.append(Finding(
+            rel, lineno, TOOLKIT_PATH_CHECK,
+            f"literal toolkit path {named} — the plugin route has no such directory. "
+            "Read through ToolkitRoot: `$ADLC_TOOLKIT_ROOT/…` after a fence's root "
+            "line, the default-expansion spelling in a partial, or "
+            "`tools/adlc/toolkit_root.py` in Python (REQ-669 BR-13, ADR-9; "
+            "exceptions: TOOLKIT_PATH_EXCEPTIONS)",
+        ))
+    return findings
+
+
+def _is_file_within_root(path: Path, root_resolved: Path) -> bool:
+    """Whether ``path`` resolves to a regular file inside ``root_resolved``. A
+    symlink that leads out of the root, or to a directory, is not."""
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(root_resolved)
+    except (OSError, ValueError):
+        return False
+    return resolved.is_file()
+
+
+def _is_tools_code_file(path: Path) -> bool:
+    """A ``tools/**`` code file: a code suffix, or any non-Markdown file whose
+    first bytes are ``#!``."""
+    if path.suffix in TOOLKIT_PATH_CODE_SUFFIXES:
+        return True
+    if path.suffix == ".md":
+        return False
+    try:
+        with path.open("rb") as fh:
+            return fh.read(2) == b"#!"
+    except OSError:
+        return False
+
+
+def _toolkit_path_tools_files(root: Path) -> list[Path]:
+    """``tools/**`` code files, walked with every pruned name removed below the
+    root: hidden directories (a nested ``.claude/worktrees/`` or ``.worktrees/``
+    checkout, ``.git``), TOOLKIT_PATH_PRUNE_DIRS and the ``tree`` exceptions.
+    ``os.walk`` does not follow directory symlinks."""
+    tools = root / "tools"
+    if not tools.is_dir():
+        return []
+    prune = TOOLKIT_PATH_PRUNE_DIRS | set(_toolkit_path_exceptions("tree"))
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(tools):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in prune)
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            if _is_tools_code_file(path):
+                out.append(path)
+    return out
+
+
+def _toolkit_path_surface_files(root: Path, surface: str) -> list[Path]:
+    if surface == "tools/**":
+        return _toolkit_path_tools_files(root)
+    if surface == "*/SKILL.md":
+        # The loader's rule (``_plugin_root_skill_dirs``): one level, no hidden
+        # directory, so nothing under ``.claude/`` or ``tools/`` is reached.
+        return [root / d / "SKILL.md" for d in _plugin_root_skill_dirs(root)]
+    return sorted(root.glob(surface))
+
+
+class SurfaceScan(NamedTuple):
+    """What ``_scan_surfaces`` did: its findings, the files it counted under each
+    surface, and the walked files ``excepted`` set aside (root-relative)."""
+    findings: list[Finding]
+    surfaces: dict[str, int]
+    set_aside: frozenset[str]
+
+
+def _scan_surfaces(root: Path, surfaces: tuple[str, ...], excepted, per_file) -> SurfaceScan:
+    """The one walker behind ``scan_toolkit_path`` and ``scan_builtin_collision``.
+
+    For each entry of ``surfaces`` it lists the files ``_toolkit_path_surface_files``
+    yields, keeps those that resolve to a file inside the scan root, and sets
+    aside every one whose root-relative path ``excepted(rel)`` accepts. Each kept
+    file counts under every surface that yields it, but is read once, and
+    ``per_file(text, rel)`` supplies its findings. A file that cannot be read is
+    an ``io-error`` finding.
+    """
+    root_resolved = root.resolve()
+    findings: list[Finding] = []
+    counts: dict[str, int] = {}
+    seen: set[str] = set()
+    set_aside: set[str] = set()
+    for surface in surfaces:
+        read = 0
+        for path in _toolkit_path_surface_files(root, surface):
+            if not _is_file_within_root(path, root_resolved):
+                continue
+            rel = _safe_label(path, root)
+            if excepted(rel):
+                set_aside.add(rel)
+                continue
+            read += 1
+            if rel in seen:
+                continue
+            seen.add(rel)
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                findings.append(Finding(rel, 1, "io-error",
+                                        f"could not read: {exc.strerror or 'I/O error'}"))
+                continue
+            findings.extend(per_file(text, rel))
+        counts[surface] = read
+    return SurfaceScan(findings, counts, frozenset(set_aside))
+
+
+def scan_toolkit_path(root: Path) -> ToolkitPathScan:
+    """REQ-669 BR-13 / ADR-9: walk TOOLKIT_PATH_SURFACES under ``root``.
+
+    Inert (no findings, no surfaces) unless ``root`` is a plugin root
+    (``is_plugin_root``): only a plugin root has a plugin-reachable surface, and
+    a consumer repo's own files are not it. Every walk keeps to the scan root
+    (a symlink that resolves outside it is skipped) and tests only the path
+    components below the root, so a root inside ``.worktrees/`` is scanned in
+    full. A file under a ``tree`` exception is never read; a ``file``
+    exception is walked, then set aside and listed in ``excepted``.
+    """
+    if not is_plugin_root(root):
+        return ToolkitPathScan([], {}, ())
+    scan = _scan_surfaces(root, TOOLKIT_PATH_SURFACES, toolkit_path_excepted_file,
+                          toolkit_path_findings)
+    files = _toolkit_path_exceptions("file")
+    excepted = tuple(sorted(rel for rel in scan.set_aside if rel in files))
+    return ToolkitPathScan(scan.findings, scan.surfaces, excepted)
+
+
+def check_toolkit_path(root: Path) -> list[Finding]:
+    """Per-root ``toolkit-path`` findings (see ``scan_toolkit_path``)."""
+    return scan_toolkit_path(root).findings
+
+
+class BuiltinCollisionScan(NamedTuple):
+    """What ``scan_builtin_collision`` did: its findings, and the files it found
+    under each BUILTIN_COLLISION_SURFACES entry (each file is read once)."""
+    findings: list[Finding]
+    surfaces: dict[str, int]
+
+
+_BUILTIN_COLLISION_NAMES_RE = "|".join(re.escape(n) for n in BUILTIN_COLLISION_NAMES)
+_BUILTIN_COLLISION_PATTERNS = (
+    re.compile(BUILTIN_COLLISION_VERB_RE % _BUILTIN_COLLISION_NAMES_RE),
+    re.compile(BUILTIN_COLLISION_TAIL_RE % _BUILTIN_COLLISION_NAMES_RE),
+)
+
+
+def builtin_collision_excepted_file(rel: str) -> bool:
+    """Whether ``rel`` sits under a toolkit-path ``tree`` exception (``tests/``,
+    ``fixtures/``), which plant bare instructions on purpose. toolkit-path's
+    ``file`` exceptions do not apply: the doctor's remediations are printed to
+    the user, and this lint spells its patterns without a watched name."""
+    return _toolkit_path_tree_excepted(rel)
+
+
+def builtin_collision_findings(text: str, rel: str) -> list[Finding]:
+    """REQ-669 BR-10: the ``builtin-collision`` findings for one file.
+
+    A line fires when it holds an instruction-style mention of a name in
+    BUILTIN_COLLISION_NAMES (BUILTIN_COLLISION_VERB_RE before the slash token,
+    or BUILTIN_COLLISION_TAIL_RE after it) and does not carry ``/adlc:<name>``.
+    Comment lines are checked too: an instruction in a comment is still one a
+    reader follows. One finding per line, naming every bare name it holds.
+    """
+    if builtin_collision_excepted_file(rel):
+        return []
+    findings: list[Finding] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        named = {m.group(1) for pat in _BUILTIN_COLLISION_PATTERNS for m in pat.finditer(line)}
+        bare = [n for n in BUILTIN_COLLISION_NAMES if n in named and f"/adlc:{n}" not in line]
+        if not bare:
+            continue
+        spelled = ", ".join(f"`/{n}`" for n in bare)
+        dual = "; ".join(f"`/{n}` (`/adlc:{n}` on the plugin install)" for n in bare)
+        findings.append(Finding(
+            rel, lineno, BUILTIN_COLLISION_CHECK,
+            f"bare {spelled} in an instruction — Claude Code owns this name too, so on "
+            "the plugin install a bare one can reach Claude Code's command, not the "
+            f"skill. Print both spellings on the same line: {dual} (REQ-669 BR-10, "
+            "ADR-5; watched names: BUILTIN_COLLISION_NAMES)",
+        ))
+    return findings
+
+
+def scan_builtin_collision(root: Path) -> BuiltinCollisionScan:
+    """REQ-669 BR-10 / ADR-5: walk BUILTIN_COLLISION_SURFACES under ``root``.
+
+    Armed like toolkit-path (``is_plugin_root``) and walked by the same
+    ``_scan_surfaces``: kept to the scan root, no hidden, pruned
+    or test-tree directory in ``tools/**``, the loader's one-level rule for
+    ``*/SKILL.md``. A file under a ``tests/`` or ``fixtures/`` tree is never read.
+    """
+    if not is_plugin_root(root):
+        return BuiltinCollisionScan([], {})
+    scan = _scan_surfaces(root, BUILTIN_COLLISION_SURFACES, builtin_collision_excepted_file,
+                          builtin_collision_findings)
+    return BuiltinCollisionScan(scan.findings, scan.surfaces)
+
+
+def check_builtin_collision(root: Path) -> list[Finding]:
+    """Per-root ``builtin-collision`` findings (see ``scan_builtin_collision``)."""
+    return scan_builtin_collision(root).findings
+
+
 def run(root: Path) -> tuple[list[Finding], int]:
     """Scan ``root`` and return ``(findings, scanned_count)``.
 
@@ -2397,6 +3744,10 @@ def run(root: Path) -> tuple[list[Finding], int]:
     # per SKILL.md) and thread the cached blob into check_canonical so a
     # canonical literal that legitimately moved into a partial is satisfied.
     partials_blob = load_partials_blob(root)
+    # REQ-669 ADR-6: the canonical dispatch sentence and the agent names, read
+    # ONCE per run from the root's conventions.md and agents/ (see the loaders).
+    dispatch_sentence, dispatch_source = load_dispatch_sentence(root)
+    agent_names = load_agent_names(root)
     findings: list[Finding] = []
     scanned = 0
     for skill_path in find_skill_files(root):
@@ -2428,6 +3779,9 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_harness_skip(text, rel))
         findings.extend(check_provenance_safe_fence(text, rel))
         findings.extend(check_unguarded_source(text, rel))
+        findings.extend(check_toolkit_root_line(text, rel))
+        findings.extend(check_dispatch_fallback(
+            text, rel, dispatch_sentence, agent_names, dispatch_source))
         # REQ-646 ADR-5: both gate on `rel`'s directory name (wrapup / bugfix).
         findings.extend(check_lesson_check_order(text, rel))
         findings.extend(check_lesson_question_coverage(text, rel))
@@ -2448,10 +3802,12 @@ def run(root: Path) -> tuple[list[Finding], int]:
             continue
         findings.extend(check_read_bin_fallback(agent_text, agent_rel))
         findings.extend(check_unguarded_source(agent_text, agent_rel))
-    # REQ-610 ADR-3: `check_unguarded_source` ALONE also walks
-    # `proceed/phase*.md`. Same posture as the agents walk — a third separate
-    # walk, and `scanned` is untouched so the vacuous-scan figure keeps meaning
-    # "SKILL.md files walked" (REQ-595 BR-5).
+        # REQ-669 ADR-1: the root line is owed wherever a fence reads the root.
+        findings.extend(check_toolkit_root_line(agent_text, agent_rel))
+    # REQ-610 ADR-3: a third separate walk, `find_phase_files`: `proceed/phase*.md`
+    # AND `partials/*.md`, the companion docs (REQ-610 review). Same posture as
+    # the agents walk: `scanned` is untouched so the vacuous-scan figure keeps
+    # meaning "SKILL.md files walked" (REQ-595 BR-5).
     for phase_path in find_phase_files(root):
         phase_rel = _safe_label(phase_path, root)
         try:
@@ -2463,7 +3819,16 @@ def run(root: Path) -> tuple[list[Finding], int]:
             )
             continue
         findings.extend(check_unguarded_source(phase_text, phase_rel))
+        findings.extend(check_toolkit_root_line(phase_text, phase_rel))
+        # REQ-669 ADR-6: /proceed's Phase 4 and lite Phase 5 dispatch steps live
+        # in its companion files, and a partials/*.md companion doc can carry a
+        # dispatch step too, so the sentence is owed in both (conventions.md
+        # 'Agent dispatch patterns').
+        findings.extend(check_dispatch_fallback(
+            phase_text, phase_rel, dispatch_sentence, agent_names, dispatch_source))
     # REQ-610: partials sourcing partials — no fences, the whole file is executable.
+    # `toolkit-root-line` does not walk them: a partial reads the root through the
+    # ADR-2 default-expansion spelling and never carries the root line.
     for partial_path in find_partial_files(root):
         partial_rel = _safe_label(partial_path, root)
         try:
@@ -2479,6 +3844,12 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_agent_model_drift(root))
     # Per-root (REQ-525 AC4): /init copy list vs /template-drift checked list parity.
     findings.extend(check_sync_surface_parity(root))
+    # Per-root (REQ-669 BR-12/BR-20): plugin and marketplace manifests vs the repo.
+    findings.extend(check_plugin_manifest(root))
+    # Per-root (REQ-669 BR-13): no literal toolkit path on the plugin-reachable surface.
+    findings.extend(check_toolkit_path(root))
+    # Per-root (REQ-669 BR-10): no bare instruction naming a skill Claude Code also owns.
+    findings.extend(check_builtin_collision(root))
     # Per-root (BUG-194): lifecycle status writes vs /spec's retrieval exclusion list.
     findings.extend(check_retrieval_status_parity(root))
     # Per-root (REQ-646 BR-4): /wrapup's and /bugfix's capture-rules blocks agree.

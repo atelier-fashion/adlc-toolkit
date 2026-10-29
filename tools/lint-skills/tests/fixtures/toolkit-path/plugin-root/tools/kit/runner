@@ -1,0 +1,3 @@
+#!/bin/sh
+# runner: an extensionless script; its comment may name ${HOME:-}/.claude/skills.
+exec python3 "$(dirname "$0")/tool.py" "$@"

@@ -488,9 +488,14 @@ def dependency_missing_line():
 
     Names the interpreter, because the failure is per-interpreter: the delegate
     venv pins PyYAML and ``$PATH``'s ``python3`` may not have it (ADR-2).
+    ``install.sh`` is the symlink route's installer, so the hint says so: the
+    plugin ships no delegation CLIs, and there ``adlc doctor``'s ``pyyaml``
+    check prints the pinned ``pip install`` for this interpreter (REQ-669).
     """
-    return ("adlc: PyYAML is not importable in %s; "
-            "run install.sh --with-delegation\n" % sys.executable)
+    return ("adlc: PyYAML is not importable in %s; run install.sh "
+            "--with-delegation (symlink install; the plugin ships no delegation "
+            "CLIs, so on the plugin `adlc doctor` prints the pip install)\n"
+            % sys.executable)
 
 
 def _emit_dependency_notice(stream=None):

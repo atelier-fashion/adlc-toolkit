@@ -1,7 +1,7 @@
 ---
 id: REQ-669
 title: "Self-sufficient Claude Code plugin install, published through a self-hosted marketplace and submitted to the Claude directory"
-status: draft
+status: approved
 deployable: false
 created: 2026-10-28
 updated: 2026-10-28

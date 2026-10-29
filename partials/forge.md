@@ -7,11 +7,12 @@ functions instead of shelling out to `gh pr` directly. A `lint-skills` check
 
 ## Call pattern
 
-Source the partial with the guarded two-level spelling (conventions.md "Bash in skills") and call the op **in the same
+Source the partial with the guarded two-level spelling, after the fence's ToolkitRoot root line (conventions.md "Bash in skills", REQ-669 ADR-1), and call the op **in the same
 fenced block** (conventions.md cross-fence rule):
 
 ```sh
-if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
 out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 # branch on rc and the normalized error_class / fields in $out
 ```

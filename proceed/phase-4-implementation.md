@@ -44,7 +44,9 @@ acceptance criteria, after a fresh retrieval: `proceed/phases-lite.md`
 - Tier 0: tasks with no dependencies — launch a **task-implementer** agent for each
 - Tier 1: tasks depending only on Tier 0 — launch after Tier 0 completes
 - Continue until all tiers complete
-- Each task-implementer agent (defined in `~/.claude/agents/`) receives: the full task file, conventions.md, architecture.md, **and the absolute path of the target repo's worktree** (from `repos[<task.repo>].worktree`). The agent must operate exclusively inside that worktree.
+- Each task-implementer agent (defined in `$ADLC_TOOLKIT_ROOT/agents/`) receives: the full task file, conventions.md, architecture.md, **and the absolute path of the target repo's worktree** (from `repos[<task.repo>].worktree`). The agent must operate exclusively inside that worktree.
+
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
 **Subagent mode** — sequential execution:
 - Execute tasks one at a time in cross-repo dependency order

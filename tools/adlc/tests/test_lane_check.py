@@ -913,6 +913,54 @@ def test_lanes_key_without_the_loader_is_an_error(make_repo, monkeypatch):
     _assert_error(sb.path, "config loader")
 
 
+@pytest.mark.parametrize("key,fix", [
+    (None, "run install.sh"),
+    ("adlc@adlc-toolkit", "claude plugin uninstall adlc@adlc-toolkit && "
+                          "claude plugin install adlc@adlc-toolkit"),
+])
+def test_missing_loader_error_names_the_route_fix(make_repo, monkeypatch, key, fix):
+    """install.sh on the symlink route only; a plugin copy is reinstalled (REQ-669 BR-11)."""
+    sb = make_repo(config="lanes:\n  lite:\n    max_files: 9\n").feature("src/a.py")
+    monkeypatch.setattr(lc, "_loader", lambda: None)
+    monkeypatch.setattr(lc, "_plugin_key", lambda: key)
+    message = _assert_error(sb.path, "config loader")
+    assert fix in message
+    assert ("install.sh" in message) is (key is None)
+
+
+def test_plugin_key_reads_the_cache_copy(cache_shaped_tree):
+    """A copy inside the plugin cache is the plugin route; its key is read off the path."""
+    tree = cache_shaped_tree
+    out = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); import lane_check as m\n"
+         "print(m._plugin_key())\n",
+         os.path.join(tree.root, "tools", "adlc")],
+        capture_output=True, text=True, env=tree.env, cwd=tree.home)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "adlc@adlc-toolkit"
+
+
+def test_vendored_lane_check_reads_the_loader_under_adlc_toolkit_root(tmp_path):
+    """A copy vendored without tools/delegate/ takes the identity-checked root's loader."""
+    vendored = tmp_path / "vend" / "tools" / "adlc"
+    vendored.mkdir(parents=True)
+    (vendored / "lane_check.py").write_text(open(lc.__file__, encoding="utf-8").read())
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); import lane_check as m\n"
+            "l = m._loader(); print(l.__file__ if l else None)\n")
+    env = {"HOME": str(tmp_path), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    without = subprocess.run([sys.executable, "-I", "-c", code, str(vendored)],
+                             capture_output=True, text=True, env=env)
+    assert without.returncode == 0, without.stderr
+    assert without.stdout.strip() == "None"
+    with_root = subprocess.run([sys.executable, "-I", "-c", code, str(vendored)],
+                               capture_output=True, text=True,
+                               env=dict(env, ADLC_TOOLKIT_ROOT=_TOOLKIT))
+    assert with_root.returncode == 0, with_root.stderr
+    assert with_root.stdout.strip() == os.path.join(
+        _TOOLKIT, "tools", "delegate", "_machine_config.py")
+
+
 @pytest.mark.parametrize("text,expected", [
     (b"lanes:\n", True),
     (b"project: x\nlanes:\n  lite: {}\n", True),

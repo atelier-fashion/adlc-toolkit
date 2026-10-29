@@ -10,7 +10,7 @@ You are validating ADLC artifacts to ensure quality before advancing to the next
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -22,7 +22,7 @@ Target: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.adlc/specs/` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first."
+Before proceeding, verify that `.adlc/specs/` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first."
 
 ## Instructions
 
@@ -162,4 +162,4 @@ and the other does not is incoherent to anyone reading the output.
 - Spec validated → "Ready for `/architect`"
 - Architecture validated → "Ready for implementation"
 - Tasks validated → "Ready for implementation"
-- Implementation validated → "Ready for `/review`"
+- Implementation validated → "Ready for `/review` (`/adlc:review` on the plugin install)"

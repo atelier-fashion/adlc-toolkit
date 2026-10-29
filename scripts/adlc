@@ -1,0 +1,22 @@
+#!/bin/sh
+# scripts/adlc — the adlc CLI on the Claude Code plugin route (REQ-669 ADR-4, BR-7).
+#
+# The plugin's SessionStart hook appends this directory to PATH, so `adlc doctor`
+# runs on a machine that never ran install.sh: no ~/bin/adlc, no venv. The shim
+# finds the plugin root from its own location and runs the stdlib-only CLI with
+# PATH's python3 (LESSON-395). It lives under scripts/, not a top-level bin/,
+# because the claude.ai plugin sync rejects a top-level bin/ (BR-20).
+#
+# Run it by path or through PATH, not through a symlink: the root is the parent
+# of the directory named in $0.
+
+adlc_shim_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P) || adlc_shim_root=
+if [ -z "$adlc_shim_root" ] || [ ! -f "$adlc_shim_root/tools/adlc/adlc.py" ]; then
+  printf 'adlc: no tools/adlc/adlc.py under the plugin root beside %s\n' "$0" >&2
+  exit 127
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  printf '%s\n' 'adlc: python3 not found on PATH; install Python 3 to run adlc' >&2
+  exit 127
+fi
+exec python3 "$adlc_shim_root/tools/adlc/adlc.py" "$@"

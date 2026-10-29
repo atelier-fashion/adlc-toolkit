@@ -9,6 +9,15 @@ effort: xhigh
 
 You are a pipeline runner agent. Your job is to execute the complete `/proceed` ADLC pipeline for a single requirement, running all phases sequentially within your own context.
 
+## Toolkit root
+
+The toolkit files this file names by a repo-relative path, such as `proceed/phases-lite.md` and `agents/lite-reviewer.md`, live in the toolkit, not in the worktree. Run this fence once, before Step 0, and read each of those files under the directory it prints:
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+echo "$ADLC_TOOLKIT_ROOT"
+```
+
 ## CRITICAL: Subagent Mode
 
 You are running as a subagent. **You CANNOT dispatch sub-agents.** All work must be done sequentially in your own context. This means:
@@ -187,7 +196,8 @@ Two contract lines used to bear on a runner's own Phase 7/8 conflict, written fo
   What the bound proves and does not: it proves both sides only added and that concatenating them cannot change nesting. It does **not** prove the result compiles — the delimiter check counts characters (a brace in a string or comment counts, which can only refuse, never pass, wrongly) and cannot see indentation-, keyword-, or tag-delimited structure. The project's build on the pushed tip is the only proof of that, so a keep-both is "safe to attempt", never "safe to ship" without it. A conflicted PR gets no CI at all (LESSON-643); a resolved one does — do not merge ahead of it.
 
 ```sh
-if [ -f .adlc/partials/conflict-bound.sh ]; then . .adlc/partials/conflict-bound.sh; else . ~/.claude/skills/partials/conflict-bound.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/conflict-bound.sh ]; then . .adlc/partials/conflict-bound.sh; else . "$ADLC_TOOLKIT_ROOT/partials/conflict-bound.sh"; fi
 wt=<repos[<id>].worktree>
 # Materialize the conflict the (non-mutating) trial-merge reported, then classify it.
 git -C "$wt" merge --no-ff --no-commit origin/<integrationBranch> >/dev/null 2>&1

@@ -77,30 +77,159 @@ class UnknownForgeError(Exception):
 
 # --- the one loader (REQ-609 ADR-1), loaded by PATH not by sys.path --------
 
-def _loader_candidates():
-    """Where ``_machine_config.py`` may live, most-local first.
+#: The loader's place under the toolkit root.
+_LOADER_REL = ("tools", "delegate", "_machine_config.py")
 
-    Two levels, mirroring how ``partials/forge.sh`` locates *this* file (project
-    copy, then the toolkit at ``~/.claude/skills``) and how
-    ``checks._partial_path`` resolves partials. The second level is not
-    decoration: a project may vendor ``tools/adlc/forge_config.py`` alone —
-    forge.sh supports exactly that — and a vendored copy with no sibling
-    ``tools/delegate/`` would otherwise read every config as unconfigured and
-    silently fall back to origin-URL auto-detection, overriding the operator's
-    written `forge.provider`.
+_HELPER_UNRESOLVED = object()
+_helper_module = _HELPER_UNRESOLVED
+
+
+def _toolkit_root_helper():
+    """This file's sibling ``toolkit_root`` module, executed by path, or ``None``.
+
+    By explicit path and not registered in ``sys.modules``, for the reasons
+    :func:`_loader` gives: nothing is put on ``sys.path``. ``None`` when this
+    file was vendored without its sibling, or the sibling will not execute.
+    Resolved once.
+    """
+    global _helper_module
+    if _helper_module is not _HELPER_UNRESOLVED:
+        return _helper_module
+    _helper_module = None
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "toolkit_root.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("toolkit_root", path)
+        if spec is not None and spec.loader is not None:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _helper_module = module
+    except Exception:
+        # Same posture as `_loader`: a helper that will not execute leaves the
+        # inline walk below, which names the same file on every layout the
+        # helper would have accepted.
+        pass
+    return _helper_module
+
+
+#: Names the installed toolkit, as the ToolkitRoot root line exports it
+#: (REQ-669 ADR-1): the plugin's cache copy, or the clone the symlink install
+#: links.
+_ROOT_ENV = "ADLC_TOOLKIT_ROOT"
+
+#: A marketplace name in the shape an ``adlc@<marketplace>`` install key takes.
+_MARKETPLACE_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+def _own_candidate():
+    """The loader's path under this file's own toolkit root (it may not exist)."""
+    helper = _toolkit_root_helper()
+    if helper is not None:
+        try:
+            return helper.toolkit_file("/".join(_LOADER_REL))
+        except helper.ToolkitRootError:
+            pass
+    tools = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    return os.path.join(tools, *_LOADER_REL[1:])
+
+
+def _env_root_candidate():
+    """The loader under ``$ADLC_TOOLKIT_ROOT``, or ``None`` when that root does not check out.
+
+    The root must be absolute and hold a ``tools/adlc/toolkit_root.py`` that,
+    executed by path, derives that same root (its identity check, REQ-669
+    ADR-2) and finds the loader under it. Anything else gives ``None``.
+    """
+    root = os.environ.get(_ROOT_ENV, "")
+    if not os.path.isabs(root):
+        return None
+    path = os.path.join(root, "tools", "adlc", "toolkit_root.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("toolkit_root", path)
+        if spec is None or spec.loader is None:
+            return None
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        if helper.toolkit_root() != os.path.realpath(root):
+            return None
+        return helper.toolkit_file("/".join(_LOADER_REL))
+    except Exception:
+        # As in `_toolkit_root_helper`: a root that will not check out, for
+        # whatever reason, is simply not a candidate.
+        return None
+
+
+def _loader_candidates():
+    """Where ``_machine_config.py`` may live: this file's toolkit root, then ``$ADLC_TOOLKIT_ROOT``.
+
+    The first path comes from ``toolkit_root.toolkit_file`` (REQ-669 ADR-2),
+    the one identity-checked root rule. A project may vendor
+    ``tools/adlc/forge_config.py`` alone, which ``partials/forge.sh`` supports,
+    so with no sibling helper, or a helper that refuses, the same walk is
+    spelled inline. On every layout the helper accepts, both name the same
+    file.
+
+    Only when that file is missing does ``$ADLC_TOOLKIT_ROOT`` give a second
+    candidate, identity-checked by the ``toolkit_root.py`` at that root
+    (:func:`_env_root_candidate`). A hand-vendored copy with no sibling
+    ``tools/delegate/`` used to borrow the installed toolkit's loader through
+    the skills symlink. That level went with ADR-2, since the plugin route has
+    no such symlink, and the variable the skills' root line exports takes its
+    place on both routes (BR-3). With neither, the loader is reported missing
+    (the `dependency-missing` line, naming the paths searched); forge then
+    auto-detects from the origin URL, as that line says.
 
     ``realpath``, not ``abspath``: for a symlinked checkout ``abspath`` walks
     from the symlink's directory and resolves wrongly (ASSUME-001's
     sharpening). The ``~/bin`` shim `exec`s this tree by absolute path, so
     script-relative resolution survives the wrapper indirection.
     """
-    tools = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    cands = [os.path.join(tools, "delegate", "_machine_config.py")]
-    home = os.path.expanduser("~")
-    if home and home != "~":
-        cands.append(os.path.join(
-            home, ".claude", "skills", "tools", "delegate", "_machine_config.py"))
-    return cands
+    own = _own_candidate()
+    if os.path.isfile(own):
+        return [own]
+    extra = _env_root_candidate()
+    return [own] if extra is None or extra == own else [own, extra]
+
+
+def _plugin_key():
+    """``adlc@<marketplace>`` when this toolkit runs as the adlc plugin, else ``None``.
+
+    The routes are told apart as the doctor tells them apart (REQ-669 ADR-7):
+    a toolkit root inside Claude Code's plugin cache,
+    ``<config dir>/plugins/cache/<marketplace>/adlc/<version>/``, is the
+    plugin. The config dir is ``$CLAUDE_CONFIG_DIR`` when that is absolute,
+    else ``~/.claude``. The roots tried are this file's own and
+    ``$ADLC_TOOLKIT_ROOT``.
+    """
+    config = os.environ.get("CLAUDE_CONFIG_DIR", "")
+    if not os.path.isabs(config):
+        config = os.path.join(os.path.expanduser("~"), ".claude")
+    cache = os.path.realpath(os.path.join(config, "plugins", "cache"))
+    roots = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))]
+    if os.path.isabs(os.environ.get(_ROOT_ENV, "")):
+        roots.append(os.path.realpath(os.environ[_ROOT_ENV]))
+    for root in roots:
+        parts = os.path.relpath(root, cache).split(os.sep)
+        if len(parts) == 3 and parts[1] == "adlc" and _MARKETPLACE_RE.fullmatch(parts[0]):
+            return "adlc@" + parts[0]
+    return None
+
+
+def _loader_fix():
+    """The fix for a missing loader on this toolkit's route (REQ-669 BR-11).
+
+    install.sh belongs to the symlink route only: run from the plugin's copy it
+    would symlink that copy into ``~/.claude`` and double the install.
+    """
+    key = _plugin_key()
+    if key is None:
+        return ("run install.sh (a vendored copy also reads "
+                "$ADLC_TOOLKIT_ROOT/tools/delegate/)")
+    return ("reinstall the adlc plugin: claude plugin uninstall %s && "
+            "claude plugin install %s" % (key, key))
 
 
 #: Distinguishes "not looked for yet" from "looked for and not found", so a
@@ -180,7 +309,7 @@ def _note_dependency_missing():
     _dependency_notice_emitted = True
     sys.stderr.write(
         "adlc: the ADLC config loader (tools/delegate/_machine_config.py) was not "
-        "found at %s; run install.sh\n" % " or ".join(_loader_candidates()))
+        "found at %s; %s\n" % (" or ".join(_loader_candidates()), _loader_fix()))
 
 
 # --- refusal-message sanitising (copied from _common._clean_report_value) --

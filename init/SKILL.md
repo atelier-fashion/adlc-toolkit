@@ -10,7 +10,7 @@ You are setting up the `.adlc/` directory structure for spec-driven development.
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Input
 
@@ -36,7 +36,7 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
 ### Step 3: Create Directory Structure
 ```
 .adlc/
-  ETHOS.md               # Copy of ~/.claude/skills/ETHOS.md — ensures skills work inside git worktrees
+  ETHOS.md               # Copy of $ADLC_TOOLKIT_ROOT/ETHOS.md — ensures skills work inside git worktrees
   context/
     project-overview.md    # What the project does, tech stack, scope
     architecture.md        # System diagram, layers, key patterns, ADRs
@@ -51,20 +51,22 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
       .gitkeep
     lessons/
       .gitkeep
-  templates/             # Copies of ~/.claude/skills/templates/*.md — ensures skills work inside git worktrees
+  templates/             # Copies of $ADLC_TOOLKIT_ROOT/templates/*.md — ensures skills work inside git worktrees
     assumption-template.md
     bug-template.md
     lesson-template.md
     requirement-template.md
     task-template.md
-  partials/              # Copies of ~/.claude/skills/partials/*.sh — shared shell snippets sourced by SKILL.md files
+  partials/              # Copies of $ADLC_TOOLKIT_ROOT/partials/*.sh — shared shell snippets sourced by SKILL.md files
     ethos-include.sh
-  workflows/             # Copies of ~/.claude/skills/workflows/ RUNTIME files only — Dynamic Workflow scripts used by the workflow engine
+  workflows/             # Copies of $ADLC_TOOLKIT_ROOT/workflows/ RUNTIME files only — Dynamic Workflow scripts used by the workflow engine
     adlc-sprint.workflow.js   # ONE self-contained file: meta first, schemas + pure helpers inlined behind // ==== BEGIN/END PURE ==== (runtime has no require)
     README.md            # NOTE: workflows/tests/ is intentionally NOT copied — those are toolkit-internal node:test files (CommonJS require) that break Jest in "type":"module" consumer repos (see Step 6)
 ```
 
-**Why the local copies of ETHOS.md, templates, partials, and workflows?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `~/.claude/skills/ETHOS.md`, `~/.claude/skills/templates/*.md`, `~/.claude/skills/partials/*.sh`, and `~/.claude/skills/workflows/*` become unreadable by subagents and any tool that uses `Read` mid-skill. Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
+**Why the local copies of ETHOS.md, templates, partials, and workflows?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `$ADLC_TOOLKIT_ROOT/ETHOS.md`, `$ADLC_TOOLKIT_ROOT/templates/*.md`, `$ADLC_TOOLKIT_ROOT/partials/*.sh`, and `$ADLC_TOOLKIT_ROOT/workflows/*` become unreadable by subagents and any tool that uses `Read` mid-skill. That holds on both install routes: the clone behind the skills symlink is outside the project, and so is the plugin's cache copy, which is not an allowed working directory either (REQ-669 `verification.md` N2). Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
+
+**ToolkitRoot.** `$ADLC_TOOLKIT_ROOT` is the running install's toolkit directory: the plugin's cache copy on the plugin route, or the clone behind the skills symlink on the symlink route. Every fence below that reads a toolkit file resolves it with the canonical root line as its first line (conventions.md "Bash in skills", REQ-669 ADR-1). Fenced blocks share no shell state, so each fence carries its own copy of that line, and `/init` copies from whichever install is running (REQ-669 ADR-8).
 
 ### Step 4: Populate Context Files
 
@@ -140,30 +142,35 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 Copy the canonical ETHOS.md and all templates from the toolkit into the project so skills keep working inside git worktrees (where Read is sandboxed to the worktree root).
 
 ```bash
-# Verify source exists
-if [ ! -f ~/.claude/skills/ETHOS.md ] || [ ! -d ~/.claude/skills/templates ] || [ ! -d ~/.claude/skills/partials ] || [ ! -d ~/.claude/skills/workflows ]; then
-  echo "ERROR: Toolkit not found at ~/.claude/skills/. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+# Verify source exists. ToolkitRoot is the plugin's cache copy on the plugin
+# route, or the clone behind the skills symlink on the symlink route.
+if [ ! -f "$ADLC_TOOLKIT_ROOT/ETHOS.md" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/templates" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/partials" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/workflows" ]; then
+  echo "ERROR: adlc toolkit not found at $ADLC_TOOLKIT_ROOT (ToolkitRoot). Install it by either route. Plugin route: claude plugin marketplace add atelier-fashion/adlc-toolkit, then claude plugin install adlc@adlc-toolkit. Symlink route: clone adlc-toolkit and run its ./install.sh."
   exit 1
 fi
 
 # Copy ETHOS.md (overwrite — canonical is source of truth)
-cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md
+cp "$ADLC_TOOLKIT_ROOT/ETHOS.md" .adlc/ETHOS.md
 
 # Copy templates (overwrite — canonical is source of truth)
 mkdir -p .adlc/templates
-cp ~/.claude/skills/templates/*.md .adlc/templates/
+cp "$ADLC_TOOLKIT_ROOT/templates"/*.md .adlc/templates/
 
 # Copy partials (overwrite — canonical is source of truth). These are POSIX
-# shell snippets sourced by SKILL.md files (e.g., ethos-include.sh).
+# shell snippets sourced by SKILL.md files (e.g., ethos-include.sh). As in the
+# other copies, the glob sits outside the quoted directory. Here that also
+# matters: partials/tests/source-guard.test.sh reads any fence line containing
+# "$ADLC_TOOLKIT_ROOT/partials/" as a partial being sourced.
 mkdir -p .adlc/partials
-cp ~/.claude/skills/partials/*.sh .adlc/partials/
+cp "$ADLC_TOOLKIT_ROOT/partials"/*.sh .adlc/partials/
 chmod +x .adlc/partials/*.sh
 
 # Copy workflows (overwrite — canonical is source of truth). These are the
 # Dynamic Workflow scripts the workflow engine runs (e.g.,
 # adlc-sprint.workflow.js — ONE self-contained file with schemas + pure helpers
 # inlined, since the runtime has no require). Resolved via the two-level fallback
-# (.adlc/workflows/... -> ~/.claude/skills/workflows/...) so the engine works
+# (.adlc/workflows/... -> $ADLC_TOOLKIT_ROOT/workflows/...) so the engine works
 # inside git worktrees where Read is sandboxed to the worktree root.
 #
 # Copy ONLY the runtime files: the workflow script(s) and the top-level README.
@@ -177,8 +184,8 @@ chmod +x .adlc/partials/*.sh
 # self-contained file (no require/import/fs), so globbing *.workflow.js captures
 # everything the runtime ever resolves.
 mkdir -p .adlc/workflows
-cp ~/.claude/skills/workflows/*.workflow.js .adlc/workflows/
-cp ~/.claude/skills/workflows/README.md .adlc/workflows/
+cp "$ADLC_TOOLKIT_ROOT/workflows"/*.workflow.js .adlc/workflows/
+cp "$ADLC_TOOLKIT_ROOT/workflows/README.md" .adlc/workflows/
 # Idempotent cleanup: remove a stale tests/ dir left by an OLDER /init that did
 # `cp -R` of the whole workflows tree. Heals already-initialized repos on re-run;
 # safe no-op when absent. (Belt-and-suspenders to the explicit-file copy above.)
@@ -214,10 +221,10 @@ update to any of them has not yet landed in this project. The two lists MUST sta
 `sync-surface-parity` check fails the build if they diverge.
 
 <!-- sync-surfaces: init -->
-- `ethos` — `cp ~/.claude/skills/ETHOS.md .adlc/ETHOS.md`
-- `templates` — `cp ~/.claude/skills/templates/*.md .adlc/templates/`
-- `partials` — `cp ~/.claude/skills/partials/*.sh .adlc/partials/`
-- `workflow-runtime` — `cp ~/.claude/skills/workflows/*.workflow.js` + `README.md` → `.adlc/workflows/`
+- `ethos` — `cp "$ADLC_TOOLKIT_ROOT/ETHOS.md" .adlc/ETHOS.md`
+- `templates` — `cp "$ADLC_TOOLKIT_ROOT/templates"/*.md .adlc/templates/`
+- `partials` — `cp "$ADLC_TOOLKIT_ROOT/partials"/*.sh .adlc/partials/`
+- `workflow-runtime` — `cp "$ADLC_TOOLKIT_ROOT/workflows"/*.workflow.js` + `README.md` → `.adlc/workflows/`
 <!-- /sync-surfaces -->
 
 (Note: `/template-drift` checks one additional surface — `workflow-test-landmine`, a stale
@@ -231,9 +238,10 @@ Copy the canonical taxonomy template to `.adlc/context/taxonomy.md` so authors o
 **This step is idempotent — skip if the file already exists** (preserve any project-local customizations).
 
 ```bash
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 # Verify source exists
-if [ ! -f ~/.claude/skills/templates/taxonomy-template.md ]; then
-  echo "ERROR: Taxonomy template not found at ~/.claude/skills/templates/taxonomy-template.md. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
+if [ ! -f "$ADLC_TOOLKIT_ROOT/templates/taxonomy-template.md" ]; then
+  echo "ERROR: Taxonomy template not found at $ADLC_TOOLKIT_ROOT/templates/taxonomy-template.md. Ensure the adlc toolkit is installed (plugin route or symlink route, see Step 6)."
   exit 1
 fi
 
@@ -242,7 +250,7 @@ mkdir -p .adlc/context
 
 # Idempotent copy: only copy if destination does not already exist
 if [ ! -f .adlc/context/taxonomy.md ]; then
-  cp ~/.claude/skills/templates/taxonomy-template.md .adlc/context/taxonomy.md
+  cp "$ADLC_TOOLKIT_ROOT/templates/taxonomy-template.md" .adlc/context/taxonomy.md
   echo "Created .adlc/context/taxonomy.md from canonical template."
 else
   echo "Preserved existing .adlc/context/taxonomy.md (idempotent — not overwritten)."
@@ -258,9 +266,10 @@ Copy the canonical Claude Code settings template to `.claude/settings.json` so `
 **This step is idempotent — skip if the file already exists** (preserve any project-local customizations).
 
 ```bash
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 # Verify source exists
-if [ ! -f ~/.claude/skills/templates/claude-settings-template.json ]; then
-  echo "ERROR: Settings template not found at ~/.claude/skills/templates/claude-settings-template.json. Ensure ~/.claude/skills is symlinked to the adlc-toolkit repo."
+if [ ! -f "$ADLC_TOOLKIT_ROOT/templates/claude-settings-template.json" ]; then
+  echo "ERROR: Settings template not found at $ADLC_TOOLKIT_ROOT/templates/claude-settings-template.json. Ensure the adlc toolkit is installed (plugin route or symlink route, see Step 6)."
   exit 1
 fi
 
@@ -269,7 +278,7 @@ mkdir -p .claude
 
 # Idempotent copy: only copy if destination does not already exist
 if [ ! -f .claude/settings.json ]; then
-  cp ~/.claude/skills/templates/claude-settings-template.json .claude/settings.json
+  cp "$ADLC_TOOLKIT_ROOT/templates/claude-settings-template.json" .claude/settings.json
   echo "Created .claude/settings.json from canonical template."
 else
   echo "Preserved existing .claude/settings.json (idempotent — not overwritten)."
@@ -284,19 +293,20 @@ Advise the user: "`.claude/settings.json` was scaffolded with a default allowlis
 
 Ask the user: "Will this repo ever share features with other repos you also work on (e.g., an admin app + its API + an iOS app)? If yes, `/proceed` can coordinate REQs across them — this repo needs a `.adlc/config.yml` to list its siblings."
 
-**Conceptual note** — explain if the user seems uncertain: "Primary" is per-REQ, not a fixed role. The current repo is primary for REQs that originate here (`/proceed` invoked from this repo). The siblings you list are other repos that might participate when a cross-repo REQ starts here. If you also originate REQs from one of those siblings, you'll run `/init` there too — each repo that hosts REQs gets its own `.adlc/` and its own `config.yml` listing the others as siblings (mirror images of each other).
+**Conceptual note** — explain if the user seems uncertain: "Primary" is per-REQ, not a fixed role. The current repo is primary for REQs that originate here (`/proceed` invoked from this repo). The siblings you list are other repos that might participate when a cross-repo REQ starts here. If you also originate REQs from one of those siblings, you'll run `/init` (`/adlc:init` on the plugin install) there too — each repo that hosts REQs gets its own `.adlc/` and its own `config.yml` listing the others as siblings (mirror images of each other).
 
 If the user confirms cross-repo **and** `.adlc/config.yml` does not already exist, copy the template:
 
 ```bash
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 # Verify source exists
-if [ ! -f ~/.claude/skills/templates/config-template.yml ]; then
-  echo "ERROR: Config template not found at ~/.claude/skills/templates/config-template.yml."
+if [ ! -f "$ADLC_TOOLKIT_ROOT/templates/config-template.yml" ]; then
+  echo "ERROR: Config template not found at $ADLC_TOOLKIT_ROOT/templates/config-template.yml. Ensure the adlc toolkit is installed (plugin route or symlink route, see Step 6)."
   exit 1
 fi
 
 if [ ! -f .adlc/config.yml ]; then
-  cp ~/.claude/skills/templates/config-template.yml .adlc/config.yml
+  cp "$ADLC_TOOLKIT_ROOT/templates/config-template.yml" .adlc/config.yml
   echo "Created .adlc/config.yml from template — edit it to match your repo layout."
 else
   echo "Preserved existing .adlc/config.yml."
@@ -305,7 +315,7 @@ fi
 
 Advise the user:
 - "Edit `.adlc/config.yml`. The entry for THIS repo should have `primary: true` and no `path` (path is implicit since it's this repo). Each sibling entry gets a `path:` (relative to this repo root, or absolute). Every sibling must already be cloned locally at that path."
-- "If you also run REQs from one of the siblings, run `/init` there too. That repo's config will mark itself as primary and list the others as siblings — the structure is symmetric."
+- "If you also run REQs from one of the siblings, run `/init` (`/adlc:init` on the plugin install) there too. That repo's config will mark itself as primary and list the others as siblings — the structure is symmetric."
 - "If this is a single-repo project (REQs only ever originate here and never touch other repos), skip this step. ADLC skills fall back to single-repo behavior when no config or no siblings are declared."
 - "After editing, verify with `cat .adlc/config.yml` and make sure each sibling path resolves: `git -C <sibling-path> rev-parse --git-dir`."
 
