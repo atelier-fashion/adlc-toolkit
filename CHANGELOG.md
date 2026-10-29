@@ -138,6 +138,21 @@ is cut per `RELEASING.md`.
   manifest version, the CHANGELOG line with the plugin version, the annotated tag,
   the `claude plugin update` check, and the Claude directory submission through
   claude.ai/directory/manage, with where its reference is recorded.
+- **Lessons reach every pipeline phase (REQ-647).** The phases that act on lessons
+  now retrieve them by the surface they touch, after the spec froze its
+  `## Retrieved Context` (LESSON-604): `/proceed` Step 0, each Phase-4 task (with a
+  recency rule for lessons captured after the spec), Phase 5 (one set for all six
+  agents; the reflector no longer greps its own), `/bugfix` Phase 2
+  (`Prior lessons consulted:`), and the sprint workflow engine's three retrieval
+  leaves. One engine, `tools/adlc/lessons.py`, behind the new partial
+  `partials/lessons.sh` (`adlc_lessons`), does the scoring (the `/spec` Step 1.6 rule),
+  the caps, the 40-line loaded text and the additive `pipeline-state.json.lessons`
+  record. The implementer acknowledges an applied lesson with a `Lessons:` commit
+  trailer; Phase 5 Step B and standalone `/validate` list unacknowledged applicable
+  lessons as Info. In the workflow engine a finding's `lessonId` escalates only when
+  it is in the Phase-5 set, and dedupe unions lesson ids. Retrieval never halts a
+  pipeline. New partial to vendor: `lessons.sh` (re-run `/init`, or `/adlc:init` on
+  the plugin install); `adlc-sprint.workflow.js` and its `README.md` changed again.
 
 - **A Hugging Face Space for `/spec` intake (REQ-670).** `space/` is a static Space.
   A visitor pastes notes or uploads a `.txt` or `.md` file and gets back a draft
@@ -277,6 +292,15 @@ Found by the REQ-669 Phase 5 review, before this release shipped.
 - **Test-harness fixes.** The intake AC-6 case counts its subshell's failures and
   stubs `adlc-read`, and the session-start doctor case sets
   `PYTHONDONTWRITEBYTECODE=1`.
+- **`/wrapup` delegates only its own transcript (BUG-253).** Step 4 walked from the
+  working tree up to `$HOME` and took the first transcript naming the REQ. A `/sprint`
+  pipeline-runner's transcript sits under the orchestrator's
+  `<session>/subagents/`, which that walk never reaches, so REQ-647's runner was
+  handed an older session that only mentioned the REQ (LESSON-733). Step 4 now prints
+  a random mark in one tool call and, in the next, takes the one transcript that holds
+  it, through the new `partials/session-transcript.sh`. No match, or more than one,
+  refuses delegation and drafts from the conversation. Tested by
+  `tests/session-transcript.test.sh` under bash, zsh, sh and dash.
 
 ### Re-sync vendored copies
 
@@ -298,6 +322,9 @@ plugin install), or re-sync per file and byte for byte rather than trusting a su
   exist, so a project that switches to the plugin re-syncs those eight first. On a
   root that also carries `tools/lint-skills`, `check.sh` reports the retired operand
   in the stale `emit-step-telemetry.sh` and `id-recheck.sh` until they are re-synced.
+- **New partial `session-transcript.sh` (BUG-253).** A project without a vendored
+  copy is not broken: `/wrapup`'s guarded source line falls back to the installed
+  toolkit's copy. `/init` vendors it on the next re-sync.
 - **Workflow runtime (`.adlc/workflows/`).** `adlc-sprint.workflow.js` (the agent
   namespace) and its `README.md` changed.
 - **Templates and `ETHOS.md`** did not change. `templates/config-template.yml` changed

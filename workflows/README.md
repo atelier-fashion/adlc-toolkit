@@ -42,6 +42,21 @@ So the engine is **ONE self-contained file** — there are no sibling `schemas.j
    memory, a squash-merged `chore(<id>): close-out` PR, worktree teardown),
    serially per repo. The terminal stays `state:"merged"` and carries
    `closeOut: ok|failed|skipped` beside it.
+4. **Lessons (REQ-647).** Three retrieval leaves run `adlc_lessons select`
+   (`partials/lessons.sh`) and return a schema-validated `LESSONS` value: the
+   Step-0 set after Phase 0, every task's set in one `TASK_LESSONS` call before
+   Phase 4, and the Phase-5 set before the panel fans out. Each leaf also writes
+   the set, without its loaded text, to `lessons.<set>` in the primary-path
+   `pipeline-state.json`. `architectPrompt`, `implementPrompt` and
+   `reviewPrompt` (all six members; the reflector is told the set was
+   pre-computed) carry the loaded text. Before consolidation,
+   `escalateByLessons` raises a finding one severity level only when its
+   `lessonId` is an id in the Phase-5 set (an id outside it is dropped), honoring
+   the `confidence: low` and superseded exemptions, and `dedupeAndRank` unions
+   lesson ids across duplicates. The leaf prompts never read `args.answers`, so
+   a resume replays them from the journal and every prompt built from them stays
+   byte-identical. Retrieval never halts a REQ: an unavailable set is logged and
+   the prompts carry no lessons block.
 
 The toolkit forbids a build step, so the pure logic stays **inline** and is
 unit-tested via a shared `vm` loader (`tests/_load-pure.js`) that evaluates just

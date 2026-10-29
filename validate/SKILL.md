@@ -139,6 +139,15 @@ and the other does not is incoherent to anyone reading the output.
 - [ ] No new lint warnings or errors
 - [ ] All requirement acceptance criteria are satisfied
 - [ ] ADLC artifacts are updated (task statuses set to `complete`)
+- [ ] **Applicable lessons are acknowledged (REQ-647 BR-4, standalone only — no pipeline calls this phase).** Run the same check `/proceed` Phase 5 Step B runs. It reads `lessons.phase5` from the REQ's `pipeline-state.json` (the primary repo path's copy) when one is recorded; otherwise pass `--spec` and one `--component` per changed path's most specific component, and it computes a Phase-5-style set from the diff:
+
+      ```sh
+      ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+      if [ -f .adlc/partials/lessons.sh ]; then . .adlc/partials/lessons.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lessons.sh"; fi
+      adlc_lessons ack-check --state "<pipeline-state.json>" --root . --worktree . --base "origin/<integration-branch>" --tasks-dir "<.adlc/specs/REQ-xxx-*/tasks>" --spec "<requirement.md>" --component "<component>"
+      ```
+
+      Report each `Applicable lesson not acknowledged: …` line, and the `(+N more …)` line, as **Info** — never Warning or Blocker. A return of 2 (`lessons: unavailable — …`) is reported as one Info line and the validation continues.
 
 ### Step 3: Report Results
 1. Display validation results as a checklist with pass/fail for each item

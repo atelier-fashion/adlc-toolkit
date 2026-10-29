@@ -61,6 +61,14 @@ const {
   AGENT_NAMESPACES,
   normalizeAgentNamespace,
   agentTypeFor,
+  // REQ-647 lessons in the engine.
+  LESSONS,
+  TASK_LESSONS,
+  escalateByLessons,
+  lessonsBlock,
+  lessonsLogLine,
+  taskSetsById,
+  lessonIdsOf,
 } = helpers;
 
 // ===========================================================================
@@ -869,4 +877,174 @@ test('agentTypeFor: every agentType in the engine goes through agentTypeFor(…,
   const reads = code.filter((line) => /\bargs\.agentNamespace\b/.test(line));
   assert.equal(reads.length, 1, reads.join('\n'));
   assert.match(reads[0], /^const AGENT_NAMESPACE_ARG = args\.agentNamespace;$/);
+});
+
+// ===========================================================================
+// REQ-647 — LESSONS schemas, set-gated escalation, lessonId union, prompt block.
+// ===========================================================================
+
+// A test-local JSON-Schema checker for the subset the engine's literals use (type,
+// required, properties, additionalProperties:false, items, maxItems, enum). The
+// harness has no ajv; this validates against the EXPORTED literal itself, so a
+// schema edit that drops a field or loosens a bound fails here (LESSON-331).
+function schemaErrors(schema, value, at = '$') {
+  const errs = [];
+  const t = schema.type;
+  const isObj = value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (t === 'object' && !isObj) return [`${at}: not an object`];
+  if (t === 'array' && !Array.isArray(value)) return [`${at}: not an array`];
+  if (t === 'string' && typeof value !== 'string') return [`${at}: not a string`];
+  if (t === 'integer' && !Number.isInteger(value)) return [`${at}: not an integer`];
+  if (t === 'boolean' && typeof value !== 'boolean') return [`${at}: not a boolean`];
+  if (schema.enum && !schema.enum.includes(value)) errs.push(`${at}: ${JSON.stringify(value)} not in enum`);
+  if (t === 'object') {
+    for (const k of schema.required || []) if (!(k in value)) errs.push(`${at}.${k}: required`);
+    for (const k of Object.keys(value)) {
+      if (schema.properties && k in schema.properties) errs.push(...schemaErrors(schema.properties[k], value[k], `${at}.${k}`));
+      else if (schema.additionalProperties === false) errs.push(`${at}.${k}: unknown key`);
+    }
+  }
+  if (t === 'array') {
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) errs.push(`${at}: ${value.length} > maxItems ${schema.maxItems}`);
+    value.forEach((v, i) => { if (schema.items) errs.push(...schemaErrors(schema.items, v, `${at}[${i}]`)); });
+  }
+  return errs;
+}
+
+function lessonEntry(n, extra = {}) {
+  return { id: `LESSON-${String(100 + n)}`, title: `t${n}`, path: `.adlc/knowledge/lessons/LESSON-${100 + n}-x.md`, ...extra };
+}
+function lessonSet(entries, extra = {}) {
+  return { query: { components: ['adlc/partials'] }, lessons: entries, retrievedAt: '2026-10-29T00:00:00Z', ...extra };
+}
+
+test('LESSONS: 15 unscored and 10 scored validate; 16 entries and an unknown key are rejected (AC-8)', () => {
+  const unscored = lessonSet(Array.from({ length: 15 }, (_, i) => lessonEntry(i)));
+  assert.deepEqual(schemaErrors(LESSONS, unscored), []);
+  const scored = lessonSet(Array.from({ length: 10 }, (_, i) => lessonEntry(i, {
+    score: 10 - i, component: 'adlc/partials', kind: 'process', confidence: 'high', newerThanSpec: true,
+    supersededBy: ['LESSON-999'], text: '---\nid: x\n---',
+  })), { cap: 10 });
+  assert.deepEqual(schemaErrors(LESSONS, scored), []);
+  const sixteen = lessonSet(Array.from({ length: 16 }, (_, i) => lessonEntry(i)));
+  assert.ok(schemaErrors(LESSONS, sixteen).some((e) => /maxItems 15/.test(e)));
+  assert.ok(schemaErrors(LESSONS, lessonSet([lessonEntry(0)], { surprise: 1 })).some((e) => /surprise: unknown key/.test(e)));
+  assert.ok(schemaErrors(LESSONS, lessonSet([lessonEntry(0, { body: 'x' })])).some((e) => /body: unknown key/.test(e)));
+  assert.ok(schemaErrors(LESSONS, lessonSet([lessonEntry(0, { kind: 'other' })])).some((e) => /not in enum/.test(e)));
+  // the unavailable shape the leaf returns when adlc_lessons exits 2 is a valid value
+  assert.deepEqual(schemaErrors(LESSONS, { query: { components: [] }, lessons: [], retrievedAt: '', unavailable: 'engine missing' }), []);
+});
+
+test('TASK_LESSONS: one {taskId, set} row per task, each a LESSONS value; unknown keys rejected', () => {
+  const ok = { sets: [{ taskId: 'TASK-001', set: lessonSet([lessonEntry(0, { score: 3 })]) }] };
+  assert.deepEqual(schemaErrors(TASK_LESSONS, ok), []);
+  assert.ok(schemaErrors(TASK_LESSONS, { sets: [{ taskId: 'TASK-001', set: lessonSet([]), extra: 1 }] }).length > 0);
+  assert.equal(TASK_LESSONS.properties.sets.items.properties.set, LESSONS, 'each row is validated against LESSONS itself');
+});
+
+test('escalateByLessons: an id outside the set is dropped and not escalated; one inside escalates one level (AC-9)', () => {
+  const set = lessonSet([lessonEntry(1, { score: 5 })]);
+  const byRepo = { r: [fset('correctness', [
+    finding('Minor', 'a.js', 'inside', { lessonId: 'LESSON-101' }),
+    finding('Minor', 'b.js', 'outside', { lessonId: 'LESSON-999' }),
+    finding('Critical', 'c.js', 'already critical', { lessonId: 'LESSON-101' }),
+    finding('Nit', 'd.js', 'no lesson'),
+  ])] };
+  const snapshot = JSON.stringify(byRepo);
+  const out = escalateByLessons(byRepo, set).r[0].findings;
+  assert.equal(out[0].severity, 'Major');
+  assert.equal(out[0].escalatedFrom, 'Minor');
+  assert.equal(out[1].severity, 'Minor', 'an untrusted id outside the set never escalates');
+  assert.equal('lessonId' in out[1], false, 'and is removed from the finding (LESSON-008)');
+  assert.equal(out[2].severity, 'Critical');
+  assert.equal('escalatedFrom' in out[2], false);
+  assert.deepEqual(out[3], finding('Nit', 'd.js', 'no lesson'));
+  assert.equal(JSON.stringify(byRepo), snapshot, 'the input is not mutated');
+  // no set at all: every lessonId is untrusted
+  assert.equal(escalateByLessons(byRepo, null).r[0].findings[0].severity, 'Minor');
+});
+
+test('escalateByLessons: confidence low and superseded lessons keep the severity and say why (REQ-646 BR-6)', () => {
+  const set = lessonSet([lessonEntry(1, { confidence: 'low' }), lessonEntry(2, { supersededBy: ['LESSON-300'] }), lessonEntry(3, { confidence: 'medium' })]);
+  const out = escalateByLessons({ r: [fset('quality', [
+    finding('Minor', 'a.js', 'low', { lessonId: 'LESSON-101' }),
+    finding('Minor', 'b.js', 'superseded', { lessonId: 'LESSON-102' }),
+    finding('Minor', 'c.js', 'medium', { lessonId: 'LESSON-103' }),
+  ])] }, set).r[0].findings;
+  assert.equal(out[0].severity, 'Minor');
+  assert.equal(out[0].lessonNote, 'matched LESSON-101, confidence low — not escalated');
+  assert.equal(out[1].severity, 'Minor');
+  assert.equal(out[1].lessonNote, 'matched LESSON-102, superseded by LESSON-300 — not escalated');
+  assert.equal(out[2].severity, 'Major', 'medium confidence escalates as before');
+});
+
+test('dedupeAndRank: unions lessonId — duplicates where only the second carries it keep the id and the escalation (AC-9)', () => {
+  const set = lessonSet([lessonEntry(1), lessonEntry(2)]);
+  const byRepo = { r: [
+    fset('correctness', [finding('Minor', 'a.js', 'Race')]),
+    fset('security', [finding('Minor', 'a.js', 'race', { lessonId: 'LESSON-101' })]),
+    fset('quality', [finding('Minor', 'a.js', 'RACE', { lessonId: 'LESSON-102' })]),
+  ] };
+  const out = dedupeAndRank(escalateByLessons(byRepo, set));
+  assert.equal(out.findings.length, 1);
+  const f = out.findings[0];
+  assert.equal(f.lessonId, 'LESSON-101');
+  assert.deepEqual(f.lessonIds, ['LESSON-101', 'LESSON-102']);
+  assert.equal(f.severity, 'Major', 'the escalated copy\'s severity wins');
+  assert.equal(f.escalatedFrom, 'Minor');
+  assert.deepEqual(lessonIdsOf(f), ['LESSON-101', 'LESSON-102']);
+  // a finding with no lesson gains no lessonIds key (pre-REQ-647 output unchanged)
+  assert.equal('lessonIds' in dedupeAndRank({ r: [fset('quality', [finding('Nit', 'b.js', 'x')])] }).findings[0], false);
+  assert.ok(closeOutDigest({ tasks: [], findings: out.findings, reports: [] }).includes('(lesson LESSON-101, LESSON-102)'));
+});
+
+test('lessonsBlock: empty for no set, an unavailable set or no lessons; caps text at 40 lines; deterministic', () => {
+  assert.equal(lessonsBlock(null, 'H'), '');
+  assert.equal(lessonsBlock(lessonSet([]), 'H'), '');
+  assert.equal(lessonsBlock(lessonSet([lessonEntry(1)], { unavailable: 'x' }), 'H'), '');
+  const long = Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n');
+  const set = lessonSet([
+    lessonEntry(1, { score: 6, kind: 'process', newerThanSpec: true, text: long }),
+    lessonEntry(2, { text: 'short' }),
+    { id: 'not-an-id', title: 'x', path: 'p' },
+  ]);
+  const block = lessonsBlock(set, 'Lessons heading:');
+  assert.equal(block, lessonsBlock(set, 'Lessons heading:'));
+  assert.ok(block.startsWith('\nLessons heading:\n\n### LESSON-101 — t1 (score 6; process; newer than spec)\n'));
+  assert.ok(block.includes('line 38\n[… truncated — read LESSON-101 for the rest]'));
+  assert.ok(!block.includes('line 39'));
+  assert.ok(block.includes('### LESSON-102 — t2\nshort'));
+  assert.ok(!block.includes('not-an-id'));
+});
+
+test('lessonsLogLine: names the lessons, brackets the newer-than-spec ones, reports unavailable (BR-10)', () => {
+  const set = lessonSet([lessonEntry(1), lessonEntry(2, { newerThanSpec: true })]);
+  assert.equal(lessonsLogLine('task TASK-012', set), 'Lessons loaded (task TASK-012): LESSON-101 [newer-than-spec: LESSON-102]');
+  assert.equal(lessonsLogLine('step0', lessonSet([])), 'Lessons loaded (step0): none');
+  assert.equal(lessonsLogLine('phase5', lessonSet([], { unavailable: 'lessons.py not found in the installed toolkit' })),
+    'Lessons loaded (phase5): unavailable — lessons.py not found in the installed toolkit');
+  assert.equal(lessonsLogLine('step0', null), 'Lessons loaded (step0): unavailable — retrieval leaf returned nothing');
+});
+
+test('taskSetsById: maps rows by taskId, first wins, malformed rows dropped', () => {
+  const a = lessonSet([lessonEntry(1)]);
+  const b = lessonSet([lessonEntry(2)]);
+  assert.deepEqual(taskSetsById({ sets: [{ taskId: 'TASK-1', set: a }, { taskId: 'TASK-1', set: b }, { set: b }, null] }), { 'TASK-1': a });
+  assert.deepEqual(taskSetsById(null), {});
+});
+
+test('lessons retrieval prompts never read args.answers, so a resume replays them byte-identically (BR-6)', () => {
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'adlc-sprint.workflow.js'), 'utf8');
+  for (const name of ['lessonsPrompt', 'taskLessonsPrompt', 'lessonsStatePath', 'lessonsFenceLines', 'lessonsUnavailableLines', 'retrieveLessons']) {
+    const at = src.indexOf(`function ${name}(`);
+    assert.ok(at >= 0, `${name} is defined`);
+    const body = src.slice(at, src.indexOf('\n}\n', at));
+    assert.doesNotMatch(body, /\bargs\b|\bans\b|answers/, `${name} must not depend on the resume answers`);
+  }
+  // every dispatch of the three prompts receives a LessonSet
+  assert.match(src, /architectPrompt\(id, worktree, exploreReports, STEP0_LESSONS\)/);
+  assert.match(src, /implementPrompt\(id, worktree, task, \(taskLessonSets \|\| \{\}\)\[task\.id\]\)/);
+  assert.equal((src.match(/^\s+lessonSet, \/\/ REQ-647 BR-3/gm) || []).length, 2, 'both reviewPrompt dispatch sites pass the set');
+  assert.equal((src.match(/dedupeAndRank\(escalateByLessons\(/g) || []).length, 2, 'both consolidations escalate first');
 });

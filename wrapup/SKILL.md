@@ -41,7 +41,7 @@ Rules:
 1. **Precondition — the feature PR is already merged.** Before anything else, confirm every touched repo's PR reports `MERGED` (`adlc_forge_pr_view <prUrl> --fields state,mergedAt`, sourcing `partials/forge.sh` in the same fence). If any is not, **stop** with `close-out refused: <repo> PR <url> is <state>, not MERGED` — this mode never merges a feature PR.
 2. **Where it runs.** In a dedicated close-out worktree the caller declares (`WORKTREE PATH (mandatory): <abs>` — the REQ-263 contract), on branch `chore/REQ-xxx-close-out` cut from `origin/<integration-branch>`. Never in the caller's live checkout, and never concurrently with another REQ's close-out in the same repo: the caller serializes close-outs per repo the way it serializes merges.
 3. **Step 3 item 5 targets the primary repo path's copy** of `pipeline-state.json` (`<repos[primary].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json`, the Step 8b target) — the close-out worktree has no state file (it is gitignored, per-worktree). Write all five fields, and additionally `"closeOut": { "status": "ok", "at": "<ISO timestamp>" }`. The caller writes `"status": "failed", "reason": "<why>"` to the same key if this mode exits non-zero, so `/status` can show a merged-but-not-closed REQ as exactly that.
-4. **Step 4 draws on supplied evidence, not a transcript.** REQ-423 transcript discovery is skipped (`JSONL` stays empty; the delegate is not invoked, which the resolver records as `fallback`/`gate=fail`, not a ghost-skip — the same case (b) the delegated-drafting rule already allows). The lesson is drafted from what the caller's prompt supplies: the REQ's consolidated Phase-5 findings (severity, title, fixed/not), the implementer and reviewer reports, the task list, the merged PR's file list, and `pipeline-state.json` (`phaseHistory`, `blockers`, `conflictsResolved`, `lane.escalations`) plus the spec's `lane_escalated` frontmatter, and validated with `adlc_lesson_check` like any other write (Step 4 **Write and check**). A non-empty `lane.escalations`, or a `lane_escalated` in the spec, is run evidence for the escalation lesson in Step 4 **Lane escalations** on its own. If the prompt supplies **none** of the findings or reports, and there is no escalation, write no lesson and put `NO_ENTRY: close-out had no run evidence` in the summary's `### Lessons captured` section — a lesson invented without run evidence is worse than none.
+4. **Step 4 draws on supplied evidence, not a transcript.** Transcript discovery is skipped (`JSONL` stays empty; the delegate is not invoked, which the resolver records as `fallback`/`gate=fail`, not a ghost-skip — the same case (b) the delegated-drafting rule already allows). The lesson is drafted from what the caller's prompt supplies: the REQ's consolidated Phase-5 findings (severity, title, fixed/not), the implementer and reviewer reports, the task list, the merged PR's file list, and `pipeline-state.json` (`phaseHistory`, `blockers`, `conflictsResolved`, `lane.escalations`) plus the spec's `lane_escalated` frontmatter, and validated with `adlc_lesson_check` like any other write (Step 4 **Write and check**). A non-empty `lane.escalations`, or a `lane_escalated` in the spec, is run evidence for the escalation lesson in Step 4 **Lane escalations** on its own. If the prompt supplies **none** of the findings or reports, and there is no escalation, write no lesson and put `NO_ENTRY: close-out had no run evidence` in the summary's `### Lessons captured` section — a lesson invented without run evidence is worse than none.
 5. **Close-out commit.** After Steps 3–5, in the close-out worktree: `git add` the spec, task files and any new `ASSUME-*`/`LESSON-*` files; commit `chore(REQ-xxx): close-out — spec complete[, LESSON-nnn]`; push; open a PR through `adlc_forge_pr_create` titled the same; merge it with `adlc_forge_pr_merge <url> --squash --delete-branch` and check `branch_deleted` (BUG-195). Lesson ids were allocated and rechecked in Step 4, so this push is collision-safe. The caller removes the close-out worktree afterwards. If the chore PR cannot be merged (policy, conflict), leave it open, report its URL, and exit non-zero so the caller records `closeOut.status: failed`.
 6. **Output.** The Step 5 summary, with `### Lessons captured` filled, is the mode's return value; the caller carries it into the sprint summary.
 
@@ -186,147 +186,37 @@ esac
 
 **Delegated drafting** (gate passes — `adlc-read` is on PATH and `ADLC_DISABLE_DELEGATE` is not `1`):
 
-**MANDATORY — no agent discretion.** When the gate passes AND step 1 resolved a transcript, invoking `adlc-read` to draft the lessons is required, not optional. Exactly two non-delegated outcomes are acceptable on the gate-pass path: (a) `adlc-read` was actually invoked and exited non-zero (→ `api-error` fallback), or (b) step 1's discovery legitimately produced no transcript — no candidates at all, or no candidate mentioning the REQ id — so there was nothing to delegate. Case (b) never reaches the call site, so `invoked` is never marked and the resolver records `fallback`/`gate=fail`; it is therefore NOT rewritten into a `ghost-skip` (that rewrite keys on `gate=pass`). Drafting the lessons-learned yourself from a transcript you *did* resolve, *instead of* calling `adlc-read` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+**MANDATORY — no agent discretion.** When the gate passes AND step 1 resolved a transcript, invoking `adlc-read` to draft the lessons is required, not optional. Exactly two non-delegated outcomes are acceptable on the gate-pass path: (a) `adlc-read` was actually invoked and exited non-zero (→ `api-error` fallback), or (b) step 1's discovery legitimately produced no transcript — no transcript holds the run's mark, or more than one does — so there was nothing to delegate. Case (b) never reaches the call site, so `invoked` is never marked and the resolver records `fallback`/`gate=fail`; it is therefore NOT rewritten into a `ghost-skip` (that rewrite keys on `gate=pass`). Drafting the lessons-learned yourself from a transcript you *did* resolve, *instead of* calling `adlc-read` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
 
-   **Close-out mode (BUG-249):** skip this step — do not run the discovery block. Mark the sidecar's `jsonl` empty (`"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl ""`, in a fence that re-sources `partials/delegate-tools-path.sh`) so step 2 falls through to **Fallback drafting**, and draft there from the evidence the caller supplied (Close-out mode rule 4).
+   **Close-out mode (BUG-249):** skip this step — do not run the discovery blocks (1a and 1b). Mark the sidecar's `jsonl` empty (`"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl ""`, in a fence that re-sources `partials/delegate-tools-path.sh`) so step 2 falls through to **Fallback drafting**, and draft there from the evidence the caller supplied (Close-out mode rule 4).
 
-1. Locate the Claude Code session JSONL whose recent content mentions the active REQ — **content-anchored discovery** (REQ-423). The original heuristic ("newest JSONL under the repo-root-encoded path") silently picked the wrong transcript when a session was opened at a parent directory and later navigated into the repo. The walk starts at the current working tree and climbs to (and including) `$HOME`, collects candidate JSONLs at each level, and picks the one whose last 200 lines contain a word-boundary match for the active REQ id. Emits exactly one stderr line per invocation stating which JSONL was chosen and why.
+1. Locate **this run's own** Claude Code transcript — **self-marked discovery** (BUG-253, replacing the REQ-423 ancestor walk). Two fences, run as **two separate tool calls**: the first prints a fresh random mark, and by the time the second runs, that output is a tool result in exactly one transcript — this conversation's, wherever the harness keeps it. The second finds that one file. A command that is still running is not yet in its own transcript, so the two must never be combined into one call.
 
-   **Two failure modes are answered by refusing, not guessing.** If no candidates exist at all, or if a REQ id was available and no candidate mentions it, `$JSONL` stays empty and control falls through to **Fallback drafting** — Claude writes the lesson from the conversation it actually ran. A well-formed lesson synthesized from an unrelated transcript is worse than no delegation, so "newest wins" is only used when there is no anchor id to check against.
+   **Why not walk the directories.** REQ-423 climbed from the working tree to `$HOME`, took each ancestor's `~/.claude/projects/<encoded>` directory, and picked the first JSONL whose tail named the REQ id. Under `/sprint` a `pipeline-runner` is a subagent: its transcript is `~/.claude/projects/<orchestrator's encoded cwd>/<session>/subagents/agent-<id>.jsonl`, which no ancestor of the runner's worktree reaches. The repo root's directory meanwhile holds older sessions that name the REQ too, so REQ-647's runner was handed a 2026-10-27 session that only mentioned it (LESSON-733). An id anchor proves a transcript mentions the work, not that it is the run; concurrent runners even share one session id. The mark is the only signal no other transcript can carry.
 
-   **Path encoding must match Claude Code exactly.** Claude Code replaces every non-alphanumeric character in the absolute path with `-`, so `.` collapses too. Encoding only `/` produced `-…-adlc-toolkit-.claude-worktrees-<slug>` where the real directory is `-…-adlc-toolkit--claude-worktrees-<slug>`, which meant sessions run inside a Claude Code harness worktree (`<repo>/.claude/worktrees/<slug>`) never matched at the worktree level; the walk then reached the repo-root dir full of older, unrelated sessions and the "newest" fallback quietly served one of those. Any change to the encoder must be re-verified against a real `~/.claude/projects/` listing, not reasoned about in the abstract.
+   **A miss refuses; it never falls back.** If no transcript holds the mark, or more than one does (a forked copy), `adlc_transcript_find` returns 1 with nothing on stdout, `$JSONL` stays empty, and control falls through to **Fallback drafting** — Claude writes the lesson from the conversation it actually ran. Do not reach for another session's transcript: a well-formed lesson about other work is worse than no delegation (LESSON-483). Each call emits exactly one stderr line saying what it chose or refused; `partials/session-transcript.sh` carries the contract.
+
+   Step 1a — print the mark (its own tool call):
    ```bash
-   # Start the walk at the CURRENT working tree, NOT at a de-worktree'd repo root. When the
-   # session runs inside a Claude Code harness worktree (`<repo>/.claude/worktrees/<slug>`),
-   # that worktree has its OWN project dir under ~/.claude/projects/ holding the only
-   # transcript of this session — de-worktree-ing here would skip it and land on the repo
-   # root's older, unrelated sessions. The upward walk below reaches the repo root anyway,
-   # so nothing is lost by starting deeper. (The former `sed 's|/\.worktrees/.*$||'` was
-   # also dead code for the harness pattern: it strips `/.worktrees/`, not `/.claude/worktrees/`.)
-   ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || ROOT="$PWD"
-   # Normalize $HOME (strip any trailing slash) so the loop terminator and prefix check are reliable.
-   HOME_NORM="${HOME%/}"
-   PROJECTS_DIR="$HOME_NORM/.claude/projects"
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/session-transcript.sh ]; then . .adlc/partials/session-transcript.sh; else . "$ADLC_TOOLKIT_ROOT/partials/session-transcript.sh"; fi
+   adlc_transcript_mark
+   ```
 
-   # Claude Code encodes an absolute path into a ~/.claude/projects/ directory name by
-   # replacing EVERY non-alphanumeric character with '-'. Both '/' and '.' are replaced,
-   # which is why `<repo>/.claude/worktrees/<slug>` encodes to `<repo>--claude-worktrees-<slug>`
-   # (double dash), and why the leading '/' becomes the leading '-' with no separate prefix
-   # step. Encoding only '/' produced `-.claude-` and never matched any real directory.
-   #
-   # Pure parameter expansion, NOT `sed`: this runs once per ancestor level and once per
-   # project-dir entry on the slow path, so a fork here is multiplied by (levels x entries).
-   # A `sed` version measured ~15s on a deep path with 500 project dirs; this is instant.
-   # `${1}` braced because Skill argument templating rewrites an unbraced dollar-digit
-   # before the block ever reaches a shell. `[!...]` (not `[^...]`) is the portable
-   # negated-class form — verified byte-identical to the sed output in bash AND zsh.
-   adlc_encode_project_dir() { printf '%s' "${1//[!A-Za-z0-9]/-}"; }
-
-   # Build candidate list: walk from $ROOT up to (and including) $HOME, encoding each ancestor.
-   # Hard guard: only enumerate paths that are $HOME or a descendant of $HOME — defends against
-   # scanning other users' / system session data (BR-6) even if $ROOT is itself above $HOME
-   # (e.g., user opened Claude at /Users with no project loaded).
-   CANDIDATES=()
-   DIR="$ROOT"
-   case "$DIR/" in
-       "$HOME_NORM"/|"$HOME_NORM"/*) ;;  # OK — $DIR is $HOME or under $HOME
-       *) DIR="" ;;                       # outside $HOME — skip discovery entirely
-   esac
-   if [ -n "$DIR" ] && [ -n "$HOME_NORM" ]; then
-       while [ -n "$DIR" ] && [ "$DIR" != "/" ]; do
-           WANT=$(adlc_encode_project_dir "$DIR")
-           MATCHES=""
-           if [ -d "$PROJECTS_DIR/$WANT" ]; then
-               # Fast path: our encoding is the real name. This is the case for every
-               # directory Claude Code has actually created, so the scan below almost
-               # never runs.
-               MATCHES="$WANT"
-           else
-               # Slow path: no exact hit. Re-scan the REAL listing and compare both sides
-               # through the SAME encoder, so a character Claude Code encodes differently
-               # than we predict (e.g. '_') still matches — the lookup keeps working
-               # without us having to re-derive the encoder table. Only entries that
-               # normalize to $WANT are accepted, so this cannot widen the walk beyond
-               # the ancestor being considered.
-               while IFS= read -r entry; do
-                   [ -n "$entry" ] || continue
-                   [ "$(adlc_encode_project_dir "$entry")" = "$WANT" ] || continue
-                   MATCHES="$MATCHES$entry
-"
-               done < <(ls -1 "$PROJECTS_DIR" 2>/dev/null)
-           fi
-           while IFS= read -r entry; do
-               [ -n "$entry" ] || continue
-               # BR-7 sanitization before the name is used as a path component. The encoder
-               # makes '.' unreachable in $WANT, but on the slow path $entry comes off the
-               # filesystem, so the explicit *..* case-reject stays as the definitive
-               # traversal guard and the regex as a secondary check on the permitted alphabet.
-               case "$entry" in *..*) continue ;; esac
-               printf '%s' "$entry" | grep -qE '^-[A-Za-z0-9_.-]+$' || continue
-               ENC_DIR="$PROJECTS_DIR/$entry"
-               [ -d "$ENC_DIR" ] || continue
-               # ls dir | grep, not ls glob: zsh errors on unmatched globs ("no
-               # matches found") instead of passing the pattern through.
-               while IFS= read -r f; do
-                   [ -n "$f" ] && CANDIDATES+=("$ENC_DIR/$f")
-               done < <(ls -t "$ENC_DIR" 2>/dev/null | grep '\.jsonl$')
-           # `%s\n`, not `%s`: `read` returns false on a final line with no terminator, so a
-           # newline-less $MATCHES (the single-entry fast path) would skip the loop entirely.
-           # The extra blank line this adds on the slow path is dropped by the -n guard above.
-           done < <(printf '%s\n' "$MATCHES")
-           # Terminate after processing $HOME — BR-6: never walk above (would otherwise scan
-           # /Users/, /, etc. and expose other users' session data).
-           [ "$DIR" = "$HOME_NORM" ] && break
-           DIR=$(dirname "$DIR")
-       done
-   fi
-
-   JSONL=""
-   if [ ${#CANDIDATES[@]} -eq 0 ]; then
-       echo "/wrapup: session JSONL — no candidates found; skipping delegation" >&2
-       # JSONL stays empty — step 2 below guards on [ -n "$JSONL" ] and falls through to
-       # Fallback drafting (BR-9 — same as today's REQ-414 cold-path behavior).
-   else
-       # Phase 1: id-match — word-boundary fixed-string grep on last 200 lines of each candidate
-       # (ADR-1). `-wF` is portable across BSD grep (macOS) and GNU grep AND is injection-safe
-       # against any regex metacharacters that might appear in $REQ_ID. First match wins; walk
-       # order is repo-root first, so the closest-to-repo match is preferred.
-       if [ -n "$REQ_ID" ]; then
-           for c in "${CANDIDATES[@]}"; do
-               if tail -n 200 "$c" 2>/dev/null | grep -qwF "$REQ_ID"; then
-                   JSONL="$c"
-                   echo "/wrapup: session JSONL — matched $REQ_ID in $(basename "$c")" >&2
-                   break
-               fi
-           done
-       fi
-       # Phase 2: no candidate matched the anchor id.
-       if [ -z "$JSONL" ] && [ -n "$REQ_ID" ]; then
-           # REFUSE, do not guess. When a REQ id was available and NO candidate mentions it,
-           # every candidate is by definition a transcript of different work — delegating one
-           # yields a confident, well-formed lesson about the wrong feature, which is strictly
-           # worse than not delegating. Leave $JSONL empty so step 2 falls through to Fallback
-           # drafting, where Claude drafts from the in-context conversation it actually ran.
-           echo "/wrapup: session JSONL — $REQ_ID not mentioned in any of ${#CANDIDATES[@]} candidate(s); REFUSING to delegate a non-matching transcript — drafting directly instead" >&2
-       elif [ -z "$JSONL" ]; then
-           # No anchor id to check against, so newest-in-closest-dir is the only signal
-           # available. Architecture note: this is newest-within-the-first-candidate-directory,
-           # not globally newest across all ancestor dirs — accepted approximation per REQ-423.
-           # Slice form, not [0]: zsh arrays are 1-indexed, so ${CANDIDATES[0]} is
-           # silently empty there; ${CANDIDATES[@]:0:1} is first-element in bash AND zsh.
-           JSONL="${CANDIDATES[@]:0:1}"
-           echo "/wrapup: session JSONL — no REQ id provided; using newest $(basename "$JSONL")" >&2
-       fi
-   fi
+   Step 1b — find the transcript that holds it (a **separate** tool call, after 1a's output has come back):
+   ```bash
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/session-transcript.sh ]; then . .adlc/partials/session-transcript.sh; else . "$ADLC_TOOLKIT_ROOT/partials/session-transcript.sh"; fi
+   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+   # <mark> is the LITERAL line step 1a printed (adlc-transcript-mark-<16 hex>) — thread it
+   # in; fenced blocks share no shell state. rc 1 (no match, or several) leaves JSONL empty.
+   JSONL=$(adlc_transcript_find "<mark>") || JSONL=""
    # Persist the chosen transcript path to the flag sidecar so step 2's separate
    # fenced block can read it — SKILL.md fenced blocks do not share shell state
-   # (REQ-522 BR-4). An empty JSONL (no candidates) is persisted as empty.
-   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+   # (REQ-522 BR-4). An empty JSONL (no transcript holds the mark) is persisted as empty.
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl "$JSONL"
    ```
-   (The leading `-` on every `~/.claude/projects/` entry is just the absolute path's leading `/` run through the same non-alphanumeric substitution — there is no separate prefix step, and stripping the `/` first would produce a name one `-` short. The walk terminates at `$HOME` per BR-6 — see REQ-423 architecture ADR-2.)
-2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when discovery emitted "no candidates found", `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
+2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when step 1b refused (no transcript, or more than one, holds the mark), `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
    ```bash
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
    if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
@@ -338,7 +228,7 @@ esac
    JSONL=$("$DELEGATE_TOOLS"/skill-flag.sh read "$flag" jsonl)
    if [ -z "$JSONL" ]; then
        # No candidate JSONL — skip delegation entirely; fall through to Fallback drafting.
-       # Skip its standard stderr emit since the "no candidates found" line in step 1 already logged.
+       # Skip its standard stderr emit since step 1b's refusal line already logged.
        :
    else
        TMPFILE=$(mktemp -t adlc-wrapup.XXXXXX) || exit 1

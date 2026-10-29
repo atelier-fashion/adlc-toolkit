@@ -338,6 +338,7 @@ New state keys are **additive and optional**, and each one defines what its abse
 - Branch naming: `feat/REQ-xxx-short-description` for features, `fix/bug-xxx-short-description` for bugs
 - Commit message format: `<type>(<scope>): <description> [TASK-xxx]` — types are `feat`, `fix`, `refactor`, `docs`, `test`, `chore`
 - The TASK-xxx (or REQ-xxx) trailer is required for work tracked through the pipeline
+- A `Lessons: LESSON-xxx, LESSON-yyy` trailer acknowledges each supplied lesson the change applies (REQ-647). `/proceed` Phase 5 Step B reads these trailers, and the task's `## Verification` block, and lists applicable lessons nobody acknowledged as Info findings. A mention only in an agent's report is not seen.
 - Co-author trailer is added by Claude Code automatically when committing on behalf of the user
 
 ## What NOT to do

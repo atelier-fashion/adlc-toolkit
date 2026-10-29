@@ -159,6 +159,28 @@ behavior. Examples:
   `lanes.lite` config block, and the `<!-- lane-vocabulary -->` block that
   `tools/lint-skills`' `lane-vocabulary` check reads. Tested by
   `tests/lane-check.test.sh` under bash, zsh, sh and dash.
+- `lessons.sh` — LessonSet retrieval for the pipeline phases (REQ-647). Defines
+  `adlc_lessons <select|text|log-line|ack-check> [args…]`, run by `/proceed`
+  (Step 0, each Phase-4 task, Phase 5), `/bugfix` Phase 2, standalone
+  `/validate` and the sprint workflow engine's retrieval leaves. It runs the
+  installed toolkit's `tools/adlc/lessons.py` and passes its stdout and exit code
+  through: **0** success, **2** could not retrieve, with one
+  `lessons: unavailable — <reason>` line. A caller logs that line and carries on:
+  retrieval is never a gate. It resolves the interpreter with `forge.sh`'s
+  `_adlc_forge_python`, as `lane-check.sh` does. The companion `lessons.md` holds
+  the subcommands, the four sets and the state record. Tested by
+  `tests/lessons.test.sh` under bash, zsh, sh and dash.
+- `session-transcript.sh` — finds this conversation's Claude Code transcript
+  for `/wrapup` Step 4's delegated draft (BUG-253). `adlc_transcript_mark` prints
+  `adlc-transcript-mark-<16 hex>`; in a **later** tool call,
+  `adlc_transcript_find <mark>` searches `~/.claude/projects/` (depth 5, so a
+  subagent's `<session>/subagents/agent-<id>.jsonl` is in reach; last 60 minutes)
+  for it. **0** one transcript holds it, path on stdout; **1** none or several do,
+  so the caller drafts from the conversation and never falls back to another
+  transcript; **2** not a mark. The mark replaces REQ-423's ancestor walk, which
+  could not reach a `/sprint` runner's transcript and matched older sessions that
+  named the REQ (LESSON-733). Tested by `tests/session-transcript.test.sh` under
+  bash, zsh, sh and dash.
 
 Skills invoke a model-2 partial like this, the fence's ToolkitRoot root line
 first (conventions.md "Bash in skills", REQ-669 ADR-1). The root line resolves
