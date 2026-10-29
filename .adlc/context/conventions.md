@@ -177,7 +177,9 @@ to skip all of the step's shell and take the fallback path with its own
 file-read tool. That step writes no telemetry record on such a harness, and on
 every other harness the REQ-424/REQ-522 contract is unchanged. `lint-skills`'
 `harness-skip` check requires the line within 30 lines above every
-`adlc_delegate_gate_check` fence. Where the delegated path does run, give the
+`adlc_delegate_gate_check` fence, and above every fence that invokes
+`emit-run-outcome.sh` (REQ-648), whose step replies `run-outcome skipped:
+provenance-classifying harness` instead. Where the delegated path does run, give the
 `adlc-read` call a shell timeout of at least 120 s (Claude Code's Bash default).
 Teton's 30 s default killed the call that surfaced this bug.
 
@@ -334,6 +336,8 @@ follow-up REQ, taken once the corpus carries obligations.
 Skills that span multiple phases (`/proceed`) write a `pipeline-state.json` next to the REQ spec. This lets a long-running pipeline resume from interruption without replaying phases. Every phase update writes the state file atomically.
 
 New state keys are **additive and optional**, and each one defines what its absence means, so an older state file parses and runs unchanged (`conflictsResolved`: none resolved; `closeOut`: not recorded). The `lane` object (REQ-652) follows the same rule: it is written only when the spec carries a `lane` key, and a state file without it is a full-lane run. The spec frontmatter, not the state file, is the authority on a REQ's lane.
+
+A key whose value is a fact for a later reader is written by code, at the moment the fact occurs, never by hand at close-out (LESSON-626, LESSON-012). REQ-648's `harness`, `validateAttempts`, `verify` and `lessonsWritten` are written by `tools/delegate/emit-run-outcome.sh record-*` into the primary-path copy, and absent means `-` or `0` in the run-outcome line built from them.
 
 ## Commits and branches
 
