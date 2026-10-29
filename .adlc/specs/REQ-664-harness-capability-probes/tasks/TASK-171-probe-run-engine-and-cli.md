@@ -47,6 +47,8 @@ line), events on stderr, signal handling, and exit codes. `harness.py` gains the
 | BR-4 | test-case | `tools/adlc/tests/test_harness_probe_recovery.py::test_trust_file_backup_and_restore` | yes |
 | BR-8 | test-case | `tools/adlc/tests/test_harness_probe_e2e.py::test_hang_times_out_without_children` | no |
 | BR-9 | test-case | `tools/adlc/tests/test_harness_probe_e2e.py::test_redaction_and_home_rewrite` | no |
+| BR-8 | test-case | `tools/adlc/tests/test_harness_probe_cli.py::test_cap_floor` | yes |
+| BR-9 | test-case | `tools/adlc/tests/test_harness_probe_cli.py::test_list_and_dry_run_outside_repo` | yes |
 | BR-10 | test-case | `tools/adlc/tests/test_harness_probe_e2e.py::test_transcript_fixture_redacted` | no |
 | BR-11 | test-case | `tools/adlc/tests/test_harness_probe_recovery.py::test_marker_refuses_then_recover` | yes |
 | BR-12 | test-case | `tools/adlc/tests/test_harness_probe_cli.py::test_launch_count_precedes_first_launch` | no |

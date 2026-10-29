@@ -42,7 +42,7 @@ the `--only` merge of an existing result file. Pure-stdlib, imports nothing from
 |------|------|----------|-------------|
 | BR-2 | test-case | `tools/adlc/tests/test_harness_probe_pins.py::test_module_imports_only_stdlib` | no |
 | BR-5 | test-case | `tools/adlc/tests/test_harness_probe_unit.py::test_combinators` | yes |
-| BR-6 | test-case | `tools/adlc/tests/test_harness_probe_unit.py::test_catalogue_and_coverage` | no |
+| BR-6 | test-case | `tools/adlc/tests/test_harness_probe_unit.py::test_catalogue_and_coverage` | yes |
 | BR-7 | test-case | `tools/adlc/tests/test_harness_probe_pins.py::test_fence_byte_identical_to_partials_readme` | no |
 | BR-12 | test-case | `tools/adlc/tests/test_harness_probe_unit.py::test_plan_counts` | no |
 | BR-16 | test-case | `tools/adlc/tests/test_harness_probe_unit.py::test_nonce_shape` | no |
