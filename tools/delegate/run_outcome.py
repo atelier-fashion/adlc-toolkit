@@ -42,6 +42,7 @@ Stdlib only: the plugin route runs it with the system ``python3``.
 """
 import argparse
 import datetime
+import importlib.util
 import json
 import os
 import re
@@ -90,17 +91,27 @@ REQ_ID_RE = re.compile(r"^REQ-[0-9]{3,6}\Z")
 VERSION_RE = re.compile(r"^[0-9A-Za-z._+-]{1,64}\Z")
 SHA_RE = re.compile(r"^[0-9a-f]{4,40}\Z")
 
-# The five-arm chain of tools/delegate/emit-telemetry.sh (REQ-415), with
-# [[:space:]] written \s. test_run_outcome.py runs the real sed line against
-# this copy on a fixture (LESSON-441 — two copies drift; the test is the
-# guard). REQ-671's tools/adlc/credential_redact.INTAKE_PATTERN is the same
-# chain: whichever of the two REQs lands second points this module at it.
-REDACT_RE = re.compile(
-    r"(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}"
-    r"|Bearer [A-Za-z0-9._-]{20,}"
-    r"|[A-Z_]+_(API_KEY|TOKEN)\s*[=:]\s*[^\s]+)"
-)
-REDACTED = "[REDACTED]"
+
+
+def _load_credential_redact():
+    """tools/adlc/credential_redact.py, the toolkit's one Python copy of the
+    credential chains (REQ-671 ADR-3), loaded by path from this file's own
+    toolkit so nothing is added to ``sys.path``."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    path = os.path.join(os.path.dirname(os.path.dirname(here)), "tools", "adlc", "credential_redact.py")
+    spec = importlib.util.spec_from_file_location("adlc_credential_redact", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# The five-arm chain: credential_redact.INTAKE_PATTERN, the same chain as
+# tools/delegate/emit-telemetry.sh's sed line (REQ-415). REQ-671 landed first,
+# so this module uses its copy instead of keeping a second one (LESSON-441);
+# test_run_outcome.py still runs the real sed line against it.
+_CREDENTIALS = _load_credential_redact()
+REDACT_RE = _CREDENTIALS.INTAKE_PATTERN
+REDACTED = _CREDENTIALS.REPLACEMENT
 
 
 class RunOutcomeError(Exception):

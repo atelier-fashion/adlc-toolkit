@@ -234,11 +234,13 @@ does not re-emit. Readers keep the latest line per REQ either way.
 crashed has no line; it is a `no-record` row, never a silent absence from `N`
 (BR-2, LESSON-571).
 
-**ADR-8 — Redaction is a Python copy of `emit-telemetry.sh`'s chain, held equal
-by a parity test that runs the real `sed` line.** `_common._KEYISH_RE` is a
-detector with a different arm set. When REQ-671's `tools/adlc/credential_redact.py`
-lands (its `INTAKE_PATTERN` is the same five arms), whichever lands second points
-`run_outcome.py` at it.
+**ADR-8 — Redaction is `emit-telemetry.sh`'s five-arm chain, held equal by a
+parity test that runs the real `sed` line.** `_common._KEYISH_RE` is a detector
+with a different arm set. REQ-671 landed first, and its
+`tools/adlc/credential_redact.py` `INTAKE_PATTERN` is the same five arms, so
+`run_outcome.py` loads that module by path (nothing is added to `sys.path`)
+rather than keeping a second copy; the parity test still pins it to the `sed`
+line.
 
 ## Lessons applied
 
