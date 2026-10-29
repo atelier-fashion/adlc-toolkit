@@ -16,7 +16,7 @@ attribution: derived
 
 
 > **Cross-repo id collision (BUG-210).** This id is also held by
-> **atelier-fashion**, whose `BUG-206` is *"The Colima preflight guards against a
+> **`atelier-fashion`**, whose `BUG-206` is *"The Colima preflight guards against a
 > stopped daemon but not a failed start"* (created 2026-08-29). Both were issued
 > from one machine-global namespace by an allocator that, run from a git
 > worktree, could see only one repository — fixed in `0cacbff`. **Neither is

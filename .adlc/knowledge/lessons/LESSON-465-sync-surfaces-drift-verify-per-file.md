@@ -14,7 +14,7 @@ updated: 2026-08-03
 ## What Happened
 
 A cross-repo sweep to purge pre-REQ-522 Kimi-era partials from admin-api,
-atelier-fashion, and infrastructure surfaced three traps:
+`atelier-fashion`, and `infrastructure` surfaced three traps:
 
 1. **Partial prior syncs masked drift.** atelier's `origin/dev` had already
    adopted `delegate-gate.sh` and most partials — but `emit-step-telemetry.sh`
@@ -22,7 +22,7 @@ atelier-fashion, and infrastructure surfaced three traps:
    and the workflow runtime were still stale. A spot-check of one or two files
    would have concluded "already synced".
 2. **Local checkouts were unusable as sync bases.** atelier's `dev` was 71
-   commits behind origin with unrelated staged work; infrastructure sat on a
+   commits behind origin with unrelated staged work; `infrastructure` sat on a
    detached HEAD; admin-api's feature branch belonged to an already-merged PR.
    Committing or rebasing in place would have disturbed live sessions.
 3. **Branch-protection gates keyed on head-ref globs.** admin-api's

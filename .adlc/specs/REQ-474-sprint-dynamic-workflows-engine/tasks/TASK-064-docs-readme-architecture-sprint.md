@@ -23,7 +23,7 @@ Document the two-engine model so future maintainers and a future `/validate` und
 - [ ] README skill catalog and layout reflect the two engines and the `workflows/` dir.
 - [ ] `context/architecture.md` gains the Workflow-engine subsection with rationale (consumer-portable; no project-specific paths).
 - [ ] `sprint/SKILL.md` NOT-DOES names the gating (Dynamic Workflows research-preview / plan-gated → legacy fallback).
-- [ ] No project-specific (atelier-fashion) paths leak into any doc.
+- [ ] No project-specific (`atelier-fashion`) paths leak into any doc.
 
 ## Technical Notes
 

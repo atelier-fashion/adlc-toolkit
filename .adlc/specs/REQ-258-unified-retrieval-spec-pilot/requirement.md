@@ -14,7 +14,7 @@ tags: [rag, retrieval, tagging, spec-skill, atelier-pattern, frontmatter-schema]
 
 ## Description
 
-Upgrade the `/spec` skill's context-loading step from the current 3-tier binary lesson grep to a unified weighted-score retriever that ranks relevance across three corpora simultaneously: lessons, prior specs (approved / in-progress / deployed), and resolved bugs. Adopt the scoring shape used by Atelier Fashion's style RAG (`knowledgeService.js` in the atelier-fashion repo): weighted-sum over multi-dimensional frontmatter tags with a foundational-doc baseline.
+Upgrade the `/spec` skill's context-loading step from the current 3-tier binary lesson grep to a unified weighted-score retriever that ranks relevance across three corpora simultaneously: lessons, prior specs (approved / in-progress / deployed), and resolved bugs. Adopt the scoring shape used by Atelier Fashion's style RAG (`knowledgeService.js` in the `atelier-fashion` repo): weighted-sum over multi-dimensional frontmatter tags with a foundational-doc baseline.
 
 **Why this change exists.** Today the `/spec` skill retrieves lessons via a 3-tier matching rule (component exact > domain + prefix > tag). Specs and bugs are not retrievable by semantic area at all — only by ID. This leaves three gaps:
 
