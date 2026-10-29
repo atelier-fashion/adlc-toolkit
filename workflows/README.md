@@ -57,6 +57,21 @@ So the engine is **ONE self-contained file** — there are no sibling `schemas.j
    a resume replays them from the journal and every prompt built from them stays
    byte-identical. Retrieval never halts a REQ: an unavailable set is logged and
    the prompts carry no lessons block.
+5. **Run-outcome telemetry (REQ-648).** Every panel member's `FINDINGS` entry
+   carries a required `class` matching `FINDING_CLASS_PATTERN` (a kebab-case
+   defect pattern, a lesson id, or a `title-slug:`; the same regex as
+   `tools/delegate/run_outcome.py` `CLASS_RE`, held equal by a test). After the
+   first consolidation, and again after the re-verify when the fix loop ran, a
+   state-write leaf records `verify` in the primary-path `pipeline-state.json`
+   through `emit-run-outcome.sh record-verify`; `markWorkflowFixed` marks a
+   finding fixed only when it was blocking and is absent from the re-verify.
+   Each validate attempt records `validateAttempts.phase<1|3>` with the gate's
+   loop counter (absolute and monotone, so a replay never double-counts). After
+   the close-out pass, `emitRunOutcomes` runs one leaf per REQ, whatever its
+   terminal, passing `TERMINAL.state` verbatim and the raw reason
+   (`runOutcomeArgs`), which the Python normalises onto its closed enum. None of
+   these leaves can halt a REQ or change `{results}`, and none reads
+   `args.answers`.
 
 The toolkit forbids a build step, so the pure logic stays **inline** and is
 unit-tested via a shared `vm` loader (`tests/_load-pure.js`) that evaluates just

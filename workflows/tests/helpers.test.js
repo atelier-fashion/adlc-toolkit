@@ -897,6 +897,10 @@ function schemaErrors(schema, value, at = '$') {
   if (t === 'integer' && !Number.isInteger(value)) return [`${at}: not an integer`];
   if (t === 'boolean' && typeof value !== 'boolean') return [`${at}: not a boolean`];
   if (schema.enum && !schema.enum.includes(value)) errs.push(`${at}: ${JSON.stringify(value)} not in enum`);
+  // REQ-648: FINDINGS.findings[].class carries a `pattern`.
+  if (t === 'string' && schema.pattern && !new RegExp(schema.pattern).test(value)) {
+    errs.push(`${at}: ${JSON.stringify(value)} does not match ${schema.pattern}`);
+  }
   if (t === 'object') {
     for (const k of schema.required || []) if (!(k in value)) errs.push(`${at}.${k}: required`);
     for (const k of Object.keys(value)) {
@@ -1047,4 +1051,112 @@ test('lessons retrieval prompts never read args.answers, so a resume replays the
   assert.match(src, /implementPrompt\(id, worktree, task, \(taskLessonSets \|\| \{\}\)\[task\.id\]\)/);
   assert.equal((src.match(/^\s+lessonSet, \/\/ REQ-647 BR-3/gm) || []).length, 2, 'both reviewPrompt dispatch sites pass the set');
   assert.equal((src.match(/dedupeAndRank\(escalateByLessons\(/g) || []).length, 2, 'both consolidations escalate first');
+});
+
+// ===========================================================================
+// REQ-648 — FINDINGS.class, the workflow `fixed` rule, and the emit leaf's args.
+// ===========================================================================
+
+const {
+  FINDINGS, FINDING_CLASS_PATTERN, verifyEntry, markWorkflowFixed, runOutcomeArgs,
+} = helpers;
+
+function classed(severity, file, title, cls, extra = {}) {
+  return { severity, file, title, class: cls, mustFix: false, userFacing: false, ...extra };
+}
+
+test('FINDINGS: class is required and pattern-checked (REQ-648 AC-7, LESSON-331)', () => {
+  const ok = { dimension: 'correctness', findings: [classed('Major', 'a.js', 'race', 'task-ordering-race')] };
+  assert.deepEqual(schemaErrors(FINDINGS, ok), []);
+  // the other two tiers are admitted too (a lesson id; the title-slug fallback)
+  for (const cls of ['LESSON-390', 'title-slug:unquoted-variable']) {
+    assert.deepEqual(schemaErrors(FINDINGS, { dimension: 'quality', findings: [classed('Nit', 'b.md', 't', cls)] }), [], cls);
+  }
+  const missing = { dimension: 'correctness', findings: [{ severity: 'Major', file: 'a.js', title: 'race', mustFix: false, userFacing: false }] };
+  assert.ok(schemaErrors(FINDINGS, missing).some((e) => /\.class: required/.test(e)), 'a finding without class is rejected');
+  for (const bad of ['Task Ordering', 'a-b-c-d-e-f-g', 'LESSON-1', 'title-slug:', 'snake_case', '']) {
+    const errs = schemaErrors(FINDINGS, { dimension: 'correctness', findings: [classed('Major', 'a.js', 't', bad)] });
+    assert.ok(errs.some((e) => /does not match/.test(e)), `class ${JSON.stringify(bad)} must be rejected`);
+  }
+  assert.ok(FINDINGS.properties.findings.items.required.includes('class'));
+  assert.equal(FINDINGS.properties.findings.items.properties.class.pattern, FINDING_CLASS_PATTERN);
+});
+
+test('FINDING_CLASS_PATTERN equals run_outcome.py CLASS_RE (REQ-648, LESSON-441)', () => {
+  const py = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', '..', 'tools', 'delegate', 'run_outcome.py'), 'utf8');
+  const m = py.match(/^CLASS_RE = re\.compile\(\s*r"([^"]+)"\)/m);
+  assert.ok(m, 'run_outcome.py still defines CLASS_RE as one raw string');
+  assert.equal(m[1].replace(/\\Z$/, '$'), FINDING_CLASS_PATTERN);
+});
+
+test('markWorkflowFixed: only a blocking finding absent after re-verify is fixed (REQ-648 BR-4)', () => {
+  const before = dedupeAndRank({ r: [
+    fset('correctness', [
+      classed('Critical', 'a.js', 'null deref', 'unchecked-null-return'),
+      classed('Major', 'b.js', 'still broken', 'off-by-one-boundary', { mustFix: true }),
+      classed('Minor', 'c.js', 'naming', 'inconsistent-name'),
+    ]),
+  ] });
+  const after = dedupeAndRank({ r: [
+    fset('correctness', [
+      classed('Major', 'b.js', 'reworded but same defect', 'off-by-one-boundary', { mustFix: true }),
+      classed('Nit', 'd.js', 'new nit', 'stray-whitespace'),
+    ]),
+  ] });
+  const out = markWorkflowFixed(before, after);
+  const byFile = Object.fromEntries(out.map((e) => [e.file, e]));
+  assert.equal(byFile['a.js'].fixed, true, 'blocking and gone → fixed');
+  assert.equal(byFile['b.js'].fixed, false, 'blocking but still present (same file + class) → not fixed');
+  assert.equal(byFile['c.js'].fixed, false, 'non-blocking findings are never fixed (the asymmetry engine: workflow shows)');
+  assert.equal(byFile['d.js'].fixed, false, 'a finding new in the re-verify is appended unfixed');
+  assert.equal(out.length, 4);
+  for (const e of out) {
+    assert.deepEqual(Object.keys(e).sort(), ['class', 'file', 'fixed', 'severity', 'title']);
+    assert.match(e.class, new RegExp(FINDING_CLASS_PATTERN));
+  }
+  // must-not-fire: no fix loop → nothing is fixed
+  assert.ok(markWorkflowFixed(before, null).every((e) => e.fixed === false));
+  assert.deepEqual(markWorkflowFixed(null, null), []);
+  // a different repo reporting the same defect does not count as still present
+  const other = dedupeAndRank({ s: [fset('correctness', [classed('Critical', 'a.js', 'null deref', 'unchecked-null-return')])] });
+  assert.equal(markWorkflowFixed(before, other).find((e) => e.file === 'a.js' && e.fixed !== undefined).fixed, true);
+});
+
+test('verifyEntry keeps a set-checked lessonId and drops everything else', () => {
+  const e = verifyEntry({ ...classed('Major', 'a.js', 't', 'x-y'), lessonId: 'LESSON-404', dimensions: ['quality'], repo: 'r' }, true);
+  assert.deepEqual(e, { severity: 'Major', file: 'a.js', title: 't', class: 'x-y', fixed: true, lessonId: 'LESSON-404' });
+  assert.equal(verifyEntry({ severity: 'Nit' }, 'yes').fixed, false, 'only a real true is fixed');
+});
+
+test('runOutcomeArgs: TERMINAL.state verbatim, the raw reason made shell-inert (REQ-648 BR-5)', () => {
+  for (const state of ['merged', 'pr-ready', 'blocked', 'failed']) {
+    assert.equal(runOutcomeArgs({ state, id: 'REQ-1' }).terminal, state);
+  }
+  assert.deepEqual(runOutcomeArgs(blocked('REQ-1', 'spec-validation', { reason: 'x' })), { terminal: 'blocked', reason: 'spec-validation' });
+  assert.equal(runOutcomeArgs({ state: 'blocked', detail: { reason: 'merge conflict — the PR could not be merged cleanly' } }).reason,
+    'merge conflict the PR could not be merged cleanly');
+  const hostile = runOutcomeArgs({ state: 'failed', reason: "x'; rm -rf / #`$(id)`" }).reason;
+  assert.doesNotMatch(hostile, /['`$;#]/);
+  assert.equal(runOutcomeArgs({ state: 'failed', reason: 'a'.repeat(500) }).reason.length, 120);
+  assert.equal(runOutcomeArgs({ state: 'merged' }).reason, '');
+});
+
+test('the run-outcome leaves are wired after the close-out pass and never read args (REQ-648 BR-2)', () => {
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'adlc-sprint.workflow.js'), 'utf8');
+  const closeOut = src.indexOf('const closed = await closeOutMerged(healed, todo);');
+  const emit = src.indexOf('await emitRunOutcomes(closed);');
+  const ret = src.indexOf('return { results: closed };');
+  assert.ok(closeOut >= 0 && closeOut < emit && emit < ret, 'emit runs after closeOutMerged and before the return');
+  for (const name of ['runOutcomeFenceLines', 'runOutcomeStateLine', 'validateAttemptLines', 'verifyStatePrompt', 'emitRunOutcomePrompt', 'emitRunOutcomes', 'recordVerify']) {
+    const at = src.indexOf(`function ${name}(`);
+    assert.ok(at >= 0, `${name} is defined`);
+    const body = src.slice(at, src.indexOf('\n}\n', at));
+    assert.doesNotMatch(body, /\bargs\.|\bans\b|answers/, `${name} must not depend on the resume answers`);
+  }
+  assert.equal((src.match(/await recordVerify\(/g) || []).length, 2, 'consolidation and re-verify each record verify');
+  assert.match(src, /phase: 1, \/\/ REQ-648 validateAttempts\.phase1/);
+  assert.match(src, /phase: 3, \/\/ REQ-648 validateAttempts\.phase3/);
+  assert.match(src, /'class \(REQUIRED, REQ-648/, 'reviewPrompt asks for the class');
 });

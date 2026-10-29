@@ -219,6 +219,24 @@ is cut per `RELEASING.md`.
   names its kind with `# adlc-home: claude-code`, `alias` or `default`, and an
   unknown kind is a finding. `session-transcript.sh` now names Claude Code's
   `~/.claude/projects` once, marked.
+- **Per-run outcome telemetry (REQ-648).** Every pipeline terminal appends one flat
+  JSON line to `~/Library/Logs/adlc-run-outcomes.log` (`$ADLC_RUN_OUTCOMES_LOG`,
+  mode 0600), a separate file from the delegation log. The line is built by
+  `tools/delegate/run_outcome.py` from `pipeline-state.json`, not from the model's
+  memory: the toolkit version and sha recorded at Step 0, the validation retries,
+  the Phase-5 findings by severity and by class, the lessons acknowledged and
+  written, and the elapsed time. The pipeline records four new optional state
+  keys to make that possible (`harness`, `validateAttempts`, `verify`,
+  `lessonsWritten`), and `adlc_lessons ack-check --record` adds
+  `lessons.acknowledged`. Every reviewer agent now gives each finding a `class`,
+  a kebab-case name for the defect pattern, and maps High/Medium/Low onto
+  Major/Minor/Nit. `/sprint`'s summary gains a **Recurrence** section from
+  `tools/delegate/check-run-outcomes.sh --recurrence`, which separates a class seen
+  in two or more of the sprint's REQs (a harness property) from one seen once, and
+  `/analyze` gains Step 1.10, `harness-fidelity`, grouped by toolkit version. The
+  workflow engine's `FINDINGS` schema requires `class`, and the engine writes
+  `verify` and emits its line through new leaves. The emitter never blocks a
+  pipeline: `emit-run-outcome.sh` always exits 0.
 - **A Hugging Face dataset of the toolkit's own ADLC artifacts (REQ-671).**
   `tools/dataset/export.py` exports `.adlc/` at one commit on `main` as
   `data/train.jsonl`, a dataset card and `revision.json`. It reads git objects, never

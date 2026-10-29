@@ -105,6 +105,8 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
 
 5. **Orchestrator `blocker-cleared` auto-resume (REQ-485 BR-8 — primary engine per OQ-1 default).** A REQ held by a Phase-8 trial-merge conflict against an ahead REQ is **not** resumed by a user reply — it is resumed by the **orchestrator** once it merges that blocker *within the run*. This is a distinct resume channel from `args.answers` (a user answer): the script threads an orchestrator-generated `blocker-cleared` signal for the held REQ. The held workflow REQ does NOT self-resume — it already returned `{state:'blocked'}` and the post-merge unblock pass (in `adlc-sprint.workflow.js`) drives its resume by relaunching the SAME script via `resumeFromRunId` carrying the cleared signal in `args` (e.g. `args.blockerCleared[<held-REQ-id>] = <blocker-id>`, parallel to `args.answers`). Like `args.answers`, the signal is injected **surgically** — only into the held REQ's Phase-8 / halt-prone path — so every untouched and already-`merged` REQ replays byte-identical from the journal cache (no recreated worktree, no double-merge). The unblock pass rebases the held REQ's own worktree first; a clean rebase resumes it (it re-runs the now-passing trial-merge gate and merges, clearing its `blockers` entry — BR-11), a conflicting rebase aborts non-mutatingly and re-halts `{state:'blocked'}` with the materialized conflict files (BR-4), retry-bounded (BR-10). Held REQs on one blocker resume in REQ-483's deterministic order, one at a time (BR-6). See the "Self-healing serialization" section below for the cross-engine behavior contract.
 
+6. **Summarise the sprint (REQ-648 BR-7).** When no REQ is left waiting on a reply, produce the summary from the final `{results}`: the Completed and Blocked tables and the Close-out table of Step 6's template, and its **Recurrence** section, built by the fence there over this run's REQ list. The engine already emitted one run-outcome line per REQ after its close-out pass, so the script has its input.
+
 **Else (the engine is `legacy`)** — run Steps 1–6 below exactly as written. This is the existing background-`pipeline-runner` orchestration, unchanged.
 
 ### Step 1: Identify Sprint REQs
@@ -249,6 +251,15 @@ The sequential flow when the orchestrator is the merge actor (cross-repo, or sin
    - Run `/wrapup REQ-xxx --close-out` with `WORKTREE PATH (mandatory): <repo-root>/.worktrees/REQ-xxx-close-out`, handing it the runner's final report (its Phase-5 findings, task list, PR URLs, and its `Lane:` line with every `lane.escalations` entry) as the run evidence. The mode writes the five-field terminal record plus `closeOut:{status:"ok"}` to the **primary repo path's** `pipeline-state.json`, captures knowledge, and commits + squash-merges its own `chore(REQ-xxx): close-out` PR. With no run evidence it records `NO_ENTRY: close-out had no run evidence` rather than inventing a lesson.
    - Remove the close-out worktree and the REQ's feature worktree(s) by the absolute paths recorded in state; `git fetch --prune`.
    - If the close-out fails, write `closeOut:{status:"failed", reason:"<why>"}` into the same state file, surface `close-out: failed — <why>` in the dashboard and summary, and move on — the merge stands.
+   - **Emit the run-outcome line (REQ-648 BR-2).** You performed the merge, so the `merged` line is yours: the runner's last line for this REQ said `pr-ready` (or claimed a merge that verification showed did not happen), and readers keep the latest line per REQ. Run it whether the close-out succeeded or failed; `<state>` is the primary repo path's `pipeline-state.json`.
+
+     **Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+     ```sh
+     ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+     if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+     "$DELEGATE_TOOLS"/emit-run-outcome.sh --state "<state>" --terminal merged --engine legacy
+     ```
 4. Move on — other pipelines keep running in the background
 
 **Post-merge unblock pass (REQ-485 — self-healing serialization).** REQ-483 holds a REQ with a `blocked` terminal when its pre-merge trial-merge conflicts (rc=1) against an ahead REQ. Today that held REQ is surfaced for a human to rebase + resume. For an unattended `/sprint` batch, **immediately after the orchestrator confirms REQ-A merged** (the merge above landed AND `repos[A].merged = true` was written), run an unblock pass so the batch self-heals — in place of parking the held REQ for a human:
@@ -288,7 +299,29 @@ Batch mode is the exception, not the rule. If you're uncertain whether diffs ove
 
 ### Step 6: Sprint Summary
 
-After all pipelines complete (or are stopped), produce a sprint summary:
+After all pipelines complete (or are stopped), produce a sprint summary.
+
+**Recurrence (REQ-648 BR-7) is computed by a script, never recalled.** Run the
+reader over this sprint's REQ list, every REQ you dispatched, whatever its
+terminal. The list is the denominator, so a REQ whose run crashed before it
+could emit is a `no-record` row rather than a silently smaller batch:
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+if [ -x "$DELEGATE_TOOLS"/check-run-outcomes.sh ]; then
+  "$DELEGATE_TOOLS"/check-run-outcomes.sh --recurrence --reqs "<REQ-a,REQ-b,...>"
+else
+  echo "recurrence unavailable: check-run-outcomes.sh not installed"
+fi
+```
+
+Each row is `<class>\t<k>\t<N>\t<tier>`, then `<REQ>\tno-record`. Render the
+rows under three headings, keeping the tier label (`lesson`, `reviewer`,
+`title-slug`): `k ≥ 2` under **harness property — consider a skill/lint/partial
+change**, `k = 1` under **single occurrence — lesson at most (confidence:
+low)**, and the `no-record` rows under **No record**. A failure or an empty
+output is one line in the section, never a reason to write the rows yourself.
 
 ```
 ## Sprint Summary — [date]
@@ -309,6 +342,17 @@ After all pipelines complete (or are stopped), produce a sprint summary:
 - LESSON-049: [title from REQ-091 wrapup]
 - LESSON-050: [title from REQ-093 wrapup]
 - REQ-094: NO_ENTRY: close-out had no run evidence
+
+### Recurrence
+**harness property — consider a skill/lint/partial change**
+- LESSON-390 — 2 of 3 REQs (lesson)
+- cross-fence-shell-state — 2 of 3 REQs (reviewer)
+
+**single occurrence — lesson at most (confidence: low)**
+- title-slug:unquoted-variable-in-fence — 1 of 3 (title-slug)
+
+**No record**
+- REQ-094
 
 ### Close-out
 | REQ | Close-out | Detail |

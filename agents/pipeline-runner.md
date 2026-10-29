@@ -145,6 +145,24 @@ Your final report MUST lead with **exactly one** terminal-state tag from the tab
 
 Format your report's first line as: `Terminal state: <tag>` followed by the standard report body.
 
+**Emit the run-outcome line before you report (REQ-648 BR-2).** You are the
+emitting actor for your own terminal, whichever tag it is: `merged` after your
+Step 8b close-out, `pr-ready` after the Step 8c note, `blocked` with the halt's
+token, `failed` with `setup-error`, `no-worktree` or `no-pr`. Use engine
+`legacy`. `<state>` is the primary-path `pipeline-state.json`; it outlives your
+worktree. Record `harness` at Step 0, each validation attempt, and the Phase-5
+findings exactly as `/proceed`'s **Run-outcome telemetry** section says: in
+subagent mode those records are yours to write too. The wrapper always exits
+0, so it cannot change your terminal.
+
+**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+"$DELEGATE_TOOLS"/emit-run-outcome.sh --state "<state>" --terminal <merged|pr-ready|blocked|failed> --engine legacy --reason "<token, or empty>"
+```
+
 ## Blocker Handling
 
 **Before declaring `blocked` for a missing/absent artifact** (spec not found, "no REQ directory", expected file absent), you MUST first `git fetch origin` and re-check against `origin/<integration-branch>` (the integration branch resolved in `/proceed` Phase 0 step 4 — `branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`; read it back from `pipeline-state.json`'s `integrationBranch`, never re-derive it as `main`). A stale local ref produces a false "no spec exists" negative (LESSON-036 — this exact false-block cost an orchestrator recovery cycle in the REQ-442/443/444 sprint). Only after a fresh fetch confirms the artifact is genuinely absent on the integration branch may you proceed to the blocked steps below.

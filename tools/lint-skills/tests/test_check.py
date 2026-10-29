@@ -1951,6 +1951,42 @@ def test_harness_skip_fires(tmp_path, fixture):
     assert hs[0].startswith(f"{fixture}/SKILL.md:{opening}: harness-skip:"), hs[0]
 
 
+def test_harness_skip_run_outcome_fires(tmp_path):
+    """REQ-648 BR-3 / AC-12: a fence invoking emit-run-outcome.sh without the
+    BUG-228 line draws exactly one `harness-skip` finding on its opening line,
+    in a SKILL.md and in a /proceed companion phase file alike."""
+    fixture = "harness-skip-run-outcome-missing"
+    lines = (FIXTURES / f"{fixture}.md").read_text().splitlines()
+    call = next(i for i, ln in enumerate(lines) if "emit-run-outcome.sh" in ln and not ln.startswith("#"))
+    opening = max(i for i in range(call) if lines[i].startswith("```sh")) + 1
+    skill_root = tmp_path / "skill"
+    skill_root.mkdir()
+    result = _run(_stage(skill_root, fixture))
+    hs = [ln for ln in result.stdout.splitlines() if " harness-skip:" in ln]
+    assert len(hs) == 1, result.stdout
+    assert hs[0].startswith(f"{fixture}/SKILL.md:{opening}: harness-skip: run-outcome fence"), hs[0]
+    (tmp_path / "phase").mkdir()
+    root = _stage_phase(tmp_path / "phase", fixture, dest_name="phases-6-8-ship.md")
+    (root / "ok").mkdir()
+    shutil.copyfile(FIXTURES / "harness-skip-ok.md", root / "ok" / "SKILL.md")  # keep scanned > 0
+    phase = [ln for ln in _run(root).stdout.splitlines() if " harness-skip:" in ln]
+    assert phase == [ln for ln in phase if ln.startswith(f"proceed/phases-6-8-ship.md:{opening}:")]
+    assert len(phase) == 1, phase
+
+
+def test_harness_skip_run_outcome_clean(tmp_path):
+    """Must-not-fire: the line present, a commented-out mention, and — in a
+    companion phase file — a delegation-gate fence, which that walk leaves to
+    the SKILL.md check (REQ-648 scopes the extra walks to run-outcome fences)."""
+    root = _stage(tmp_path, "harness-skip-run-outcome-ok")
+    result = _run(root)
+    assert " harness-skip:" not in result.stdout, result.stdout
+    assert result.returncode == 0, result.stdout
+    _stage_phase(tmp_path, "harness-skip-missing", dest_name="phases-1-3-validation.md")
+    result = _run(root)
+    assert " harness-skip:" not in result.stdout, result.stdout
+
+
 def test_provenance_safe_fence_clean(tmp_path):
     """BUG-230: a marked fence inside the grammar (placeholders allowed) and an
     unmarked fence full of shell syntax draw no `provenance-safe-fence` finding."""

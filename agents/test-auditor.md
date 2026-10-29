@@ -77,17 +77,17 @@ Run `npm test -- --coverage` (or equivalent) if applicable to get coverage data.
 ## Testing Audit
 
 ### Coverage Gaps
-- **Source**: `path/to/file.js` — no test file found
-- **Source**: `path/to/file.js:functionName` — not tested
+- **Source**: `path/to/file.js` — no test file found (class: `untested-new-module`)
+- **Source**: `path/to/file.js:functionName` — not tested (class: `untested-error-path`)
 
 ### Mock Issues
-- **Mock**: `__mocks__/module.js` — missing export `newFunction`
+- **Mock**: `__mocks__/module.js` — missing export `newFunction` (class: `incomplete-mock-export`)
 
 ### Quality Issues
-- **Test**: `path/to/test.js:42` — [description of quality issue]
+- **Test**: `path/to/test.js:42` — [description of quality issue] (class: [defect pattern])
 
 ### Determinism Issues
-- **Test**: `path/to/test.js:78` — [description of flakiness risk]
+- **Test**: `path/to/test.js:78` — [description of flakiness risk] (class: [defect pattern])
 
 ### Coverage Summary
 **Test discovery scope** (REQUIRED — list every directory pattern scanned so consumers can sanity-check the methodology):
@@ -108,3 +108,7 @@ Run `npm test -- --coverage` (or equivalent) if applicable to get coverage data.
 - Quality issues: N
 - Determinism risks: N
 ```
+
+<!-- finding-class -->
+**Finding class and severity (REQ-648).** Every finding names its defect *class*: a `**Class**:` line in a multi-line finding, a `class: <name>` token in a one-line one. The class names the defect **pattern**, not this instance: lowercase kebab-case, one to six words, matching `^[a-z0-9]+(-[a-z0-9]+){0,5}$` (for example `unanchored-marker-regex`, `cross-fence-shell-state`). When the finding matches a lesson you were given, also cite that lesson's id; consolidation then uses the id as the class. When a pattern you already classed in this run appears again, reuse that class exactly, because the sprint's Recurrence report counts exact equality and two spellings of one defect read as two defects. Severity is Critical, Major, Minor or Nit; a scale with other names maps on the way out: High → Major, Medium → Minor, Low → Nit, Critical unchanged, and a test-coverage gap with no other severity is Major.
+<!-- /finding-class -->
