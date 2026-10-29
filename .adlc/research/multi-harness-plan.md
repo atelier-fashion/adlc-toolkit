@@ -397,6 +397,12 @@ carries it.
 
 ## 6. Verify on real installs before writing the specs
 
+Each item is now a scripted probe (REQ-664): `adlc harness probe <harness>`
+writes `.adlc/research/harness-probes/<harness>.json`, and the gated REQs cite
+that file. The *Probe* line under each item names the probe id, or the reason
+the item is not probed. `tools/adlc/README.md` "adlc harness probe" has the
+catalogue.
+
 1. **Codex git writes.** (a) In a main checkout under `workspace-write` with
    an `allow` `prefix_rule` for `git commit`: does it run unprompted under
    `on-request`, interactive and in `codex exec`? (b) In a **linked worktree**,
@@ -404,35 +410,54 @@ carries it.
    work with `writable_roots` set to the repo, given the documented
    `<writable_root>/.git` read-only rule? Decides P3 autonomy and P6's
    working-copy strategy for Codex.
+   *Probe:* (a) `git-write-main`, headless half only — the interactive half is
+   REQ-655's own experiment; (b) `git-write-worktree`, sub-variants
+   `root-is-worktree` and `writable-roots-repo` on codex.
 2. **Copilot committed allowlist**: anything beyond `allowed-tools:` in
    SKILL.md and the user-level `permissions-config.json`?
+   *Probe:* not probed — a documentation question, no experiment decides it.
 3. **Cursor headless deny**: without `--force`, does `agent -p` honour
    `.cursor/cli.json` `allow` for the routine tier and `deny` for the ask
    tier, and what exit/state results from a denied command?
+   *Probe:* `ask-tier-deny` (deny half, all five harnesses) and `git-write-main`
+   (routine-allow half).
 4. **Gemini skill activation headless**: does `activate_skill` get
    auto-approved under `tools.allowed` without `--yolo`? (Matters for
    interactive use; the exec engine does not depend on it.)
+   *Probe:* `skill-activation` (gemini).
 5. **Gemini/Antigravity**: which of skills, hooks, subagents, extensions
    Antigravity CLI kept, and its directory names.
+   *Probe:* not probed — a product-scope survey; it stays REQ-658's.
 6. **Shell timeouts** per harness vs the ≥120 s `adlc-read` needs.
+   *Probe:* `shell-timeout`.
 7. **Skill discovery with the clone root mounted** at `~/.agents/skills`:
    confirm Codex, Gemini and Cursor ignore non-skill directories; otherwise
    point that one symlink at a generated skills-only view.
+   *Probe:* not probed — answered structurally by REQ-654's skills-only view, so
+   no harness ever sees the clone root.
 8. **Hooks in headless mode after per-run trust**, on each harness: does the
    `sessionStart` context reach the model, and does writing trust into the
    user config (Codex, Gemini) take effect for a `-p` run started immediately
    after?
+   *Probe:* `trust-then-headless` (trust + load) and `session-start-context`
+   (injection).
 9. **Transcript fixtures**: one real session file from Codex and Copilot.
+   *Probe:* `transcript-locate`, which also writes `fixtures/<harness>.jsonl`.
 10. **Claude `$N` substitution** (M3): confirm with a throwaway skill that
     `$1` inside a fence is substituted when the body has no `$ARGUMENTS`. The
     dodges stay regardless; this only decides whether the lint can ever be
     narrowed.
+    *Probe:* `arg-substitution` (claude).
 11. **Allowlist vs fences**: on each harness, hand a partial-sourcing fence to
     the routine-tier allowlist and record whether it prompts; this fixes the
     "broad entry" each renderer must emit.
+    *Probe:* `fence-vs-allowlist`, sub-variants `routine-only`, `broad-sh` and
+    `broad-first-token`.
 12. **Stdin prompt delivery** per harness in headless mode: that a multi-hundred-line
     prompt on stdin is accepted whole, and which flag combination (with or
     without `-p`) makes it the task rather than attached context.
+    *Probe:* `stdin-prompt`, sub-variants `with-prompt-flag` and
+    `without-prompt-flag`.
 
 ---
 

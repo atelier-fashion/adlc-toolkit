@@ -17,3 +17,7 @@
 
 # pytest cache (a stale one has tripped the brand scan)
 .pytest_cache/
+
+# Python bytecode (a tracked .pyc slipped into a REQ-664 commit)
+__pycache__/
+*.pyc
