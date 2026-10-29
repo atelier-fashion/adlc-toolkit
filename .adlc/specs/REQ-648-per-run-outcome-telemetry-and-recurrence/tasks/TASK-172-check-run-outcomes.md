@@ -1,7 +1,7 @@
 ---
 id: TASK-172
 title: "check-run-outcomes.sh: the Recurrence and harness-fidelity reader"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
