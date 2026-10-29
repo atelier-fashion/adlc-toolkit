@@ -92,7 +92,7 @@ whenever nobody read the warning.
 
 Worth stating precisely, because the temptation is to inflate it: a survey of the
 toolkit and all four consumer repos found **no orphaned branch actually
-attributable to this bug** — the `promote/*` branches in atelier-fashion are
+attributable to this bug** — the `promote/*` branches in `atelier-fashion` are
 deliberate REQ-380 snapshots. The claim is "this cost a manual step on every
 worktree merge and could have leaked," not "this had already made a mess." That
 is why it was filed `medium` and not `high`.

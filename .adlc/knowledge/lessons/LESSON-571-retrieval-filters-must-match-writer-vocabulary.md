@@ -15,7 +15,7 @@ updated: 2026-08-27
 
 REQ-258 shipped `/spec`'s unified tag-based retriever. Its spec-corpus filter
 admitted frontmatter `status` in `approved` | `in-progress` | `deployed` — a
-phrase carried over from atelier-fashion's style RAG, written as a design-time
+phrase carried over from `atelier-fashion`'s style RAG, written as a design-time
 description of "what counts as usable prior art."
 
 Nobody enumerated what the toolkit's own skills actually write into that field:

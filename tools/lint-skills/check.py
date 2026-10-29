@@ -155,7 +155,9 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
     ``adlc_delegate_gate_check`` needs ``HARNESS_SKIP_LITERAL`` on a prose line
     within ``HARNESS_SKIP_WINDOW`` lines above it (BUG-228), telling a
     provenance-classifying harness (Teton Code) to skip the step's shell
-    rather than pin the session on an unclassifiable command.
+    rather than pin the session on an unclassifiable command. A fence that
+    invokes ``emit-run-outcome.sh`` owes the same line (REQ-648 BR-3); that
+    half also walks ``agents/*.md`` and ``proceed/phase*.md``.
 11. ``check_provenance_safe_fence`` — a shell fence whose first body line is
     ``# provenance-safe`` keeps every line inside the grammar such a harness
     can prove in reach: no unmodelled character, no ``=``, no program named by
@@ -505,6 +507,10 @@ FORGE_DIRECT_GH_RE = re.compile(
 HARNESS_SKIP_LITERAL = "**Provenance-classifying harness (BUG-228):**"
 HARNESS_SKIP_WINDOW = 30
 HARNESS_SKIP_GATE_RE = re.compile(r"^\s*adlc_delegate_gate_check\b")
+# REQ-648 BR-3: the run-outcome fences run a helper by path too
+# (`"$DELEGATE_TOOLS"/emit-run-outcome.sh`), which pins such a harness the same
+# way, so they owe the same line. Matched anywhere on a non-comment fence line.
+HARNESS_SKIP_RUN_OUTCOME_RE = re.compile(r"emit-run-outcome\.sh\b")
 
 # BUG-230: a shell fence whose first body line is this marker is one a
 # provenance-classifying harness (Teton Code) must be able to prove in reach, so
@@ -1828,7 +1834,7 @@ def _harness_line_above(lines: list[str], fence_lines: set[int], opening: int) -
     )
 
 
-def check_harness_skip(text: str, rel: str) -> list[Finding]:
+def check_harness_skip(text: str, rel: str, gate: bool = True) -> list[Finding]:
     """BUG-228: every delegating step tells a provenance-classifying harness to skip it.
 
     No spelling of a delegating step's shell passes Teton Code's REQ-614/619
@@ -1843,29 +1849,36 @@ def check_harness_skip(text: str, rel: str) -> list[Finding]:
     ``HARNESS_SKIP_LITERAL`` on a **prose** line within ``HARNESS_SKIP_WINDOW``
     lines above its opening. A copy inside a fence is not read as an
     instruction and does not count, and a commented-out gate call is not a call.
+
+    REQ-648 BR-3: so must every fence that invokes ``emit-run-outcome.sh``,
+    whose step then replies ``run-outcome skipped: provenance-classifying
+    harness`` instead. ``gate=False`` checks only that second kind: the
+    ``agents/*.md`` and ``proceed/phase*.md`` walks carry run-outcome fences,
+    and the delegation gate's own documentation there is out of this check's
+    scope.
     """
     fences = list(_iter_fences(text))
     fence_lines = _shell_fence_line_numbers(fences)
-    gate_fences = [
-        body_start - 1
-        for _lang, _idx, body_start, body in fences
-        if any(
-            HARNESS_SKIP_GATE_RE.match(line)
-            for _, line in body
-            if not line.lstrip().startswith("#")
-        )
-    ]
     lines = text.splitlines()
     findings: list[Finding] = []
-    for opening in gate_fences:
+    for _lang, _idx, body_start, body in fences:
+        calls = [line for _, line in body if not line.lstrip().startswith("#")]
+        opening = body_start - 1
+        if gate and any(HARNESS_SKIP_GATE_RE.match(line) for line in calls):
+            kind = ("delegation-gate fence", "the step's 'Before the gate check' block (see "
+                    "partials/delegate-gate.md)")
+        elif any(HARNESS_SKIP_RUN_OUTCOME_RE.search(line) for line in calls):
+            kind = ("run-outcome fence", "the fence, telling the step to reply 'run-outcome "
+                    "skipped: provenance-classifying harness' (REQ-648 BR-3)")
+        else:
+            continue
         if not _harness_line_above(lines, fence_lines, opening):
             findings.append(
                 Finding(
                     rel, opening, "harness-skip",
-                    "delegation-gate fence without the provenance-classifying "
-                    "harness line in the %d lines above it — add '%s' before the "
-                    "step's 'Before the gate check' block (see "
-                    "partials/delegate-gate.md)" % (HARNESS_SKIP_WINDOW, HARNESS_SKIP_LITERAL),
+                    "%s without the provenance-classifying harness line in the %d "
+                    "lines above it — add '%s' before %s"
+                    % (kind[0], HARNESS_SKIP_WINDOW, HARNESS_SKIP_LITERAL, kind[1]),
                 )
             )
     return findings
@@ -3954,6 +3967,8 @@ def run(root: Path) -> tuple[list[Finding], int]:
             continue
         findings.extend(check_read_bin_fallback(agent_text, agent_rel))
         findings.extend(check_unguarded_source(agent_text, agent_rel))
+        # REQ-648 BR-3: pipeline-runner's terminal emit is a run-outcome fence.
+        findings.extend(check_harness_skip(agent_text, agent_rel, gate=False))
         # REQ-669 ADR-1: the root line is owed wherever a fence reads the root.
         findings.extend(check_toolkit_root_line(agent_text, agent_rel))
     # REQ-610 ADR-3: a third separate walk, `find_phase_files`: `proceed/phase*.md`
@@ -3972,6 +3987,8 @@ def run(root: Path) -> tuple[list[Finding], int]:
             continue
         findings.extend(check_unguarded_source(phase_text, phase_rel))
         findings.extend(check_toolkit_root_line(phase_text, phase_rel))
+        # REQ-648 BR-3: the companions' Phase 1/3/5/8 run-outcome fences.
+        findings.extend(check_harness_skip(phase_text, phase_rel, gate=False))
         # REQ-669 ADR-6: /proceed's Phase 4 and lite Phase 5 dispatch steps live
         # in its companion files, and a partials/*.md companion doc can carry a
         # dispatch step too, so the sentence is owed in both (conventions.md

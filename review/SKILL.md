@@ -62,13 +62,17 @@ Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin i
 4. **test-auditor** agent — same inputs. Focus: test coverage gaps for the changed code, mock completeness, edge case coverage, test isolation, determinism. Tell it: "Audit test coverage only for the diff under review. Report findings only. Do not apply fixes."
 5. **security-auditor** agent — same inputs. Focus: input validation, authentication/authorization gaps, data exposure (PII, secrets), injection risks, dependency issues, rate limiting. Tell it: "Audit security posture only for the diff under review. Report findings only. Do not apply fixes."
 
-Each agent returns structured findings with severity (Critical/Major/Minor/Nit), file path, line number, and suggested fix.
+Each agent returns structured findings with severity (Critical/Major/Minor/Nit), file path, line number, class, and suggested fix. The class and the severity vocabulary are defined once, here; every reviewer agent carries this block byte for byte, and `tools/delegate/tests/test_run_outcome_docs.py` fails when a copy drifts:
+
+<!-- finding-class -->
+**Finding class and severity (REQ-648).** Every finding names its defect *class*: a `**Class**:` line in a multi-line finding, a `class: <name>` token in a one-line one. The class names the defect **pattern**, not this instance: lowercase kebab-case, one to six words, matching `^[a-z0-9]+(-[a-z0-9]+){0,5}$` (for example `unanchored-marker-regex`, `cross-fence-shell-state`). When the finding matches a lesson you were given, also cite that lesson's id; consolidation then uses the id as the class. When a pattern you already classed in this run appears again, reuse that class exactly, because the sprint's Recurrence report counts exact equality and two spellings of one defect read as two defects. Severity is Critical, Major, Minor or Nit; a scale with other names maps on the way out: High → Major, Medium → Minor, Low → Nit, Critical unchanged, and a test-coverage gap with no other severity is Major.
+<!-- /finding-class -->
 
 **Gate rule** (mirrors `llm-review.yml`): if ANY agent reports a `Critical` finding, the review gate FAILS and the changes are not ready to merge. Fix critical findings before proceeding to push. Major findings should typically be fixed before merge but can be escalated to the user for judgment calls.
 
 ### Step 4: Consolidate Findings
 1. Collect results from all 5 agents
-2. Deduplicate overlapping findings
+2. Deduplicate overlapping findings, keeping each survivor's class: when two agents raised one defect under two classes, keep the first, and when a finding matches one of the loaded lessons, its class is that lesson's id (REQ-648 BR-6)
 3. Categorize by severity:
    - **Critical**: Must fix before merge (bugs, security, data loss, test gaps that hide regressions)
    - **Major**: Should fix before merge (convention violations, missing tests, architectural smells)

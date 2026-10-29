@@ -240,6 +240,41 @@ is cut per `RELEASING.md`.
   `tools/adlc/README.md` states both. `claude.json` holds the first live run.
   `tools/lint-skills`' `toolkit-path` check exempts, byte for byte, the probe's one
   line naming the throwaway repo's `.claude/skills`.
+- **Per-run outcome telemetry (REQ-648).** Every pipeline terminal appends one flat
+  JSON line to `~/Library/Logs/adlc-run-outcomes.log` (`$ADLC_RUN_OUTCOMES_LOG`,
+  mode 0600), a separate file from the delegation log. The line is built by
+  `tools/delegate/run_outcome.py` from `pipeline-state.json`, not from the model's
+  memory: the toolkit version and sha recorded at Step 0, the validation retries,
+  the Phase-5 findings by severity and by class, the lessons acknowledged and
+  written, and the elapsed time. The pipeline records four new optional state
+  keys to make that possible (`harness`, `validateAttempts`, `verify`,
+  `lessonsWritten`), and `adlc_lessons ack-check --record` adds
+  `lessons.acknowledged`. Every reviewer agent now gives each finding a `class`,
+  a kebab-case name for the defect pattern, and maps High/Medium/Low onto
+  Major/Minor/Nit. `/sprint`'s summary gains a **Recurrence** section from
+  `tools/delegate/check-run-outcomes.sh --recurrence`, which separates a class seen
+  in two or more of the sprint's REQs (a harness property) from one seen once, and
+  `/analyze` gains Step 1.10, `harness-fidelity`, grouped by toolkit version. The
+  workflow engine's `FINDINGS` schema requires `class`, and the engine writes
+  `verify` and emits its line through new leaves. The emitter never blocks a
+  pipeline: `emit-run-outcome.sh` always exits 0.
+- **A Hugging Face dataset of the toolkit's own ADLC artifacts (REQ-671).**
+  `tools/dataset/export.py` exports `.adlc/` at one commit on `main` as
+  `data/train.jsonl`, a dataset card and `revision.json`. It reads git objects, never
+  the working tree (the DenyList included), and two exports of one commit are
+  byte-identical. Every line is scrubbed for credentials, home paths, email addresses,
+  private repo names and URLs, and the maintainer's name. The export refuses when the
+  files scanned differ from `git ls-tree` for any kind, when a path under `.adlc/` is
+  neither a kind nor a named exclusion, or when a residue pass, written independently of
+  the scrub, finds anything in the output. A local report lists every finding.
+  `tools/dataset/publish.py` is the separate maintainer step: it needs a terminal,
+  checks that the commit is on `main`, re-runs the residue pass, re-exports the commit
+  and requires a byte-identical match, and asks for the repo id to be typed before it
+  commits the checked bytes and tags `v<version>-<sha12>`. The Hub client is pinned in `tools/dataset/requirements.txt`
+  and imported only inside `publish.py`. `tools/adlc/credential_redact.py` holds the
+  credential chains of `partials/intake.sh` and `partials/lesson-check.sh`, pinned to
+  them by a test. The companion article's draft and number script are in
+  `tools/dataset/article/` and `tools/dataset/article_numbers.py`.
 
 ### Changed
 

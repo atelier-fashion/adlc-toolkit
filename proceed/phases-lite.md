@@ -183,14 +183,19 @@ none can be counted as a ghost-skip.
      a contract change). Go through **Escalation** with trigger `implementer` and
      the reviewer's finding as the detail (BR-9). Never "fix" such a finding by
      dropping what the acceptance criteria asked for.
-4. **Fix in one pass**, as Phase 5 Step C does: Critical and must-fix Major
+4. **Record the findings (REQ-648 BR-4)** before fixing: `proceed/SKILL.md`
+   **Run-outcome telemetry** R3 with `--loops 0` and one entry per finding in
+   the review's `findings:` section (its severity, `file`, a short title, and its
+   `class:` token), each `fixed: false`. After step 5's fixes land, run R3 again
+   with `fixed: true` on each finding fixed, and `--loops 1` if the review re-ran.
+5. **Fix in one pass**, as Phase 5 Step C does: Critical and must-fix Major
    findings immediately, should-fix Minor unless it is a significant refactor,
    trivial nits inline. A coverage row marked `unmet` or `partial` is a
    must-fix finding. Commit as `fix(<scope>): address lite review finding
    [REQ-xxx]`, re-run the gates, and push. If a Critical finding was fixed, re-run the
    review once over the fixed diff. A non-empty `questions:` section (a question
    only the operator can answer) is legitimate halt #2, as for the reflector.
-5. **Lane check (BR-6, AC-16)**, on the diff as it stands after the fixes are
+6. **Lane check (BR-6, AC-16)**, on the diff as it stands after the fixes are
    committed and pushed: the tree must be clean (an untracked build artifact is
    an error, so commit or remove it) and `HEAD` must equal `origin/<branch>`.
    See **The lane check** below.

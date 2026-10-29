@@ -122,6 +122,7 @@ Standalone command-line utilities (not skills). See:
 
 - [`tools/adlc/`](tools/adlc/README.md) — the `adlc` umbrella CLI. Its first subcommand, `adlc doctor`, is a read-only health check that diagnoses every install dependency and prints a copy-pasteable fix for each failure. On the plugin route the SessionStart hook puts [`scripts/adlc`](scripts/adlc) on the session's PATH; on the symlink route the root [`install.sh`](#symlink-install) writes `~/bin/adlc`.
 - [`tools/delegate/`](tools/delegate/README.md) — provider-agnostic delegation CLIs (`adlc-read`, `adlc-write`, `extract-chat`) for offloading token-heavy I/O. **Off by default.** Symlink route only: opt in with `./install.sh --with-delegation`.
+- [`tools/dataset/`](tools/dataset/README.md) — Dataset export. A maintainer tool that exports this repo's own `.adlc/` artifacts, scrubbed, as a Hugging Face dataset. Publishing is a separate step the maintainer runs after reading the export's report.
 
 ## How it works
 

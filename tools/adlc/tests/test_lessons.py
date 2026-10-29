@@ -13,6 +13,7 @@ Three groups:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -375,6 +376,58 @@ def test_ack_check_cli_reads_trailers(tmp_path):
     mismatched = _run("ack-check", "--state", state, "--root", root, "--worktree", root,
                       "--worktree", other, "--base", "main", "--base", "main", "--base", "main")
     assert mismatched.returncode == 2
+
+
+def _acked_repo(tmp_path):
+    root = str(tmp_path)
+    _lesson(root, "LESSON-100", component="p/q", domain="d")
+    _lesson(root, "LESSON-101", component="p/q", domain="d")
+    spec = _spec(root, domain="d")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(HOME=root, GIT_CONFIG_NOSYSTEM="1")
+    git = lambda *a: subprocess.run(["git", "-C", root, *a], check=True, capture_output=True, env=env)
+    git("init", "-q", "-b", "main")
+    git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base")
+    git("checkout", "-q", "-b", "feat")
+    git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty",
+        "-m", "feat: x\n\nLessons: LESSON-100, LESSON-999")
+    state = os.path.join(root, "state.json")
+    assert _run("select", "--set", "phase5", "--root", root, "--spec", spec, "--component", "p/q",
+                "--state-out", state).returncode == 0
+    with open(state, encoding="utf-8") as handle:
+        data = json.load(handle)
+    data["verify"] = {"findings": [], "loops": 0}
+    with open(state, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    return root, state
+
+
+def test_ack_check_record_writes_acknowledged(tmp_path):
+    """REQ-648: --record writes lessons.acknowledged, the lessons_cited source."""
+    root, state = _acked_repo(tmp_path)
+    result = _run("ack-check", "--state", state, "--root", root, "--worktree", root, "--base", "main",
+                  "--record")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "Applicable lesson not acknowledged: LESSON-101 — LESSON-101 title"
+    with open(state, encoding="utf-8") as handle:
+        data = json.load(handle)
+    acked = data["lessons"]["acknowledged"]
+    assert acked["ids"] == ["LESSON-100", "LESSON-999"], "every acknowledged id, applicable or not"
+    assert re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", acked["checkedAt"])
+    assert "phase5" in data["lessons"] and data["verify"] == {"findings": [], "loops": 0}, "other keys survive"
+    # --record needs a file to record into
+    assert _run("ack-check", "--root", root, "--worktree", root, "--base", "main", "--record").returncode == 2
+
+
+def test_ack_check_without_record_leaves_state_alone(tmp_path):
+    root, state = _acked_repo(tmp_path)
+    with open(state, "rb") as handle:
+        before = handle.read()
+    result = _run("ack-check", "--state", state, "--root", root, "--worktree", root, "--base", "main")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "Applicable lesson not acknowledged: LESSON-101 — LESSON-101 title"
+    with open(state, "rb") as handle:
+        assert handle.read() == before, "without --record the state file is byte-identical"
 
 
 # --- state record (BR-7) and log line (BR-10) --------------------------------
