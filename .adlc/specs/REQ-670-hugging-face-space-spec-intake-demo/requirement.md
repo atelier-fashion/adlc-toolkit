@@ -127,6 +127,13 @@ that asks for an API key has to give a guarantee it can prove.
 - Local or open-weight model inference on the Space.
 - Interactive back-and-forth to answer blocking gaps.
 
+## Deferred
+
+Two acceptance criteria need a live Space, so they wait for the maintainer's go-ahead to publish (architecture ADR-11). The steps are in `RELEASING.md` under "The Hugging Face Space (REQ-670)".
+
+- **AC-12 and the BR-13 links:** create the Space under the owning Hugging Face account (Open Question 2), deploy `space/` from a tagged release, and record its URL in the root `README.md` once it is live. Add the REQ-671 dataset link to the card once that dataset is live.
+- **AC-1:** run the live check with a real key. Paste the sample transcript and confirm every template section and at least one classified gap. The code path is covered by mocked tests only. At the same deploy, recheck that 429 and 529 classify live (ASSUME-007 validated only the 401).
+
 ## Retrieved Context
 
 - REQ-594 (spec, score 10): Spec intake: turn raw human input into a draft REQ plus an explicit gap list
