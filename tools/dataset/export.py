@@ -37,7 +37,9 @@ import classify  # noqa: E402
 import denylist  # noqa: E402
 import frontmatter  # noqa: E402
 import residue  # noqa: E402
+import schema  # noqa: E402
 import scrub  # noqa: E402
+from schema import COLUMNS, LIST_FIELDS, SCALAR_FIELDS, record_strings  # noqa: E402
 
 EXIT_OK, EXIT_REFUSED, EXIT_ERROR = 0, 1, 2
 
@@ -45,12 +47,6 @@ CARD_TEMPLATE = os.path.join(HERE, "card_template.md")
 MAIN_REFS = ("refs/heads/main", "refs/remotes/origin/main")
 #: Records at or above this count put the card in the next size category.
 SIZE_CATEGORY_LIMIT = 1000
-
-SCALAR_FIELDS = ("title", "status", "created", "updated", "component", "domain", "lane")
-LIST_FIELDS = ("stack", "concerns", "tags")
-#: Every column, in the order the card documents them.
-COLUMNS = ("id", "kind", "parent_req") + SCALAR_FIELDS + LIST_FIELDS + (
-    "body", "references", "source_path")
 
 #: The finding rules an excluded record carries, next to scrub.RULES.
 RULE_UNPARSEABLE = "unparseable"
@@ -317,20 +313,6 @@ def dumps(obj, indent=None):
                       indent=indent)
 
 
-def record_strings(record):
-    """``(column, text)`` for every string a record publishes, list items included."""
-    for key in COLUMNS:
-        value = record[key]
-        if isinstance(value, str):
-            yield key, value
-        elif key == "references":
-            for ref in value:
-                yield key, ref["id"]
-        else:
-            for item in value:
-                yield key, item
-
-
 def render_report_md(report):
     lines = ["# Scrub report", ""]
     head = "Source commit `%s`, toolkit version %s." % (
@@ -543,8 +525,12 @@ def _render_outputs(records, report, sha, commit_date, dl):
     values.update(("count_" + k, v) for k, v in counts.items())
     with open(CARD_TEMPLATE, encoding="utf-8") as fh:
         card = render_template(fh.read(), values)
-    revision = dumps({"source_commit": sha, "toolkit_version": report["toolkit_version"],
-                      "records": counts, "scrub_replacements": report["rules"]}) + "\n"
+    revision_data = {"source_commit": sha, "toolkit_version": report["toolkit_version"],
+                     "records": counts, "scrub_replacements": report["rules"]}
+    problem = schema.revision_problem(revision_data)
+    if problem:  # publish.py would refuse it, so do not write it
+        report["refusal"].append("revision.json %s" % problem)
+    revision = dumps(revision_data) + "\n"
 
     # Layer 3: the exact text about to be written.
     checker = residue.Checker(dl)

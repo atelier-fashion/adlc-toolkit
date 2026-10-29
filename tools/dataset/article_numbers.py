@@ -38,6 +38,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 
 import classify  # noqa: E402
+import schema  # noqa: E402
 
 EXIT_OK, EXIT_MISMATCH, EXIT_ERROR = 0, 1, 2
 
@@ -57,8 +58,6 @@ _REQUIRED = (("id", str), ("kind", str), ("parent_req", str), ("created", str),
 _REF_ORDER = ("REQ", "TASK", "LESSON", "BUG", "ASSUME")
 _REF_ID_RE = re.compile(r"^(REQ|TASK|LESSON|BUG|ASSUME)-([0-9]+)$")
 _DATE_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_RULE_RE = re.compile(r"^[a-z][a-z-]*$")
 _TOKEN_RE = re.compile(r"\{\{([^{}]*)\}\}")
 _BLOCK_RE = re.compile(r"<!-- if:([^ >]*) -->\n?(.*?)<!-- endif -->\n?", re.S)
 _DATASET_URL_RE = re.compile(
@@ -117,28 +116,14 @@ def _check_record(record, where):
     for ref in record["references"]:
         if not (isinstance(ref, dict) and isinstance(ref.get("id"), str)
                 and _REF_ID_RE.match(ref["id"])
-                and ref.get("status") in ("resolved", "dangling")):
+                and ref.get("status") in schema.REF_STATUSES):
             raise NumbersError("%s: malformed reference %r" % (where, ref))
 
 
 def _check_revision(revision):
-    if not isinstance(revision, dict):
-        raise NumbersError("%s: not a JSON object" % REVISION)
-    if not (isinstance(revision.get("source_commit"), str)
-            and _SHA_RE.match(revision["source_commit"])):
-        raise NumbersError("%s: source_commit is not a full commit SHA" % REVISION)
-    version = revision.get("toolkit_version")
-    if not (isinstance(version, str) and re.match(r"^[0-9A-Za-z][0-9A-Za-z.+-]*$", version)):
-        raise NumbersError("%s: toolkit_version is missing or malformed" % REVISION)
-    records = revision.get("records")
-    if not (isinstance(records, dict) and set(records) == set(classify.KIND_ORDER)
-            and all(type(n) is int and n >= 0 for n in records.values())):
-        raise NumbersError("%s: records must give a count for each of %s" % (
-            REVISION, ", ".join(classify.KIND_ORDER)))
-    rules = revision.get("scrub_replacements")
-    if not (isinstance(rules, dict) and rules and "total" not in rules
-            and all(_RULE_RE.match(k) and type(n) is int and n >= 0 for k, n in rules.items())):
-        raise NumbersError("%s: scrub_replacements must map rule names to counts" % REVISION)
+    problem = schema.revision_problem(revision)
+    if problem:
+        raise NumbersError("%s: %s" % (REVISION, problem))
 
 
 def load(dataset_dir):
@@ -224,7 +209,7 @@ def compute(dataset_dir):
         by_kind[r["kind"]].append(r)
 
     values = {"toolkit_version": revision["toolkit_version"],
-              "source_commit_short": revision["source_commit"][:12],
+              "source_commit_short": revision["source_commit"][:schema.SHA_SHORT],
               "total_records": len(records)}
     for kind in classify.KIND_ORDER:
         values["count_" + kind] = len(by_kind[kind])
