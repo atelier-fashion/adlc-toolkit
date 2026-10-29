@@ -237,6 +237,23 @@ is cut per `RELEASING.md`.
   workflow engine's `FINDINGS` schema requires `class`, and the engine writes
   `verify` and emits its line through new leaves. The emitter never blocks a
   pipeline: `emit-run-outcome.sh` always exits 0.
+- **A Hugging Face dataset of the toolkit's own ADLC artifacts (REQ-671).**
+  `tools/dataset/export.py` exports `.adlc/` at one commit on `main` as
+  `data/train.jsonl`, a dataset card and `revision.json`. It reads git objects, never
+  the working tree (the DenyList included), and two exports of one commit are
+  byte-identical. Every line is scrubbed for credentials, home paths, email addresses,
+  private repo names and URLs, and the maintainer's name. The export refuses when the
+  files scanned differ from `git ls-tree` for any kind, when a path under `.adlc/` is
+  neither a kind nor a named exclusion, or when a residue pass, written independently of
+  the scrub, finds anything in the output. A local report lists every finding.
+  `tools/dataset/publish.py` is the separate maintainer step: it needs a terminal,
+  checks that the commit is on `main`, re-runs the residue pass, re-exports the commit
+  and requires a byte-identical match, and asks for the repo id to be typed before it
+  commits the checked bytes and tags `v<version>-<sha12>`. The Hub client is pinned in `tools/dataset/requirements.txt`
+  and imported only inside `publish.py`. `tools/adlc/credential_redact.py` holds the
+  credential chains of `partials/intake.sh` and `partials/lesson-check.sh`, pinned to
+  them by a test. The companion article's draft and number script are in
+  `tools/dataset/article/` and `tools/dataset/article_numbers.py`.
 
 ### Changed
 
