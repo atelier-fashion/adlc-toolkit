@@ -1,0 +1,12 @@
+{
+  "name": "adlc",
+  "version": "5.4.0",
+  "description": "Agentic Development Lifecycle skills and agents for Claude Code: spec, architect, implement, review and ship a requirement, with the knowledge base that carries lessons between features.",
+  "author": {
+    "name": "Atelier Fashion",
+    "url": "https://github.com/atelier-fashion"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/atelier-fashion/adlc-toolkit",
+  "skills": "./"
+}

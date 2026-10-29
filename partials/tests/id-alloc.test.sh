@@ -89,6 +89,23 @@ N=$( cd "$ADLC_REPOS_ROOT/myrepo"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 
 check "bootstrap from local scan (octal-safe)" "43" "$N"
 cleanup
 
+# --- case_no_dot_claude_dir (REQ-669 BR-6): no ~/.claude at all => allocation succeeds --
+# The plugin route never runs install.sh, so ~/.claude may not exist. The allocator
+# creates it before taking the lock; the counter bootstraps from the local scan as above.
+new_sandbox
+case "$SBX" in
+  */idalloc.*) rm -rf "$SBX/home/.claude" ;;
+  *) fail "case_no_dot_claude_dir: sandbox path '$SBX' is not one new_sandbox made — not deleting" ;;
+esac
+mkdir -p "$ADLC_REPOS_ROOT/myrepo/.adlc/specs/REQ-042-foo"
+( cd "$ADLC_REPOS_ROOT/myrepo" && git init -q )
+check "case_no_dot_claude_dir: fixture has no ~/.claude" "absent" "$([ -e "$HOME/.claude" ] && echo present || echo absent)"
+N=$( cd "$ADLC_REPOS_ROOT/myrepo"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+check "case_no_dot_claude_dir: allocates with no ~/.claude" "43" "$N"
+check "case_no_dot_claude_dir: counter created" "44" "$(cat "$HOME/.claude/.global-next-req" 2>/dev/null)"
+check "case_no_dot_claude_dir: lock released" "absent" "$([ -e "$HOME/.claude/.global-next-req.lock.d" ] && echo present || echo absent)"
+cleanup
+
 # --- case: remote-ahead — local counter=100, remote feat/REQ-600 => allocate 601 ----
 new_sandbox
 make_remote_with_branch feat/REQ-600-x

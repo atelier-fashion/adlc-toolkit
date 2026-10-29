@@ -20,6 +20,10 @@
 # harnesses it dispatches.
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RC=0
+# REQ-669: no harness inherits a ToolkitRoot from the developer's shell. A
+# harness that needs one sets it itself (plugin-route.test.sh, source-guard.test.sh),
+# so every other harness runs the symlink route exactly as before (BR-3).
+unset ADLC_TOOLKIT_ROOT CLAUDE_PLUGIN_ROOT
 
 run_all() { # run_all <shell> <harness>... — element-wise, no word-splitting (BUG-118)
   shell=$1; shift
@@ -33,7 +37,7 @@ if [ "${1-}" = "--inner" ]; then
   # Inner pass: run.sh re-run under a specific shell ($2) — runs every harness
   # with that shell, and in doing so exercises this script's own list handling
   # under that shell.
-  run_all "$2" "$HERE/id-alloc.test.sh" "$HERE/forge.test.sh" "$HERE/attribution.test.sh" "$HERE/intake.test.sh" "$HERE/delegate-gate.test.sh" "$HERE/source-guard.test.sh" "$HERE/conflict-bound.test.sh" "$HERE/lesson-check.test.sh" "$HERE/lane-check.test.sh"
+  run_all "$2" "$HERE/id-alloc.test.sh" "$HERE/forge.test.sh" "$HERE/attribution.test.sh" "$HERE/intake.test.sh" "$HERE/delegate-gate.test.sh" "$HERE/source-guard.test.sh" "$HERE/toolkit-root.test.sh" "$HERE/conflict-bound.test.sh" "$HERE/lesson-check.test.sh" "$HERE/lane-check.test.sh" "$HERE/plugin-route.test.sh" "$HERE/session-start.test.sh" "$HERE/set-u-home.test.sh" "$HERE/sprint-fence.test.sh"
   exit $RC
 fi
 

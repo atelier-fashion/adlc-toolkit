@@ -10,7 +10,7 @@ You are closing out a completed feature after it has been merged. This skill ens
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -27,7 +27,7 @@ Target: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/conventions.md` exist. If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/context/conventions.md` exist. If any of these files are missing, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first to set up the project context."
 
 ## Close-out mode (`--close-out`)
 
@@ -139,10 +139,11 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 #### Assumptions Validated or Invalidated
 - Review assumptions from the requirement spec
 - Log any that were validated, invalidated, or still unresolved to `.adlc/knowledge/assumptions/`
-- Use the assumption template (check `.adlc/templates/assumption-template.md` first, fall back to `~/.claude/skills/templates/assumption-template.md`)
+- Use the assumption template (check `.adlc/templates/assumption-template.md` first, fall back to `$ADLC_TOOLKIT_ROOT/templates/assumption-template.md`)
 - Name files: `ASSUME-xxx-slug.md`. Determine the next ID with the reservation-aware allocator `adlc_alloc_id assume` (REQ-546 BR-12): it atomically reserves the number on this repo's `origin` (`refs/adlc/ids/assume/<NNN>`) BEFORE returning it, so concurrent `/wrapup` runs across clones of one repo — or concurrent `/sprint` wrapups — cannot double-allocate an ASSUME id. The per-checkout `.adlc/.next-assume` counter is now a CACHE: `max(remote, local) + 1` supersedes the old "never re-scan after the counter exists" rule, and the mkdir-lock + symlink pre-check (LESSON-014, LESSON-110) now live inside `adlc_alloc_id`. Source the partial and call it in the SAME fenced block (fenced blocks don't share shell state):
   ```bash
-  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+  ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-alloc.sh"; fi
   ASSUME_NUM=$(adlc_alloc_id assume)
   # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — guard parent.
   [ -n "$ASSUME_NUM" ] || { echo "ERROR: failed to allocate ASSUME number — aborting" >&2; exit 1; }
@@ -156,7 +157,8 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
 flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)
 trap '"$DELEGATE_TOOLS"/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"
@@ -170,8 +172,9 @@ REQ-522 BR-4). The resolution block reads it back with `skill-flag.sh read`.
 Decide drafting strategy via the shared predicate (REQ-416 ADR-2 — see `partials/delegate-gate.md`), then proceed down the appropriate branch:
 
 ```sh
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
 adlc_delegate_gate_check; gate=$?
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" reason "$ADLC_DELEGATE_GATE_REASON"
 case $gate in
@@ -318,14 +321,16 @@ esac
    # Persist the chosen transcript path to the flag sidecar so step 2's separate
    # fenced block can read it — SKILL.md fenced blocks do not share shell state
    # (REQ-522 BR-4). An empty JSONL (no candidates) is persisted as empty.
-   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl "$JSONL"
    ```
    (The leading `-` on every `~/.claude/projects/` entry is just the absolute path's leading `/` run through the same non-alphanumeric substitution — there is no separate prefix step, and stripping the `/` first would produce a name one `-` short. The walk terminates at `$HOME` per BR-6 — see REQ-423 architecture ADR-2.)
 2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when discovery emitted "no candidates found", `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
    ```bash
-   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
-   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
+   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
    # Re-read the transcript path step 1 persisted to the sidecar (fenced blocks
    # do not share shell state — REQ-522 BR-4). The gate partial is re-sourced
    # for the same reason: it exports ADLC_READ_BIN, the resolved binary (PATH,
@@ -350,10 +355,10 @@ esac
            # turned "no transcript to summarise", an ordinary non-delegating
            # fallback, into a hard exit. It still precedes `mark invoked 1`, so
            # a refusal is recorded as NOT invoked.
-           case "$ADLC_READ_BIN" in /*) ;; *) echo "/wrapup: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+           case "$ADLC_READ_BIN" in /*) ;; *) echo "/wrapup: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2; exit 1 ;; esac
            # Mark invoked/exit around the call (REQ-424 telemetry).
            "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
-           command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "Propose a LESSON-<reqid> draft following the template at .adlc/templates/lesson-template.md (or ~/.claude/skills/templates/lesson-template.md if absent). 400 words max. Include frontmatter (id, title, component, domain, stack, concerns, tags, req, dates, and the six v2 fields kind, evidence, confidence, enforcement, generalizes, supersedes - kind, evidence and confidence are required; enforcement stays none unless a lint, test, script or hook enforces the lesson) and the four template sections; ## Lesson and ## Applies When must not be empty. Lesson capture rules (REQ-646): 0. Declare kind: process if the lesson is about how a skill, agent, partial or pipeline phase behaves; domain if it is about the codebase or stack the implementer works in. 1. Cite the moment: a lesson you cannot trace to a specific commit, finding, bug, test or transcript line is speculation; put that moment in evidence (a commit sha, a BUG-/REQ-/LESSON-/TASK- id, a path:line, or a test name). Never a home-directory path: write ~/ for the home prefix rather than dropping the citation. 2. Declare the contrast: confidence is decided by whether the evidence contains a contrast - a bug reproduced then fixed, a test failing then passing, a Phase-5 finding confirmed by its fix and re-verify, or two approaches or runs compared. high = a contrast was observed and the evidence names the mechanism (a specific line, command or finding); medium = a contrast was observed but the mechanism is inferred; low = a single observation with no contrast. An invented attribution poisons retrieval for every later REQ. 3. NO_ENTRY is a valid answer: if nothing transferable survived, write NO_ENTRY: <reason> in the summary slot; never pad. Granularity: too generic never changes behaviour (be thorough); too specific never fires again (the fee rose on Jan 1) - aim between. If your answer is NO_ENTRY, reply with that one line and no draft. A /wrapup lesson has a contrast only when a Phase-5 finding or a failing test backs it; otherwise confidence is low."
+           command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "Propose a LESSON-<reqid> draft following the template at .adlc/templates/lesson-template.md (or \$ADLC_TOOLKIT_ROOT/templates/lesson-template.md if absent). 400 words max. Include frontmatter (id, title, component, domain, stack, concerns, tags, req, dates, and the six v2 fields kind, evidence, confidence, enforcement, generalizes, supersedes - kind, evidence and confidence are required; enforcement stays none unless a lint, test, script or hook enforces the lesson) and the four template sections; ## Lesson and ## Applies When must not be empty. Lesson capture rules (REQ-646): 0. Declare kind: process if the lesson is about how a skill, agent, partial or pipeline phase behaves; domain if it is about the codebase or stack the implementer works in. 1. Cite the moment: a lesson you cannot trace to a specific commit, finding, bug, test or transcript line is speculation; put that moment in evidence (a commit sha, a BUG-/REQ-/LESSON-/TASK- id, a path:line, or a test name). Never a home-directory path: write ~/ for the home prefix rather than dropping the citation. 2. Declare the contrast: confidence is decided by whether the evidence contains a contrast - a bug reproduced then fixed, a test failing then passing, a Phase-5 finding confirmed by its fix and re-verify, or two approaches or runs compared. high = a contrast was observed and the evidence names the mechanism (a specific line, command or finding); medium = a contrast was observed but the mechanism is inferred; low = a single observation with no contrast. An invented attribution poisons retrieval for every later REQ. 3. NO_ENTRY is a valid answer: if nothing transferable survived, write NO_ENTRY: <reason> in the summary slot; never pad. Granularity: too generic never changes behaviour (be thorough); too specific never fires again (the fee rose on Jan 1) - aim between. If your answer is NO_ENTRY, reply with that one line and no draft. A /wrapup lesson has a contrast only when a Phase-5 finding or a failing test backs it; otherwise confidence is low."
            "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
        fi
    fi
@@ -400,11 +405,12 @@ A /wrapup lesson has a contrast only when a Phase-5 finding or a failing test ba
 
 - **In close-out mode** there is no conversation memory of the implementation: draft only from the findings, reports, task list and PR file list the caller supplied, cite them, and when none were supplied write no lesson and record `NO_ENTRY: close-out had no run evidence` in the summary (Close-out mode rule 4).
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work. A `NO_ENTRY` outcome (rule 3) allocates no id and writes no file: its line goes in Step 5's `### Lessons captured`, and none of the blocks below, up to and including the pre-push recheck, runs.
-- Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `~/.claude/skills/templates/lesson-template.md`)
+- Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `$ADLC_TOOLKIT_ROOT/templates/lesson-template.md`)
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
 - **Allocate the next ID atomically via the global `~/.claude/.global-next-lesson` counter** (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004; directory scans also race against concurrent `/sprint` pipelines — LESSON-110). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock with its LESSON-014 symlink pre-check. The lock path `~/.claude/.global-next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
   ```bash
-  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+  ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-alloc.sh"; fi
   LESSON_NUM=$(adlc_alloc_id lesson)
   # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — LESSON_NUM
   # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
@@ -424,7 +430,8 @@ Then validate the file you just wrote with `adlc_lesson_check` — the return-co
 **Provenance-classifying harness (BUG-228):** if your shell tool pins the session when it cannot classify a command (Teton Code's `shell` does), the fence below runs a partial by path and would pin the turn. There, validate in-model against the rule table in `partials/lesson-check.md`, apply the same repair loop, and write `lesson check: in-model (provenance-classifying harness)` in the summary slot (Step 5's `### Lessons captured`); run none of the fence below.
 
 ```sh
-if [ -f .adlc/partials/lesson-check.sh ]; then . .adlc/partials/lesson-check.sh; else . ~/.claude/skills/partials/lesson-check.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/lesson-check.sh ]; then . .adlc/partials/lesson-check.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lesson-check.sh"; fi
 # <path> is the LITERAL path of the file you just wrote — thread it in; fenced
 # blocks share no shell state and LESSON_ID is not a sanctioned cross-fence var.
 adlc_lesson_check .adlc/knowledge/lessons/LESSON-<id>-<slug>.md
@@ -439,7 +446,8 @@ This loop is **not** a pipeline halt and adds no halt point to `/proceed`: wheth
 **Pre-push recheck (BR-4, BR-8).** Before the lesson file is committed on a branch for push, re-verify `LESSON-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
 
 ```bash
-if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-recheck.sh"; fi
 LESSON_ID=$(printf 'LESSON-%03d' "$LESSON_NUM")
 if ! adlc_recheck_id lesson "$LESSON_ID"; then
   echo "Halting: $LESSON_ID collides on the remote — renumber before pushing (see message above)." >&2
@@ -450,7 +458,8 @@ fi
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback drafting path completes, before continuing to Convention Updates. Emit telemetry ONLY by sourcing and calling the shared resolver in the SAME fenced block — it derives `mode`/`reason`/`gate_result`/`duration_ms` from the flag-file sidecar the steps above `mark`ed, so no shell variable crosses a fence boundary (REQ-522 BR-4). Never hand-construct a telemetry line:
 
 ```sh
-if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . "$ADLC_TOOLKIT_ROOT/partials/emit-step-telemetry.sh"; fi
 _adlc_emit_step_telemetry wrapup Step-4-Lessons-Learned
 ```
 

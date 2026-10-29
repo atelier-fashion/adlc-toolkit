@@ -6,6 +6,7 @@ importing internals.
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -20,6 +21,20 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 PARTIALS_DIR = REPO_ROOT / "partials"
+CONVENTIONS_MD = REPO_ROOT / ".adlc" / "context" / "conventions.md"
+
+
+def _load_check_module():
+    """Import `check.py` by path, for the few REQ-669 cases that need its pinned
+    constants (`TOOLKIT_ROOT_LINE`, `guarded_source_line`) rather than a copy of
+    their bytes here. Every finding is still read from the CLI's output."""
+    spec = importlib.util.spec_from_file_location("_lint_check_main", CHECK_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_check = _load_check_module()
 
 
 def _stage(tmp_path: Path, *fixture_names: str) -> Path:
@@ -165,6 +180,56 @@ def test_missing_canonical_reports_per_rule(tmp_path):
     # REQ-610 ADR-4: the two source literals are the `[ -f ]`-guarded spelling.
     assert "if [ -f .adlc/partials/delegate-gate.sh ]; then" in result.stdout
     assert "if [ -f .adlc/partials/delegate-tools-path.sh ]; then" in result.stdout
+    # REQ-669 BR-5: the ToolkitRoot spelling is the one offered. Since TASK-124
+    # retired the REQ-610 operand, the finding no longer offers it as well.
+    gate_line = next(
+        ln for ln in result.stdout.splitlines() if "delegate-gate.sh ]; then" in ln
+    )
+    assert '. "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi' in gate_line, gate_line
+    assert ". ~/.claude/skills/partials/delegate-gate.sh; fi" not in gate_line, gate_line
+
+
+def test_canonical_helper_accepts_toolkit_root_spelling(tmp_path):
+    """REQ-669 BR-5: the two delegate-* canonical literals accept the ToolkitRoot
+    spelling. A skill whose gate and tools-path lines both use it, behind the
+    fence's root line, has every literal and no other finding. Since TASK-124
+    it is the only operand that satisfies the literal: the REQ-610 operand and
+    the retired `2>/dev/null ||` shape satisfy neither
+    (`test_old_delegate_gate_spelling_fails_...`).
+    """
+    sub = tmp_path / "toolkit-root-gate"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(
+        "# The post-REQ-669 telemetry shape.\n\n"
+        "**Provenance-classifying harness (BUG-228):** on such a harness, skip this step's shell.\n\n"
+        "```sh\n"
+        + _check.TOOLKIT_ROOT_LINE + "\n"
+        + _check.guarded_source_line("delegate-gate") + "\n"
+        + _check.guarded_source_line("delegate-tools-path") + "\n"
+        'flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)\n'
+        '"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"\n'
+        "adlc_delegate_gate_check; gate=$?\n"
+        + _check.guarded_source_line("emit-step-telemetry") + "\n"
+        "_adlc_emit_step_telemetry some-skill Some-Step\n"
+        "# anchor: ADLC_DISABLE_DELEGATE gate-case comment\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    _stage_partial(tmp_path, layout="partials")
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "", result.stdout
+
+    # Benign-path control (LESSON-440): drop the gate line and exactly that
+    # literal is reported, so the clean run above was the literal being found.
+    text = (sub / "SKILL.md").read_text(encoding="utf-8")
+    (sub / "SKILL.md").write_text(
+        text.replace(_check.guarded_source_line("delegate-gate") + "\n", ""),
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    assert result.stdout.count("canonical-helper") == 1, result.stdout
+    assert "delegate-gate.sh ]; then" in result.stdout, result.stdout
 
 
 def test_delegate_gate_new_spelling_is_clean(tmp_path):
@@ -359,12 +424,9 @@ def test_canonical_partial_does_not_rescue_skill_that_does_not_source_it(tmp_pat
     (sub / "SKILL.md").write_text(
         "# no-source\n\n"
         "```sh\n"
-        "if [ -f .adlc/partials/delegate-gate.sh ]; then "
-        ". .adlc/partials/delegate-gate.sh; else "
-        ". ~/.claude/skills/partials/delegate-gate.sh; fi\n"
-        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then "
-        ". .adlc/partials/delegate-tools-path.sh; else "
-        ". ~/.claude/skills/partials/delegate-tools-path.sh; fi\n"
+        + _check.TOOLKIT_ROOT_LINE + "\n"
+        + _check.guarded_source_line("delegate-gate") + "\n"
+        + _check.guarded_source_line("delegate-tools-path") + "\n"
         'flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)\n'
         '"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"\n'
         "_adlc_emit_step_telemetry some-skill Some-Step\n"
@@ -812,15 +874,25 @@ def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
       regex branch that recognises it is otherwise unexercised;
     * a quoted operand (``. ".adlc/partials/x.sh"``) — the optional-quote branch.
 
-    The two retired lines match BOTH of the check's rules; the exact count is
-    what proves the per-line dedupe (one finding, not two).
+    REQ-669 BR-5 adds three must-fire shapes of the ToolkitRoot operand
+    ``"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"``, each in a fence that carries the
+    root line (so ``toolkit-root-line`` is silent): ``||``-chained behind the
+    repo-local copy, sourced alone with no repo-local arm, and guarded with a
+    mismatched ``<name>`` (the backreference holds for the new operand too).
+
+    REQ-669 TASK-124 adds the eleventh: the guarded REQ-610 spelling, whose
+    ``else`` arm is ``~/.claude/skills/partials/<name>.sh``. TASK-122 accepted
+    it while the corpus was rewritten; it is now a finding like the rest.
+
+    The retired lines (both operands) match BOTH of the check's rules; the exact
+    count is what proves the per-line dedupe (one finding, not two).
     """
     root = _stage(tmp_path, "unguarded-source-fence")
     result = _run(root)
-    assert result.returncode == 7, result.stdout + result.stderr
+    assert result.returncode == 11, result.stdout + result.stderr
 
     lines = _unguarded_lines(result)
-    assert len(lines) == 7, result.stdout
+    assert len(lines) == 11, result.stdout
     sh_retired = _line_of(
         "unguarded-source-fence", "2>/dev/null || . ~/.claude/skills/partials/forge.sh"
     )
@@ -832,15 +904,31 @@ def test_unguarded_source_flags_retired_and_chain_forms(tmp_path):
     source_spelling = _line_of("unguarded-source-fence", "source .adlc/partials/forge.sh")
     home_spelling = _line_of("unguarded-source-fence", "${HOME}/.claude/skills/partials/forge.sh")
     quoted = _line_of("unguarded-source-fence", '. ".adlc/partials/forge.sh"')
-    assert [sh_retired, bash_retired, chain, mismatch, source_spelling, home_spelling, quoted] == sorted(
-        int(ln.split(":")[1]) for ln in lines
-    ), lines
+    new_chained = _line_of(
+        "unguarded-source-fence", '2>/dev/null || . "$ADLC_TOOLKIT_ROOT/partials/lane-check.sh"'
+    )
+    new_alone = _line_of(
+        "unguarded-source-fence", '. "$ADLC_TOOLKIT_ROOT/partials/conflict-bound.sh"'
+    )
+    new_mismatch = _line_of(
+        "unguarded-source-fence", 'else . "$ADLC_TOOLKIT_ROOT/partials/intake.sh"; fi'
+    )
+    old_operand = _line_of(
+        "unguarded-source-fence", "else . ~/.claude/skills/partials/forge.sh; fi"
+    )
+    assert [
+        sh_retired, bash_retired, chain, mismatch, source_spelling, home_spelling,
+        quoted, new_chained, new_alone, new_mismatch, old_operand,
+    ] == sorted(int(ln.split(":")[1]) for ln in lines), lines
     for ln in lines:
         assert ln.startswith("unguarded-source-fence/SKILL.md:"), ln
         assert "conventions.md 'Bash in skills'" in ln, ln
+        # Every message names the ToolkitRoot spelling, never the retired one.
+        assert '"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"' in ln, ln
+        assert "~/.claude/skills/partials/<name>.sh" not in ln, ln
     # The whole finding set is unguarded-source — no collateral from another
     # check, so the counts above mean what they say.
-    assert len(result.stdout.strip().splitlines()) == 7, result.stdout
+    assert len(result.stdout.strip().splitlines()) == 11, result.stdout
 
 
 def test_unguarded_source_flags_prose_occurrence(tmp_path):
@@ -875,12 +963,19 @@ def test_guarded_source_ok_is_clean(tmp_path):
     """REQ-610 BR-5 benign path: the canonical spelling (in ``sh``, ``bash`` and
     ``shell`` fences, indented, and with a trailing comment), the
     executable-partial ``sh <local> ... || sh <canonical>`` macro, and a comment
-    line naming a partial all produce ZERO findings.
+    line naming a partial all produce ZERO findings. REQ-669: every guarded
+    line uses the ToolkitRoot operand behind its fence's root line. TASK-124
+    dropped the REQ-610 operand from this fixture; it is must-fire now, in
+    ``unguarded-source-fence``.
 
     Staged a second time ALONGSIDE the negative fixture, so "clean" cannot be
     produced by a linter that had stopped running the check at all
-    (LESSON-602): the same run must still report the four bad lines.
+    (LESSON-602): the same run must still report the eleven bad lines.
     """
+    fixture = (FIXTURES / "guarded-source-ok.md").read_text(encoding="utf-8")
+    assert 'else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi' in fixture
+    assert "else . ~/.claude/skills/partials/" not in fixture
+
     alone = tmp_path / "alone"
     alone.mkdir()
     _stage(alone, "guarded-source-ok")
@@ -893,9 +988,131 @@ def test_guarded_source_ok_is_clean(tmp_path):
     _stage(both, "guarded-source-ok", "unguarded-source-fence")
     result = _run(both)
     lines = _unguarded_lines(result)
-    assert len(lines) == 7, result.stdout
+    assert len(lines) == 11, result.stdout
     assert all("unguarded-source-fence/" in ln for ln in lines), lines
     assert "guarded-source-ok" not in result.stdout, result.stdout
+
+
+def test_old_operand_now_fires(tmp_path):
+    """REQ-669 TASK-124 (BR-2): the REQ-610 fallback operand
+    ``~/.claude/skills/partials/<name>.sh`` is no longer accepted. TASK-122
+    accepted it beside the ToolkitRoot operand while the corpus was rewritten;
+    TASK-124 rewrote the corpus and retired that acceptance, so the guarded
+    REQ-610 spelling is an ``unguarded-source`` finding on every surface the
+    check walks: a SKILL.md fence, an ``agents/*.md`` fence, a
+    ``proceed/phase*.md`` fence, and a ``partials/*.sh`` line. The message
+    names the new spelling, and says the guard is fine and the operand is not.
+
+    The same line behind the fence's root line (a half-finished rewrite) fires
+    too. Benign control (LESSON-440): the ToolkitRoot spelling in the same
+    places is clean, in the same run's shape.
+    """
+    old_line = _check.guarded_source_line("forge", _check.RETIRED_REQ610_OPERAND)
+    assert old_line == (
+        "if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; "
+        "else . ~/.claude/skills/partials/forge.sh; fi"
+    )
+    old_partial = _check.guarded_source_line("intake", _check.RETIRED_REQ610_OPERAND)
+
+    bad = tmp_path / "bad"
+    (bad / "old-operand").mkdir(parents=True)
+    (bad / "old-operand" / "SKILL.md").write_text(
+        "# Old operand\n\n```sh\n" + old_line + "\n```\n\n"
+        "Behind the root line, as a half-finished rewrite would leave it.\n\n"
+        "```sh\n" + _check.TOOLKIT_ROOT_LINE + "\n" + old_line + "\n```\n",
+        encoding="utf-8",
+    )
+    (bad / "agents").mkdir()
+    (bad / "agents" / "some-agent.md").write_text(
+        "# Agent\n\n```sh\n" + old_line + "\n```\n", encoding="utf-8"
+    )
+    (bad / "proceed").mkdir()
+    (bad / "proceed" / "phases-x.md").write_text(
+        "# Phase\n\n```sh\n" + old_line + "\n```\n", encoding="utf-8"
+    )
+    (bad / "partials").mkdir()
+    (bad / "partials" / "some-partial.sh").write_text(
+        "#!/bin/sh\n" + old_partial + "\n", encoding="utf-8"
+    )
+    result = _run(bad)
+    lines = _unguarded_lines(result)
+    assert sorted(ln.split(": unguarded-source:")[0] for ln in lines) == sorted([
+        "agents/some-agent.md:4",
+        "old-operand/SKILL.md:4",
+        "old-operand/SKILL.md:11",
+        "partials/some-partial.sh:2",
+        "proceed/phases-x.md:4",
+    ]), result.stdout
+    for ln in lines:
+        assert "retired REQ-610 operand" in ln, ln
+        assert "~/.claude/skills/partials/<name>.sh" not in ln, ln
+        if ln.startswith("partials/"):
+            # A partial has no root line: it is offered the ADR-2 spelling.
+            assert _check.guarded_source_line("<name>", _check.PARTIAL_SOURCE_OPERAND) in ln, ln
+        else:
+            assert _check.GUARDED_SOURCE_SPELLING in ln, ln
+    # unguarded-source is the only check that fires: the old operand reads no
+    # ToolkitRoot, so `toolkit-root-line` has nothing to say about it.
+    assert len(result.stdout.strip().splitlines()) == 5, result.stdout
+    assert result.returncode == 5, result.stdout + result.stderr
+
+    good = tmp_path / "good"
+    (good / "new-operand").mkdir(parents=True)
+    fence = "```sh\n" + _check.TOOLKIT_ROOT_LINE + "\n" + _check.guarded_source_line("forge") + "\n```\n"
+    (good / "new-operand" / "SKILL.md").write_text("# New operand\n\n" + fence, encoding="utf-8")
+    (good / "agents").mkdir()
+    (good / "agents" / "some-agent.md").write_text("# Agent\n\n" + fence, encoding="utf-8")
+    (good / "proceed").mkdir()
+    (good / "proceed" / "phases-x.md").write_text("# Phase\n\n" + fence, encoding="utf-8")
+    (good / "partials").mkdir()
+    (good / "partials" / "some-partial.sh").write_text(
+        "#!/bin/sh\n" + _check.guarded_source_line("intake", _check.PARTIAL_SOURCE_OPERAND) + "\n",
+        encoding="utf-8",
+    )
+    result = _run(good)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "", result.stdout
+
+    # The accepted sets hold the ToolkitRoot operand alone (plus, in a partial,
+    # the ADR-2 default-expansion one), and the transitional constant is gone.
+    assert _check.ACCEPTED_SOURCE_OPERANDS == ('"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"',)
+    assert _check.PARTIAL_ACCEPTED_SOURCE_OPERANDS == (
+        '"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"',
+        _check.PARTIAL_SOURCE_OPERAND,
+    )
+    assert not hasattr(_check, "TRANSITIONAL_OLD_OPERAND")
+
+
+def test_repo_root_unguarded_source_and_root_line_clean():
+    """REQ-669 TASK-124 (BR-2, BR-10): on the real tree, after the corpus
+    rewrite, ``unguarded-source`` and ``toolkit-root-line`` report nothing, and
+    neither do ``canonical-helper`` and ``sentinel`` (the rewrite moved the two
+    delegate-* source literals, and touched no skill reference). Every
+    top-level ``*/SKILL.md`` is walked, so the zero is over the whole corpus
+    and not over an empty walk (REQ-595 BR-5, LESSON-019).
+
+    A nested worktree under ``.claude/worktrees/`` is another checkout's tree
+    and is left out of both sides of the comparison.
+    """
+    result = _run(REPO_ROOT)
+    own = [
+        ln for ln in result.stdout.splitlines()
+        if ln.strip() and not ln.startswith(".claude/")
+    ]
+    for check_id in ("unguarded-source", "toolkit-root-line", "canonical-helper", "sentinel"):
+        hits = [ln for ln in own if f": {check_id}:" in ln]
+        assert hits == [], "\n".join(hits)
+
+    skills = sorted(p.parent.name for p in REPO_ROOT.glob("*/SKILL.md"))
+    assert len(skills) >= 1
+    walked = sorted(
+        p.relative_to(REPO_ROOT).parts[0]
+        for p in _check.find_skill_files(REPO_ROOT)
+        if len(p.relative_to(REPO_ROOT).parts) == 2
+    )
+    assert walked == skills
+    scanned = len(list(_check.find_skill_files(REPO_ROOT)))
+    assert f"scanned {scanned} SKILL.md file(s)" in result.stderr, result.stderr
 
 
 def test_unguarded_source_walks_phase_files_without_counting_them(tmp_path):
@@ -944,7 +1161,9 @@ def test_old_delegate_gate_spelling_fails_canonical_and_unguarded(tmp_path):
 
     This is the deliberate old-shape negative case: it is what proves the
     `CANONICAL_LITERALS` entry genuinely moved to the guarded spelling rather
-    than being widened to accept both (REQ-436 ADR-4 / LESSON-019 #1). Every
+    than being widened to accept both (REQ-436 ADR-4 / LESSON-019 #1). REQ-669
+    moves the entry to the ToolkitRoot operand (TASK-124 retired the
+    transitional REQ-610 one); the retired shape is still not it. Every
     other literal in the file is present — the tools-path source line, the
     start_s mark, the resolver call, and (via the staged partial) the
     emit-telemetry exec — so `canonical-helper == 1` names the gate line alone.
@@ -954,18 +1173,15 @@ def test_old_delegate_gate_spelling_fails_canonical_and_unguarded(tmp_path):
     (sub / "SKILL.md").write_text(
         "# The post-REQ-522 telemetry shape with ONE retired source line.\n\n"
         "```sh\n"
+        + _check.TOOLKIT_ROOT_LINE + "\n"
         # The deliberate old shape under test — the only retired delegate-*
         # source line left anywhere in this suite (REQ-610 BR-6).
         ". .adlc/partials/delegate-gate.sh 2>/dev/null || "
         ". ~/.claude/skills/partials/delegate-gate.sh\n"
-        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then "
-        ". .adlc/partials/delegate-tools-path.sh; else "
-        ". ~/.claude/skills/partials/delegate-tools-path.sh; fi\n"
+        + _check.guarded_source_line("delegate-tools-path") + "\n"
         'flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)\n'
         '"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"\n'
-        "if [ -f .adlc/partials/emit-step-telemetry.sh ]; then "
-        ". .adlc/partials/emit-step-telemetry.sh; else "
-        ". ~/.claude/skills/partials/emit-step-telemetry.sh; fi\n"
+        + _check.guarded_source_line("emit-step-telemetry") + "\n"
         "_adlc_emit_step_telemetry some-skill Some-Step\n"
         "# anchor: ADLC_DISABLE_DELEGATE gate-case comment\n"
         "```\n",
@@ -983,7 +1199,8 @@ def test_old_delegate_gate_spelling_fails_canonical_and_unguarded(tmp_path):
     lines = _unguarded_lines(result)
     assert len(lines) == 1, result.stdout
     body = (sub / "SKILL.md").read_text().splitlines()
-    old_line = next(i + 1 for i, ln in enumerate(body) if "2>/dev/null" in ln)
+    # `2>/dev/null ||`, not `2>/dev/null`: the root line's pointer arm carries one.
+    old_line = next(i + 1 for i, ln in enumerate(body) if "2>/dev/null ||" in ln)
     assert lines[0].startswith(
         f"old-gate-spelling/SKILL.md:{old_line}: unguarded-source:"
     ), lines
@@ -1287,6 +1504,13 @@ def test_unguarded_source_walks_partials_in_both_layouts_without_counting_them(t
     SKILL.md scanned figure. The unguarded shape here is the multi-line chain
     id-recheck.sh actually carried — continuation lines beginning with `||` —
     which no line-anchored extraction sees.
+
+    REQ-669: the same continuation chain with the ToolkitRoot operand is a
+    finding too (`bad-new.sh`), and the guarded line with the ToolkitRoot
+    operand or the ADR-2 default-expansion one is not (`ok.sh`; the REQ-610
+    operand was retired by TASK-124, `test_old_operand_now_fires`). A partial reads the root through the ADR-2 default-expansion
+    spelling and carries no root line, so `toolkit-root-line` never walks
+    `partials/*.sh` — `ok.sh` reads the variable with no root line and is clean.
     """
     _stage(tmp_path, "clean")
     (tmp_path / "partials").mkdir()
@@ -1301,23 +1525,88 @@ def test_unguarded_source_walks_partials_in_both_layouts_without_counting_them(t
         "    || return 2\n"
         "}\n"
     )
+    bad_new = (
+        "#!/bin/sh\n"
+        "f() {\n"
+        "  . .adlc/partials/id-alloc.sh 2>/dev/null \\\n"
+        "    || . \"$ADLC_TOOLKIT_ROOT/partials/id-alloc.sh\"\n"
+        "}\n"
+    )
     ok = (
         "#!/bin/sh\n"
         "if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; "
-        "else . ~/.claude/skills/partials/delegate-tools-path.sh; fi\n"
+        "else . \"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/delegate-tools-path.sh\"; fi\n"
+        "if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; "
+        "else . \"$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh\"; fi\n"
+        "engine=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/adlc/lane_check.py\"\n"
     )
     (tmp_path / "partials" / "bad.sh").write_text(bad, encoding="utf-8")
     (tmp_path / ".adlc" / "partials" / "also-bad.sh").write_text(bad, encoding="utf-8")
+    (tmp_path / "partials" / "bad-new.sh").write_text(bad_new, encoding="utf-8")
     (tmp_path / "partials" / "ok.sh").write_text(ok, encoding="utf-8")
     result = _run(tmp_path)
     out = result.stdout
     assert "partials/bad.sh:5: unguarded-source" in out
     assert "partials/bad.sh:6: unguarded-source" in out
     assert ".adlc/partials/also-bad.sh:5: unguarded-source" in out
+    assert "partials/bad-new.sh:3: unguarded-source" in out
+    assert "partials/bad-new.sh:4: unguarded-source" in out
     assert "partials/ok.sh" not in out
     assert "bad.sh:2:" not in out  # the header comment is not a source
+    assert "toolkit-root-line" not in out, out
     assert "scanned 1 SKILL.md file(s)" in result.stderr
-    assert result.returncode == 4  # 2 findings x 2 copies; partials never inflate `scanned`
+    # 2 findings x 2 copies + 2 in bad-new.sh; partials never inflate `scanned`.
+    assert result.returncode == 6, out
+
+
+def test_partial_default_expansion_operand_accepted_only_inside_partials(tmp_path):
+    """REQ-669 ADR-2 (TASK-123): a partial sourcing another partial has no root
+    line, and a test harness may source it with no ToolkitRoot set, so its
+    guarded line ends in the default-expansion operand
+    ``PARTIAL_SOURCE_OPERAND``. That line is clean in ``partials/*.sh`` (benign
+    path) and a finding in a SKILL.md fence, which has its root line. The
+    operand sourced without the guard, guarded under a different ``<name>``, or
+    behind the retired ``2>/dev/null ||`` is a finding in a partial too, and the
+    retired shape is one in prose.
+    """
+    assert _check.PARTIAL_SOURCE_OPERAND == (
+        '"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/<name>.sh"'
+    )
+    op = _check.PARTIAL_SOURCE_OPERAND
+    ok_line = _check.guarded_source_line("id-alloc", op)
+    (tmp_path / "partials").mkdir()
+    (tmp_path / "partials" / "ok.sh").write_text(
+        "#!/bin/sh\n" + ok_line + "\n" + "  " + ok_line + "  # indented, commented\n",
+        encoding="utf-8",
+    )
+    bad = (
+        "#!/bin/sh\n"
+        + '. "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/id-alloc.sh"\n'
+        + ok_line.replace("partials/id-alloc.sh\"", "partials/forge.sh\"") + "\n"
+        + '. .adlc/partials/x.sh 2>/dev/null || . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/x.sh"\n'
+        + '. "${ADLC_TOOLKIT_ROOT:-~/.claude/skills}/partials/x.sh"\n'
+    )
+    (tmp_path / "partials" / "bad.sh").write_text(bad, encoding="utf-8")
+    sub = tmp_path / "fence-default-operand"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(
+        "# Default operand in a fence\n\n"
+        "Never type `x 2>/dev/null || . \"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/x.sh\"`.\n\n"
+        "```sh\n" + _check.TOOLKIT_ROOT_LINE + "\n" + ok_line + "\n```\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    out = result.stdout
+    lines = _unguarded_lines(result)
+    assert "partials/ok.sh" not in out, out
+    assert "partials/bad.sh:2: unguarded-source" in out, out
+    assert "partials/bad.sh:3: unguarded-source" in out, out
+    assert "partials/bad.sh:4: unguarded-source" in out, out
+    assert "partials/bad.sh:5: unguarded-source" in out, out
+    assert "fence-default-operand/SKILL.md:3: unguarded-source" in out, out
+    assert "fence-default-operand/SKILL.md:7: unguarded-source" in out, out
+    assert len(lines) == 6, out
+    assert "toolkit-root-line" not in out, out
 
 
 def test_unguarded_source_walks_partials_companion_docs(tmp_path):
@@ -1365,6 +1654,275 @@ def test_new_walks_skip_symlinks_that_escape_root(tmp_path):
     assert "partials/real.sh:2: unguarded-source" in out, out
     assert "escaped" not in out, out
     assert result.returncode == 2, out + result.stderr
+
+
+# ---------------------------------------------------------------------------
+# REQ-669 ADR-1: `toolkit-root-line`. A fence that reads $ADLC_TOOLKIT_ROOT
+# carries the canonical root line, byte-exact, before its first read.
+# ---------------------------------------------------------------------------
+
+
+def _root_lines(result) -> list[str]:
+    return [ln for ln in result.stdout.splitlines() if " toolkit-root-line:" in ln]
+
+
+def _fixture_lines_equal(fixture_name: str, needle: str) -> list[int]:
+    """1-based numbers of every line of a fixture that CONTAINS `needle`."""
+    lines = (FIXTURES / f"{fixture_name}.md").read_text(encoding="utf-8").splitlines()
+    return [i + 1 for i, ln in enumerate(lines) if needle in ln]
+
+
+def test_toolkit_root_line_fixtures_carry_the_pinned_bytes():
+    """The fixtures spell the root line out by hand. If the constant ever moves,
+    every root line in them must move with it, or the fixtures would test a
+    spelling the linter no longer pins (LESSON-019)."""
+    for name in ("toolkit-root-line-ok", "toolkit-root-line-missing",
+                 "guarded-source-ok", "unguarded-source-fence"):
+        text = (FIXTURES / f"{name}.md").read_text(encoding="utf-8")
+        assert _check.TOOLKIT_ROOT_LINE in text, name
+
+
+def test_toolkit_root_line_ok_is_clean(tmp_path):
+    """Benign path (LESSON-440): the root line before the first read, in `sh`,
+    `bash` and indented `shell` fences, braced and unbraced reads, a comment
+    naming the variable above the line, a second fence with its own root line,
+    a fence that never names the variable, prose mentions and a `text` fence
+    showing a variant — zero findings. Staged again beside the must-fire fixture
+    so "clean" cannot come from a check that stopped running (LESSON-602)."""
+    alone = tmp_path / "alone"
+    alone.mkdir()
+    _stage(alone, "toolkit-root-line-ok")
+    result = _run(alone)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "", result.stdout
+
+    both = tmp_path / "both"
+    both.mkdir()
+    _stage(both, "toolkit-root-line-ok", "toolkit-root-line-missing")
+    result = _run(both)
+    lines = _root_lines(result)
+    assert len(lines) == 4, result.stdout
+    assert all(ln.startswith("toolkit-root-line-missing/") for ln in lines), lines
+
+
+def test_toolkit_root_line_missing_fires(tmp_path):
+    """A read with no root line above it in the same fence is one finding per
+    fence, on the first read: no root line at all, the root line only after the
+    read, a braced read in a `bash` fence, and a read that leans on an earlier
+    fence's root line. The earlier fence itself is clean."""
+    root = _stage(tmp_path, "toolkit-root-line-missing")
+    result = _run(root)
+    assert result.returncode == 4, result.stdout + result.stderr
+    lines = _root_lines(result)
+    assert len(lines) == 4, result.stdout
+    expected = sorted([
+        _line_of("toolkit-root-line-missing", 'else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi'),
+        _line_of("toolkit-root-line-missing", 'echo "root is $ADLC_TOOLKIT_ROOT"'),
+        _line_of("toolkit-root-line-missing", 'python3 "${ADLC_TOOLKIT_ROOT}/tools'),
+        _line_of("toolkit-root-line-missing", "templates/across-fences"),
+    ])
+    assert [int(ln.split(":")[1]) for ln in lines] == expected, lines
+    for ln in lines:
+        assert "no root line above it in this fence" in ln, ln
+        assert _check.TOOLKIT_ROOT_LINE in ln, ln  # the message names the fix
+        assert "conventions.md 'Bash in skills'" in ln, ln
+    assert len(result.stdout.strip().splitlines()) == 4, result.stdout
+
+
+def test_toolkit_root_line_cross_fence_use_is_a_finding(tmp_path):
+    """Architecture ADR-1 / task note: the root line is per fence by design, so
+    `$ADLC_TOOLKIT_ROOT` set in fence 1 and read in fence 2 must still be a
+    finding. `cross-fence-var` exempts exported names, and the root line
+    exports, so it is `toolkit-root-line` that reports the read — on fence 2's
+    read line, not on fence 1."""
+    sub = tmp_path / "two-fences"
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(
+        "# Two fences\n\n```sh\n"
+        + _check.TOOLKIT_ROOT_LINE + "\n"
+        + _check.guarded_source_line("forge") + "\n"
+        "```\n\nLater:\n\n```sh\n"
+        'ls "$ADLC_TOOLKIT_ROOT/templates"\n'
+        "```\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    lines = _root_lines(result)
+    assert len(lines) == 1, result.stdout
+    assert lines[0].startswith("two-fences/SKILL.md:11: toolkit-root-line:"), lines
+    assert "cross-fence-var" not in result.stdout, result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+def test_toolkit_root_line_variant_fails(tmp_path):
+    """BR-4: a variant of the root line is a finding, on the variant line — a
+    dropped character, a changed character, a trailing space, the rejected
+    `${CLAUDE_PLUGIN_ROOT:-…}` default form (Claude Code does not rewrite it,
+    verification.md row 1), the unbraced token, and a re-assignment after a
+    correct root line. The guarded source after each is canonical, so these
+    six are the only findings."""
+    root = _stage(tmp_path, "toolkit-root-line-variant")
+    result = _run(root)
+    assert result.returncode == 6, result.stdout + result.stderr
+    lines = _root_lines(result)
+    assert len(lines) == 6, result.stdout
+    needles = (
+        '"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skill}"',  # one character dropped
+        '[ -z "$ADLC_TOOLKIT_ROOT" ]',                  # one character changed
+        'skills}" ',                                    # one character added
+        "${CLAUDE_PLUGIN_ROOT:-$HOME/.claude/skills}",  # the rejected default form
+        'ADLC_TOOLKIT_ROOT="$CLAUDE_PLUGIN_ROOT"',      # the unbraced token
+        "export ADLC_TOOLKIT_ROOT=/opt/elsewhere",      # re-assignment after the line
+    )
+    for needle in needles:  # each needle names exactly one line of the fixture
+        assert len(_fixture_lines_equal("toolkit-root-line-variant", needle)) == 1, needle
+    expected = sorted(_line_of("toolkit-root-line-variant", n) for n in needles)
+    assert [int(ln.split(":")[1]) for ln in lines] == expected, (lines, expected)
+    reassign = _line_of("toolkit-root-line-variant", "export ADLC_TOOLKIT_ROOT=/opt/elsewhere")
+    for ln in lines:
+        if ln.startswith(f"toolkit-root-line-variant/SKILL.md:{reassign}:"):
+            assert "re-assigns ADLC_TOOLKIT_ROOT after the root line" in ln, ln
+        else:
+            assert "is not the canonical root line (first difference at column" in ln, ln
+    assert len(result.stdout.strip().splitlines()) == 6, result.stdout
+
+
+def test_toolkit_root_line_every_one_char_edit_fails(tmp_path):
+    """AC: a one-character variant of the root line fails `toolkit-root-line`.
+    Not a sample: every single-character deletion and every single-character
+    substitution of the pinned line, one skill each, in one scan. Each skill
+    must carry exactly one `toolkit-root-line` finding. (A deletion inside
+    `$(` can also draw a `balance` finding; only this check is counted.)"""
+    line = _check.TOOLKIT_ROOT_LINE
+    variants: set[str] = set()
+    for i in range(len(line)):
+        variants.add(line[:i] + line[i + 1:])
+        variants.add(line[:i] + ("X" if line[i] != "X" else "Y") + line[i + 1:])
+    variants.discard(line)
+    tail = _check.guarded_source_line("forge")
+    for n, variant in enumerate(sorted(variants)):
+        sub = tmp_path / f"v{n:04d}"
+        sub.mkdir()
+        (sub / "SKILL.md").write_text(
+            f"# variant {n}\n\n```sh\n{variant}\n{tail}\n```\n", encoding="utf-8"
+        )
+    result = _run(tmp_path)
+    assert f"scanned {len(variants)} SKILL.md file(s)" in result.stderr, result.stderr
+    per_skill: dict[str, int] = {}
+    for ln in _root_lines(result):
+        per_skill[ln.split("/", 1)[0]] = per_skill.get(ln.split("/", 1)[0], 0) + 1
+    missed = sorted(f"v{n:04d}" for n in range(len(variants)) if per_skill.get(f"v{n:04d}") != 1)
+    assert not missed, [
+        (name, sorted(variants)[int(name[1:])]) for name in missed[:5]
+    ]
+
+
+def test_toolkit_root_line_walks_agents_and_companion_files_not_partials(tmp_path):
+    """`toolkit-root-line` walks the same markdown families as
+    `unguarded-source` — `agents/*.md`, `proceed/phase*.md` and the partials'
+    companion docs `partials/*.md` — none of which count toward `scanned`. It
+    does NOT walk `partials/*.sh`, which read the root through the ADR-2
+    default-expansion spelling and never carry the root line."""
+    _stage(tmp_path, "clean")
+    _stage_agent(tmp_path, "toolkit-root-line-missing")
+    _stage_phase(tmp_path, "toolkit-root-line-missing", dest_name="phases-6-8-ship.md")
+    (tmp_path / "partials").mkdir()
+    shutil.copyfile(FIXTURES / "toolkit-root-line-missing.md", tmp_path / "partials" / "forge.md")
+    (tmp_path / "partials" / "lane-check.sh").write_text(
+        "#!/bin/sh\n"
+        'engine="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/adlc/lane_check.py"\n'
+        'python3 "$engine" "$ADLC_TOOLKIT_ROOT"\n',
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    lines = _root_lines(result)
+    by_file: dict[str, int] = {}
+    for ln in lines:
+        by_file[ln.split(":", 1)[0]] = by_file.get(ln.split(":", 1)[0], 0) + 1
+    assert by_file == {
+        "agents/toolkit-root-line-missing.md": 4,
+        "proceed/phases-6-8-ship.md": 4,
+        "partials/forge.md": 4,
+    }, result.stdout
+    assert "lane-check.sh" not in result.stdout, result.stdout
+    assert "scanned 1 SKILL.md file(s)" in result.stderr, result.stderr
+
+
+def test_conventions_documents_root_line_and_spelling_byte_exact(tmp_path):
+    """conventions.md 'Bash in skills' is where the spelling is taught, and
+    `partials/tests/toolkit-root.test.sh` executes the copy it finds there. So
+    the documented bytes must be the pinned bytes: every line of conventions.md
+    that starts (after indentation) with `ADLC_TOOLKIT_ROOT=` is the root line,
+    there is at least one, and the guarded spelling appears verbatim. Then the
+    documented pair, staged as a fence, lints clean — and with the root line
+    dropped, it does not."""
+    text = CONVENTIONS_MD.read_text(encoding="utf-8")
+    documented = [
+        ln.lstrip() for ln in text.splitlines()
+        if ln.lstrip().startswith("ADLC_TOOLKIT_ROOT=")
+    ]
+    assert documented, "conventions.md quotes no root line"
+    assert set(documented) == {_check.TOOLKIT_ROOT_LINE}, documented
+    assert _check.GUARDED_SOURCE_SPELLING in text.splitlines()
+    assert _check.GUARDED_SOURCE_SPELLING == (
+        'if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; '
+        'else . "$ADLC_TOOLKIT_ROOT/partials/<name>.sh"; fi'
+    )
+    # Arm order and the never-written default form are documented in words too.
+    assert "${CLAUDE_PLUGIN_ROOT:-" in text
+
+    sub = tmp_path / "documented"
+    sub.mkdir()
+    body = documented[0] + "\n" + _check.GUARDED_SOURCE_SPELLING.replace("<name>", "forge") + "\n"
+    (sub / "SKILL.md").write_text(f"# documented\n\n```sh\n{body}```\n", encoding="utf-8")
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "", result.stdout
+
+    (sub / "SKILL.md").write_text(
+        "# documented\n\n```sh\n"
+        + _check.GUARDED_SOURCE_SPELLING.replace("<name>", "forge") + "\n```\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    assert len(_root_lines(result)) == 1, result.stdout
+
+
+def test_toolkit_root_line_on_a_real_skill_rewrite(tmp_path):
+    """LESSON-019: the checks read real trees, not only their fixtures. Take the
+    real `architect/SKILL.md`, rewrite its guarded source line to the
+    ToolkitRoot spelling with the root line above it (if TASK-124 has already
+    done so, take the file as it is), and the rewrite adds no finding of any
+    kind. Remove that one root line and exactly one `toolkit-root-line` finding
+    appears, on the source line that lost it."""
+    real = (REPO_ROOT / "architect" / "SKILL.md").read_text(encoding="utf-8")
+    lines = real.splitlines(keepends=True)
+    idx = next(
+        i for i, ln in enumerate(lines)
+        if _check.CANONICAL_SOURCE_RE.match(ln.rstrip("\n"))
+    )
+    src = lines[idx]
+    indent = src[: len(src) - len(src.lstrip())]
+    name = src.split(".adlc/partials/", 1)[1].split(".sh", 1)[0]
+    new_src = indent + _check.guarded_source_line(name) + "\n"
+    root_line = indent + _check.TOOLKIT_ROOT_LINE + "\n"
+    if idx > 0 and lines[idx - 1] == root_line and lines[idx] == new_src:
+        rewritten = lines
+        root_at = idx - 1
+    else:
+        rewritten = lines[:idx] + [root_line, new_src] + lines[idx + 1:]
+        root_at = idx
+
+    def lint(content: list[str]) -> list[str]:
+        d = tmp_path / f"run{len(list(tmp_path.iterdir()))}" / "architect"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("".join(content), encoding="utf-8")
+        return [ln.split(": ", 2)[1] for ln in _run(d.parent).stdout.splitlines() if ": " in ln]
+
+    baseline = sorted(lint(lines))
+    assert sorted(lint(rewritten)) == baseline
+    without_root = rewritten[:root_at] + rewritten[root_at + 1:]
+    assert sorted(lint(without_root)) == sorted(baseline + ["toolkit-root-line"])
 
 
 def test_harness_skip_clean_when_line_present(tmp_path):
@@ -2255,3 +2813,245 @@ def test_lesson_check_order_second_recheck_before_check_fails(tmp_path, skill):
     lines = lines[:h] + lines[ro:rc + 1] + [""] + lines[h:]
     result = _mutated_run(tmp_path, skill, lambda _ls: lines)
     assert _lco(result) == [(f"{skill}/SKILL.md", h + 1, "recheck-before-check")], result.stdout
+
+
+# ---------------------------------------------------------------------------
+# dispatch-fallback (REQ-669 ADR-6, BR-9, BR-4). The canonical sentence is read
+# from conventions.md, never copied into this file: fixtures carry a
+# `{{DISPATCH_SENTENCE}}` placeholder that staging fills from the real block.
+# ---------------------------------------------------------------------------
+
+DISPATCH_CHECK = "dispatch-fallback"
+# The skills ADR-6 names, plus /adversary, which dispatches its own agent. Each
+# must name a dispatched agent and carry the sentence, so the repo-clean test is
+# not passing over files the detector cannot see (LESSON-019).
+DISPATCHING_FILES = (
+    "review/SKILL.md", "reflect/SKILL.md", "architect/SKILL.md", "optimize/SKILL.md",
+    "analyze/SKILL.md", "proceed/SKILL.md", "sprint/SKILL.md", "adversary/SKILL.md",
+    "proceed/phase-4-implementation.md", "proceed/phases-lite.md",
+)
+
+
+def _dispatch_sentence() -> str:
+    sentence, _source = _check.load_dispatch_sentence(REPO_ROOT)
+    assert sentence, "conventions.md has no readable dispatch-fallback-sentence block"
+    return sentence
+
+
+def _wrap(sentence: str, indent: str = "", width: int = 60) -> str:
+    """Hard-wrap at spaces only, the way the /proceed companion files are."""
+    lines, current = [], ""
+    for word in sentence.split(" "):
+        if current and len(current) + 1 + len(word) > width:
+            lines.append(indent + current)
+            current = word
+        else:
+            current = f"{current} {word}" if current else word
+    lines.append(indent + current)
+    return "\n".join(lines)
+
+
+def _stage_dispatch(tmp_path: Path, name: str, sentence: str | None = None) -> Path:
+    """Stage `fixtures/<name>.md` as `<tmp>/<name>/SKILL.md`, filling the
+    sentence placeholders (plain and hard-wrapped) from conventions.md."""
+    sentence = sentence or _dispatch_sentence()
+    text = (FIXTURES / f"{name}.md").read_text()
+    text = text.replace("{{DISPATCH_SENTENCE_WRAPPED}}", _wrap(sentence, "   "))
+    text = text.replace("{{DISPATCH_SENTENCE}}", sentence)
+    sub = tmp_path / name
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(text)
+    return tmp_path
+
+
+def _dispatch_findings(result) -> list[tuple[str, int, str]]:
+    out = []
+    for ln in result.stdout.splitlines():
+        parts = ln.split(": ", 2)
+        if len(parts) == 3 and parts[1] == DISPATCH_CHECK:
+            path, lineno = parts[0].rsplit(":", 1)
+            out.append((path, int(lineno), parts[2]))
+    return out
+
+
+def _staged_line(root: Path, name: str, needle: str) -> int:
+    lines = (root / name / "SKILL.md").read_text().splitlines()
+    return next(i + 1 for i, ln in enumerate(lines) if needle in ln)
+
+
+def test_dispatch_fallback_missing_sentence_fires(tmp_path):
+    """BR-9 must-fire: a step that dispatches the reflector with no canonical
+    sentence is one finding, at the step's first mention (its heading)."""
+    root = _stage_dispatch(tmp_path, "dispatch-fallback-missing")
+    result = _run(root)
+    found = _dispatch_findings(result)
+    heading = _staged_line(root, "dispatch-fallback-missing", "### Step 2: Dispatch")
+    assert [(p, n) for p, n, _ in found] == [("dispatch-fallback-missing/SKILL.md", heading)], result.stdout
+    assert "`reflector` agent" in found[0][2]
+    assert "conventions.md 'Agent dispatch patterns'" in found[0][2]
+    assert result.returncode == 1, result.stdout
+
+
+def test_dispatch_fallback_cross_reference_does_not_fire(tmp_path):
+    """BR-9 benign path: the reflector named only in cross-references ("see the
+    reflector's checklist in `/reflect`", "(the `reflector` agent)"), behind a
+    negation or a time word, as `agent's`, inside a fence, or a Claude Code
+    built-in ("Launch Explore agents") is not a dispatch."""
+    root = _stage_dispatch(tmp_path, "dispatch-fallback-cross-reference")
+    result = _run(root)
+    assert _dispatch_findings(result) == [], result.stdout
+    assert result.returncode == 0, result.stdout
+    # Not vacuous: the fixture does name toolkit agents the detector knows.
+    names = _check.load_agent_names(REPO_ROOT)
+    text = (FIXTURES / "dispatch-fallback-cross-reference.md").read_text()
+    assert {"reflector", "security-auditor", "test-auditor"} <= names
+    assert all(n in text for n in ("reflector", "security-auditor", "test-auditor"))
+    assert _check.dispatch_mentions(text, names, _dispatch_sentence())[0] == []
+
+
+def test_dispatch_fallback_with_sentence_does_not_fire(tmp_path):
+    """Every dispatch step carries the sentence; one copy is hard-wrapped and
+    indented, which whitespace normalization accepts."""
+    root = _stage_dispatch(tmp_path, "dispatch-fallback-ok")
+    result = _run(root)
+    assert _dispatch_findings(result) == [], result.stdout
+    text = (root / "dispatch-fallback-ok" / "SKILL.md").read_text()
+    mentions, _ = _check.dispatch_mentions(text, _check.load_agent_names(REPO_ROOT), _dispatch_sentence())
+    assert {m.agent for m in mentions} == {"reflector", "correctness-reviewer", "security-auditor"}
+
+
+def test_dispatch_fallback_sentence_in_another_step_fires(tmp_path):
+    """The sentence is owed once per dispatch step: a copy in Step 2 does not
+    cover Step 3's task-implementer dispatch."""
+    root = _stage_dispatch(tmp_path, "dispatch-fallback-wrong-step")
+    result = _run(root)
+    line = _staged_line(root, "dispatch-fallback-wrong-step", "dispatch a `task-implementer` agent")
+    found = _dispatch_findings(result)
+    assert [(p, n) for p, n, _ in found] == [("dispatch-fallback-wrong-step/SKILL.md", line)], result.stdout
+    assert "`task-implementer` agent" in found[0][2]
+
+
+def test_dispatch_fallback_near_miss_sentence_fires(tmp_path):
+    """One changed word in the copy is a finding: the comparison is exact
+    after whitespace normalization."""
+    sentence = _dispatch_sentence()
+    near = sentence.replace("instead of skipping it", "instead of dropping it")
+    assert near != sentence
+    text = (FIXTURES / "dispatch-fallback-ok.md").read_text()
+    text = text.replace("{{DISPATCH_SENTENCE_WRAPPED}}", sentence).replace("{{DISPATCH_SENTENCE}}", near, 1)
+    (tmp_path / "near").mkdir()
+    (tmp_path / "near" / "SKILL.md").write_text(text)
+    result = _run(tmp_path)
+    assert len(_dispatch_findings(result)) == 1, result.stdout
+
+
+def test_dispatch_fallback_walks_proceed_phase_files(tmp_path):
+    """/proceed's Phase 4 dispatch lives in a companion file, so the check walks
+    `proceed/phase*.md`; a mention in the file's introduction is satisfied by the
+    sentence anywhere in that file."""
+    root = _stage(tmp_path, "clean")
+    proceed = root / "proceed"
+    proceed.mkdir()
+    body = (
+        "# /proceed — Phase 9\n\nDispatching task-implementer agents in tiers.\n\n"
+        "### Phase 9\n\n- Tier 0: launch a **task-implementer** agent for each task.\n"
+    )
+    (proceed / "phase-9-test.md").write_text(body)
+    found = _dispatch_findings(_run(root))
+    assert [(p, n) for p, n, _ in found] == [
+        ("proceed/phase-9-test.md", 3), ("proceed/phase-9-test.md", 7),
+    ], found
+    (proceed / "phase-9-test.md").write_text(body + "\n" + _wrap(_dispatch_sentence()) + "\n")
+    assert _dispatch_findings(_run(root)) == []
+
+
+def test_dispatch_fallback_walks_partials_md(tmp_path):
+    """conventions.md says the check covers `partials/*.md`: a companion doc
+    whose step dispatches a toolkit agent fires without the sentence and is
+    clean with it, and a cross-reference there does not fire."""
+    root = _stage(tmp_path, "clean")
+    partials = root / "partials"
+    partials.mkdir()
+    body = "# partial\n\n## Step 1\n\nDispatch the **reflector** agent for a second look.\n"
+    (partials / "companion.md").write_text(body)
+    found = _dispatch_findings(_run(root))
+    assert [(p, n) for p, n, _ in found] == [("partials/companion.md", 5)], found
+    (partials / "companion.md").write_text(body + "\n" + _wrap(_dispatch_sentence()) + "\n")
+    assert _dispatch_findings(_run(root)) == []
+    (partials / "companion.md").write_text(
+        "# partial\n\n## Step 1\n\nSee the reflector's checklist in `/reflect`.\n")
+    assert _dispatch_findings(_run(root)) == []
+    # The walk that carries it is the phase walk, which lists partials/*.md.
+    assert partials / "companion.md" in _check.find_phase_files(root)
+
+
+def test_dispatch_fallback_reads_the_scan_roots_conventions_copy(tmp_path):
+    """The root's own conventions.md is the source of the sentence: a skill
+    that carries a different text fires, the root's text passes."""
+    root = _stage_dispatch(tmp_path, "dispatch-fallback-ok")
+    conv = root / ".adlc" / "context" / "conventions.md"
+    conv.parent.mkdir(parents=True)
+    other = "Agents are dispatched by the name the Agent tool lists, or run inline."
+    conv.write_text(
+        "## Agent dispatch patterns\n\n<!-- dispatch-fallback-sentence -->\n"
+        f"{other}\n<!-- /dispatch-fallback-sentence -->\n"
+    )
+    assert len(_dispatch_findings(_run(root))) == 2  # both steps carry the toolkit text
+    shutil.rmtree(root / "dispatch-fallback-ok")
+    _stage_dispatch(root, "dispatch-fallback-ok", sentence=other)
+    assert _dispatch_findings(_run(root)) == []
+
+
+@pytest.mark.parametrize("block", [
+    "",  # markers removed entirely
+    "<!-- dispatch-fallback-sentence -->\n<!-- /dispatch-fallback-sentence -->\n",  # emptied
+    "<!-- dispatch-fallback-sentence -->\nAgent names are bare.\n",  # never closed
+    "```markdown\n<!-- dispatch-fallback-sentence -->\nAgent names are bare.\n"
+    "<!-- /dispatch-fallback-sentence -->\n```\n",  # only an example inside a fence
+])
+def test_dispatch_fallback_unreadable_sentence_block_fires(tmp_path, block):
+    """LESSON-019: deleting, emptying or unclosing the block in the root's
+    conventions.md must not disarm the check. A file that names a dispatch
+    reports the missing source instead of passing unchecked."""
+    root = _stage_dispatch(tmp_path, "dispatch-fallback-ok")
+    conv = root / ".adlc" / "context" / "conventions.md"
+    conv.parent.mkdir(parents=True)
+    conv.write_text("## Agent dispatch patterns\n\n" + block)
+    found = _dispatch_findings(_run(root))
+    assert len(found) == 1, found
+    assert "could not be read from .adlc/context/conventions.md" in found[0][2]
+
+
+def test_dispatch_fallback_repo_clean():
+    """BR-4/BR-9 on the real tree: zero findings, and not vacuously. The block
+    parses, every dispatching file names at least one dispatched agent, and each
+    of those files carries the sentence (LESSON-019: verify the real post-change
+    tree, not only fixtures)."""
+    result = _run(REPO_ROOT)
+    assert _dispatch_findings(result) == [], result.stdout
+    sentence = _dispatch_sentence()
+    names = _check.load_agent_names(REPO_ROOT)
+    assert len(names) >= 19, names
+    for rel in DISPATCHING_FILES:
+        text = (REPO_ROOT / rel).read_text()
+        mentions, _ = _check.dispatch_mentions(text, names, sentence)
+        assert mentions, f"{rel}: the detector sees no dispatch, so the clean result proves nothing"
+        assert sentence in " ".join(text.split()), rel
+    # And a skill that does not dispatch a toolkit agent has no mention at all.
+    bugfix = (REPO_ROOT / "bugfix" / "SKILL.md").read_text()
+    assert "Launch Explore agents" in bugfix
+    assert _check.dispatch_mentions(bugfix, names, sentence)[0] == []
+
+
+@pytest.mark.parametrize("rel", [r for r in DISPATCHING_FILES if r.endswith("/SKILL.md")])
+def test_dispatch_fallback_fires_when_sentence_removed_from_real_skill(tmp_path, rel):
+    """Mutation on the real corpus: removing every copy of the sentence from a
+    shipped dispatching skill produces at least one finding for it."""
+    sentence = _dispatch_sentence()
+    text = (REPO_ROOT / rel).read_text()
+    assert sentence in text, rel
+    sub = tmp_path / rel.split("/")[0]
+    sub.mkdir()
+    (sub / "SKILL.md").write_text(text.replace(sentence, ""))
+    found = _dispatch_findings(_run(tmp_path))
+    assert found and all(p == f"{sub.name}/SKILL.md" for p, _, _ in found), found

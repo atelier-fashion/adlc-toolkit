@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: Post-implementation self-review — catch issues before /review
+description: Post-implementation self-review — catch issues before /review (/adlc:review on the plugin install)
 argument-hint: Optional REQ-xxx ID or branch name to scope the reflection
 ---
 
@@ -10,7 +10,7 @@ You are performing a self-review of recently implemented code to catch issues be
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -26,7 +26,7 @@ Scope: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.adlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up conventions."
+Before proceeding, verify that `.adlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first to set up conventions."
 
 ## Instructions
 
@@ -39,6 +39,8 @@ Before proceeding, verify that `.adlc/context/conventions.md` exists. If it does
 
 ### Step 2: Dispatch the `reflector` agent
 Launch the **reflector** agent via the Agent tool. The agent owns the canonical self-review checklist (Correctness, Convention Compliance, Architecture, Testing, Completeness) and handles reading changed files and cross-referencing lessons learned. Keeping the checklist in the agent ensures a single source of truth that `/proceed` Phase 5 also uses.
+
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
 Provide the agent with:
 - The scope (REQ ID, branch name, or "current uncommitted changes")
@@ -62,11 +64,11 @@ Do not proceed past this step until the user has answered — their responses ma
 
 ### Step 5: Fix or Defer
 1. If Critical issues are found, fix them immediately
-2. If Major issues are found, ask the user whether to fix now or note for `/review`
+2. If Major issues are found, ask the user whether to fix now or note for `/review` (`/adlc:review` on the plugin install)
 3. Minor issues can be listed for the user to decide
 4. After fixes, re-run tests to verify nothing broke
 
 ### Step 6: Recommend Next Action
-- If no issues or only minor ones: "Ready for `/review`"
-- If fixes were applied: "Fixes applied. Re-run `/reflect` to verify, or proceed to `/review`"
-- If blockers remain: "Address these issues before `/review`"
+- If no issues or only minor ones: "Ready for `/review` (`/adlc:review` on the plugin install)"
+- If fixes were applied: "Fixes applied. Re-run `/reflect` to verify, or proceed to `/review` (`/adlc:review` on the plugin install)"
+- If blockers remain: "Address these issues before `/review` (`/adlc:review` on the plugin install)"

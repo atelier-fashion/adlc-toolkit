@@ -157,6 +157,16 @@ none can be counted as a ghost-skip.
    - **Subagent mode**, or a harness with no agent tool: run the checklist in
      `agents/lite-reviewer.md` inline in your own context over the same inputs.
 
+   Agent names are bare on the symlink install and `adlc:`-prefixed on the
+   plugin install (`adlc:<name>`). Before dispatching, check which form the
+   Agent tool lists and use that one; do not wait for an error, because a name
+   it does not list can silently run a generic agent without the checklist. If
+   neither form is listed, say which agent is missing, then read
+   `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of
+   this skill's base directory) and run its checklist inline, or give its body
+   to a general-purpose agent as the prompt, instead of skipping it; a review
+   or audit agent stays read-only either way.
+
    If the review reports that no retrieval set was provided, run Phase 4 step 1
    again and repeat the review.
 3. **Escalate before fixing**, in this order:
@@ -221,7 +231,8 @@ elif [ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$wt" rev-parse "origin/$br
 elif [ -n "$(git -C "$wt" diff --name-only "origin/$ib...HEAD" -- ':(icase).adlc/partials' ':(icase).adlc/tools')" ]; then
   printf 'lane_check=error\ntrigger=check-error\ndetail=the branch changes the vendored partials or tools the check runs\n'; rc=2
 else
-  if [ -f .adlc/partials/lane-check.sh ]; then . .adlc/partials/lane-check.sh; else . ~/.claude/skills/partials/lane-check.sh; fi
+  ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+  if [ -f .adlc/partials/lane-check.sh ]; then . .adlc/partials/lane-check.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lane-check.sh"; fi
   adlc_lane_check "$wt" "origin/$ib"; rc=$?
 fi
 echo "lane_check_rc=$rc"
@@ -316,7 +327,8 @@ edit and the resume, and let Step 0 finish normally on the full lane.
    by the shell. Write it as one line (it already is one in the frontmatter), so
    no line of it can close the heredoc:
    ```sh
-   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
    tmp=$(mktemp "${TMPDIR:-/tmp}/prbody.XXXXXX"); line=$(mktemp "${TMPDIR:-/tmp}/prline.XXXXXX"); trap 'rm -f "$tmp" "$line"' EXIT
    cat > "$line" <<'LANE_ESCALATED'
    <the lane_escalated value, verbatim>

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Nothing here names a watched skill as an instruction; /status is a noun.
+exec true

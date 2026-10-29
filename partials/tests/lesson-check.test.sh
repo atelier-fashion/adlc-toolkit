@@ -670,6 +670,25 @@ expect_accept crlf_file_passes crlf "CRLF line ends (comment-headed file) are no
 
 { printf '\357\273\277'; cat "$(fx wf)"; } > "$(fx bom)"
 expect_accept bom_file_passes bom "a leading UTF-8 BOM is dropped"
+# The same file under a UTF-8 locale, macOS Terminal's default. There awk reads the BOM
+# as one character, and a byte-wise `\357\273\277` regex no longer matches it; the
+# partial runs its awk under LC_ALL=C so the strip stays byte-exact. A locale counts
+# only when a bare awk in it really fails that strip (the defect this guards against
+# is live there); with none available the regression is reported as not run, never as
+# a pass. LC_ALL is set in this shell, not a subshell, so the case is counted, then
+# put back.
+UTF8_LOCALE=''
+for l in en_US.UTF-8 C.UTF-8 en_US.utf8 C.utf8; do
+  if [ "$(printf '\357\273\277x\n' | LC_ALL=$l awk '{ print sub(/^\357\273\277/, "") }' 2>/dev/null)" = 0 ]; then UTF8_LOCALE=$l; break; fi
+done
+if [ -n "$UTF8_LOCALE" ]; then
+  _lc_set=${LC_ALL+x}; _lc_was=${LC_ALL-}
+  LC_ALL=$UTF8_LOCALE; export LC_ALL
+  expect_accept bom_file_passes_utf8_locale bom "a leading UTF-8 BOM is dropped under LC_ALL=$UTF8_LOCALE too"
+  if [ -n "$_lc_set" ]; then LC_ALL=$_lc_was; export LC_ALL; else unset LC_ALL; fi
+else
+  echo "NOTE: no UTF-8 locale in which awk is multibyte; bom_file_passes_utf8_locale not run"
+fi
 
 printf '%s\n' "$BODY_OK" > "$(fx nofm)"
 printf '%s\n' '---' 'id: LESSON-999' 'kind: "process"' '' "$BODY_OK" > "$(fx unclosed)"
@@ -1345,11 +1364,22 @@ printf '%s\r\n' '---' 'id: LESSON-506' 'supersedes: [LESSON-40]' '---' '' 'Body 
 # A frontmatter-less legacy file: `---` rules around a supersedes line are not a block.
 printf '%s\n' '# A legacy lesson' '' 'Some text.' '' '---' '' 'supersedes: [LESSON-40]' '' '---' \
   > "$SANDBOX/rl/LESSON-508-legacy.md"
+for rl_md in "$REVIEW_MD" "$(dirname "$REVIEW_MD")/../spec/SKILL.md"; do
+  if grep -qF -- "LC_ALL=C find .adlc/knowledge/lessons -maxdepth 1 -type f -name 'LESSON-*.md' -exec awk -v id=\"\$ID\" '" "$rl_md"; then
+    pass "supersedes_lookup_runs_bytewise: $(basename "$(dirname "$rl_md")")/SKILL.md runs the lookup under LC_ALL=C, so a BOM-headed lesson matches under a UTF-8 locale"
+  else
+    fail "supersedes_lookup_runs_bytewise: $rl_md's supersedes lookup is not 'LC_ALL=C find ... -exec awk' — under a UTF-8 locale macOS awk misses a BOM-headed lesson"
+  fi
+done
 if [ -z "$RL_PROG" ]; then
   fail "supersedes_reverse_lookup_is_exact: no single lookup program extracted from review/SKILL.md ($rl_n line(s) carry '-exec awk -v id=\"\$ID\" '' — want exactly 1, closed by \"' {} +\")"
 else
-  rl_hits=$(awk -v id=LESSON-40 "$RL_PROG" "$SANDBOX"/rl/*.md 2>&1 | sed 's#.*/##' | tr '\n' ' ')
-  rl_bom=$(awk -v id=LESSON-400 "$RL_PROG" "$SANDBOX"/rl/*.md 2>&1 | sed 's#.*/##' | tr '\n' ' ')
+  # LC_ALL=C: the program's BOM strip is a byte-wise regex, which a multibyte awk
+  # (any UTF-8 locale) does not match. The lookup line in review/SKILL.md and its
+  # twin in spec/SKILL.md run it as `LC_ALL=C find ... -exec awk`, so the case runs
+  # it the same way; supersedes_lookup_runs_bytewise pins that prefix.
+  rl_hits=$(LC_ALL=C awk -v id=LESSON-40 "$RL_PROG" "$SANDBOX"/rl/*.md 2>&1 | sed 's#.*/##' | tr '\n' ' ')
+  rl_bom=$(LC_ALL=C awk -v id=LESSON-400 "$RL_PROG" "$SANDBOX"/rl/*.md 2>&1 | sed 's#.*/##' | tr '\n' ' ')
   if [ "$rl_hits" = "LESSON-501-comment-headed.md LESSON-506-crlf.md " ] \
      && [ "$rl_bom" = "LESSON-507-bom.md " ]; then
     pass "supersedes_reverse_lookup_is_exact: review/SKILL.md's program finds LESSON-40 in the comment-headed and CRLF files only (not the body, a comment, 404, 140, the BOM file's body or the legacy rules), and LESSON-400 in the BOM file's frontmatter"

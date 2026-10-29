@@ -2,6 +2,75 @@
 
 Skills, agents, and templates for spec-driven development with [Claude Code](https://claude.com/claude-code). Stack-agnostic at the core, with optional preset configs for common stacks (iOS+Firebase+Cloud Run, etc.).
 
+## Install
+
+Two commands, run in your own terminal:
+
+```bash
+claude plugin marketplace add atelier-fashion/adlc-toolkit
+claude plugin install adlc@adlc-toolkit
+```
+
+This repo is both the marketplace (`adlc-toolkit`) and the plugin (`adlc`). Start a new Claude Code session after installing. On this route every skill is namespaced: type `/adlc:<skill>`, for example `/adlc:init`, `/adlc:spec` or `/adlc:proceed`. The toolkit's agents are registered as `adlc:<name>`. The skill table below uses the bare names; add the `adlc:` prefix on the plugin route.
+
+The plugin's version is pinned to this repo's `VERSION`, so it changes only when a release is cut, not on every merge; you get a new release when you update (see [Updating](#updating)). Contributors and the maintainer use a symlink live install instead, described under [Contributing and live install](#contributing-and-live-install). Use one route per machine, not both (see [Known limitations](#known-limitations)).
+
+**Did it work?** `adlc doctor` checks every dependency end to end and prints a copy-pasteable fix for anything that fails. On the plugin route, run it by path from any terminal once a Claude Code session has started (the session's start hook writes the pointer file this line reads):
+
+```bash
+"$(cat ~/.claude/adlc/plugin-root)/scripts/adlc" doctor
+```
+
+Inside a Claude Code session the same hook also appends the plugin's `scripts/` directory to the shell's PATH, so skills can run plain `adlc` (see the loader table below for how far that is verified).
+
+On the plugin route, the four checks that inspect the symlink install (`skills-symlink`, `agents-symlink`, `toolkit-clean`, `path-shims`) print SKIP with a notice. Two checks cover the routes themselves:
+
+- **`plugin-route`** reports which route the doctor runs on and its version. On the plugin route it checks that this is the copy Claude Code loads, that `~/.claude/adlc/plugin-root` names it, and that `scripts/adlc` is executable and, inside a Claude Code session, on PATH. Its fixes re-run what the hook does (`CLAUDE_PLUGIN_ROOT='<root>' sh '<root>/scripts/session-start.sh'`, or just start a new session), `chmod +x '<root>/scripts/adlc'`, or reinstall (`claude plugin uninstall adlc@adlc-toolkit && claude plugin install adlc@adlc-toolkit`). When the doctor cannot read the install record, it fails and points at `claude plugin details adlc`.
+- **`doubled-install`** fails when the symlink install and the plugin are both installed. It prints one fix for each way out: `claude plugin uninstall adlc@adlc-toolkit` keeps the symlink install, and an `rm` of the `~/.claude/skills` and `~/.claude/agents` links (plus `~/bin/adlc` when it runs the clone) keeps the plugin. The `rm` removes the links, not the clone.
+
+See [`tools/adlc/README.md`](tools/adlc/README.md) for the full check list.
+
+### What the plugin runs and writes
+
+This paragraph is for anyone reviewing what the plugin does to a machine, including the Claude directory's security scan. The plugin registers one hook, in [`hooks/hooks.json`](hooks/hooks.json). At session start Claude Code runs `sh "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh"`. [`scripts/session-start.sh`](scripts/session-start.sh) is POSIX `sh`. It uses no network and no Python. It writes nothing until `CLAUDE_PLUGIN_ROOT` passes a check: the path must be absolute, must hold no newline, `..` or shell metacharacter, and must contain a `.claude-plugin/plugin.json` naming `adlc` and a `partials/` directory. Then it does three things:
+
+1. **Pointer file.** It writes the plugin root, one line, to `~/.claude/adlc/plugin-root`. The write goes through a temp file and `mv`, and happens only when the content changed. Skill text that Claude Code did not substitute reads this file to find the plugin (the third arm of the ToolkitRoot line, see `.adlc/context/architecture.md`).
+2. **Config scaffold.** It writes `~/.claude/adlc/config.yml` only when nothing exists at that path. The file sets `delegate: enabled: false`, so installing the plugin never turns delegation on. Its bytes are identical to the scaffold `install.sh` writes, and a test pins the two copies equal. That is why its comment says "scaffolded by install.sh" and suggests `./install.sh --with-delegation`. On the plugin route, ignore that line. The plugin does not ship the delegation CLIs, and `install.sh` run from the plugin's copy would link that copy into `~/.claude` and double the install. `adlc doctor` on the plugin route never prints `install.sh` as a fix: its `pyyaml` and `delegate-gate` checks print a pinned `pip install` and a config edit instead. To use delegation, install by the symlink route with `./install.sh --with-delegation`.
+3. **PATH line.** When Claude Code provides `CLAUDE_ENV_FILE`, the session's environment file, the hook appends one marked line, `export PATH="$PATH:<plugin root>/scripts" # adlc-plugin-path`, and only once. The plugin's directory goes after your own PATH, so a `~/bin/adlc` you already have still wins. [`scripts/adlc`](scripts/adlc) is a POSIX shim that runs `python3 <plugin root>/tools/adlc/adlc.py`. That CLI uses only the Python standard library.
+
+The hook writes nothing else. It writes nothing into the plugin cache, and it edits no shell rc file, no `settings.json` and no `CLAUDE.md`. Every path exits 0, nothing goes to stdout, and at most one `adlc:` line goes to stderr, so a hook problem never costs you the session. The skills themselves keep machine state where the symlink install keeps it, shared by both routes. That covers the id counters `~/.claude/.global-next-{req,bug,lesson}`, their lock directories, the reservations ledger `~/.claude/.adlc-own-reservations`, and the telemetry log `~/Library/Logs/adlc-skill-telemetry.log`. Their commands run through Claude Code's Bash tool under your permission settings.
+
+### Loader behavior, and what is verified
+
+The plugin's design rests on how Claude Code loads plugins. A claim marked **verified** was observed directly on a real install of **Claude Code 2.1.258** on 2026-10-28, using sandbox `HOME`s. Anything else is marked **unverified**, including behavior seen only in the shell Claude Code runs a skill's `!` lines in, which is a proxy for the Bash tool and not the same thing. The full record is [`.adlc/specs/REQ-669-claude-code-plugin-marketplace-install/verification.md`](.adlc/specs/REQ-669-claude-code-plugin-marketplace-install/verification.md).
+
+| Claim | Status |
+|---|---|
+| `"skills": "./"` in `plugin.json` exposes all 17 root-level `<skill>/SKILL.md` directories | verified, 2.1.258 |
+| With no `agents` field, the default `agents/` scan exposes all 19 agents | verified, 2.1.258 |
+| Both manifests pass `claude plugin validate --strict` | verified, 2.1.258 |
+| An install copies the plugin to `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, with no `.git`. Earlier versions stay on disk after `claude plugin update` | verified, 2.1.258, through a git marketplace (the clone-then-cache path a GitHub source takes). The two commands above against this GitHub repo are **unverified** until the first release check |
+| `${CLAUDE_PLUGIN_ROOT}` is substituted in skill text: prose, fenced shell and `!` lines, before a `!` line runs. The `${CLAUDE_PLUGIN_ROOT:-…}` default form is **not** substituted | verified, 2.1.258 |
+| `${CLAUDE_PLUGIN_ROOT}` is substituted in an agent body | **unverified** (needs a model turn) |
+| A file read through the Read tool is not substituted | **unverified**. On 2.1.258 the install was seen not to rewrite files, but no Read tool call was made |
+| `CLAUDE_PLUGIN_ROOT` is not set in the Bash tool's environment | **unverified**. On 2.1.258 it was empty in the shell that runs `!` lines; a model-issued Bash tool call was not made |
+| The plugin's SessionStart hook runs and receives `CLAUDE_ENV_FILE` | verified, 2.1.258, at `claude -p` startup. Interactive sessions and the resume, clear and compact starts are **unverified** |
+| The hook's PATH line reaches the Bash tool, so plain `adlc` resolves | **unverified**. On 2.1.258 it reached the shell that runs `!` lines; a model-issued Bash tool call was not made. Running `scripts/adlc` by path, as above, does not depend on it |
+| A typed bare `/<skill>` reaches the plugin skill when nothing else owns that name | verified, 2.1.258, on a plugin-only `HOME`. The Skill tool given a bare name is **unverified**. Names Claude Code's own commands own were not measured, which is why this README prints `/adlc:<skill>` |
+| Plugin agents are registered as `adlc:<name>`, and a bare or unknown name on the fork path silently becomes a generic agent | verified, 2.1.258 |
+| The Agent tool's `subagent_type` and the Workflow tool's `agentType` take `adlc:<name>` | **unverified** (needs a model turn) |
+| A local-path marketplace (`claude plugin marketplace add ./` from a clone) runs the plugin from the source directory, not the cache | verified, 2.1.258 |
+| A Claude directory install goes through the claude.ai sync path that rejects a top-level `bin/` | **unverified**. The plugin ships no top-level `bin/`, so either answer works |
+
+### Known limitations
+
+- **Agent dispatch spelling.** Whether the Agent tool's `subagent_type` and the Workflow tool's `agentType` accept `adlc:<name>` has not been probed. The `/sprint` workflow engine prefixes agent names with `adlc:` on the plugin route, inferred from the agent registry. Every skill that dispatches an agent says to use the spelling the Agent tool lists and, when neither spelling is listed, to name the missing agent and run its checklist inline from the agent file. A wrong spelling does not fail loudly.
+- **Skill names Claude Code also owns.** Skill text prints bare next steps such as "run `/validate`", and on a plugin-only machine a typed bare name reached the plugin skill in the probe. Three skill names are Claude Code's own as well. `/init` and `/status` are built-in commands, and `/review` is an alias of the bundled `code-review` skill. The Claude Code 2.1.258 binary resolves a bare name to an exact command-name match first, so on the plugin route a bare `/init` runs Claude Code's CLAUDE.md generator, not this toolkit's `/init` (read from the binary; a typed command was not measured). Wherever skill text tells you to run one of these three, it prints both spellings on the same line, such as "`/init` (`/adlc:init` on the plugin install)". On the plugin route, type the `/adlc:` spelling. The `tools/lint-skills` `builtin-collision` check fails a bare instruction for any of the three, so the text stays that way. Which command a bare `/review` reaches on the plugin route depends on Claude Code's command order and is **unverified**. The other skill names are not Claude Code commands, and their bare spelling works on both routes.
+- **PyYAML.** The ADLC config is parsed with PyYAML, which a fresh Mac's system `python3` lacks. On a plugin-only machine that is not a failure for the setup the plugin leaves you with: when there is no delegate venv and no project `.adlc/config.yml`, and the machine config is byte for byte the delegation-off scaffold the hook writes, the doctor's `pyyaml` check SKIPs, because read without PyYAML that file sets nothing. A project config or an edited machine config makes the check live, and on such a `python3` it then FAILs. The printed fix is a pinned `pip install --user` for that interpreter. Until it is installed, a `forge.provider` written in a config is not read, and the provider comes from the origin URL instead.
+- **A disabled plugin still counts.** The doctor reads `~/.claude/plugins/installed_plugins.json` and the plugin cache, not `enabledPlugins` in `~/.claude/settings.json`. A plugin disabled there still counts as installed, so `doubled-install` can report a doubling that Claude Code is not loading.
+- **Both routes at once.** With the symlink install and the plugin both active, bare `/spec` reaches the symlink copy and `/adlc:spec` the plugin, per the Claude Code skills docs (**unverified**: not measured on a doubled machine). The `doubled-install` check above reports it, with a fix for each way out.
+- **Delegation** is not part of the plugin route (see the config scaffold above).
+
 ## What's Included
 
 ### Skills
@@ -24,7 +93,9 @@ Skills, agents, and templates for spec-driven development with [Claude Code](htt
 | `/manifest` | Remote-derived view of all in-flight ADLC work — open PRs + pushed `feat/REQ-*` branches, with advisory component/domain + file-footprint overlap and a deterministic merge order (REQ-483) |
 | `/analyze` | Codebase health audit |
 | `/optimize` | API cost & performance scanner |
-| `/template-drift` | Detect drift between a project's local `.adlc/templates/` and the canonical toolkit templates |
+| `/template-drift` | Detect drift between a project's local `.adlc/templates/` and the canonical toolkit templates. On the plugin route it names the plugin version it compares against (`adlc plugin <version>`) |
+
+On the plugin route each skill is `/adlc:<skill>`.
 
 ### Templates
 
@@ -43,51 +114,25 @@ Stack-shaped starter configs that seed `.adlc/config.yml` for common stacks. See
 
 ### Workflows
 
-Deterministic Dynamic-Workflow scripts + the JSON-Schema literals they validate agent output against. See [`workflows/`](workflows/README.md) — reached via the skills symlink and vendored into a consumer's `.adlc/workflows/` by `/init` (same two-level path resolution as `templates/` and `partials/`).
+Deterministic Dynamic-Workflow scripts + the JSON-Schema literals they validate agent output against. See [`workflows/`](workflows/README.md). They are read from the installed toolkit on either route and vendored into a consumer's `.adlc/workflows/` by `/init`, with the same two-level path resolution as `templates/` and `partials/`.
 
 ### Tools
 
 Standalone command-line utilities (not skills). See:
 
-- [`tools/adlc/`](tools/adlc/README.md) — the `adlc` umbrella CLI. Its first subcommand, `adlc doctor`, is a read-only health check that diagnoses every install dependency and prints a copy-pasteable fix for each failure. Installed by the root [`install.sh`](#setup).
-- [`tools/delegate/`](tools/delegate/README.md) — provider-agnostic delegation CLIs (`adlc-read`, `adlc-write`, `extract-chat`) for offloading token-heavy I/O. **Off by default** — opt in via `./install.sh --with-delegation`.
+- [`tools/adlc/`](tools/adlc/README.md) — the `adlc` umbrella CLI. Its first subcommand, `adlc doctor`, is a read-only health check that diagnoses every install dependency and prints a copy-pasteable fix for each failure. On the plugin route the SessionStart hook puts [`scripts/adlc`](scripts/adlc) on the session's PATH; on the symlink route the root [`install.sh`](#symlink-install) writes `~/bin/adlc`.
+- [`tools/delegate/`](tools/delegate/README.md) — provider-agnostic delegation CLIs (`adlc-read`, `adlc-write`, `extract-chat`) for offloading token-heavy I/O. **Off by default.** Symlink route only: opt in with `./install.sh --with-delegation`.
 
 ## How it works
 
 The toolkit is split into two layers:
 
-1. **The toolkit repo** (this repo) — generic skills, agents, and templates that work for any stack. Symlinked into `~/.claude/skills/` so every Claude Code session sees them.
+1. **The toolkit** (this repo) — generic skills, agents, and templates that work for any stack. It reaches Claude Code by one of two routes: the plugin, a pinned copy under `~/.claude/plugins/cache/`, or the symlink install, this clone linked at `~/.claude/skills/`. Either way every Claude Code session on the machine sees it. One skill text serves both routes: a skill finds the toolkit's own files through one variable, `$ADLC_TOOLKIT_ROOT`, set by a canonical line at the top of each shell block.
 2. **Per-project `.adlc/` directory** — lives in each code repo. Holds the project's specs, architecture, conventions, and a `config.yml` that declares the project's stack, deploy targets, and repo layout. **All project-specific values live here**, never in the toolkit.
 
 Skills read `.adlc/config.yml` at runtime to resolve project-specific things (GCP project IDs, iOS device names, Cloud Run service names, etc.) — nothing is hardcoded in the skills themselves.
 
 ## Setup
-
-Two commands:
-
-```bash
-# Replace <owner> with the canonical upstream's GitHub owner (or your fork's).
-git clone https://github.com/<owner>/adlc-toolkit.git
-cd adlc-toolkit && ./install.sh
-```
-
-`install.sh` is idempotent and repair-capable: it symlinks `~/.claude/skills` and `~/.claude/agents` to this clone, puts the `adlc` CLI on your PATH, scaffolds `~/.claude/adlc/config.yml` (delegation **off** by default), and finishes by running `adlc doctor`. Run it again any time — a healthy machine reports zero actions; a broken one is repaired. Moved the clone? `./install.sh --repair` re-stamps everything to the new location.
-
-**Did it work?** `adlc doctor` is the answer to every "is my environment set up right?" question. It checks each dependency end-to-end (symlinks, PATH, `gh` auth, git identity, counters, delegation state, …) and prints an exact, copy-pasteable fix for anything that fails. See [`tools/adlc/README.md`](tools/adlc/README.md) for the full check list.
-
-```bash
-adlc doctor                          # full health check
-adlc doctor --checks forge           # just one check (skills use this as a pre-flight)
-```
-
-Other install options:
-
-```bash
-./install.sh --dry-run           # print the action plan, change nothing
-./install.sh --with-delegation   # also install the (opt-in) delegation CLIs
-```
-
-The toolkit uses a **symlink-based live install**: one canonical git clone on disk, exposed to Claude Code at `~/.claude/skills/` via an absolute-path symlink. There is no separate "installed" copy and no sync step — edits you commit to the clone are instantly visible to every Claude Code session on the machine. (For the manual steps `install.sh` performs under the hood, see [Manual install](#manual-install-under-the-hood) below.)
 
 ### Initialize a project
 
@@ -95,54 +140,30 @@ In any code repo:
 
 ```bash
 claude
-> /init
+> /adlc:init        # plugin route; /init on the symlink route
 ```
 
-This bootstraps the `.adlc/` directory with project-specific context, specs, and copies of the templates.
+This bootstraps the `.adlc/` directory with project-specific context, specs, and copies of the templates, partials and workflow engine.
 
 ### Configure for your stack
 
-Pick a preset that matches your stack and copy it to `.adlc/config.yml`:
+Pick a preset that matches your stack and copy it to `.adlc/config.yml`. The presets live in the installed toolkit, whose root depends on the route:
 
 ```bash
-ls ~/.claude/skills/presets/
-cp ~/.claude/skills/presets/ios-firebase-cloudrun.yml .adlc/config.yml
+ADLC_TOOLKIT_ROOT="$(cat ~/.claude/adlc/plugin-root)"   # plugin route, after a session has started
+# ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"              # symlink route
+ls "$ADLC_TOOLKIT_ROOT/presets/"
+cp "$ADLC_TOOLKIT_ROOT/presets/ios-firebase-cloudrun.yml" .adlc/config.yml
 $EDITOR .adlc/config.yml  # replace every <placeholder> with a real value
 ```
 
-If no preset matches, copy the bare template instead and fill it out from scratch:
+[`presets/README.md`](presets/README.md) has the one-line resolver that works on both routes. If no preset matches, copy the bare template instead and fill it out from scratch:
 
 ```bash
-cp ~/.claude/skills/templates/config-template.yml .adlc/config.yml
+cp "$ADLC_TOOLKIT_ROOT/templates/config-template.yml" .adlc/config.yml
 ```
 
 Single-repo projects without a backend can leave the file absent — every skill falls back to legacy single-repo behavior in that case.
-
-### Manual install (under the hood)
-
-`./install.sh` is the supported path; this section documents what it does so you can reproduce it by hand or debug a failure. (`adlc doctor` checks each of these.)
-
-```bash
-# 1. Back up any existing directories (rename is safe and reversible)
-[ -e ~/.claude/skills ] && mv ~/.claude/skills ~/.claude/skills.bak
-[ -e ~/.claude/agents ] && mv ~/.claude/agents ~/.claude/agents.bak
-
-# 2. Symlink to Claude Code's skills and agents directories.
-#    Use ABSOLUTE paths so they resolve from any cwd.
-TOOLKIT="$PWD"                       # run from the toolkit clone root
-ln -sfn "$TOOLKIT" "$HOME/.claude/skills"
-ln -sfn "$TOOLKIT/agents" "$HOME/.claude/agents"
-
-# 3. Put the adlc CLI on your PATH (install.sh writes a shim in ~/bin).
-#    Either add ~/bin to PATH, or run the CLI directly:
-python3 "$TOOLKIT/tools/adlc/adlc.py" doctor
-
-# 4. Verify
-readlink ~/.claude/skills            # → absolute path to your adlc-toolkit clone
-ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
-```
-
-Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably. Delegation (the `tools/delegate/` CLIs) is a separate opt-in — `./install.sh --with-delegation` or run `tools/delegate/install.sh` directly.
 
 ## Workflow
 
@@ -153,6 +174,8 @@ Git commands run from inside `~/.claude/skills/` transparently operate on the cl
 For bugs: `/bugfix` (report → analyze → fix → verify → ship)
 
 For multi-REQ batches: `/sprint` (parallel `/proceed` runners)
+
+On the plugin route, prefix each with `adlc:` (`/adlc:spec`, `/adlc:proceed`, …).
 
 ## Project Structure
 
@@ -165,6 +188,7 @@ After `/init`, each code repo will have:
   specs/             # Requirement docs, architecture docs, tasks
   knowledge/         # Assumptions validated, lessons learned
   templates/         # Copies of templates (from this toolkit)
+  partials/          # Copies of the shared shell partials (from this toolkit)
   workflows/         # Copies of Dynamic Workflow scripts + schemas (from this toolkit)
 ```
 
@@ -241,15 +265,78 @@ If you want to add support for a new stack (e.g., AWS Lambda backends, Android d
 
 ## Updating
 
-Pull the latest toolkit to update all skills across all projects:
+**Plugin route.** A new version reaches you when a release is tagged and you update:
 
 ```bash
-cd "$(readlink ~/.claude/skills)"
-git pull
+claude plugin marketplace update adlc-toolkit
+claude plugin update adlc@adlc-toolkit
+```
+
+Restart Claude Code to load it. The steps behind a release are in [`RELEASING.md`](RELEASING.md).
+
+**Symlink route.** Pull the clone. This command works only on the symlink route, where `~/.claude/skills` is a link to the clone:
+
+```bash
+git -C "$(readlink ~/.claude/skills)" pull
 ```
 
 Since `~/.claude/skills` is a symlink, changes are picked up immediately.
 
-## Contributing
+On either route, the copies `/init` vendored into each project's `.adlc/` do not update themselves. Run `/template-drift` (`/adlc:template-drift` on the plugin route) in a project to see which are stale, and re-run `/init` (`/adlc:init` on the plugin install) to refresh them.
+
+## Contributing and live install
 
 This is published as a generic toolkit you can fork or contribute back to. Patches that add presets, support new stacks, or sharpen workflows for stacks already supported are all welcome.
+
+Contributors and the maintainer run the toolkit from a git clone with a **symlink-based live install**. There is one clone on disk, exposed to Claude Code at `~/.claude/skills/` through an absolute-path symlink. There is no separate installed copy and no sync step: edits you commit to the clone are visible to every Claude Code session on the machine at once. Skills keep their bare names (`/spec`, not `/adlc:spec`). If the plugin is installed too, uninstall it first (`claude plugin uninstall adlc@adlc-toolkit`), or `adlc doctor` will report a doubled install.
+
+### Symlink install
+
+```bash
+git clone https://github.com/atelier-fashion/adlc-toolkit.git   # or your fork
+cd adlc-toolkit && ./install.sh
+```
+
+`install.sh` is idempotent and repair-capable: it symlinks `~/.claude/skills` and `~/.claude/agents` to this clone, puts the `adlc` CLI on your PATH (`~/bin/adlc`), scaffolds `~/.claude/adlc/config.yml` (delegation **off** by default), and finishes by running `adlc doctor`. Run it again any time — a healthy machine reports zero actions; a broken one is repaired. Moved the clone? `./install.sh --repair` re-stamps everything to the new location.
+
+```bash
+adlc doctor                          # full health check
+adlc doctor --checks forge           # just one check (skills use this as a pre-flight)
+```
+
+Other install options:
+
+```bash
+./install.sh --dry-run           # print the action plan, change nothing
+./install.sh --with-delegation   # also install the (opt-in) delegation CLIs
+```
+
+### Manual install (under the hood)
+
+`./install.sh` is the supported path for the symlink route; this section documents what it does so you can reproduce it by hand or debug a failure. (`adlc doctor` checks each of these.) The `~/.claude/skills` and `~/.claude/agents` paths below are the symlink route's own; the plugin route uses neither.
+
+```bash
+# 1. Back up any existing directories (rename is safe and reversible)
+[ -e ~/.claude/skills ] && mv ~/.claude/skills ~/.claude/skills.bak
+[ -e ~/.claude/agents ] && mv ~/.claude/agents ~/.claude/agents.bak
+
+# 2. Symlink to Claude Code's skills and agents directories.
+#    Use ABSOLUTE paths so they resolve from any cwd.
+TOOLKIT="$PWD"                       # run from the toolkit clone root
+ln -sfn "$TOOLKIT" "$HOME/.claude/skills"
+ln -sfn "$TOOLKIT/agents" "$HOME/.claude/agents"
+
+# 3. Put the adlc CLI on your PATH (install.sh writes a shim in ~/bin).
+#    Either add ~/bin to PATH, or run the CLI directly:
+python3 "$TOOLKIT/tools/adlc/adlc.py" doctor
+
+# 4. Verify
+readlink ~/.claude/skills            # → absolute path to your adlc-toolkit clone
+ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
+```
+
+Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably. Delegation (the `tools/delegate/` CLIs) is a separate opt-in — `./install.sh --with-delegation` or run `tools/delegate/install.sh` directly.
+
+### Trying the plugin from a clone
+
+To test the plugin route from a checkout, add the clone as a local-path marketplace in a sandbox `HOME`, not your own: `claude plugin marketplace add ./` then `claude plugin install adlc@adlc-toolkit`. A local-path marketplace runs the plugin from the source directory rather than a cache copy, and `adlc doctor` recognises that as the plugin route. Releases are cut per [`RELEASING.md`](RELEASING.md).

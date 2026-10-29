@@ -12,7 +12,7 @@ This skill is the **pre-push ADLC review gate**. It runs 5 specialized review ag
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -28,7 +28,7 @@ Scope: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.adlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up conventions."
+Before proceeding, verify that `.adlc/context/conventions.md` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first to set up conventions."
 
 ## Instructions
 
@@ -52,7 +52,9 @@ Before proceeding, verify that `.adlc/context/conventions.md` exists. If it does
 Read the complete current version of every changed file (not just the diff) to understand full context.
 
 ### Step 3: Launch Review Agents
-Launch **5 formal review agents in parallel** using the Agent tool. Each agent is defined in `~/.claude/agents/` with its full checklist, model selection, and tool restrictions. Running in parallel minimizes wall-clock time.
+Launch **5 formal review agents in parallel** using the Agent tool. Each agent is defined in `$ADLC_TOOLKIT_ROOT/agents/` with its full checklist, model selection, and tool restrictions. Running in parallel minimizes wall-clock time.
+
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
 1. **correctness-reviewer** agent — provide it the list of changed files, the full diff, `conventions.md` content, and recent lessons. Focus: logic errors, null risks, race conditions, edge cases, concurrency bugs. Tell it: "Report findings only. Do not apply fixes."
 2. **quality-reviewer** agent — same inputs. Focus: naming, convention compliance, code duplication, complexity, maintainability. Tell it: "Report findings only. Do not apply fixes."
@@ -85,7 +87,7 @@ Each agent returns structured findings with severity (Critical/Major/Minor/Nit),
    ID='<id>'
    case "$ID" in
      LESSON-[0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9][0-9]|LESSON-[0-9][0-9][0-9][0-9][0-9][0-9])
-       find .adlc/knowledge/lessons -maxdepth 1 -type f -name 'LESSON-*.md' -exec awk -v id="$ID" 'FNR==1{s=0;skip=0;c=0;sub(/^\357\273\277/,"")} {sub(/\r$/,"")} skip{next} s==0&&/^[ \t]*$/{next} s==0&&/^<!--/{c=1} c{ if(/-->/){c=0}; next } s==0&&!/^---$/{skip=1;next} s<2&&/^---$/{s++;next} s==1&&$(0)~("^supersedes:[ \t][^#]*" id "([^0-9]|$)"){print FILENAME;skip=1}' {} + 2>/dev/null ;;
+       LC_ALL=C find .adlc/knowledge/lessons -maxdepth 1 -type f -name 'LESSON-*.md' -exec awk -v id="$ID" 'FNR==1{s=0;skip=0;c=0;sub(/^\357\273\277/,"")} {sub(/\r$/,"")} skip{next} s==0&&/^[ \t]*$/{next} s==0&&/^<!--/{c=1} c{ if(/-->/){c=0}; next } s==0&&!/^---$/{skip=1;next} s<2&&/^---$/{s++;next} s==1&&$(0)~("^supersedes:[ \t][^#]*" id "([^0-9]|$)"){print FILENAME;skip=1}' {} + 2>/dev/null ;;
      *) echo "superseded lookup: $ID is not a LESSON-nnn id — skipped" >&2 ;;
    esac
    ```

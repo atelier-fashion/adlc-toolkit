@@ -30,8 +30,9 @@
 # proof of syntactic validity; treat a passing bound as "safe to attempt", never
 # "safe to ship" without it.
 #
-# Source this partial, then call WITHIN THE SAME fenced block:
-#   if [ -f .adlc/partials/conflict-bound.sh ]; then . .adlc/partials/conflict-bound.sh; else . ~/.claude/skills/partials/conflict-bound.sh; fi
+# Source this partial, then call WITHIN THE SAME fenced block, after the fence's
+# ToolkitRoot root line (conventions.md "Bash in skills"):
+#   if [ -f .adlc/partials/conflict-bound.sh ]; then . .adlc/partials/conflict-bound.sh; else . "$ADLC_TOOLKIT_ROOT/partials/conflict-bound.sh"; fi
 #   offenders=$(adlc_conflict_append_only "$worktree"); rc=$?
 #   case $rc in
 #     0) adlc_conflict_keep_both "$worktree" && adlc_conflict_verify_kept "$worktree" ;;  # resolve + verify

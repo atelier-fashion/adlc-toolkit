@@ -10,12 +10,15 @@ Stack-shaped starter configs for `.adlc/config.yml`. Each preset captures a comm
 
 ## How to use a preset
 
-From inside the repo where you're running `/init`:
+From inside the repo where you're running `/init` (`/adlc:init` on the plugin install):
 
 ```bash
-cp ~/.claude/skills/presets/ios-firebase-cloudrun.yml .adlc/config.yml
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+cp "$ADLC_TOOLKIT_ROOT/presets/ios-firebase-cloudrun.yml" .adlc/config.yml
 $EDITOR .adlc/config.yml
 ```
+
+The first line is the toolkit's canonical root line. It sets `ADLC_TOOLKIT_ROOT` to the installed toolkit: on the symlink route the clone that `install.sh` links into `~/.claude`, and on the plugin route the plugin's cache copy (read from `~/.claude/adlc/plugin-root`, which the plugin's session hook writes).
 
 Replace every `<placeholder>` with a real value (project name, GCP project IDs, repo paths, device names). Don't leave placeholders in — skills will fail loudly when they try to use them, but it's faster to just fill them in up front.
 

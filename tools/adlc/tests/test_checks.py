@@ -566,6 +566,78 @@ def test_pyyaml_check_does_not_skip_once_a_config_exists(tmp_path, monkeypatch):
     assert checks.check_pyyaml(_profile(tmp_path))[0] is Result.FAIL
 
 
+#: The toolkit these tests run from: it carries scripts/session-start.sh, the
+#: hook whose scaffold text the `pyyaml` check compares against.
+_TOOLKIT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.realpath(__file__)))))
+
+
+def _scaffold_machine(tmp_path, monkeypatch):
+    """A machine after the plugin's first session: the scaffold, no venv, no PyYAML.
+
+    Returns ``(profile, machine config path, interpreter)``. The profile's root
+    is this toolkit, so the hook text the check reads is the shipped one.
+    """
+    home = _home(tmp_path, monkeypatch)
+    scaffold = checks._config_scaffold(_TOOLKIT)
+    assert scaffold and scaffold.startswith(b"# ADLC toolkit config"), "non-vacuity"
+    cfg = _machine_cfg(home, monkeypatch)
+    cfg.write_bytes(scaffold)
+    monkeypatch.chdir(tmp_path)
+    interp = _interpreter_without_pyyaml(tmp_path)
+    monkeypatch.setattr(checks, "_delegate_interpreter", lambda: interp)
+    profile = Profile(os="Darwin", login_shell="/bin/zsh", repo_root=_TOOLKIT)
+    return profile, cfg, interp
+
+
+def test_pyyaml_check_skips_on_the_unedited_scaffold(tmp_path, monkeypatch):
+    """REQ-669 AC-1: the hook's scaffold, no venv, no project config, no PyYAML -> SKIP.
+
+    The SKIP says why, so an operator who edits the file knows the check
+    comes back.
+    """
+    profile, cfg, _interp = _scaffold_machine(tmp_path, monkeypatch)
+    result, detail, remediation = checks.check_pyyaml(profile)
+    assert result is Result.SKIP, detail
+    assert str(cfg) in detail and "unedited delegation-off scaffold" in detail
+    assert "makes this check live" in detail
+    assert remediation == ""
+
+
+@pytest.mark.parametrize("change", ["edited", "project-config", "venv", "no-hook-text"])
+def test_pyyaml_check_scaffold_skip_ends_with_anything_else(tmp_path, monkeypatch, change):
+    """Each departure from that machine makes the check live: here, a FAIL without PyYAML."""
+    profile, cfg, _interp = _scaffold_machine(tmp_path, monkeypatch)
+    if change == "edited":
+        cfg.write_bytes(cfg.read_bytes() + b"# one more line\n")
+    elif change == "project-config":
+        proj = tmp_path / ".adlc" / "config.yml"
+        proj.parent.mkdir(parents=True)
+        proj.write_text("forge:\n  provider: github\n")
+    elif change == "venv":
+        _script(tmp_path / "home" / ".claude" / "delegate-venv" / "bin" / "python3",
+                '#!/bin/sh\nexec "%s" "$@"\n' % sys.executable)
+    else:
+        # A toolkit whose hook text cannot be read gives no scaffold to match.
+        profile = Profile(os="Darwin", login_shell="/bin/zsh", repo_root=str(tmp_path))
+    result, detail, _rem = checks.check_pyyaml(profile)
+    assert result is Result.FAIL, detail
+    assert "PyYAML is not importable" in detail
+
+
+@pytest.mark.parametrize("text", [
+    b"#!/bin/sh\n",                                            # no assignment
+    b"#!/bin/sh\nadlc_ss_scaffold='a\nadlc_ss_scaffold='b'\n",  # two
+    b"#!/bin/sh\nadlc_ss_scaffold='never closed\n",           # unterminated
+])
+def test_config_scaffold_reader_refuses_a_shape_it_does_not_know(tmp_path, text):
+    """No guess: a hook text in another shape gives ``None``, so nothing skips."""
+    hook = tmp_path / "scripts" / "session-start.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_bytes(text)
+    assert checks._config_scaffold(str(tmp_path)) is None
+
+
 def test_pyyaml_check_never_crashes_on_an_unrunnable_interpreter(tmp_path, monkeypatch):
     """An interpreter that cannot be executed still REPORTS (LESSON-395)."""
     home, _exe = _venv(tmp_path, monkeypatch, with_pyyaml=True)
@@ -628,7 +700,10 @@ def test_doctor_reports_pyyaml_fail_on_a_bare_machine(tmp_path, repo_root):
 
     The subset is deliberate: `reservations` pushes a probe ref to `origin`, so
     it is excluded to keep the suite offline. The included checks cover the
-    symlink, config, forge and counter paths, all of which run without PyYAML.
+    route, symlink, doubled-install, config, forge and counter paths, all of
+    which run without PyYAML. This checkout on a sandbox HOME is the symlink
+    route with neither install present, so the two route checks pass
+    (REQ-669 ADR-7).
     """
     home = tmp_path / "home"
     (home / ".claude" / "adlc").mkdir(parents=True)
@@ -642,11 +717,14 @@ def test_doctor_reports_pyyaml_fail_on_a_bare_machine(tmp_path, repo_root):
     out = subprocess.run(
         [sys.executable, os.path.join(repo_root, "tools", "adlc", "adlc.py"),
          "doctor", "--checks",
-         "pyyaml,skills-symlink,forge,counters,template-version,claude-code"],
+         "plugin-route,pyyaml,skills-symlink,doubled-install,forge,counters,"
+         "template-version,claude-code"],
         capture_output=True, text=True, cwd=str(workdir), env=env,
     )
     assert "Traceback" not in out.stderr, out.stderr
     assert "check raised" not in out.stdout, out.stdout
+    assert "[PASS] plugin-route — symlink route: " in out.stdout, out.stdout
+    assert "[PASS] doubled-install — no install.sh symlink install" in out.stdout, out.stdout
     pyyaml_rows = [ln for ln in out.stdout.splitlines() if " pyyaml " in ln]
     assert len(pyyaml_rows) == 1, out.stdout
     assert pyyaml_rows[0].startswith("[FAIL] pyyaml"), out.stdout
@@ -768,3 +846,40 @@ def test_classify_git_failure_layers():
     assert checks._classify_git_failure("! [remote rejected] (pre-receive hook declined)") == "server policy"
     assert checks._classify_git_failure("fatal: Could not read from remote repository") == "transport"
     assert checks._classify_git_failure("something odd") == "unknown"
+
+
+# --- partial paths are shell-quoted in the bash probes ---------------------
+
+#: A checkout directory name that ends a single-quoted shell word and then
+#: carries a command substitution. Unquoted, `. '<path>'` would stop at the `'`
+#: and run `$(touch CANARY)` in the probe's cwd.
+_HOSTILE_DIR = "it's $(touch CANARY); x"
+
+
+def _stub_partial(repo, name, body):
+    path = repo / "partials" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+
+
+@pytest.mark.parametrize("verdict, partial, body, expected", [
+    ("_gate_verdict", "delegate-gate.sh",
+     "adlc_delegate_gate_check() { ADLC_DELEGATE_GATE_REASON=stub-ok; return 0; }\n",
+     (0, "stub-ok")),
+    ("_forge_provider_verdict", "forge.sh",
+     "adlc_forge_provider() { printf '%s\\n' github; return 0; }\n",
+     ("github", "resolved")),
+])
+def test_bash_probe_quotes_a_partial_path_holding_a_quote(tmp_path, monkeypatch, verdict,
+                                                          partial, body, expected):
+    """The probe sources the partial through ``shlex.quote``: a repo root whose
+    name holds `'` and `$(…)` still sources the stub, and runs nothing else."""
+    repo = tmp_path / _HOSTILE_DIR
+    _stub_partial(repo, partial, body)
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    profile = Profile(os="Darwin", login_shell="/bin/zsh", repo_root=str(repo))
+    assert getattr(checks, verdict)(profile) == expected
+    assert not (work / "CANARY").exists()
+    assert not list(tmp_path.rglob("CANARY"))

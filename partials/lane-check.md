@@ -16,7 +16,8 @@ Source the partial and call it **in the same fenced block** (the cross-fence-fn
 rule, conventions.md "Bash in skills"):
 
 ```sh
-if [ -f .adlc/partials/lane-check.sh ]; then . .adlc/partials/lane-check.sh; else . ~/.claude/skills/partials/lane-check.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/lane-check.sh ]; then . .adlc/partials/lane-check.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lane-check.sh"; fi
 adlc_lane_check "<worktree>" "origin/<integrationBranch>"; echo "lane_check_rc=$?"
 ```
 
@@ -59,7 +60,11 @@ and the first line is the verdict that code means (`lane_check=pass`,
 as the three-line contract with rc 2: an exit code outside 0-2 (127 for a
 missing interpreter, 137 for a killed one; `detail=lane_check.py exited <rc>`),
 or a code whose first line does not match it, such as an interpreter that exits
-2 without running the engine at all.
+2 without running the engine at all. The wrapper also refuses, with the same
+contract and `detail=the engine is inside the worktree under check`, when the
+engine's directory resolves inside the worktree it would check: `ADLC_TOOLKIT_ROOT`
+naming the tree itself, a copy vendored in it, or either reached through a
+symlink. A change must never be judged by code it can edit (LESSON-718).
 
 Every `detail` is one line that `str.splitlines()` cannot split: a backslash is
 written `\\`, and control characters, the Unicode line and paragraph separators,
@@ -209,13 +214,19 @@ are case-sensitive.
 ## Interpreter
 
 The engine is **always the installed toolkit's**,
-`~/.claude/skills/tools/adlc/lane_check.py`, never a copy in the tree under
-check: a branch that could supply its own checker could certify itself. Missing,
-it is an error (rc 2). The engine finds its config loader,
+`"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/adlc/lane_check.py"`, never a
+copy in the tree under check: a branch that could supply its own checker could
+certify itself (LESSON-718). ToolkitRoot is installed by definition. The fence's
+root line resolves `$ADLC_TOOLKIT_ROOT` to the plugin's cache copy or to the clone
+behind the skills symlink, never to the branch under review, and an
+unset variable defaults to that symlink install (REQ-669 ADR-2). The root must be
+an absolute path, and so must `HOME` when the default is used; either refusal is
+an error (rc 2). A missing engine is an error (rc 2) whose message names both
+install routes. The engine finds its config loader,
 `tools/delegate/_machine_config.py`, next to its own real path, so that comes
-from the installed toolkit too. The toolkit's own tests point `HOME` at a sandbox
-whose `.claude/skills` is the checkout under test, which is how they exercise
-the working copy rather than the installed one.
+from the installed toolkit too. The toolkit's own tests point `HOME`, or
+`ADLC_TOOLKIT_ROOT`, at a sandbox install that is the checkout under test, which
+is how they exercise the working copy rather than the installed one.
 
 The partial resolves Python with `forge.sh`'s `_adlc_forge_python` (the delegate
 venv when it carries PyYAML, else `python3`), so the forge adapter and the lane

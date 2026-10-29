@@ -55,7 +55,18 @@
 
 # Guarded with [ -f ] because "." is a POSIX special built-in — a failed source is
 # fatal under sh, so the fallback arm of a `. A || . B` chain never runs (REQ-610).
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+# The fallback is ToolkitRoot's copy, read through the partials' default-expansion
+# spelling (REQ-669 ADR-2): a partial carries no root line, and a harness may source
+# this one with ADLC_TOOLKIT_ROOT unset. That operand reads a bare $HOME, so with
+# neither ADLC_TOOLKIT_ROOT nor HOME set it is not reached (a `set -u` caller
+# would abort on it) and DELEGATE_TOOLS keeps delegate-tools-path.sh's defensive
+# default: telemetry must never block a skill (REQ-424).
+if [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/delegate-tools-path.sh ]; then
+  if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/delegate-tools-path.sh"; fi
+else
+  DELEGATE_TOOLS="tools/delegate"
+  export DELEGATE_TOOLS
+fi
 _adlc_emit_step_telemetry() {
     # $1 = skill name, $2 = step label. All telemetry state is read from the
     # flag-file sidecar — NEVER from caller shell vars (REQ-522 BR-4).

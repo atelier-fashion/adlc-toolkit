@@ -549,21 +549,117 @@ def evaluate(files, config):
 
 # --- the shared loader, executed by PATH (mirrors forge_config._loader) -----
 
-def _loader_candidates():
-    """Where ``_machine_config.py`` may live, most-local first.
+_LOADER_REL = ("tools", "delegate", "_machine_config.py")
 
-    The same two levels ``forge_config._loader_candidates`` uses: the sibling
-    ``tools/delegate/`` of this file's real location, then the toolkit at
-    ``~/.claude/skills``. Copied rather than imported from ``forge_config`` so
-    a project that vendors this file alone still runs.
+_HELPER_UNRESOLVED = object()
+_helper_module = _HELPER_UNRESOLVED
+
+
+def _toolkit_root_helper():
+    """This file's sibling ``toolkit_root`` module, executed by path, or ``None``.
+
+    Copied from ``forge_config._toolkit_root_helper``: by explicit path, never
+    on ``sys.path``, and ``None`` when this file was vendored without it.
     """
+    global _helper_module
+    if _helper_module is not _HELPER_UNRESOLVED:
+        return _helper_module
+    _helper_module = None
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "toolkit_root.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("toolkit_root", path)
+        if spec is not None and spec.loader is not None:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _helper_module = module
+    except Exception:  # why this is broad: forge_config._toolkit_root_helper
+        pass
+    return _helper_module
+
+
+_ROOT_ENV = "ADLC_TOOLKIT_ROOT"
+_MARKETPLACE_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+def _own_candidate():
+    """Copied from ``forge_config._own_candidate``."""
+    helper = _toolkit_root_helper()
+    if helper is not None:
+        try:
+            return helper.toolkit_file("/".join(_LOADER_REL))
+        except helper.ToolkitRootError:
+            pass
     tools = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    cands = [os.path.join(tools, "delegate", "_machine_config.py")]
-    home = os.path.expanduser("~")
-    if home and home != "~":
-        cands.append(os.path.join(
-            home, ".claude", "skills", "tools", "delegate", "_machine_config.py"))
-    return cands
+    return os.path.join(tools, *_LOADER_REL[1:])
+
+
+def _env_root_candidate():
+    """Copied from ``forge_config._env_root_candidate``: the loader under
+    ``$ADLC_TOOLKIT_ROOT``, identity-checked by that root's ``toolkit_root.py``."""
+    root = os.environ.get(_ROOT_ENV, "")
+    if not os.path.isabs(root):
+        return None
+    path = os.path.join(root, "tools", "adlc", "toolkit_root.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("toolkit_root", path)
+        if spec is None or spec.loader is None:
+            return None
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        if helper.toolkit_root() != os.path.realpath(root):
+            return None
+        return helper.toolkit_file("/".join(_LOADER_REL))
+    except Exception:  # why this is broad: forge_config._env_root_candidate
+        return None
+
+
+def _loader_candidates():
+    """Where ``_machine_config.py`` may live: this file's toolkit root, then ``$ADLC_TOOLKIT_ROOT``.
+
+    The same rule ``forge_config._loader_candidates`` uses: the first path
+    comes from ``toolkit_root.toolkit_file`` (REQ-669 ADR-2), and the inline
+    ``realpath`` walk covers a copy vendored without its sibling helper. Only
+    when that file is missing does ``$ADLC_TOOLKIT_ROOT`` give a second,
+    identity-checked candidate. There is no skills-symlink level, which a
+    plugin-only machine does not have. Copied rather than imported from
+    ``forge_config`` so a project that vendors this file alone still runs.
+    """
+    own = _own_candidate()
+    if os.path.isfile(own):
+        return [own]
+    extra = _env_root_candidate()
+    return [own] if extra is None or extra == own else [own, extra]
+
+
+def _plugin_key():
+    """Copied from ``forge_config._plugin_key``: ``adlc@<marketplace>`` when this
+    toolkit runs from Claude Code's plugin cache, else ``None``."""
+    config = os.environ.get("CLAUDE_CONFIG_DIR", "")
+    if not os.path.isabs(config):
+        config = os.path.join(os.path.expanduser("~"), ".claude")
+    cache = os.path.realpath(os.path.join(config, "plugins", "cache"))
+    roots = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))]
+    if os.path.isabs(os.environ.get(_ROOT_ENV, "")):
+        roots.append(os.path.realpath(os.environ[_ROOT_ENV]))
+    for root in roots:
+        parts = os.path.relpath(root, cache).split(os.sep)
+        if len(parts) == 3 and parts[1] == "adlc" and _MARKETPLACE_RE.fullmatch(parts[0]):
+            return "adlc@" + parts[0]
+    return None
+
+
+def _loader_fix():
+    """Copied from ``forge_config._loader_fix``: install.sh on the symlink route only."""
+    key = _plugin_key()
+    if key is None:
+        return ("run install.sh (a vendored copy also reads "
+                "$ADLC_TOOLKIT_ROOT/tools/delegate/)")
+    return ("reinstall the adlc plugin: claude plugin uninstall %s && "
+            "claude plugin install %s" % (key, key))
 
 
 _LOADER_UNRESOLVED = object()
@@ -590,7 +686,7 @@ def _loader():
                 continue
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-        except Exception:
+        except Exception:  # why this is broad: forge_config._loader
             continue
         _loader_module = module
         break
@@ -703,8 +799,8 @@ def load_overrides(worktree, base_oid, base):
     if loader is None:
         raise LaneCheckError(
             "config %s may carry a 'lanes' key but the ADLC config loader "
-            "(tools/delegate/_machine_config.py) was not found at %s; run "
-            "install.sh" % (label, " or ".join(_loader_candidates())))
+            "(tools/delegate/_machine_config.py) was not found at %s; %s"
+            % (label, " or ".join(_loader_candidates()), _loader_fix()))
     outcome = _load_bytes(loader, data)
     if outcome.kind == loader.KIND_PARSED:
         return validate_lanes(outcome.document, label)

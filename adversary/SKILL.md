@@ -18,7 +18,7 @@ This skill operationalizes Ethos #7 (Skeptical by Default) as an invocable gate.
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -65,6 +65,8 @@ Read the target at full fidelity first. Then attack:
 
 - **When the Agent tool and the `adversary` agent (`agents/adversary.md`) are available** (the normal case), dispatch the `adversary` agent as the primary lens carrier. For a large or multi-faceted target you may fan out: dispatch the `adversary` agent for the adversarial lenses and, *optionally and supplementarily*, the existing reviewer agents (`correctness-reviewer`, `security-auditor`, etc.) as additional executors for the diff/PR correctness surface. Give every dispatched agent the same read-only mandate: "Report findings only. Do not modify the target."
 - **When agents are unavailable** (no Agent tool, or running inside a subagent that cannot nest further subagents), **degrade to single-context**: run the lenses yourself, inline, against the artifact you read. Same lenses, same protocol — only the execution venue changes. This is the same soft-fallback philosophy as the delegation gates.
+
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
 ### Step 4: Mandatory self-refutation (BR-3)
 

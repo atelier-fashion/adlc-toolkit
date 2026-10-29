@@ -12,7 +12,7 @@ You are an autonomous ADLC orchestrator. Given a requirement number (REQ-xxx), y
 
 This skill supports two modes:
 
-1. **Main conversation mode** (default): Dispatches formal agents (defined in `~/.claude/agents/`) for parallelism at Phase 4 (task implementation) and Phase 5 (verify). Use this mode when running `/proceed` directly.
+1. **Main conversation mode** (default): Dispatches formal agents (defined in `$ADLC_TOOLKIT_ROOT/agents/`) for parallelism at Phase 4 (task implementation) and Phase 5 (verify). Use this mode when running `/proceed` directly.
 2. **Subagent mode** (when running as a `pipeline-runner` agent inside `/sprint`): Execute ALL phases sequentially in-context. Do NOT dispatch sub-agents. At Phase 4, implement tasks one at a time. At Phase 5, run the reflector + reviewer checklists sequentially in your own context using the criteria from the agent definitions. Subagents cannot spawn other subagents.
 
 You are in subagent mode if you were explicitly told so in your launch prompt.
@@ -32,7 +32,7 @@ For everything else — including every **End-of-phase log** block below, every 
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Arguments
 
@@ -84,7 +84,7 @@ merge_order:
 
 **Rules**:
 - In each repo's own config, exactly one entry — that repo itself — has `primary: true`. Sibling entries describe other repos.
-- Every repo that can originate a REQ needs `/init` run in it AND its own `.adlc/config.yml`. Repos that will only ever participate as siblings (never originate REQs) technically don't need a config, but it's cheap insurance — configure them anyway so any of them can host a REQ later.
+- Every repo that can originate a REQ needs `/init` (`/adlc:init` on the plugin install) run in it AND its own `.adlc/config.yml`. Repos that will only ever participate as siblings (never originate REQs) technically don't need a config, but it's cheap insurance — configure them anyway so any of them can host a REQ later.
 - Task frontmatter must include a `repo:` field naming one of the invoking repo's configured repo ids. A task without `repo:` defaults to the invoking (primary-for-this-REQ) repo.
 - "Touched repos" for a REQ = the set of distinct `repo:` values across its tasks.
 - If the invoking repo's config has only itself (no siblings), or the file is absent, behave as single-repo.
@@ -200,9 +200,9 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 **Before doing anything else**, resolve the repository set, isolate each touched repo in a git worktree, and prime the shared context so subskills don't re-read the same files:
 
 1. **Preflight** — verify all prerequisite files exist in the **primary** repo (stop with a clear message if any are missing):
-   - `.adlc/context/project-overview.md` — run `/init` if missing
-   - `.adlc/context/architecture.md` — run `/init` if missing
-   - `.adlc/context/conventions.md` — run `/init` if missing
+   - `.adlc/context/project-overview.md` — run `/init` (`/adlc:init` on the plugin install) if missing
+   - `.adlc/context/architecture.md` — run `/init` (`/adlc:init` on the plugin install) if missing
+   - `.adlc/context/conventions.md` — run `/init` (`/adlc:init` on the plugin install) if missing
    - `.adlc/specs/REQ-xxx-*/requirement.md` — run `/spec` if missing
 2. **Resolve repo registry**:
    - Read `.adlc/config.yml` if it exists. If absent or has no `repos` block, use single-repo mode: the registry is `{ <cwd-repo-id>: { primary: true, path: <cwd>, touched: true } }` where the repo id is the basename of the cwd.
@@ -246,7 +246,8 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    if [ -n "$(git -C <repo-path> ls-remote --heads origin "refs/heads/$BRANCH" 2>/dev/null)" ]; then
      echo "id recheck: remote already carries this pipeline's own '$BRANCH' (resume / crash-recovery) — skipping self-collision halt (REQ-545 BR-3)." >&2
    else
-     if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
+     ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+     if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-recheck.sh"; fi
      # OWN_SPEC_DIR is this REQ's own spec dir basename (REQ-xxx-<dirslug>) from the
      # invoking repo — passed so the recheck recognizes the REQ's OWN merged spec as
      # self (specs merge BEFORE /proceed in the normal flow; without this the
@@ -313,7 +314,8 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    Declared for `tools/lint-skills`'s `retrieval-status-parity` check (BUG-194). That commit is also the lite branch's first, which is what lets item 8a's draft PR open (LESSON-390).
 8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR through the forge adapter (so the step works on GitHub or Azure DevOps — REQ-520), making this REQ's intent — and, after `/architect`, its footprint — visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
    ```bash
-   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
    git -C <worktree> push -u origin <branch-name>
    adlc_forge_pr_create -R <owner/repo> --draft --base <integration-branch> --head <branch-name> --title "[WIP] REQ-xxx: <short title>" --body "Draft opened at Step 0 by /proceed; body filled in at Phase 6."
    ```
@@ -382,6 +384,16 @@ Main mode dispatches `task-implementer` agents in dependency tiers (parallel
 within a tier); subagent mode runs tasks sequentially in-context. End-of-phase
 log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin
+install (`adlc:<name>`). Before dispatching, check which form the Agent tool
+lists and use that one; do not wait for an error, because a name it does not
+list can silently run a generic agent without the checklist. If neither form
+is listed, say which agent is missing, then read
+`$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this
+skill's base directory) and run its checklist inline, or give its body to a
+general-purpose agent as the prompt, instead of skipping it; a review or audit
+agent stays read-only either way.
+
 **Lite lane:** no task files and no `task-implementer` dispatch. Run a fresh
 retrieval for the surfaces about to be touched, implement from the spec's
 acceptance criteria in your own context, commit with `[REQ-xxx]`, and run the
@@ -407,7 +419,8 @@ escalates (trigger `implementer`). See `proceed/phases-lite.md` "Phase 4 (lite)"
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
 flag=$("$DELEGATE_TOOLS"/skill-flag.sh create)
 trap '"$DELEGATE_TOOLS"/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  # cleanup on abort
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" start_s "$(date -u +%s)"
@@ -421,8 +434,9 @@ REQ-522 BR-4). The resolution block reads it back with `skill-flag.sh read`.
 Gate the pre-pass via the shared predicate (REQ-416 ADR-2 — see `partials/delegate-gate.md`):
 
 ```sh
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
 adlc_delegate_gate_check; gate=$?
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" reason "$ADLC_DELEGATE_GATE_REASON"
 case $gate in
@@ -447,9 +461,10 @@ esac
    ```
 4. Invoke the delegate over the redacted diff. Mark `invoked=1` to the flag sidecar immediately before the call (REQ-424 telemetry), and mark the call's `exit` immediately after it returns — these marks are how the resolution block detects a real call vs a ghost-skip:
    ```bash
-   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
-   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . ~/.claude/skills/partials/delegate-tools-path.sh; fi
-   case "$ADLC_READ_BIN" in /*) ;; *) echo "/proceed: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
+   if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+   case "$ADLC_READ_BIN" in /*) ;; *) echo "/proceed: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2; exit 1 ;; esac
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
    command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
@@ -491,7 +506,8 @@ esac
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes for this Phase 5 pre-pass, before continuing to the 6-agent dispatch. Emit telemetry ONLY by sourcing and calling the shared resolver in the SAME fenced block — it derives `mode`/`reason`/`gate_result`/`duration_ms` from the flag-file sidecar the steps above `mark`ed, so no shell variable crosses a fence boundary (REQ-522 BR-4). Never hand-construct a telemetry line:
 
 ```sh
-if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . "$ADLC_TOOLKIT_ROOT/partials/emit-step-telemetry.sh"; fi
 _adlc_emit_step_telemetry proceed-phase-5 Phase-5-Verify
 ```
 
@@ -505,6 +521,8 @@ Then continue with **Step A — Single-gate parallel dispatch** unchanged.
 
 The six agents match the dimensions covered by `/review` (correctness, quality, architecture, test coverage, security) plus the reflector self-assessment:
 
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+
 1. **reflector** agent — provide REQ-xxx, the repo id, the worktree path, changed files, diff, conventions.md, architecture.md. Tell it: "Report findings only. The parent pipeline will apply fixes."
 2. **correctness-reviewer** agent — repo id, worktree path, changed files, diff, conventions.md. "Report findings only. Do not apply fixes."
 3. **quality-reviewer** agent — same inputs. "Report findings only. Do not apply fixes."
@@ -513,7 +531,7 @@ The six agents match the dimensions covered by `/review` (correctness, quality, 
 6. **security-auditor** agent — repo id, worktree path, changed files, diff, conventions.md. "Audit security posture only for the diff under review. Report findings only. Do not apply fixes."
 
 **Subagent mode** — sequential inline review:
-For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Use the criteria from the agent definitions in `~/.claude/agents/`. Do NOT dispatch sub-agents.
+For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Use the criteria from the agent definitions in `$ADLC_TOOLKIT_ROOT/agents/`. Do NOT dispatch sub-agents.
 
 **Step B — Consolidate**: When all agents return (or all checklists complete in subagent mode), dedupe overlapping findings **within each repo** and also flag cross-repo issues (e.g., API contract drift between an api repo and its consumer). Produce a single ranked list by severity, tagging each finding with the repo id it applies to.
 
@@ -555,9 +573,10 @@ Architecture or Reflection sections (`proceed/phases-lite.md`, BR-13).
 **Gate**: `currentPhase` must be `7`. After completion: append `7`, set `currentPhase=8`.
 
 Lightweight per-PR sanity check — review already ran in Phase 5, do NOT
-re-run `/review`. For every PR: review diff, catch stray debug/TODO/secret
-content, verify cross-repo contract consistency, push fixups in the owning
-worktree if needed, wait for `gh pr checks` to go green. End-of-phase log:
+re-run `/review` (`/adlc:review` on the plugin install). For every PR: review
+diff, catch stray debug/TODO/secret content, verify cross-repo contract
+consistency, push fixups in the owning worktree if needed, wait for
+`gh pr checks` to go green. End-of-phase log:
 one line per PR, then "All N PRs ready for merge". **Lite lane:** if this phase
 added commits, re-run the lane check before leaving it.
 
@@ -585,7 +604,7 @@ lane:** re-run the lane check immediately before the pre-merge trial-merge gate.
 
 - **Test failures during implementation**: Stop the current task, diagnose the failure, fix it inside the task's target-repo worktree, and re-run tests before continuing. If you can't fix it after 2 attempts, pause and ask the user.
 - **Validation stuck after 3 loops**: Present the remaining FAIL items and ask the user how to proceed (fix manually, skip validation, or abort).
-- **Missing context files**: If `.adlc/context/` files don't exist in the primary repo, stop and tell the user to run `/init` first. Do not proceed without context files.
+- **Missing context files**: If `.adlc/context/` files don't exist in the primary repo, stop and tell the user to run `/init` (`/adlc:init` on the plugin install) first. Do not proceed without context files.
 - **Missing sibling repo**: If `.adlc/config.yml` references a sibling whose path doesn't exist or isn't a git repo, stop at Step 0 and list the missing repos. The user must clone or fix paths before retrying.
 - **Task with unknown `repo:` value**: If a task frontmatter names a repo id not in the registry, stop Phase 4 and surface the mismatch — either the config or the task is wrong.
 - **Merge conflicts**: If any feature branch has conflicts with its base branch — during Phase 7 rebase or Phase 8 merge — stop and ask the user how to resolve. **That is the solo rule: the human is present.** Under `/sprint` (subagent mode) the runner may instead resolve an **append-point collision** itself — both sides purely adding self-contained, delimiter-balanced lines at the same point, checked by `partials/conflict-bound.sh` (LESSON-646: an empty base section alone does not make the region a whole syntactic unit), resolved keep-both, verified, and recorded in `conflictsResolved` before continuing — and must halt as `blocked` on anything else (BUG-207; the full rule and fence are in `agents/pipeline-runner.md` "Bounded resolution"). In cross-repo mode, state which repo conflicted; earlier repos in `mergeOrder` may have already merged (see `repos[<id>].merged`), so the user can resume mid-sequence rather than re-doing completed merges. **Whoever resolves it** — you after the user answers, or the user directly in the worktree — append a `conflictsResolved` entry to `pipeline-state.json` before continuing (schema in `agents/pipeline-runner.md`, BUG-212). The narrative report is not the record; the state file is.

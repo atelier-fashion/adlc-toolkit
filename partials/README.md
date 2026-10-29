@@ -14,11 +14,11 @@ differs and so does what kind of partial you should add.
 ### 1. Executable partial (emits text to stdout)
 
 The partial is a script Claude Code's `!`...`` macro runs and substitutes its
-stdout into the skill prompt. Skills invoke it like:
-
-```
-!`sh .adlc/partials/<name>.sh 2>/dev/null || sh ~/.claude/skills/partials/<name>.sh`
-```
+stdout into the skill prompt, as `sh <path to the partial>`. No shipped skill
+uses this form today. The old two-level macro, `sh <vendored copy> || sh <copy
+under the skills symlink>`, is retired: the plugin route has no such
+symlink (REQ-669), and a `!` line cannot carry the root line, because a `!` line
+that expands a `$VAR` is refused headless (REQ-669 `verification.md` N1).
 
 Prefer this form only when the partial has to *compute* something. A partial
 that only prints a file is better written at the call site as the `test`/`cat`
@@ -29,11 +29,10 @@ Teton Code pins the session to its local tier on either (BUG-218) — while
 `cat <in-root file>` is provably in reach. `ethos-include.sh` is kept for
 vendored copies that still call it.
 
-The consumer-project-first fallback works whether or not `/init` has been run
-in the consumer repo. This form needs **no** `[ -f ]` guard: `sh <file>` is an
-ordinary command, so an absent repo-local copy fails with exit 127 and the `||`
-arm runs normally. Model 2 below is the one that has to be guarded, because `.`
-is a POSIX special built-in and a failed `.` is fatal under `sh` (REQ-610).
+This form needs **no** `[ -f ]` guard: `sh <file>` is an ordinary command, so
+an absent copy fails with exit 127 rather than killing the shell. Model 2 below
+is the one that has to be guarded, because `.` is a POSIX special built-in and a
+failed `.` is fatal under `sh` (REQ-610).
 
 ### 2. Sourceable partial (defines a function)
 
@@ -161,10 +160,15 @@ behavior. Examples:
   `tools/lint-skills`' `lane-vocabulary` check reads. Tested by
   `tests/lane-check.test.sh` under bash, zsh, sh and dash.
 
-Skills invoke a model-2 partial like:
+Skills invoke a model-2 partial like this, the fence's ToolkitRoot root line
+first (conventions.md "Bash in skills", REQ-669 ADR-1). The root line resolves
+`$ADLC_TOOLKIT_ROOT` to the running install: the plugin's cache copy, or the
+clone behind the skills symlink. The vendored `.adlc/partials/` copy
+still wins on both routes (REQ-669 BR-5):
 
 ```bash
-if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . "$ADLC_TOOLKIT_ROOT/partials/<name>.sh"; fi
 adlc_<name>_function; result=$?
 ```
 
@@ -181,6 +185,26 @@ of* the repo-local one whenever the repo-local copy's last command returns
 non-zero, inverting the repo-local-first precedence. `tools/lint-skills`'
 `unguarded-source` check rejects every spelling but the one above; the full
 reasoning is in conventions.md "Bash in skills".
+
+**Inside a partial** the rules differ in one place. A partial carries no root
+line, and it can be sourced by a test harness or older SKILL.md text that never
+ran one. So a partial that reads a toolkit-owned file, including another
+partial, reads it through the default-expansion spelling, byte-identical at every
+site (REQ-669 ADR-2). Shown in a plain block because it is partial code, not
+fence code (a fence has its root line, and `unguarded-source` rejects this
+operand there):
+
+```
+if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/<name>.sh"; fi
+engine="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/adlc/lane_check.py"
+```
+
+A sourced partial sees the `ADLC_TOOLKIT_ROOT` its fence exported; unset, the
+default is the symlink install, which is today's behavior. `unguarded-source`
+accepts that operand in `partials/*.sh` only. Where a partial must survive a
+`set -u` caller with `HOME` unset, it tests `[ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ]`
+before the expansion rather than respelling it (`delegate-tools-path.sh`,
+`forge.sh`, `intake.sh`).
 
 ## When does a partial need a companion `.md`?
 
@@ -203,7 +227,7 @@ canonical example.
 - Update `/template-drift` if the partial is one consumer projects might
   customize and you want drift detection. Partial drift detection IS
   implemented: `/template-drift` Step 3 ("Detect Partial Drift") diffs each
-  `~/.claude/skills/partials/*.sh` against the consumer's `.adlc/partials/`
+  `$ADLC_TOOLKIT_ROOT/partials/*.sh` against the consumer's `.adlc/partials/`
   copy and classifies it `synced` / `stale` / `missing` (no
   intentional-customization escape hatch — any partial drift is reported as
   `stale` by design, since a modified gate/ethos partial is the threat model

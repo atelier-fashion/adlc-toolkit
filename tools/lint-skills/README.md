@@ -30,7 +30,9 @@ a general markdown linter and NOT a general shell linter.
      sets `$DELEGATE_TOOLS`; required so corruption that strips it while leaving
      the invocation is caught)
 
-   Each missing literal is a separate finding.
+   Each missing literal is a separate finding. The two source-line literals
+   are satisfied by the guarded spelling with the ToolkitRoot fallback operand
+   (item 9), the only one accepted since TASK-124 retired the REQ-610 one.
 
    **Canonical follows the indirection (REQ-436 ADR-4).** A literal is
    satisfied if it appears in the SKILL.md text **or** in the text of a
@@ -101,8 +103,9 @@ a general markdown linter and NOT a general shell linter.
    empty string, and nothing else. The correct shape is:
 
    ```sh
-   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
-   case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
+   case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2; exit 1 ;; esac
    command "$ADLC_READ_BIN" --no-warn --paths … --question "…"
    ```
 
@@ -174,10 +177,12 @@ a general markdown linter and NOT a general shell linter.
    is exactly **one** accepted spelling, on a single line:
 
    ```sh
-   if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi
+   if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . "$ADLC_TOOLKIT_ROOT/partials/<name>.sh"; fi
    ```
 
-   The repo-local copy is *tested* before it is sourced, never guessed at with
+   It follows the fence's root line (item 15), which resolves
+   `$ADLC_TOOLKIT_ROOT` to the running install (REQ-669 BR-5, ADR-1). The
+   repo-local copy is *tested* before it is sourced, never guessed at with
    `||`. `[ -f ]` rather than `[ -r ]`: an existing-but-unreadable vendored copy
    then fails loudly at the `.` instead of silently falling through to canonical
    and hiding a permissions problem. One line, so Skill `$<digit>` argument
@@ -185,6 +190,25 @@ a general markdown linter and NOT a general shell linter.
    sees one statement. The regex carries a **backreference**, so all three
    `<name>`s must agree — a line that guards `forge.sh` and then sources
    `intake.sh` is a finding, not a pass. A trailing `#` comment is allowed.
+
+   **Retired operand (REQ-669 TASK-124).** The REQ-610 operand
+   `~/.claude/skills/partials/<name>.sh` was accepted in the same position
+   while TASK-122 to TASK-124 rewrote the corpus. TASK-124 retired it: the old
+   operand is now a finding on every walked surface, partials included, and a
+   line that is otherwise the guarded spelling gets a message saying the
+   `else` arm is what has to change (`check.py` keeps the operand as
+   `RETIRED_REQ610_OPERAND` for that message alone). Finding messages name only
+   the new spelling.
+
+   **Inside a partial.** A partial that sources another partial
+   (`partials/*.sh`, `.adlc/partials/*.sh`) carries no root line, and it is
+   also sourced by test harnesses and older SKILL.md text that never ran one.
+   So there, and only there, the guarded line may end in the ADR-2
+   default-expansion operand
+   `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/<name>.sh"`
+   (`PARTIAL_SOURCE_OPERAND`, REQ-669 TASK-123). The same line in a fence is a
+   finding, and a default-expansion operand sourced without the guard is a
+   finding everywhere.
 
    This check walks five file families — `*/SKILL.md`, `agents/*.md`,
    `proceed/phase*.md`, the partials' companion docs `partials/*.md` (whose
@@ -202,13 +226,17 @@ a general markdown linter and NOT a general shell linter.
      (or bash-only `source`, which `dash` lacks entirely) at statement position
      (start of line, or after `;`, `&&`, `||`, `then`, `do`, `{`) whose operand is one
      of the toolkit's **convention paths** — `.adlc/partials/<name>.sh`,
+     `$ADLC_TOOLKIT_ROOT/partials/<name>.sh` (braced or not),
      `~/.claude/skills/partials/<name>.sh`, `$HOME/.claude/skills/partials/<name>.sh` —
-     must match that spelling exactly. A source through a variable path
+     must match that spelling exactly. So the new operand sourced alone, or
+     `||`-chained behind the repo-local copy, is a finding like the old one. A
+     source through any other variable path
      (`. "$D/partials/x.sh"` behind the author's own `[ -f ]`) is deliberately out of
      remit: the two-level spelling would point a consumer's own partial at a
-     `~/.claude/skills/partials/<their-name>.sh` that does not exist;
+     `$ADLC_TOOLKIT_ROOT/partials/<their-name>.sh` that does not exist;
    - **anywhere in the file** — prose, inline code, fence comment — the retired
-     literal is a finding. A SKILL.md sentence instructing the agent to type the
+     `. <local> 2>/dev/null || . <fallback>` shape is a finding, with either
+     fallback operand. A SKILL.md sentence instructing the agent to type the
      line is as executable as a fence (`analyze/SKILL.md` Step 1.5 carried
      exactly such a sentence), and a fence comment quoting it is one paste away
      from being live. A retired fence line matches both rules and is deduped by
@@ -337,6 +365,257 @@ a general markdown linter and NOT a general shell linter.
     `retrieval-status-parity` check's `LIFECYCLE_WRITE_SITES`, because a lite
     REQ gets `status: approved` from `/proceed` Step 0 (BR-18).
 
+14. **Plugin manifest (`plugin-manifest`)** (REQ-669 BR-1, BR-12, BR-20,
+    ADR-3): this repo is both the Claude Code marketplace and the plugin, and
+    the check keeps `.claude-plugin/plugin.json` and
+    `.claude-plugin/marketplace.json` in step with the tree. Each of these is
+    one finding:
+
+    | Fires when |
+    |---|
+    | a manifest is missing, is not UTF-8 or JSON, is not a top-level object, or uses `NaN`/`Infinity` |
+    | a JSON object repeats a key, at any depth. `json.loads` keeps the last value and the plugin loader may keep another, so the parse uses an `object_pairs_hook` that rejects the repeat (LESSON-716). `claude plugin validate --strict` passes such a file |
+    | `plugin.json` `version` is not the trimmed content of `VERSION`, or `VERSION` is missing |
+    | the plugin `name` is not kebab-case, or starts with a reserved prefix in `PLUGIN_RESERVED_NAME_PREFIXES`: `claude`, `anthropic` or `cc-plugin-` (case-insensitive). The three cover every prefix requirement.md's PluginManifest entity forbids (`claude-`, `anthropic-`, `anthropics-`, `cc-plugin-`). `cc-tools` and `ccplugin-x` are clean |
+    | a root-level `<dir>/SKILL.md` is not reachable through `skills`: reachable means `skills` is `"./"` or `"."`, or an array holding one of them or `"./<dir>"`. An entry that does not start with `./` reaches nothing, as in the loader. A missing `skills` field is one finding |
+    | an `agents` field is present but omits an `agents/*.md`. The field replaces the default `agents/` scan, so the manifest carries none |
+    | `marketplace.json` `plugins` does not have exactly one entry, the entry's `name` differs from the plugin name, or its `source` is not `"./"` |
+    | a top-level `bin` exists, of any kind: a directory, a file, or a symlink (a dangling one included; the test is `os.path.lexists`). Directory listings reach Claude Code users through the claude.ai sync path, which rejects a plugin with one, so executables go under `scripts/` (ADR-4) |
+
+    The skill set uses the loader's rule from the architecture probe: one level
+    below the root, hidden directories (`.adlc/`, `.claude/`) excluded, so a
+    `SKILL.md` under `tools/` is not a skill. The check is per-root. It is
+    inert unless the root has `.claude-plugin/` or is a versioned skills root
+    (`VERSION` plus a root-level `<dir>/SKILL.md`). Either one arms it, so
+    deleting `.claude-plugin/` turns into two missing-manifest findings, not a
+    silent pass (LESSON-019). `scan_plugin_manifest` also returns the number
+    of manifests it read, and every test asserts it is non-zero. Fixture trees
+    are in `tests/fixtures/plugin-manifest/`. Their skills are stored as
+    `SKILL.fixture.md` and renamed when a test stages them, so neither this
+    lint's `SKILL.md` walk nor the plugin loader ever sees a fixture skill.
+
+    BR-1's install commands are checked by a test rather than a lint rule,
+    because they live in the README:
+    `test_readme_install_commands_match_the_manifests` requires `claude plugin marketplace add atelier-fashion/adlc-toolkit` and
+    `claude plugin install adlc@adlc-toolkit`, each verbatim on a line of
+    README.md, every `claude plugin install <plugin>@<marketplace>` line there to
+    type plugin.json's and marketplace.json's `name`s, and the added repo to be
+    plugin.json's `repository`. `test_readme_install_check_fires_on_drift` edits
+    each side in turn and expects a problem.
+
+15. **Toolkit root line (`toolkit-root-line`)** (REQ-669 ADR-1, BR-3, BR-4):
+    every shell fence that reads `$ADLC_TOOLKIT_ROOT` carries the canonical
+    root line, byte-exact, on its own line before the first read:
+
+    ```sh
+    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+    ```
+
+    `check.py` pins it as `TOOLKIT_ROOT_LINE`, and conventions.md 'Bash in
+    skills' explains the arm order. Walking each fence's non-comment lines in
+    order, two things are findings, and each fence reports only its first:
+
+    | Fires when |
+    |---|
+    | a line reads the variable (`$ADLC_TOOLKIT_ROOT`, `${ADLC_TOOLKIT_ROOT}`, `${ADLC_TOOLKIT_ROOT:-…}`) and no root line sits above it in the same fence. That covers a fence with no root line, a root line placed after the first read, and a fence that leans on an earlier fence's root line. Fenced blocks share no shell state, and `cross-fence-var` exempts exported names, so this rule is what catches the cross-fence read |
+    | any other line assigns `ADLC_TOOLKIT_ROOT` at statement position, optionally behind `export` or `readonly`. That is a variant of the root line (the message gives the first differing column) or a re-assignment after it. Every one-character edit of the root line leaves at least one of its four assignments in place, so every such edit lands here, and the suite checks each deletion and substitution |
+
+    Leading indentation is allowed. Anything after the line, even one trailing
+    space or a comment, makes it a variant. The rejected
+    `${CLAUDE_PLUGIN_ROOT:-…}` form and the unbraced `$CLAUDE_PLUGIN_ROOT` are
+    variants: Claude Code rewrites only the braced, unadorned token. A fence
+    that never names the variable needs no root line. `bash` fences are not
+    exempt, for the reason item 9 gives. Prose, non-shell fences and comment
+    lines are not read. The check walks the same markdown families as item 9
+    (`*/SKILL.md`, `agents/*.md`, `proceed/phase*.md`, `partials/*.md`), and
+    none of them count toward `scanned`. It does not walk `partials/*.sh`: a
+    partial reads the root through the ADR-2 default-expansion spelling
+    `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/…"` and never carries the
+    root line. `partials/tests/toolkit-root.test.sh` runs the copy of the
+    line in conventions.md under bash, zsh, `/bin/sh` and dash, and
+    `test_conventions_documents_root_line_and_spelling_byte_exact` pins that
+    copy to `TOOLKIT_ROOT_LINE`.
+
+16. **Dispatch fallback (`dispatch-fallback`)** (REQ-669 ADR-6, BR-9, BR-4):
+    the toolkit's agents are offered by bare name on the symlink install and as
+    `adlc:<name>` on the plugin install, and a name the session does not offer
+    can silently become a generic agent instead of failing. So every step that
+    dispatches a toolkit agent carries the canonical dispatch sentence, which
+    tells the model to use the form the Agent tool lists and, when neither form
+    is listed, to say so and run `$ADLC_TOOLKIT_ROOT/agents/<name>.md` inline.
+
+    The sentence is **not** copied into `check.py`. It lives once, between the
+    line-start markers `<!-- dispatch-fallback-sentence -->` and
+    `<!-- /dispatch-fallback-sentence -->` in `.adlc/context/conventions.md`
+    'Agent dispatch patterns', and the check reads it from there once per run.
+    The scan root's own conventions.md is the source whenever the root has one.
+    A missing, empty or unclosed block there, or one that exists only inside a
+    fenced example, is a finding on every file that names a dispatch, so
+    deleting it cannot disarm the check. Only a root with no conventions.md at
+    all (a fixture root) reads the copy in the checkout the lint lives in. The
+    agent names are the stems of `<root>/agents/*.md`, with the same fallback.
+
+    A step is a `##` or `###` region; deeper headings belong to the step above
+    them. A mention is one of:
+
+    | Shape | Example |
+    |---|---|
+    | the bold list-item form | `1. **reflector** agent — …` |
+    | a dispatch verb (`dispatch`, `launch`, `spawn` and their forms), then `<name> agent` in the same clause, bare, backticked, bold or `adlc:`-prefixed | ``Dispatch the `reflector` agent``, ``dispatch one `lite-reviewer` agent`` |
+    | `launch … agents`, when the same or the next paragraph names a toolkit agent | `Launch 3 formal exploration agents …` followed by the list |
+
+    Each step with a mention must contain the sentence, compared after
+    collapsing whitespace, so a hard-wrapped or indented copy counts. One
+    finding per step, at its first mention. A mention above the first `##`/`###`
+    heading (a file's introduction) is satisfied by the sentence anywhere in the
+    file. These are **not** mentions, and the suite pins each as must-not-fire:
+    a cross-reference with no dispatch verb ("see the reflector's checklist in
+    `/reflect`", "(the `reflector` agent)", "the reflector agent returns"), a
+    verb after `not`, `never`,
+    `cannot`, `n't`, `without`, `before` or `after` ("Do not attempt to launch
+    reviewer or reflector agents"), `agent's`, any fenced line, and a Claude
+    Code built-in such as "Launch Explore agents". The sentence's own text is
+    removed before matching, so it never reads as a dispatch.
+
+    The check walks `*/SKILL.md` and, through the same extra walk as items 9
+    and 15 (`find_phase_files`), `proceed/phase*.md` and `partials/*.md`,
+    because `/proceed`'s Phase 4 and lite Phase 5 dispatch steps live in
+    companion files and a partial's companion doc can carry a dispatch step too.
+    `test_dispatch_fallback_walks_partials_md` pins the `partials/*.md` walk
+    (fires without the sentence, clean with it). Neither extra walk
+    counts toward `scanned`. `agents/*.md` is not walked: an agent cannot
+    dispatch, and `pipeline-runner.md` only says not to. The workflow engine
+    names agents in code, so it is held to the same rule by
+    `workflows/tests/helpers.test.js` instead: every `agentType` goes through
+    `agentTypeFor(name, AGENT_NS)`. `test_dispatch_fallback_repo_clean` runs the
+    check on the real tree and also asserts that each dispatching file has a
+    mention and carries the sentence, so a clean run cannot be vacuous
+    (LESSON-019).
+
+17. **Toolkit path (`toolkit-path`)** (REQ-669 BR-13, BR-2, ADR-9): no literal
+    toolkit read path on the plugin-reachable surface. The plugin route has no
+    `~/.claude/skills` and no `~/.claude/agents`, so a read through either
+    names a file that is not there, or the clone on a doubled machine. Reads go
+    through ToolkitRoot: `$ADLC_TOOLKIT_ROOT/…` after a fence's root line, the
+    default-expansion spelling in a partial, `tools/adlc/toolkit_root.py` in
+    Python.
+
+    The surface is `TOOLKIT_PATH_SURFACES`, one entry per family: `*/SKILL.md`,
+    `proceed/phase*.md`, `agents/*.md`, `partials/*.sh`, `partials/*.md`,
+    `workflows/*.js`, `tools/**`, `presets/*` and `templates/*`. In `tools/**`
+    only code files are read: `.py`, `.sh`, `.js`, and any other non-Markdown
+    file that opens with `#!`. The presets and templates ship in the plugin and
+    are what a user copies from, so a path in them is one the user types. The
+    flagged spellings are `TOOLKIT_PATH_SPELLINGS`, each in a `~`, `$HOME`,
+    `${HOME}` and `${HOME:-}` form for both directories: `~/.claude/skills`,
+    `$HOME/.claude/skills`, `${HOME}/.claude/skills`,
+    `${HOME:-}/.claude/skills`, `~/.claude/agents`, `$HOME/.claude/agents`,
+    `${HOME}/.claude/agents` and `${HOME:-}/.claude/agents`. Each is a plain
+    substring match, never `\b` (LESSON-013). In a `.py` file the check also
+    flags a path built from parts, `TOOLKIT_PATH_PY_JOIN_RE`: a quoted `.claude`
+    then a quoted `skills` or `agents` joined by `,` or `/`
+    (`os.path.join(home, ".claude", "skills")`, `Path.home() / ".claude" /
+    "agents"`), or a quoted `.claude/skills` or `.claude/agents`.
+    `".claude", "adlc"` and `".claude", "skills-cache"` are clean, and the
+    shape is not looked for outside Python. One finding per line, naming every
+    spelling the line holds.
+
+    The exceptions are one constant, `TOOLKIT_PATH_EXCEPTIONS`. Each literal is
+    matched byte-exact, never as a pattern, so a near-miss of an exempt
+    spelling is a finding:
+
+    | Kind | Exempt | Why |
+    |---|---|---|
+    | line | the canonical root line (`TOOLKIT_ROOT_LINE`), leading indentation aside | its symlink arms are ToolkitRoot on the symlink route. A trailing space or comment, or a `${HOME}` arm, is a variant and fires |
+    | token | `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/`, opening quote and trailing slash included | the ADR-2 default-expansion spelling a partial uses, since it carries no root line. It is removed before the search, so the rest of the line is still checked. The unquoted and `${HOME}` forms are not this literal |
+    | file | `install.sh` | the symlink installer, which the plugin route never runs |
+    | file | `tools/adlc/checks.py` | the doctor's route checks inspect the symlink install on purpose (ADR-7). The exception is whole-file, so a test holds it to that purpose (below) |
+    | file | `tools/lint-skills/check.py` | the lint's own rule table: it spells every pattern it polices |
+    | comment | `#` in shell, Python and the shell fences of a Markdown file; `//` and `/* … */` in JavaScript, except under `presets/` and `templates/` (`TOOLKIT_PATH_INSTRUCTION_DIRS`) | a comment is not a read. A Markdown heading is not a comment, and a trailing comment does not exempt its code line. In a preset or a template a `#` line is the user's instruction (the preset header says `#   cp "$ADLC_TOOLKIT_ROOT/presets/<x>.yml" .adlc/config.yml`), so no comment line there is exempt |
+    | tree | `tests/` and `fixtures/`, at any depth below the root | they plant the spellings on purpose |
+
+    The file exceptions are root-relative paths, so `tools/delegate/install.sh`
+    is checked. `tools/adlc/checks.py` is set aside whole, and ADR-2 replaced
+    `_partial_path`'s `~/.claude/skills` fallback in that very file, which is
+    where a regression would land unseen. So
+    `test_checks_py_names_the_symlink_install_only_where_it_inspects_it` reads
+    the committed file and requires every line that names the symlink install
+    (a flagged spelling, a `.claude`/`skills` join, or a
+    `_claude_home(), "skills"` join, docstrings and comments included) to sit
+    in one of `CHECKS_PY_INSPECTORS`: `_symlink_install`,
+    `check_doubled_install`, `check_skills_symlink` and `check_agents_symlink`.
+    Each of the four must name it, so the list cannot go stale, and
+    `test_checks_py_guard_fires_on_a_partial_path_fallback` plants each
+    fallback shape in `_partial_path` and expects it reported.
+
+    The check is per-root and armed like `plugin-manifest` (`is_plugin_root`):
+    only a plugin root has a plugin-reachable surface, so a consumer repo is
+    never read. Like every walk here it keeps to the scan root and tests only
+    the path components below it, so a root inside `.worktrees/` is scanned in
+    full. The `tools/**` walk never enters a hidden directory (a nested
+    `.claude/worktrees/` or `.worktrees/` checkout, `.git`), `node_modules` or
+    `__pycache__`, and `*/SKILL.md` uses the loader's one-level rule. The walk
+    is `_scan_surfaces`, shared with `builtin-collision`: a file two surfaces
+    yield counts under each and is read once, and both checks share the
+    `tests/`/`fixtures/` tree test (`_toolkit_path_tree_excepted`).
+    `scan_toolkit_path` returns the files read per surface and the file
+    exceptions it set aside, and
+    `test_repo_root_clean_and_every_surface_scanned` fails if any surface read
+    nothing (LESSON-019). Fixture trees are in `tests/fixtures/toolkit-path/`.
+
+    REQ-666's `no-harness-path` check is a superset of this one: it adds the
+    other harness homes. When it lands it absorbs `toolkit-path` and lifts
+    `TOOLKIT_PATH_EXCEPTIONS` whole (REQ-669 BR-18).
+
+18. **Built-in collision (`builtin-collision`)** (REQ-669 BR-10, ADR-5,
+    TASK-133): a skill name Claude Code also owns is never printed bare as an
+    instruction. Claude Code 2.1.258 resolves a bare `/<name>` to the first
+    command whose name matches exactly, so on the plugin install a bare `/init`
+    reaches Claude Code's built-in CLAUDE.md generator, not `/adlc:init`. The
+    watched names are `BUILTIN_COLLISION_NAMES`: `init` and `status` (built-in
+    commands) and `review` (an alias of the bundled `code-review` skill).
+
+    A line fires when it mentions a watched name as an instruction and does not
+    also carry `/adlc:<name>`. A mention is an instruction when one of these
+    verbs comes right before the slash token: run, re-run, rerun, running,
+    re-running, invoke, type, recommend (running), "proceed to", "ready for",
+    before, "note for", use or try. It is also one when one of these phrases
+    comes right after it: first, "there too", "to vendor", "to refresh",
+    "to scaffold", "to set up", "if missing" or "to copy". These are
+    `BUILTIN_COLLISION_VERB_RE` and `BUILTIN_COLLISION_TAIL_RE`, the same
+    patterns as the e2e audit `builtin_collision_static`. A test keeps the two
+    equal. A noun mention does not fire: a heading, a table cell naming the
+    skill, "the `/<name>` skill copies…", or a path component such as
+    `$ADLC_TOOLKIT_ROOT/<name>/SKILL.md`. Comment lines are checked, because a
+    reader follows an instruction in a comment too. One finding per line,
+    naming every bare name on it.
+
+    The fix is the dual spelling from conventions.md, "Skill names Claude Code
+    also owns", on the same line as the bare name. The form depends on where
+    the text appears: Markdown prose, a quoted runtime string, or a `!` preamble
+    line that allows neither backticks nor parentheses.
+
+    The surface is `BUILTIN_COLLISION_SURFACES`. It is toolkit-path's surface
+    (`*/SKILL.md`, `proceed/phase*.md`, `agents/*.md`, `partials/*.sh`,
+    `partials/*.md`, `workflows/*.js`, `tools/**`, `presets/*`, `templates/*`)
+    plus the shipped families the e2e audit also reads: `proceed/*.md`,
+    `workflows/*.md`, `scripts/*`, `hooks/*`, `ETHOS.md` and `tools/delegate/*`.
+    So a clean lint leaves that audit no bare line to fail on. It also reads the
+    two root docs a reader follows step by step, `README.md` (install and
+    setup) and `RELEASING.md` (the release sequence). `CHANGELOG.md` is not
+    read: its released entries record what shipped and are not rewritten, so a
+    bare instruction in a new `[Unreleased]` entry is fixed by hand. Each
+    surface is listed once. The check is
+    walked and armed like `toolkit-path` (`is_plugin_root`), and a file two
+    surfaces yield is read once. Of toolkit-path's exceptions only the `tests/`
+    and `fixtures/` trees apply. The doctor's remediations in
+    `tools/adlc/checks.py` are printed to the user, so they are checked.
+    Fixture trees are in `tests/fixtures/builtin-collision/`.
+
+    When a Claude Code upgrade adds a built-in that shares a skill's name,
+    `builtin_collision_static` reports it. Add the name to
+    `BUILTIN_COLLISION_NAMES`, then dual-spell the lines this check names.
+
 ## Usage
 
 ```sh
@@ -391,7 +670,7 @@ pytest tools/delegate/tests/ tools/lint-skills/tests/ -q
 
 ## Constraints
 
-- Python 3 stdlib only (`argparse`, `re`, `pathlib`, `sys`). No third-party
-  packages. No network.
+- Python 3 stdlib only (`argparse`, `json`, `os`, `posixpath`, `re`,
+  `pathlib`, `sys`). No third-party packages. No network.
 - POSIX `sh`-compatible wrapper. Tested on macOS and Linux.
 - Read-only against the repo. No temp files, no logs, no cache.
