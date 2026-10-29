@@ -113,7 +113,7 @@ time; fixing at the adapter fixes all of them.
 
 A survey of the toolkit and all four consumer repos for remote branches fully
 merged into their default branch found **no orphan attributable to this bug**.
-The eight `promote/*` branches in atelier-fashion are deliberate REQ-380 promotion
+The eight `promote/*` branches in `atelier-fashion` are deliberate REQ-380 promotion
 snapshots, not leaks. So the honest claim is: this costs a manual step on every
 worktree merge and leaves a latent leak whenever nobody reads the warning — **not**
 that it has already accumulated damage. That is why this is `medium`, not `high`.

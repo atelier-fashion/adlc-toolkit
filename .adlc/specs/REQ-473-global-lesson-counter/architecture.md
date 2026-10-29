@@ -81,7 +81,7 @@ accidental omission to restore. (informed by LESSON-023)
 
 Migration mirrors REQ-380's intentional-gap policy: existing LESSON files are
 NOT renumbered. The bootstrap dry-run revealed the counter is machine-global
-across ALL ADLC repos under the repos root — atelier-fashion (max 233),
+across ALL ADLC repos under the repos root — `atelier-fashion` (max 233),
 **infrastructure (max 312)**, atelier-web (max 67), admin-api (max 34),
 adlc-toolkit (max 23) — not just two. Their low LESSON ranges already collide
 heavily (LESSON-001..023 in four-plus repos); those collisions are frozen
