@@ -2,13 +2,13 @@
   "schema": 1,
   "harness": "claude",
   "harness_version": "2.1.258 (Claude Code)",
-  "probe_tool_version": "5.4.0+2773420",
+  "probe_tool_version": "5.4.0+f8ace64",
   "platform": {
     "os": "darwin",
     "arch": "arm64",
     "shell": "/bin/zsh"
   },
-  "ran_at": "2026-10-29T21:25:03Z",
+  "ran_at": "2026-10-29T21:38:35Z",
   "date": "2026-10-29",
   "plan_ref": ".adlc/research/multi-harness-plan.md revision 2 \u00a76",
   "launches": {
@@ -21,7 +21,7 @@
       "reason": "binary-exit-1",
       "plan_item": "6.1a (headless half), 6.3 (allow half)",
       "oracle": "remote-ref",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "evidence": {
         "launch": "l02",
         "command": [
@@ -33,14 +33,14 @@
           "--setting-sources",
           "project,local"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
         "exit_code": 1,
-        "wall_s": 0.6,
+        "wall_s": 0.7,
         "stdout_bytes": 1156,
         "stderr_bytes": 346,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"131b02ec-440d-4af1-8d39-83469f1e261a\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":65,\"uuid\":\"2fb39eb0-bfec-413b-83ed-c99967fba35b\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-        "observation": "ref main: c6fccad \u2192 c6fccad"
+        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"449ce2c4-a1eb-4640-85cd-3a6e8a5ec339\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"6589d784-01cf-4a08-9dbb-5958f2ce5772\",\"queued_turn_count\":0}\n",
+        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+        "observation": "ref main: e33bf78 \u2192 e33bf78"
       }
     },
     "git-write-worktree": {
@@ -48,9 +48,9 @@
       "reason": "binary-exit-1",
       "plan_item": "6.1b",
       "oracle": "remote-ref",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "evidence": {
-        "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo/.git/worktrees/wt",
+        "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo/.git/worktrees/wt",
         "launch": "l03",
         "command": [
           "claude",
@@ -61,14 +61,14 @@
           "--setting-sources",
           "project,local"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/wt",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/wt",
         "exit_code": 1,
         "wall_s": 0.7,
         "stdout_bytes": 1156,
         "stderr_bytes": 346,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"aaf950ed-ec89-4af5-99c0-0a3a36309cba\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":91,\"uuid\":\"2fa33728-53df-40c9-b2e2-81f54444597c\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-        "observation": "ref probe-wt: c6fccad \u2192 c6fccad"
+        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"95ce7b17-7164-4aa6-9b1e-5fc3f76f143a\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":78,\"uuid\":\"be4fa3a7-6a3f-4baf-a665-21efa47f2bd8\",\"queued_turn_count\":0}\n",
+        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+        "observation": "ref probe-wt: e33bf78 \u2192 e33bf78"
       }
     },
     "ask-tier-deny": {
@@ -76,7 +76,7 @@
       "reason": "ask-not-reached",
       "plan_item": "6.3",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "sub_results": {
         "baseline": {
           "status": "unknown",
@@ -92,12 +92,12 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
-            "wall_s": 0.7,
+            "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"c0d567c1-65de-4c31-b5cf-5b1d60ba7cc4\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":64,\"uuid\":\"3e98ce80-dd41-487a-9f71-bfeafdccb365\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"e6c5ac9f-d736-492f-a64d-0ae70e953711\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"cb64b5c9-27c9-4c87-9898-9ddeb6a3802e\",\"queued_turn_count\":0}\n",
             "stderr_tail": "",
             "observation": "sentinel target: absent; reversed nonce in final message: no"
           }
@@ -116,13 +116,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"29b939f2-36ee-4e72-aabb-da7b411fb157\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":65,\"uuid\":\"bc0db58e-f140-480e-a2f2-0fe0164ec7ae\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"de74d196-f053-47e9-a13e-f6b60ad18d62\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"c20dcf22-3ce8-43d5-a23b-29089b594ae5\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel target: absent; reversed nonce in final message: no"
           }
         },
@@ -140,12 +140,12 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"bb5c92fa-7f4c-4644-961e-a1e90b7322aa\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":63,\"uuid\":\"6b75ffdb-fc18-4ce1-b9b4-f48408bb7483\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"5428c083-b375-4a53-9e9b-21549da276c2\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"1b8d46dd-b143-45e8-9692-1e55d5bf8daa\",\"queued_turn_count\":0}\n",
             "stderr_tail": "",
             "observation": "ref refs/heads/probe-deny-l09: absent; reversed nonce in final message: no"
           }
@@ -164,13 +164,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"3c879ade-a8b5-4bdd-b204-56b92a948524\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":63,\"uuid\":\"4555ad4e-d1b5-4633-baff-d7b6fee7c486\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"64529941-95d4-4191-889c-67cb92a6d273\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"d33521b3-6433-400f-a6fb-71ed96028997\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "ref refs/heads/probe-deny-l10: absent; reversed nonce in final message: no"
           }
         },
@@ -188,13 +188,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"3cb5cb5c-886b-46a7-8f2b-041dc5690c36\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":64,\"uuid\":\"2ccf594c-f0f0-41a3-ae1a-805470876147\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"217faf6f-94d4-4879-9849-a1e8650e40b9\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"f5f372b4-c4ad-46d0-860d-49b09dd2dab5\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel target: absent; witness: absent; reversed nonce in final message: no"
           }
         },
@@ -212,13 +212,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.7,
             "stdout_bytes": 1156,
             "stderr_bytes": 346,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"f6d4ef8b-3af2-4e11-9fe8-cbcfcb2ea544\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":64,\"uuid\":\"7af459bd-f3c0-4e4b-a4c8-8452862f539f\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"1a1d3f03-8ea3-4ff1-9b7e-0bf0236cbc0a\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"fdc11611-a49b-4a6e-a67b-4e50f273a426\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel target: absent; witness: absent; reversed nonce in final message: no"
           }
         },
@@ -236,13 +236,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 346,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"4d0ba832-3557-47e2-9339-0309aaf6f686\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":65,\"uuid\":\"7ec2e2c2-2749-441d-aa5e-a0e0440f8ba6\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"5829fe45-a1d6-464f-ac67-383e314d21e5\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"70640151-f13c-4cd7-9463-08e02fab4794\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "ref refs/heads/probe-deny-l06: absent; witness: absent; reversed nonce in final message: no"
           }
         }
@@ -253,14 +253,14 @@
       "reason": "not-applicable: plan \u00a76.4 is a Gemini question (automatic skill activation)",
       "plan_item": "6.4",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-29T21:25:03Z"
+      "ran_at": "2026-10-29T21:38:35Z"
     },
     "shell-timeout": {
       "status": "unknown",
       "reason": "ask-not-reached",
       "plan_item": "6.6",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "evidence": {
         "launch": "l11",
         "command": [
@@ -272,13 +272,13 @@
           "--setting-sources",
           "project,local"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
         "exit_code": 1,
         "wall_s": 0.6,
         "stdout_bytes": 1156,
         "stderr_bytes": 346,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"920ffb35-b20a-489e-930f-40993223eb50\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":63,\"uuid\":\"8e85bca9-8c07-4795-9808-dde37b8cbad0\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"be1b26ed-4bf3-40ed-9a21-d678018747c1\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":52,\"uuid\":\"62fc51bb-af22-4d8a-8672-f63f915368ac\",\"queued_turn_count\":0}\n",
+        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
         "observation": "sentinel: absent; reversed nonce in final message: no"
       }
     },
@@ -287,7 +287,7 @@
       "reason": "binary-exit-1",
       "plan_item": "6.8 (trust + load)",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "sub_results": {
         "hooks-loaded": {
           "status": "unknown",
@@ -303,13 +303,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"b86cc843-12de-408b-bd43-f920a92a78cd\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":50,\"uuid\":\"a64f3dcf-0b09-4b4c-a90c-9241b5a6dfb8\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"76eed50d-30ee-4520-8bf3-18d41c6df6bf\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":44,\"uuid\":\"efbb8d55-6932-416e-b085-c255fef27132\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel A (hook): present; sentinel B (allow): absent"
           }
         },
@@ -327,13 +327,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"b86cc843-12de-408b-bd43-f920a92a78cd\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":50,\"uuid\":\"a64f3dcf-0b09-4b4c-a90c-9241b5a6dfb8\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"76eed50d-30ee-4520-8bf3-18d41c6df6bf\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":44,\"uuid\":\"efbb8d55-6932-416e-b085-c255fef27132\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel A (hook): present; sentinel B (allow): absent"
           }
         }
@@ -344,7 +344,7 @@
       "reason": "binary-exit-1",
       "plan_item": "6.8 (injection)",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "evidence": {
         "launch": "l12",
         "command": [
@@ -356,12 +356,12 @@
           "--setting-sources",
           "project,local"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
         "exit_code": 1,
         "wall_s": 0.7,
         "stdout_bytes": 1156,
         "stderr_bytes": 0,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"e9382c78-8428-4008-8205-49c42ec4aca7\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":57,\"uuid\":\"21645af7-fe5b-41a4-96f0-7e268c4442e8\",\"queued_turn_count\":0}\n",
+        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"87c38f61-a815-4a3a-ba61-93f30741b604\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":45,\"uuid\":\"57d2345b-d0d1-4ccf-9d1c-7a0566bf05f8\",\"queued_turn_count\":0}\n",
         "stderr_tail": "",
         "observation": "reversed nonce in final message: no"
       }
@@ -371,7 +371,7 @@
       "reason": "binary-exit-1",
       "plan_item": "6.12",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "evidence": {
         "returned_reversed_nonce": [],
         "observation": "variants that made stdin the task (returned the reversed nonce): none"
@@ -390,12 +390,12 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.7,
             "stdout_bytes": 1156,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"1d743f96-5c26-4936-ab91-bbedb277bdd9\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":63,\"uuid\":\"6095e746-3bca-4ad6-9ab5-b0d73e17a4d5\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"fc320bc7-4115-4bab-9723-3cf4116a2951\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"47c46d3f-c0de-44a0-9882-6ef8f7bc261b\",\"queued_turn_count\":0}\n",
             "stderr_tail": "",
             "observation": "reversed nonce in final message: no"
           }
@@ -412,12 +412,12 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
-            "wall_s": 0.7,
+            "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"5f539a0c-6a08-4998-b179-e33b985e679d\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":62,\"uuid\":\"b734b07a-00f6-45fe-afeb-e761339b4f5c\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"bfbdc4ff-1e7a-4703-9991-5b54bd69ecbc\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":57,\"uuid\":\"68b91df9-e466-4fc4-ae63-baecaad7863d\",\"queued_turn_count\":0}\n",
             "stderr_tail": "",
             "observation": "reversed nonce in final message: no"
           }
@@ -429,7 +429,7 @@
       "reason": "binary-exit-1",
       "plan_item": "6.11",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "sub_results": {
         "routine-only": {
           "status": "unknown",
@@ -445,13 +445,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
-            "wall_s": 0.7,
+            "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 347,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"09c80dca-a1b2-42e2-b222-5e5ad9f288d0\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":62,\"uuid\":\"9acfda37-96d0-4877-820c-28a51af9212c\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 43 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"c76a0d9e-e1ca-48a3-b1b4-2ee3ff073fd2\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":50,\"uuid\":\"5decf6fe-e218-40d3-a5fa-3a8b948414ac\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 43 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel: absent"
           }
         },
@@ -469,13 +469,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 347,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"a4c2ee37-346b-4a81-b670-caa60fc883f8\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":64,\"uuid\":\"d56da71b-d075-43e9-90d2-8bc82052276e\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 44 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"de6f6a88-e7bf-41df-a239-561f3adfcad6\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":58,\"uuid\":\"80e9d678-2f7e-4016-8401-021c3921947a\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 44 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel: absent"
           }
         },
@@ -493,13 +493,13 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
             "exit_code": 1,
             "wall_s": 0.6,
             "stdout_bytes": 1156,
             "stderr_bytes": 347,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"52101539-9dfc-4c19-981d-eed3088d7f1b\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":62,\"uuid\":\"e40cb29f-75dd-4c05-8543-1a7ae92bc070\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 44 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"5d17beda-bd6f-4ed8-af15-4b46590230c7\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"c19643df-34a0-4ba7-b984-0266d8ba5db0\",\"queued_turn_count\":0}\n",
+            "stderr_tail": "Ignoring 44 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel: absent"
           }
         }
@@ -509,33 +509,35 @@
       "status": "pass",
       "plan_item": "6.9",
       "oracle": "file-located",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "evidence": {
-        "location": "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/2d2cbdbb-e727-454f-b685-b1cdd1e85203.jsonl",
+        "location": "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/0972795e-5ca8-4d87-be13-4698705499c3.jsonl",
         "discovery_rule": "directory-encoding",
         "records_copied": 13,
         "fixture": ".adlc/research/harness-probes/fixtures/claude.jsonl",
         "session_files": [
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/2d2cbdbb-e727-454f-b685-b1cdd1e85203.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/52101539-9dfc-4c19-981d-eed3088d7f1b.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/a4c2ee37-346b-4a81-b670-caa60fc883f8.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/09c80dca-a1b2-42e2-b222-5e5ad9f288d0.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/5f539a0c-6a08-4998-b179-e33b985e679d.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/1d743f96-5c26-4936-ab91-bbedb277bdd9.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/e9382c78-8428-4008-8205-49c42ec4aca7.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/920ffb35-b20a-489e-930f-40993223eb50.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/3c879ade-a8b5-4bdd-b204-56b92a948524.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/bb5c92fa-7f4c-4644-961e-a1e90b7322aa.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/29b939f2-36ee-4e72-aabb-da7b411fb157.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/c0d567c1-65de-4c31-b5cf-5b1d60ba7cc4.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/4d0ba832-3557-47e2-9339-0309aaf6f686.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/f6d4ef8b-3af2-4e11-9fe8-cbcfcb2ea544.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/3cb5cb5c-886b-46a7-8f2b-041dc5690c36.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-wt/aaf950ed-ec89-4af5-99c0-0a3a36309cba.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/131b02ec-440d-4af1-8d39-83469f1e261a.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude--5jlk6q9-repo/b86cc843-12de-408b-bd43-f920a92a78cd.jsonl"
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/0972795e-5ca8-4d87-be13-4698705499c3.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/5d17beda-bd6f-4ed8-af15-4b46590230c7.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/de6f6a88-e7bf-41df-a239-561f3adfcad6.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/c76a0d9e-e1ca-48a3-b1b4-2ee3ff073fd2.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/bfbdc4ff-1e7a-4703-9991-5b54bd69ecbc.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/fc320bc7-4115-4bab-9723-3cf4116a2951.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/87c38f61-a815-4a3a-ba61-93f30741b604.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/be1b26ed-4bf3-40ed-9a21-d678018747c1.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/64529941-95d4-4191-889c-67cb92a6d273.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/5428c083-b375-4a53-9e9b-21549da276c2.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/de74d196-f053-47e9-a13e-f6b60ad18d62.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/e6c5ac9f-d736-492f-a64d-0ae70e953711.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/5829fe45-a1d6-464f-ac67-383e314d21e5.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/1a1d3f03-8ea3-4ff1-9b7e-0bf0236cbc0a.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/217faf6f-94d4-4879-9849-a1e8650e40b9.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-wt/95ce7b17-7164-4aa6-9b1e-5fc3f76f143a.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/449ce2c4-a1eb-4640-85cd-3a6e8a5ec339.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/76eed50d-30ee-4520-8bf3-18d41c6df6bf.jsonl"
         ],
-        "observation": "located 18 session file(s) newer than the first launch"
+        "launches_exited_zero": "0 of 18",
+        "observation": "located 18 session file(s) newer than the first launch; 0 of 18 launches exited 0",
+        "files_scanned": 5052
       }
     },
     "arg-substitution": {
@@ -543,7 +545,7 @@
       "reason": "binary-exit-1",
       "plan_item": "6.10",
       "oracle": "sentinel-content",
-      "ran_at": "2026-10-29T21:25:03Z",
+      "ran_at": "2026-10-29T21:38:35Z",
       "evidence": {
         "launch": "l18",
         "command": [
@@ -555,13 +557,13 @@
           "--setting-sources",
           "project,local"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
         "exit_code": 1,
-        "wall_s": 0.6,
+        "wall_s": 0.7,
         "stdout_bytes": 1156,
         "stderr_bytes": 344,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"2d2cbdbb-e727-454f-b685-b1cdd1e85203\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":66,\"uuid\":\"96b37189-54bb-4056-ad1e-61f8b8355a74\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-_5jlk6q9/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"0972795e-5ca8-4d87-be13-4698705499c3\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":61,\"uuid\":\"faf212fb-7709-41c3-9b6c-558973053703\",\"queued_turn_count\":0}\n",
+        "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
         "observation": "sentinel content: absent"
       }
     }
