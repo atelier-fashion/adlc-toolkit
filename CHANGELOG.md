@@ -252,6 +252,9 @@ Found by the REQ-669 Phase 5 review, before this release shipped.
 - **End-to-end sandbox.** GitHub access is a scoped `GH_TOKEN` only, and later cases
   get no GitHub credentials. A suite that exits 0 but prints `FAIL` lines is a FAIL.
   `plugin-sandbox.selftest.sh` tests the harness itself.
+- **No keychain prompts from the e2e sandbox.** Each sandbox HOME's `.gitconfig` resets
+  `credential.helper`, so Xcode git's `osxkeychain` helper no longer raises a "Keychain
+  Not Found" dialog after every push, which stalled the run until it was dismissed.
 - **Test-harness fixes.** The intake AC-6 case counts its subshell's failures and
   stubs `adlc-read`, and the session-start doctor case sets
   `PYTHONDONTWRITEBYTECODE=1`.
