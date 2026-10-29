@@ -449,23 +449,37 @@ function dedupeAndRank(findingsByRepo) {
       // and the merge-OR below test `=== true`, which a bare `1` would slip past).
       // Defensive: the FINDINGS schema types these as boolean, but the consolidation
       // gate is the merge-safety backstop and must not be fooled by a truthy non-bool.
-      byRepoKey.set(rk, {
+      const survivor = {
         ...f,
         mustFix: Boolean(f.mustFix),
         userFacing: Boolean(f.userFacing),
         dimensions: [f.dimension],
-      });
+      };
+      if (f.lessonId) survivor.lessonIds = [f.lessonId];
+      byRepoKey.set(rk, survivor);
       continue;
     }
-    // Merge into the survivor.
+    // Merge into the survivor. The more severe copy's severity wins, and with it
+    // the record of whether a lesson escalated it (REQ-647 BR-6).
     if (SEVERITY_RANK[f.severity] < SEVERITY_RANK[prev.severity]) {
       prev.severity = f.severity;
+      if (f.escalatedFrom) prev.escalatedFrom = f.escalatedFrom; else delete prev.escalatedFrom;
     }
     prev.mustFix = prev.mustFix || Boolean(f.mustFix);
     prev.userFacing = prev.userFacing || Boolean(f.userFacing);
     if (!prev.dimensions.includes(f.dimension)) prev.dimensions.push(f.dimension);
+    // UNION lesson ids across duplicates rather than keeping the first copy's: a
+    // reviewer that matched a lesson must not be erased by one that did not. The
+    // first non-empty id stays in `lessonId` (the FINDINGS field). (REQ-647 BR-6)
+    if (f.lessonId) {
+      if (!prev.lessonId) prev.lessonId = f.lessonId;
+      prev.lessonIds = prev.lessonIds || [];
+      if (!prev.lessonIds.includes(f.lessonId)) prev.lessonIds.push(f.lessonId);
+    }
+    if (!prev.lessonNote && f.lessonNote) prev.lessonNote = f.lessonNote;
   }
   const deduped = Array.from(byRepoKey.values());
+  for (const f of deduped) if (f.lessonIds) f.lessonIds.sort(cmp);
 
   // 3) Cross-repo tag: a (file, normalized-title) key present in >1 repo gets
   //    crossRepo:true on every surviving copy.
@@ -790,7 +804,7 @@ function closeOutDigest(ev, limits) {
   for (const f of findings.slice(0, maxFindings)) {
     lines.push(
       `  - [${f.severity}] ${f.file}${typeof f.line === 'number' ? `:${f.line}` : ''} — ${f.title}`
-      + (f.lessonId ? ` (lesson ${f.lessonId})` : '') + (f.mustFix ? ' [must-fix]' : ''),
+      + (lessonIdsOf(f).length ? ` (lesson ${lessonIdsOf(f).join(', ')})` : '') + (f.mustFix ? ' [must-fix]' : ''),
     );
   }
   if (findings.length === 0) lines.push('  (none)');
@@ -835,6 +849,199 @@ function groupMergedByRepo(terminals, primaryRepoById) {
   return Object.keys(groups).sort().map((k) => groups[k].slice().sort());
 }
 
+// ===========================================================================
+// REQ-647 — lessons reach the architect, each implementer and the review panel.
+//
+// The script has no shell, so a LessonSet is produced by a RETRIEVAL LEAF that runs
+// `adlc_lessons select … --format json --with-text` (partials/lessons.sh) and returns
+// it as a LESSONS object: after Phase 0 (the Step-0 set), before Phase 4 (every
+// task's set in one call, as TASK_LESSONS), and before the Phase-5 fan-out. The
+// leaf also writes the set, without `text`, to the primary-path state copy
+// (`lessons.<set>`). `text` is the loaded text (frontmatter + `## Lesson` +
+// `## Applies When`, ≤ 40 lines) and exists only so a prompt can carry it.
+// Closed schemas + a pure structural test, in the same change (LESSON-331).
+// ===========================================================================
+const LESSON_ID_RE = /^LESSON-[0-9]{3,6}$/;
+const LESSON_TEXT_MAX_LINES = 40;
+
+const LESSON_QUERY = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['components'],
+  properties: {
+    components: { type: 'array', items: { type: 'string' } },
+    domain: { type: 'string' },
+    stack: { type: 'array', items: { type: 'string' } },
+    concerns: { type: 'array', items: { type: 'string' } },
+    tags: { type: 'array', items: { type: 'string' } },
+  },
+};
+
+const LESSON_ENTRY = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'title', 'path'],
+  properties: {
+    id: { type: 'string' },
+    title: { type: 'string' },
+    path: { type: 'string' },
+    component: { type: 'string' },
+    score: { type: 'integer' }, // absent on a Phase-5 top-up entry
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    kind: { type: 'string', enum: ['process', 'domain'] },
+    newerThanSpec: { type: 'boolean' },
+    supersededBy: { type: 'array', items: { type: 'string' } },
+    text: { type: 'string' },
+  },
+};
+
+const LESSONS = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['query', 'lessons', 'retrievedAt'],
+  properties: {
+    query: LESSON_QUERY,
+    lessons: { type: 'array', maxItems: 15, items: LESSON_ENTRY },
+    cap: { type: 'integer' },
+    retrievedAt: { type: 'string' },
+    unavailable: { type: 'string' }, // the `lessons: unavailable — <reason>` reason
+  },
+};
+
+const TASK_LESSONS = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sets'],
+  properties: {
+    sets: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['taskId', 'set'],
+        properties: { taskId: { type: 'string' }, set: LESSONS },
+      },
+    },
+  },
+};
+
+// lessonIdsOf — every lesson id a consolidated finding carries (the unioned
+// `lessonIds` when present, else its single `lessonId`). Pure.
+function lessonIdsOf(f) {
+  if (f && Array.isArray(f.lessonIds) && f.lessonIds.length) return f.lessonIds;
+  return f && f.lessonId ? [f.lessonId] : [];
+}
+
+// setEntriesById — the set's entries keyed by id, keeping only well-formed ids.
+function setEntriesById(set) {
+  const byId = new Map();
+  for (const e of (set && Array.isArray(set.lessons)) ? set.lessons : []) {
+    if (e && typeof e.id === 'string' && LESSON_ID_RE.test(e.id) && !byId.has(e.id)) byId.set(e.id, e);
+  }
+  return byId;
+}
+
+// escalateByLessons(findingsByRepo, set) — /review Step 4's escalation rule, in
+// code, BEFORE dedupeAndRank. A finding's `lessonId` escalates its severity one
+// level (Nit→Minor→Major→Critical; Critical stays) ONLY when the id is a member of
+// the Phase-5 set the panel was handed: an agent-written id is untrusted
+// (LESSON-008), so an id outside the set is REMOVED from the finding and never
+// escalates. A member with `confidence: "low"` or a non-empty `supersededBy` keeps
+// the finding's severity and records /review's annotation in `lessonNote` (REQ-646
+// BR-6). Returns a new map; the input is not mutated. Pure. (REQ-647 BR-6)
+function escalateByLessons(findingsByRepo, set) {
+  const UP = { Nit: 'Minor', Minor: 'Major', Major: 'Critical' };
+  const byId = setEntriesById(set);
+  const out = {};
+  for (const repo of Object.keys(findingsByRepo || {})) {
+    out[repo] = (findingsByRepo[repo] || []).map((fset) => {
+      if (!fset) return fset;
+      return {
+        ...fset,
+        findings: (fset.findings || []).map((f) => {
+          if (!f || !f.lessonId) return f;
+          const g = { ...f };
+          const entry = byId.get(f.lessonId);
+          if (!entry) {
+            delete g.lessonId;
+            return g;
+          }
+          const supersededBy = (Array.isArray(entry.supersededBy) ? entry.supersededBy : [])
+            .filter((id) => typeof id === 'string' && LESSON_ID_RE.test(id));
+          if (supersededBy.length) {
+            g.lessonNote = `matched ${entry.id}, superseded by ${supersededBy.join(', ')} — not escalated`;
+            return g;
+          }
+          if (entry.confidence === 'low') {
+            g.lessonNote = `matched ${entry.id}, confidence low — not escalated`;
+            return g;
+          }
+          if (UP[g.severity]) {
+            g.escalatedFrom = g.severity;
+            g.severity = UP[g.severity];
+          }
+          return g;
+        }),
+      };
+    });
+  }
+  return out;
+}
+
+// lessonsBlock(set, heading) — the prompt text for a LessonSet: a heading, then
+// one `### LESSON-xxx — title (notes)` block of loaded text per lesson, each capped
+// at 40 lines. '' for an absent, unavailable or empty set, so a prompt with no
+// lessons is byte-identical to one built before REQ-647. Pure + deterministic.
+function lessonsBlock(set, heading) {
+  const byId = setEntriesById(set);
+  if (!set || set.unavailable || byId.size === 0) return '';
+  const lines = ['', heading];
+  for (const e of byId.values()) {
+    const notes = [];
+    if (Number.isInteger(e.score)) notes.push(`score ${e.score}`);
+    if (e.kind === 'process') notes.push('process');
+    if (e.newerThanSpec === true) notes.push('newer than spec');
+    if (e.confidence === 'low') notes.push('confidence low');
+    const sup = (Array.isArray(e.supersededBy) ? e.supersededBy : []).filter((id) => LESSON_ID_RE.test(String(id)));
+    if (sup.length) notes.push(`superseded by ${sup.join(', ')}`);
+    lines.push('', `### ${e.id} — ${String(e.title || '')}${notes.length ? ` (${notes.join('; ')})` : ''}`);
+    if (typeof e.text === 'string' && e.text) {
+      const text = e.text.split('\n');
+      lines.push(...(text.length > LESSON_TEXT_MAX_LINES
+        ? text.slice(0, LESSON_TEXT_MAX_LINES - 1).concat(`[… truncated — read ${e.id} for the rest]`)
+        : text));
+    }
+  }
+  return lines.join('\n');
+}
+
+// lessonsLogLine(label, set) — REQ-647 BR-10: the line that names which lessons a
+// phase loaded, in the same shape `adlc_lessons` prints:
+//   Lessons loaded (task TASK-012): LESSON-013, LESSON-335 [newer-than-spec: LESSON-582]
+// Pure + deterministic.
+function lessonsLogLine(label, set) {
+  if (!set) return `Lessons loaded (${label}): unavailable — retrieval leaf returned nothing`;
+  if (set.unavailable) return `Lessons loaded (${label}): unavailable — ${set.unavailable}`;
+  const entries = Array.from(setEntriesById(set).values());
+  const plain = entries.filter((e) => e.newerThanSpec !== true).map((e) => e.id);
+  const newer = entries.filter((e) => e.newerThanSpec === true).map((e) => e.id);
+  let line = `Lessons loaded (${label}):`;
+  if (plain.length) line += ` ${plain.join(', ')}`;
+  if (newer.length) line += ` [newer-than-spec: ${newer.join(', ')}]`;
+  if (!plain.length && !newer.length) line += ' none';
+  return line;
+}
+
+// taskSetsById(taskLessons) — TASK_LESSONS → { taskId: LESSONS }. A malformed or
+// duplicate row is dropped (first wins), never thrown on. Pure.
+function taskSetsById(taskLessons) {
+  const out = {};
+  for (const row of (taskLessons && Array.isArray(taskLessons.sets)) ? taskLessons.sets : []) {
+    if (row && typeof row.taskId === 'string' && row.set && !(row.taskId in out)) out[row.taskId] = row.set;
+  }
+  return out;
+}
+
 // Guarded export — load-bearing (see the BEGIN PURE banner): in the Workflow
 // runtime `module` is undefined so this line is SKIPPED (a bare module.exports
 // would throw); under the test loader `module` is defined so the pure logic is
@@ -850,6 +1057,8 @@ if (typeof module !== 'undefined') module.exports = {
   allMerged, stripVerifyMarkers,
   groupCrossRepoReqs, sharesRepo,
   closeOutEvidenceStatus, closeOutDigest, repoRootFromWorktree, groupMergedByRepo,
+  LESSON_QUERY, LESSON_ENTRY, LESSONS, TASK_LESSONS,
+  lessonIdsOf, escalateByLessons, lessonsBlock, lessonsLogLine, taskSetsById,
 };
 // ==== END PURE ====
 
@@ -1231,6 +1440,13 @@ async function runReq(id) {
   // can carry retry guidance on a resume without a second read site.
   EVIDENCE.set(id, { repos, tasks: [], findings: null, reports: [], ans });
 
+  // REQ-647 BR-6 (a) — the Step-0 LessonSet: REQ-vintage background, handed to
+  // the architect. A retrieval leaf runs `adlc_lessons` (the script has no shell)
+  // and writes `lessons.step0` to the primary-path state copy. Retrieval is never
+  // a gate: an unavailable set is logged and the REQ carries on without lessons.
+  const STEP0_LESSONS = await retrieveLessons(id, P, lessonsPrompt(id, worktree, repos, 'step0'), 'step0', LESSONS);
+  log(`${id} ${lessonsLogLine('step0', STEP0_LESSONS)}`);
+
   // -------------------------------------------------------------------------
   // Phase 1 — validate the spec. `gate()` runs the ≤3 validate→fix loop and
   // returns a boolean; 3× failure → RETURN blocked (never throw). (BR-4)
@@ -1269,7 +1485,7 @@ async function runReq(id) {
     )
   ).filter(Boolean);
 
-  const TASK_PLAN = await agent(architectPrompt(id, worktree, exploreReports), {
+  const TASK_PLAN = await agent(architectPrompt(id, worktree, exploreReports, STEP0_LESSONS), {
     ...P,
     label: `${id} phase2-architect`,
     schema: TASKS,
@@ -1303,8 +1519,17 @@ async function runReq(id) {
   // RETURN a `blocked` terminal (a reflector userFacing question); that halt is
   // propagated here exactly like the gate halts above — never thrown. (ADR-6)
   // -------------------------------------------------------------------------
-  await implement(id, P, worktree, tasks);           // Phase 4 — serial writer
-  const verifyResult = await verify(id, P, worktree, repos, ans); // Phase 5 — panel
+  // REQ-647 BR-6 (b) — every task's LessonSet in ONE leaf, now that the task files
+  // exist and have passed Phase 3. Phase 4 is serial, so one call before it is
+  // enough; each set is chosen by the files its task touches (BR-1a).
+  const TASK_LESSON_SETS = taskSetsById(
+    await retrieveLessons(id, P, taskLessonsPrompt(id, worktree, repos, tasks), 'tasks', TASK_LESSONS));
+  for (const t of orderByTier(tasks)) log(`${id} ${lessonsLogLine(`task ${t.id}`, TASK_LESSON_SETS[t.id])}`);
+  await implement(id, P, worktree, tasks, TASK_LESSON_SETS); // Phase 4 — serial writer
+  // REQ-647 BR-6 (c) — the Phase-5 LessonSet, from the diff, before the fan-out.
+  const PHASE5_LESSONS = await retrieveLessons(id, P, lessonsPrompt(id, worktree, repos, 'phase5'), 'phase5', LESSONS);
+  log(`${id} ${lessonsLogLine('phase5', PHASE5_LESSONS)}`);
+  const verifyResult = await verify(id, P, worktree, repos, ans, PHASE5_LESSONS); // Phase 5 — panel
   if (verifyResult !== true) return verifyResult;    // reflector-question halt
   const PR_STATE = await openPRs(id, P, repos);       // Phase 6 — open PR(s)
   await cleanupAndWatchCI(id, P, PR_STATE);           // Phase 7 — sanity + CI
@@ -1479,8 +1704,8 @@ function explorePrompt(id, worktree, agentType) {
   ].join('\n');
 }
 
-function architectPrompt(id, worktree, exploreReports) {
-  return [
+function architectPrompt(id, worktree, exploreReports, step0Lessons) {
+  const lines = [
     `Phase 2 architect for ${id} in worktree ${worktree}: synthesize the`,
     'exploration reports below into a tiered task plan. Group tasks into',
     'dependency tiers; tasks within a tier MUST touch disjoint files (this is',
@@ -1489,7 +1714,11 @@ function architectPrompt(id, worktree, exploreReports) {
     '',
     'Exploration reports (JSON):',
     JSON.stringify(exploreReports),
-  ].join('\n');
+  ];
+  // REQ-647: no block when no Step-0 set was retrieved, so the prompt is unchanged.
+  const block = lessonsBlock(step0Lessons, 'Lessons for this REQ (the Step-0 set, REQ-647). Design around them and name, in the architecture rationale, the ids your design applies:');
+  if (block) lines.push(block);
+  return lines.join('\n');
 }
 
 function phase3ValidatePrompt(id, worktree) {
@@ -1518,7 +1747,7 @@ function phase3FixPrompt(id, worktree) {
 
 // --- Phase 4 prompt builders (serial implement) -----------------------------
 
-function implementPrompt(id, worktree, task) {
+function implementPrompt(id, worktree, task, lessonSet) {
   return [
     `Phase 4 implement for ${id}: task ${task.id} — ${task.title || '(untitled)'}`,
     `in worktree ${worktree}.`,
@@ -1529,6 +1758,8 @@ function implementPrompt(id, worktree, task) {
     'work in the worktree with the conventional message for this task. Operate',
     'entirely within the absolute worktree path.',
     task.repo ? `Target repo for this task: ${task.repo}.` : '',
+    // REQ-647 BR-2: '' when the task has no set, so the prompt is unchanged.
+    lessonsBlock(lessonSet, `Lessons for ${task.id}, selected for the files it touches (REQ-647). Read them before writing code. When one applies to a change you make, acknowledge it where the Phase-5 check looks: a \`Lessons: LESSON-xxx\` commit trailer (comma-separate several), or the id in the task's ## Verification block. A mention only in your report is not seen.`),
   ].filter(Boolean).join('\n');
 }
 
@@ -1554,6 +1785,95 @@ function completedTasksPrompt(id, worktree) {
     'VERBATIM. If the file, the phase4 object, or the completedTasks array is',
     'absent (a fresh run), return an empty array. This is a READ-ONLY check — do',
     'NOT modify code, state, or run tests.',
+  ].join('\n');
+}
+
+// --- REQ-647 retrieval leaf prompts -----------------------------------------
+//
+// Each prompt's bytes depend only on the REQ id, the worktree, the Phase-0 repo
+// records and (for the task leaf) the Phase-2 task list — never on args.answers —
+// so a resume replays the leaf from the journal and every prompt built from its
+// output stays byte-identical (REQ-474 BR-7). The leaf runs the same
+// `adlc_lessons select` call /proceed runs and returns its JSON verbatim.
+
+function lessonsStatePath(id, worktree, repos) {
+  const primary = (repos || []).find((r) => r.primary) || (repos || [])[0] || {};
+  const root = repoRootFromWorktree(primary.worktree || worktree, id);
+  return `${root || '<repoRoot>'}/.adlc/specs/${id}-*/pipeline-state.json`;
+}
+
+function lessonsFenceLines(worktree) {
+  return [
+    `Run ONE shell fence from ${worktree}: the ToolkitRoot root line, then source`,
+    '`partials/lessons.sh` with the guarded two-level spelling (conventions.md',
+    '"Bash in skills"), then call adlc_lessons in the SAME fence — shell state does',
+    'not cross fences.',
+  ];
+}
+
+function lessonsUnavailableLines() {
+  return [
+    'If adlc_lessons returns 2 it prints one `lessons: unavailable — <reason>` line:',
+    'then use {"query":{"components":[]},"lessons":[],"retrievedAt":"<now, ISO-8601',
+    'UTC>","unavailable":"<reason>"} as the set. Never fabricate, reorder or edit an',
+    'entry — the JSON the command prints is the set. Retrieval never blocks the REQ.',
+  ];
+}
+
+function lessonsPrompt(id, worktree, repos, setName) {
+  const state = lessonsStatePath(id, worktree, repos);
+  const lines = [
+    `Lessons retrieval for ${id}: the ${setName} LessonSet (REQ-647), primary worktree`,
+    `${worktree}. You are READ-ONLY apart from the one state write the command below`,
+    'makes itself (lessons.<set> in the primary-path pipeline-state.json).',
+    '',
+    ...lessonsFenceLines(worktree),
+    `  adlc_lessons select --set ${setName} --root "${worktree}" \\`,
+    `    --spec "<the requirement.md under ${worktree}/.adlc/specs/${id}-*/>" \\`,
+    `    --state-out "<${state} resolved; the worktree's copy when that spec directory does not exist>" \\`,
+  ];
+  if (setName === 'step0') {
+    lines.push('    --fresh --format json --with-text');
+  } else {
+    lines.push(
+      '    --base "origin/<integrationBranch>" --component "<c>" [--component "<c>" ...] \\',
+      '    --format json --with-text',
+      '',
+      'The components: for EVERY touched repo below, list the paths its branch changes',
+      '(`git -C "<worktree>" diff --name-only origin/<integrationBranch>...HEAD`) and',
+      'infer each path\'s MOST SPECIFIC component the way /review Step 1 item 7a does',
+      '(partials/forge.sh -> adlc/partials/forge; the engine adds the ancestors). One',
+      '--component per distinct component, across all repos.',
+      `Touched repos: ${(repos || []).map((r) => `${r.repo} @ ${r.worktree} (base origin/${r.integrationBranch || '<resolve>'})`).join('; ')}.`,
+    );
+  }
+  lines.push('', 'Return the JSON it prints VERBATIM as the LESSONS schema object.', ...lessonsUnavailableLines());
+  return lines.join('\n');
+}
+
+function taskLessonsPrompt(id, worktree, repos, tasks) {
+  const state = lessonsStatePath(id, worktree, repos);
+  const list = orderByTier(tasks || []).map((t) => `${t.id} — ${t.title || '(untitled)'}`).join('; ') || '(none)';
+  return [
+    `Lessons retrieval for ${id}: one LessonSet PER TASK (REQ-647 BR-1a), primary`,
+    `worktree ${worktree}. You are READ-ONLY apart from the state writes the command`,
+    'makes itself (lessons.tasks.<TASK-xxx> in the primary-path pipeline-state.json).',
+    '',
+    `Tasks, in order: ${list}.`,
+    '',
+    `For EACH task: read its file under ${worktree}/.adlc/specs/${id}-*/tasks/, take the`,
+    'paths under `## Files to Create/Modify`, infer each path\'s MOST SPECIFIC',
+    'component the way /review Step 1 item 7a does (partials/forge.sh ->',
+    'adlc/partials/forge; the engine adds the ancestors), and run:',
+    ...lessonsFenceLines(worktree),
+    `  adlc_lessons select --set task --task-id <TASK-xxx> --root "${worktree}" \\`,
+    `    --spec "<the requirement.md under ${worktree}/.adlc/specs/${id}-*/>" \\`,
+    `    --state-out "<${state} resolved; the worktree's copy when that spec directory does not exist>" \\`,
+    '    --component "<c>" [--component "<c>" ...] --format json --with-text',
+    '',
+    'Return the TASK_LESSONS schema object: sets = one {taskId, set} row per task,',
+    'in the order above, where set is the JSON the call printed, VERBATIM.',
+    ...lessonsUnavailableLines(),
   ].join('\n');
 }
 
@@ -1603,7 +1923,7 @@ function prePassPrompt(id, repo, worktree, base) {
 // sanitized). It is passed ONLY for the 5 reviewer dimensions — the reflector is
 // always called with `candidates` empty/absent (BR-9). Advisory means advisory:
 // the reviewer must independently CONFIRM or REFUTE each candidate, not trust it.
-function reviewPrompt(id, worktree, member, repo, manifest, candidates) {
+function reviewPrompt(id, worktree, member, repo, manifest, candidates, lessonSet) {
   const advisory = (candidates || []).filter(Boolean);
   const lines = [
     `Phase 5 review for ${id} (${member.dimension}) in worktree ${worktree},`,
@@ -1650,6 +1970,13 @@ function reviewPrompt(id, worktree, member, repo, manifest, candidates) {
       JSON.stringify(manifest),
     );
   }
+  // REQ-647 BR-3: the Phase-5 LessonSet, for ALL SIX members. The reflector is
+  // told the set was pre-computed and must not grep its own. Only an id from this
+  // set escalates a finding (escalateByLessons); '' when no set was retrieved.
+  const block = lessonsBlock(lessonSet, member.dimension === 'reflector'
+    ? 'Lessons for this diff, PRE-COMPUTED by the engine (REQ-647): use these and do NOT grep .adlc/knowledge/lessons/ yourself. When a finding matches one, set lessonId to its id:'
+    : 'Lessons for this diff, pre-computed by the engine (REQ-647). When a finding matches one, set lessonId to its id; only an id from this list counts:');
+  if (block) lines.push(block);
   return lines.join('\n');
 }
 
@@ -1813,7 +2140,7 @@ function verifyMergedPrompt(id, prs) {
 // intra-tier parallelism are explicitly out of scope for v1 (OQ-5). After each
 // task an IO agent records progress into pipeline-state.json.phase4 (the script
 // has no fs — every state write is an agent leaf, ADR-3).
-async function implement(id, P, worktree, tasks) {
+async function implement(id, P, worktree, tasks, taskLessonSets) {
   // Sort into ascending dependency tiers. A missing `tier` sorts as tier 0 so a
   // flat (untiered) plan still runs in array order. Sorting is pure JS — the
   // script owns ordering; the agents own the writes. (ADR-3, ADR-5)
@@ -1845,7 +2172,7 @@ async function implement(id, P, worktree, tasks) {
     // ONE writer: await each task-implementer before dispatching the next. Using
     // a serial for-loop (NOT parallel()) is what prevents git-index contention
     // in the shared worktree. task-implementer is the unchanged specialist.
-    const report = await agent(implementPrompt(id, worktree, task), {
+    const report = await agent(implementPrompt(id, worktree, task, (taskLessonSets || {})[task.id]), {
       ...P,
       label: `${id} phase4-${task.id}`,
       agentType: agentTypeFor('task-implementer', AGENT_NS),
@@ -1910,7 +2237,7 @@ async function implement(id, P, worktree, tasks) {
 //
 // Returns `true` when the panel is clean / non-blocking (the REQ proceeds to
 // Phase 6); returns a `{state:'blocked'}` value on a reflector question.
-async function verify(id, P, worktree, repos, ans) {
+async function verify(id, P, worktree, repos, ans, lessonSet) {
   // The PANEL: agent name + the dimension label it reports under (the FINDINGS
   // `dimension` enum is distinct from the agent name). The reflector leads;
   // the 5 reviewers follow. (PANEL_DIMENSIONS / REVIEWER_DIMENSIONS, PURE block)
@@ -1956,6 +2283,7 @@ async function verify(id, P, worktree, repos, ans) {
             // (validateCitations already excludes reflector candidates, but the
             // panelMembers reflector entry would key nothing here anyway). (BR-9)
             m.dimension === 'reflector' ? null : byDim[m.dimension],
+            lessonSet, // REQ-647 BR-3 — every member, the reflector included
           ), {
             ...P,
             label: `${id} phase5-${r.repo}-${m.dimension}`,
@@ -1988,7 +2316,10 @@ async function verify(id, P, worktree, repos, ans) {
 
   // Deterministic consolidation: dedupe within repo, tag cross-repo issues, rank
   // by severity, and decide whether merge is blocked (any Critical or mustFix).
-  let consolidated = dedupeAndRank(findingsByRepo);
+  // REQ-647 BR-6: a finding whose lessonId is in the Phase-5 set escalates one
+  // level BEFORE dedupe (an id outside the set is dropped, never escalates), and
+  // dedupe unions lesson ids across duplicates.
+  let consolidated = dedupeAndRank(escalateByLessons(findingsByRepo, lessonSet));
 
   // Did the resumed user actually answer a reflector question this pass? If so the
   // answer MUST change the artifact even when consolidation does not block (the
@@ -2044,6 +2375,7 @@ async function verify(id, P, worktree, repos, ans) {
               id, repoWt, m, repoId,
               m.dimension === 'architecture' ? MANIFEST : null,
               byDim[m.dimension], // reviewer-only re-check keeps its advisory slice (BR-9)
+              lessonSet, // REQ-647 BR-3
             ), {
               ...P,
               label: `${id} phase5-reverify-${repoId}-${m.dimension}`,
@@ -2060,7 +2392,7 @@ async function verify(id, P, worktree, repos, ans) {
     // for a re-checked (repo,dimension) the fresh findings REPLACE the stale
     // ones; everything else (including the reflector's, untouched) is kept.
     const merged = mergeReverified(findingsByRepo, reverified);
-    consolidated = dedupeAndRank(merged);
+    consolidated = dedupeAndRank(escalateByLessons(merged, lessonSet));
     // ≤1 loop: we do NOT re-fix here. If it still blocks, the gate stands and the
     // PR phase will carry the unresolved Critical/mustFix forward for the user.
   }
@@ -2077,6 +2409,31 @@ async function verify(id, P, worktree, repos, ans) {
   // cite. The return contract (`true` | blocked) is unchanged.
   if (EVIDENCE.has(id)) EVIDENCE.get(id).findings = consolidated.findings;
   return true;
+}
+
+// ===========================================================================
+// retrieveLessons(id, P, prompt, label, schema) — dispatch one REQ-647 retrieval
+// leaf. Retrieval is never a gate (BR-7): a leaf that throws or returns nothing
+// yields an `unavailable` value the log line reports, and the prompts built from
+// it carry no lessons block. Never throws. (BR-6)
+// ===========================================================================
+async function retrieveLessons(id, P, prompt, label, schema) {
+  const unavailable = (why) => (schema === TASK_LESSONS
+    ? { sets: [] }
+    : { query: { components: [] }, lessons: [], retrievedAt: '', unavailable: why });
+  try {
+    const value = await agent(prompt, {
+      ...P,
+      label: `${id} lessons-${label}`,
+      schema,
+      // Default workflow subagent (no agentType) — a generic read-only IO worker
+      // running the inline adlc_lessons call.
+    });
+    return value || unavailable('retrieval leaf returned nothing');
+  } catch (e) {
+    log(`${id} lessons-${label}: retrieval leaf threw — ${e && e.message ? e.message : String(e)}`);
+    return unavailable('retrieval leaf threw');
+  }
 }
 
 // ===========================================================================
