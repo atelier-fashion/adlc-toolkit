@@ -1,7 +1,7 @@
 ---
 id: TASK-173
 title: "adlc_lessons ack-check --record: write lessons.acknowledged"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
