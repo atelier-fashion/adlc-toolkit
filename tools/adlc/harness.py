@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""adlc harness detect — which agent harnesses are installed, and mounted (REQ-654 BR-7).
+"""adlc harness — which agent harnesses are installed and mounted (REQ-654 BR-7),
+and the capability probes that exercise them (REQ-664).
 
 Read-only and pure standard library (LESSON-395): `/init --harness` and the exec
 engine will call it to choose defaults before the machine is set up, so it may
@@ -21,6 +22,11 @@ For each of the five harnesses the multi-harness plan surveyed it reports:
   ``$HOME/.agents/skills`` (architecture ADR-7).
 
 Absence of every harness is a result, so the command exits 0 whenever it ran.
+
+``adlc harness probe`` (REQ-664) lives in ``harness_probe.py``, which is pure
+standard library and imports nothing from the toolkit (its AC-14). This module
+hands it the toolkit services it needs as a :class:`harness_probe.Deps` value:
+the version lookup above, ``ADLC_HOME``, and the tool's own version.
 """
 
 import argparse
@@ -180,6 +186,42 @@ def probe_all() -> List[HarnessProbe]:
     return [probe(name, root) for name in NAMES]
 
 
+def _probe_tool_version() -> str:
+    """``<VERSION>+<short sha>`` of the toolkit this runs from; ``-`` with no ``.git``
+    (the plugin route's cache copy, REQ-669)."""
+    root = _toolkit_root()
+    version = "unknown"
+    sha = "-"
+    if root:
+        try:
+            with open(os.path.join(root, "VERSION"), encoding="utf-8") as fh:
+                version = fh.read().strip() or "unknown"
+        except OSError:
+            pass
+        try:
+            out = subprocess.run(["git", "-C", root, "rev-parse", "--short", "HEAD"],
+                                 capture_output=True, text=True, timeout=10,
+                                 stdin=subprocess.DEVNULL)
+            if out.returncode == 0 and out.stdout.strip():
+                sha = out.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return "%s+%s" % (version, sha)
+
+
+def probe_deps():
+    """The services ``harness_probe`` is handed (REQ-664 architecture ADR-1)."""
+    import adlc_home
+    import harness_probe
+    return harness_probe.Deps(version_of=_version, adlc_home=adlc_home.adlc_home,
+                              tool_version=_probe_tool_version)
+
+
+def _cmd_probe(argv) -> int:
+    import harness_probe
+    return harness_probe.main(argv, probe_deps())
+
+
 def format_table(probes: List[HarnessProbe]) -> str:
     rows = [("harness", "binary", "state", "version", "mount")]
     rows += [(p.name, p.binary, p.state, p.version, p.mount) for p in probes]
@@ -192,12 +234,18 @@ def format_table(probes: List[HarnessProbe]) -> str:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "probe":
+        return _cmd_probe(argv[1:])
     parser = argparse.ArgumentParser(
         prog="adlc harness",
-        description="Read-only: which agent harnesses are installed, and whether "
-                    "each one's skills directory reaches this toolkit.")
+        description="Which agent harnesses are installed, and whether each one's "
+                    "skills directory reaches this toolkit (detect, read-only); "
+                    "scripted capability probes against one of them (probe).")
     sub = parser.add_subparsers(dest="verb")
-    detect = sub.add_parser("detect", help="probe the five known harnesses")
+    sub.add_parser("probe", add_help=False,
+                   help="run the §6 capability probes against one installed harness "
+                        "(REQ-664; --list, --dry-run, --recover)")
+    detect = sub.add_parser("detect", help="report the five known harnesses (read-only)")
     detect.add_argument("--json", action="store_true",
                         help="one JSON object per harness, as an array")
     args = parser.parse_args(argv)

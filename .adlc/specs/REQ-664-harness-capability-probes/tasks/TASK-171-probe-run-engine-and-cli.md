@@ -1,7 +1,7 @@
 ---
 id: TASK-171
 title: "Probe run engine, user-file contract, launcher and CLI"
-status: draft
+status: complete
 parent: REQ-664
 created: 2026-10-29
 updated: 2026-10-29
