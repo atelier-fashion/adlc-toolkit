@@ -33,8 +33,11 @@ def _run(tmp_path, bindir, *args, home=None):
     home = home or str(tmp_path / "home")
     os.makedirs(home, exist_ok=True)
     env = {"HOME": home, "PATH": bindir + ":" + SYSTEM_PATH}
+    # cwd outside any repository: the last_probe column (REQ-664) reads the
+    # caller's repo, and this checkout carries committed probe results.
     return subprocess.run([sys.executable, ADLC, "harness"] + list(args),
-                          env=env, capture_output=True, text=True, timeout=60)
+                          env=env, capture_output=True, text=True, timeout=60,
+                          cwd=str(tmp_path))
 
 
 def _mounted_home(tmp_path):

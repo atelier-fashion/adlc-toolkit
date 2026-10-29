@@ -220,7 +220,7 @@ is cut per `RELEASING.md`.
   unknown kind is a finding. `session-transcript.sh` now names Claude Code's
   `~/.claude/projects` once, marked.
 - **`adlc harness probe` (REQ-664).** The multi-harness plan's §6 items as scripted,
-  repeatable probes against whichever harness is installed. Eleven probes cover ten
+  repeatable probes against whichever harness is installed. Eleven probes cover nine
   of the twelve items: `git-write-main`, `git-write-worktree`, `ask-tier-deny`,
   `skill-activation`, `shell-timeout`, `trust-then-headless`,
   `session-start-context`, `stdin-prompt`, `fence-vs-allowlist`,

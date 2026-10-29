@@ -216,3 +216,43 @@ def test_noop_restore_when_the_edit_never_landed(tmp_path):
     assert out.returncode == 0, out.stderr
     assert open(_codex_config(sb)).read() == USER_CONFIG
     assert not os.path.exists(sb.marker("codex"))
+
+
+def test_symlinked_user_file_stays_a_symlink(tmp_path):
+    sb = Sandbox(tmp_path)
+    dotfiles = tmp_path / "dotfiles"
+    dotfiles.mkdir()
+    target = dotfiles / "codex-config.toml"
+    target.write_text(USER_CONFIG)
+    os.symlink(str(target), _codex_config(sb))
+    before = _sha(str(target))
+    out = sb.run("codex", "--only", "shell-timeout")
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert os.path.islink(_codex_config(sb))
+    assert os.path.realpath(_codex_config(sb)) == os.path.realpath(str(target))
+    assert _sha(str(target)) == before
+
+
+@pytest.mark.parametrize("field,value", [
+    ("files", [{"path": "/etc/hosts", "kind": "trust-entry", "flavor": "codex-toml",
+                "backup": "x", "backup_sha256": "absent", "post_edit_sha256": None,
+                "added": {}}]),
+    ("outside_dirs", ["/tmp/outside-codex-x"]),
+    ("created_dirs", ["/usr"]),
+    ("run_dir", "/tmp/not-a-probe-dir"),
+])
+def test_recover_refuses_a_marker_naming_foreign_paths(tmp_path, field, value):
+    """--recover deletes what a marker names, so it acts only on what a run on that
+    harness can create (BR-4)."""
+    sb = Sandbox(tmp_path)
+    state = os.path.join(sb.adlc_home, "adlc", "harness-probe")
+    os.makedirs(state)
+    marker = {"schema": 1, "harness": "codex", "run_id": "codex-x", "run_dir": "",
+              "temp_root": "", "state_root": state, "created_dirs": [], "marker_dirs": [],
+              "outside_dirs": [], "files": []}
+    marker[field] = value
+    with open(sb.marker("codex"), "w") as fh:
+        json.dump(marker, fh)
+    out = sb.run("codex", "--recover", cwd=str(tmp_path))
+    assert out.returncode == 1 and "refusing to act on the recovery marker" in out.stderr
+    assert os.path.exists(sb.marker("codex"))

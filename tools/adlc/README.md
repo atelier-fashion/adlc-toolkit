@@ -364,7 +364,15 @@ lift an omission carries this residual.
 
 Claude runs with `--setting-sources project,local` and the project pins
 `permissions.defaultMode: "default"`, so a project-local allow or deny is what is
-measured, not your user settings.
+measured, not your user settings. Claude Code 2.1.258 ignores a project's
+`permissions.allow` in a workspace it has not been told to trust (it names
+`~/.claude.json` `projects["<path>"].hasTrustDialogAccepted`). The probe does not
+write that file, because it is not among the user-level files a run may edit. So
+on that version the allow-dependent claude probes record `fail`, with Claude's
+message in their evidence. That is the finding, not a probe fault.
+
+A user-level file that is a symlink (a dotfiles setup) is edited and restored
+through its target, so the link survives.
 
 ### Exit codes
 

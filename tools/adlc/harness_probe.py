@@ -964,6 +964,18 @@ def _write_marker(path: str, marker: Dict) -> None:
     _atomic_write(path, (json.dumps(marker, indent=2) + "\n").encode("utf-8"))
 
 
+def _create_marker(path: str, marker: Dict) -> None:
+    """The first write is exclusive: a second run on the same harness that started
+    in the same instant finds the marker and stops before any user-level edit."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise ProbeError("another %s probe run holds %s; wait for it, or run --recover if "
+                         "it died" % (marker["harness"], path))
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(marker, indent=2) + "\n")
+
+
 def codex_trust_edit(home: str, run_id: str, paths: Sequence[str]) -> UserEdit:
     """``~/.codex/config.toml`` gains one ``[projects."<realpath>"]`` table per path."""
     for p in paths:
@@ -1053,6 +1065,9 @@ class UserFiles:
         os.makedirs(backup_dir, exist_ok=True)
         dirs: List[str] = []
         for i, edit in enumerate(self.edits):
+            # A dotfiles symlink stays a symlink: edit and restore its target.
+            if os.path.islink(edit.path):
+                edit.path = os.path.realpath(edit.path)
             backup = os.path.join(backup_dir, "%d-%s" % (i, os.path.basename(edit.path)))
             sha = sha256_of(edit.path)
             if sha is not None:
@@ -1068,7 +1083,7 @@ class UserFiles:
         # ADLC_HOME included; each is removed with rmdir, only when empty.
         self.marker_dirs = _absent_dirs(self.marker, os.path.dirname(self.adlc_home))
         os.makedirs(self.state_root, exist_ok=True)
-        _write_marker(self.marker, self._marker_doc())
+        _create_marker(self.marker, self._marker_doc())
         self.started = True
         for entry in self.entries:
             emit("user_file_backed_up", path=entry["path"], sha256=entry["backup_sha256"],
@@ -1207,6 +1222,53 @@ def restore_from_marker(marker: Dict, emit) -> Tuple[object, List[str]]:
     return outcome, leftovers
 
 
+def _known_user_file(harness: str, path: str, home: str) -> bool:
+    """Whether ``path`` is one of the user files a run on ``harness`` may edit."""
+    def same(a: str, b: str) -> bool:
+        return os.path.realpath(a) == os.path.realpath(b)
+    if harness == "codex":
+        return same(path, os.path.join(home, ".codex", "config.toml"))
+    if harness == "gemini":
+        if same(path, os.path.join(home, ".gemini", "trustedFolders.json")):
+            return True
+        policies = os.path.join(home, ".gemini", "policies")
+        name = os.path.basename(path)
+        return (same(os.path.dirname(path), policies) and name.startswith("adlc-probe-gemini-")
+                and name.endswith(".toml"))
+    return False
+
+
+def _validate_marker(marker: Dict, harness: str, adlc_home: str, home: str) -> Optional[str]:
+    """Why a marker must not be acted on, or ``None``.
+
+    --recover deletes and restores what a marker names, so a marker is checked
+    against what a run on this harness can create: its own user files, their
+    parent directories, outside-dirs under this ADLC_HOME, and a run dir in a
+    temp root. The marker's own idea of where its state root is, is not used.
+    """
+    if marker.get("harness") != harness or not isinstance(marker.get("files"), list):
+        return "it is not a %s marker" % harness
+    files = []
+    for entry in marker["files"]:
+        path = entry.get("path") if isinstance(entry, dict) else None
+        if not isinstance(path, str) or not _known_user_file(harness, path, home):
+            return "it names %r, which a %s run never edits" % (path, harness)
+        files.append(os.path.realpath(path))
+    for d in marker.get("created_dirs", []):
+        real = os.path.realpath(d)
+        if not any(f.startswith(real.rstrip(os.sep) + os.sep) for f in files):
+            return "created_dirs names %r, which holds none of its files" % d
+    state = os.path.realpath(_state_root(adlc_home))
+    for d in marker.get("outside_dirs", []):
+        if os.path.dirname(os.path.realpath(d)) != state or not os.path.basename(d).startswith(
+                OUTSIDE_PREFIX + harness + "-"):
+            return "outside_dirs names %r, which is not a probe directory under %s" % (d, state)
+    run_dir = marker.get("run_dir") or ""
+    if run_dir and not os.path.basename(run_dir).startswith(RUN_PREFIX + harness + "-"):
+        return "run_dir %r is not a probe run directory" % run_dir
+    return None
+
+
 def recover(harness: str, adlc_home: str, home: str) -> int:
     """``adlc harness probe <name> --recover``: needs no repo and no binary (BR-4)."""
     path = marker_path(adlc_home, harness)
@@ -1225,6 +1287,13 @@ def recover(harness: str, adlc_home: str, home: str) -> int:
         _say("%s %s" % (event, " ".join("%s=%s" % (k, tilde(str(v), home))
                                          for k, v in kw.items())))
 
+    problem = _validate_marker(marker, harness, adlc_home, home) if isinstance(marker, dict) \
+        else "it is not a JSON object"
+    if problem:
+        _say("refusing to act on the recovery marker %s: %s. Inspect it and restore by hand "
+             "from the backups it names." % (tilde(path, home), problem))
+        return 1
+    marker["state_root"] = _state_root(adlc_home)
     outcome, leftovers = restore_from_marker(marker, emit)
     run_dir = marker.get("run_dir")
     temp_root = marker.get("temp_root")
@@ -1430,6 +1499,7 @@ class Engine:
         self.leftovers: List[str] = []
         self.repo_removed = False
         self.reported: List[str] = []   # cursor: transcript paths its hooks reported
+        self.scanned = 0
 
     # -- events ------------------------------------------------------------
 
@@ -1443,6 +1513,10 @@ class Engine:
     # -- layout --------------------------------------------------------------
 
     def _make_run_dir(self) -> None:
+        if self.profile.has_allow_required_path and not _SAFE_PATH.match(
+                os.path.join(_state_root(self.adlc_home), OUTSIDE_PREFIX + self.run_id)):
+            raise ProbeError("ADLC_HOME %s holds characters the probes cannot quote into "
+                             "allow rules" % self.adlc_home)
         made = tempfile.mkdtemp(prefix="%s%s-" % (RUN_PREFIX, self.h), dir=self.temp_root)
         self.run_dir = _guard_dir(made, self.temp_root, RUN_PREFIX)
         if not _SAFE_PATH.match(self.run_dir):
@@ -1461,9 +1535,6 @@ class Engine:
         if self.profile.has_allow_required_path:
             self.outside = os.path.join(_state_root(self.adlc_home),
                                         OUTSIDE_PREFIX + self.run_id)
-            if not _SAFE_PATH.match(self.outside):
-                raise ProbeError("ADLC_HOME %s holds characters the probes cannot quote "
-                                 "into allow rules" % self.adlc_home)
             self.remote = os.path.join(self.outside, "remote.git")
         else:
             self.remote = os.path.join(self.run_dir, "remote.git")
@@ -2105,6 +2176,7 @@ class Engine:
         else:
             root = os.path.join(self.home, self.profile.transcript_root[2:])
             seen = 0
+            self.scanned = 0
             for dirpath, _dirs, files in os.walk(root):
                 for fname in files:
                     seen += 1
@@ -2134,8 +2206,9 @@ class Engine:
                     matches.append((mtime, path, rule))
                 if seen > TRANSCRIPT_SCAN_CAP:
                     break
+            self.scanned = min(seen, TRANSCRIPT_SCAN_CAP)
+        exited_zero = sum(1 for r in self.results if r.exit_code == 0)
         if not matches:
-            exited_zero = any(r.exit_code == 0 for r in self.results)
             where = "the hook-reported path" if self.profile.transcript_root == "hook-reported" \
                 else self.profile.transcript_root
             if exited_zero:
@@ -2156,8 +2229,12 @@ class Engine:
                     "records_copied": copied,
                     "fixture": "/".join(RESULT_DIR + ("fixtures", "%s.jsonl" % self.h)),
                     "session_files": [tilde(p, self.home) for _m, p, _r in matches[:50]],
-                    "observation": "located %d session file(s) newer than the first launch"
-                                   % len(matches)}
+                    "launches_exited_zero": "%d of %d" % (exited_zero, len(self.results)),
+                    "observation": "located %d session file(s) newer than the first launch; "
+                                   "%d of %d launches exited 0"
+                                   % (len(matches), exited_zero, len(self.results))}
+        if self.profile.transcript_root != "hook-reported":
+            evidence["files_scanned"] = self.scanned
         return self._entry(probe, Verdict(PASS), evidence)
 
     def _write_fixture(self, path: str) -> int:
