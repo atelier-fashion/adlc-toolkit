@@ -1,7 +1,7 @@
 ---
 id: TASK-175
 title: "Live probe run against the installed claude binary"
-status: draft
+status: complete
 parent: REQ-664
 created: 2026-10-29
 updated: 2026-10-29

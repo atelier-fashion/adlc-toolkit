@@ -421,6 +421,9 @@ def write_session(path, harness, cwd, prompt, message):
     if "leak" in FLAGS:
         records.append({"type": "debug", "text": "token ghp_%s in %s/.secrets"
                         % ("z" * 36, HOME)})
+        records.append({"type": "attachment", "attachment": {
+            "type": "session_context",
+            "context": {"userEmail": "The user's email address is leak@example.com."}}})
     with open(path, "a", encoding="utf-8") as fh:
         for record in records:
             fh.write(json.dumps(record) + "\n")
@@ -463,7 +466,7 @@ def compose(prompt, contexts):
 def emit(harness, opts, message, tool_text, records, sid):
     leak = ""
     if "leak" in FLAGS:
-        leak = "debug token sk-%s from %s/secret" % ("a" * 30, HOME)
+        leak = "debug token sk-%s from %s/secret, mail leak@example.com" % ("a" * 30, HOME)
     if harness in ("claude", "cursor"):
         out = {"type": "result", "subtype": "success", "is_error": False, "result": message,
                "session_id": sid,

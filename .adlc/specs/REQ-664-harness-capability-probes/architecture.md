@@ -87,6 +87,11 @@ regex text equals intake.sh's `sed -E` pattern with `[[:space:]]` translated, an
 and REQ-664 lands second may point the probe at the shared module in a
 follow-up; the pin test keeps them equal until then.
 
+`scrub()` adds one pass the chain lacks: email addresses become
+`[REDACTED-EMAIL]`. The first live run (AC-13) found the account's email in a
+Claude Code session record's `session_context`, and the fixture is committed.
+`redact()` itself stays the chain, so the pin holds.
+
 ### ADR-4 (answers OQ-6): codex's `allow_required_path` lives under `$ADLC_HOME`
 
 `workspace-write` makes the cwd, `$TMPDIR` and `/tmp` writable, so nothing under

@@ -77,3 +77,26 @@ def test_readme_consumer_mapping_and_residual():
     # The variant names the README cites are the ones the tool writes.
     for name in ("wrapped-allow", "deny-under-allow"):
         assert name in hp.ATD_VARIANTS
+
+
+def test_committed_claude_result_is_clean():
+    """AC-13: the first live run's result and fixture are committed, carry every
+    ResultFile field, decided nothing by guesswork, and hold no home path, no
+    credential-shaped string and no email address."""
+    import json
+    base = os.path.join(TOOLKIT, ".adlc", "research", "harness-probes")
+    result_text = _read(".adlc", "research", "harness-probes", "claude.json")
+    fixture_text = _read(".adlc", "research", "harness-probes", "fixtures", "claude.jsonl")
+    result = json.loads(result_text)
+    assert result["harness"] == "claude" and result["schema"] == hp.SCHEMA
+    assert list(result["probes"]) == [p.id for p in hp.CATALOGUE]
+    assert set(result["coverage"]) == set(hp.COVERAGE)
+    assert result["cleanup"]["leftovers"] == []
+    arg = result["probes"]["arg-substitution"]
+    assert arg["status"] in hp.STATUSES and (arg["status"] in ("pass", "fail") or arg["reason"])
+    for text in (result_text, fixture_text):
+        assert "/Users/" not in text and "/home/" not in text
+        assert hp.REDACT_RE.search(text) is None and hp.EMAIL_RE.search(text) is None
+    assert 0 < len(fixture_text.splitlines()) <= hp.FIXTURE_RECORDS
+    assert len(fixture_text.encode("utf-8")) <= hp.FIXTURE_CAP
+    assert os.path.isdir(base)

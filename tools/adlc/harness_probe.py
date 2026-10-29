@@ -148,6 +148,13 @@ def redact(text: str) -> str:
         pos = best.end()
 
 
+#: An email address. Not in intake.sh's chain, but a committed result or fixture
+#: must not carry one: Claude Code's session records hold the account's email in
+#: a ``session_context`` record (found by the first live run, REQ-664 AC-13).
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+REDACTED_EMAIL = "[REDACTED-EMAIL]"
+
+
 def home_rewrite(text: str, home: Optional[str]) -> str:
     """Rewrite the home directory (and its real path) to ``~`` (BR-9)."""
     if not home:
@@ -160,8 +167,9 @@ def home_rewrite(text: str, home: Optional[str]) -> str:
 
 
 def scrub(text: str, home: Optional[str]) -> str:
-    """Redact, then rewrite ``$HOME``: what every captured string goes through."""
-    return home_rewrite(redact(text), home)
+    """Redact credentials and email addresses, then rewrite ``$HOME``: what every
+    captured string goes through before it is written."""
+    return home_rewrite(EMAIL_RE.sub(REDACTED_EMAIL, redact(text)), home)
 
 
 def scrub_obj(value, home: Optional[str]):

@@ -342,7 +342,7 @@ def test_transcript_fixture_redacted(tmp_path, h):
                            "%s.jsonl" % h)
     text = open(fixture, encoding="utf-8").read()
     assert 0 < len(text.splitlines()) <= hp.FIXTURE_RECORDS
-    assert hp.REDACT_RE.search(text) is None
+    assert hp.REDACT_RE.search(text) is None and hp.EMAIL_RE.search(text) is None
     assert sb.home not in text and os.path.realpath(sb.home) not in text
     for line in text.splitlines():
         json.loads(line)
@@ -355,6 +355,7 @@ def test_redaction_and_home_rewrite(tmp_path):
     _run_ok(sb, "claude", "--only", "git-write-main", "--only", "session-start-context")
     text = open(sb.result_path("claude"), encoding="utf-8").read()
     assert "sk-" + "a" * 30 not in text and hp.REDACTED in text
+    assert "leak@example.com" not in text and hp.REDACTED_EMAIL in text
     assert sb.home not in text and os.path.realpath(sb.home) not in text
     for entry in json.loads(text)["probes"].values():
         ev = entry.get("evidence") or {}

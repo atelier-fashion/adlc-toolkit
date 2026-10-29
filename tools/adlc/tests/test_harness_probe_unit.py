@@ -224,6 +224,10 @@ def test_redaction_and_home():
     assert "/Users/someone" not in out and "~/x" in out
     assert out.count(hp.REDACTED) == 5
     assert hp.redact("nothing to see") == "nothing to see"      # benign path
+    # Email addresses go too (scrub only; redact stays intake.sh's chain).
+    mail = hp.scrub("context: The user's email address is someone@example.co.uk.", home)
+    assert "someone@" not in mail and hp.REDACTED_EMAIL in mail
+    assert hp.scrub("adlc-probe@localhost", home) == "adlc-probe@localhost"
 
 
 def test_tail_cap():

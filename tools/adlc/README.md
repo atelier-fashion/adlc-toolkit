@@ -277,7 +277,7 @@ checks itself: a ref in the bare remote, a sentinel file, or the nonce reversed 
 the final assistant message. What the model says it did is never evidence. Then
 it removes the repository, restores every user-level file byte for byte, and
 writes `<repo root>/.adlc/research/harness-probes/<harness>.json`, which is meant
-to be committed (credentials redacted, `$HOME` written as `~`). The probes need
+to be committed (credentials and email addresses redacted, `$HOME` written as `~`). The probes need
 nothing from `harness/`, no renderer and no mount in any harness: the per-harness
 facts are one table in the module (`PROFILES`).
 
@@ -358,7 +358,9 @@ lift an omission carries this residual.
   needs nothing. Codex also gets a probe-named directory outside its sandbox's
   writable roots, `<ADLC_HOME>/adlc/harness-probe/outside-<run_id>/`, holding the
   bare `origin` and the sentinels whose commands need an allow.
-- The harness's own session records, which are left in place.
+- The harness's own state, which is left in place: its session records, and on
+  Claude Code a `projects["<throwaway repo>"]` entry it adds to `~/.claude.json`
+  for each new cwd (seen on 2.1.258).
 
 Claude runs with `--setting-sources project,local` and the project pins
 `permissions.defaultMode: "default"`, so a project-local allow or deny is what is
