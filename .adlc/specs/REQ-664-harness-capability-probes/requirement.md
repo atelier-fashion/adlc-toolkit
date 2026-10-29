@@ -218,6 +218,21 @@ _Permissions: not applicable — single-user machine tooling; the only authority
 - `extract-chat --format <harness>` parsers (P5); this REQ only captures the fixture they will be written against.
 - Windows.
 
+## Deferred
+
+- **AC-13, "with `arg-substitution` decided".** The live run against Claude Code
+  2.1.258 exited 0 with complete cleanup, and its result and fixture are committed
+  (`.adlc/research/harness-probes/claude.json`). But this machine's standalone
+  `claude` CLI is not logged in: `claude auth status` reports `loggedIn: false`,
+  because sessions here authenticate through the desktop host. Every launch
+  therefore ended `Not logged in`, and §6.10 records `unknown / binary-exit-1`.
+  To decide it, run `claude /login`, then `adlc harness probe claude` (LESSON-747).
+- **Claude's trust mechanism.** The same run showed Claude Code ignoring project
+  `permissions.allow` in an untrusted workspace (ASSUME-010, invalidated), so the
+  profile's `trust: none` is wrong for permissions. Writing a `~/.claude.json`
+  trust entry is outside BR-4's closed list, so the fix belongs to REQ-657 and
+  the plan's §1, not to this REQ.
+
 ## Retrieved Context
 
 - REQ-519 (spec, score 8): One-Command Installer and `adlc doctor` Health Check
