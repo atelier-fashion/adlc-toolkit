@@ -1,10 +1,10 @@
 ---
 id: REQ-664
 title: "Harness capability probes: scripted, repeatable §6 experiments with a machine-readable result per harness"
-status: draft
+status: approved
 deployable: false
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-29
 component: "adlc/install"
 domain: "adlc"
 stack: ["python", "sh", "markdown", "json"]
