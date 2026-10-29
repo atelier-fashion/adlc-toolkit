@@ -219,6 +219,27 @@ is cut per `RELEASING.md`.
   names its kind with `# adlc-home: claude-code`, `alias` or `default`, and an
   unknown kind is a finding. `session-transcript.sh` now names Claude Code's
   `~/.claude/projects` once, marked.
+- **`adlc harness probe` (REQ-664).** The multi-harness plan's §6 items as scripted,
+  repeatable probes against whichever harness is installed. Eleven probes cover ten
+  of the twelve items: `git-write-main`, `git-write-worktree`, `ask-tier-deny`,
+  `skill-activation`, `shell-timeout`, `trust-then-headless`,
+  `session-start-context`, `stdin-prompt`, `fence-vs-allowlist`,
+  `transcript-locate` and `arg-substitution`. 6.2, 6.5 and 6.7 are recorded as not
+  probed, and 6.1a as headless only. Each run builds a throwaway repository with a
+  bare `origin` and a linked worktree, launches the harness headlessly under a
+  wall-clock cap, and decides every verdict from a side effect it checks itself:
+  a ref, a sentinel, or a nonce reversed in the final message, never the model's
+  word. It removes the repository and restores the one user-level trust file
+  (codex, gemini) and gemini's probe-named policy file byte for byte. A recovery
+  marker under `ADLC_HOME` covers them until the checksum-verified restore, and
+  `--recover` handles a crashed run. The result is
+  `.adlc/research/harness-probes/<harness>.json`, redacted and with `$HOME` as `~`,
+  and `adlc harness detect` gains a `last_probe` column. Pure stdlib, tested
+  against a fake harness on all five profiles. `ask-tier-deny` answers the `git-c`
+  and `prefix` wrapper shapes only, and a `pass` is a single model sample;
+  `tools/adlc/README.md` states both. `claude.json` holds the first live run.
+  `tools/lint-skills`' `toolkit-path` check exempts, byte for byte, the probe's one
+  line naming the throwaway repo's `.claude/skills`.
 
 ### Changed
 

@@ -1,7 +1,7 @@
 ---
 id: TASK-174
 title: "Document the probes: tools/adlc README, CHANGELOG, plan §6"
-status: draft
+status: complete
 parent: REQ-664
 created: 2026-10-29
 updated: 2026-10-29
