@@ -427,7 +427,12 @@ REC=$(cat "$GH_RECORD")
 contains "gh create byte-compat" "pr create --base main --head feat/x --title T --body B --draft" "$REC"
 contains "gh ready byte-compat"  "pr ready 9" "$REC"
 contains "gh view byte-compat"   "pr view 9 --json state,url,number" "$REC"
-contains "gh merge byte-compat"  "pr merge 9 --squash --delete-branch" "$REC"
+contains "gh merge byte-compat"  "pr merge 9 --squash" "$REC"
+# BUG-252: the adapter keeps --delete-branch for itself; gh never sees it.
+case "$REC" in
+  *"--delete-branch"*) fail "gh merge must not receive --delete-branch (got: $REC)" ;;
+  *) pass "gh merge argv carries no --delete-branch" ;;
+esac
 contains "gh comment byte-compat" "pr comment 9 --body hi" "$REC"
 contains "gh edit byte-compat"   "pr edit 9 --title NT --body NB" "$REC"
 # Normalized outputs through the github backend
@@ -629,6 +634,98 @@ check "classify local worktree collision" "local-git" \
   "$(_adlc_forge_classify "failed to run git: fatal: 'main' is already used by worktree at '/x'")"
 check "classify still defaults to network" "network" \
   "$(_adlc_forge_classify 'some transient socket hangup')"
+
+# ===========================================================================
+# 7c. BUG-252: the merge must not remove the worktree that holds the PR branch.
+# ===========================================================================
+# Real git, so the outcome is observed, not inferred: a bare origin, a primary
+# checkout on main, and a linked REQ worktree on the feature branch carrying an
+# untracked pipeline-state.json — the /sprint layout. The gh shim does what gh
+# 2.103.3's `-d` does: remove the worktree holding the branch, delete the local
+# branch, delete the remote one. Without `-d` it only merges.
+B252="$SBX/b252"; mkdir -p "$B252/bin"
+B252BR="feat/REQ-252-x"; B252REC="$B252/gh-rec"; B252STATE=MERGED
+export B252BR B252REC B252STATE
+b252git() { git -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
+git init -q --bare "$B252/origin.git"
+git init -q "$B252/primary"
+b252git -C "$B252/primary" checkout -q -b main
+b252git -C "$B252/primary" commit -q --allow-empty -m init
+git -C "$B252/primary" remote add origin "$B252/origin.git"
+git -C "$B252/primary" push -q origin main 2>/dev/null
+B252WT="$B252/primary/.worktrees/REQ-252"
+git -C "$B252/primary" worktree add -q -b "$B252BR" "$B252WT" 2>/dev/null
+b252git -C "$B252WT" commit -q --allow-empty -m feat
+git -C "$B252WT" push -q origin "$B252BR" 2>/dev/null
+mkdir -p "$B252WT/.adlc/specs/REQ-252-x"
+echo '{"currentPhase":8,"completed":false}' > "$B252WT/.adlc/specs/REQ-252-x/pipeline-state.json"
+cat > "$B252/bin/gh" <<'B252GH'
+#!/bin/sh
+case "$1 $2" in
+  "pr merge")
+    echo "$*" >> "$B252REC"
+    for a in "$@"; do
+      case "$a" in
+        --delete-branch|-d)
+          wt=$(git worktree list --porcelain | awk -v b="branch refs/heads/$B252BR" \
+            '/^worktree /{w=substr($0,10)} $0==b{print w}')
+          [ -n "$wt" ] && git worktree remove --force "$wt" && echo "Removed worktree $wt" >&2
+          git branch -D "$B252BR" >/dev/null 2>&1
+          git push -q origin --delete "$B252BR" 2>/dev/null ;;
+      esac
+    done
+    exit 0 ;;
+  "pr view")
+    echo "{\"state\":\"$B252STATE\",\"headRefName\":\"$B252BR\",\"isCrossRepository\":false}" ;;
+esac
+exit 0
+B252GH
+chmod +x "$B252/bin/gh"
+OLDPATH5=$PATH; PATH="$B252/bin:$PATH"; export PATH
+export ADLC_FORGE_PROVIDER_OVERRIDE=github
+: > "$B252REC"
+# From the parent repo path, exactly as /proceed Phase 8 runs it.
+mout=$(cd "$B252/primary" && adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); mrc=$?
+check "BUG-252: merge rc 0" "0" "$mrc"
+contains "BUG-252: reports MERGED" "state=MERGED" "$mout"
+contains "BUG-252: reports branch_deleted=1" "branch_deleted=1" "$mout"
+if [ -d "$B252WT" ]; then pass "BUG-252: the REQ worktree survives the merge"
+else fail "BUG-252: the merge removed the REQ worktree (out: $mout)"; fi
+contains "BUG-252: its untracked pipeline-state.json survives" '"currentPhase":8' \
+  "$(cat "$B252WT/.adlc/specs/REQ-252-x/pipeline-state.json" 2>/dev/null)"
+case "$(cat "$B252REC")" in
+  *"--delete-branch"*|*" -d"*) fail "BUG-252: gh received a delete flag (argv: $(cat "$B252REC"))" ;;
+  *) pass "BUG-252: gh received no delete flag" ;;
+esac
+if git -C "$B252/origin.git" show-ref -q --verify "refs/heads/$B252BR"; then
+  fail "BUG-252: the remote branch survived the merge"
+else pass "BUG-252: the remote branch is deleted"; fi
+if git -C "$B252/primary" show-ref -q --verify "refs/heads/$B252BR"; then
+  pass "BUG-252: the local branch is left for the caller's ordered teardown"
+else fail "BUG-252: the merge deleted the local branch"; fi
+
+# gh's short spelling `-d` is stripped the same way.
+git -C "$B252WT" push -q origin "$B252BR" 2>/dev/null
+: > "$B252REC"
+sout=$(cd "$B252/primary" && adlc_forge_pr_merge 9 --squash -d 2>&1); src=$?
+check "BUG-252: -d merge rc 0" "0" "$src"
+if [ -d "$B252WT" ]; then pass "BUG-252: -d leaves the REQ worktree in place"
+else fail "BUG-252: -d removed the REQ worktree (out: $sout)"; fi
+contains "BUG-252: -d still deletes the remote branch" "branch_deleted=1" "$sout"
+
+# A zero exit that did not merge (auto-merge, a merge queue) must keep the head:
+# deleting an open PR's branch closes the PR.
+git -C "$B252WT" push -q origin "$B252BR" 2>/dev/null
+B252STATE=OPEN; export B252STATE
+oout=$(cd "$B252/primary" && adlc_forge_pr_merge 9 --squash --delete-branch 2>&1); orc=$?
+check "BUG-252: unmerged-after-exit-0 rc 0" "0" "$orc"
+contains "BUG-252: reports the real state" "state=OPEN" "$oout"
+contains "BUG-252: reports branch_deleted=0" "branch_deleted=0" "$oout"
+if git -C "$B252/origin.git" show-ref -q --verify "refs/heads/$B252BR"; then
+  pass "BUG-252: an open PR's head branch is kept"
+else fail "BUG-252: deleted the head branch of a PR that is still open"; fi
+PATH=$OLDPATH5; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE B252BR B252REC B252STATE
 
 # ===========================================================================
 # 8. ADO merge arg-translation (REQ-523 BR-9): gh-shaped flags -> az equivalents
