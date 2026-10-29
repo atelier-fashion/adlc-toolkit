@@ -37,6 +37,7 @@ adlc --version
 | `agents render` | Render `agents/*.md` `model:` frontmatter from tier classes + config (below). |
 | `renumber` | Rename an artifact id repo-wide, collision-safe, dry-run by default (REQ-518). |
 | `harness detect` | Read-only: which agent harnesses are installed, and whether each one's skills directory reaches this toolkit (REQ-654, below). |
+| `harness probe` | The plan's §6 experiments against one installed harness, with one committed JSON result per harness (REQ-664, below). |
 
 Each is one entry in the data-driven `SUBCOMMANDS` table (REQ-519 BR-11).
 
@@ -233,7 +234,7 @@ mapping) refuses for both consumers.
 
 ```bash
 adlc harness detect            # one row per harness
-adlc harness detect --json     # [{name, binary, state, path, version, mount}, ...]
+adlc harness detect --json     # [{name, binary, state, path, version, mount, last_probe, probe_file}, ...]
 ```
 
 Read-only and pure stdlib ([`harness.py`](harness.py)). For each of `claude`,
@@ -249,8 +250,167 @@ Read-only and pure stdlib ([`harness.py`](harness.py)). For each of `claude`,
   symlink install or the adlc plugin is installed; for the other four, a skill
   under `~/.agents/skills` resolves into the toolkit — else `not-mounted`.
 
+- **last_probe** (REQ-664): the `date` of this repository's
+  `.adlc/research/harness-probes/<name>.json`, `never` when there is none or the
+  cwd is not in a repository, `unreadable` when it does not parse; `--json` adds
+  `probe_file`, its path or `null`.
+
 It exits 0 whenever it ran: no harness at all is a result. `adlc harness` with no
 verb, or another one, prints usage and exits 2.
+
+## `adlc harness probe` (REQ-664)
+
+```bash
+adlc harness probe --list                       # the catalogue; works anywhere
+adlc harness probe codex --dry-run              # the plan and the files it would edit; launches nothing
+adlc harness probe codex [--only <probe>]... [--keep] [--timeout <s>]
+adlc harness probe codex --recover              # restore user files after a crashed run
+```
+
+The scripted, repeatable form of `.adlc/research/multi-harness-plan.md` §6
+([`harness_probe.py`](harness_probe.py), pure standard library). Against the
+harness binary already installed, it builds a throwaway git repository under the
+temp root (a bare `origin` and a linked worktree), writes the project-local hook,
+allowlist, skill and trust fixtures a probe needs, launches the harness headlessly
+with a short single-purpose prompt, and decides the verdict from a side effect it
+checks itself: a ref in the bare remote, a sentinel file, or the nonce reversed in
+the final assistant message. What the model says it did is never evidence. Then
+it removes the repository, restores every user-level file byte for byte, and
+writes `<repo root>/.adlc/research/harness-probes/<harness>.json`, which is meant
+to be committed (credentials and email addresses redacted, `$HOME` written as `~`). The probes need
+nothing from `harness/`, no renderer and no mount in any harness: the per-harness
+facts are one table in the module (`PROFILES`).
+
+**Every launch is a model session on your account.** The command prints the
+launch count before the first one (a full run is 17 or 18 launches; `ask-tier-deny`
+alone is seven), and `--dry-run` shows the plan without paying. There is no
+confirmation prompt: invoking the command is the consent.
+
+### The catalogue
+
+| id | §6 item | harnesses | decided by |
+|---|---|---|---|
+| `git-write-main` | 6.1a (headless half), 6.3 (allow half) | all | `main` in the bare remote advanced to a commit holding the staged nonce file |
+| `git-write-worktree` | 6.1b | all; on codex two sub-variants, `root-is-worktree` and `writable-roots-repo` | the same, for `probe-wt` pushed from the linked worktree |
+| `ask-tier-deny` | 6.3 | all | the deny held: its effect absent, a config witness present, the reversed nonce in the reply; gated on four controls (below) |
+| `skill-activation` | 6.4 | gemini | the skill's sentinel |
+| `shell-timeout` | 6.6 | all | `sleep 125 && touch` left its sentinel (default shell timeout ≥ 120 s) |
+| `trust-then-headless` | 6.8 (trust + load) | all | two halves: `hooks-loaded` (a session-start hook's sentinel) and `allowlist-loaded` (a project-only allow worked); copilot has no project-local allow form, so its status is `hooks-loaded` alone |
+| `session-start-context` | 6.8 (injection) | all | the reversed nonce a session-start hook added to the context |
+| `stdin-prompt` | 6.12 | all | a 420-line prompt on stdin, nonce on line 250; with and without the prompt flag |
+| `fence-vs-allowlist` | 6.11 | all | partials/README.md's sourcing fence, byte for byte, under `routine-only`, `broad-sh` and `broad-first-token` allowlists |
+| `transcript-locate` | 6.9 | all | a session file under the harness's transcript root naming the run; its first 20 records, redacted, become `fixtures/<harness>.jsonl` |
+| `arg-substitution` | 6.10 | claude | a skill with no `$ARGUMENTS` whose fence writes `"$1"` to a sentinel: `hello` passes, empty or a literal `$1` fails |
+
+Not probed, and recorded as such in the result's `coverage`: 6.2 (a documentation
+question), 6.5 (a product-scope survey) and 6.7 (answered by REQ-654's skills-only
+view). 6.1a is recorded as `headless only`; the interactive half is REQ-655's.
+
+`broad-first-token` allows the fence's first word as it is written today. That is
+the ToolkitRoot root line's `ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}";`, not the
+guarded `if` the plan names, because REQ-669 put the root line first.
+
+### Verdicts
+
+`pass` and `fail` mean the harness exited 0 and the oracle was positive or
+negative. `unknown` is anything else, always with a reason: `binary-exit-<n>`,
+`timeout`, `launch-refused` (the harness rejected the command line — itself a §6
+finding about the profile's facts), `ask-not-reached`, `precondition-unmet: …`.
+`n/a` means the probe does not apply to that harness. A model that exits 0 having
+declined the ask records `fail`: the probe cannot tell a sandbox that blocked an
+action from a model that refused it, so read the evidence before citing a result.
+
+On codex and gemini, whose trust is a user-level file, `trust-then-headless` is
+the run's first launch and its `allowlist-loaded` half gates every other probe:
+when it is not `pass` they record `unknown / precondition-unmet:
+trust-then-headless <status>` and are not launched.
+
+`ask-tier-deny` runs three variants and four controls. `lone-deny` installs a
+deny alone; `deny-under-allow` installs the same deny while the base command is
+allowed; `wrapped-allow` denies `git push --force origin …` and asks the
+`git -C <repo>` form. The controls `baseline`, `allow-only`, `baseline-git-c` and
+`allow-only-git-c` show whether the allow was necessary and effective: a variant
+is decided only when its `allow-only*` control ran the command and its
+`baseline*` control did not. A headless ask is already a deny on most harnesses,
+so `lone-deny` is `n/a` unless `baseline` ran its command.
+
+**Consumer mapping.** REQ-655, REQ-656 and REQ-662 read `sub_results` for which
+configuration passed. The `git-c` wrapper shape is read from `wrapped-allow` and
+the `prefix` shape from `deny-under-allow`. The `env-prefix` and `shell-opener`
+shapes have no sub-variant here, so they stay `unverified`: no result file from
+this tool lifts REQ-657's `capabilities.deny_under_allow` for them. REQ-662 reads
+`unknown` and `n/a` alike as `unverified`.
+
+**Residual: a `pass` is one sample.** Each launch is a single model sample, so a
+one-off hollow `pass` stays possible, for example a model that runs the witness
+and then declines the denied command for reasons of its own. The byte-identical
+controls and the witness bound that and do not remove it. Any `pass` cited to
+lift an omission carries this residual.
+
+### What a run touches
+
+- A `mkdtemp` directory under the temp root (validated before any recursive
+  removal), removed at the end; `--keep` keeps it and prints its path.
+- On codex, `~/.codex/config.toml` gains a `[projects."<realpath>"]` trust table
+  for the throwaway repo and its worktree; on gemini, `~/.gemini/trustedFolders.json`
+  gains the two paths and `~/.gemini/policies/adlc-probe-<run_id>.toml` holds
+  `ask-tier-deny`'s variant denies. Copilot and cursor get a trust flag; claude
+  needs nothing. Codex also gets a probe-named directory outside its sandbox's
+  writable roots, `<ADLC_HOME>/adlc/harness-probe/outside-<run_id>/`, holding the
+  bare `origin` and the sentinels whose commands need an allow.
+- The harness's own state, which is left in place: its session records, and on
+  Claude Code a `projects["<throwaway repo>"]` entry it adds to `~/.claude.json`
+  for each new cwd (seen on 2.1.258).
+
+Claude runs with `--setting-sources project,local` and the project pins
+`permissions.defaultMode: "default"`, so a project-local allow or deny is what is
+measured, not your user settings. Claude Code 2.1.258 ignores a project's
+`permissions.allow` in a workspace it has not been told to trust (it names
+`~/.claude.json` `projects["<path>"].hasTrustDialogAccepted`). The probe does not
+write that file, because it is not among the user-level files a run may edit. So
+on that version the allow-dependent claude probes record `fail`, with Claude's
+message in their evidence. That is the finding, not a probe fault.
+
+A user-level file that is a symlink (a dotfiles setup) is edited and restored
+through its target, so the link survives.
+
+### Exit codes
+
+| code | meaning |
+|---|---|
+| 0 | every applicable probe ran to a verdict (a run full of `fail` still exits 0) |
+| 1 | the tool failed or refused: something was left behind, a restore did not match its checksum (including a `surgical` one), the result could not be written, a recovery marker exists, or the cwd is outside a git repository. Every leftover path and the `--recover` command are printed |
+| 2 | a usage error, an unknown probe id, a cap under 180 s with `shell-timeout` selected, or the harness binary is not on `PATH` (no result file is written) |
+
+### Recovery
+
+Before the first user-level edit the run backs the file up and writes a marker,
+`<ADLC_HOME>/adlc/harness-probe/<harness>.marker.json`, naming each backup, its
+checksum and every directory the run created. The marker is cleared only after a
+checksum-verified restore. A run killed in between (SIGKILL, a power cut) leaves
+it behind, and the next run on that harness refuses:
+
+```bash
+adlc harness probe codex --recover   # needs no repository and no harness binary
+```
+
+`--recover` restores each covered file from its backup, deletes files the run
+created, removes the probe's directories (a created directory is `rmdir`-ed only
+when empty; a non-empty one is listed and left), and clears the marker. If
+something else changed a covered file during the run, the restore is
+**surgical**: only the probe's own entry is removed, a copy of the file as it was
+sits beside the marker, and the exit is 1. SIGINT, SIGTERM and SIGHUP restore
+before exiting, leave no marker and write no result.
+
+### `--only` and the result file
+
+`--only <probe>` (repeatable) runs those probes and carries the others forward
+from the existing result file only when its `harness_version` and
+`probe_tool_version` both match this run; otherwise they become
+`unknown / not-run-this-version`, and stderr says how many were dropped and why.
+Each probe keeps its own `ran_at`. `adlc harness detect` shows the file's `date`
+as `last_probe`.
+
 
 ## `adlc agents render` (REQ-516)
 

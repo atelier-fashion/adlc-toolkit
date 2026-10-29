@@ -527,6 +527,7 @@ a general markdown linter and NOT a general shell linter.
     | Kind | Exempt | Why |
     |---|---|---|
     | line | the canonical root line (`TOOLKIT_ROOT_LINE`), leading indentation aside | its symlink arms are ToolkitRoot on the symlink route. A trailing space or comment, or a `${HOME}` arm, is a variant and fires |
+    | line | `CLAUDE_PROJECT_SKILLS = ".claude/skills"` (`PROBE_PROJECT_SKILLS_LINE`) | `adlc harness probe` (REQ-664) writes Claude Code's project-local skills directory into the throwaway repository it builds; the path is joined to that repository, never to a home. A test holds the line to `tools/adlc/harness_probe.py` verbatim |
     | token | `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/`, opening quote and trailing slash included | the ADR-2 default-expansion spelling a partial uses, since it carries no root line. It is removed before the search, so the rest of the line is still checked. The unquoted and `${HOME}` forms are not this literal |
     | file | `install.sh` | the symlink installer, which the plugin route never runs |
     | file | `tools/adlc/checks.py` | the doctor's route checks inspect the symlink install on purpose (ADR-7). The exception is whole-file, so a test holds it to that purpose (below) |

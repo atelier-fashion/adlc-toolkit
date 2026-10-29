@@ -1,0 +1,22 @@
+#!/bin/sh
+# Fake agent harness for tools/adlc/tests (REQ-664 BR-14, architecture ADR-2).
+#
+# Tests copy this file onto a sandbox PATH under each harness's binary name
+# (claude, copilot, codex, gemini, agent). It hands its own name and arguments to
+# the Python implementation, which mimics that harness's headless CLI well
+# enough to perform or refuse each probe's side effect, hang, or exit non-zero,
+# as FAKE_HARNESS_SCENARIO and FAKE_HARNESS_FLAGS say.
+#
+# POSIX sh and bash 3.2 safe: no `local`, no `[[`, no `case` inside `$( )`
+# (LESSON-582). Run under /bin/bash, zsh and /bin/sh by
+# tests/test_harness_probe_shells.py.
+name=${0##*/}
+if [ -z "${FAKE_HARNESS_IMPL:-}" ]; then
+    echo "fake-harness: FAKE_HARNESS_IMPL is not set" >&2
+    exit 70
+fi
+if [ ! -f "$FAKE_HARNESS_IMPL" ]; then
+    echo "fake-harness: no implementation at $FAKE_HARNESS_IMPL" >&2
+    exit 70
+fi
+exec "${FAKE_HARNESS_PYTHON:-python3}" -I -B "$FAKE_HARNESS_IMPL" "$name" "$@"

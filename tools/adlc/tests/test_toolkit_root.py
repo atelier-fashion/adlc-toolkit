@@ -327,6 +327,17 @@ def _code_strings(path):
     return found
 
 
+def _probe_data(name, value):
+    """REQ-664: ``harness_probe.py`` names ``.claude/skills/`` only inside the
+    throwaway repository it builds (a project-relative path, never the user's),
+    and carries the canonical fence as data it hands to a harness, pinned by
+    ``test_harness_probe_pins.py``. Neither is a toolkit read."""
+    if name != "harness_probe.py":
+        return False
+    import harness_probe
+    return value in (harness_probe.FENCE, harness_probe.CLAUDE_PROJECT_SKILLS)
+
+
 def test_no_skills_dir_reads_outside_the_doctor_symlink_checks():
     """Only the doctor's symlink-route checks build a ``~/.claude/skills`` path.
 
@@ -340,7 +351,8 @@ def test_no_skills_dir_reads_outside_the_doctor_symlink_checks():
         if not name.endswith(".py"):
             continue
         for func, value in _code_strings(os.path.join(adlc_dir, name)):
-            if value == "skills" or ".claude/skills" in value:
+            if (value == "skills" or ".claude/skills" in value) \
+                    and not _probe_data(name, value):
                 hits.append((name, func))
     assert ("checks.py", "check_skills_symlink") in hits, "non-vacuity"
     assert [h for h in hits if h[0] != "checks.py"] == []
