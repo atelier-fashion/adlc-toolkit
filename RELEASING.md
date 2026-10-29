@@ -22,6 +22,8 @@ Do these in order. `X.Y.Z` is the new version throughout.
    python3 -m pytest tools -q
    sh partials/tests/run.sh
    node --test 'workflows/tests/*.test.js'
+   node --test 'space/tests/*.test.js'
+   node space/build.mjs --check                # the Space's toolkit data matches this tree (REQ-670 BR-3)
    ./install.sh --dry-run                      # on a symlink-route machine: zero actions
    ```
 
@@ -37,7 +39,13 @@ Do these in order. `X.Y.Z` is the new version throughout.
    sh tools/adlc/tests/e2e/plugin-sandbox.sh --with-model --throwaway-repo OWNER/adlc-e2e-YYYYMMDD --keep
    ```
 
-2. **Bump `VERSION`** to `X.Y.Z`, the bare version and a newline.
+2. **Bump `VERSION`** to `X.Y.Z`, the bare version and a newline. Then regenerate the
+   Space's toolkit data, which carries the version (REQ-670), so the release commit
+   holds the file the Space will serve:
+
+   ```bash
+   node space/build.mjs
+   ```
 
 3. **Bump the plugin manifest.** Set `version` in
    [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) to the same `X.Y.Z`.
@@ -47,6 +55,7 @@ Do these in order. `X.Y.Z` is the new version throughout.
 
    ```bash
    tools/lint-skills/check.sh
+   node space/build.mjs --check                # the regenerated Space data matches the bumped VERSION
    claude plugin validate . --strict
    claude plugin validate .claude-plugin/plugin.json --strict
    claude plugin tag --dry-run .               # checks plugin.json and the marketplace entry agree
@@ -124,6 +133,49 @@ Do these in order. `X.Y.Z` is the new version throughout.
    first submission, also record it in
    `.adlc/specs/REQ-669-claude-code-plugin-marketplace-install/verification.md`.
    The tag stays where step 6 put it.
+
+## The Hugging Face Space (REQ-670)
+
+The `space/` directory is a static Hugging Face Space that runs `/spec` intake in the
+visitor's browser, under the visitor's own Anthropic key. It is rebuilt from a tagged
+release, never from an arbitrary commit, so the toolkit version it shows is a real one.
+Deploying publishes it, so each step below is a maintainer action, taken with the
+maintainer's go-ahead.
+
+1. **Check out the release tag** in a clean clone: `git checkout vX.Y.Z`.
+2. **Build and check.** `node space/build.mjs` regenerates `space/toolkit-data.js` from
+   `templates/requirement-template.md`, the marked gap rules in `spec/SKILL.md`, the
+   budget and redaction chain in `partials/intake.sh`, the install lines in `README.md`
+   and `VERSION`. At a tag it must change nothing, because release step 2 regenerated it
+   after the `VERSION` bump and release step 3 ran `--check`:
+
+   ```bash
+   node space/build.mjs --check
+   node --test 'space/tests/*.test.js'
+   ```
+
+3. **Push `space/`'s contents to the Space repository.** The Space is its own git
+   repository on Hugging Face (`sdk: static`, card in `space/README.md`). Copy
+   everything in `space/` except `build.mjs` and `tests/` to the Space repository's
+   root, then commit with the tag in the message and push. The first time, create the
+   Space under the owning account or organization first. Keep write access to the Space
+   to the maintainers: anyone who can push to it can serve the page that handles
+   visitors' keys.
+   After the push, confirm that the Space serves the tagged files. Compare a hash of each
+   served file with the one at the tag, for example
+   `curl -s https://<space-host>/intake.js | shasum -a 256` against `shasum -a 256 space/intake.js`.
+4. **Check it live (AC-1).** Open the Space. Before entering a key, confirm that the page
+   shows the disclosure and the model id. Then paste the sample transcript from
+   `space/sample.js` with a real key, and confirm that the result has every template
+   section and at least one gap with a severity and a justification. Download it and
+   confirm that the file matches the page. Never record the key anywhere.
+5. **Record the URL, once it is live (BR-13).** Add the Space URL to the root
+   `README.md` in a commit to `main`. Until the Space is live there is no link to it.
+   Add the REQ-671 dataset link to the card the same way, once the dataset is live.
+   Before that, the card carries no dataset line at all.
+
+The model is `space/config.json`'s `model`. Changing it is a config edit and a redeploy,
+with no code change (BR-9).
 
 ## After a release
 

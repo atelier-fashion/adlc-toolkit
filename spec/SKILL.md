@@ -190,6 +190,8 @@ The gap list is the point. A spec written from a transcript will always contain 
    adlc_intake_sections
    ```
 
+   <!-- intake-gap-rules: read verbatim by space/build.mjs (REQ-670); keep the markers -->
+
    For **each** section returned, ask what the source material does not answer, and write the gap as a **specific unanswered question**, never a category label. "Who is allowed to archive a project — any member, or only the owner?" is a gap. "Permissions unclear" is not; it names a topic instead of a question, and nobody can answer it.
 
    A section with everything it needs produces no gap. A complete, unambiguous source produces **zero gaps, no halt, and no Open Questions** (BR-11).
@@ -202,6 +204,8 @@ The gap list is the point. A spec written from a transcript will always contain 
    | `assumption` | The spec **can** proceed under a stated assumption a reviewer can later challenge | Assumptions section |
 
    Classification is per-gap and **must be justified in one sentence**. The justification is what stops `blocking` from becoming a reflex and `assumption` from becoming a dumping ground.
+
+   <!-- /intake-gap-rules -->
 
 6. **Disposition by mode (BR-3, BR-4).** Non-interactive is detected by the **same conditions Step 1.5 item 4 already lists** — do not restate them here; one definition, referenced twice. Of those conditions exactly one is reachable today: dispatch into a subagent context that cannot receive further user input. `/spec` is human-invoked — `/proceed` refuses to create a spec (`proceed/SKILL.md:41`, `:538`) and `/sprint` requires the spec to already exist on the integration branch — so no pipeline calls `/spec` at present. The rule is written to the general condition so it holds unchanged if that ever becomes reachable.
 
