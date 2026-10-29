@@ -21,7 +21,9 @@ You are a self-review agent. Your job is to honestly assess recently implemented
 Read the complete current version of every changed file (not just the diff) to understand full context.
 
 ### 2. Check Lessons Learned
-Use Grep on `.adlc/knowledge/lessons/` with patterns matching the affected areas (e.g., `component:.*API/auth` or `domain:.*API`). Read ONLY matched lesson files. Flag any applicable lessons as findings.
+**When the caller supplied a lesson set** — `/proceed` Phase 5 hands every panel member the pre-computed Phase-5 LessonSet for this diff (REQ-647) — use that set and **do not grep** `.adlc/knowledge/lessons/` yourself: it was scored against the diff's components, and a second selection of your own would disagree with the one the other five agents reviewed against. Read a lesson's full file when its loaded text is truncated and you need the rest. Flag every supplied lesson the change violates as a finding, citing its id.
+
+**When no set was supplied** (`/reflect`, or a caller whose retrieval was unavailable), use Grep on `.adlc/knowledge/lessons/` with patterns matching the affected areas (e.g., `component:.*API/auth` or `domain:.*API`). Read ONLY matched lesson files. Flag any applicable lessons as findings.
 
 ### 3. Run Self-Review Checklist
 
@@ -68,6 +70,7 @@ You will receive:
 - A REQ ID and/or branch name to scope the reflection
 - The project's conventions (conventions.md) and architecture (architecture.md)
 - Changed files list and diff
+- Optionally, a pre-computed lesson set (Step 2 says how it changes the lessons check)
 
 ## Output Format
 

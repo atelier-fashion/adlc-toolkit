@@ -458,6 +458,36 @@ and skip without it, so the authoritative run is under the delegate venv, with
 ADLC_REQUIRE_PYYAML=1 ~/.claude/delegate-venv/bin/python3 -m pytest tools/adlc/tests/test_lane_check.py
 ```
 
+## `lessons.py` (REQ-647)
+
+LessonSet selection for the phases that act on lessons: `/proceed` Step 0,
+each Phase-4 task, Phase 5, `/bugfix` Phase 2, and the sprint workflow engine's
+retrieval leaves. A helper module, not a subcommand. `partials/lessons.sh`
+(`adlc_lessons <subcommand> …`) is the entry point the skills call; it runs the
+installed toolkit's copy (`$ADLC_TOOLKIT_ROOT/tools/adlc/lessons.py`).
+Standard library only.
+
+```bash
+python3 tools/adlc/lessons.py select --set step0|task|phase5|bugfix --root <dir> \
+    --spec <requirement.md> [--component <c>]... [--task-id TASK-nnn] \
+    [--state-out <pipeline-state.json>] [--fresh|--reuse] [--format text|json] [--with-text]
+python3 tools/adlc/lessons.py text <LESSON-nnn-slug.md>
+python3 tools/adlc/lessons.py log-line --state <file> --key step0|phase5|tasks.TASK-nnn --root <dir>
+python3 tools/adlc/lessons.py ack-check --state <file> --root <dir> --worktree <dir> --base <ref>
+```
+
+The caller passes the components of the paths being touched (the `/review`
+Step 1.7a inference); the engine adds their ancestors and does the rest: the
+`/spec` Step 1.6 score, the per-task recency rule, the caps, the 40-line loaded
+text, the `pipeline-state.json` `lessons` record, the BR-10 log line and the
+BR-4 acknowledgement check. Exit 0 on success; any usage or I/O error is exit 2
+with one `lessons: unavailable — <reason>` line, which callers log before
+carrying on without lessons. Contract: `partials/lessons.md`.
+
+**Tests.** `tools/adlc/tests/test_lessons.py`. The corpus cases (the LESSON-604
+reproduction, the 40-line cap over every lesson) read this repo's own
+`.adlc/knowledge/lessons`.
+
 ## Running the tests
 
 ```bash

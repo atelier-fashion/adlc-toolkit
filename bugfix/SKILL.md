@@ -61,18 +61,28 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 2. If given a BUG ID, read the existing bug report — note any `repo:` or `touched_repos:` field for routing.
 
 ### Phase 2: Analyze
-1. Launch Explore agents to trace the bug:
+1. **Consult prior lessons first** (REQ-647 BR-5). Before diagnosing, retrieve the lessons the toolkit already holds for this surface, so a known pitfall is recognized rather than rediscovered. Infer the components of the reproduction's file paths (the files the bug report names, or the ones the failing command touches) the way `/review` Step 1 item 7a does, passing the **most specific** component of each path; the engine joins them with the bug's own `component`, adds their ancestors, scores with the `/spec` Step 1.6 rule over `.adlc/knowledge/lessons/` with the bug's frontmatter tags as the rest of the query, and keeps the top 5, each loaded as at most 40 lines (frontmatter, `## Lesson`, `## Applies When`):
+
+   ```sh
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/lessons.sh ]; then . .adlc/partials/lessons.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lessons.sh"; fi
+   # <bug> = this bug's .adlc/bugs/BUG-xxx-*.md; one --component per reproduction path's component.
+   adlc_lessons select --set bugfix --root . --bug "<bug>" --component "<component>"
+   ```
+
+   The output opens with a `Prior lessons consulted:` list (one `LESSON-xxx — title (score N)` line per lesson, or `none`), followed by each lesson's loaded text. Emit the list, read the lessons, and copy the list — ids and titles, not the loaded text — to the top of the bug report's "Root Cause" section before writing the analysis, so the report shows what was consulted. A return of 2 prints one `lessons: unavailable — <reason>` line: record `Prior lessons consulted: unavailable — <reason>` instead and continue — retrieval never halts the phase.
+2. Launch Explore agents to trace the bug:
    - Search for relevant code paths based on the bug description
    - Trace the execution flow that triggers the bug
    - Identify the root cause (not just symptoms)
-2. Read the identified files to understand the context
-3. Document the root cause in the bug report's "Root Cause" section
-4. Validate the analysis:
+3. Read the identified files to understand the context
+4. Document the root cause in the bug report's "Root Cause" section, below the `Prior lessons consulted:` list. When a consulted lesson describes this failure, say so and cite its id — the fix should apply its remedy, not rediscover it
+5. Validate the analysis:
    - Re-read the affected code paths to confirm the root cause is correct
    - Check for secondary issues or edge cases related to the bug
    - Adjust the root cause and fix approach if validation reveals inaccuracies
-5. Update the bug report with the validated findings
-6. **Attribute the incident to the REQ that shipped its cause** (REQ-593). Root-cause
+6. Update the bug report with the validated findings
+7. **Attribute the incident to the REQ that shipped its cause** (REQ-593). Root-cause
    analysis has just produced a file/line set; that set is exactly what `git blame` needs
    to name the change that introduced the behavior. Derive the candidates, then record or
    refuse — never guess.
@@ -88,7 +98,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
    if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . "$ADLC_TOOLKIT_ROOT/partials/attribution.sh"; fi
    # <repo> = the repo whose history to blame (this repo, or a sibling's path from
    # .adlc/config.yml). <primary> = the repo holding .adlc/specs — always the current repo.
-   # <file> <start> <end> = one root-cause range from step 4. Repeat per range, per repo.
+   # <file> <start> <end> = one root-cause range from step 5. Repeat per range, per repo.
    adlc_attr_blame_reqs "<repo>" "<primary>" "<file>" "<start>" "<end>"
    ```
 

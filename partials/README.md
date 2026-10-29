@@ -159,6 +159,17 @@ behavior. Examples:
   `lanes.lite` config block, and the `<!-- lane-vocabulary -->` block that
   `tools/lint-skills`' `lane-vocabulary` check reads. Tested by
   `tests/lane-check.test.sh` under bash, zsh, sh and dash.
+- `lessons.sh` — LessonSet retrieval for the pipeline phases (REQ-647). Defines
+  `adlc_lessons <select|text|log-line|ack-check> [args…]`, run by `/proceed`
+  (Step 0, each Phase-4 task, Phase 5), `/bugfix` Phase 2, standalone
+  `/validate` and the sprint workflow engine's retrieval leaves. It runs the
+  installed toolkit's `tools/adlc/lessons.py` and passes its stdout and exit code
+  through: **0** success, **2** could not retrieve, with one
+  `lessons: unavailable — <reason>` line. A caller logs that line and carries on:
+  retrieval is never a gate. It resolves the interpreter with `forge.sh`'s
+  `_adlc_forge_python`, as `lane-check.sh` does. The companion `lessons.md` holds
+  the subcommands, the four sets and the state record. Tested by
+  `tests/lessons.test.sh` under bash, zsh, sh and dash.
 
 Skills invoke a model-2 partial like this, the fence's ToolkitRoot root line
 first (conventions.md "Bash in skills", REQ-669 ADR-1). The root line resolves

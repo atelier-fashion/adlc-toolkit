@@ -156,11 +156,18 @@ Execute these phases in order. Each phase has a validation gate — if validatio
     "skippedPhases": [1, 2, 3],
     "escalations": [ { "at": "2026-03-27T10:30:00Z", "phase": 5, "trigger": "blocked-path", "detail": "packages/domain/src/page.ts", "actor": "solo" } ],
     "overrides": []
+  },
+  "lessons": {
+    "step0": { "query": { "components": ["adlc/proceed"], "domain": "adlc", "stack": [], "concerns": [], "tags": [] }, "lessons": [ { "id": "LESSON-604", "title": "…", "path": ".adlc/knowledge/lessons/LESSON-604-….md", "component": "adlc/proceed", "score": 11, "kind": "process" } ], "cap": 10, "retrievedAt": "2026-03-27T10:01:00Z" },
+    "tasks": { "TASK-012": { "query": { "components": ["adlc/partials/forge", "adlc/partials"] }, "lessons": [ { "id": "LESSON-582", "newerThanSpec": true } ], "cap": 15, "retrievedAt": "2026-03-27T10:20:00Z" } },
+    "phase5": { "query": { "components": ["adlc/proceed"] }, "lessons": [], "cap": 15, "retrievedAt": "2026-03-27T10:35:00Z" }
   }
 }
 ```
 
 `lane` is optional and additive (REQ-652): written at Step 0 only when the spec carries a `lane` key. Absent means the full lane, and a state file without it parses and runs unchanged. `initial` and `current` are the lane the run started on and the one it is on now; `skippedPhases` lists the phases a lite run recorded as skipped; `escalations` gets one entry per escalation, appended before the pipeline continues; `overrides` gets one entry, `{ at, phase, sha, triggers, pairs, actor }`, each time the operator answers halt #4 with "keep lite", where `pairs` are the exact `<trigger>: <detail>` strings the operator saw and `sha` the commit they saw them at; a later check halts again on any pair not listed or whose file changed since, and a `check-error` is never overridden. The spec frontmatter is the authority on the lane when a run starts, because state files are gitignored and machine-local; once the object exists, `lane.current` decides every lane branch of that run (each phase's "Lite lane" note included), so a lost escalation commit cannot put an escalated REQ back on the lite lane.
+
+`lessons` is optional and additive (REQ-647): one LessonSet per retrieval point — `step0` at Step 0 item 7, `tasks["TASK-xxx"]` before each Phase-4 task, `phase5` before Phase 5 Step A — each `{ query, lessons[], cap, retrievedAt }` without the loaded text. `partials/lessons.sh` writes it, at the moment the set is computed, to the **primary repo path's** copy (`<repos[<primary>].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json`, the same target as Step 8b's terminal record, because the worktree copy is deleted at teardown; when that spec directory does not exist on the primary checkout, the worktree's copy). Absent means "no lessons recorded"; `/status`, resume and both sprint engines read a file without it unchanged, and nothing reads it for control flow. Retrieval is never a gate: a `lessons: unavailable — <reason>` result is logged and the phase continues without lessons. Contract: `partials/lessons.md`.
 
 `closeOut` is optional and additive (BUG-249): written by the Step 8b close-out
 actor — `/wrapup --close-out` writes `status: "ok"`; the orchestrator that invoked it
@@ -303,6 +310,18 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    - `.adlc/context/project-overview.md`
    - `.adlc/specs/REQ-xxx-*/requirement.md`
    - `.adlc/config.yml` (if present)
+
+   **Then compute the Step-0 LessonSet (REQ-647 BR-1).** The spec's `## Retrieved Context` was frozen when the spec was written; this set is the REQ-vintage background the orchestrator carries, scored by the `/spec` Step 1.6 rule over `.adlc/knowledge/lessons/` with the REQ's own frontmatter as the query, top 10. It is not the per-surface set (that is Phase 4's, BR-1a). Decide fresh or resume from the progress record, not from whether a `lessons` key exists (LESSON-719): a run whose worktree `pipeline-state.json` existed before this invocation is a resume and passes `--reuse`, which keeps a recorded `lessons.step0` instead of recomputing it; any other run passes `--fresh`, which clears a previous run's `lessons` first. `<state>` is the primary-path copy named under "Pipeline State Tracking" (`lessons`):
+
+   ```sh
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/lessons.sh ]; then . .adlc/partials/lessons.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lessons.sh"; fi
+   # <worktree> = the primary worktree; <spec> = its .adlc/specs/REQ-xxx-*/requirement.md;
+   # <state> = <repos[primary].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json; <mode> = --fresh | --reuse
+   adlc_lessons select --set step0 --root "<worktree>" --spec "<spec>" --state-out "<state>" <mode>
+   ```
+
+   The first stdout line is the Step 0 log line (`Lessons loaded (step0): …`, BR-10); emit it, then keep the loaded text below it as background context for the run. A return of 2 prints one `lessons: unavailable — <reason>` line: emit that instead and continue — retrieval never halts the pipeline.
 8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, integrationBranch: <integration-branch>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. `integrationBranch` is the value resolved in step 4 — Phase 6 (PR base) and Phase 8 (merge target) MUST read it from state, never re-derive or assume `main`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
 
    **Then read the lane (REQ-652), before item 8a.** Run `proceed/phases-lite.md` "Step 0 additions": read `lane` from the spec in the primary worktree (absent ⇒ `full`), record the `lane` object in state when the spec has the key (on a resume, the existing object's `lane.current` wins over the spec), handle `--full`, and, while `lane.current` is `lite` and `3` is not yet in `completedPhases` (a fresh run, or a resume of an interrupted Step 0), write `status: approved`, commit it, and record Phases 1–3 as skipped. A lite REQ skips both normal writers of `approved` (Phase 1 and `/architect`), and one left `draft` is invisible to `/spec` retrieval (BR-18):
@@ -380,6 +399,11 @@ End-of-phase log: "Architecture and tasks validated."
 Execute the task graph across all touched-repo worktrees. Each task runs in
 `repos[<task.repo>].worktree`. Track per-task progress in `phase4.currentTask`
 / `completedTasks` / `failedTasks` so a mid-phase compression resumes exactly.
+**Before each task, compute its LessonSet (REQ-647 BR-1a)** — the components of
+the task's `## Files to Create/Modify` paths, a recency rule for lessons newer
+than the spec, and the Step-0 set's `kind: process` lessons — and hand its loaded
+text to the implementer with the task file (BR-2). The fence and the log line are
+in the companion, step 4.
 Main mode dispatches `task-implementer` agents in dependency tiers (parallel
 within a tier); subagent mode runs tasks sequentially in-context. End-of-phase
 log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
@@ -513,6 +537,18 @@ _adlc_emit_step_telemetry proceed-phase-5 Phase-5-Verify
 
 **In subagent mode (`/sprint` pipeline-runner)**: do NOT dispatch the delegate pre-pass. Subagents cannot reliably reach a parent's shell env for `adlc-read`, and the pre-pass would be skipped or fail unpredictably. Skip the entire pre-pass block in subagent mode and run the reviewer checklists as before.
 
+**Phase-5 LessonSet (REQ-647 BR-3) — both modes, once per REQ.** Before Step A, compute the one set the six agents share in every touched repo: the lessons corpus lives in the primary, and `lessons.phase5` is a single record. Infer the components of the changed paths of **every** touched repo's diff the way `/review` Step 1 item 7a does — the **most specific** component of each path (`partials/forge.sh` → `adlc/partials/forge`); the engine adds the ancestors — and pass each as `--component`. The set is scored with the `/spec` Step 1.6 rule (not `/review`'s inclusion filter), top 15, topped up with the most recent lessons when fewer than 5 score. `--base` makes a lesson file this diff adds or modifies carry no escalation standing, as `/review` Step 1 item 7f does. `--root` is the primary worktree; the state file is the primary-path copy:
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/lessons.sh ]; then . .adlc/partials/lessons.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lessons.sh"; fi
+# <worktree> = the primary worktree; <spec> = its requirement.md; <state> = the primary-path
+# pipeline-state.json; one --component per inferred component, across every touched repo.
+adlc_lessons select --set phase5 --root "<worktree>" --spec "<spec>" --state-out "<state>" --base "origin/<integrationBranch>" --component "<component>"
+```
+
+Emit the first stdout line (`Lessons loaded (phase5): …`, BR-10). The loaded text below it — at most 15 lessons of at most 40 lines, the frontmatter, `## Lesson` and `## Applies When` of each — is what every Step A agent receives as its lessons, replacing `/review` Step 1 item 7d's "read their bodies in full" inside this pipeline only (BR-1b); an agent that cites a lesson may read its full file. A return of 2 is logged and the panel runs without a set, the reflector then falling back to its own grep.
+
 Then continue with **Step A — Single-gate parallel dispatch** unchanged.
 
 **Main conversation mode** — parallel agents:
@@ -523,7 +559,9 @@ The six agents match the dimensions covered by `/review` (correctness, quality, 
 
 Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
-1. **reflector** agent — provide REQ-xxx, the repo id, the worktree path, changed files, diff, conventions.md, architecture.md. Tell it: "Report findings only. The parent pipeline will apply fixes."
+Every one of the six also receives the **Phase-5 LessonSet's loaded text** computed above (REQ-647 BR-3), under a heading that says it is the pre-computed lesson set for this diff. When a finding matches one of those lessons, the agent cites its id; Step B applies `/review` Step 4's escalation rule (including REQ-646 BR-6's `confidence: low` and superseded exemptions, which the set's `confidence` and `supersededBy` fields carry) exactly as standalone `/review` does.
+
+1. **reflector** agent — provide REQ-xxx, the repo id, the worktree path, changed files, diff, conventions.md, architecture.md, and the Phase-5 LessonSet. Tell it: "The lessons below were pre-computed for this diff; use them and do not grep `.adlc/knowledge/lessons/` yourself. Report findings only. The parent pipeline will apply fixes."
 2. **correctness-reviewer** agent — repo id, worktree path, changed files, diff, conventions.md. "Report findings only. Do not apply fixes."
 3. **quality-reviewer** agent — same inputs. "Report findings only. Do not apply fixes."
 4. **architecture-reviewer** agent — repo id, worktree path, changed files, diff, architecture.md, **plus a summary of the other touched repos' changes** (so it can flag cross-repo contract breaks). "Report findings only. Do not apply fixes."
@@ -531,9 +569,22 @@ Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin i
 6. **security-auditor** agent — repo id, worktree path, changed files, diff, conventions.md. "Audit security posture only for the diff under review. Report findings only. Do not apply fixes."
 
 **Subagent mode** — sequential inline review:
-For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Use the criteria from the agent definitions in `$ADLC_TOOLKIT_ROOT/agents/`. Do NOT dispatch sub-agents.
+For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Use the criteria from the agent definitions in `$ADLC_TOOLKIT_ROOT/agents/`. Do NOT dispatch sub-agents. The Phase-5 LessonSet above is the lesson input to every checklist, the reflector's included: read its loaded text instead of grepping the lessons directory.
 
 **Step B — Consolidate**: When all agents return (or all checklists complete in subagent mode), dedupe overlapping findings **within each repo** and also flag cross-repo issues (e.g., API contract drift between an api repo and its consumer). Produce a single ranked list by severity, tagging each finding with the repo id it applies to.
+
+Then run the **acknowledgement check** (REQ-647 BR-4), once per REQ. An applicable lesson — one in `lessons.phase5` whose `component` is one of the set's components, or that carries `kind: process` — is acknowledged when its id appears in a `Lessons:` commit trailer on the branch or in a task's `## Verification` block (the implementer's BR-2 obligation). The check lists the rest:
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/lessons.sh ]; then . .adlc/partials/lessons.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lessons.sh"; fi
+# <state> = the primary-path pipeline-state.json; <tasks> = the primary worktree's .adlc/specs/REQ-xxx-*/tasks.
+# One --worktree per touched repo, each with its own --base (one --base serves all when they share it):
+# a trailer in any touched repo's commits acknowledges the lesson.
+adlc_lessons ack-check --state "<state>" --root "<primary worktree>" --worktree "<worktree>" --base "origin/<integrationBranch>" --tasks-dir "<tasks>"
+```
+
+Add each printed `Applicable lesson not acknowledged: LESSON-xxx — <title>` line (at most 5, then a `(+N more applicable lessons not listed)` line) to the consolidated list as an **Info** finding. Info never blocks and is not fixed in Step C; it tells the next reader which lessons the change did not say it applied. A `domain`- or `tags`-only match is never listed.
 
 **Step C — Fix in one pass**:
 1. **Critical + must-fix Major** (bugs, security, convention violations, missing tests): fix immediately in the finding's target repo worktree, run that repo's test suite after each related cluster of fixes, commit inside that worktree with `fix(scope): address verify finding [REQ-xxx]`.
@@ -543,7 +594,7 @@ For each touched repo, run the reflector checklist, then correctness, quality, a
 
 **Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the (repo, dimension) pairs that had fixes: e.g., if correctness fixes landed only in the api repo, rerun correctness-reviewer for that repo only. In subagent mode, re-run the corresponding reviewer checklists inline.
 
-**End-of-phase log**: Emit the combined verify summary across repos — per-repo findings, dedupe count, how many fixed, any deferred. If reflector surfaced user-facing questions, halt here (legitimate halt #2). Otherwise continue to Phase 6.
+**End-of-phase log**: Emit the combined verify summary across repos — per-repo findings, dedupe count, how many fixed, any deferred, and the `Lessons loaded (phase5): …` line (BR-10; `adlc_lessons log-line --state "<state>" --key phase5 --root "<worktree>"` recomputes it, with a `(stale: N lessons newer than this set)` suffix when lessons landed since). If reflector surfaced user-facing questions, halt here (legitimate halt #2). Otherwise continue to Phase 6.
 
 ---
 
