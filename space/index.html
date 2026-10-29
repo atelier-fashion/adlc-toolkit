@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- REQ-670 ADR-1: scripts and styles from this Space only, and the network only to
+       this Space and the Anthropic API. The visitor's key cannot be sent anywhere else. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://api.anthropic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>ADLC Spec Intake</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>ADLC Spec Intake</h1>
+      <p class="lede">Paste meeting notes, a chat transcript or a ticket dump. Get back a draft
+        <code>requirement.md</code> in the ADLC toolkit's template, and a list of the questions
+        your notes leave unanswered, each marked <strong>blocking</strong> or <strong>assumption</strong>.</p>
+    </header>
+
+    <section id="disclosure" class="disclosure" aria-labelledby="disclosure-title">
+      <h2 id="disclosure-title">Before you run it</h2>
+      <ul>
+        <li>Your text goes from this page straight to <strong>Anthropic's API, under your own API key</strong>.
+          You pay for the call. Nothing goes through a server of ours.</li>
+        <li><strong>Nothing is stored.</strong> Not your key, not your text, not the result: no logs, no
+          browser storage, no analytics. Reloading the page forgets everything.</li>
+        <li>Some common credential formats (API keys, access tokens) are removed from your text before
+          it is sent. Other secrets are not, so check what you paste.</li>
+        <li>Consider a separate key with a low spend limit, and revoke it when you are done.</li>
+        <li><strong>Do not paste anything you may not share with Anthropic.</strong></li>
+      </ul>
+      <p class="model">Model: <code id="model-id">loading…</code>
+        · Toolkit version: <code id="toolkit-version"></code></p>
+    </section>
+
+    <section class="inputs" aria-label="Your source">
+      <label for="api-key">Anthropic API key <span class="hint">(leave empty to see the sample run)</span></label>
+      <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"
+        data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other">
+
+      <label for="source">Source <span class="hint">(up to <span id="max-lines"></span> lines)</span></label>
+      <textarea id="source" rows="14" spellcheck="false" autocomplete="off" placeholder="Paste notes here, or upload a .txt or .md file."></textarea>
+      <div class="row">
+        <input id="file" type="file" accept=".txt,.md,text/plain,text/markdown">
+        <button id="run" type="button">Draft the requirement</button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="output" aria-labelledby="output-title">
+      <h2 id="output-title">Result <span id="output-kind" class="badge"></span></h2>
+      <p id="redactions" class="meta"></p>
+      <h3>Gaps</h3>
+      <ol id="gaps"></ol>
+      <h3>requirement.md</h3>
+      <pre id="requirement" class="doc"></pre>
+      <button id="download" type="button" disabled>Download requirement.md</button>
+    </section>
+
+    <section aria-labelledby="next-title">
+      <h2 id="next-title">Carry on locally</h2>
+      <p>Install the toolkit as a Claude Code plugin, save your notes to a file, and run intake in your own repository:</p>
+      <pre id="next-step" class="doc"></pre>
+    </section>
+
+    <footer>
+      <p>Source: <a href="https://github.com/atelier-fashion/adlc-toolkit" rel="noopener noreferrer">atelier-fashion/adlc-toolkit</a>.</p>
+    </footer>
+  </main>
+
+  <script src="toolkit-data.js"></script>
+  <script src="sample.js"></script>
+  <script src="intake.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
