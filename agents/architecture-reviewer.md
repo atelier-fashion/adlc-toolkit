@@ -77,26 +77,34 @@ Return findings as a structured list:
 
 ### Critical
 - **File**: `path/to/file.js:42`
+  **Class**: `layer-bypass`
   **Pattern**: [which architectural pattern is violated]
   **Issue**: [description]
   **Fix**: [specific suggestion]
 
 ### Major
 - **File**: `path/to/file.js:78`
+  **Class**: [defect pattern]
   **Pattern**: [which pattern]
   **Issue**: [description]
   **Fix**: [suggestion]
 
 ### Minor
 - **File**: `path/to/file.js:15`
+  **Class**: [defect pattern]
   **Issue**: [description]
   **Fix**: [suggestion]
 
 ### Nit
 - **File**: `path/to/file.js:5`
+  **Class**: [defect pattern]
   **Issue**: [description]
   **Fix**: [suggestion]
 ```
+
+<!-- finding-class -->
+**Finding class and severity (REQ-648).** Every finding names its defect *class*: a `**Class**:` line in a multi-line finding, a `class: <name>` token in a one-line one. The class names the defect **pattern**, not this instance: lowercase kebab-case, one to six words, matching `^[a-z0-9]+(-[a-z0-9]+){0,5}$` (for example `unanchored-marker-regex`, `cross-fence-shell-state`). When the finding matches a lesson you were given, also cite that lesson's id; consolidation then uses the id as the class. When a pattern you already classed in this run appears again, reuse that class exactly, because the sprint's Recurrence report counts exact equality and two spellings of one defect read as two defects. Severity is Critical, Major, Minor or Nit; a scale with other names maps on the way out: High → Major, Medium → Minor, Low → Nit, Critical unchanged, and a test-coverage gap with no other severity is Major.
+<!-- /finding-class -->
 
 Severity guide:
 - **Critical**: Architectural violation that will cause maintenance/scaling problems

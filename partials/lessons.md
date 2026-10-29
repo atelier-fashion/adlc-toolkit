@@ -24,7 +24,7 @@ adlc_lessons select --set step0 --root "<worktree>" --spec "<requirement.md>" --
 | `select --set step0\|task\|phase5\|bugfix --root <dir> …` | computes one LessonSet; with `--state-out` merges it into `lessons.<set>` of that state file | the log line (`bugfix`: the `Prior lessons consulted:` list), then one `### LESSON-xxx — title` block of loaded text per lesson; `--format json [--with-text]` prints the set as JSON instead |
 | `text <LESSON-nnn-slug.md>` | the loaded text of one lesson | up to 40 lines |
 | `log-line --state <file> --key step0\|phase5\|tasks.TASK-nnn --root <dir>` | recomputes the log line for a recorded set | one line, with `(stale: N lessons newer than this set)` when lesson files changed after `retrievedAt` |
-| `ack-check --state <file> --root <dir> --worktree <dir> --base <ref> [--tasks-dir <dir>]` | the BR-4 acknowledgement check over `lessons.phase5` | at most 5 `Applicable lesson not acknowledged: …` lines and `(+N more applicable lessons not listed)`, or `No unacknowledged applicable lessons.` |
+| `ack-check --state <file> --root <dir> --worktree <dir> --base <ref> [--tasks-dir <dir>] [--record]` | the BR-4 acknowledgement check over `lessons.phase5`; with `--record`, also writes `lessons.acknowledged` (REQ-648) | at most 5 `Applicable lesson not acknowledged: …` lines and `(+N more applicable lessons not listed)`, or `No unacknowledged applicable lessons.` |
 
 `select` flags: `--spec` (the REQ's `requirement.md`; `--bug` for the bugfix
 set), `--component <c>` repeatable (the most specific component of each path
@@ -74,3 +74,13 @@ for control flow.
 atomically to the **primary repo path's** `pipeline-state.json` (the worktree
 copy is deleted at teardown). Every other key in the file is preserved; an
 unreadable state file is refused (rc 2), never overwritten.
+
+`lessons.acknowledged` (REQ-648) is `{ids[], checkedAt}`: every `LESSON-nnn`
+the branch acknowledged (`Lessons:` trailers since `--base` in each
+`--worktree`, and the task files' `## Verification` blocks), applicable or not,
+sorted. `ack-check --record` writes it, and nothing else does; without the flag
+`ack-check` writes nothing and its output is unchanged. `--record` without
+`--state` is a usage error (rc 2). It is the source of the RunOutcome
+`lessons_cited` field (`tools/delegate/run_outcome.py`), and it is read by
+nothing for control flow. A `select --fresh` at Step 0 clears it with the rest
+of `lessons`.

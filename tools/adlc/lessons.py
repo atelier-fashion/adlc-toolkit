@@ -677,6 +677,12 @@ def write_state(path, req_id, set_name, task_id, lessonset, fresh):
     else:
         lessons[set_name] = record
     data["lessons"] = lessons
+    _atomic_write_json(path, data)
+
+
+def _atomic_write_json(path, data):
+    """Write ``data`` to ``path`` through a same-directory tempfile + ``os.replace``."""
+    directory = os.path.dirname(os.path.abspath(path))
     handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory,
                                          prefix=".pipeline-state.", suffix=".tmp", delete=False)
     try:
@@ -690,6 +696,27 @@ def write_state(path, req_id, set_name, task_id, lessonset, fresh):
         except OSError:
             pass
         raise LessonsError(f"cannot write state file {path}: {exc}") from exc
+
+
+def write_acknowledged(path, ids, checked_at=None):
+    """Record the acknowledged lesson ids as ``lessons.acknowledged`` (REQ-648).
+
+    The deterministic source of the RunOutcome ``lessons_cited`` field. Every
+    other key, the recorded sets included, survives; only valid ids are kept.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(directory):
+        raise LessonsError(f"state directory does not exist: {directory}")
+    data = read_state(path)
+    lessons = data.get("lessons")
+    if not isinstance(lessons, dict):
+        lessons = {}
+    lessons["acknowledged"] = {
+        "ids": sorted(i for i in set(ids or ()) if LESSON_ID_RE.match(i)),
+        "checkedAt": checked_at or now_iso(),
+    }
+    data["lessons"] = lessons
+    _atomic_write_json(path, data)
 
 
 def _with_text(lessonset, docs):
@@ -859,14 +886,30 @@ def cmd_log_line(args):
 def cmd_ack_check(args):
     for ref in args.base:
         _check_ref(ref)
+    if args.record and not args.state:
+        raise LessonsError("--record needs --state (the file lessons.acknowledged is written to)")
     record = state_record(read_state(args.state), "phase5", None)
     root = os.path.abspath(args.root)
     if record is None:
         if not (args.spec and args.component):
+            if args.record:
+                write_acknowledged(args.state, acknowledged_ids(args))
             print("No lessons.phase5 set recorded — acknowledgement check skipped.")
             return 0
         docs = load_corpus(root)
         record = build_set("phase5", docs, read_frontmatter_file(args.spec, "spec"), args.component)
+    acknowledged = acknowledged_ids(args)
+    if args.record:
+        write_acknowledged(args.state, acknowledged)
+    lines = unacknowledged(record.get("lessons"), (record.get("query") or {}).get("components"),
+                           acknowledged)
+    print("\n".join(lines) if lines else "No unacknowledged applicable lessons.")
+    return 0
+
+
+def acknowledged_ids(args):
+    """Lesson ids acknowledged on the branch: ``Lessons:`` trailers in every
+    ``--worktree``'s commits since its ``--base``, and ``## Verification`` blocks."""
     worktrees, bases = args.worktree, args.base
     if len(bases) == 1:
         bases = bases * len(worktrees)
@@ -883,10 +926,7 @@ def cmd_ack_check(args):
                 with open(path, encoding="utf-8", errors="replace") as handle:
                     texts.append(handle.read())
     acknowledged |= verification_ids(texts)
-    lines = unacknowledged(record.get("lessons"), (record.get("query") or {}).get("components"),
-                           acknowledged)
-    print("\n".join(lines) if lines else "No unacknowledged applicable lessons.")
-    return 0
+    return acknowledged
 
 
 class _ArgumentParser(argparse.ArgumentParser):
@@ -929,6 +969,7 @@ def _parser():
     ack.add_argument("--tasks-dir")
     ack.add_argument("--spec")
     ack.add_argument("--component", action="append", default=[])
+    ack.add_argument("--record", action="store_true")
     return parser
 
 

@@ -114,8 +114,8 @@ Return exactly these five sections, in this order, each starting at the beginnin
 findings:
 
 ### Correctness
-- **Critical** `path/to/file.ts:42` — what is wrong. Fix: what to do.
-- **Minor** `path/to/file.ts:88` — what is wrong. Fix: what to do.
+- **Critical** `path/to/file.ts:42` class: `unchecked-empty-input` — what is wrong. Fix: what to do.
+- **Minor** `path/to/file.ts:88` class: `off-by-one-boundary` — what is wrong. Fix: what to do.
 
 ### Quality
 - none
@@ -124,7 +124,7 @@ findings:
 - none
 
 ### Test coverage
-- **Major** `path/to/file.ts:42` — the new empty-input branch has no test. Fix: add a case to `path/to/file.test.ts`.
+- **Major** `path/to/file.ts:42` class: `untested-new-branch` — the new empty-input branch has no test. Fix: add a case to `path/to/file.test.ts`.
 
 ### Security
 - none
@@ -160,10 +160,14 @@ questions:
 Rules for the format:
 
 - All five dimension headings are always present. A dimension with nothing to report has the single line `- none`.
-- Every finding carries a severity, a `file:line`, a description and a fix.
+- Every finding carries a severity, a `file:line`, a `class:` token, a description and a fix.
 - `reversals:`, `out_of_lane:` and `questions:` are always present. When empty, each is exactly `<key>: none` on one line.
 - `out_of_lane:` lists changes the lite lane excludes; the orchestrator escalates on any entry (trigger `implementer`).
 - `questions:` holds only what the operator alone can answer (a product decision the spec leaves open); the orchestrator halts on any entry. Everything you can judge yourself is a finding.
+
+<!-- finding-class -->
+**Finding class and severity (REQ-648).** Every finding names its defect *class*: a `**Class**:` line in a multi-line finding, a `class: <name>` token in a one-line one. The class names the defect **pattern**, not this instance: lowercase kebab-case, one to six words, matching `^[a-z0-9]+(-[a-z0-9]+){0,5}$` (for example `unanchored-marker-regex`, `cross-fence-shell-state`). When the finding matches a lesson you were given, also cite that lesson's id; consolidation then uses the id as the class. When a pattern you already classed in this run appears again, reuse that class exactly, because the sprint's Recurrence report counts exact equality and two spellings of one defect read as two defects. Severity is Critical, Major, Minor or Nit; a scale with other names maps on the way out: High → Major, Medium → Minor, Low → Nit, Critical unchanged, and a test-coverage gap with no other severity is Major.
+<!-- /finding-class -->
 
 Severity guide:
 

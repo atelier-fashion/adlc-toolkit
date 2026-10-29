@@ -25,9 +25,9 @@ See `proceed/phases-lite.md`.
 
 **Goal**: Ensure the requirement is complete and well-formed before designing architecture.
 
-1. Invoke the `/validate` skill with the REQ ID
+1. Record the attempt (REQ-648): `proceed/SKILL.md` **Run-outcome telemetry** R2 with `--phase 1 --attempt <n>`, `<n>` counting from 1. Then invoke the `/validate` skill with the REQ ID
 2. If **APPROVED**: set requirement status to `approved` and move to Phase 2
-3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
+3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops), recording each attempt first. When the third fails, emit the run-outcome line (R5, `blocked`, `validation-exhausted`) before halting
 
 **End-of-phase log**: Emit one line — "Spec validated and approved." Continue to Phase 2 immediately; do not wait for user acknowledgment.
 
@@ -59,8 +59,8 @@ See `proceed/phases-lite.md`.
 
 **Goal**: Ensure the architecture and task breakdown are solid before implementation.
 
-1. Invoke the `/validate` skill with the REQ ID (it will auto-detect the architecture+tasks phase)
+1. Record the attempt (R2, `--phase 3 --attempt <n>`), then invoke the `/validate` skill with the REQ ID (it will auto-detect the architecture+tasks phase)
 2. If **APPROVED**: move to Phase 4
-3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops)
+3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops), recording each attempt first. When the third fails, emit the run-outcome line (R5, `blocked`, `validation-exhausted`) before halting
 
 **End-of-phase log**: Emit one line — "Architecture and tasks validated." Continue to Phase 4 immediately.

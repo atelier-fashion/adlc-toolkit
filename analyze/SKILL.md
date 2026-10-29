@@ -266,6 +266,43 @@ skill-md-corruption: <file>:<line>: <check-name>: <message>
 
 Append the resulting `skill-md-corruption` block to the audit report alongside the standard 4 dimensions surfaced by Step 2's agents and the `delegation-fidelity` dimension from Step 1.8. The agent dispatch in Step 2 is unchanged — this is a parallel self-check, not an extra agent.
 
+### Step 1.10: Harness-fidelity audit
+
+**Provenance-classifying harness (BUG-230):** on a harness that pins the session on a shell command it cannot classify (Teton Code), skip this step — its shell expands `$DELEGATE_TOOLS` and runs a helper by path, both unclassifiable — and put `/analyze: harness-fidelity audit unavailable on this harness` in the report.
+
+Summarise the run-outcome log (REQ-648): one line per pipeline terminal, written by `tools/delegate/emit-run-outcome.sh`. This audits how the toolkit's own pipeline performed under each toolkit version, not the codebase, and surfaces under a `harness-fidelity` dimension beside `delegation-fidelity`. It is how "did a harness change reduce Major findings?" gets an answer: compare the rows of two versions.
+
+**Gate (silent skip on older installs):**
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+if [ -x "$DELEGATE_TOOLS"/check-run-outcomes.sh ]; then
+    fid_tsv=$("$DELEGATE_TOOLS"/check-run-outcomes.sh --window 7d 2>/dev/null)
+    fid_rc=$?
+    printf '%s\n' "$fid_tsv"
+    echo "rc=$fid_rc"
+else
+    echo "rc=absent"
+fi
+```
+
+Read the printed `rc=` line, then the output above it:
+
+- `rc=absent`, or `rc=0` with nothing above it (no log file): **skip silently** — emit nothing for the dimension and continue to Step 2.
+- `rc=0` and the single line `no runs in 7d window`: emit `/analyze: harness-fidelity — no runs in 7d window`.
+- `rc=1` (a log none of whose lines parse) or any other non-zero: emit `/analyze: harness-fidelity audit unavailable` and continue. `/analyze` never fails loud on this dimension.
+- `rc=0` and a TSV: its header is `toolkit_version runs merged pr_ready blocked failed mean_validate_retries verify_loop_rate critical major minor nit top_classes`, one row per toolkit version. Emit the block below, one entry per row:
+
+```
+## harness-fidelity (Step 1.10, last 7d)
+- toolkit <toolkit_version>: <runs> run(s) — <merged> merged, <pr_ready> pr-ready, <blocked> blocked, <failed> failed; mean validate retries <mean_validate_retries>; verify re-loop rate <verify_loop_rate>; findings <critical> Critical / <major> Major / <minor> Minor / <nit> Nit; top classes <top_classes>
+```
+
+A class in `top_classes` that also appears in an earlier version's row is a pattern the harness change did not remove; name it. A `--window <N>d` other than 7 is passed through when the user asked for one, and the heading says the same window.
+
+Append the `harness-fidelity` block to the audit report beside `delegation-fidelity` and `skill-md-corruption`. Like those, it is a self-check, not an extra agent.
+
 ### Step 2: Launch Audit Agents + Repo Hygiene Scan (parallel)
 In a single message, launch the 4 audit agents AND run the repo hygiene bash checks below in parallel. The agents live in `$ADLC_TOOLKIT_ROOT/agents/` with their full audit checklists, model selection (sonnet for deep analysis, haiku for pattern matching), and tool restrictions.
 
