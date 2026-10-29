@@ -35,9 +35,28 @@ adlc --version
 |---------|---------|
 | `doctor` | Read-only environment health check (below). |
 | `agents render` | Render `agents/*.md` `model:` frontmatter from tier classes + config (below). |
+| `renumber` | Rename an artifact id repo-wide, collision-safe, dry-run by default (REQ-518). |
+| `harness detect` | Read-only: which agent harnesses are installed, and whether each one's skills directory reaches this toolkit (REQ-654, below). |
 
-(`renumber` — REQ-518 — is the next designated home; it slots into the same
-`SUBCOMMANDS` table.)
+Each is one entry in the data-driven `SUBCOMMANDS` table (REQ-519 BR-11).
+
+## Machine state: `ADLC_HOME` (REQ-654)
+
+Every machine-state path this CLI reads — the id counters and their locks, the
+machine config, the delegate venv, the skills view — is under `ADLC_HOME`,
+default `~/.claude`, resolved by [`adlc_home.py`](adlc_home.py). With it unset
+every path is the one it always was. `ADLC_CONFIG` still names the config file
+outright. A set `ADLC_HOME` that is empty or not absolute stops `adlc doctor`
+before any check, with exit 2 and a message naming the variable.
+
+The rule is written out three times — `adlc_home.py`,
+[`partials/adlc-home.sh`](../../partials/adlc-home.sh) and
+`tools/delegate/_machine_config.py::adlc_home` — because a partial cannot import
+Python and the delegation tools import nothing from here;
+[`tests/test_adlc_home.py`](tests/test_adlc_home.py) drives all three over one
+input vector. Paths Claude Code owns (its config dir and plugin cache, the
+`~/.claude/skills` and `~/.claude/agents` mounts) are not machine state and stay
+where Claude Code reads them; the `adlc-home` lint keeps the two apart.
 
 ## `adlc doctor`
 
@@ -63,9 +82,11 @@ tables below show placeholders such as `<root>` unquoted.
 | id | passes when | fails → remediation | skip when |
 |----|-------------|---------------------|-----------|
 | `plugin-route` | symlink route: always (reports the root and `VERSION`). Plugin route: this copy is the one Claude Code loads, `~/.claude/adlc/plugin-root` names it, `scripts/adlc` is executable, and inside a Claude Code session `adlc` is on PATH (REQ-669 ADR-7). Fails on either route when route detection itself failed | `CLAUDE_PLUGIN_ROOT=<root> sh <root>/scripts/session-start.sh` (the SessionStart hook's own command); `chmod +x <root>/scripts/adlc`; `export PATH="$PATH":<root>/scripts`; `<live root>/scripts/adlc doctor` for an older cached copy; `claude plugin uninstall <key> && claude plugin install <key>` (reinstall) when the copy has no `plugin.json` naming `adlc` or no `scripts/adlc`; `claude plugin details adlc` when the install record cannot be read, the running cache copy is not installed, or route detection failed | — |
-| `skills-symlink` | `~/.claude/skills` is a symlink into a git checkout | `ln -sfn <root> ~/.claude/skills` | plugin route |
-| `agents-symlink` | `~/.claude/agents` resolves to `<root>/agents` | `ln -sfn <root>/agents ~/.claude/agents` | plugin route |
+| `skills-symlink` | `~/.claude/skills` is a symlink into a git checkout, and so is `<ADLC_HOME>/skills` when `ADLC_HOME` names another directory (REQ-654) | `ln -sfn <root> <link>`, one line per bad link | plugin route |
+| `agents-symlink` | `~/.claude/agents` resolves to `<root>/agents`, and so does `<ADLC_HOME>/agents` when `ADLC_HOME` names another directory | `ln -sfn <root>/agents <link>`, one line per bad link | plugin route |
 | `doubled-install` | not both installs at once: no symlink install, or no adlc plugin install. Cache copies an uninstall left behind are not an install | one fix per way out: `claude plugin uninstall adlc@adlc-toolkit` (keep the symlink install), or `rm` of the two links, plus `~/bin/adlc` when it runs the clone (keep the plugin) | — |
+| `skills-view` | `<ADLC_HOME>/adlc/skills-view` holds a link to `<clone>/<name>` for every `<clone>/<name>/SKILL.md`, nothing dangles, and nothing else is linked (REQ-654). A skill added to the clone shows up there at the next `install.sh` run | `'<root>/install.sh'` | plugin route |
+| `agents-skills-mount` | `~/.agents/skills` is a link to the view, or a directory of yours holding a link to every toolkit skill (names your own entries already use are listed, not failed) | `'<root>/install.sh'`; for a foreign dangling link or a file there, `mv` it aside first | plugin route |
 | `toolkit-clean` | clone is on a branch and not dirty | `git -C <root> checkout main` / `git status` | plugin route |
 | `path-shims` | `adlc` is on PATH and `adlc --version` runs | `./install.sh --repair`, restart shell | plugin route |
 | `gh-present` | `gh` (GitHub CLI) is on PATH | per-OS install line (`brew install gh`, …) | — |
@@ -73,10 +94,11 @@ tables below show placeholders such as `<root>` unquoted.
 | `git-identity` | `user.name` and `user.email` set | `git config --global user.email …` | — |
 | `delegate-gate` | delegation enabled and reachable | (see below) | delegation not opted in (default) |
 | `pyyaml` | PyYAML imports in the interpreter `adlc` runs under — the one that parses `~/.claude/adlc/config.yml` (REQ-609). Says so when the delegate venv is being bypassed because it has no PyYAML of its own | symlink route: `<root>/install.sh --with-delegation` (creates/refreshes the venv, which pins the version). Plugin route: `'<interpreter>' -m pip install --user '<the pyyaml line of tools/delegate/requirements.txt>'`. For a venv that exists without PyYAML, either route: `~/.claude/delegate-venv/bin/pip install -r <root>/tools/delegate/requirements.txt` | no venv and no project config, **and** either no machine config or one that is byte for byte the delegation-off scaffold install.sh and the SessionStart hook write — nothing PyYAML would read changes a setting |
-| `counters` | each `~/.claude/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
+| `counters` | each `<ADLC_HOME>/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
 | `launchctl` | (macOS) delegate setenv LaunchAgent loaded *when delegation is on* | `launchctl bootstrap gui/$(id -u) <plist>` | Linux (macOS-only); delegation off |
 | `template-version` | project `.adlc/` scaffold present | run `/template-drift` to compare | run outside a consumer project |
-| `claude-code` | (report-only) `claude` on PATH | never fails the verdict | `claude` not detected |
+| `consumer-sync` | every consumer repo under `$ADLC_REPOS_ROOT` (default: the parent of the current repo's main worktree, as id-alloc reads it) whose `.adlc/partials/` matches the canonical partials by content (REQ-654 BR-8). The baseline is named first (branch, `partials/` dirty or not, distance behind `origin/<default>` as of the last fetch); a checkout that is not clean-and-current is compared through `origin/<default>`, the plugin route against `adlc plugin <version>`. It never fetches and writes to no repo | one line per stale repo: `cd '<repo>' && claude -p /template-drift` (`/adlc:template-drift` on the plugin route) | no consumer under the root; **unverified-baseline** (no `origin/<default>` ref, or no readable plugin version) is a SKIP that names the repos that differ and asserts nothing |
+| `harness:claude`, `harness:copilot`, `harness:codex`, `harness:gemini`, `harness:cursor` | (report-only) the binary is on PATH; reports its version and whether its skills directory reaches this toolkit. Replaces the former `claude-code` check (REQ-654) | never fails the verdict | the binary is not on PATH |
 
 ### The `delegate-gate` check (reuses REQ-515)
 
@@ -206,6 +228,29 @@ proceeds *unconfigured* after the same single stderr line — the one carve-out,
 only for that reason class. Every **file** defect (unreadable, undecodable,
 over-cap, a duplicated key anywhere in the document, a top level that is not a
 mapping) refuses for both consumers.
+
+## `adlc harness detect` (REQ-654)
+
+```bash
+adlc harness detect            # one row per harness
+adlc harness detect --json     # [{name, binary, state, path, version, mount}, ...]
+```
+
+Read-only and pure stdlib ([`harness.py`](harness.py)). For each of `claude`,
+`copilot`, `codex`, `gemini` and `cursor` (whose CLI is `agent`, or the
+`cursor-agent` alias):
+
+- **state**: `present` when the binary is on `PATH`, else `absent`;
+- **version**: the first line of `<binary> --version`, run with stdin closed in
+  its own process group under a 3-second timeout. A non-zero exit, a timeout or
+  empty output is `unknown`, never an error;
+- **mount**: `n/a` when absent; otherwise `mounted` when the harness's skills
+  directory reaches this toolkit — for Claude, `~/.claude/skills` is the
+  symlink install or the adlc plugin is installed; for the other four, a skill
+  under `~/.agents/skills` resolves into the toolkit — else `not-mounted`.
+
+It exits 0 whenever it ran: no harness at all is a result. `adlc harness` with no
+verb, or another one, prints usage and exits 2.
 
 ## `adlc agents render` (REQ-516)
 
@@ -511,3 +556,11 @@ HOME="$SB" ./install.sh --dry-run       # plan only, no change (AC-7)
 # Move the clone, then: ./install.sh --repair re-stamps the shim with the new
 # path; `grep -c <old-path> ~/bin/adlc` returns 0 (AC-4, no stale paths).
 ```
+
+Since REQ-654 the whole installer also runs in sandbox clones under pytest:
+[`tests/test_install_home.py`](tests/test_install_home.py) builds a throwaway clone
+with **no git remote** (so the closing doctor's `reservations` check SKIPs rather
+than pushing) and covers the first and second run on a healthy install, an
+overridden `ADLC_HOME`, the skills view tracking an added and a removed skill, a
+pre-existing `~/.agents/skills` of the user's own, `--dry-run`, and `--repair`
+after a clone move.

@@ -4,7 +4,7 @@
 A single user-facing entry point whose subcommands are registered in a
 data-driven table (``SUBCOMMANDS``) so later REQs add commands without editing
 dispatch logic (REQ-519 BR-11). ``doctor`` is the first subcommand; ``renumber``
-(REQ-518) and the tier render (REQ-516) are the designated next homes.
+(REQ-518), the tier render (REQ-516) and ``harness detect`` (REQ-654) followed.
 
 This module is **pure standard library** on purpose: ``adlc doctor`` must run on
 a machine that has never opted into delegation, so it cannot depend on the delegate
@@ -61,6 +61,13 @@ def _cmd_agents(argv):
     return agents_render.main(argv)
 
 
+def _cmd_harness(argv):
+    """Lazy-import the harness subcommand and delegate to its main() (REQ-654)."""
+    import harness  # noqa: E402  (lazy so --version works even if harness breaks)
+
+    return harness.main(argv)
+
+
 def _cmd_renumber(argv):
     """Lazy-import the renumber subcommand and delegate to its main() (REQ-518)."""
     import renumber  # noqa: E402  (lazy so --version works even if renumber breaks)
@@ -83,6 +90,10 @@ SUBCOMMANDS = {
     "renumber": {
         "handler": _cmd_renumber,
         "help": "rename an artifact id repo-wide, collision-safe (dry-run by default)",
+    },
+    "harness": {
+        "handler": _cmd_harness,
+        "help": "read-only: which agent harnesses are installed and mounted (detect [--json])",
     },
 }
 

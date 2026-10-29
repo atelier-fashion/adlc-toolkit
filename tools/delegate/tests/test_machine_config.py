@@ -140,13 +140,14 @@ def test_seeded_corpus_three_surfaces(entry, clean_env, monkeypatch):
         entry.cleanup(clean_env)
 
 
-#: The two classes no corpus FILE can make the LOADER emit.
+#: The classes no corpus FILE can make the LOADER emit.
 #: `dependency-missing` is a statement about the interpreter, not the file, and
-#: has its own test below. `schema` is emitted one layer up, by
+#: has its own test below. `home-invalid` is a statement about the environment
+#: (an unusable ADLC_HOME, REQ-654), tested in test_machine_config_home.py. `schema` is emitted one layer up, by
 #: `parse_delegate_config` when a document that PARSED says something the closed
 #: schema does not allow — so it never appears as an `Entry.reason`, and the
 #: test below reaches it through the adapter instead.
-_NOT_FROM_A_FILE = frozenset({"dependency-missing"})
+_NOT_FROM_A_FILE = frozenset({"dependency-missing", "home-invalid"})
 _NOT_FROM_THE_LOADER = _NOT_FROM_A_FILE | frozenset({"schema"})
 
 

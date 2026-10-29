@@ -399,8 +399,10 @@ CHECKS_PY = REPO_ROOT / "tools" / "adlc" / "checks.py"
 CHECKS_PY_INSPECTORS = frozenset({
     "_symlink_install",
     "check_doubled_install",
-    "check_skills_symlink",
-    "check_agents_symlink",
+    # check_skills_symlink and check_agents_symlink left this list with REQ-654
+    # (ADR-6): they walk `_mount_homes()` (Claude Code's directory, and
+    # ADLC_HOME when it differs) and join "skills"/"agents" onto each, so no
+    # line of theirs spells the symlink install any more. Fewer names, same rule.
 })
 # The doctor's own join shape: `os.path.join(_claude_home(), "skills")`.
 _CLAUDE_HOME_JOIN_RE = re.compile(r"""_claude_home\(\)\s*,\s*["'](?:skills|agents)["']""")

@@ -165,9 +165,74 @@ is cut per `RELEASING.md`.
   `spec/SKILL.md` gains `intake-gap-rules` markers for that build. The Space is
   deployed from a tagged release by the maintainer (`RELEASING.md`). Its URL goes in
   the root README once it is live.
+- **`ADLC_HOME`: the toolkit's machine state is a variable, and nothing moves
+  (REQ-654).** The id counters and their locks, the reservations ledger, the machine
+  config, the delegate venv and the launchctl helpers live under `ADLC_HOME`, which
+  defaults to `~/.claude`, so with it unset every path is byte-identical to before.
+  One rule, written three times because a partial cannot import Python: the new
+  partial `partials/adlc-home.sh` (`adlc_home`, `adlc_home_source`,
+  `adlc_machine_config`), `tools/adlc/adlc_home.py`, and
+  `tools/delegate/_machine_config.py::adlc_home`; `tools/adlc/tests/test_adlc_home.py`
+  holds the three equal over one input vector. A set `ADLC_HOME` that is empty or
+  relative is an error naming it: `adlc doctor` exits 2, `install.sh` stops before
+  any change, id allocation refuses, the forge adapter fails loud, the delegation
+  config loader refuses with the new `home-invalid` reason, and the plugin hook
+  writes no config. `ADLC_CONFIG` still names the config outright. `id-alloc.sh` and
+  `forge.sh` load the resolver once, never fatally; the plugin hook scaffolds the
+  config under `ADLC_HOME` and keeps its pointer at `~/.claude/adlc/plugin-root`.
+- **A skills-only view, mounted at `~/.agents/skills` (REQ-654).** Copilot CLI,
+  Codex, Gemini CLI and Cursor read user-level skills from `~/.agents/skills`.
+  `install.sh` builds `<ADLC_HOME>/adlc/skills-view/`, one link per clone directory
+  that holds a `SKILL.md`, so those harnesses never see `tools/`, `partials/` or
+  `.adlc/`, and keeps it current on every run (a skill added or removed in the clone
+  reaches the view at the next run). An absent `~/.agents/skills` becomes a link to
+  the view. A directory the user already owns gets one link per toolkit skill and
+  nothing else: a name already taken there is skipped and reported, never
+  overwritten. `--dry-run` names the state it found and the plan; `--repair` after a
+  clone move repoints every view link. `~/.claude/skills` and `~/.claude/agents` stay
+  links to the clone on every run, and under an overridden `ADLC_HOME` the installer
+  adds `<ADLC_HOME>/skills` and `<ADLC_HOME>/agents` beside them.
+- **`adlc harness detect` (REQ-654).** A read-only, stdlib-only subcommand that
+  reports, for `claude`, `copilot`, `codex`, `gemini` and `cursor` (`agent` or
+  `cursor-agent`), whether the binary is on PATH, the line `--version` prints under
+  a 3-second timeout (`unknown` otherwise, never an error), and whether its skills
+  directory reaches the toolkit. `--json` emits one object per harness. It exits 0
+  whenever it ran.
+- **Three doctor checks (REQ-654).** `skills-view` fails when the view is missing a
+  skill, holds a dangling or foreign link, or links a directory that is not a skill;
+  `agents-skills-mount` fails when `~/.agents/skills` reaches neither the view nor a
+  link per toolkit skill. Both SKIP on the plugin route, and their fix runs
+  `<clone>/install.sh` verbatim from any directory. `consumer-sync` walks
+  `$ADLC_REPOS_ROOT` (id-alloc's default otherwise) and FAILs every consumer whose
+  vendored `.adlc/partials/` differ from the canonical copies, with a per-repo
+  `cd '<repo>' && claude -p /template-drift`. It names its baseline first (BUG-204):
+  a toolkit checkout that is not clean-and-current is compared through
+  `origin/<default>` as of the last fetch, the plugin route against
+  `adlc plugin <version>`, and with no trustworthy baseline it SKIPs as
+  `unverified-baseline` and asserts nothing. It never fetches and writes to no repo.
+  On a machine with stale consumers it turns `install.sh`'s closing doctor red
+  until they are re-synced, on purpose.
+- **The `adlc-home` lint (REQ-654).** `tools/lint-skills` fails on a new literal
+  home-directory `.claude` path in the code of `tools/`, `scripts/`, `install.sh` or
+  a partial. Comments, docstrings, test and fixture trees, the root line and
+  REQ-669's default-expansion token are exempt; any other line that keeps a literal
+  names its kind with `# adlc-home: claude-code`, `alias` or `default`, and an
+  unknown kind is a finding. `session-transcript.sh` now names Claude Code's
+  `~/.claude/projects` once, marked.
 
 ### Changed
 
+- **`claude-code` is now `harness:claude` (REQ-654).** Doctor's report-only
+  `claude-code` check is generalized to five `harness:<name>` checks, one per
+  harness `adlc harness detect` knows, each PASS when present and SKIP when absent,
+  never FAIL. `adlc doctor --checks claude-code` is now an unknown id.
+- **The one interpreter rule names `<ADLC_HOME>/delegate-venv` (REQ-654).** At all
+  three sites (the `~/bin/adlc` shim, `checks._delegate_interpreter`,
+  `forge.sh::_adlc_forge_python`). The shim resolves `ADLC_HOME` at run time, so the
+  first `install.sh` run after this release re-stamps it once, and it is now
+  rewritten without a `.bak` (a generated file; a backup only kept a stale clone path
+  after `--repair`). `skills-symlink` and `agents-symlink` check `<ADLC_HOME>/skills`
+  and `<ADLC_HOME>/agents` too when `ADLC_HOME` names another directory.
 - **Skill names Claude Code also owns are printed in both spellings (TASK-133).**
   Claude Code 2.1.258 has a built-in `init` and `status`, and its bundled
   `code-review` skill has the alias `review`. On the plugin route a bare `/init` ran
@@ -329,6 +394,14 @@ plugin install), or re-sync per file and byte for byte rather than trusting a su
   namespace) and its `README.md` changed.
 - **Templates and `ETHOS.md`** did not change. `templates/config-template.yml` changed
   only in comments, and `/init` copies it only when `.adlc/config.yml` is absent.
+- **REQ-654 follow-up: re-sync every consumer's partials.** `id-alloc.sh`, `forge.sh`
+  and `session-transcript.sh` changed (the first two read `ADLC_HOME`), and
+  `adlc-home.sh` is new, so `/template-drift` reports the changed ones `stale` and the
+  new one `missing`, and nothing else. A stale copy keeps working unchanged while
+  `ADLC_HOME` is unset, because every path it names is still where it was; set
+  `ADLC_HOME` only after the consumers on that machine are re-synced. `adlc doctor`'s
+  `consumer-sync` lists the repos to visit, one `cd '<repo>' && claude -p
+  /template-drift` line each.
 
 ### Reconciliation with unmerged REQs (REQ-669 BR-18)
 
@@ -339,9 +412,11 @@ reconciles:
   keeps the symlink install primary in the README, yields to REQ-669 BR-19. REQ-669
   made no edit to REQ-665's unmerged branch. If REQ-665's `manifest-parity` check
   lands, it absorbs `plugin-manifest`, so there is one check, not two.
-- **REQ-654 BR-3** says the REQ-610 fence spelling and its literal `~/.claude/skills`
-  fallback do not change. It yields to REQ-669 BR-5 and BR-13: only the fallback
-  operand changed, and `.adlc/` is still read first.
+- **REQ-654 BR-3** said the REQ-610 fence spelling and its literal `~/.claude/skills`
+  fallback do not change. It yielded to REQ-669 BR-5 and BR-13: REQ-654 landed second
+  and now keeps REQ-669's root line and default-expansion spelling unchanged, names
+  their two `.claude` literals as compatibility aliases, and keeps toolkit reads on
+  ToolkitRoot.
 - **REQ-666**'s `no-harness-path` check absorbs `toolkit-path` and its exception list.
   It keeps the ToolkitRoot root line, or replaces it for both routes in one change.
   Its vendoring of agents into `.adlc/agents/` meets REQ-669 BR-9 if it keeps

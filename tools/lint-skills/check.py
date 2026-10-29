@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
 (REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609,
-BUG-228, BUG-230, REQ-646, REQ-652, REQ-669).
+BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654).
 
 Run from the repo root:
 
@@ -12,7 +12,7 @@ Exit code: 0 on clean, ``min(num_findings, 254)`` when findings exist, and
 exits 0 having done no work is a failure, not a pass — the count is also
 printed to stderr on every run so a caller can read the work done directly).
 
-Eight checks run once per scan root rather than per SKILL.md, in ``run()``
+Nine checks run once per scan root rather than per SKILL.md, in ``run()``
 order:
 
 * ``check_agent_model_drift`` (REQ-516) — on-disk ``model:`` vs the config
@@ -41,6 +41,12 @@ order:
   ``/bugfix``'s capture-rules blocks are byte-equal.
 * ``check_lane_vocabulary`` (REQ-652 BR-17) — every lane value at every writer
   and reader is in ``partials/lane-check.md``'s vocabulary.
+* ``check_adlc_home`` (REQ-654 BR-13, ADR-9) — no new literal home-directory
+  ``.claude`` path (``ADLC_HOME_SHELL_RE``, and in Python ``ADLC_HOME_PY_JOIN_RE``)
+  in the code of ``ADLC_HOME_SURFACES``: machine state is read through
+  ``ADLC_HOME``. A Claude Code-owned path, a compatibility alias or the spelled
+  default keeps its literal only with an ``adlc-home: <kind>`` marker on the line
+  (``ADLC_HOME_MARKER_KINDS``).
 
 Each one is gated, so a root it does not apply to yields zero findings, never a
 crash. Model drift, sync-surface, retrieval-status and lesson-rules parity
@@ -842,6 +848,42 @@ TOOLKIT_PATH_EXCEPTIONS = (
 # root's own components are never tested, LESSON-019). Hidden directories cover
 # a nested `.claude/worktrees/` or `.worktrees/` checkout and `.git`.
 TOOLKIT_PATH_PRUNE_DIRS = frozenset(SKIP_DIR_PARTS | {"__pycache__"})
+
+# REQ-654 BR-13 / ADR-9 `adlc-home`: the toolkit's machine state (counters, the
+# config, the venv, the skills view) lives under ADLC_HOME, default ~/.claude, and
+# code reads it through partials/adlc-home.sh or tools/adlc/adlc_home.py. A new
+# literal home-directory `.claude` path in code silently closes that seam again.
+# Three kinds of line keep a literal, each saying so with a marker on the line:
+# a path Claude Code itself owns (its config dir, plugin cache, settings.json,
+# CLAUDE.md, its skills and agents mounts), one of BR-3's two compatibility
+# aliases (~/.claude/skills, ~/.claude/adlc/plugin-root), and the default itself
+# where a resolver or a message spells it. Distinct from toolkit-path, which is
+# about toolkit READS on the plugin surface (REQ-669); REQ-666's no-harness-path
+# is about skill text.
+ADLC_HOME_CHECK = "adlc-home"
+ADLC_HOME_SURFACES = ("partials/*.sh", "tools/**", "install.sh", "scripts/*")
+# `~/.claude`; `$HOME/.claude` in every brace, default, trim (`${HOME%/}`), quoted
+# and escaped form a shell or a generated script carries; `$<var>/.claude` for any variable whose name
+# holds `home`. `.claude` must end the component, so `.claude-plugin` and
+# `.claude.json` (a repo directory, Claude Code's own file) never match.
+ADLC_HOME_SHELL_RE = re.compile(
+    r"""(?:~|\\?\$(?:\{[A-Za-z_]*[Hh][Oo][Mm][Ee][A-Za-z_]*(?:[^A-Za-z0-9_}][^}]*)?\}"""
+    r"""|[A-Za-z_]*[Hh][Oo][Mm][Ee][A-Za-z_]*)(?:\\?["'])?)/\.claude(?![A-Za-z0-9_.-])"""
+)
+# Python only: `.claude` joined onto a home rather than spelled whole, such as
+# `os.path.join(os.path.expanduser("~"), ".claude")`, `Path.home() / ".claude"` or
+# `os.path.join(home, ".claude")`.
+ADLC_HOME_PY_JOIN_RE = re.compile(
+    r"""(?:expanduser\(\s*["']~["']\s*\)|home\(\s*\)|\b[A-Za-z_]*home[A-Za-z_]*)"""
+    r"""\s*[,/]\s*["']\.claude["']""",
+    re.IGNORECASE,
+)
+# The marker, and the only kinds it may name. Any other kind is a finding, so a
+# typo cannot exempt a line.
+ADLC_HOME_MARKER_RE = re.compile(r"adlc-home:\s*([A-Za-z0-9_-]+)")
+ADLC_HOME_MARKER_KINDS = ("claude-code", "alias", "default")
+# Files set aside whole: this lint spells every pattern it polices.
+ADLC_HOME_FILE_EXCEPTIONS = ("tools/lint-skills/check.py",)
 
 # REQ-669 BR-10 / ADR-5 (TASK-133) `builtin-collision`: a skill name Claude Code
 # also owns is never printed bare as an instruction. Claude Code 2.1.258 resolves a
@@ -3655,6 +3697,107 @@ def check_toolkit_path(root: Path) -> list[Finding]:
     return scan_toolkit_path(root).findings
 
 
+def _python_docstring_lines(text: str) -> set[int]:
+    """1-based line numbers of every module, class and function docstring.
+
+    Found with ``ast``, so a triple-quoted MESSAGE in code is not mistaken for
+    one. A file that does not parse exempts nothing.
+    """
+    import ast
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return set()
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = node.body
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                first = body[0].lineno
+                last = getattr(body[0], "end_lineno", first) or first
+                out.update(range(first, last + 1))
+    return out
+
+
+def adlc_home_excepted_file(rel: str) -> bool:
+    """Whether ``rel`` is set aside whole: this lint, or a test or fixture tree."""
+    if "/".join(_rel_parts(rel)) in ADLC_HOME_FILE_EXCEPTIONS:
+        return True
+    return _toolkit_path_tree_excepted(rel)
+
+
+def adlc_home_findings(text: str, rel: str) -> list[Finding]:
+    """REQ-654 BR-13: the ``adlc-home`` findings for one file.
+
+    Comment lines and (in Python) docstrings are not code. The canonical root
+    line and the ADR-2 default-expansion token are REQ-669's, unchanged by
+    REQ-654 (BR-3), so they are removed before the search. A line that still
+    holds a literal is a finding unless it carries a marker naming one of
+    ADLC_HOME_MARKER_KINDS; a marker naming anything else is a finding itself.
+    """
+    if adlc_home_excepted_file(rel):
+        return []
+    comments = _toolkit_path_comment_lines(text, rel)
+    python = posixpath.splitext(rel)[1] == ".py"
+    if python:
+        comments |= _python_docstring_lines(text)
+    token = '"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/'
+    findings: list[Finding] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        marker = ADLC_HOME_MARKER_RE.search(line)
+        if marker and marker.group(1) not in ADLC_HOME_MARKER_KINDS:
+            findings.append(Finding(
+                rel, lineno, ADLC_HOME_CHECK,
+                f"unknown adlc-home marker kind `{marker.group(1)}` — use one of "
+                f"{', '.join(ADLC_HOME_MARKER_KINDS)} (REQ-654 BR-13, ADR-9)"))
+            continue
+        if lineno in comments or line.lstrip() == TOOLKIT_ROOT_LINE:
+            continue
+        probe = line.replace(token, "\0")
+        hits = [m.group(0) for m in ADLC_HOME_SHELL_RE.finditer(probe)]
+        if python:
+            hits.extend(m.group(0) for m in ADLC_HOME_PY_JOIN_RE.finditer(probe))
+        if not hits or marker:
+            continue
+        named = ", ".join(f"`{h}`" for h in hits)
+        findings.append(Finding(
+            rel, lineno, ADLC_HOME_CHECK,
+            f"literal home-directory .claude path {named} — machine state lives under "
+            "ADLC_HOME: read it through `adlc_home` (partials/adlc-home.sh, "
+            "tools/adlc/adlc_home.py). A path Claude Code owns, a compatibility alias "
+            "or a spelled default keeps its literal only with "
+            "`# adlc-home: claude-code|alias|default` on the line (REQ-654 BR-13, ADR-9)",
+        ))
+    return findings
+
+
+class AdlcHomeScan(NamedTuple):
+    """What ``scan_adlc_home`` did: its findings and the files read per surface."""
+    findings: list[Finding]
+    surfaces: dict[str, int]
+
+
+def scan_adlc_home(root: Path) -> AdlcHomeScan:
+    """REQ-654 BR-13 / ADR-9: walk ADLC_HOME_SURFACES under ``root``.
+
+    Armed like toolkit-path (``is_plugin_root``): only the toolkit's own tree has
+    this code, and a consumer repo is not it. The walk is ``_scan_surfaces``'s:
+    kept to the root, no hidden, pruned or test-tree directory in ``tools/**``.
+    """
+    if not is_plugin_root(root):
+        return AdlcHomeScan([], {})
+    scan = _scan_surfaces(root, ADLC_HOME_SURFACES, adlc_home_excepted_file,
+                          adlc_home_findings)
+    return AdlcHomeScan(scan.findings, scan.surfaces)
+
+
+def check_adlc_home(root: Path) -> list[Finding]:
+    """Per-root ``adlc-home`` findings (see ``scan_adlc_home``)."""
+    return scan_adlc_home(root).findings
+
+
 class BuiltinCollisionScan(NamedTuple):
     """What ``scan_builtin_collision`` did: its findings, and the files it found
     under each BUILTIN_COLLISION_SURFACES entry (each file is read once)."""
@@ -3856,6 +3999,8 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_lesson_rules_parity(root))
     # Per-root (REQ-652 BR-17): lane values at every writer/reader are in the vocabulary.
     findings.extend(check_lane_vocabulary(root))
+    # Per-root (REQ-654 BR-13): no new literal home-directory .claude path in code.
+    findings.extend(check_adlc_home(root))
     return findings, scanned
 
 

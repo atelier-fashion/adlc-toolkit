@@ -33,6 +33,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import adlc_home  # noqa: E402  (stdlib only; REQ-654)
 import toolkit_root  # noqa: E402  (stdlib only; needs the sys.path line above)
 
 
@@ -130,20 +131,20 @@ def _claude_dir() -> str:
     be told to run install.sh. Only an absolute value is honoured: a relative
     one would depend on the directory the doctor was started in.
 
-    This directory is for the plugin signals only. The pointer, the machine
-    config and the symlink install stay under ``~/.claude``, where the
-    SessionStart hook and install.sh write them.
+    This directory is for the plugin signals only. The pointer and the symlink
+    install stay under ``~/.claude``, where the SessionStart hook and install.sh
+    write them, and the machine config under ``ADLC_HOME`` (REQ-654).
     """
     configured = os.environ.get("CLAUDE_CONFIG_DIR", "")
     if configured and os.path.isabs(configured):
         return configured
-    return os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(os.path.expanduser("~"), ".claude")  # adlc-home: claude-code
 
 
 def _claude_dir_label() -> str:
     """How reports spell :func:`_claude_dir`, without the expanded home path."""
     configured = os.environ.get("CLAUDE_CONFIG_DIR", "")
-    return "$CLAUDE_CONFIG_DIR" if configured and os.path.isabs(configured) else "~/.claude"
+    return "$CLAUDE_CONFIG_DIR" if configured and os.path.isabs(configured) else "~/.claude"  # adlc-home: claude-code
 
 
 def _read_json(path: str):
@@ -540,6 +541,14 @@ def main(argv=None) -> int:
              "contract: e.g. --checks forge,delegate-gate",
     )
     args = parser.parse_args(argv)
+
+    # REQ-654 BR-2: an ADLC_HOME that is set but empty or relative is an error
+    # naming the variable, before any check reads a path. Falling through to
+    # ~/.claude would report on a machine the operator did not point us at.
+    home_error = adlc_home.validate()
+    if home_error:
+        sys.stderr.write("adlc doctor: %s\n" % home_error)
+        return 2
 
     profile = build_profile()
     registry = _build_registry()

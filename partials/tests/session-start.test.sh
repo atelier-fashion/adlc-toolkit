@@ -647,6 +647,33 @@ check "case_hook_registration: it is a SessionStart hook" "1" "$(command grep -c
 check "case_hook_registration: no top-level bin/" "no" "$([ -e "$TOOLKIT/bin" ] && echo yes || echo no)"
 
 # ===========================================================================
+# 14. case_adlc_home (REQ-654 BR-1, BR-2, BR-3)
+# ===========================================================================
+# The config follows ADLC_HOME; the pointer never does, because the root line's
+# arm 3 reads it at ~/.claude/adlc/plugin-root by literal. Benign half: unset,
+# both land in ~/.claude/adlc (case_valid_root_writes_pointer above).
+new_home ahome
+AH_DIR="$SANDBOX/adlc home"
+ADLC_HOME="$AH_DIR/"; export ADLC_HOME
+run_hook ahome "$CACHE"
+unset ADLC_HOME
+hook_contract ahome 0
+check "case_adlc_home: the config is scaffolded under ADLC_HOME" "1" \
+  "$(command grep -c -x -F '  enabled: false' "$AH_DIR/adlc/config.yml" 2>/dev/null)"
+check "case_adlc_home: the pointer stays at ~/.claude/adlc" "$CACHE_REAL" "$(cat "$CASE_HOME/.claude/adlc/plugin-root" 2>/dev/null)"
+check "case_adlc_home: no config under ~/.claude when ADLC_HOME names elsewhere" "./plugin-root " "$(listing "$CASE_HOME/.claude/adlc")"
+check "case_adlc_home: nothing else under ADLC_HOME" "./adlc ./adlc/config.yml " "$(listing "$AH_DIR")"
+for ahbad in '' 'rel/home'; do
+  new_home "ahbad$(printf '%s' "$ahbad" | tr -c 'a-z' '_')"
+  ADLC_HOME=$ahbad; export ADLC_HOME
+  run_hook ahbad "$CACHE"
+  unset ADLC_HOME
+  hook_contract ahbad 1
+  check "case_adlc_home: ADLC_HOME='$ahbad' — the note names ADLC_HOME" "1" "$(command grep -c 'ADLC_HOME' "$SANDBOX/out/ahbad.err")"
+  check "case_adlc_home: ADLC_HOME='$ahbad' — no config written, the pointer still is" "./plugin-root " "$(listing "$CASE_HOME/.claude/adlc")"
+done
+
+# ===========================================================================
 # Case-count floor: a harness that ran nothing must not read as a pass.
 echo "session-start.test.sh: $CASES cases executed"
 if [ "$CASES" -lt 100 ]; then

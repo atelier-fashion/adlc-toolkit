@@ -1,4 +1,7 @@
-"""The one loader for the machine config at ``~/.claude/adlc/config.yml``.
+"""The one loader for the machine config at ``<ADLC_HOME>/adlc/config.yml``.
+
+``ADLC_HOME`` defaults to ``~/.claude`` (REQ-654), so the default path is
+``~/.claude/adlc/config.yml``, byte-identical to the one this loader always read.
 
 REQ-609 ADR-1. Every consumer of that file — the delegation opt-in in
 ``_common.parse_delegate_config`` and (REQ-609 TASK-096) the forge section in
@@ -95,6 +98,10 @@ REASON_CLASSES = frozenset({
     "alias-or-merge",
     "not-a-mapping",
     "dependency-missing",
+    # REQ-654 BR-2: ADLC_HOME is set but empty or not absolute, so there is no
+    # path to read. A statement about the environment, not a file (like
+    # `dependency-missing`); it refuses exactly as an unreadable file does.
+    "home-invalid",
     # Emitted one layer up, by `_common.parse_delegate_config`, when a document
     # that PARSED says something `validate_delegate_section` does not allow.
     # It belongs in the closed set even though this module never writes it: the
@@ -184,17 +191,55 @@ class AliasOrMerge(Exception):
 
 # --- paths ------------------------------------------------------------------
 
+class AdlcHomeError(ValueError):
+    """``ADLC_HOME`` is set but cannot be used. The message names the variable."""
+
+
+def adlc_home():
+    """The toolkit's machine-state home (REQ-654 BR-1, BR-2), or :class:`AdlcHomeError`.
+
+    THE RULE: ``ADLC_HOME`` unset is ``~/.claude``, spelled as this module always
+    spelled it; set and absolute is used with trailing slashes removed; set and
+    empty or not absolute
+    is an error naming the variable, never a fall-through to the default.
+
+    Written out at THREE sites, because a partial cannot import Python and these
+    delegation tools import nothing from ``tools/adlc``: the other two are
+    ``tools/adlc/adlc_home.py`` and ``partials/adlc-home.sh``. Change one, change
+    all three; ``tools/adlc/tests/test_adlc_home.py`` drives all three over one
+    input vector.
+    """
+    if "ADLC_HOME" not in os.environ:
+        return os.path.join(os.path.expanduser("~"), ".claude")  # adlc-home: default
+    value = os.environ["ADLC_HOME"]
+    if value == "":
+        raise AdlcHomeError(
+            "ADLC_HOME is set but empty — unset it to use ~/.claude, or set it to "  # adlc-home: default
+            "an absolute path (REQ-654 BR-2)")
+    if not value.startswith("/"):
+        raise AdlcHomeError(
+            "ADLC_HOME must be an absolute path, got %r — unset it to use "
+            "~/.claude, or set an absolute path (REQ-654 BR-2)" % value)  # adlc-home: default
+    return value.rstrip("/") or "/"
+
+
 def default_config_path():
-    """``$ADLC_CONFIG`` or ``~/.claude/adlc/config.yml``.
+    """``$ADLC_CONFIG``, else ``<ADLC_HOME>/adlc/config.yml``.
 
     The single spelling of the machine-config location; ``_common._config_path``
     defers to it so the delegate and forge consumers cannot drift apart about
-    which file they are reading (REQ BR-8).
+    which file they are reading (REQ BR-8). A set ``ADLC_CONFIG`` never consults
+    the home; otherwise an unusable ``ADLC_HOME`` raises :class:`AdlcHomeError`,
+    which :func:`load_machine_config` turns into ``home-invalid``.
     """
     override = os.environ.get("ADLC_CONFIG")
     if override:
         return override
-    return os.path.join(os.path.expanduser("~"), ".claude", "adlc", "config.yml")
+    return os.path.join(adlc_home(), "adlc", "config.yml")
+
+
+#: The label a ``home-invalid`` outcome carries for its path: there is none.
+HOME_INVALID_PATH = "$ADLC_HOME"
 
 
 # --- reading ----------------------------------------------------------------
@@ -535,7 +580,12 @@ def load_machine_config(path=None):
     configuration (continuity may apply, REQ BR-6).
     """
     if path is None:
-        path = default_config_path()
+        try:
+            path = default_config_path()
+        except AdlcHomeError as exc:
+            # No path to read, so nothing was read: refuse as a file defect
+            # refuses (REQ-654 BR-2), naming the variable, never the default.
+            return _malformed(HOME_INVALID_PATH, "home-invalid", str(exc))
 
     try:
         fh = _open_regular(path)

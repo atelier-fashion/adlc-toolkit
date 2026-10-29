@@ -640,7 +640,7 @@ def _plugin_key():
     toolkit runs from Claude Code's plugin cache, else ``None``."""
     config = os.environ.get("CLAUDE_CONFIG_DIR", "")
     if not os.path.isabs(config):
-        config = os.path.join(os.path.expanduser("~"), ".claude")
+        config = os.path.join(os.path.expanduser("~"), ".claude")  # adlc-home: claude-code
     cache = os.path.realpath(os.path.join(config, "plugins", "cache"))
     roots = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))]
     if os.path.isabs(os.environ.get(_ROOT_ENV, "")):

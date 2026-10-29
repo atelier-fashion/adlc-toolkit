@@ -47,7 +47,10 @@ with open(os.path.join(_TOOLKIT, "tools", "delegate", "requirements.txt"),
     _PYYAML_PIN = [ln.strip() for ln in _fh if ln.lower().startswith("pyyaml")][0]
 
 #: The four checks of the install.sh symlink install (ADR-7).
-_SYMLINK_CHECKS = ("skills-symlink", "agents-symlink", "toolkit-clean", "path-shims")
+#: REQ-654 added the skills view and the ~/.agents/skills mount: install.sh
+#: builds both, so both SKIP on the plugin route like the original four.
+_SYMLINK_CHECKS = ("skills-symlink", "agents-symlink", "skills-view", "agents-skills-mount",
+                   "toolkit-clean", "path-shims")
 
 #: What a toolkit copy needs for every doctor check to run from it.
 _COPY = (".claude-plugin/*.json", "hooks/hooks.json", "scripts/*", "VERSION",
@@ -647,7 +650,7 @@ def test_registry_order_and_route_gating():
         if check.id in _SYMLINK_CHECKS:
             assert not check.applies_to(plugin), check.id
             assert check.skip_notice.startswith("plugin route:"), check.id
-    # Darwin profiles, so launchctl applies on both; only the four are gated.
+    # Darwin profiles, so launchctl applies on both; only the six are gated.
     assert sorted(c.id for c in checks.REGISTRY if not c.applies_to(plugin)) \
         == sorted(_SYMLINK_CHECKS)
 

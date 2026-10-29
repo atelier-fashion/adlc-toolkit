@@ -32,6 +32,8 @@ new_sandbox() {
   # (REQ-610 — the dash pass in run.sh is what surfaced this).
   mkdir -p "$HOME/.claude/skills/partials"
   ln -s "$PARTIALS/id-alloc.sh" "$HOME/.claude/skills/partials/id-alloc.sh"
+  # REQ-654: id-alloc.sh sources the home resolver the same way, sibling first.
+  ln -s "$PARTIALS/adlc-home.sh" "$HOME/.claude/skills/partials/adlc-home.sh"
   ADLC_REPOS_ROOT="$SBX/repos"; export ADLC_REPOS_ROOT; mkdir -p "$ADLC_REPOS_ROOT"
   # REQ-546: the allocator now PUSHES a reservation ref to the current repo's origin.
   # GIT_TERMINAL_PROMPT=0 guarantees a push/ls-remote against an unreachable or
@@ -100,7 +102,10 @@ esac
 mkdir -p "$ADLC_REPOS_ROOT/myrepo/.adlc/specs/REQ-042-foo"
 ( cd "$ADLC_REPOS_ROOT/myrepo" && git init -q )
 check "case_no_dot_claude_dir: fixture has no ~/.claude" "absent" "$([ -e "$HOME/.claude" ] && echo present || echo absent)"
-N=$( cd "$ADLC_REPOS_ROOT/myrepo"; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+# No ~/.claude also means no ~/.claude/skills, so this is the plugin route: the
+# fence's root line has set ADLC_TOOLKIT_ROOT, which is where dash (no sibling
+# lookup) finds adlc-home.sh (REQ-654).
+N=$( cd "$ADLC_REPOS_ROOT/myrepo"; ADLC_TOOLKIT_ROOT=$(dirname "$PARTIALS"); export ADLC_TOOLKIT_ROOT; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
 check "case_no_dot_claude_dir: allocates with no ~/.claude" "43" "$N"
 check "case_no_dot_claude_dir: counter created" "44" "$(cat "$HOME/.claude/.global-next-req" 2>/dev/null)"
 check "case_no_dot_claude_dir: lock released" "absent" "$([ -e "$HOME/.claude/.global-next-req.lock.d" ] && echo present || echo absent)"
@@ -423,6 +428,8 @@ two_machines() {
   mkdir -p "$HA/.claude/skills/partials" "$HB/.claude/skills/partials"
   ln -s "$PARTIALS/id-alloc.sh" "$HA/.claude/skills/partials/id-alloc.sh"
   ln -s "$PARTIALS/id-alloc.sh" "$HB/.claude/skills/partials/id-alloc.sh"
+  ln -s "$PARTIALS/adlc-home.sh" "$HA/.claude/skills/partials/adlc-home.sh"
+  ln -s "$PARTIALS/adlc-home.sh" "$HB/.claude/skills/partials/adlc-home.sh"
   ROOTA="$SBX/reposA"; ROOTB="$SBX/reposB"; mkdir -p "$ROOTA" "$ROOTB"
   RA="$ROOTA/proj"; RB="$ROOTB/proj"
   git clone -q "$SHARED_BARE" "$RA" 2>/dev/null
@@ -691,6 +698,32 @@ else
   fail "BUG-210: could not create the linked worktree fixture (git worktree add failed)"
 fi
 rm -rf "$BUG210_SBX"
+
+# --- case: adlc_home_override — REQ-654 BR-1: ADLC_HOME moves every machine-global ----
+# path, and the default home is left untouched. Benign half: with ADLC_HOME unset the
+# same allocation lands in $HOME/.claude, exactly as before REQ-654.
+new_sandbox
+AH_ALT="$SBX/alt home"
+mkdir -p "$ADLC_REPOS_ROOT/myrepo/.adlc/specs/REQ-070-foo"
+( cd "$ADLC_REPOS_ROOT/myrepo" && git init -q )
+N=$( cd "$ADLC_REPOS_ROOT/myrepo"; ADLC_HOME="$AH_ALT"; export ADLC_HOME; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+check "adlc_home_override: allocates under ADLC_HOME" "71" "$N"
+check "adlc_home_override: counter written under ADLC_HOME" "72" "$(cat "$AH_ALT/.global-next-req" 2>/dev/null)"
+check "adlc_home_override: default counter untouched" "absent" "$([ -e "$HOME/.claude/.global-next-req" ] && echo present || echo absent)"
+check "adlc_home_override: lock released under ADLC_HOME" "absent" "$([ -e "$AH_ALT/.global-next-req.lock.d" ] && echo present || echo absent)"
+P=$( ADLC_HOME="$AH_ALT"; export ADLC_HOME; . "$PARTIALS/id-alloc.sh"; adlc_id_kind_counter bug; adlc_id_kind_lockdir lesson; adlc_id_own_ledger )
+check "adlc_home_override: every machine-global path under ADLC_HOME" \
+  "$AH_ALT/.global-next-bug|$AH_ALT/.global-next-lesson.lock.d|$AH_ALT/.adlc-own-reservations" \
+  "$(printf '%s\n' "$P" | tr '\n' '|' | sed 's/|$//')"
+P=$( . "$PARTIALS/id-alloc.sh"; adlc_id_kind_counter req; adlc_id_own_ledger )
+check "adlc_home_override: benign — unset ADLC_HOME is \$HOME/.claude" \
+  "$HOME/.claude/.global-next-req|$HOME/.claude/.adlc-own-reservations" \
+  "$(printf '%s\n' "$P" | tr '\n' '|' | sed 's/|$//')"
+RC=$( ADLC_HOME=relative; export ADLC_HOME; . "$PARTIALS/id-alloc.sh"; adlc_id_kind_counter req >/dev/null 2>&1; echo $? )
+check "adlc_home_override: a relative ADLC_HOME is refused (rc 2)" "2" "$RC"
+N=$( cd "$ADLC_REPOS_ROOT/myrepo"; ADLC_HOME=relative; export ADLC_HOME; . "$PARTIALS/id-alloc.sh"; adlc_alloc_id req 2>/dev/null )
+check "adlc_home_override: allocation refuses a relative ADLC_HOME" "" "$N"
+cleanup
 
 echo
 if [ "$FAILS" -eq 0 ]; then
