@@ -5,8 +5,8 @@
 
 The separate, explicit maintainer step after ``export.py``. Nothing runs it on
 its own: it needs a maintainer at a terminal who has read the export's report
-and types the target repo id back. Each check refuses before the Hub client is
-imported, so a refused run sends nothing:
+and types the target repo id back. Checks 1 to 6 refuse before the Hub client
+is imported, and nothing is sent before check 7 passes:
 
 1. stdin is a terminal;
 2. ``--dataset`` holds exactly ``README.md``, ``data/train.jsonl`` and
@@ -19,11 +19,12 @@ imported, so a refused run sends nothing:
 5. a fresh export of ``source_commit`` produces these files byte for byte
    (BR-7), so a hand-edited or foreign dataset cannot be published;
 6. ``--repo-id`` is ``<owner>/<name>``;
-7. after the summary, the maintainer types the repo id, and the files are
-   unchanged since they were checked.
+7. the client is imported and asked one read, the account its login publishes
+   as, which the summary prints; the maintainer then types the repo id, and the
+   files are unchanged since they were checked.
 
-Only then does it import ``huggingface_hub``, inside a function (BR-10,
-LESSON-022). It refuses a tag that already exists, commits the checked bytes
+The client is imported inside a function (BR-10, LESSON-022). After the
+confirmation it refuses a tag that already exists, commits the checked bytes
 (not a fresh read of the directory), deletes any other file on the Hub repo,
 and tags the Hub commit ``v<toolkit_version>-<sha12>`` (BR-7). It never reads
 or prints a token: the client uses the maintainer's own login.
@@ -46,8 +47,9 @@ sys.path.insert(0, HERE)
 
 import classify  # noqa: E402
 import denylist  # noqa: E402
-import export  # noqa: E402  (stdlib, imported as a module: its git reads and columns)
+import export  # noqa: E402  (stdlib, imported as a module: its git reads)
 import residue  # noqa: E402
+import schema  # noqa: E402
 
 EXIT_OK, EXIT_REFUSED, EXIT_ERROR = 0, 1, 2
 
@@ -56,16 +58,8 @@ DATASET_FILES = ("README.md", "data/train.jsonl", "revision.json")
 REQUIREMENTS = "tools/dataset/requirements.txt"
 HUB_URL = "https://huggingface.co/datasets/"
 
-#: How many characters of the source commit a tag and a commit message carry.
-SHA_SHORT = 12
-
 REPO_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$")
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-#: A version that is safe inside a tag name.
-_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]*$")
-_REVISION_KEYS = ("records", "scrub_replacements", "source_commit", "toolkit_version")
-_STRING_COLUMNS = ("id", "kind", "parent_req") + export.SCALAR_FIELDS + ("body", "source_path")
-_REF_STATUSES = ("resolved", "dangling")
+_STRING_COLUMNS = ("id", "kind", "parent_req") + schema.SCALAR_FIELDS + ("body", "source_path")
 
 Revision = namedtuple("Revision", "source_commit toolkit_version records scrub_replacements")
 
@@ -133,50 +127,35 @@ def _text(files, rel):
         raise Refused("%s is not valid UTF-8" % rel)
 
 
-def _count(value):
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
-
-
 def parse_revision(text):
     """Recognize ``revision.json`` against its closed schema; refuse otherwise."""
     try:
         data = json.loads(text)
     except ValueError as exc:
         raise Refused("revision.json is not valid JSON (%s)" % exc)
-    if not isinstance(data, dict) or sorted(data) != sorted(_REVISION_KEYS):
-        raise Refused("revision.json must hold exactly %s" % ", ".join(_REVISION_KEYS))
-    sha, version = data["source_commit"], data["toolkit_version"]
-    records, replaced = data["records"], data["scrub_replacements"]
-    if not isinstance(sha, str) or not _SHA_RE.match(sha):
-        raise Refused("revision.json source_commit is not a full commit SHA")
-    if not isinstance(version, str) or not _VERSION_RE.match(version):
-        raise Refused("revision.json toolkit_version is not a version")
-    if not isinstance(records, dict) or sorted(records) != sorted(classify.KIND_ORDER) \
-            or not all(_count(v) for v in records.values()):
-        raise Refused("revision.json records must count each of %s" % ", ".join(
-            classify.KIND_ORDER))
-    if not isinstance(replaced, dict) or not all(
-            isinstance(k, str) and _count(v) for k, v in replaced.items()):
-        raise Refused("revision.json scrub_replacements must map rules to counts")
-    return Revision(sha, version, records, replaced)
+    problem = schema.revision_problem(data)
+    if problem:
+        raise Refused("revision.json %s" % problem)
+    return Revision(data["source_commit"], data["toolkit_version"], data["records"],
+                    data["scrub_replacements"])
 
 
 def _shape_problem(record):
     """Why ``record`` does not match the card's schema, or ``None``."""
     if not isinstance(record, dict):
         return "not a JSON object"
-    if sorted(record) != sorted(export.COLUMNS):
+    if sorted(record) != sorted(schema.COLUMNS):
         return "its columns differ from the card's schema"
     for key in _STRING_COLUMNS:
         if not isinstance(record[key], str):
             return "%s is not a string" % key
-    for key in export.LIST_FIELDS:
+    for key in schema.LIST_FIELDS:
         if not isinstance(record[key], list) or not all(isinstance(v, str) for v in record[key]):
             return "%s is not a list of strings" % key
     refs = record["references"]
     if not isinstance(refs, list) or not all(
             isinstance(r, dict) and sorted(r) == ["id", "status"] and isinstance(r["id"], str)
-            and r["status"] in _REF_STATUSES for r in refs):
+            and r["status"] in schema.REF_STATUSES for r in refs):
         return "references is not a list of {id, status} objects"
     if record["kind"] not in classify.KIND_ORDER:
         return "kind is not one of the six kinds"
@@ -203,7 +182,7 @@ def scan_records(text, checker):
         if problem:
             raise Refused("data/train.jsonl line %d: %s" % (lineno, problem))
         counts[record["kind"]] += 1
-        for key, value in export.record_strings(record):
+        for key, value in schema.record_strings(record):
             hits.extend("data/train.jsonl record %d %s line %d: %s" % (
                 lineno, key, h.line, h.detector) for h in residue.scan(value, checker))
     return counts, hits
@@ -243,11 +222,6 @@ def check_provenance(repo, rev, files):
                       "wrote, unedited (BR-7)" % (", ".join(differ), rev.source_commit))
 
 
-def release_tag(rev):
-    """The Hub tag for a revision: ``v<toolkit_version>-<sha12>``."""
-    return "v%s-%s" % (rev.toolkit_version, rev.source_commit[:SHA_SHORT])
-
-
 def check_on_main(repo, sha):
     """Refuse unless ``sha`` is on ``main`` or ``origin/main`` in ``repo`` (check 3)."""
     try:
@@ -263,13 +237,14 @@ def _kinds(counts):
     return ", ".join("%s %d" % (k, counts.get(k, 0)) for k in classify.KIND_ORDER)
 
 
-def print_summary(dataset, repo_id, rev, tag):
+def print_summary(dataset, repo_id, rev, tag, account):
     total = sum(rev.records.values())
     print("publish: dataset  %s" % dataset)
     print("publish: source   %s (toolkit %s)" % (rev.source_commit, rev.toolkit_version))
     print("publish: records  %s (%d in all)" % (_kinds(rev.records), total))
     print("publish: scrub    %s" % (", ".join(
         "%s %d" % (k, v) for k, v in sorted(rev.scrub_replacements.items())) or "none"))
+    print("publish: account  %s" % account)
     print("publish: target   %s%s" % (HUB_URL, repo_id))
     print("publish: tag      %s" % tag)
     report = os.path.join(os.path.dirname(dataset), "report", "scrub-report.md")
@@ -295,15 +270,33 @@ def _hub_api():
     return HfApi(), CommitOperationAdd, CommitOperationDelete
 
 
-def upload(files, repo_id, rev, tag):
+def hub_account(api):
+    """The Hub account the client's token publishes as.
+
+    Read before the confirmation, so the maintainer sees whose token is about
+    to write. No token, a rejected one or no network is an error, not a pass.
+    """
+    try:
+        info = api.whoami()
+    except Exception as exc:  # the client raises many types; each is an error
+        raise PublishError("reading the Hub account failed (%s: %s); log in with "
+                           "`huggingface-cli login` or set HF_TOKEN" % (type(exc).__name__, exc))
+    name = info.get("name") if isinstance(info, dict) else None
+    if not isinstance(name, str) or not name:
+        raise PublishError("the Hub did not name the account this token publishes as")
+    return name
+
+
+def upload(client, files, repo_id, rev, tag):
     """Commit the checked ``files`` to the Hub repo and tag it; return the commit id.
 
-    The bytes committed are the ones the checks read, so nothing written to the
-    directory after the confirmation can be sent. Files on the Hub repo that are
-    not dataset files are deleted in the same commit (``.gitattributes`` stays).
+    ``client`` is what ``_hub_api`` returned. The bytes committed are the ones
+    the checks read, so nothing written to the directory after the confirmation
+    can be sent. Files on the Hub repo that are not dataset files are deleted in
+    the same commit (``.gitattributes`` stays).
     """
-    api, add, delete = _hub_api()
-    sha12 = rev.source_commit[:SHA_SHORT]
+    api, add, delete = client
+    sha12 = rev.source_commit[:schema.SHA_SHORT]
     stage = "checking the repository"
     try:
         exists = api.repo_exists(repo_id, repo_type="dataset")
@@ -359,9 +352,11 @@ def publish(args):
     # 6. A well-formed target.
     if not REPO_ID_RE.match(args.repo_id):
         raise Refused("--repo-id %r is not <owner>/<name>" % args.repo_id)
-    # 7. The summary, then the maintainer types the target back.
-    tag = release_tag(rev)
-    print_summary(dataset, args.repo_id, rev, tag)
+    # 7. The summary, with the account the token publishes as, then the
+    #    maintainer types the target back.
+    tag = schema.release_tag(rev.toolkit_version, rev.source_commit)
+    client = _hub_api()
+    print_summary(dataset, args.repo_id, rev, tag, hub_account(client[0]))
     try:
         answer = _ask("Type the repo id to publish: ")
     except (EOFError, KeyboardInterrupt):
@@ -371,7 +366,7 @@ def publish(args):
     if read_dataset(dataset) != files:
         raise Refused("%s changed after it was checked; run publish again" % dataset)
 
-    oid = upload(files, args.repo_id, rev, tag)
+    oid = upload(client, files, args.repo_id, rev, tag)
     print("publish: published %s%s" % (HUB_URL, args.repo_id))
     print("publish: tag %s%s" % (tag, " on commit %s" % oid if oid else ""))
     return EXIT_OK

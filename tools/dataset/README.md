@@ -100,8 +100,10 @@ python3 tools/dataset/publish.py --dataset ~/adlc-dataset/<version>/dataset --re
   change to `tools/dataset/`, export again before publishing;
 - `--repo-id` is not `<owner>/<name>`.
 
-It then prints the record counts, the scrub counts, the source commit and the
-target URL, and asks you to type the repo id. Read the report before you answer.
+It then loads the client, reads the Hub account your login publishes as, and
+prints the record counts, the scrub counts, the source commit, that account and
+the target URL, and asks you to type the repo id. A missing or rejected login is
+exit `2`, before the question. Read the report before you answer.
 Anything else refuses. On a match it refuses if the tag `v<version>-<sha12>` is
 already on the Hub repository (that revision was published before), before it
 creates anything, then creates the dataset repository if it does not exist. It then commits the bytes it checked, not a
@@ -186,6 +188,7 @@ Run the tests after any change.
 | File | Purpose |
 |---|---|
 | `export.py` | the export CLI: git reads, scope check, records, report, card |
+| `schema.py` | the columns, `revision.json`'s schema and the release tag, shared by the three scripts |
 | `classify.py` | maps every `.adlc/` path to a kind or a named exclusion |
 | `frontmatter.py` | the strict frontmatter recognizer |
 | `scrub.py`, `detectors.py` | the scrub rules and their detectors |

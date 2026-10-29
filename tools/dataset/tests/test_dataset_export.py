@@ -505,6 +505,15 @@ def test_missing_version_refuses(sandbox, dl_path, tmp_path):
     assert not os.path.exists(os.path.join(str(out), "dataset"))
 
 
+def test_version_publish_would_refuse_refuses(sandbox, dl_path, tmp_path):
+    """A VERSION that cannot sit in a release tag is refused here, not at publish."""
+    _tree(sandbox, {"VERSION": "1.0 beta\n"})
+    out = tmp_path / "out"
+    assert _run(sandbox, dl_path, out) == export.EXIT_REFUSED
+    assert "revision.json toolkit_version is not a version" in _report(out)["refusal"]
+    assert not os.path.exists(os.path.join(str(out), "dataset"))
+
+
 def test_unterminated_and_missing_frontmatter_excluded(sandbox, dl_path, tmp_path):
     _tree(sandbox, {".adlc/bugs/BUG-011-open.md": "---\nid: BUG-011\ntitle: \"x\"\n\nbody\n",
                     ".adlc/bugs/BUG-012-none.md": "# BUG-012\n\nNo frontmatter.\n"})
