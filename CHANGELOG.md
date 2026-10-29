@@ -139,6 +139,18 @@ is cut per `RELEASING.md`.
   the `claude plugin update` check, and the Claude directory submission through
   claude.ai/directory/manage, with where its reference is recorded.
 
+- **A Hugging Face Space for `/spec` intake (REQ-670).** `space/` is a static Space.
+  A visitor pastes notes or uploads a `.txt` or `.md` file and gets back a draft
+  `requirement.md` and a classified gap list. The visitor's browser calls Anthropic
+  with the visitor's own key, so the key never reaches a server. A strict CSP limits
+  the page's network to the Space and `api.anthropic.com`, and nothing is stored.
+  With no key, the page shows a sample run on a synthetic transcript. The template,
+  the gap rules, the 8000-line budget, the redaction chain and the install commands
+  are generated from the toolkit by `space/build.mjs`, and `--check` fails on drift.
+  `spec/SKILL.md` gains `intake-gap-rules` markers for that build. The Space is
+  deployed from a tagged release by the maintainer (`RELEASING.md`). Its URL goes in
+  the root README once it is live.
+
 ### Changed
 
 - **Skill names Claude Code also owns are printed in both spellings (TASK-133).**
