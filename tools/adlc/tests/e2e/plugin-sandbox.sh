@@ -646,9 +646,14 @@ E2E_GIT_EMAIL=$(git config --global --get user.email 2>/dev/null) || E2E_GIT_EMA
 # e2e_new_home <dir> [guard] — a fresh HOME with only a git identity, the machine fact
 # every user has. With `guard`, ~/.claude/skills and ~/.claude/agents are mode-000
 # directories, so any read under them fails (BR-2, AC-2).
+# The empty credential.helper resets the helper list. Xcode's git ships
+# `helper = osxkeychain` in its own gitconfig, and after every authenticated push git
+# asks it to store the credential: under a sandbox HOME there is no login keychain, so
+# macOS raises a modal "Keychain Not Found" dialog and the push waits on it.
 e2e_new_home() {
   mkdir -p "$1/.claude" || return 1
-  printf '[user]\n\tname = %s\n\temail = %s\n' "$E2E_GIT_NAME" "$E2E_GIT_EMAIL" > "$1/.gitconfig"
+  printf '[user]\n\tname = %s\n\temail = %s\n[credential]\n\thelper =\n' \
+    "$E2E_GIT_NAME" "$E2E_GIT_EMAIL" > "$1/.gitconfig"
   if [ "${2:-}" = guard ]; then
     mkdir -p "$1/.claude/skills" "$1/.claude/agents" && chmod 000 "$1/.claude/skills" "$1/.claude/agents"
   fi
