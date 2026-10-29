@@ -273,7 +273,10 @@ def test_exception_literals_track_their_sources():
     for e in check.TOOLKIT_PATH_EXCEPTIONS:
         by_kind.setdefault(e.kind, []).append(e.value)
     assert set(by_kind) == {"line", "token", "file", "comment", "tree"}
-    assert by_kind["line"] == [check.TOOLKIT_ROOT_LINE]
+    assert by_kind["line"] == [check.TOOLKIT_ROOT_LINE, check.PROBE_PROJECT_SKILLS_LINE]
+    # REQ-664's line is the probe's, verbatim: drift there is a finding, not a pass.
+    probe = (Path(__file__).resolve().parents[2] / "adlc" / "harness_probe.py")
+    assert check.PROBE_PROJECT_SKILLS_LINE in probe.read_text(encoding="utf-8").splitlines()
     # The token is the ADR-2 operand's prefix, so the two cannot drift apart.
     (token,) = by_kind["token"]
     assert check.PARTIAL_SOURCE_OPERAND.startswith(token)

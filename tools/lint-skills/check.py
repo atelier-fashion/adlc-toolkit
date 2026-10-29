@@ -794,6 +794,10 @@ TOOLKIT_PATH_PY_JOIN_RE = re.compile(
 )
 
 
+#: tools/adlc/harness_probe.py's one spelling of the throwaway repo's skills dir.
+PROBE_PROJECT_SKILLS_LINE = 'CLAUDE_PROJECT_SKILLS = ".claude/skills"'
+
+
 class ToolkitPathException(NamedTuple):
     """One entry of TOOLKIT_PATH_EXCEPTIONS: how it matches, and its literal."""
     kind: str   # line | token | file | comment | tree
@@ -809,6 +813,11 @@ TOOLKIT_PATH_EXCEPTIONS = (
     # route. Exempt only when the line, leading indentation aside, equals
     # TOOLKIT_ROOT_LINE; a trailing space or comment makes it a variant again.
     ToolkitPathException("line", TOOLKIT_ROOT_LINE),
+    # REQ-664: `adlc harness probe` writes Claude Code's project-local skills
+    # directory into the throwaway repository it builds under the temp root. It
+    # is joined to that repository, never to a home, and is not a toolkit read.
+    # The probe spells it on this one line, which must stay exactly as written.
+    ToolkitPathException("line", PROBE_PROJECT_SKILLS_LINE),
     # The ADR-2 default-expansion spelling, opening quote and trailing slash
     # included. A partial carries no root line and is also sourced by test
     # harnesses and older SKILL.md text, so it reads the variable with the

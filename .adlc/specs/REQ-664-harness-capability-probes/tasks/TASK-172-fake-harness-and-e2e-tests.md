@@ -1,7 +1,7 @@
 ---
 id: TASK-172
 title: "Fake harness and end-to-end probe tests"
-status: draft
+status: complete
 parent: REQ-664
 created: 2026-10-29
 updated: 2026-10-29

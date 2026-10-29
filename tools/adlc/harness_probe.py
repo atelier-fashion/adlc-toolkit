@@ -457,13 +457,18 @@ class Profile:
     has_allow_required_path: bool = False
 
 
+#: Claude Code's project-local skills directory, inside the throwaway repository
+#: the probe builds (never the user's). This is the one line that spells it, and
+#: tools/lint-skills' toolkit-path check exempts it byte for byte.
+CLAUDE_PROJECT_SKILLS = ".claude/skills"
+
 PROFILES: Dict[str, Profile] = {
     "claude": Profile(
         name="claude", binaries=("claude",), trust="none",
         transcript_root="~/.claude/projects",  # adlc-home: claude-code
         final_message="json-result",
         hook_file=".claude/settings.json", hook_event="SessionStart",
-        allow_form="project-file", skill_dir=".claude/skills"),
+        allow_form="project-file", skill_dir=CLAUDE_PROJECT_SKILLS),
     "copilot": Profile(
         name="copilot", binaries=("copilot",), trust="flag",
         transcript_root="~/.copilot/session-state", final_message="stdout",
@@ -588,13 +593,15 @@ def routine_rules() -> List[Rule]:
 
 
 #: partials/README.md's model-2 invocation block with ``<name>`` = ``probe``
-#: (architecture ADR-6), byte for byte; pinned by the AC-7 test.
-FENCE_LINES: Tuple[str, ...] = (
-    'ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"',  # adlc-home: alias
-    'if [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . "$ADLC_TOOLKIT_ROOT/partials/probe.sh"; fi',
-    'adlc_probe_function; result=$?',
-)
-FENCE = "\n".join(FENCE_LINES) + "\n"
+#: (architecture ADR-6), byte for byte; pinned by the AC-7 test. Its first line
+#: is the canonical ToolkitRoot root line, on a line of its own, exactly as
+#: tools/lint-skills recognises it.
+FENCE = """\
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . "$ADLC_TOOLKIT_ROOT/partials/probe.sh"; fi
+adlc_probe_function; result=$?
+"""
+FENCE_LINES: Tuple[str, ...] = tuple(FENCE.splitlines())
 #: The fence's first token, derived (ADR-6): what ``broad-first-token`` allows.
 FENCE_FIRST_TOKEN = FENCE_LINES[0].split()[0]
 #: The command-base broad entry plan §2e names (``Bash(sh:*)``-style).
@@ -1562,7 +1569,8 @@ class Engine:
             body = "Run `touch %s`." % s
             return Spec(repo, prompt="Mark the adlc probe checkpoint.", nonce=nonce,
                         allow=[Rule("touch")], extra_tools=["activate_skill"],
-                        skills=[(".gemini/skills/adlc-probe/SKILL.md", _skill_md(
+                        skills=[(os.path.join(PROFILES["gemini"].skill_dir, "adlc-probe",
+                                              "SKILL.md"), _skill_md(
                             "adlc-probe", "Marks the adlc probe checkpoint. Use when "
                             "asked to mark the adlc probe checkpoint.", body))],
                         absent=[s], paths={"sentinel": s})
@@ -1601,7 +1609,8 @@ class Engine:
                     "printf '%%s' \"$1\" > %s\n```" % _q(s))
             return Spec(repo, prompt="/adlc-probe hello", nonce=nonce,
                         allow=[Rule("printf")],
-                        skills=[(".claude/skills/adlc-probe/SKILL.md", _skill_md(
+                        skills=[(os.path.join(CLAUDE_PROJECT_SKILLS, "adlc-probe",
+                                              "SKILL.md"), _skill_md(
                             "adlc-probe", "adlc harness probe throwaway skill for the "
                             "argument-substitution check", body))],
                         absent=[s], paths={"sentinel": s})
@@ -2041,8 +2050,10 @@ class Engine:
         verdict = disjunction(list(subs.values()))
         evidence = None
         if probe.id == "stdin-prompt":
-            evidence = {"returned_reversed_nonce": [k for k, v in subs.items()
-                                                    if v.status == PASS]}
+            returned = [k for k, v in subs.items() if v.status == PASS]
+            evidence = {"returned_reversed_nonce": returned,
+                        "observation": "variants that made stdin the task (returned the "
+                                       "reversed nonce): %s" % (", ".join(returned) or "none")}
         return self._entry(probe, verdict, evidence, subs)
 
     def _decide_all(self) -> Dict[str, Dict]:
