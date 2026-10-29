@@ -1,7 +1,7 @@
 ---
 id: TASK-173
 title: "adlc harness detect: last_probe column"
-status: draft
+status: complete
 parent: REQ-664
 created: 2026-10-29
 updated: 2026-10-29

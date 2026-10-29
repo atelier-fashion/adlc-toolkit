@@ -16,7 +16,11 @@ For each of the five harnesses the multi-harness plan surveyed it reports:
   ``unknown``: never an error, and never a guess (LESSON-581).
 * **mount** — ``n/a`` when the binary is absent. Otherwise ``mounted`` when the
   harness's user-level skills directory reaches this toolkit, else
-  ``not-mounted``. Claude Code reads its own skills mount, which install.sh keeps
+  ``not-mounted``.
+* **last_probe** (REQ-664 BR-13) — the ``date`` of the current repository's
+  ``.adlc/research/harness-probes/<name>.json``, ``never`` when there is none (or
+  no repository), ``unreadable`` when it does not parse. ``probe_file`` is its
+  path, or ``None``. Claude Code reads its own skills mount, which install.sh keeps
   whatever ``ADLC_HOME`` says (REQ-654 BR-6), or loads the adlc plugin; the
   doctor's symlink-install test decides which. The other four read
   ``$HOME/.agents/skills`` (architecture ADR-7).
@@ -73,6 +77,8 @@ class HarnessProbe:
     path: Optional[str]    # where the binary is, when present
     version: str           # the version line, or "unknown"; "n/a" when absent
     mount: str             # mounted | not-mounted | n/a
+    last_probe: str = "never"          # YYYY-MM-DD | never | unreadable (REQ-664)
+    probe_file: Optional[str] = None   # the result file read, when there is one
 
 
 def _toolkit_root() -> Optional[str]:
@@ -181,9 +187,50 @@ def probe(name: str, root: Optional[str] = None) -> HarnessProbe:
     raise ValueError("unknown harness %r (known: %s)" % (name, ", ".join(NAMES)))
 
 
+#: Where `adlc harness probe` writes its results, relative to the repo root.
+PROBE_RESULTS = (".adlc", "research", "harness-probes")
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _caller_repo_root() -> Optional[str]:
+    """The git top level of the cwd, or ``None`` (REQ-664 BR-13: never fails)."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, timeout=PROBE_TIMEOUT_SECONDS * 2,
+                             stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    top = out.stdout.strip()
+    return top if out.returncode == 0 and top else None
+
+
+def last_probe(name: str, repo_root: Optional[str]) -> Tuple[str, Optional[str]]:
+    """``(date | never | unreadable, path | None)`` for one harness's result file."""
+    if not repo_root:
+        return "never", None
+    path = os.path.join(repo_root, *PROBE_RESULTS, "%s.json" % name)
+    if not os.path.isfile(path):
+        return "never", None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return "unreadable", path
+    date = data.get("date") if isinstance(data, dict) else None
+    if isinstance(date, str) and _DATE.match(date):
+        return date, path
+    return "unreadable", path
+
+
 def probe_all() -> List[HarnessProbe]:
     root = _toolkit_root()
-    return [probe(name, root) for name in NAMES]
+    repo = _caller_repo_root()
+    out = []
+    for name in NAMES:
+        p = probe(name, root)
+        p.last_probe, p.probe_file = last_probe(name, repo)
+        out.append(p)
+    return out
 
 
 def _probe_tool_version() -> str:
@@ -223,12 +270,12 @@ def _cmd_probe(argv) -> int:
 
 
 def format_table(probes: List[HarnessProbe]) -> str:
-    rows = [("harness", "binary", "state", "version", "mount")]
-    rows += [(p.name, p.binary, p.state, p.version, p.mount) for p in probes]
-    widths = [max(len(r[i]) for r in rows) for i in range(4)]
+    rows = [("harness", "binary", "state", "version", "mount", "last_probe")]
+    rows += [(p.name, p.binary, p.state, p.version, p.mount, p.last_probe) for p in probes]
+    widths = [max(len(r[i]) for r in rows) for i in range(5)]
     lines = []
     for r in rows:
-        lines.append("  ".join(r[i].ljust(widths[i]) for i in range(4)) + "  " + r[4])
+        lines.append("  ".join(r[i].ljust(widths[i]) for i in range(5)) + "  " + r[5])
     return "\n".join(lines)
 
 
