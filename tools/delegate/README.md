@@ -403,7 +403,7 @@ created mode 0600. Unlike the delegation tools these need only the system
 
 | Tool | Role |
 |---|---|
-| `run_outcome.py` | Derives the line from the primary-path `pipeline-state.json` (`emit`), and writes the state keys it reads: `record-harness` (once, at `/proceed` Step 0), `record-validate` (absolute, monotone attempt count), `record-verify` (normalised Phase-5 findings), `record-lessons-written` (`/wrapup` Step 5). Every count, class and retry total is computed here, never by the model. |
+| `run_outcome.py` | Derives the line from the primary-path `pipeline-state.json` (`emit`), and writes the state keys it reads: `record-harness` (once, at `/proceed` Step 0), `record-validate` (absolute, monotone attempt count), `record-verify` (normalised Phase-5 findings), `record-lessons-written` (`/wrapup`, end of Step 4). Every count, class and retry total is computed here, never by the model. |
 | `emit-run-outcome.sh` | The call-site wrapper (`"$DELEGATE_TOOLS"/emit-run-outcome.sh`). Emits and appends under `umask 077`, or passes a `record-*` subcommand through. **Always exits 0**: a failure is one `run-outcome: <reason>` line on stderr, never a blocked pipeline. Execute it; never source it. |
 | `check-run-outcomes.sh` | The reader. `--recurrence --reqs REQ-a,REQ-b` prints `<class>\t<k>\t<N>\t<tier>` per defect class over the latest line of each listed REQ, then a `no-record` row for each REQ with no line (`/sprint`'s Recurrence section). The default `--window <N>d` prints a TSV grouped by `toolkit_version` (`/analyze` Step 1.10): no log is no output, a log with nothing in the window is `no runs in <N>d window`, and a log none of whose lines parse exits 1. |
 

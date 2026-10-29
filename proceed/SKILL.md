@@ -187,7 +187,7 @@ by code at the moment it occurs (**Run-outcome telemetry** below), to the
 primary-path copy, as `lessons` is. `harness` is the toolkit's `{version, sha}`
 at Step 0, before any pull; `validateAttempts` the attempt counts at Phases 1 and
 3; `verify` the consolidated Phase-5 findings, each with a `class` and a `fixed`
-flag; `lessonsWritten` the `/wrapup` Step 5 outcome (`LESSON-` ids, or the string
+flag; `lessonsWritten` the `/wrapup` lesson outcome (recorded at the end of its Step 4) (`LESSON-` ids, or the string
 `NO_ENTRY`). `lessons.acknowledged`, written by `ack-check --record`, belongs to
 the same record. Absent means not recorded: the emitter prints `-` or `0` for
 what it derives from a missing key, and nothing reads any of them for control

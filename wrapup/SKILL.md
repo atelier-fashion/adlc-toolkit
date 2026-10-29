@@ -374,6 +374,18 @@ A REQ that started on the lite lane and escalated to the full lane owes one less
 - Were any new conventions established? Propose updates to `.adlc/context/conventions.md`
 - Were any existing conventions found to be problematic?
 
+#### Record the lessons outcome (REQ-648)
+
+Step 4's lesson outcome is now settled: the `LESSON-xxx` lines, or the one `NO_ENTRY:` line, that Step 5's `### Lessons captured` slot will carry. Record it in the primary repo path's `pipeline-state.json`, the file Step 3 item 5 writes (in close-out mode, the primary-path copy named in Close-out mode rule 3). Pass every `LESSON-xxx` written, comma-separated, with `--ids`, or `--no-entry` when the slot holds a `NO_ENTRY:` line. It is the source of the run-outcome line's `lessons_written`. Skip it when the spec directory has no `pipeline-state.json` (a standalone `/wrapup`); the wrapper always exits 0.
+
+**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+"$DELEGATE_TOOLS"/emit-run-outcome.sh record-lessons-written --state "<state>" --ids "<LESSON-a,LESSON-b>"
+```
+
 ### Step 5: Generate Ship Summary
 Create a concise summary suitable for sharing with the team. In cross-repo mode, list each repo/PR under a Repos section.
 
@@ -434,16 +446,6 @@ Create a concise summary suitable for sharing with the team. In cross-repo mode,
 ### Lessons captured
 - LESSON-xxx — one-line hook (one line per lesson written in Step 4)
   (or exactly one line: `NO_ENTRY: <reason>` — e.g. `NO_ENTRY: close-out had no run evidence`)
-```
-
-**Record the outcome (REQ-648).** Once `### Lessons captured` is final, record it in the primary repo path's `pipeline-state.json`, the file Step 3 item 5 writes (in close-out mode, the primary-path copy named in Close-out mode rule 3). Pass every `LESSON-xxx` written, comma-separated, with `--ids`, or `--no-entry` when the slot holds a `NO_ENTRY:` line. It is the source of the run-outcome line's `lessons_written`. Skip it when the spec directory has no `pipeline-state.json` (a standalone `/wrapup`); the wrapper always exits 0.
-
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
-
-```sh
-ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
-"$DELEGATE_TOOLS"/emit-run-outcome.sh record-lessons-written --state "<state>" --ids "<LESSON-a,LESSON-b>"
 ```
 
 In close-out mode the summary is the mode's return value and the skill ends after the close-out commit (Close-out mode rules 5–6); Steps 6–8 below do not run.

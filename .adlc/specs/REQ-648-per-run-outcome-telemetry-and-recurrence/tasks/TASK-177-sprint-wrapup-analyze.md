@@ -14,20 +14,20 @@ repo: adlc-toolkit
 `/sprint`: the legacy orchestrator emits (engine `legacy`) after the Step 5
 close-out of a REQ it merged; Step 6 gains a **Recurrence** section built by
 `check-run-outcomes.sh --recurrence`; the workflow branch gains a summary step
-after `{results}`. `/wrapup` Step 5 records `lessonsWritten`. `/analyze` gains
+after `{results}`. `/wrapup` records `lessonsWritten` at the end of Step 4. `/analyze` gains
 Step 1.10 `harness-fidelity`, mirroring Step 1.8.
 
 ## Files to Create/Modify
 
 - `sprint/SKILL.md` — Step 0 workflow branch summary step; Step 5 orchestrator emit; Step 6 Recurrence section
-- `wrapup/SKILL.md` — Step 5 `record-lessons-written`
+- `wrapup/SKILL.md` — `record-lessons-written` at the end of Step 4 (a fence in Step 5 would count as a summary template — `partials/tests/lesson-check.test.sh`)
 - `analyze/SKILL.md` — Step 1.10
 
 ## Acceptance Criteria
 
 - [ ] Rows with `k ≥ 2` render under `harness property — consider a skill/lint/partial change`, rows with `k = 1` under `single occurrence — lesson at most (confidence: low)`, `no-record` rows listed
 - [ ] `/analyze` Step 1.10 skips silently when the script or log is absent, prints the `no runs` line, the unavailable line on rc 1, and a block grouped by `toolkit_version` otherwise; BUG-230 skip line present
-- [ ] `/wrapup` Step 5 records the `### Lessons captured` outcome in both modes into the primary-path copy
+- [ ] `/wrapup` records the `### Lessons captured` outcome in both modes into the primary-path copy
 - [ ] `tools/lint-skills/check.sh` passes
 
 ## Verification

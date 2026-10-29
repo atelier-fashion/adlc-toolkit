@@ -18,7 +18,7 @@ the moment its fact occurs (LESSON-626), and one reader-side record:
 | validation retries | `validateAttempts` | `run_outcome.py record-validate` | before each `/validate` at Phase 1 / 3 (solo, legacy); in the workflow's validate leaf prompt |
 | Phase-5 findings | `verify` | `run_outcome.py record-verify` | Phase 5 Step B (and Phase 5 (lite)); again after Step C/D; the workflow's state-write leaves |
 | lessons acknowledged | `lessons.acknowledged` | `lessons.py ack-check --record` | Phase 5 Step B (REQ-647's own key) |
-| lessons written | `lessonsWritten` | `run_outcome.py record-lessons-written` | `/wrapup` Step 5, both modes |
+| lessons written | `lessonsWritten` | `run_outcome.py record-lessons-written` | `/wrapup`, end of Step 4, both modes |
 | the run's outcome | one log line | `emit-run-outcome.sh` → `run_outcome.py emit` | per the BR-2 ownership table |
 
 Every state write targets the **primary repo path's** copy
@@ -191,7 +191,7 @@ preceded by the BUG-228 provenance line; phases and companions point at it.
 Halt-point emits: one fence, run at each halt with that halt's token.
 `agents/pipeline-runner.md` gains the runner's emit. `/sprint` gains the
 orchestrator emit in Step 5, a Recurrence section in Step 6, and a summary step
-on the workflow branch. `/wrapup` Step 5 records `lessonsWritten`. `/analyze`
+on the workflow branch. `/wrapup` records `lessonsWritten` at the end of Step 4. `/analyze`
 gains Step 1.10. `tools/lint-skills`'s `harness-skip` check also fires on a fence
 that invokes `emit-run-outcome.sh`.
 
@@ -216,7 +216,7 @@ it there costs one flag and keeps one owner for the `lessons` key. Rejected: a
 second trailer scan in `run_outcome.py` (two readers of one fact — LESSON-441),
 and scanning at emit time (the worktree is gone by then).
 
-**ADR-4 — `lessonsWritten` is a top-level key written at `/wrapup` Step 5.**
+**ADR-4 — `lessonsWritten` is a top-level key written at the end of `/wrapup` Step 4.**
 Solo `/wrapup` writes no `closeOut` key (only close-out mode does), so nesting it
 there would leave solo runs without a source. Step 5 is where the
 `### Lessons captured` outcome is final in both modes.
