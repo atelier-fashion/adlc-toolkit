@@ -10,7 +10,7 @@ You are generating a status report of all ADLC work in the current project.
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 > **See also `/manifest`** — `/status` reads this **local** checkout; `/manifest` derives in-flight work across **all sessions** from the remote (open PRs + pushed `feat/REQ-*` branches), with an advisory overlap report. Use `/manifest` to see what other people are working on before you start.
 
@@ -26,7 +26,7 @@ Filter: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that the `.adlc/specs/` directory exists (this skill reads requirement and task frontmatter from there). `.adlc/bugs/` and live `pipeline-state.json` files are read when present but are not required. If `.adlc/specs/` does not exist, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first to set up the project context."
+Before proceeding, verify that the `.adlc/specs/` directory exists (this skill reads requirement and task frontmatter from there). `.adlc/bugs/` and live `pipeline-state.json` files are read when present but are not required. If `.adlc/specs/` does not exist, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first to set up the project context."
 
 ## Instructions
 
@@ -122,7 +122,8 @@ stored backlink rots silently when an artifact is moved or renumbered (BR-4, LES
 Source the partial and call it **in the same fenced block** (the cross-fence-fn rule):
 
 ```bash
-if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . ~/.claude/skills/partials/attribution.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . "$ADLC_TOOLKIT_ROOT/partials/attribution.sh"; fi
 # Emits one "BUG-id<TAB>REQ-id" line per attributed edge; add a REQ id as a second
 # argument to filter to that REQ's incidents. Strictly read-only.
 adlc_attr_bugs_with_attribution "$PWD"

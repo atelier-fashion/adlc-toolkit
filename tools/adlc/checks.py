@@ -17,16 +17,37 @@ holds transitively (LESSON-395) — nothing YAML-related is imported here or in
 anything imported here, because the `pyyaml` check below exists precisely to
 report on a machine where PyYAML is missing, and a check that cannot load
 without the thing it diagnoses cannot report it.
+
+Checks know the install route (REQ-669 ADR-7). The four that inspect the
+``install.sh`` symlink install are ``applies_to`` the symlink route only, so a
+plugin-only machine SKIPs them with a notice. ``plugin-route`` reports the route
+and checks the plugin's wiring, and ``doubled-install`` fires when both routes
+are installed at once (BR-11). A remediation that runs ``install.sh`` is printed
+on the symlink route only: on the plugin route it would symlink the plugin's
+copy into ``~/.claude`` and double the install. When route detection failed,
+the route is a fallback, so ``install.sh`` is not printed then either.
+
+Every path, interpreter and install key a fix command carries goes through
+``shlex.quote``. They come from real paths, the install record and the plugin
+cache, and a quote, ``$(`` or ``;`` in any of them must stay text when the
+operator pastes the line into a shell.
 """
 
 import glob
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import time
 
-from doctor import Check, Profile, Result
+import toolkit_root
+from doctor import (PLUGIN_MARKETPLACE, PLUGIN_NAME, ROUTE_PLUGIN, Check, PluginInstall,
+                    Profile, Result, detect_plugin_install, plugin_manifest,
+                    under_plugin_cache, valid_install_key)
+
+#: Every printed fix quotes what it interpolates (see the module docstring).
+_q = shlex.quote
 
 # A counter lock dir older than this (seconds) with no live holder is treated as
 # stale (BR-4 "lock-dir not stale"). 15 minutes is generous for any real
@@ -148,11 +169,305 @@ def _machine_config_path() -> str:
 
 
 def _partial_path(profile: Profile, name: str) -> str:
-    """Resolve a partial with the two-level fallback (project, then toolkit)."""
+    """Resolve a partial with the two-level fallback (project, then toolkit).
+
+    The toolkit level is ``toolkit_root.toolkit_file`` (REQ-669 ADR-2), the
+    tree this module runs from, not the symlink install's directory, which a
+    plugin-only machine does not have. When neither level has the file, the project path
+    is returned so the caller's ``isfile`` check reports it missing.
+    """
     local = os.path.join(profile.repo_root, "partials", name)
     if os.path.isfile(local):
         return local
-    return os.path.join(_claude_home(), "skills", "partials", name)
+    try:
+        return toolkit_root.toolkit_file("partials/" + name)
+    except toolkit_root.ToolkitRootError:
+        return local
+
+
+def _read_text(path: str):
+    """The file's text, or ``None`` when it cannot be read."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+# --- install route (REQ-669 ADR-7) -----------------------------------------
+
+#: The skill the doubled-install finding traces through both spellings.
+_SAMPLE_SKILL = "spec"
+
+#: SKIP notice of the four checks that inspect the install.sh symlink install.
+_SYMLINK_ROUTE_ONLY = ("plugin route: this check inspects the install.sh symlink "
+                       "install, which the plugin route does not use")
+
+#: Claude Code is taken to set this to ``1`` in the shells it starts. That is
+#: unverified: REQ-669 verification.md records Claude Code 2.1.258 and has no
+#: row for this variable. Only inside such a shell must the SessionStart hook's
+#: PATH entry be present (BR-7); outside one, a missing entry is a note.
+_IN_CLAUDE_CODE_ENV = "CLAUDECODE"
+
+
+def _on_symlink_route(profile: Profile) -> bool:
+    return profile.route != ROUTE_PLUGIN
+
+
+def _install_sh_ok(profile: Profile) -> bool:
+    """True when a fix may run install.sh: the symlink route, known to be one (BR-11)."""
+    return profile.route != ROUTE_PLUGIN and not profile.route_error
+
+
+def _plugin_install(profile: Profile) -> PluginInstall:
+    """The profile's plugin-install reading, made here for a profile built by hand."""
+    return profile.plugin if profile.plugin is not None else detect_plugin_install()
+
+
+def _install_key(root: str) -> str:
+    """``adlc@<marketplace>`` read off a cache path, else this repo's marketplace.
+
+    A marketplace directory whose name is not a valid install key falls back
+    to this repo's marketplace rather than reaching a fix command.
+    """
+    real = os.path.realpath(root)
+    if os.path.basename(os.path.dirname(real)) == PLUGIN_NAME:
+        marketplace = os.path.basename(os.path.dirname(os.path.dirname(real)))
+        key = "%s@%s" % (PLUGIN_NAME, marketplace)
+        if valid_install_key(key) and os.path.basename(os.path.dirname(os.path.dirname(
+                os.path.dirname(real)))) == "cache":
+            return key
+    return "%s@%s" % (PLUGIN_NAME, PLUGIN_MARKETPLACE)
+
+
+def _reinstall_fix(key: str) -> str:
+    return "claude plugin uninstall %s && claude plugin install %s" % (_q(key), _q(key))
+
+
+def _pointer_problem(root: str):
+    """Why ``~/.claude/adlc/plugin-root`` does not name ``root``, or ``""``.
+
+    The SessionStart hook writes the plugin root and one newline (ADR-4). An
+    empty or relative value is a problem, not a match: ``realpath("")`` is the
+    current directory, which may well be ``root``.
+    """
+    pointer = os.path.join(_claude_home(), "adlc", "plugin-root")
+    text = _read_text(pointer)
+    if text is None:
+        state = "missing" if not os.path.lexists(pointer) else "unreadable"
+        return ("~/.claude/adlc/plugin-root is %s, so skill text read without "
+                "substitution cannot find this copy (ToolkitRoot arm 3)" % state)
+    value = text[:-1] if text.endswith("\n") else text
+    if not value or "\n" in value or not os.path.isabs(value):
+        return "~/.claude/adlc/plugin-root does not hold one absolute path"
+    if os.path.realpath(value) != root:
+        return "~/.claude/adlc/plugin-root names %s, not this copy" % value
+    return ""
+
+
+def _local_pointer_note(root: str) -> str:
+    """What the pointer holds, for a plugin root outside the plugin cache.
+
+    The SessionStart hook records only a plugin-cache copy (ADR-4), so a
+    local-path marketplace, which runs from its source directory, never records
+    itself. A pointer that does not name such a root is expected, not a fault,
+    and re-running the hook would not change it.
+    """
+    text = _read_text(os.path.join(_claude_home(), "adlc", "plugin-root"))
+    value = (text[:-1] if text and text.endswith("\n") else text) or ""
+    held = value if value and "\n" not in value and os.path.isabs(value) else "absent"
+    return ("the SessionStart hook records only a plugin-cache copy, so skill text "
+            "read without substitution resolves through ~/.claude/adlc/plugin-root "
+            "(%s), not this local-path copy" % held)
+
+
+def check_plugin_route(profile: Profile):
+    """Report the route and version; on the plugin route, check its wiring.
+
+    On the plugin route three things must hold: this copy is the one Claude
+    Code loads, the SessionStart hook has recorded it in
+    ``~/.claude/adlc/plugin-root`` (ToolkitRoot arm 3, ADR-4; a copy outside the
+    plugin cache is never recorded, so there it is only reported), and
+    ``scripts/adlc`` is executable and, inside a Claude Code session, on PATH
+    (BR-7). A plugin install this doctor cannot read is a FAIL, never a PASS
+    (LESSON-581). The symlink route has none of these, so there the check only
+    reports. When route detection failed, the route is a fallback and this
+    check FAILs saying so.
+    """
+    root = os.path.realpath(profile.repo_root)
+    details_fix = "claude plugin details adlc   # shows the adlc install Claude Code loads"
+    if profile.route_error:
+        return (
+            Result.FAIL,
+            f"route detection failed ({profile.route_error}); the doctor fell back to the "
+            "symlink route so every check runs, and prints no install.sh fix, because "
+            "this may be a plugin install",
+            details_fix,
+        )
+    if profile.route != ROUTE_PLUGIN:
+        version = (_read_text(os.path.join(root, "VERSION")) or "").strip() or "unknown"
+        return Result.PASS, f"symlink route: {root}, version {version}", ""
+
+    manifest = plugin_manifest(root) or {}
+    version = manifest.get("version") if isinstance(manifest.get("version"), str) else "unknown"
+    head = f"plugin route: {root}, version {version}"
+    plugin = _plugin_install(profile)
+    if plugin.state == "unknown":
+        return (
+            Result.FAIL,
+            f"{head}; cannot confirm this is the copy Claude Code loads: {plugin.detail}",
+            details_fix,
+        )
+    key = plugin.keys[0] if plugin.keys else _install_key(root)
+    if root not in plugin.roots:
+        if plugin.roots:
+            return (
+                Result.FAIL,
+                f"{head}; this is not the copy Claude Code loads ({', '.join(plugin.roots)})",
+                "%s doctor" % _q(os.path.join(plugin.roots[0], "scripts", "adlc")),
+            )
+        if not manifest:
+            return (
+                Result.FAIL,
+                f"{head}; this copy has no .claude-plugin/plugin.json naming {PLUGIN_NAME}",
+                _reinstall_fix(key),
+            )
+        # A cache copy the record does not name: what an uninstall leaves.
+        return (
+            Result.FAIL,
+            f"{head}; the adlc plugin is not installed, so Claude Code does not load "
+            f"this copy: {plugin.detail}",
+            details_fix,
+        )
+
+    problems, fixes = [], []
+    cached = under_plugin_cache(root)
+    pointer = _pointer_problem(root) if cached else ""
+    if pointer:
+        problems.append(pointer)
+        fixes.append("CLAUDE_PLUGIN_ROOT=%s sh %s" % (
+            _q(root), _q(os.path.join(root, "scripts", "session-start.sh")))
+            + "   # what the SessionStart hook runs; a new Claude Code session does the same")
+
+    shim = os.path.join(root, "scripts", "adlc")
+    if not os.path.isfile(shim):
+        problems.append("scripts/adlc is missing from this copy")
+        fixes.append(_reinstall_fix(key))
+    elif not os.access(shim, os.X_OK):
+        problems.append("scripts/adlc is not executable")
+        fixes.append("chmod +x %s" % _q(shim))
+
+    on_path = shutil.which("adlc")
+    path_note = ""
+    if on_path and os.path.realpath(on_path) == os.path.realpath(shim):
+        path_note = "adlc on PATH is this copy's scripts/adlc"
+    elif on_path:
+        path_note = f"adlc on PATH is {on_path}, not this copy's scripts/adlc"
+    elif os.environ.get(_IN_CLAUDE_CODE_ENV) == "1":
+        problems.append("adlc is not on this Claude Code session's PATH")
+        # `$PATH` stays inside double quotes so it expands; the root is a
+        # separately quoted word glued on after the colon.
+        fixes.append('export PATH="$PATH":%s' % _q(os.path.join(root, "scripts"))
+                     + "   # what the SessionStart hook adds; a new Claude Code session does the same")
+    else:
+        path_note = ("adlc is not on this shell's PATH; the SessionStart hook adds "
+                     "scripts/ inside Claude Code sessions")
+
+    if problems:
+        return Result.FAIL, f"{head}: " + "; ".join(problems), "\n".join(fixes)
+    pointer_note = ("~/.claude/adlc/plugin-root names this copy" if cached
+                    else _local_pointer_note(root))
+    return (
+        Result.PASS,
+        f"{head} ({', '.join(plugin.keys)}); {pointer_note}; "
+        f"scripts/adlc is executable; {path_note}",
+        "",
+    )
+
+
+def _symlink_install():
+    """``(skills link, real target, agents link or None)``, or ``None``.
+
+    The install.sh symlink install counts when ``~/.claude/skills`` is a symlink
+    to a directory that holds ``partials/`` (the test that ToolkitRoot's arm 2
+    makes, ADR-1) and the sample skill. A directory of personal skills, or a link to
+    one, is not this toolkit. The agents link is returned only when it points
+    into the same tree, so a fix never removes a link this toolkit did not make.
+    """
+    skills = os.path.join(_claude_home(), "skills")
+    if not os.path.islink(skills):
+        return None
+    target = os.path.realpath(skills)
+    if not (os.path.isdir(os.path.join(target, "partials"))
+            and os.path.isfile(os.path.join(target, _SAMPLE_SKILL, "SKILL.md"))):
+        return None
+    agents = os.path.join(_claude_home(), "agents")
+    ours = os.path.islink(agents) and \
+        os.path.realpath(agents) == os.path.realpath(os.path.join(target, "agents"))
+    return skills, target, (agents if ours else None)
+
+
+def _doubled_fixes(sym, keys):
+    """One copy-pasteable line per way out of a doubled install (BR-11)."""
+    skills, target, agents = sym
+    uninstall = " && ".join("claude plugin uninstall %s" % _q(k) for k in keys)
+    removals = ["rm %s" % _q(skills)] + (["rm %s" % _q(agents)] if agents else [])
+    # install.sh's ~/bin/adlc shim runs the clone and comes first on PATH, so
+    # with only the links gone `adlc doctor` would still run the clone, see the
+    # symlink route without its links, and advise re-creating them.
+    shim = os.path.join(os.path.expanduser("~"), "bin", "adlc")
+    text = _read_text(shim) if os.path.isfile(shim) else None
+    if text and os.path.join(target, "tools", "adlc", "adlc.py") in text:
+        removals.append("rm %s" % _q(shim))
+    return [
+        f"{uninstall}   # keep the symlink install: skills stay bare (/{_SAMPLE_SKILL})",
+        " && ".join(removals)
+        + "   # keep the plugin: skills become /adlc:<name>; removes the links, not the clone",
+    ]
+
+
+def check_doubled_install(profile: Profile):
+    """FAIL when the symlink install and the adlc plugin are both installed (BR-11).
+
+    The finding names which copy each spelling of the sample skill reaches and
+    prints one fix per way out. A plugin install that cannot be read, next to a
+    live symlink install, is also a FAIL: it is not known to be safe
+    (LESSON-581). With either install alone the check passes and prints no
+    finding (LESSON-440).
+    """
+    plugin = _plugin_install(profile)
+    sym = _symlink_install()
+    if sym is None:
+        return (Result.PASS,
+                f"no install.sh symlink install at ~/.claude/skills (adlc plugin: {plugin.state})",
+                "")
+    _skills, target, _agents = sym
+    if plugin.state == "absent":
+        return (Result.PASS,
+                f"symlink install only: ~/.claude/skills -> {target}; {plugin.detail}", "")
+    keys = plugin.keys or [f"{PLUGIN_NAME}@{PLUGIN_MARKETPLACE}"]
+    fixes = _doubled_fixes(sym, keys)
+    if plugin.state != "present":
+        return (
+            Result.FAIL,
+            f"the symlink install is active (~/.claude/skills -> {target}), and whether "
+            f"the adlc plugin is installed too cannot be told: {plugin.detail}",
+            "\n".join(["claude plugin details adlc   # if Claude Code lists the plugin, "
+                       "the install is doubled; then run one of the next two lines"] + fixes),
+        )
+    plugin_copies = " and ".join(
+        os.path.join(r, _SAMPLE_SKILL, "SKILL.md") for r in plugin.roots)
+    same = " (the same directory, loaded through both routes)" if target in plugin.roots else ""
+    return (
+        Result.FAIL,
+        f"both installs are active{same}. Bare /{_SAMPLE_SKILL} reaches the personal copy "
+        f"at ~/.claude/skills ({os.path.join(target, _SAMPLE_SKILL, 'SKILL.md')}); "
+        f"/adlc:{_SAMPLE_SKILL} reaches the plugin ({', '.join(plugin.keys)}) at "
+        f"{plugin_copies}. A bare name reaches a plugin skill only when nothing else "
+        "owns it (skills docs; measured for the plugin-only case in REQ-669 "
+        "verification.md row 6, Claude Code 2.1.258)",
+        "\n".join(fixes),
+    )
 
 
 # --- symlink checks --------------------------------------------------------
@@ -164,7 +479,7 @@ def check_skills_symlink(profile: Profile):
     return (
         Result.FAIL,
         f"{link} is missing, dangling, or not a symlink into a git checkout",
-        f"ln -sfn '{profile.repo_root}' '{link}'",
+        "ln -sfn %s %s" % (_q(profile.repo_root), _q(link)),
     )
 
 
@@ -176,7 +491,7 @@ def check_agents_symlink(profile: Profile):
     return (
         Result.FAIL,
         f"{link} does not resolve to {target}",
-        f"ln -sfn '{target}' '{link}'",
+        "ln -sfn %s %s" % (_q(target), _q(link)),
     )
 
 
@@ -192,7 +507,7 @@ def check_toolkit_clean(profile: Profile):
         return (
             Result.FAIL,
             "toolkit clone is in detached HEAD state",
-            f"git -C '{root}' checkout main",
+            "git -C %s checkout main" % _q(root),
         )
     dirty = subprocess.run(
         ["git", "-C", root, "status", "--porcelain"],
@@ -202,7 +517,7 @@ def check_toolkit_clean(profile: Profile):
         return (
             Result.FAIL,
             "toolkit clone has uncommitted changes",
-            f"git -C '{root}' status   # review, then commit or stash",
+            "git -C %s status   # review, then commit or stash" % _q(root),
         )
     return Result.PASS, f"on {head.stdout.strip()}, clean", ""
 
@@ -210,19 +525,24 @@ def check_toolkit_clean(profile: Profile):
 # --- PATH / shims ----------------------------------------------------------
 
 def check_path_shims(profile: Profile):
+    # With route detection failed this may be a plugin machine, where
+    # install.sh doubles the install (BR-11); the fix asks first.
+    unsure = ("claude plugin details adlc   # route detection failed: if Claude Code "
+              "lists adlc, its scripts/adlc is the CLI and the plugin needs no shim")
     adlc = shutil.which("adlc")
     if not adlc:
         return (
             Result.FAIL,
             "adlc is not on PATH",
-            "./install.sh --repair   # then restart your shell (or: source ~/.zshrc)",
+            "./install.sh --repair   # then restart your shell (or: source ~/.zshrc)"
+            if _install_sh_ok(profile) else unsure,
         )
     probe = subprocess.run([adlc, "--version"], capture_output=True, text=True)
     if probe.returncode != 0:
         return (
             Result.FAIL,
             f"adlc on PATH ({adlc}) but `adlc --version` failed",
-            "./install.sh --repair   # regenerates the shim",
+            "./install.sh --repair   # regenerates the shim" if _install_sh_ok(profile) else unsure,
         )
     return Result.PASS, f"adlc -> {adlc} (v{probe.stdout.strip()})", ""
 
@@ -271,8 +591,10 @@ def _forge_provider_verdict(profile: Profile):
     # No temp-file redirect: subprocess capture_output collects stderr into
     # proc.stderr, so there is no predictable-path junk file / TOCTOU foothold
     # (LESSON-008). The function's fail-loud message lands in proc.stderr if needed.
+    # The path is shell-quoted: a checkout under a directory whose name holds a
+    # `'` would otherwise end the quote and run the rest of the path as shell.
     script = (
-        f". '{partial}'; "
+        f". {_q(partial)}; "
         "adlc_forge_provider \"$PWD\"; rc=$?; "
         'printf "%s\\n" "$rc"'
     )
@@ -318,7 +640,7 @@ def check_forge(profile: Profile):
             return (
                 Result.FAIL,
                 "partials/forge.sh not found — forge adapter is not installed",
-                "re-run /init to vendor partials, or check the toolkit checkout",
+                "re-run /init (/adlc:init on the plugin install) to vendor partials, or check the toolkit checkout",
             )
         # Unrecognized host / unresolved: fail loud (BR-2) with config remediation.
         return (
@@ -534,8 +856,9 @@ def _gate_verdict(profile: Profile):
     partial = _partial_path(profile, "delegate-gate.sh")
     if not os.path.isfile(partial):
         return None, "gate-partial-missing"
+    # Shell-quoted, as in ``_forge_provider_verdict``.
     script = (
-        f". '{partial}'; adlc_delegate_gate_check; rc=$?; "
+        f". {_q(partial)}; adlc_delegate_gate_check; rc=$?; "
         'printf "%s\\n%s\\n" "$rc" "$ADLC_DELEGATE_GATE_REASON"'
     )
     out = subprocess.run(
@@ -581,6 +904,64 @@ def _config_enabled(profile: Profile):
 
 # --- PyYAML in the interpreter adlc runs under (REQ-609 BR-8, ADR-2) -------
 
+def _pyyaml_requirement(root: str) -> str:
+    """The ``pyyaml`` line of the toolkit's delegate requirements, e.g. ``pyyaml==6.0.3``.
+
+    Read from ``tools/delegate/requirements.txt`` so the pin lives in one
+    place; a missing file or line gives the bare name.
+    """
+    text = _read_text(os.path.join(root, "tools", "delegate", "requirements.txt")) or ""
+    for line in text.splitlines():
+        spec = line.split("#", 1)[0].strip()
+        name = spec
+        for sep in "=<>!~;[ ":
+            name = name.split(sep, 1)[0]
+        if name.lower() == "pyyaml":
+            return spec
+    return "pyyaml"
+
+
+#: Where the machine-config scaffold's text lives: the plugin's SessionStart
+#: hook. test_config_scaffold_parity.py pins the bytes that hook writes to the
+#: bytes install.sh's `ensure_config` writes, and that this reader returns, so
+#: the doctor compares against that one source rather than a third copy.
+_SCAFFOLD_SOURCE = ("scripts", "session-start.sh")
+#: The hook's assignment of the scaffold text: one single-quoted shell word.
+_SCAFFOLD_OPEN = b"\nadlc_ss_scaffold='"
+
+
+def _config_scaffold(root: str):
+    """The bytes a fresh machine config holds, as the hook and install.sh write them.
+
+    Read off the hook's ``adlc_ss_scaffold='...'`` assignment under ``root``;
+    the write adds one newline. ``None`` when the hook is missing or its
+    assignment is not that one single-quoted word, so the check does not skip.
+    """
+    try:
+        with open(os.path.join(root, *_SCAFFOLD_SOURCE), "rb") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    if text.count(_SCAFFOLD_OPEN) != 1:
+        return None
+    body = text.split(_SCAFFOLD_OPEN, 1)[1]
+    if b"'" not in body:
+        return None
+    return body.split(b"'", 1)[0] + b"\n"
+
+
+def _is_untouched_scaffold(path: str, root: str) -> bool:
+    """True when the file at ``path`` is byte for byte the config scaffold."""
+    scaffold = _config_scaffold(root)
+    if scaffold is None:
+        return False
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(len(scaffold) + 1) == scaffold
+    except OSError:
+        return False
+
+
 def check_pyyaml(profile: Profile):
     """Is PyYAML importable in the interpreter that parses the ADLC config?
 
@@ -592,11 +973,16 @@ def check_pyyaml(profile: Profile):
     interpreter THE RULE selects, and says when the venv is being bypassed
     because it has no PyYAML of its own.
 
-    **SKIP has one shape only**: no delegate venv *and* no config file at
-    either path — there is nothing on this machine for PyYAML to read, and a
-    red row for a parser that would parse nothing teaches operators to ignore
-    the verdict. The moment a config exists, or a venv does, the check is live
-    again.
+    **SKIP has two shapes**, both with no delegate venv and no project
+    config: no machine config either, or a machine config that is byte for
+    byte the delegation-off scaffold install.sh and the plugin's SessionStart
+    hook write. The hook writes that file on every plugin machine, and a fresh
+    Mac's system ``python3`` has no PyYAML, so without the second shape the
+    plugin route's first ``adlc doctor`` would FAIL (REQ-669 AC-1). Read
+    without PyYAML, the scaffold changes nothing: delegation stays off and the
+    forge stays unconfigured, which is what it says. A red row for a parser
+    with nothing to change teaches operators to ignore the verdict. A project
+    config, an edited machine config, or a venv makes the check live again.
 
     The probe is a subprocess, never an import here — this module must load on
     a machine that has no PyYAML at all (LESSON-395) — and it is bounded, so a
@@ -616,17 +1002,37 @@ def check_pyyaml(profile: Profile):
             f"{machine_cfg} and {project_cfg})",
             "",
         )
+    if state == "absent" and configs == [machine_cfg] \
+            and _is_untouched_scaffold(machine_cfg, profile.repo_root):
+        return (
+            Result.SKIP,
+            f"{machine_cfg} is the unedited delegation-off scaffold install.sh and the "
+            f"plugin's SessionStart hook write, with no project config at {project_cfg} "
+            "and no delegate venv: read without PyYAML it sets nothing. Editing that file, "
+            "or adding a project config, makes this check live",
+            "",
+        )
 
     # The fix has to be correct for the CASE (BR-5). `install.sh
     # --with-delegation` creates or refreshes the venv, which is what pins
     # PyYAML at the version the toolkit tests against. The retired alternative,
     # `python3 -m pip install --user 'pyyaml>=6.0'`, was neither: pip refuses
     # `--user` inside a venv, and outside one it bypasses the `==6.0.3` pin.
-    installer = os.path.join(profile.repo_root, "install.sh") + " --with-delegation"
+    # On the plugin route install.sh is not the fix: run from the plugin's copy
+    # it would symlink that copy into ~/.claude and double the install (BR-11).
+    # The interpreter gets the pinned requirement directly instead, with
+    # `--user` only outside the venv. A failed route detection gets the same,
+    # since it may be the plugin route.
+    if not _install_sh_ok(profile):
+        user = "" if interp == os.path.join(venv, "bin", "python3") else " --user"
+        installer = "%s -m pip install%s %s" % (
+            _q(interp), user, _q(_pyyaml_requirement(profile.repo_root)))
+    else:
+        installer = _q(os.path.join(profile.repo_root, "install.sh")) + " --with-delegation"
     if state == "no-pyyaml":
         pip_fix = "%s install -r %s" % (
-            os.path.join(venv, "bin", "pip"),
-            os.path.join(profile.repo_root, "tools", "delegate", "requirements.txt"),
+            _q(os.path.join(venv, "bin", "pip")),
+            _q(os.path.join(profile.repo_root, "tools", "delegate", "requirements.txt")),
         )
         fix = "%s   # or: %s" % (pip_fix, installer)
         note = (" (falling back from %s, which has no PyYAML — a venv created "
@@ -685,11 +1091,19 @@ def check_delegate_gate(profile: Profile):
         # adlc-read not on PATH. Only a FAIL if config asked for delegation
         # (misconfigured); otherwise it is the expected not-opted-in posture.
         if _config_enabled(profile):
+            if not _install_sh_ok(profile):
+                # The plugin ships no delegation CLIs, and install.sh from its
+                # copy would double the install, so the config edit is the fix.
+                # A failed route detection may be the plugin route.
+                fix = ("set delegate.enabled: false in ~/.claude/adlc/config.yml   "
+                       "# the adlc plugin does not install the delegation CLIs")
+            else:
+                fix = ("./install.sh --with-delegation   # installs the delegate shims, "
+                       "or set delegate.enabled: false in ~/.claude/adlc/config.yml")
             return (
                 Result.FAIL,
                 "delegation config sets enabled: true but adlc-read is not on PATH",
-                "./install.sh --with-delegation   # installs the delegate shims, "
-                "or set delegate.enabled: false in ~/.claude/adlc/config.yml",
+                fix,
             )
         return Result.SKIP, "delegation not enabled (adlc-read not installed)", ""
     # rc is None — the gate probe itself failed.
@@ -725,15 +1139,15 @@ def check_counters(profile: Profile):
                 # Use strerror, not str(exc): OSError.__str__ embeds the absolute
                 # filename, which leaks into the report/CI logs (LESSON-021).
                 problems.append(f"{name} unreadable ({exc.strerror or 'I/O error'})")
-                fixes.append(f"ls -l '{path}'")
+                fixes.append("ls -l %s" % _q(path))
                 continue
             if not raw.isdigit():
                 problems.append(f"{name} is not numeric ('{raw}')")
-                fixes.append(f"printf '<correct-next-number>' > '{path}'")
+                fixes.append("printf '<correct-next-number>' > %s" % _q(path))
         # A counter that does not exist yet is fine (first run) — not flagged.
         if os.path.isdir(lock) and _lock_is_stale(lock):
             problems.append(f"{name} has a stale lock dir")
-            fixes.append(f"rmdir '{lock}'")
+            fixes.append("rmdir %s" % _q(lock))
     if problems:
         return Result.FAIL, "; ".join(problems), " && ".join(fixes)
     return Result.PASS, "global counters present, numeric, no stale locks", ""
@@ -760,7 +1174,7 @@ def check_launchctl(profile: Profile):
     return (
         Result.FAIL,
         f"LaunchAgent {label} is not loaded",
-        f"launchctl bootstrap gui/$(id -u) '{plist}'",
+        "launchctl bootstrap gui/$(id -u) %s" % _q(plist),
     )
 
 
@@ -790,10 +1204,19 @@ def check_claude_code(profile: Profile):
 # --- registry (report order) ----------------------------------------------
 
 REGISTRY = [
-    Check("skills-symlink", check_skills_symlink),
-    Check("agents-symlink", check_agents_symlink),
-    Check("toolkit-clean", check_toolkit_clean),
-    Check("path-shims", check_path_shims),
+    # Reports the route every later check is gated on, so it runs first (ADR-7).
+    Check("plugin-route", check_plugin_route),
+    # The four checks of the install.sh symlink install SKIP on the plugin route.
+    Check("skills-symlink", check_skills_symlink,
+          applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
+    Check("agents-symlink", check_agents_symlink,
+          applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
+    # Runs on both routes: either one can find the other installed (BR-11).
+    Check("doubled-install", check_doubled_install),
+    Check("toolkit-clean", check_toolkit_clean,
+          applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
+    Check("path-shims", check_path_shims,
+          applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
     Check("gh-present", check_gh_present),
     # `forge` supersedes the standalone gh-auth check (REQ-520 ADR-4): it folds the
     # gh auth probe in for provider github and handles azure-devops auth too.

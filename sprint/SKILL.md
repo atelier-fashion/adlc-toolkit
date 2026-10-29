@@ -10,7 +10,7 @@ You are a sprint orchestrator that launches multiple `/proceed` pipelines in par
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -26,9 +26,9 @@ Target REQs: $ARGUMENTS
 ## Prerequisites
 
 Before proceeding, verify:
-1. `.adlc/context/project-overview.md` exists — run `/init` if missing
-2. `.adlc/context/architecture.md` exists — run `/init` if missing
-3. `.adlc/context/conventions.md` exists — run `/init` if missing
+1. `.adlc/context/project-overview.md` exists — run `/init` (`/adlc:init` on the plugin install) if missing
+2. `.adlc/context/architecture.md` exists — run `/init` (`/adlc:init` on the plugin install) if missing
+3. `.adlc/context/conventions.md` exists — run `/init` (`/adlc:init` on the plugin install) if missing
 
 ## Instructions
 
@@ -49,17 +49,29 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
 
 **If the engine is `workflow`:**
 
-1. **Resolve the script path** with the standard two-level fallback (ADR-2): prefer the consumer-vendored copy, fall back to the toolkit copy.
-   - First choice: `.adlc/workflows/adlc-sprint.workflow.js` (present after the consumer ran `/init`).
-   - Fallback: `~/.claude/skills/workflows/adlc-sprint.workflow.js` (always present via the skills symlink).
-   - Use whichever path exists; if neither exists, report the missing script and fall back to `legacy`.
+1. **Resolve the script path and the agent namespace** in one fence (REQ-669 ADR-1, ADR-6). The script path keeps the two-level fallback (ADR-2): the consumer-vendored copy first, then the toolkit copy under ToolkitRoot, which is the clone on the symlink install and the plugin's own copy on the plugin install. The namespace comes from this skill's text, because the workflow runtime has no filesystem and cannot tell the routes apart: on the plugin install Claude Code rewrites `${CLAUDE_PLUGIN_ROOT}` to the plugin's path before the fence runs, and the toolkit's agents are registered as `adlc:<name>`; on the symlink install the token reaches the shell unsubstituted, expands empty, and the agents keep their bare names. A vendored engine from before REQ-669 ignores `args.agentNamespace` and dispatches bare names, which on the plugin install silently run as generic agents. So on the plugin install a vendored copy that lacks `agentTypeFor` is passed over for the toolkit copy, with a warning; on the symlink install bare names are right, and the vendored copy still wins.
+   ```sh
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   sprint_plugin_root="${CLAUDE_PLUGIN_ROOT}"
+   if [ -n "$sprint_plugin_root" ]; then sprint_ns="adlc:"; else sprint_ns=""; fi
+   sprint_script=missing
+   if [ -f .adlc/workflows/adlc-sprint.workflow.js ]; then sprint_script=.adlc/workflows/adlc-sprint.workflow.js; fi
+   if [ "$sprint_script" != missing ] && [ -n "$sprint_ns" ] && ! command grep -q agentTypeFor "$sprint_script"; then echo "WARNING: stale workflow engine: .adlc/workflows/adlc-sprint.workflow.js predates agent namespacing (no agentTypeFor), so on the plugin install it would dispatch bare agent names that run as generic agents; this run uses the plugin's copy instead. Run /template-drift to see what else is stale."; sprint_script=missing; fi
+   if [ "$sprint_script" = missing ] && [ -f "$ADLC_TOOLKIT_ROOT/workflows/adlc-sprint.workflow.js" ]; then sprint_script="$ADLC_TOOLKIT_ROOT/workflows/adlc-sprint.workflow.js"; fi
+   echo "SCRIPT_PATH=$sprint_script"
+   echo "AGENT_NAMESPACE=$sprint_ns"
+   ```
+   - `WARNING: stale workflow engine: ...`: relay the line to the user as printed, then go on with the `SCRIPT_PATH` printed after it, as below.
+   - `SCRIPT_PATH=missing`: report the missing script and fall back to `legacy`.
+   - Otherwise use the printed `SCRIPT_PATH` as `scriptPath`, and the printed `AGENT_NAMESPACE` value as `args.agentNamespace`: `"adlc:"`, or `""` when nothing follows the `=`. Copy both from the output; do not infer the route yourself. The engine accepts only `""` or `"adlc:"`, logs anything else and falls back to bare names, so a wrong value can never reach an `agentType`.
 2. **Invoke the `Workflow` tool** with the resolved script path and the documented args. The script itself is the orchestration engine (ADR-3) — this dispatcher is the only place the `Workflow` tool is invoked:
    ```
    Workflow({
-     scriptPath: <resolved path from step 1>,
+     scriptPath: <SCRIPT_PATH from step 1>,
      args: {
        reqs: <normalized REQ-id list from $ARGUMENTS, with --workflow stripped>,
        integrationBranch: <resolved integration branch for the primary repo, by /proceed step 4's rule: branches.integration from .adlc/config.yml when declared, else "staging" in two-branch repos, else "main">,
+       agentNamespace: <AGENT_NAMESPACE from step 1: "adlc:" or "">,
        answers: {}
      }
    })
@@ -84,11 +96,12 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
      args: {
        reqs: <same REQ-id list>,
        integrationBranch: <same hint>,
+       agentNamespace: <same namespace>,
        answers: { '<blocked-REQ-id>': '<the user's reply>' }
      }
    })
    ```
-   Keep `reqs` and `integrationBranch` identical to the prior run, and put the reply under the blocked REQ's id (answer multiple blocked REQs by adding more keys). The engine references `args.answers` **only** inside the blocked REQ's halt-prone agent prompts, so on resume only that REQ diverges from the journal cache and advances past its halt: every untouched REQ — and every already-`merged` REQ — replays from cache with **no re-executed side effects** (no recreated worktree, no re-implemented task, no double-merge). Re-inspect the returned `{results}` exactly as in step 3, repeating the surface→answer→resume loop until no REQ is `blocked`. (Steps 1–6 below do **not** apply to the workflow engine — they are the legacy engine.)
+   Keep `reqs`, `integrationBranch` and `agentNamespace` identical to the prior run (a different namespace changes every dispatch's `agentType`, so the resume would not replay the prior run like-for-like), and put the reply under the blocked REQ's id (answer multiple blocked REQs by adding more keys). The engine references `args.answers` **only** inside the blocked REQ's halt-prone agent prompts, so on resume only that REQ diverges from the journal cache and advances past its halt: every untouched REQ — and every already-`merged` REQ — replays from cache with **no re-executed side effects** (no recreated worktree, no re-implemented task, no double-merge). Re-inspect the returned `{results}` exactly as in step 3, repeating the surface→answer→resume loop until no REQ is `blocked`. (Steps 1–6 below do **not** apply to the workflow engine — they are the legacy engine.)
 
 5. **Orchestrator `blocker-cleared` auto-resume (REQ-485 BR-8 — primary engine per OQ-1 default).** A REQ held by a Phase-8 trial-merge conflict against an ahead REQ is **not** resumed by a user reply — it is resumed by the **orchestrator** once it merges that blocker *within the run*. This is a distinct resume channel from `args.answers` (a user answer): the script threads an orchestrator-generated `blocker-cleared` signal for the held REQ. The held workflow REQ does NOT self-resume — it already returned `{state:'blocked'}` and the post-merge unblock pass (in `adlc-sprint.workflow.js`) drives its resume by relaunching the SAME script via `resumeFromRunId` carrying the cleared signal in `args` (e.g. `args.blockerCleared[<held-REQ-id>] = <blocker-id>`, parallel to `args.answers`). Like `args.answers`, the signal is injected **surgically** — only into the held REQ's Phase-8 / halt-prone path — so every untouched and already-`merged` REQ replays byte-identical from the journal cache (no recreated worktree, no double-merge). The unblock pass rebases the held REQ's own worktree first; a clean rebase resumes it (it re-runs the now-passing trial-merge gate and merges, clearing its `blockers` entry — BR-11), a conflicting rebase aborts non-mutatingly and re-halts `{state:'blocked'}` with the materialized conflict files (BR-4), retry-bounded (BR-10). Held REQs on one blocker resume in REQ-483's deterministic order, one at a time (BR-6). See the "Self-healing serialization" section below for the cross-engine behavior contract.
 
@@ -145,7 +158,9 @@ Ask the user to confirm the sprint lineup before proceeding.
 
 ### Step 3: Launch Parallel Pipelines
 
-For each eligible REQ, launch a **pipeline-runner** agent (defined in `~/.claude/agents/`) using the Agent tool with `run_in_background: true`.
+For each eligible REQ, launch a **pipeline-runner** agent (defined in `$ADLC_TOOLKIT_ROOT/agents/`) using the Agent tool with `run_in_background: true`.
+
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
 
 **Agent prompt for each REQ** (the orchestrator computes `<absolute-path>` as `<repo-path>/.worktrees/REQ-xxx` and substitutes it verbatim):
 
@@ -181,7 +196,7 @@ Background `pipeline-runner` agents send an automatic notification when they fin
 
 2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.adlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
 
-   **Verify the agent's terminal-state claim before accepting it.** A pipeline-runner's final report MUST lead with one of `{merged, pr-ready, blocked, failed}` (see `~/.claude/agents/pipeline-runner.md` Terminal state contract). The orchestrator MUST NOT trust the claim at face value:
+   **Verify the agent's terminal-state claim before accepting it.** A pipeline-runner's final report MUST lead with one of `{merged, pr-ready, blocked, failed}` (see `$ADLC_TOOLKIT_ROOT/agents/pipeline-runner.md` Terminal state contract). The orchestrator MUST NOT trust the claim at face value:
    - For `merged` and `pr-ready` claims: run `adlc_forge_pr_view <prUrl> --json state,mergedAt` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; forge-neutral per REQ-520) against every touched-repo PR before updating the dashboard.
      - If the agent claimed `merged` but the PR is `OPEN`: treat the claim as `pr-ready` and merge the PR per Step 5.
      - If the agent claimed `pr-ready` but the PR is `MERGED`: just move on (agent was conservative, no harm done).
@@ -221,7 +236,7 @@ Completed: 0/3 | Blocked: 0 | Running: 3
 
 **Ordering enforcement (REQ-483).** When `/manifest`'s verdict (Step 2 pre-flight) shows footprint overlaps in the batch, merge the overlapping REQs in its **deterministic order** (earliest-published first, lower REQ tiebreak — BR-8) instead of as-they-complete, and gate **each** merge: `git -C <worktree> fetch origin <integrationBranch>` (refresh the tip), source `partials/trial-merge.sh`, then `adlc_trial_merge "<worktree>" origin/<integrationBranch>` before `adlc_forge_pr_merge`. **rc=1** → hold that REQ (`blocked`, surfaced for rebase); **rc=0** → merge; **rc=2/3** → `failed` (setup error, not a conflict). For overlapping **single-repo** REQs (whose pipeline-runners would otherwise self-merge as they complete), the orchestrator MUST hold the later-ranked one until the earlier merges — do not let both self-merge, or both could pass a stale-tip gate and collide at merge. Non-overlapping REQs still merge as they complete (parallel-by-default). Serializes **merges**, never implementation; computed in orchestrator code, not delegated (BR-10).
 
-**Who actually performs the merge depends on REQ topology** (see `~/.claude/agents/pipeline-runner.md` Phase 8):
+**Who actually performs the merge depends on REQ topology** (see `$ADLC_TOOLKIT_ROOT/agents/pipeline-runner.md` Phase 8):
 
 - **Single-repo REQ** (one touched repo in `pipeline-state.repos`): the pipeline-runner agent already merged its own PR in its Phase 8 and reports `merged`. The orchestrator's job here is to **verify** (per Step 4 verify gate) and move on — do NOT re-merge. If verification shows the PR is still `OPEN` despite the `merged` claim, fall through to the cross-repo flow below and merge it yourself.
 - **Cross-repo REQ** (multiple touched repos): the pipeline-runner stops at Phase 7 and reports `pr-ready`. The orchestrator owns merge sequencing and walks the per-REQ `mergeOrder` itself.

@@ -1,0 +1,13 @@
+{
+  "name": "adlc-toolkit",
+  "owner": {
+    "name": "Atelier Fashion"
+  },
+  "description": "Fixture marketplace for the plugin-manifest lint tests.",
+  "plugins": [
+    {
+      "name": "adlc",
+      "source": "./"
+    }
+  ]
+}

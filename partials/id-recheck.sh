@@ -1,7 +1,8 @@
 # partials/id-recheck.sh — pre-push / PR-time id collision recheck (REQ-518 BR-4, BR-8).
 #
-# Source this partial, then call adlc_recheck_id WITHIN THE SAME fenced block:
-#   if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
+# Source this partial, then call adlc_recheck_id WITHIN THE SAME fenced block, after the
+# fence's ToolkitRoot root line (conventions.md "Bash in skills"):
+#   if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-recheck.sh"; fi
 #   if ! adlc_recheck_id req REQ-518; then
 #     echo "halt: rename before pushing (see message above)" >&2
 #     exit 1
@@ -91,8 +92,11 @@ adlc_recheck_id() {
   if ! command -v adlc_remote_high >/dev/null 2>&1; then
     if [ -n "$_ADLC_RECHECK_DIR" ] && [ -f "$_ADLC_RECHECK_DIR/id-alloc.sh" ]; then . "$_ADLC_RECHECK_DIR/id-alloc.sh"; fi
   fi
-  if ! command -v adlc_remote_high >/dev/null 2>&1; then
-    if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+  # The fallback operand reads a bare $HOME: with neither ADLC_TOOLKIT_ROOT nor HOME
+  # set it is not reached (a `set -u` caller would abort on it), and the check below
+  # returns 2.
+  if ! command -v adlc_remote_high >/dev/null 2>&1 && { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/id-alloc.sh ]; }; then
+    if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/id-alloc.sh"; fi
   fi
   if ! command -v adlc_remote_high >/dev/null 2>&1; then
     echo "adlc_recheck_id: cannot source id-alloc.sh (kind mappers)" >&2
@@ -149,7 +153,10 @@ adlc_recheck_id() {
   # worktree the parent-of-toplevel default is the worktree container, which narrows the
   # namespace this recheck is supposed to cover. adlc_main_worktree lives in id-alloc.sh;
   # source it if the caller has not (both partials are always vendored together).
-  if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+  # Same $HOME guard as above; id-alloc.sh is already loaded by this point.
+  if [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/id-alloc.sh ]; then
+    if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/id-alloc.sh"; fi
+  fi
   adlc_rc_root="${ADLC_REPOS_ROOT:-$(cd "$(adlc_main_worktree)/.." 2>/dev/null && pwd)}"
   [ -n "$adlc_rc_root" ] || adlc_rc_root="."
 

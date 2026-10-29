@@ -32,6 +32,294 @@ PRs (`atelier-fashion/adlc-toolkit`).
 
 ## [Unreleased]
 
+A second install route: the toolkit as a Claude Code plugin that works on a machine
+that never ran `install.sh` (REQ-669). The symlink live install stays, for contributors
+and the maintainer. One skill text serves both routes. The plugin version for this
+release, and the Claude directory submission reference, are added when the release
+is cut per `RELEASING.md`.
+
+### Added
+
+- **The Claude Code plugin route (REQ-669).** This repo is both a marketplace and
+  the plugin. A user installs with two commands:
+
+  ```bash
+  claude plugin marketplace add atelier-fashion/adlc-toolkit
+  claude plugin install adlc@adlc-toolkit
+  ```
+
+  `.claude-plugin/plugin.json` names the plugin `adlc` and pins `version` to `VERSION`,
+  so users move only on a release. It exposes all 17 skills with `"skills": "./"`, and
+  all 19 agents through the default `agents/` scan, since it has no `agents` field.
+  `.claude-plugin/marketplace.json` names the marketplace `adlc-toolkit` and lists one
+  plugin, `{ name: "adlc", source: "./" }`. On this route skills are `/adlc:<skill>`
+  and agents are `adlc:<name>`. There is no top-level `bin/`, because the claude.ai
+  sync path rejects one. The loader behavior this rests on was probed on Claude Code
+  2.1.258. `verification.md` in the REQ-669 spec records the status of each claim, and
+  the README's loader table marks every claim that is not verified.
+- **ToolkitRoot: one root line, four arms.** Every toolkit-owned read in a skill,
+  phase or agent fence now goes through `$ADLC_TOOLKIT_ROOT`. One canonical root line,
+  pinned byte-exact, sets it at the top of each fence that reads it. Its arms run in
+  this order:
+  1. the `${CLAUDE_PLUGIN_ROOT}` Claude Code substitutes into plugin skill text;
+  2. `$HOME/.claude/skills` when the symlink install is present;
+  3. the plugin pointer file `~/.claude/adlc/plugin-root`;
+  4. the literal `$HOME/.claude/skills`, which fails loudly.
+
+  The guarded partial source keeps REQ-610's shape. Only the `else` operand changes,
+  to `"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"`, and `.adlc/partials/` is still read
+  first. Partials that need a toolkit file read
+  `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/…"`. That covers `lane-check.sh`,
+  `forge.sh`, `delegate-tools-path.sh`, `ethos-include.sh`, `intake.sh`, and the
+  partial-to-partial sources in `id-recheck.sh` (of `id-alloc.sh`) and
+  `emit-step-telemetry.sh` (of `delegate-tools-path.sh`). The
+  Python tools derive their root from their own real path through the new
+  `tools/adlc/toolkit_root.py`, identity-checked. It replaces the `~/.claude/skills`
+  fallbacks in `forge_config.py`, `lane_check.py`, `renumber.py` and `checks.py`, and
+  `adlc renumber` now fails loudly when the recheck partial is missing, where it used
+  to report no collision. `id-alloc.sh` creates `~/.claude` before taking its lock,
+  so a fresh machine allocates ids without `install.sh`.
+- **A SessionStart hook and a CLI shim.** `hooks/hooks.json` runs
+  `sh "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh"`. The script validates the
+  plugin root before any write, then does three things. It writes the pointer file.
+  It scaffolds `~/.claude/adlc/config.yml` with delegation off, only when nothing is
+  there, byte-identical to `install.sh`'s scaffold (pinned by
+  `tools/adlc/tests/test_config_scaffold_parity.py`). And it appends
+  `<root>/scripts` after the user's PATH through `CLAUDE_ENV_FILE`, once. It always
+  exits 0. `scripts/adlc` is a POSIX shim that runs the stdlib-only `adlc` CLI from
+  the plugin's copy. `partials/tests/session-start.test.sh` covers the hook under
+  bash, zsh, `/bin/sh` and dash.
+- **`adlc doctor` knows the route.** `Profile.route` is `plugin` when the running copy
+  is in the plugin cache or is a root `installed_plugins.json` records (a local-path
+  marketplace runs from its source), and `symlink` otherwise. It is printed on the
+  `profile:` line. Two checks are new:
+  - **`plugin-route`** runs first. It reports the route and version. On the plugin
+    route it checks that this is the copy Claude Code loads, that the pointer file
+    names it, and that `scripts/adlc` is executable and, inside a Claude Code
+    session, on PATH.
+  - **`doubled-install`** fails when the symlink install and the plugin are both
+    installed. It names which copy bare `/spec` and `/adlc:spec` reach, and prints one
+    fix per way out: `claude plugin uninstall adlc@adlc-toolkit`, or removing the two
+    links (and `~/bin/adlc` when it runs the clone).
+
+  An install record the doctor cannot read is `unknown`, which fails, never passes
+  (LESSON-581). `skills-symlink`, `agents-symlink`, `toolkit-clean` and `path-shims`
+  SKIP on the plugin route with a notice. A fix that runs `install.sh` is printed on
+  the symlink route only: run from the plugin's copy it would double the install. So
+  on the plugin route `pyyaml` prints a pinned `pip install --user`, and
+  `delegate-gate` prints the config edit. Tests are in
+  `tools/adlc/tests/test_plugin_route.py`.
+- **Agent dispatch on both routes.** Every step that dispatches a toolkit agent
+  carries one canonical sentence, kept once in conventions.md "Agent dispatch
+  patterns". It tells the model to use the spelling the Agent tool lists, bare or
+  `adlc:<name>`, and when neither is listed, to name the missing agent and run its
+  checklist inline from `$ADLC_TOOLKIT_ROOT/agents/<name>.md`. The workflow engine
+  takes `args.agentNamespace` (`"adlc:"` on the plugin route), and every `agentType`
+  goes through the new pure `agentTypeFor(name, ns)`.
+- **`/init` and `/template-drift` read the running install.** `/init` copies from
+  ToolkitRoot. `/template-drift` drops its toolkit-reaching `!` line. On the plugin
+  route it names its baseline `adlc plugin <version>` from the cache copy's
+  `plugin.json`, and it reports `unverified-baseline` when that file cannot be read.
+  The symlink route keeps BUG-204's checks unchanged.
+- **Five `tools/lint-skills` checks.**
+  - `plugin-manifest`: `plugin.json`'s version equals `VERSION`, every skill and
+    agent is exposed, the marketplace has exactly one matching entry, there is no
+    top-level `bin/`, and no JSON object repeats a key.
+  - `toolkit-root-line`: every fence that reads `$ADLC_TOOLKIT_ROOT` carries the
+    canonical root line, byte-exact, above the first read.
+  - `dispatch-fallback`: every dispatching step carries the canonical sentence.
+  - `toolkit-path`: no literal `~/.claude/skills` or `~/.claude/agents` read path on
+    the plugin-reachable surface, outside one exception list.
+  - `builtin-collision`: no instruction-style bare `/init`, `/status` or `/review`
+    (`BUILTIN_COLLISION_NAMES`) on a line without `/adlc:<name>`. Its surface is
+    `toolkit-path`'s plus the shipped families the e2e audit reads. A heading, a table
+    cell or another noun mention does not fire.
+- **`RELEASING.md`**, the maintainer's release sequence: the `VERSION` bump, the
+  manifest version, the CHANGELOG line with the plugin version, the annotated tag,
+  the `claude plugin update` check, and the Claude directory submission through
+  claude.ai/directory/manage, with where its reference is recorded.
+
+### Changed
+
+- **Skill names Claude Code also owns are printed in both spellings (TASK-133).**
+  Claude Code 2.1.258 has a built-in `init` and `status`, and its bundled
+  `code-review` skill has the alias `review`. On the plugin route a bare `/init` ran
+  Claude Code's CLAUDE.md generator, not the toolkit's. Every line that tells the user
+  or the model to run one of these now prints both spellings on that line, such as
+  "`/init` (`/adlc:init` on the plugin install)". That covers the Ethos and template
+  `!` lines, the "Run `/init` first" prerequisites, the delegation refusal message,
+  `/reflect`'s and `/validate`'s "Ready for `/review`", and the doctor's forge
+  remediation. conventions.md, "Skill names Claude Code also owns", gives the three
+  forms. The skills are not renamed, and the other 14 names stay bare. ADR-5 in the
+  REQ-669 architecture records the amendment.
+- **The README leads with the plugin install.** The symlink install moves under
+  "Contributing and live install". `.adlc/context/project-overview.md` and
+  `.adlc/context/architecture.md` now describe both install routes. The install
+  layer is versioned on the plugin route, and those docs no longer say otherwise.
+- **The retired guarded-source operand.** `unguarded-source` accepts only the new
+  operand. The REQ-610 operand, `else . ~/.claude/skills/partials/<name>.sh`, is a
+  finding on every walked surface, partials included, and its message says the `else`
+  arm is what changes.
+- **`ASSUME-005` revisited.** It still holds, through ToolkitRoot. On a plugin-only
+  machine the substituted text and the pointer arm are what make it hold.
+
+### Fixed
+
+Found by the REQ-669 Phase 5 review, before this release shipped.
+
+- **`adlc doctor` after a plugin uninstall.** A well-formed install record with no
+  adlc entry reads `absent`. The cache copies an uninstall leaves behind are named as
+  leftovers, not reported as a conflict, and a copy carrying `.orphaned_at` is
+  skipped.
+- **The `pyyaml` check on the unedited scaffold.** It SKIPs when there is no delegate
+  venv, no project config, and a machine config byte for byte the delegation-off
+  scaffold, which sets nothing when read without PyYAML. A project config or an
+  edited machine config still FAILs on a `python3` without PyYAML.
+- **`CLAUDE_CONFIG_DIR`.** When it is an absolute path, the doctor reads the plugin
+  cache, `installed_plugins.json` and `known_marketplaces.json` under it instead of
+  `~/.claude`. A contributor clone that is both the symlink target and a recorded
+  local-path plugin root stays on the symlink route, and `doubled-install` still
+  reports it.
+- **Quoted fix commands and a strict install key.** Every fix the doctor prints
+  quotes its paths, interpreter and install key with `shlex.quote`; the PATH line
+  keeps `$PATH` expanding. An install key that is not `adlc@<marketplace>`, with a
+  kebab-case marketplace, makes the install record `unknown`.
+- **No `install.sh` hint when route detection fails.** `plugin-route` FAILs and says
+  the route could not be told, and no fix prints `install.sh`, which would double a
+  plugin install.
+- **`adlc renumber`'s recheck.** It runs with `ADLC_TOOLKIT_ROOT` set to this
+  toolkit, and an exit other than 0 or 1 refuses the renumber instead of reading as
+  no collision.
+- **The `forge_config` and `lane_check` loader fallback.** A vendored copy with no
+  loader beside it falls back to `$ADLC_TOOLKIT_ROOT/tools/delegate/_machine_config.py`,
+  identity-checked by that root's `toolkit_root.py`. The missing-loader hint names
+  `install.sh` on the symlink route only.
+- **`toolkit-path` reads presets and templates.** `presets/*` and `templates/*` are on
+  its surface, and a `#` line there is the user's instruction, so the comment
+  exception does not reach them. The iOS preset's copy line now reads
+  `cp "$ADLC_TOOLKIT_ROOT/presets/ios-firebase-cloudrun.yml" .adlc/config.yml`, as
+  the config template's does.
+- **`toolkit-path` spellings.** The `$HOME`, `${HOME}` and `${HOME:-}` forms of
+  `~/.claude/agents` are flagged, and so is a Python path joined from parts
+  (`".claude", "skills"`, `".claude" / "agents"`, `".claude/skills"`).
+- **The `tools/adlc/checks.py` exception has a guard.** It stays whole-file, and a
+  test holds every symlink spelling and `.claude`/`skills` join in the committed file
+  to the four functions that inspect the symlink install. ADR-2 replaced the
+  `_partial_path` fallback in that same file.
+- **`builtin-collision` reads `README.md` and `RELEASING.md`.** `RELEASING.md`'s two
+  re-sync steps and the re-sync entry below now print "`/init` (`/adlc:init` on the
+  plugin install)". `CHANGELOG.md` stays off the surface, because its released
+  entries are a record.
+- **`plugin-manifest`.** `cc-plugin-` is a reserved name prefix, as the requirement
+  says, and a top-level `bin` file or symlink is rejected like a `bin/` directory.
+  A test checks that README.md carries both install commands verbatim and that the
+  names they type are the manifests' `name`s (BR-1).
+- **`dispatch-fallback` on `partials/*.md`.** The check already walked them; a test
+  now pins it.
+- **One walker for `toolkit-path` and `builtin-collision`** (`_scan_surfaces`), with
+  no change to what either reports.
+- **Delegation refusals name their route.** The `ADLC_READ_BIN` refusals in the
+  skills, `agents/delegate-pre-pass.md`, `partials/delegate-gate.md` and
+  conventions.md, and the missing-PyYAML line, say "install.sh --with-delegation
+  (symlink install; the plugin ships no delegation CLIs)".
+- **The doctor's bash probes quote the partial path.** `forge` and `delegate-gate`
+  source their partial through `shlex.quote`, so a checkout path holding `'` is
+  sourced as written and runs nothing else.
+- **The plugin-root pointer names only a plugin-cache copy.** The SessionStart hook
+  writes `~/.claude/adlc/plugin-root`, with the resolved path, only when the root sits
+  strictly below `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/`. A
+  `--plugin-dir` checkout or a local-path marketplace leaves the pointer as it was, so
+  other sessions never source partials from a working tree. `adlc doctor` reports the
+  pointer for such a root instead of failing on it.
+- **The SessionStart hook's other writes.** A root holding `:` is rejected. The
+  config scaffold is created with a no-clobber hard link, so it never replaces a file
+  another writer made. A PATH marker line for another root is replaced in place, and
+  duplicates collapse to one.
+- **`lane-check` will not run an engine it is checking.** When the engine's directory
+  resolves inside the worktree under check, the check exits 2 with `check-error`.
+- **`set -u` with HOME unset.** `emit-step-telemetry.sh`, `id-recheck.sh`,
+  `ethos-include.sh` and `lane-check.sh` no longer abort a `set -u` caller.
+- **`/sprint` on the plugin route passes over a stale vendored engine.** A vendored
+  `adlc-sprint.workflow.js` with no `agentTypeFor` is replaced by
+  `$ADLC_TOOLKIT_ROOT`'s copy, with a warning naming `/template-drift`.
+- **`agentNamespace` is a closed allowlist**, `""` or `"adlc:"`; anything else becomes
+  `""` and is logged.
+- **The superseded-lesson lookups run byte-wise.** `/review`'s and `/spec`'s lookup
+  runs under `LC_ALL=C`, so a lesson starting with a UTF-8 BOM is found under a UTF-8
+  locale (macOS awk otherwise never matches the BOM strip).
+- **`builtin-collision` knows "re-runs".** "until it re-runs `/init`" is an
+  instruction, like "re-run `/init`".
+- **End-to-end sandbox.** GitHub access is a scoped `GH_TOKEN` only, and later cases
+  get no GitHub credentials. A suite that exits 0 but prints `FAIL` lines is a FAIL.
+  `plugin-sandbox.selftest.sh` tests the harness itself.
+- **Test-harness fixes.** The intake AC-6 case counts its subshell's failures and
+  stubs `adlc-read`, and the session-start doctor case sets
+  `PYTHONDONTWRITEBYTECODE=1`.
+
+### Re-sync vendored copies
+
+⚠️ **`/template-drift` will report vendored copies as `stale` in every consumer
+project.** That is expected, not a regression. Re-run `/init` (`/adlc:init` on the
+plugin install), or re-sync per file and byte for byte rather than trusting a summary
+(LESSON-465).
+
+- **Partials (`.adlc/partials/*.sh`).** Twelve of thirteen changed; only
+  `delegate-gate.sh` did not.
+  - Executable changes: `delegate-tools-path.sh`, `emit-step-telemetry.sh`,
+    `ethos-include.sh`, `forge.sh`, `id-alloc.sh`, `id-recheck.sh`, `intake.sh` and
+    `lane-check.sh`.
+  - Header comments only: `attribution.sh`, `conflict-bound.sh`, `lesson-check.sh` and
+    `trial-merge.sh`.
+
+  A stale copy of one of the eight keeps working on the symlink route, because its
+  fallback still names `~/.claude/skills`. On the plugin route that path does not
+  exist, so a project that switches to the plugin re-syncs those eight first. On a
+  root that also carries `tools/lint-skills`, `check.sh` reports the retired operand
+  in the stale `emit-step-telemetry.sh` and `id-recheck.sh` until they are re-synced.
+- **Workflow runtime (`.adlc/workflows/`).** `adlc-sprint.workflow.js` (the agent
+  namespace) and its `README.md` changed.
+- **Templates and `ETHOS.md`** did not change. `templates/config-template.yml` changed
+  only in comments, and `/init` copies it only when `.adlc/config.yml` is absent.
+
+### Reconciliation with unmerged REQs (REQ-669 BR-18)
+
+REQ-669 lands without depending on REQ-654 through REQ-666. Whichever lands second
+reconciles:
+
+- **REQ-665** drops its Claude Code manifest in favour of this one. Its BR-6, which
+  keeps the symlink install primary in the README, yields to REQ-669 BR-19. REQ-669
+  made no edit to REQ-665's unmerged branch. If REQ-665's `manifest-parity` check
+  lands, it absorbs `plugin-manifest`, so there is one check, not two.
+- **REQ-654 BR-3** says the REQ-610 fence spelling and its literal `~/.claude/skills`
+  fallback do not change. It yields to REQ-669 BR-5 and BR-13: only the fallback
+  operand changed, and `.adlc/` is still read first.
+- **REQ-666**'s `no-harness-path` check absorbs `toolkit-path` and its exception list.
+  It keeps the ToolkitRoot root line, or replaces it for both routes in one change.
+  Its vendoring of agents into `.adlc/agents/` meets REQ-669 BR-9 if it keeps
+  `$ADLC_TOOLKIT_ROOT/agents/` as the second source.
+- **REQ-648** (draft): BR-10 should read `harness.{version,sha}` from
+  `$ADLC_TOOLKIT_ROOT` on the plugin route. The version comes from `VERSION`. The sha
+  is `-` because the cache copy has no `.git`, though `installed_plugins.json` records
+  a `gitCommitSha`. Its BR-11 "canonical guarded spelling" means the ToolkitRoot
+  spelling.
+
+### Known limitations
+
+- The Agent tool's `subagent_type` and the Workflow tool's `agentType` spellings for
+  plugin agents are not probed. The workflow engine's `adlc:` prefix is inferred from
+  the agent registry, where Claude Code 2.1.258 lists plugin agents as
+  `<plugin>:<agent>`.
+- On a plugin-only machine whose `python3` has no PyYAML, the doctor's `pyyaml` check
+  fails once there is a project config or an edited machine config. With only the
+  hook's unedited scaffold, and no delegate venv, it SKIPs, because read without PyYAML
+  that file sets nothing. Until PyYAML is installed, a written `forge.provider` is not
+  read, and the provider comes from the origin URL.
+- The doctor does not read `enabledPlugins`, so a plugin disabled there still counts
+  as installed.
+- The config scaffold's comment says "scaffolded by install.sh" and suggests
+  `./install.sh --with-delegation` on both routes, because its bytes are pinned to
+  `install.sh`'s. The plugin ships no delegation CLIs, and the README says so.
+
 ## [5.4.0] — 2026-10-27
 
 Two features adapted from Google's Harness² research note, and the close-out gap

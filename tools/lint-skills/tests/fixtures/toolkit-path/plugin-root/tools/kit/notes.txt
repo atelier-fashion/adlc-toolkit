@@ -1,0 +1,1 @@
+Not code (no shebang, no code suffix): ~/.claude/skills is not scanned here.

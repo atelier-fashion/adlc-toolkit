@@ -10,12 +10,12 @@ You are fixing a bug using a streamlined workflow that skips the full spec cerem
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
 - Project config: !`test -s .adlc/config.yml && echo present — read .adlc/config.yml before Step 1 || echo none — single-repo legacy mode`
-- Bug template: !`cat .adlc/templates/bug-template.md || echo No bug template found — run /init to vendor .adlc/templates`
+- Bug template: !`cat .adlc/templates/bug-template.md || echo No bug template found — run /init, or /adlc:init on the plugin install, to vendor .adlc/templates`
 - Conventions: !`cat .adlc/context/conventions.md || echo No conventions found`
 - Existing bugs: !`ls .adlc/bugs/ || echo No bugs directory found`
 
@@ -25,7 +25,7 @@ Bug report: $ARGUMENTS
 
 ## Prerequisites
 
-Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` first."
+Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first."
 
 ## Instructions
 
@@ -33,7 +33,8 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 1. If given a bug description (not a BUG ID), create a bug report:
    - Determine the next BUG ID using the **global** atomic counter file `~/.claude/.global-next-bug` (shared across all repos for unique IDs, mirroring the REQ counter — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the existing `mkdir` lock. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its REQ-416/LESSON-014 rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
      ```bash
-     if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+     ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+     if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-alloc.sh"; fi
      BUG_NUM=$(adlc_alloc_id bug)
      # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — BUG_NUM
      # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
@@ -45,7 +46,8 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
      Note: the legacy per-repo `.adlc/.next-bug` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
    - **Pre-push recheck (BR-4, BR-8).** Before the bug file is committed on a branch for push, re-verify `BUG-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
      ```bash
-     if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
+     ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+     if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-recheck.sh"; fi
      BUG_ID=$(printf 'BUG-%03d' "$BUG_NUM")
      if ! adlc_recheck_id bug "$BUG_ID"; then
        echo "Halting: $BUG_ID collides on the remote — renumber before pushing (see message above)." >&2
@@ -82,7 +84,8 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
    rule — see conventions.md "Bash in skills"):
 
    ```bash
-   if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . ~/.claude/skills/partials/attribution.sh; fi
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . "$ADLC_TOOLKIT_ROOT/partials/attribution.sh"; fi
    # <repo> = the repo whose history to blame (this repo, or a sibling's path from
    # .adlc/config.yml). <primary> = the repo holding .adlc/specs — always the current repo.
    # <file> <start> <end> = one root-cause range from step 4. Repeat per range, per repo.
@@ -241,7 +244,8 @@ A reproduce-then-fix sequence is a contrast (rule 2); name it in `evidence`.
 
 If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the **global** atomic counter `~/.claude/.global-next-lesson` (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock (`~/.claude/.global-next-lesson.lock.d`, shared with `/wrapup` so concurrent `/bugfix` and `/wrapup` runs mutually exclude). Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its LESSON-014 symlink pre-check live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
 ```bash
-if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-alloc.sh"; fi
 LESSON_NUM=$(adlc_alloc_id lesson)
 # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — LESSON_NUM
 # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
@@ -250,13 +254,14 @@ LESSON_NUM=$(adlc_alloc_id lesson)
 `adlc_alloc_id lesson` handles the absent-counter bootstrap scan internally (highest `LESSON-xxx` under `$ADLC_REPOS_ROOT`; lessons are `.md` files so the scan uses `-type f`), the shared `mkdir` lock, and the remote high-water max. Single-machine behavior is unchanged when the remote has no higher allocation (BR-7). Note: the legacy per-repo `.adlc/.next-lesson` counter is **deprecated** and no longer consulted — existing files can be left in place but should not be read or written.
 
 <!-- lesson-write-point -->
-**Write the lesson** now — before the schema check below, which reads the file, and the pre-push recheck, which checks its id against the remote. Use the lesson template (`.adlc/templates/lesson-template.md`, fall back to `~/.claude/skills/templates/lesson-template.md`). Filename format is `LESSON-xxx-slug.md` only — no date prefixes, no bare-numeric prefixes — so the file is `.adlc/knowledge/lessons/LESSON-<id>-<slug>.md`, `<id>` being the number just allocated, zero-padded to three digits. Include `domain`, `component`, and `tags` so future runs of `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance, and `kind`, `evidence`, and `confidence` per the capture rules above (rules 0–2); `## Lesson` and `## Applies When` must both be non-empty. Write a **new** file only — never edit an existing lesson: a refinement of LESSON-A is a new lesson carrying `generalizes: [LESSON-A]` or `supersedes: [LESSON-A]` (BR-2). `enforcement` stays `none` unless a lint, test, script or hook actually enforces the lesson. Every `generalizes` / `supersedes` id must match `^LESSON-[0-9]{3,6}$` and exist — `find .adlc/knowledge/lessons -maxdepth 1 -type f -name '<id>-*' | head -1` must print a path (a `find`, not a bare glob — zsh aborts on an unmatched glob, LESSON-335); drop any id that fails (a list left empty is written `[]`).
+**Write the lesson** now — before the schema check below, which reads the file, and the pre-push recheck, which checks its id against the remote. Use the lesson template (`.adlc/templates/lesson-template.md`, fall back to `$ADLC_TOOLKIT_ROOT/templates/lesson-template.md`). Filename format is `LESSON-xxx-slug.md` only — no date prefixes, no bare-numeric prefixes — so the file is `.adlc/knowledge/lessons/LESSON-<id>-<slug>.md`, `<id>` being the number just allocated, zero-padded to three digits. Include `domain`, `component`, and `tags` so future runs of `/spec`, `/architect`, `/reflect`, and `/review` can filter by relevance, and `kind`, `evidence`, and `confidence` per the capture rules above (rules 0–2); `## Lesson` and `## Applies When` must both be non-empty. Write a **new** file only — never edit an existing lesson: a refinement of LESSON-A is a new lesson carrying `generalizes: [LESSON-A]` or `supersedes: [LESSON-A]` (BR-2). `enforcement` stays `none` unless a lint, test, script or hook actually enforces the lesson. Every `generalizes` / `supersedes` id must match `^LESSON-[0-9]{3,6}$` and exist — `find .adlc/knowledge/lessons -maxdepth 1 -type f -name '<id>-*' | head -1` must print a path (a `find`, not a bare glob — zsh aborts on an unmatched glob, LESSON-335); drop any id that fails (a list left empty is written `[]`).
 
 **Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of the fence below. Validate the draft in-model against the rule table in `partials/lesson-check.md` instead, apply the same repair loop described below (at most 2 repairs, then `NO_ENTRY`), and write `lesson check: in-model (provenance-classifying harness)` in the `### Lessons captured` summary slot (Step 6).
 
 **Schema check (REQ-646 BR-3).** Validate the file you just wrote. Source `partials/lesson-check.sh` and call it **in the same fenced block**; the return codes and the rule table live in `partials/lesson-check.md`:
 ```sh
-if [ -f .adlc/partials/lesson-check.sh ]; then . .adlc/partials/lesson-check.sh; else . ~/.claude/skills/partials/lesson-check.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/lesson-check.sh ]; then . .adlc/partials/lesson-check.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lesson-check.sh"; fi
 # <path> is the LITERAL path of the file you just wrote — thread it in; fenced
 # blocks share no shell state and LESSON_ID is not a sanctioned cross-fence var.
 adlc_lesson_check .adlc/knowledge/lessons/LESSON-<id>-<slug>.md
@@ -265,7 +270,8 @@ adlc_lesson_check .adlc/knowledge/lessons/LESSON-<id>-<slug>.md
 
 **Pre-push recheck (BR-4, BR-8).** Before the lesson file is committed on a branch for push, re-verify `LESSON-<id>` against the remote — a colleague on another machine may have pushed the same id since allocation. Source `partials/id-recheck.sh` and call `adlc_recheck_id` **in the same fenced block**; a collision halts with the renumber instruction rather than pushing a duplicate:
 ```bash
-if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . ~/.claude/skills/partials/id-recheck.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-recheck.sh"; fi
 LESSON_ID=$(printf 'LESSON-%03d' "$LESSON_NUM")
 if ! adlc_recheck_id lesson "$LESSON_ID"; then
   echo "Halting: $LESSON_ID collides on the remote — renumber before pushing (see message above)." >&2

@@ -1,7 +1,8 @@
 # partials/trial-merge.sh — non-mutating dry-run merge (REQ-483 BR-16).
 #
-# Source this partial, then call adlc_trial_merge WITHIN THE SAME fenced block:
-#   if [ -f .adlc/partials/trial-merge.sh ]; then . .adlc/partials/trial-merge.sh; else . ~/.claude/skills/partials/trial-merge.sh; fi
+# Source this partial, then call adlc_trial_merge WITHIN THE SAME fenced block, after
+# the fence's ToolkitRoot root line (conventions.md "Bash in skills"):
+#   if [ -f .adlc/partials/trial-merge.sh ]; then . .adlc/partials/trial-merge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/trial-merge.sh"; fi
 #   git -C "$worktree" fetch origin "$integration_branch" >/dev/null 2>&1   # caller MUST refresh the base
 #   conflicts=$(adlc_trial_merge "$worktree" "origin/$integration_branch"); rc=$?
 #   case $rc in

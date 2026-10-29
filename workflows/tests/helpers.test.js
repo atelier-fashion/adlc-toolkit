@@ -56,6 +56,11 @@ const {
   closeOutDigest,
   repoRootFromWorktree,
   groupMergedByRepo,
+  // REQ-669 ADR-6 agent namespace.
+  panelMembers,
+  AGENT_NAMESPACES,
+  normalizeAgentNamespace,
+  agentTypeFor,
 } = helpers;
 
 // ===========================================================================
@@ -784,4 +789,84 @@ test('sharesRepo: true iff the two touched-repo lists intersect', () => {
   assert.equal(sharesRepo(['api'], ['web']), false);
   assert.equal(sharesRepo([], ['api']), false);
   assert.equal(sharesRepo(['api'], []), false);
+});
+
+// ===========================================================================
+// REQ-669 ADR-6 — agentTypeFor / normalizeAgentNamespace: the agent namespace
+// /sprint passes as args.agentNamespace. Bare on the symlink install, `adlc:` on
+// the plugin install. A wrong agentType does not fail loudly (an unresolved name
+// can silently run a generic agent, REQ-669 verification.md N4), so these pin the
+// value and the source check below pins that it reaches every dispatch.
+// ===========================================================================
+
+test('agentTypeFor: bare name on the symlink route, adlc:-prefixed on the plugin route', () => {
+  assert.equal(agentTypeFor('reflector', ''), 'reflector');
+  assert.equal(agentTypeFor('reflector', 'adlc:'), 'adlc:reflector');
+  assert.equal(agentTypeFor('task-implementer', 'adlc:'), 'adlc:task-implementer');
+  // Absent is the documented default ("").
+  assert.equal(agentTypeFor('reflector', undefined), 'reflector');
+  assert.equal(agentTypeFor('reflector', null), 'reflector');
+});
+
+test('agentTypeFor: an invalid namespace yields the bare name, never a spliced value (LESSON-008)', () => {
+  const invalid = [
+    '../', 'adlc', 'ADLC:', 'adlc::', ':', 'a b:', 'adlc:x', 'adlc:\n', '\nadlc:',
+    'adlc:../', 'adlc/:', 'ädlc:', ' adlc:', 'adlc: ',
+    // Well-shaped, but not a value /sprint sends: the allowlist is closed.
+    'other:', 'my-fork2:', 'adlc-dev:', 'a:',
+    42, true, {}, ['adlc:'], () => 'adlc:',
+  ];
+  for (const ns of invalid) {
+    assert.equal(agentTypeFor('reflector', ns), 'reflector', `namespace ${String(ns)} must be refused`);
+  }
+});
+
+test('normalizeAgentNamespace: "" and absent are the quiet default; a bad value is flagged rejected', () => {
+  assert.deepEqual(normalizeAgentNamespace(undefined), { ns: '', rejected: false });
+  assert.deepEqual(normalizeAgentNamespace(null), { ns: '', rejected: false });
+  assert.deepEqual(normalizeAgentNamespace(''), { ns: '', rejected: false });
+  assert.deepEqual(normalizeAgentNamespace('adlc:'), { ns: 'adlc:', rejected: false });
+  assert.deepEqual(normalizeAgentNamespace('../'), { ns: '', rejected: true });
+  assert.deepEqual(normalizeAgentNamespace('adlc'), { ns: '', rejected: true });
+  assert.deepEqual(normalizeAgentNamespace(0), { ns: '', rejected: true });
+  // Another plugin's well-shaped prefix is rejected and logged, not honoured.
+  assert.deepEqual(normalizeAgentNamespace('other:'), { ns: '', rejected: true });
+  assert.deepEqual(normalizeAgentNamespace(new String('adlc:')), { ns: '', rejected: true });
+});
+
+test('AGENT_NAMESPACES: the closed allowlist is exactly "" and "adlc:", and frozen', () => {
+  assert.deepEqual([...AGENT_NAMESPACES], ['', 'adlc:']);
+  assert.equal(Object.isFrozen(AGENT_NAMESPACES), true);
+});
+
+test('panelMembers: bare agent names, so the dispatch site alone applies the namespace', () => {
+  const members = panelMembers();
+  assert.deepEqual(members.map((m) => m.agent), [
+    'reflector', 'correctness-reviewer', 'quality-reviewer',
+    'architecture-reviewer', 'test-auditor', 'security-auditor',
+  ]);
+  for (const m of members) {
+    assert.equal(Object.prototype.hasOwnProperty.call(m, 'agentType'), false);
+    assert.equal(agentTypeFor(m.agent, 'adlc:'), `adlc:${m.agent}`);
+  }
+});
+
+test('agentTypeFor: every agentType in the engine goes through agentTypeFor(…, AGENT_NS)', () => {
+  // The Workflow runtime cannot be run here, so this reads the engine source.
+  // Comment lines are dropped first; what remains must name agentType only as
+  // `agentType: agentTypeFor(<name>, AGENT_NS)`. The count floor keeps the check
+  // from passing vacuously if the dispatch sites move (LESSON-019).
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'adlc-sprint.workflow.js'), 'utf8');
+  const code = src.split('\n').filter((line) => !/^\s*\/\//.test(line));
+  const sites = code.filter((line) => /\bagentType\s*:/.test(line));
+  assert.ok(sites.length >= 7, `expected at least 7 agentType sites, found ${sites.length}`);
+  for (const line of sites) {
+    assert.match(line, /\bagentType: agentTypeFor\([^,()]+, AGENT_NS\),?\s*$/, line.trim());
+  }
+  assert.equal(code.filter((line) => /agentType:\s*'/.test(line)).length, 0);
+  // args.agentNamespace is read at exactly one site (ADR-6: read once, validated).
+  const reads = code.filter((line) => /\bargs\.agentNamespace\b/.test(line));
+  assert.equal(reads.length, 1, reads.join('\n'));
+  assert.match(reads[0], /^const AGENT_NAMESPACE_ARG = args\.agentNamespace;$/);
 });

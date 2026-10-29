@@ -32,7 +32,7 @@ Every skill begins with:
 ```markdown
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo "No ethos found — run /init to vendor .adlc/ETHOS.md"`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 ```
 
 The line reads the **project's vendored copy only**: `/init` writes `.adlc/ETHOS.md` into every consumer project and `/template-drift` keeps it current, and the `test -s` is REQ-416 H1 — an empty copy must fall through to the notice, not swallow the ethos. It deliberately names **no path outside the session root and runs no interpreter** (BUG-218): a host that classifies what a skill preamble could have read — Teton Code's REQ-614/619 grammar is the one that bit — treats `sh <file>` as opaque and an out-of-root path such as `~/.claude/skills/ETHOS.md` as unprovable, and either one pins the session to its local tier for every skill that carries the line. `test`, `cat` and `echo` over an in-root file are provably in reach. `partials/ethos-include.sh` still exists for consumer projects whose vendored skills predate this line; do not reintroduce it, or a `~/` fallback, at a call site. Never hardcode the ethos body inside a skill.
@@ -67,7 +67,8 @@ mark it `# provenance-safe` on its first line and `lint-skills`'
 from the empty tree instead of `cksum | awk` for duplicate detection. A
 skill step that needs agent dispatch must also say what to do without it,
 since Teton has no agent tool and its `read` is jailed to the session root,
-so `~/.claude/agents/*.md` is unreachable there. `/canary`'s `gcloud` lines and `/template-drift`'s toolkit
+so the toolkit's `agents/*.md` (under ToolkitRoot, outside the session root on
+either install route) is unreachable there. `/canary`'s `gcloud` lines and `/template-drift`'s toolkit
 listing are the known exceptions: those verbs and paths are outside the grammar
 by nature, and those two skills pin a Teton session by design.
 
@@ -80,7 +81,8 @@ Skills that delegate bulk reads or drafting to the configured delegate (`adlc-re
 (REQ-522 retired the legacy `kimi-gate.sh` back-compat alias):
 
 ```sh
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
 adlc_delegate_gate_check; gate=$?
 case $gate in
   0) ;;  # delegated
@@ -94,8 +96,9 @@ and invokes the **absolute path** the gate exported, refusing anything that is n
 absolute path in that same fence before any corpus is handed over (REQ-609 BR-12):
 
 ```sh
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
-case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
+case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2; exit 1 ;; esac
 command "$ADLC_READ_BIN" --no-warn --paths ... --question "..."
 ```
 
@@ -190,7 +193,8 @@ Source the sourceable partial and call the op **in the same fenced block** (the
 cross-fence rule above):
 
 ```sh
-if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
 out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 ```
 
@@ -210,7 +214,7 @@ Full contract: `partials/forge.md`.
 
 ## Context loading pattern
 
-Skills load context via `!bash` macros under a `## Context` section. Use the same fallback chain: prefer consumer-project `.adlc/...`, fall back to `~/.claude/skills/...`. Example:
+Skills load context via `!bash` macros under a `## Context` section. Read the consumer project's `.adlc/...` copy; a `!` preamble names no path outside the session root (see "Ethos injection pattern"), so a step that needs the toolkit's own copy reads it in a fence, from `$ADLC_TOOLKIT_ROOT/...` after the root line (see "Bash in skills"). Example:
 
 ```markdown
 - Conventions: !`cat .adlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
@@ -222,7 +226,23 @@ For shared multi-line snippets that would otherwise duplicate across many SKILL.
 
 ## Prerequisites block
 
-Every skill that depends on the `.adlc/` scaffold must have a `## Prerequisites` section that stops with a clear "run `/init` first" message if required files are missing. Do not silently produce broken output when context is absent.
+Every skill that depends on the `.adlc/` scaffold must have a `## Prerequisites` section that stops with a clear "run `/init` (`/adlc:init` on the plugin install) first" message if required files are missing. Do not silently produce broken output when context is absent.
+
+## Skill names Claude Code also owns
+
+Skill text prints next steps by bare name, such as "run `/validate`", and on both install routes a bare name reaches the skill (REQ-669 ADR-5), except where Claude Code owns the name too. Claude Code 2.1.258 resolves a bare `/<name>`, typed or sent through the Skill tool, to the first command whose name matches exactly. So on the plugin install a bare `/init` reaches Claude Code's built-in CLAUDE.md generator, not `/adlc:init` (REQ-669 `verification.md`, "Built-in command collision audit").
+
+The watched names are `BUILTIN_COLLISION_NAMES` in `tools/lint-skills/check.py`: `init` and `status`, which are built-in commands, and `review`, which is an alias of the bundled `code-review` skill. Any line that tells the user or the model to run one of them prints both spellings on that same line, in the form for where the text appears:
+
+| Where | Form |
+|---|---|
+| Markdown prose, including a quoted message the skill tells the model to say | `` `/init` (`/adlc:init` on the plugin install) `` |
+| a quoted runtime string, such as `echo "…"` in a fence or a Python string | `/init (/adlc:init on the plugin install)` |
+| a `!` preamble line, which allows neither backticks nor parentheses (BUG-220) | `/init, or /adlc:init on the plugin install` |
+
+Replace `init` with `review` or `status` for the other names, and keep the words as written so the text stays the same everywhere. A name used as a noun stays bare: a heading, a table cell naming the skill, or "the `/init` skill copies…". The skill is not renamed, because on the symlink install the bare name still reaches it. The other skill names collide with nothing and stay bare.
+
+`tools/lint-skills`' **`builtin-collision`** check enforces this. It fails an instruction-style mention of a watched name (a verb such as run, re-run, "ready for" or before right before the slash token, or a phrase such as first or "if missing" right after it) on a line that does not also carry `/adlc:<name>`. When a Claude Code upgrade adds a built-in that shares a skill's name, `builtin_collision_static` in `tools/adlc/tests/e2e/plugin-sandbox.sh` reports it. Add the name to `BUILTIN_COLLISION_NAMES` and dual-spell the lines the lint then names.
 
 ## Bash in skills
 
@@ -235,19 +255,43 @@ Every skill that depends on the `.adlc/` scaffold must have a `## Prerequisites`
 
 **Fenced blocks do not share shell state across steps.** Each ```sh fenced block in a SKILL.md may be an independent shell invocation — shell functions and non-exported variables defined in one fenced block are NOT visible in another (the Claude Code Bash-tool contract: "the working directory persists between commands, but shell state does not"). Therefore a shared shell **function** MUST be sourced from a `partials/*.sh` at *each* call site, in the **same fenced block as the invocation**, and MUST NEVER be defined in one fenced block and invoked from another (the silent-`command not found` telemetry-loss class — REQ-436, REQ-424). The canonical pattern is `partials/delegate-gate.sh` and `partials/emit-step-telemetry.sh`: a function-exporting partial sourced with the guarded two-level spelling (below) immediately before it is called. This is enforced structurally, not by prose/honor-system (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but invoked from a different fenced block in the same SKILL.md.
 
-**Source a partial with the guarded two-level form.** There is exactly one canonical spelling, on a single line:
+**Resolve ToolkitRoot with the root line (REQ-669 ADR-1).** The toolkit runs from one of two installs: the symlink route (`~/.claude/skills` pointing at a clone) or the Claude Code plugin route (a cache copy under `~/.claude/plugins/cache/`). A fence that reads a toolkit-owned file (a partial, a tool, a template) first resolves that directory, ToolkitRoot, with exactly one canonical line. Write it byte-exact, on its own line, before the fence's first `$ADLC_TOOLKIT_ROOT`:
 
 ```sh
-if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . ~/.claude/skills/partials/<name>.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 ```
 
-`.` is a POSIX **special built-in**, and POSIX requires a non-interactive shell to *exit* when a special built-in fails (XCU 2.8.1, "Consequences of Shell Errors"). So under `dash` and under `bash` in posix mode — which is what macOS ships as `/bin/sh` — dot-sourcing an absent repo-local copy kills the whole block before any fallback can run; under bash and zsh it is merely a non-zero status, which is why this stayed latent (REQ-610, observed 2026-09-01). The repo-local copy is therefore proven to exist with `[ -f ]` before it is sourced, and never guessed at with `||`. Two forms that look like fixes and are not: **`command .`** — still exits under macOS `/bin/sh` (it only rescues `dash`); and **`[ -f A ] && . A || . B`** — when `A` exists but its last command returns non-zero, the `||` arm fires as well and the canonical copy is sourced *on top of* the repo-local one, inverting the repo-local-first precedence LESSON-441 depends on. The retired shape, `. <local> 2>/dev/null || . <canonical>`, is rejected by the `tools/lint-skills` `unguarded-source` check in fences and in prose alike; its `2>/dev/null` is also what made the original failure silent, so the guarded form suppresses **no** stderr — a missing canonical copy or a syntax error in a vendored one must reach stderr naming the path. `[ -f ]` rather than `[ -r ]`: an existing-but-unreadable vendored copy then fails loudly at the `.` instead of silently falling through and hiding a permissions problem. The executable-partial `!`-macro form (`sh <local> || sh <canonical>`) needs no guard — `sh <file>` is an ordinary command, so it fails with exit 127, never fatally. The **final canonical arm is deliberately unguarded**: its absence means the toolkit is not installed, which is unrecoverable, so it fails loudly (fatal under `sh`, an error line under bash/zsh) rather than being tested and skipped. That arm trusts `$HOME` — it dot-sources whatever `~/.claude/skills/partials/` resolves to — so the toolkit is not safe to invoke with an attacker-controlled `HOME` (a CI runner that points `HOME` at the workspace, `sudo` without `-H`); that was already true under bash/zsh and is now true under `sh` as well, because the arm is now reachable there. One `set -e` caveat: the retired `. A || . B` sat in an `||` list and was exempt from `errexit`, whereas `. A` inside an `if` branch is not — so under a `set -e` fence a vendored partial whose last top-level statement returns non-zero would abort the block. No fence sets `-e` today and every partial ends on a zero-status statement; if you add `set -e` to a fence, keep it that way.
+Its four arms run in this order, and the first non-empty one wins:
+
+1. `${CLAUDE_PLUGIN_ROOT}`. On the plugin route Claude Code rewrites this exact token in the skill text to the cache path before any shell sees it. On the symlink route the token reaches the shell as written, and the variable is not in the Bash tool environment, so it expands empty.
+2. `$HOME/.claude/skills`, when `~/.claude/skills/partials` exists: the symlink install. It comes before the pointer, so on a machine with both installs a symlink-route skill still reads the clone (REQ-669 BR-3), and `adlc doctor` reports the doubling.
+3. The path in `~/.claude/adlc/plugin-root`, which the plugin's SessionStart hook writes. It covers plugin skill text that Claude Code did not substitute, such as a subagent reading a SKILL.md through the Read tool.
+4. `$HOME/.claude/skills` as a literal default. On a machine with neither install, the partial source that follows then fails loudly and names the path.
+
+**Never write `${CLAUDE_PLUGIN_ROOT:-…}`**, and never the unbraced `$CLAUDE_PLUGIN_ROOT`. Only the braced, unadorned token is substituted (verified on Claude Code 2.1.258, REQ-669 `verification.md` row 1). A default form reaches the shell as written, so on the plugin route it would silently read `~/.claude/skills`. The line is POSIX: no `[[`, no `local`, no `case` inside `$( )`. `${CLAUDE_PLUGIN_ROOT}` without `:-` is an error only under `set -u`, which no fence sets. The line is per fence. Fenced blocks share no shell state, and the `export` does not carry the value across them either, so every fence that reads `$ADLC_TOOLKIT_ROOT` carries its own copy, and a fence that does not read it carries none. Partials never carry it: a partial that needs a toolkit file reads `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/…"` (REQ-669 ADR-2), and that default-expansion spelling is for partials only. The `tools/lint-skills` `toolkit-root-line` check pins the bytes: a read with no root line above it in the same fence is a finding, and so is any other line that assigns `ADLC_TOOLKIT_ROOT`. `partials/tests/toolkit-root.test.sh` runs the line quoted above, taken from this file, under bash, zsh, `/bin/sh` and dash.
+
+**Source a partial with the guarded two-level form.** There is exactly one canonical spelling, on a single line, after the fence's root line:
+
+```sh
+if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . "$ADLC_TOOLKIT_ROOT/partials/<name>.sh"; fi
+```
+
+The fallback operand is double-quoted because ToolkitRoot is a path, and `$HOME` can contain a space. **Retired (REQ-669 TASK-124):** the REQ-610 spelling, whose `else` arm is `. ~/.claude/skills/partials/<name>.sh`, was accepted by `unguarded-source` while TASK-122 to TASK-124 rewrote the corpus. TASK-124 removed that acceptance, so the old operand is now a finding.
+
+`.` is a POSIX **special built-in**, and POSIX requires a non-interactive shell to *exit* when a special built-in fails (XCU 2.8.1, "Consequences of Shell Errors"). So under `dash` and under `bash` in posix mode — which is what macOS ships as `/bin/sh` — dot-sourcing an absent repo-local copy kills the whole block before any fallback can run; under bash and zsh it is merely a non-zero status, which is why this stayed latent (REQ-610, observed 2026-09-01). The repo-local copy is therefore proven to exist with `[ -f ]` before it is sourced, and never guessed at with `||`. Two forms that look like fixes and are not: **`command .`** — still exits under macOS `/bin/sh` (it only rescues `dash`); and **`[ -f A ] && . A || . B`** — when `A` exists but its last command returns non-zero, the `||` arm fires as well and the canonical copy is sourced *on top of* the repo-local one, inverting the repo-local-first precedence LESSON-441 depends on. The retired shape, `. <local> 2>/dev/null || . <canonical>`, is rejected by the `tools/lint-skills` `unguarded-source` check in fences and in prose alike; its `2>/dev/null` is also what made the original failure silent, so the guarded form suppresses **no** stderr — a missing canonical copy or a syntax error in a vendored one must reach stderr naming the path. `[ -f ]` rather than `[ -r ]`: an existing-but-unreadable vendored copy then fails loudly at the `.` instead of silently falling through and hiding a permissions problem. The executable-partial `!`-macro form (`sh <local> || sh <canonical>`) needs no guard — `sh <file>` is an ordinary command, so it fails with exit 127, never fatally. The **final canonical arm is deliberately unguarded**: its absence means the toolkit is not installed, which is unrecoverable, so it fails loudly (fatal under `sh`, an error line under bash/zsh) rather than being tested and skipped. That arm trusts `$HOME` — it dot-sources whatever `$ADLC_TOOLKIT_ROOT/partials/` resolves to, and the root line resolves that through `$HOME` (its symlink, pointer-file and default arms) — so the toolkit is not safe to invoke with an attacker-controlled `HOME` (a CI runner that points `HOME` at the workspace, `sudo` without `-H`); that was already true under bash/zsh and is now true under `sh` as well, because the arm is now reachable there. One `set -e` caveat: the retired `. A || . B` sat in an `||` list and was exempt from `errexit`, whereas `. A` inside an `if` branch is not — so under a `set -e` fence a vendored partial whose last top-level statement returns non-zero would abort the block. No fence sets `-e` today and every partial ends on a zero-status statement; if you add `set -e` to a fence, keep it that way.
 
 ## Agent dispatch patterns
 
 - **Parallel review**: dispatch 5–6 review agents in a single message (`correctness-reviewer`, `quality-reviewer`, `architecture-reviewer`, `test-auditor`, `security-auditor`, `reflector`). Read-only mandate: every agent must be told "Report findings only. Do not apply fixes."
 - **Parallel implementation**: `task-implementer` agents dispatched one per independent task. Group into dependency tiers.
 - **Subagent mode**: when a skill runs inside a subagent (e.g., via `/sprint`'s `pipeline-runner`), do NOT dispatch further subagents. Execute sequentially in-context instead.
+- **Dispatch on both installs (REQ-669 ADR-6, BR-9)**: on the symlink install the toolkit's agents are offered by bare name (`reflector`); on the plugin install Claude Code offers them as `<plugin>:<agent>` (`adlc:reflector`, REQ-669 `verification.md` row 7). A name the session does not offer does not fail loudly: on the fork path it silently became a generic `general-purpose` agent, without the checklist (row 7, evidence E3). So every step that dispatches a toolkit agent carries the canonical dispatch sentence below, once per step, and never relies on a dispatch error to trigger the fallback. The text between the two markers is the only copy: `tools/lint-skills`' `dispatch-fallback` check reads it from here and requires it, whitespace-normalized, in every `##`/`###` step of a `SKILL.md`, `proceed/phase*.md` or `partials/*.md` that names a dispatched agent. Edit it here and nowhere else, then copy it into each step the check names.
+
+<!-- dispatch-fallback-sentence -->
+Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+<!-- /dispatch-fallback-sentence -->
+
+The workflow engine names its agents in code instead, so it cannot carry the sentence: `/sprint` passes `args.agentNamespace` (`adlc:` on the plugin route, `""` otherwise) and every `agentType` goes through the pure `agentTypeFor(name, ns)` helper (`workflows/README.md`).
 
 ## Verification obligations
 

@@ -14,16 +14,21 @@ vars were empty across the fence boundary), and de-branded the identifiers.
 ## Sourcing the partial
 
 Use the guarded two-level source (conventions.md "Bash in skills") so the macro works in consumer projects that
-haven't re-run `/init` since the toolkit shipped the partial:
+haven't re-run `/init` (`/adlc:init` on the plugin install) since the toolkit shipped the partial. The fence's
+ToolkitRoot root line comes first; it resolves the fallback level to the running install, the plugin's cache copy
+or the clone behind the skills symlink (REQ-669 ADR-1):
 
 ```sh
-if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . "$ADLC_TOOLKIT_ROOT/partials/emit-step-telemetry.sh"; fi
 ```
 
 `.` (dot) is POSIX; do NOT use `source` (bash-only).
 
 This partial **self-sources** `partials/delegate-tools-path.sh` (with the same
-guarded two-level source) as its first executable line, before defining the
+guarded two-level source, its fallback read through the partials'
+default-expansion spelling `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/…"`,
+REQ-669 ADR-2) as its first executable line, before defining the
 function. Call sites therefore do **NOT** need to source the
 `delegate-tools-path` resolver themselves — sourcing this partial both
 resolves/exports `$DELEGATE_TOOLS` and defines the function in one step. The
@@ -119,7 +124,8 @@ the source line and the invocation **MUST live in the same fenced block**, with
 the source immediately before the call:
 
 ```sh
-if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . ~/.claude/skills/partials/emit-step-telemetry.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/emit-step-telemetry.sh ]; then . .adlc/partials/emit-step-telemetry.sh; else . "$ADLC_TOOLKIT_ROOT/partials/emit-step-telemetry.sh"; fi
 _adlc_emit_step_telemetry analyze Step-1.5
 ```
 

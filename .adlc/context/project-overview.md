@@ -8,12 +8,17 @@ This repo dogfoods the toolkit on its own feature work: REQs in `.adlc/specs/`, 
 
 ## Who uses it
 
-- **Consumer projects** (e.g., `~/Documents/GitHub/atelier-fashion`) symlink this repo to `~/.claude/skills/` and `~/.claude/agents/`. Any improvement committed here is immediately visible to every Claude Code session on the machine — no publish step.
+- **Consumer projects** (e.g., `~/Documents/GitHub/atelier-fashion`) get the toolkit by one of the two install routes below. Plugin users run a pinned release and move to a new one when it is tagged and they update. A machine on the symlink route (this repo linked at `~/.claude/skills/` and `~/.claude/agents/`) sees any improvement committed here in every Claude Code session immediately, with no publish step.
 - **Toolkit maintainers** (Brett) evolve the skills, add new ones, and fix bugs in the skill definitions themselves. REQs tracked here describe changes to the toolkit's own surface area: skill behavior, template schemas, agent prompts, documentation.
 
 ## Install model
 
-Symlink-based live install. One canonical git clone on disk, symlinked at `~/.claude/skills/`. Edits to the clone are visible immediately. No separate installed copy, no sync step, no versioning at the install layer. This matters because skill changes committed here take effect for every project on the machine the instant they land.
+Two routes (REQ-669). One skill text serves both, and a machine should use one of them, not both.
+
+- **Plugin route (users).** This repo is both a Claude Code marketplace (`adlc-toolkit`) and the plugin (`adlc`). `claude plugin marketplace add atelier-fashion/adlc-toolkit`, then `claude plugin install adlc@adlc-toolkit`, copies a release into `~/.claude/plugins/cache/adlc-toolkit/adlc/<version>/`. The plugin's `version` is pinned to `VERSION`, so the install layer is versioned on this route. Users move only when a release is tagged and they run `claude plugin update` (`RELEASING.md` is the release sequence). Skills are `/adlc:<skill>` and agents `adlc:<name>`. A SessionStart hook records the plugin root in `~/.claude/adlc/plugin-root`, scaffolds a delegation-off `~/.claude/adlc/config.yml` when none exists, and puts `scripts/adlc` on the session's PATH.
+- **Symlink route (contributors and the maintainer).** One canonical git clone on disk, linked at `~/.claude/skills/` and `~/.claude/agents/` by `install.sh`. Edits to the clone are visible immediately, with no separate installed copy and no sync step. This matters because a skill change committed here takes effect for every project on such a machine the instant it lands, while plugin users get it at the next release.
+
+Every toolkit-owned file a skill, partial, agent, workflow or tool reads resolves through **ToolkitRoot** (`$ADLC_TOOLKIT_ROOT`): the clone on the symlink route, the cache copy on the plugin route (see architecture.md "Install routes"). Machine state, meaning the id counters, their locks, `~/.claude/adlc/config.yml` and the telemetry log, stays where it is and is shared by both routes. Both routes active on one machine is a doubled install, which `adlc doctor` reports.
 
 ## Primary surface areas
 
@@ -23,7 +28,8 @@ Symlink-based live install. One canonical git clone on disk, symlinked at `~/.cl
 | Agents | `agents/<agent-name>.md` | Specialized subagent definitions with tool restrictions and model selection |
 | Templates | `templates/*.md` | Canonical templates for requirements, bugs, lessons, tasks, assumptions |
 | Ethos | `ETHOS.md` | The ETHOS principles injected into every skill — the non-negotiable constitution |
-| Docs | `README.md` | Install instructions and skill catalog |
+| Docs | `README.md`, `RELEASING.md` | Install instructions for both routes (plugin first), the skill catalog, and the maintainer's release and directory-submission sequence |
+| Plugin | `.claude-plugin/`, `hooks/`, `scripts/` | The plugin and marketplace manifests, the SessionStart hook, and the `scripts/adlc` CLI shim (REQ-669) |
 
 ## Relationship to consumer projects
 

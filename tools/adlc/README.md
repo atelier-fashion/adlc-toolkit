@@ -2,13 +2,27 @@
 
 `adlc` is the toolkit's user-facing command-line entry point. It is a
 **pure-standard-library** Python CLI (no third-party deps, no venv) so it runs
-on any machine that has cloned the toolkit — including one that has never opted
-into delegation. Subcommands are registered in a data-driven table
-(`SUBCOMMANDS` in `adlc.py`), so future REQs add commands without touching
-dispatch logic.
+on any machine that has the toolkit, cloned or installed as the Claude Code
+plugin — including one that has never opted into delegation. Subcommands are
+registered in a data-driven table (`SUBCOMMANDS` in `adlc.py`), so future REQs
+add commands without touching dispatch logic.
 
-Installed on your PATH by the root [`install.sh`](../../install.sh) (it writes a
-shim at `~/bin/adlc`). You can also run it directly:
+How it reaches your PATH depends on the install route (REQ-669):
+
+- **Plugin route.** The plugin's SessionStart hook appends `<plugin root>/scripts`
+  to the PATH of the Claude Code session, after your own entries.
+  [`scripts/adlc`](../../scripts/adlc) is a POSIX shim that runs
+  `python3 <plugin root>/tools/adlc/adlc.py`. Outside a Claude Code session, run the
+  shim by path; the hook records the plugin root in `~/.claude/adlc/plugin-root`:
+
+  ```bash
+  "$(cat ~/.claude/adlc/plugin-root)/scripts/adlc" doctor
+  ```
+
+- **Symlink route.** The root [`install.sh`](../../install.sh) writes a shim at
+  `~/bin/adlc`.
+
+On either route you can also run it directly from the toolkit root:
 
 ```bash
 python3 tools/adlc/adlc.py doctor
@@ -39,21 +53,26 @@ adlc doctor --checks forge,delegate-gate     # run only the named checks
 
 Each failing check prints a **copy-pasteable** remediation — a literal command or
 exact file edit, never "see the docs". Run the printed `-> fix:` line verbatim
-and re-run doctor; it should turn green.
+and re-run doctor; it should turn green. Every path, interpreter and install key
+a fix carries is quoted with `shlex.quote`, so a `'`, `$(` or `;` in a home
+directory or a cache path stays text when the line is pasted into a shell. The
+tables below show placeholders such as `<root>` unquoted.
 
 ### Checks
 
 | id | passes when | fails → remediation | skip when |
 |----|-------------|---------------------|-----------|
-| `skills-symlink` | `~/.claude/skills` is a symlink into a git checkout | `ln -sfn <root> ~/.claude/skills` | — |
-| `agents-symlink` | `~/.claude/agents` resolves to `<root>/agents` | `ln -sfn <root>/agents ~/.claude/agents` | — |
-| `toolkit-clean` | clone is on a branch and not dirty | `git -C <root> checkout main` / `git status` | — |
-| `path-shims` | `adlc` is on PATH and `adlc --version` runs | `./install.sh --repair`, restart shell | — |
+| `plugin-route` | symlink route: always (reports the root and `VERSION`). Plugin route: this copy is the one Claude Code loads, `~/.claude/adlc/plugin-root` names it, `scripts/adlc` is executable, and inside a Claude Code session `adlc` is on PATH (REQ-669 ADR-7). Fails on either route when route detection itself failed | `CLAUDE_PLUGIN_ROOT=<root> sh <root>/scripts/session-start.sh` (the SessionStart hook's own command); `chmod +x <root>/scripts/adlc`; `export PATH="$PATH":<root>/scripts`; `<live root>/scripts/adlc doctor` for an older cached copy; `claude plugin uninstall <key> && claude plugin install <key>` (reinstall) when the copy has no `plugin.json` naming `adlc` or no `scripts/adlc`; `claude plugin details adlc` when the install record cannot be read, the running cache copy is not installed, or route detection failed | — |
+| `skills-symlink` | `~/.claude/skills` is a symlink into a git checkout | `ln -sfn <root> ~/.claude/skills` | plugin route |
+| `agents-symlink` | `~/.claude/agents` resolves to `<root>/agents` | `ln -sfn <root>/agents ~/.claude/agents` | plugin route |
+| `doubled-install` | not both installs at once: no symlink install, or no adlc plugin install. Cache copies an uninstall left behind are not an install | one fix per way out: `claude plugin uninstall adlc@adlc-toolkit` (keep the symlink install), or `rm` of the two links, plus `~/bin/adlc` when it runs the clone (keep the plugin) | — |
+| `toolkit-clean` | clone is on a branch and not dirty | `git -C <root> checkout main` / `git status` | plugin route |
+| `path-shims` | `adlc` is on PATH and `adlc --version` runs | `./install.sh --repair`, restart shell | plugin route |
 | `gh-present` | `gh` (GitHub CLI) is on PATH | per-OS install line (`brew install gh`, …) | — |
 | `forge` | resolved forge provider's backend CLI present + auth valid + read-only API probe (github: `gh auth status`; azure-devops: `az account show` or PAT env var). **Supersedes the former `gh-auth` check** (REQ-520). | provider-specific (`gh auth login`; `az login` / set the PAT env var; or install `az`) | repo has no git remote |
 | `git-identity` | `user.name` and `user.email` set | `git config --global user.email …` | — |
 | `delegate-gate` | delegation enabled and reachable | (see below) | delegation not opted in (default) |
-| `pyyaml` | PyYAML imports in the interpreter `adlc` runs under — the one that parses `~/.claude/adlc/config.yml` (REQ-609). Says so when the delegate venv is being bypassed because it has no PyYAML of its own | `<root>/install.sh --with-delegation` (creates/refreshes the venv, which pins the version); for a venv that exists without PyYAML, `~/.claude/delegate-venv/bin/pip install -r <root>/tools/delegate/requirements.txt` | no venv **and** no config at either path — nothing to parse yet |
+| `pyyaml` | PyYAML imports in the interpreter `adlc` runs under — the one that parses `~/.claude/adlc/config.yml` (REQ-609). Says so when the delegate venv is being bypassed because it has no PyYAML of its own | symlink route: `<root>/install.sh --with-delegation` (creates/refreshes the venv, which pins the version). Plugin route: `'<interpreter>' -m pip install --user '<the pyyaml line of tools/delegate/requirements.txt>'`. For a venv that exists without PyYAML, either route: `~/.claude/delegate-venv/bin/pip install -r <root>/tools/delegate/requirements.txt` | no venv and no project config, **and** either no machine config or one that is byte for byte the delegation-off scaffold install.sh and the SessionStart hook write — nothing PyYAML would read changes a setting |
 | `counters` | each `~/.claude/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
 | `launchctl` | (macOS) delegate setenv LaunchAgent loaded *when delegation is on* | `launchctl bootstrap gui/$(id -u) <plist>` | Linux (macOS-only); delegation off |
 | `template-version` | project `.adlc/` scaffold present | run `/template-drift` to compare | run outside a consumer project |
@@ -78,7 +97,74 @@ Mapping:
 | 0 (`ok`) | delegated path live | **PASS** |
 | 1 (`not-opted-in` / `disabled-via-config` / `disabled-via-env`) | opt-in off | **SKIP** (reason shown) |
 | 2 (`no-binary`) + config `enabled: false`/absent | not installed, not requested | **SKIP** |
-| 2 (`no-binary`) + config `enabled: true` | **misconfigured** | **FAIL** → `./install.sh --with-delegation`, or set `delegate.enabled: false` |
+| 2 (`no-binary`) + config `enabled: true` | **misconfigured** | **FAIL** → `./install.sh --with-delegation`, or set `delegate.enabled: false`. On the plugin route only the config edit: the plugin ships no delegation CLIs |
+
+### Install routes (REQ-669 ADR-7)
+
+Doctor runs on one of two routes, and `Profile.route` records which. It is
+derived once, from the real path of the running copy, and printed on the
+`profile:` line:
+
+- **`plugin`** when that copy is inside `~/.claude/plugins/cache/`, or is a root
+  `~/.claude/plugins/installed_plugins.json` records for `adlc@<marketplace>`. A
+  local-path marketplace runs the plugin from its source directory, not the
+  cache, so its root is read from `known_marketplaces.json` and the
+  marketplace's own `marketplace.json`.
+- **`symlink`** otherwise. This is the route whose checks all run, so a machine
+  doctor cannot place is never spared a check. That includes a contributor's
+  clone that `~/.claude/skills` links *and* a local-path marketplace installs:
+  it stays `symlink`, so the symlink health checks still run on it, and
+  `doubled-install` reports the doubling.
+
+When `CLAUDE_CONFIG_DIR` is set to an absolute path, Claude Code keeps its
+plugins there, so the doctor reads `plugins/cache/`, `installed_plugins.json`
+and `known_marketplaces.json` under it instead of `~/.claude` (details name it
+as `$CLAUDE_CONFIG_DIR/...`). The pointer, the machine config and the symlink
+install stay under `~/.claude`, where the hook and `install.sh` write them. A
+relative value is ignored.
+
+`git rev-parse` plays no part: a cache copy has no `.git`, and `~/.claude` can
+sit inside a dotfiles repo. The root itself comes from `toolkit_root.py`.
+
+The adlc plugin install is read from two signals: the install record and the
+cache (`~/.claude/plugins/cache/*/adlc/*/` with a `plugin.json` naming `adlc`,
+skipping a version that carries Claude Code's `.orphaned_at` marker). The
+record wins when it exists, and its `installPath` names the live copy, since
+older versions stay in the cache after an update. A well-formed version-2
+record with no adlc entry is **absent** whatever the cache holds: that is what
+`claude plugin uninstall` leaves, and any copies still in the cache are named in
+the detail as leftovers Claude Code does not load, not as a conflict. A record
+that cannot be read, has a schema other than version 2, names an `installPath`
+without the plugin's manifest, or holds an install key that is not
+`adlc@<marketplace>` (`^adlc@[a-z0-9][a-z0-9-]*$`) makes the install
+**unknown**. Unknown is a FAIL wherever it matters: `plugin-route` cannot
+confirm the running copy, and `doubled-install` cannot rule out a doubling next
+to a live symlink install (LESSON-581). The plugin install is read once per run
+and carried on the profile, so the route and both route checks see the same
+reading.
+
+If route detection itself raises, the route falls back to `symlink`, so every
+check runs, and `plugin-route` FAILs saying detection failed, with
+`claude plugin details adlc` as the fix. The `profile:` line then reads
+`route=symlink (route detection failed)`.
+
+A remediation that runs `install.sh` is printed on the symlink route only, and
+not at all when route detection failed. Run from the plugin's copy,
+`install.sh` would symlink that copy into `~/.claude` and double the install.
+A check with more than one way out prints one `-> fix:` line per way.
+
+Two gaps are known:
+
+- The doctor does not read `enabledPlugins` in `~/.claude/settings.json`. A
+  plugin disabled there still counts as installed, so `doubled-install` can
+  report a doubling that Claude Code is not loading.
+- On a plugin-only machine whose `python3` has no PyYAML (a fresh Mac's system
+  Python), `pyyaml` SKIPs while `~/.claude/adlc/config.yml` is still the
+  SessionStart hook's unedited scaffold, which reads the same without PyYAML.
+  The scaffold text is read off `scripts/session-start.sh`, not copied
+  (`test_config_scaffold_parity.py` pins it to both writers). Once that file is
+  edited, or a project `.adlc/config.yml` exists, `pyyaml` FAILs there, and the
+  fix it prints is the pinned `pip install --user` for that interpreter.
 
 ### Which interpreter parses the config (REQ-609 BR-8 / ADR-2)
 
@@ -217,7 +303,13 @@ non-zero exit naming the path and the reason class, not a silent `{}`. It resolv
 the provider with precedence
 per-project `.adlc/config.yml` > machine config > `auto` (origin-URL detection,
 fail-loud on an unrecognized host), and refuses a key-shaped `forge.auth` value
-(BR-6). CLI surface used by the partial and the check:
+(BR-6). The loader is taken from this file's own toolkit root. A copy vendored
+without `tools/delegate/` beside it (`.adlc/tools/adlc/forge_config.py`) falls
+back to `$ADLC_TOOLKIT_ROOT/tools/delegate/_machine_config.py`, accepted only
+when that root's own `toolkit_root.py` derives the same root; `lane_check.py`
+does the same. With neither, the one stderr line names the paths searched and
+the route's fix: `install.sh` on the symlink route, a plugin reinstall on the
+plugin route. CLI surface used by the partial and the check:
 
 ```bash
 python3 tools/adlc/forge_config.py resolve-provider [<repo-dir>]   # prints github|azure-devops
@@ -230,8 +322,9 @@ The lite lane's mechanical check (REQ-652 BR-6, architecture ADR-3). It is a
 helper module, not a subcommand. `partials/lane-check.sh` (`adlc_lane_check
 <worktree> <base-ref>`) is the entry point the skills call. It runs this file by
 path, and only the installed toolkit's copy
-(`~/.claude/skills/tools/adlc/lane_check.py`), never one in the tree under
-check:
+(`$ADLC_TOOLKIT_ROOT/tools/adlc/lane_check.py`: the clone behind
+`~/.claude/skills` on the symlink route, the plugin's cache copy on the plugin
+route), never one in the tree under check:
 
 ```bash
 python3 tools/adlc/lane_check.py --worktree <path> --base origin/<integration-branch>

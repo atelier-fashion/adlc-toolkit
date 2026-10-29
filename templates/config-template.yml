@@ -25,9 +25,15 @@
 # The fastest way to fill this in is to start from a preset that matches your
 # stack, then replace the placeholder values.
 #
-#   cp ~/.claude/skills/presets/ios-firebase-cloudrun.yml .adlc/config.yml
+#   cp "$ADLC_TOOLKIT_ROOT/presets/ios-firebase-cloudrun.yml" .adlc/config.yml
 #
-# Available presets (see ~/.claude/skills/presets/):
+# $ADLC_TOOLKIT_ROOT is the installed toolkit (ToolkitRoot): on the symlink
+# route the clone install.sh links into ~/.claude, and on the plugin route the
+# plugin's cache copy, whose path `cat ~/.claude/adlc/plugin-root` prints. Set it
+# in your shell first; the presets README has a one-line resolver that works on
+# both routes.
+#
+# Available presets (see $ADLC_TOOLKIT_ROOT/presets/):
 #   - ios-firebase-cloudrun.yml — iOS app + Firebase + Cloud Run backend
 #
 # If no preset matches, fill out the sections below from scratch.

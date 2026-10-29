@@ -1,0 +1,14 @@
+{
+  "name": "adlc-toolkit",
+  "owner": {
+    "name": "Atelier Fashion",
+    "url": "https://github.com/atelier-fashion"
+  },
+  "description": "The ADLC toolkit marketplace. It lists one plugin, adlc, which is this repository.",
+  "plugins": [
+    {
+      "name": "adlc",
+      "source": "./"
+    }
+  ]
+}

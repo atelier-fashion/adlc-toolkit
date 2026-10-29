@@ -1,7 +1,8 @@
 # partials/id-alloc.sh — collision-safe id allocation, remote as source of truth (REQ-518).
 #
-# Source this partial, then call adlc_alloc_id WITHIN THE SAME fenced block:
-#   if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . ~/.claude/skills/partials/id-alloc.sh; fi
+# Source this partial, then call adlc_alloc_id WITHIN THE SAME fenced block, after the
+# fence's ToolkitRoot root line (conventions.md "Bash in skills"):
+#   if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-alloc.sh"; fi
 #   REQ_NUM=$(adlc_alloc_id req)
 #   # `exit 1` inside adlc_alloc_id's subshell terminates only the subshell — REQ_NUM
 #   # would be silently empty. Guard the parent context (REQ-416 verify D-pass).
@@ -12,6 +13,10 @@
 # Allocation order (BR-1): derive remote high-water -> max(remote, local) -> allocate
 # max+1 -> fast-forward the local counter, all inside the existing mkdir lock with its
 # symlink/TOCTOU guards intact. The local counter is a CACHE, not an authority.
+# Machine state needs no installer (REQ-669 BR-6): the plugin route never runs
+# install.sh, so `~/.claude` may not exist yet. adlc_alloc_id creates it with
+# `mkdir -p "$HOME/.claude"` before it takes the lock (the lock mkdir needs its
+# parent), and an absent counter bootstraps from the local scan as it always has.
 #
 # Functions exported:
 #   adlc_id_kind_counter <kind>   -> prints the ~/.claude counter path for the kind
@@ -603,6 +608,9 @@ adlc_alloc_id() {
     KIND="$adlc_ai_kind"
     RESERVE_REPO="$adlc_ai_reserve_repo"
     MAXTRIES="${ADLC_RESERVE_MAX_TRIES:-10}"
+    # REQ-669 BR-6: create ~/.claude rather than assume install.sh made it. Without
+    # it every lock mkdir below fails and allocation dies after the full retry budget.
+    mkdir -p "$HOME/.claude" || { echo "ERROR: cannot create $HOME/.claude for the $KIND counter and lock — aborting" >&2; exit 1; }
     if [ -L "$LOCK" ]; then
       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
       exit 1

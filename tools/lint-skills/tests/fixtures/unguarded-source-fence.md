@@ -1,6 +1,6 @@
 # Fixture: unguarded partial sourcing inside fences (REQ-610 BR-3/BR-5)
 
-Four wrong ways to source a partial, one per fence, each a single
+Eleven wrong ways to source a partial, one per fence, each a single
 `unguarded-source` finding on its own line. The two retired-spelling lines match
 BOTH of the check's rules and must still yield ONE finding each, not two — the
 second pass is deduped by line number.
@@ -65,5 +65,45 @@ even tilde-expand, so this shape is doubly wrong.
 . ".adlc/partials/forge.sh" 2>/dev/null || . "~/.claude/skills/partials/forge.sh"
 ```
 
-Expect exactly seven `unguarded-source` findings and no other finding of any
+The REQ-669 operand, `"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"`, gets no
+exemption from the guard. Each fence below carries the root line, so
+`toolkit-root-line` is silent and the only findings are the source lines.
+
+The new operand `||`-chained behind the repo-local copy: the same fatal shape as
+the retired one.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+. .adlc/partials/lane-check.sh 2>/dev/null || . "$ADLC_TOOLKIT_ROOT/partials/lane-check.sh"
+```
+
+The new operand sourced alone, with no repo-local arm: it skips the vendored
+copy LESSON-441 depends on.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+. "$ADLC_TOOLKIT_ROOT/partials/conflict-bound.sh"
+```
+
+The new operand with a mismatched `<name>`: the guard tests `forge.sh` and the
+`else` arm sources `intake.sh`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/intake.sh"; fi
+```
+
+The guarded REQ-610 spelling, exactly as the whole corpus wrote it before
+REQ-669 TASK-124. The guard is right; the `else` arm is not. It reads
+`~/.claude/skills`, which only the symlink install has, so on the plugin route
+the fallback names a file that is not there. TASK-122 accepted it while the
+corpus was rewritten, and TASK-124 retired that acceptance. It needs no root
+line, since it never reads `$ADLC_TOOLKIT_ROOT`, so `toolkit-root-line` stays
+silent here and the one finding is the source line's.
+
+```sh
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+```
+
+Expect exactly eleven `unguarded-source` findings and no other finding of any
 kind.

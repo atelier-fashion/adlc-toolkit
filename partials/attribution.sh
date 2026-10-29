@@ -1,7 +1,8 @@
 # partials/attribution.sh — incident→REQ attribution (REQ-593).
 #
-# Source this partial, then call the functions WITHIN THE SAME fenced block:
-#   if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . ~/.claude/skills/partials/attribution.sh; fi
+# Source this partial, then call the functions WITHIN THE SAME fenced block, after
+# the fence's ToolkitRoot root line (conventions.md "Bash in skills"):
+#   if [ -f .adlc/partials/attribution.sh ]; then . .adlc/partials/attribution.sh; else . "$ADLC_TOOLKIT_ROOT/partials/attribution.sh"; fi
 #   reqs=$(adlc_attr_blame_reqs "$repo" "$primary" "src/foo.js" 10 24)
 #
 # Derives "which REQ introduced this defect" from git history: blame the root-cause

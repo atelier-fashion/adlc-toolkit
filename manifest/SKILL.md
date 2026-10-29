@@ -14,7 +14,7 @@ Unlike `/status`, which reconstructs its view from the **local** `.adlc/` checko
 
 ## Ethos
 
-!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init to vendor .adlc/ETHOS.md`
+!`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 
 ## Context
 
@@ -72,7 +72,8 @@ clean_field() { printf '%s' "${1}" | tr -c 'A-Za-z0-9 ._/:-' ' ' | cut -c1-60; }
 # The GitHub backend forwards args verbatim, so the existing --json/--jq pipelines
 # below stay byte-identical (BR-3); the branch-only ls-remote fallback (Step 2b)
 # is pure git and unchanged (BR-8).
-if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . ~/.claude/skills/partials/forge.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
 
 TAB=$(printf '\t')
 raw=$(mktemp "${TMPDIR:-/tmp}/manifest.XXXXXX") || { echo "/manifest: mktemp failed — skipping manifest" >&2; exit 0; }

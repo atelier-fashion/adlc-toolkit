@@ -70,6 +70,113 @@ def test_refuses_when_new_id_collides_on_remote(tmp_path, monkeypatch, capsys):
     assert (repo / ".adlc" / "specs" / "REQ-600-demo").is_dir()
 
 
+# --- a missing recheck partial refuses, never "no collision" (REQ-669 ADR-2) --------
+
+def _no_toolkit_partials(monkeypatch):
+    """The toolkit level finds no partial, as on an install that lost its partials/."""
+    def missing(rel):
+        raise renumber.toolkit_root.ToolkitFileNotFound(
+            "adlc: toolkit file not found: /nowhere/" + rel)
+    monkeypatch.setattr(renumber.toolkit_root, "toolkit_file", missing)
+
+
+def test_remote_collision_raises_when_recheck_partial_missing(tmp_path, monkeypatch):
+    """No recheck partial anywhere -> a named error, not False.
+
+    False reads as "no collision", which let a rename into a remote collision
+    proceed with nothing said. The message names the partial and the project
+    path that was searched.
+    """
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    _no_toolkit_partials(monkeypatch)
+    with pytest.raises(renumber.RecheckUnavailableError) as exc:
+        renumber.remote_collision("REQ-700")
+    msg = str(exc.value)
+    assert "id-recheck.sh" in msg
+    assert os.path.join(".adlc", "partials", "id-recheck.sh") in msg
+    assert "REQ-700" in msg
+
+
+def test_main_refuses_when_recheck_partial_missing(tmp_path, monkeypatch, capsys):
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    _no_toolkit_partials(monkeypatch)
+    rc = renumber.main(["REQ-600", "REQ-700", "--yes"])
+    assert rc == 1
+    assert "id-recheck.sh" in capsys.readouterr().err
+    assert (repo / ".adlc" / "specs" / "REQ-600-demo").is_dir()
+    assert not (repo / ".adlc" / "specs" / "REQ-700-demo").exists()
+
+
+def test_find_partial_project_copy_then_toolkit(tmp_path, monkeypatch):
+    """Benign twins: the toolkit tree answers when the project has no copy, and a
+    project copy under .adlc/partials still wins when it has one."""
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    toolkit_copy = renumber.toolkit_root.toolkit_file("partials/id-recheck.sh")
+    assert renumber._find_partial("id-recheck.sh") == toolkit_copy
+
+    local = repo / ".adlc" / "partials" / "id-recheck.sh"
+    local.parent.mkdir(parents=True)
+    local.write_text("adlc_recheck_id() { return 0; }\n", encoding="utf-8")
+    assert os.path.realpath(renumber._find_partial("id-recheck.sh")) == \
+        os.path.realpath(str(local))
+
+
+def _stub_recheck(repo, body):
+    """A project recheck partial whose adlc_recheck_id runs ``body``."""
+    local = repo / ".adlc" / "partials" / "id-recheck.sh"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text("adlc_recheck_id() {\n%s\n}\n" % body, encoding="utf-8")
+
+
+@pytest.mark.parametrize("rc,collides", [(0, False), (1, True)])
+def test_remote_collision_reads_the_two_verdicts(tmp_path, monkeypatch, rc, collides):
+    """Benign twins: 0 is no collision, 1 is a collision, as the partial's contract says."""
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    _stub_recheck(repo, "  return %d" % rc)
+    assert renumber.remote_collision("REQ-700") is collides
+
+
+@pytest.mark.parametrize("body", ["  return 2", "  exit 2", "  exit 127"])
+def test_remote_collision_refuses_any_other_exit(tmp_path, monkeypatch, body):
+    """Neither 0 nor 1 is no verdict: dash exits 2 when the fallback id-alloc.sh is missing.
+
+    That used to read as "no collision".
+    """
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    _stub_recheck(repo, "  echo 'id-alloc.sh: not found' >&2\n" + body)
+    with pytest.raises(renumber.RecheckUnavailableError) as exc:
+        renumber.remote_collision("REQ-700")
+    msg = str(exc.value)
+    assert "REQ-700" in msg and "exited" in msg and "id-alloc.sh: not found" in msg
+
+
+def test_main_refuses_when_the_recheck_gives_no_verdict(tmp_path, monkeypatch, capsys):
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    _stub_recheck(repo, "  return 2")
+    assert renumber.main(["REQ-600", "REQ-700", "--yes"]) == 1
+    assert "exited 2" in capsys.readouterr().err
+    assert (repo / ".adlc" / "specs" / "REQ-600-demo").is_dir()
+
+
+def test_recheck_runs_with_this_toolkit_as_adlc_toolkit_root(tmp_path, monkeypatch):
+    """The partial's fallback arm reads ADLC_TOOLKIT_ROOT, so it is set to this toolkit.
+
+    An inherited value is replaced, not trusted: it may name another install.
+    """
+    repo = _init_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("ADLC_TOOLKIT_ROOT", "/some/other/install")
+    _stub_recheck(repo, '  printf "%s" "$ADLC_TOOLKIT_ROOT" > seen-root\n  return 0')
+    assert renumber.remote_collision("REQ-700") is False
+    assert (repo / "seen-root").read_text() == renumber.toolkit_root.toolkit_root()
+
+
 # --- dry-run then apply -------------------------------------------------------------
 
 def test_dry_run_mutates_nothing(tmp_path, monkeypatch, capsys):

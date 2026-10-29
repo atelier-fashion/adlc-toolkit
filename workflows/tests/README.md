@@ -27,6 +27,7 @@ gate, the BR-12 max-5 bound), so they get real, deterministic unit coverage here
 | `orderByTier` | The Phase-4 stable ascending tier sort. |
 | `groupCrossRepoReqs` | The **ADR-12** cross-REQ merge grouping (union-find over "shares a touched repo"). |
 | `blocked` / `failed` | The TERMINAL constructors — `state` discriminant, string→`{detail}` normalization, undefined-key omission (closed-schema safe). |
+| `agentTypeFor`, `normalizeAgentNamespace`, `AGENT_NAMESPACES`, `panelMembers` | **REQ-669 ADR-6**: the agent namespace `/sprint` passes as `args.agentNamespace`. `agentTypeFor('reflector', '')` is `reflector`, `agentTypeFor('reflector', 'adlc:')` is `adlc:reflector`, and anything outside the closed allowlist `""` / `"adlc:"` (`'../'`, `'adlc'`, a non-string, and a well-shaped other prefix such as `'other:'`) yields the bare name. A source check asserts every `agentType:` in the engine is `agentTypeFor(<name>, AGENT_NS)` and that `args.agentNamespace` is read at one site, because a wrong agentType fails silently rather than loudly. |
 | `closeOutEvidenceStatus`, `closeOutDigest`, `repoRootFromWorktree`, `groupMergedByRepo` | The **BUG-249** Step-8b close-out pass: the no-evidence ⇒ `NO_ENTRY` decision, the bounded deterministic evidence digest (byte-identical replay prompts), repo-root recovery from the `<root>/.worktrees/<id>` convention, and per-repo serialization of close-outs. Plus a closed-schema check that `TERMINAL` admits `closeOut`/`closeOutDetail` beside `state:"merged"`. |
 
 ## Running the tests
@@ -40,7 +41,7 @@ dependencies**. Run from the **toolkit repo root** (the directory that contains
 node --test 'workflows/tests/*.test.js'
 ```
 
-Expected: all tests pass (`ℹ pass 52  ℹ fail 0`).
+Expected: all tests pass (`ℹ pass 58  ℹ fail 0`).
 
 > **Note on Node versions.** The glob form above is the portable invocation. On
 > recent Node (≥ 22) you can also let the runner discover tests by walking the

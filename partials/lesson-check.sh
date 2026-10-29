@@ -6,8 +6,9 @@
 # block — SKILL.md fences share no shell state (conventions.md "Bash in skills",
 # enforced by tools/lint-skills cross-fence-fn; LESSON-020). The path is a threaded
 # literal the model substitutes, never a variable carried in from another fence
-# (ADR-1: cross-fence-var sanctions no such name):
-#   if [ -f .adlc/partials/lesson-check.sh ]; then . .adlc/partials/lesson-check.sh; else . ~/.claude/skills/partials/lesson-check.sh; fi
+# (ADR-1: cross-fence-var sanctions no such name). The source line follows the
+# fence's ToolkitRoot root line (conventions.md "Bash in skills"):
+#   if [ -f .adlc/partials/lesson-check.sh ]; then . .adlc/partials/lesson-check.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lesson-check.sh"; fi
 #   adlc_lesson_check .adlc/knowledge/lessons/LESSON-<id>-<slug>.md
 #
 # Contract — adlc_lesson_check <lesson-file>:

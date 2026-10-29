@@ -10,10 +10,13 @@ bodies stay inline at the call site.
 ## Sourcing the partial
 
 Use the guarded two-level source (conventions.md "Bash in skills") so the macro works in consumer projects that
-haven't re-run `/init` since the toolkit shipped the partial:
+haven't re-run `/init` (`/adlc:init` on the plugin install) since the toolkit shipped the partial. The fence's
+ToolkitRoot root line comes first; it resolves the fallback level to the running install, the plugin's cache copy
+or the clone behind the skills symlink (REQ-669 ADR-1):
 
 ```sh
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
 ```
 
 `.` (dot) is POSIX; do NOT use `source` (bash-only).
@@ -59,7 +62,8 @@ Read `$?` IMMEDIATELY into a variable — `$?` is clobbered by every
 subsequent command:
 
 ```sh
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
 adlc_delegate_gate_check; gate=$?
 case $gate in
   0) # delegated path — invoke adlc-read, capture stdout, post-validate
@@ -159,8 +163,9 @@ gate-check fence does not reach the invocation fence — and then satisfy three
 obligations before the corpus is handed over (REQ-609 BR-12, ADR-3):
 
 ```sh
-if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . ~/.claude/skills/partials/delegate-gate.sh; fi
-case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation, and /init to refresh the vendored gate)" >&2; exit 1 ;; esac
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
+case "$ADLC_READ_BIN" in /*) ;; *) echo "/<skill>: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2; exit 1 ;; esac
 command "$ADLC_READ_BIN" --no-warn --paths ... --question "..."
 ```
 
@@ -228,17 +233,18 @@ a path the resolver returned.
 predates REQ-609 still exports a plain command name on a `$PATH` hit; the new
 call-site guard now refuses that value outright rather than invoking it, so the
 stale copy degrades to "no delegation" instead of to the pre-REQ-609 resolution.
-`/template-drift` reports the stale copy (LESSON-441); re-run `/init` to
-re-vendor, which the refusal message says.
+`/template-drift` reports the stale copy (LESSON-441); re-run
+`/init` (`/adlc:init` on the plugin install) to re-vendor, which the refusal
+message says.
 
 **Known limitation: the vendored gate is trusted as repo-local code.** A skill
 fence sources `.adlc/partials/delegate-gate.sh` from the working repo before
-falling back to `~/.claude/skills/partials/`, and there is no digest pin on that
+falling back to ToolkitRoot's `partials/` (`$ADLC_TOOLKIT_ROOT`, REQ-669), and there is no digest pin on that
 copy — it is trusted exactly as every other vendored partial (`forge.sh`,
 `emit-step-telemetry.sh`, `delegate-tools-path.sh`) is trusted, i.e. as code the
 operator has checked out and is running on purpose. The bound is exact and not
 small: `/init` vendors the partials into the repo but never the `SKILL.md` files,
-which stay machine-global under `~/.claude/skills/`, so a checkout — a branch, a
+which stay machine-global in the installed toolkit (ToolkitRoot), so a checkout — a branch, a
 PR, a fork — can carry a modified `delegate-gate.sh` while the skill that sources
 it does not travel with it. Sourcing that copy is already arbitrary code execution
 in the fence's shell; the corpus hand-over is not the marginal risk, and the

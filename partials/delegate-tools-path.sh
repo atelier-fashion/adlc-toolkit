@@ -8,9 +8,12 @@
 #
 # Resolution order:
 #   1. project-local  tools/delegate                          (canonical repo / dogfooding)
-#   2. global symlink  ${HOME:-}/.claude/skills/tools/delegate  (every downstream
-#      repo — ~/.claude/skills is symlinked to the canonical toolkit repo root;
-#      ${HOME:-} so an unset HOME under a `set -u` caller degrades, not aborts)
+#   2. ToolkitRoot     "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/delegate"
+#      (every downstream repo — the installed toolkit: the plugin's cache copy, or
+#      the clone behind the ~/.claude/skills symlink when ADLC_TOOLKIT_ROOT is unset;
+#      REQ-669 ADR-2). The default arm reads a bare $HOME, so this tier is probed
+#      only when ADLC_TOOLKIT_ROOT or HOME is set: an unset HOME under a `set -u`
+#      caller degrades to 3, not aborts)
 #   3. neither → tools/delegate (defensive default; existing 2>/dev/null / || true
 #      guards at call sites keep this a silent no-op — telemetry must never block
 #      a skill: REQ-424 / LESSON-008 BR-4)
@@ -24,8 +27,8 @@ export DELEGATE_TOOLS="tools/delegate"
 
 if [ -x "tools/delegate/emit-telemetry.sh" ]; then
   DELEGATE_TOOLS="tools/delegate"
-elif [ -x "${HOME:-}/.claude/skills/tools/delegate/emit-telemetry.sh" ]; then
-  DELEGATE_TOOLS="${HOME:-}/.claude/skills/tools/delegate"
+elif [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -x "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/delegate/emit-telemetry.sh" ]; then
+  DELEGATE_TOOLS="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/delegate"
 else
   DELEGATE_TOOLS="tools/delegate"
 fi

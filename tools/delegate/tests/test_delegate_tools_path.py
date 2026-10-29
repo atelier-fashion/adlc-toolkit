@@ -8,8 +8,11 @@ override `HOME` so the real `~/.claude` is never read or mutated.
 
 Resolution contract under test (`partials/delegate-tools-path.sh`, sourced):
   1. `tools/delegate/emit-telemetry.sh` executable rel. CWD → DELEGATE_TOOLS=tools/delegate
-  2. elif `$HOME/.claude/skills/tools/delegate/emit-telemetry.sh` executable →
-     DELEGATE_TOOLS=$HOME/.claude/skills/tools/delegate
+  2. elif `<ToolkitRoot>/tools/delegate/emit-telemetry.sh` executable →
+     DELEGATE_TOOLS=<ToolkitRoot>/tools/delegate, where ToolkitRoot is
+     `${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}` (REQ-669 ADR-2): the exported
+     root when set, else the symlink install under HOME. A set root is the
+     install, so HOME's copy is then never consulted.
   3. else → DELEGATE_TOOLS=tools/delegate  (non-fatal degrade; emits nothing; rc 0)
 It must never write to stdout/stderr and must not abort a `set -eu` caller.
 """
@@ -238,4 +241,96 @@ def test_delegate_tools_is_exported_to_child(tmp_path):
 
     assert r.returncode == 0, r.stderr
     assert r.stdout == "tools/delegate", repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+# ---------------------------------------------------------------------------
+# REQ-669 ADR-2: tier 2 reads ToolkitRoot. With ADLC_TOOLKIT_ROOT exported (the
+# plugin route), the root's copy is used and HOME's ~/.claude/skills is not.
+# ---------------------------------------------------------------------------
+
+def test_toolkit_root_resolves_without_home_skills(tmp_path):
+    """Plugin route: ADLC_TOOLKIT_ROOT names a cache-shaped root, HOME has no
+    `.claude/skills` at all → DELEGATE_TOOLS=<root>/tools/delegate."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    root = tmp_path / "plugins" / "cache" / "mkt" / "adlc" / "1.0.0"
+    _make_emit(root / "tools" / "delegate")
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)  # no skills/ beneath it
+
+    env = {"HOME": str(fake_home), "PATH": _BASE_PATH, "ADLC_TOOLKIT_ROOT": str(root)}
+    r = _run(_PROBE, env, cwd)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == str(root / "tools" / "delegate"), repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+def test_toolkit_root_wins_over_home_skills(tmp_path):
+    """Both installs present (a doubled machine whose fence resolved the plugin
+    root): the exported root wins; HOME's copy is not read."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    root = tmp_path / "root"
+    _make_emit(root / "tools" / "delegate")
+    fake_home = tmp_path / "home"
+    _make_emit(fake_home / ".claude" / "skills" / "tools" / "delegate")
+
+    env = {"HOME": str(fake_home), "PATH": _BASE_PATH, "ADLC_TOOLKIT_ROOT": str(root)}
+    r = _run(_PROBE, env, cwd)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == str(root / "tools" / "delegate"), repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+def test_toolkit_root_without_tools_degrades_not_falls_back_to_home(tmp_path):
+    """A set root with no `tools/delegate` degrades to tier 3. It does NOT fall
+    back to HOME's copy: ToolkitRoot is the install, and two installs never mix."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    fake_home = tmp_path / "home"
+    _make_emit(fake_home / ".claude" / "skills" / "tools" / "delegate")
+
+    env = {"HOME": str(fake_home), "PATH": _BASE_PATH, "ADLC_TOOLKIT_ROOT": str(root)}
+    r = _run(_PROBE, env, cwd)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "tools/delegate", repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+def test_empty_toolkit_root_uses_home_symlink_install(tmp_path):
+    """An empty ADLC_TOOLKIT_ROOT is the same as unset (`:-`): the symlink
+    install under HOME answers, exactly as before REQ-669 (BR-3)."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    fake_home = tmp_path / "home"
+    _make_emit(fake_home / ".claude" / "skills" / "tools" / "delegate")
+
+    expected = str(fake_home / ".claude" / "skills" / "tools" / "delegate")
+    env = {"HOME": str(fake_home), "PATH": _BASE_PATH, "ADLC_TOOLKIT_ROOT": ""}
+    r = _run(_PROBE, env, cwd)
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == expected, repr(r.stdout)
+    assert r.stderr == "", repr(r.stderr)
+
+
+def test_home_unset_with_toolkit_root_under_set_eu(tmp_path):
+    """HOME unset, ADLC_TOOLKIT_ROOT set, `sh -eu`: the root's copy resolves and
+    the default arm's bare `$HOME` is never expanded, so `-u` does not abort."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    root = tmp_path / "root"
+    _make_emit(root / "tools" / "delegate")
+
+    env = {"PATH": _BASE_PATH, "ADLC_TOOLKIT_ROOT": str(root)}  # NO "HOME"
+    r = _run(_PROBE, env, cwd, posix_flags=True)
+
+    assert r.returncode == 0, (r.returncode, r.stderr)
+    assert r.stdout == str(root / "tools" / "delegate"), repr(r.stdout)
     assert r.stderr == "", repr(r.stderr)

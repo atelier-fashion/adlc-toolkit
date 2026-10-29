@@ -641,17 +641,46 @@ function mergeReverified(original, reverified) {
 }
 
 // panelMembers — the 6 review-panel members: the reflector plus the 5 reviewers.
-// Each entry maps the FINDINGS `dimension` label to the agentType that produces
-// it (the two namespaces differ). Pure literal builder. (PANEL_DIMENSIONS)
+// Each entry maps the FINDINGS `dimension` label to the bare name of the agent
+// that produces it (the two namespaces differ). The dispatch site turns `agent`
+// into an agentType with agentTypeFor (REQ-669 ADR-6). Pure literal builder.
+// (PANEL_DIMENSIONS)
 function panelMembers() {
   return [
-    { dimension: 'reflector', agentType: 'reflector' },
-    { dimension: 'correctness', agentType: 'correctness-reviewer' },
-    { dimension: 'quality', agentType: 'quality-reviewer' },
-    { dimension: 'architecture', agentType: 'architecture-reviewer' },
-    { dimension: 'test-coverage', agentType: 'test-auditor' },
-    { dimension: 'security', agentType: 'security-auditor' },
+    { dimension: 'reflector', agent: 'reflector' },
+    { dimension: 'correctness', agent: 'correctness-reviewer' },
+    { dimension: 'quality', agent: 'quality-reviewer' },
+    { dimension: 'architecture', agent: 'architecture-reviewer' },
+    { dimension: 'test-coverage', agent: 'test-auditor' },
+    { dimension: 'security', agent: 'security-auditor' },
   ];
+}
+
+// AGENT_NAMESPACE_RE / normalizeAgentNamespace / agentTypeFor — REQ-669 ADR-6.
+// The toolkit's agents are registered by bare name on the symlink install and as
+// `<plugin>:<agent>` on the plugin install, so `adlc:reflector` there
+// (verification.md row 7). A wrong agentType does not fail loudly: on the fork
+// path an unresolved name silently became a generic agent with no checklist
+// (row 7, evidence E3, note N4). So every agentType in this file goes through
+// agentTypeFor, and the namespace is checked against a closed allowlist.
+//
+// `args.agentNamespace` is untrusted input like every arg (LESSON-008).
+// normalizeAgentNamespace accepts exactly the two values /sprint can send: ""
+// (or an absent value) on the symlink install and "adlc:" on the plugin install.
+// Anything else, a well-shaped other plugin's prefix such as "other:" included,
+// is `rejected` and yields "", so a bad value degrades to bare names instead of
+// routing every dispatch to another plugin's agents. agentTypeFor normalizes
+// again, so a caller cannot bypass the check.
+const AGENT_NAMESPACES = Object.freeze(['', 'adlc:']);
+
+function normalizeAgentNamespace(raw) {
+  if (raw === undefined || raw === null || raw === '') return { ns: '', rejected: false };
+  if (typeof raw === 'string' && AGENT_NAMESPACES.includes(raw)) return { ns: raw, rejected: false };
+  return { ns: '', rejected: true };
+}
+
+function agentTypeFor(name, ns) {
+  return normalizeAgentNamespace(ns).ns + name;
 }
 
 // allMerged — pure JS: true only when EVERY verified PR row reports the gh
@@ -817,6 +846,7 @@ if (typeof module !== 'undefined') module.exports = {
   dedupeAndRank, dedupeKey, cmp,
   validateCitations, sanitizeDescription, candidatesByDimension,
   reflectorQuestions, fixedPairs, mergeReverified, panelMembers,
+  AGENT_NAMESPACES, normalizeAgentNamespace, agentTypeFor,
   allMerged, stripVerifyMarkers,
   groupCrossRepoReqs, sharesRepo,
   closeOutEvidenceStatus, closeOutDigest, repoRootFromWorktree, groupMergedByRepo,
@@ -1028,8 +1058,29 @@ const REBASE_RESULT_SCHEMA = {
 //                            from a user answer (REQ-485 BR-8). Like args.answers
 //                            it is read ONLY in runReq for the held REQ, keeping
 //                            every other REQ byte-identical (cache replay).
+//   args.agentNamespace    — string, default "". `adlc:` when /sprint runs from
+//                            the plugin install, "" on the symlink install. The
+//                            script has no fs, so it cannot detect the route
+//                            itself; /sprint computes this from its substituted
+//                            ${CLAUDE_PLUGIN_ROOT} (REQ-669 ADR-6). Read ONCE,
+//                            just below, and validated there.
 
 phase('Preflight — eligibility + max-5 bound');
+
+// REQ-669 ADR-6: the one read site of args.agentNamespace. A value outside the
+// closed allowlist ("" or "adlc:") is logged and replaced by "" (bare names). The log line names only
+// the value's type, never the value, so an untrusted string is not echoed
+// (LESSON-008). Declared before the first await so runReq and the post-pipeline
+// passes never meet it in its TDZ.
+const AGENT_NAMESPACE_ARG = args.agentNamespace;
+const AGENT_NAMESPACE = normalizeAgentNamespace(AGENT_NAMESPACE_ARG);
+if (AGENT_NAMESPACE.rejected) {
+  log(
+    `agentNamespace rejected: a ${typeof AGENT_NAMESPACE_ARG} that is not "" or ` +
+    '"adlc:" — dispatching every agent by its bare name.',
+  );
+}
+const AGENT_NS = AGENT_NAMESPACE.ns;
 
 // Preflight — ONE agent scores eligibility per REQ (BR-12, BUG-060). The agent
 // does all the I/O the script cannot: reads each REQ's spec/state, checks the
@@ -1212,7 +1263,7 @@ async function runReq(id) {
         agent(explorePrompt(id, worktree, a), {
           ...P,
           label: `${id} explore-${a}`,
-          agentType: a,
+          agentType: agentTypeFor(a, AGENT_NS),
         }),
       ),
     )
@@ -1314,7 +1365,7 @@ async function gate(id, P, worktree, spec, ans) {
     await agent(spec.fixPrompt(verdict) + guidance, {
       ...P,
       label: `${spec.fixLabel} (round ${i})`,
-      agentType: 'task-implementer',
+      agentType: agentTypeFor('task-implementer', AGENT_NS),
     });
   }
   // Unreachable (the loop returns on the final attempt), but keep the contract
@@ -1797,7 +1848,7 @@ async function implement(id, P, worktree, tasks) {
     const report = await agent(implementPrompt(id, worktree, task), {
       ...P,
       label: `${id} phase4-${task.id}`,
-      agentType: 'task-implementer',
+      agentType: agentTypeFor('task-implementer', AGENT_NS),
     });
     // Keep the implementer's report as close-out evidence (BUG-249). Same
     // prompt bytes as before — capturing the return changes nothing the journal
@@ -1860,8 +1911,8 @@ async function implement(id, P, worktree, tasks) {
 // Returns `true` when the panel is clean / non-blocking (the REQ proceeds to
 // Phase 6); returns a `{state:'blocked'}` value on a reflector question.
 async function verify(id, P, worktree, repos, ans) {
-  // The PANEL: agentType + the dimension label it reports under (the FINDINGS
-  // `dimension` enum is distinct from the agentType name). The reflector leads;
+  // The PANEL: agent name + the dimension label it reports under (the FINDINGS
+  // `dimension` enum is distinct from the agent name). The reflector leads;
   // the 5 reviewers follow. (PANEL_DIMENSIONS / REVIEWER_DIMENSIONS, PURE block)
   const PANEL = panelMembers();
 
@@ -1909,7 +1960,7 @@ async function verify(id, P, worktree, repos, ans) {
             ...P,
             label: `${id} phase5-${r.repo}-${m.dimension}`,
             schema: FINDINGS,
-            agentType: m.agentType,
+            agentType: agentTypeFor(m.agent, AGENT_NS),
           }),
         ),
       )
@@ -1968,7 +2019,7 @@ async function verify(id, P, worktree, repos, ans) {
     await agent(fixFindingsPrompt(id, worktree, consolidated.blocking) + fixGuidance, {
       ...P,
       label: `${id} phase5-fix`,
-      agentType: 'task-implementer',
+      agentType: agentTypeFor('task-implementer', AGENT_NS),
     });
 
     // The (repo,dimension) pairs that were touched by the fix — recompute the
@@ -1997,7 +2048,7 @@ async function verify(id, P, worktree, repos, ans) {
               ...P,
               label: `${id} phase5-reverify-${repoId}-${m.dimension}`,
               schema: FINDINGS,
-              agentType: m.agentType,
+              agentType: agentTypeFor(m.agent, AGENT_NS),
             }),
           ),
         )
@@ -2062,7 +2113,7 @@ async function runPrePass(id, P, worktree, repos) {
       ...P,
       label: `${id} phase5-prepass-${r.repo}`,
       schema: CANDIDATES,
-      agentType: 'delegate-pre-pass',
+      agentType: agentTypeFor('delegate-pre-pass', AGENT_NS),
     });
 
     if (!CAND) { advisoryByRepo[r.repo] = {}; continue; }

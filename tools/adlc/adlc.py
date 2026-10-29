@@ -15,40 +15,35 @@ never breaks ``adlc --version`` or the usage listing.
 
 import argparse
 import os
-import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def _repo_root():
-    """Absolute path to the toolkit checkout root.
+    """Absolute real path of the toolkit root this CLI runs from.
 
-    Prefers ``git rev-parse --show-toplevel`` from this script's directory so it
-    resolves through the skills symlink regardless of cwd; falls back to walking
-    up from ``__file__`` (``tools/adlc/adlc.py`` → repo root is two levels up).
+    It is ``toolkit_root.toolkit_root()`` (REQ-669 ADR-2): derived from this
+    file's real path and identity-checked, so it is the clone on the symlink
+    route and the copy itself on the plugin route. ``git rev-parse`` is not
+    used, because a plugin cache copy has no ``.git`` and may sit inside an
+    enclosing dotfiles repo. Raises ``toolkit_root.ToolkitRootError`` when the
+    root cannot be established.
     """
-    here = os.path.dirname(os.path.abspath(__file__))
-    try:
-        out = subprocess.run(
-            ["git", "-C", here, "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        if out:
-            return out
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
-    # tools/adlc/adlc.py -> tools/adlc -> tools -> <root>
-    return os.path.dirname(os.path.dirname(here))
+    import toolkit_root  # noqa: E402  (stdlib only; lazy like every other import here)
+
+    return toolkit_root.toolkit_root()
 
 
 def _version():
     """Read the toolkit VERSION file; never hardcode the version (BR-3 spirit)."""
-    path = os.path.join(_repo_root(), "VERSION")
+    import toolkit_root  # noqa: E402
+
     try:
+        path = os.path.join(_repo_root(), "VERSION")
         with open(path, encoding="utf-8") as fh:
             return fh.read().strip()
-    except OSError:
+    except (OSError, toolkit_root.ToolkitRootError):
         return "unknown"
 
 
