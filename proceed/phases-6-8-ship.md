@@ -133,7 +133,7 @@ A vague "Pipeline complete" claim without one of these tags is a protocol violat
 
 **Lite lane — lane check first (REQ-652 BR-6).** On a REQ still on the lite lane, run the lane check (`proceed/phases-lite.md` "The lane check") immediately before the trial-merge gate below. A failure escalates, or is legitimate halt #4 for a forced-lite REQ in a solo run; either way do not merge.
 
-**Pre-merge trial-merge gate (REQ-483, BR-9/BR-16 — authoritative).** Before merging, first **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** — the gate MUST test the *current* tip; a stale local ref gives a false pass (LESSON-036). Then source `partials/trial-merge.sh` (the guarded spelling from conventions.md "Bash in skills") and run `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`, branching on the return code: **rc=1** (real conflict, files on stdout) → **solo:** do NOT merge: return the `blocked` terminal, populate `pipeline-state.json.blockers` with `{blockedBy, conflictFiles, unblockCondition}` ("resume after <blocker> merges, then rebase") — legitimate halt #3. **Under `/sprint`:** first run the bounded keep-both path (`agents/pipeline-runner.md` "Bounded resolution (BUG-207)", `partials/conflict-bound.sh`): if every conflicted file is an append-point collision, resolve keep-both, verify, append the `conflictsResolved` entry, push, and **re-run this gate** — it must return rc=0 before you merge, and on a lite REQ re-run the lane check too, since the resolution commit changed the diff; otherwise abort and halt `blocked` as in solo. **rc=0** → proceed to the merge below. **rc=2/3** (uncommitted worktree / unfetched-or-bad ref) → surface as `failed`, NOT `blocked` (it is a setup error, not a conflict). A footprint overlap alone never blocks — only rc=1 does (resolution is rebase, never a "merge anyway" — ethos #6).
+**Pre-merge trial-merge gate (REQ-483, BR-9/BR-16 — authoritative).** Before merging, first **`git -C <repos[<id>].worktree> fetch origin <integrationBranch>`** — the gate MUST test the *current* tip; a stale local ref gives a false pass (LESSON-036). Then source `partials/trial-merge.sh` (the guarded spelling from conventions.md "Bash in skills") and run `adlc_trial_merge "<repos[<id>].worktree>" origin/<integrationBranch>`, branching on the return code: **rc=1** (real conflict, files on stdout) → **solo:** do NOT merge: return the `blocked` terminal, populate `pipeline-state.json.blockers` with `{blockedBy, conflictFiles, unblockCondition}` ("resume after <blocker> merges, then rebase"), and emit the run-outcome line (R5, `blocked`, `merge-conflict`) — legitimate halt #3. **Under `/sprint`:** first run the bounded keep-both path (`agents/pipeline-runner.md` "Bounded resolution (BUG-207)", `partials/conflict-bound.sh`): if every conflicted file is an append-point collision, resolve keep-both, verify, append the `conflictsResolved` entry, push, and **re-run this gate** — it must return rc=0 before you merge, and on a lite REQ re-run the lane check too, since the resolution commit changed the diff; otherwise abort and halt `blocked` as in solo. **rc=0** → proceed to the merge below. **rc=2/3** (uncommitted worktree / unfetched-or-bad ref) → surface as `failed`, NOT `blocked` (it is a setup error, not a conflict). A footprint overlap alone never blocks — only rc=1 does (resolution is rebase, never a "merge anyway" — ethos #6).
 
 **`blockers` entry shape (REQ-485 additions).** The entry written on rc=1 carries, beyond `{blockedBy, conflictFiles, unblockCondition}`, three fields the `/sprint` orchestrator's auto-rebase/resume pass reads and updates: `holdState` (`held` \| `rebasing` \| `resumed` \| `re-halted` \| `needs-manual-rebase`), `rebaseAttempts` (capped at the retry bound — default 1, config `auto_rebase_max_attempts`), and `resolvedBlocker` (the now-merged blocker id after a post-merge materialized conflict). On a rc=1 halt set `holdState: "held"` and `rebaseAttempts: 0`. See `agents/pipeline-runner.md` "Blocker Handling" for the full table.
 
@@ -153,7 +153,15 @@ optional for either.
   Terminal claim is `merged` after all repos land, or `pr-ready` if dispatched by an orchestrator that owns merge sequencing (see Step 8c).
 
 **Step 8b — Close out (runs in BOTH topologies).** Do not skip any of these
-because the REQ touched only one repo:
+because the REQ touched only one repo.
+
+**First, carry the run's state to the primary-path copy (REQ-648)** — before
+`/wrapup` writes anything there, so no partial write can shadow a key:
+`proceed/SKILL.md` **Run-outcome telemetry** R4. It copies every key of the
+worktree copy that the primary-path copy lacks (`startedAt`, `repos`,
+`phaseHistory`, …) and keeps the primary-path copy's own (`lessons`, `harness`,
+`validateAttempts`, `verify`), so the record the run-outcome line is built from
+survives step 3's teardown.
 
 1. Run `/wrapup` with the REQ ID from the primary repo. In cross-repo mode, also pass the list of touched repos so `/wrapup` can:
    - Update ADLC artifacts (spec, decisions, knowledge) in the primary
@@ -174,14 +182,19 @@ because the REQ touched only one repo:
    file that contradicts the repo. Re-read the file after writing and confirm
    the five fields rather than assuming the write landed.
 3. Remove the worktree in each touched repo using the absolute path from state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`. Do NOT use the relative `.worktrees/REQ-xxx` form here. Then delete the local feature branch the squash-merge left behind (`git -C <repo-path> branch -D <branch>`): the merge deleted only the remote one (BUG-252).
-4. The pipeline is now complete.
+4. Emit the run-outcome line (REQ-648 BR-2): `proceed/SKILL.md`
+   **Run-outcome telemetry** R5 with `--terminal merged`, engine `solo` (or
+   `legacy` in subagent mode). It reads the primary-path copy, so the teardown
+   in step 3 cannot change its counts. The pipeline is now complete.
 
 **Step 8c — When the terminal is `pr-ready`, name the reconciler.** A
 `pr-ready` claim means someone else merges: the `/sprint` orchestrator, or a
 human on a user-reserved merge. `completed:false` is correct at that moment and
 becomes wrong the instant the PR lands, so the run MUST record who closes it —
 append to `pipeline-state.json.notes`: `terminal pr-ready; <orchestrator |
-user> owns the merge and the Step 8b close-out`. Whoever performs that merge
+user> owns the merge and the Step 8b close-out`. Then emit the run-outcome
+line (R5, `--terminal pr-ready`); the actor that later merges emits `merged`,
+and readers keep the latest line per REQ. Whoever performs that merge
 owns Step 8b in full, and runs it as `/wrapup REQ-xxx --close-out` (BUG-249):
 the close-out-only mode, in a dedicated `.worktrees/REQ-xxx-close-out`
 worktree, because that actor did not implement the REQ and must not re-merge or

@@ -13,8 +13,13 @@ Subcommands::
     emit --state S --terminal T --engine E [--reason R] [--req REQ-xxx]
         Print one flat JSON line (every value a string; counts are quoted
         decimals or "-"). ``emit-run-outcome.sh`` appends it to the log.
-    record-harness --state S --toolkit-root DIR
-        Write ``harness: {version, sha}`` once; an existing one is kept (BR-10).
+    record-harness --state S --toolkit-root DIR [--fresh]
+        Write ``harness: {version, sha}`` once; on a resume an existing one is
+        kept (BR-10, never re-read). ``--fresh`` — a fresh Step 0, decided from
+        the progress record exactly as ``adlc_lessons --fresh`` is (LESSON-719),
+        never from whether the key exists — re-stamps it and clears the
+        ``validateAttempts``, ``verify`` and ``lessonsWritten`` an earlier run of
+        the same REQ left in the primary-path copy.
     record-validate --state S --phase 1|3 --attempt N
         Set ``validateAttempts.phase<N>`` to max(existing, N): absolute and
         monotone, so a replay or a repeated call never double-counts.
@@ -23,6 +28,10 @@ Subcommands::
         and replace ``verify.findings``; stamp ``consolidatedAt``.
     record-lessons-written --state S (--ids LESSON-a,LESSON-b | --no-entry)
         Record ``/wrapup``'s ``### Lessons captured`` outcome.
+    record-carry --state S --from W
+        Copy every top-level key of W (the worktree copy) that S (the
+        primary-path copy) lacks into S, before teardown deletes W. S's own keys
+        win, so the records above, ``lessons`` and the terminal record survive.
 
 Exit codes: 0 ok; 1 a state file that cannot be read or written; 2 usage.
 Every state write is atomic (tempfile in the same directory + ``os.replace``)
@@ -427,12 +436,18 @@ def cmd_emit(args):
     return 0
 
 
+RUN_KEYS = ("validateAttempts", "verify", "lessonsWritten")
+
+
 def cmd_record_harness(args):
     result = {}
 
     def mutate(data):
+        if args.fresh:
+            for key in RUN_KEYS:
+                data.pop(key, None)
         current = data.get("harness")
-        if not (isinstance(current, dict) and "version" in current and "sha" in current):
+        if args.fresh or not (isinstance(current, dict) and "version" in current and "sha" in current):
             data["harness"] = read_harness(args.toolkit_root)
         result.update(data["harness"])
 
@@ -494,6 +509,21 @@ def cmd_record_verify(args):
     return 0
 
 
+def cmd_record_carry(args):
+    source = read_state(args.source)
+    carried = []
+
+    def mutate(data):
+        for key, value in source.items():
+            if key not in data:
+                data[key] = value
+                carried.append(key)
+
+    _update(args.state, mutate)
+    print("carried: " + (", ".join(carried) if carried else "(nothing — every key already present)"))
+    return 0
+
+
 def cmd_record_lessons_written(args):
     if args.no_entry:
         value = "NO_ENTRY"
@@ -528,6 +558,7 @@ def _parser():
     h = sub.add_parser("record-harness", add_help=False)
     h.add_argument("--state", required=True)
     h.add_argument("--toolkit-root", required=True)
+    h.add_argument("--fresh", action="store_true")
     v = sub.add_parser("record-validate", add_help=False)
     v.add_argument("--state", required=True)
     v.add_argument("--phase", required=True, choices=("1", "3"))
@@ -541,6 +572,9 @@ def _parser():
     group = w.add_mutually_exclusive_group(required=True)
     group.add_argument("--ids")
     group.add_argument("--no-entry", action="store_true")
+    c = sub.add_parser("record-carry", add_help=False)
+    c.add_argument("--state", required=True)
+    c.add_argument("--from", dest="source", required=True)
     return p
 
 
@@ -550,6 +584,7 @@ COMMANDS = {
     "record-validate": cmd_record_validate,
     "record-verify": cmd_record_verify,
     "record-lessons-written": cmd_record_lessons_written,
+    "record-carry": cmd_record_carry,
 }
 
 
@@ -558,7 +593,7 @@ def main(argv=None):
         args = _parser().parse_args(argv)
         if args.command not in COMMANDS:
             raise UsageError("usage: run_outcome.py emit|record-harness|record-validate|"
-                             "record-verify|record-lessons-written …")
+                             "record-verify|record-lessons-written|record-carry …")
         return COMMANDS[args.command](args)
     except UsageError as exc:
         print(f"run-outcome: {exc}", file=sys.stderr)

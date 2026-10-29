@@ -4,7 +4,7 @@
 #   emit-run-outcome.sh --state <abs> --terminal <t> --engine <e> [--reason <r>] [--req <REQ-xxx>]
 #       runs `run_outcome.py emit` and appends its one JSON line to
 #       ${ADLC_RUN_OUTCOMES_LOG:-$HOME/Library/Logs/adlc-run-outcomes.log}
-#   emit-run-outcome.sh record-harness|record-validate|record-verify|record-lessons-written <args>
+#   emit-run-outcome.sh record-harness|record-validate|record-verify|record-lessons-written|record-carry <args>
 #       passes straight through to the same run_outcome.py subcommand (a state
 #       write; its one stdout line is relayed)
 #
@@ -36,7 +36,7 @@ if [ -z "$PY" ]; then
 fi
 
 case "${1-}" in
-  record-harness|record-validate|record-verify|record-lessons-written)
+  record-harness|record-validate|record-verify|record-lessons-written|record-carry)
     "$PY" "$MODULE" "$@" || echo "run-outcome: $1 failed (rc $?) — state not updated" >&2
     exit 0
     ;;

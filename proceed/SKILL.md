@@ -26,6 +26,8 @@ You are in subagent mode if you were explicitly told so in your launch prompt.
 3. **Merge conflicts during rebase** (Phase 8 / wrapup) — surface conflicts and wait.
 4. **The lane check fails on a forced-lite REQ in a solo run** (lite lane, `proceed/phases-lite.md` "The lane check") — list the failing rules as a numbered question: escalate, or keep lite. In subagent mode (a `/sprint` runner, with no operator present) the same failure escalates instead and never halts (REQ-652 BR-8).
 
+Before you stop at any of the four, emit the run-outcome line (**Run-outcome telemetry** R5, `blocked`, with that halt's token).
+
 For everything else — including every **End-of-phase log** block below, every agent dispatch, every commit, every PR creation, every CI wait — you **continue immediately** to the next step without asking the user. Prompt only for tool-level permissions on truly destructive operations (these are governed by `.claude/settings.json`, not this skill).
 
 **Writing logs vs asking questions**: when the skill says "report X" or "log Y", emit a one-line status line to the conversation and continue. Do NOT phrase it as a question or wait for acknowledgment. A bad example: "Spec validated — shall I proceed to Phase 2?" A good example: "Spec validated. Moving to Phase 2."
@@ -149,6 +151,10 @@ Execute these phases in order. Each phase has a validation gate — if validatio
   },
   "conflictsResolved": [],
   "closeOut": { "status": "ok", "at": "2026-03-27T10:45:00Z" },
+  "harness": { "version": "5.4.0", "sha": "c013262" },
+  "validateAttempts": { "phase1": 1, "phase3": 2 },
+  "verify": { "findings": [ { "severity": "Major", "file": "partials/forge.sh", "title": "…", "class": "unanchored-marker-regex", "lessonId": "LESSON-404", "fixed": true } ], "loops": 1, "consolidatedAt": "2026-03-27T10:36:00Z" },
+  "lessonsWritten": ["LESSON-605"],
   "lane": {
     "initial": "lite",
     "current": "full",
@@ -175,6 +181,18 @@ writes `status: "failed", reason: "<why>"` when the mode exits non-zero. Absent 
 "close-out not recorded"; nothing reads it for control flow. `/status` reports
 `failed` under its Stale Pipeline State heading.
 
+`harness`, `validateAttempts`, `verify` and `lessonsWritten` are optional and
+additive (REQ-648): the facts the run-outcome line is derived from, each written
+by code at the moment it occurs (**Run-outcome telemetry** below), to the
+primary-path copy, as `lessons` is. `harness` is the toolkit's `{version, sha}`
+at Step 0, before any pull; `validateAttempts` the attempt counts at Phases 1 and
+3; `verify` the consolidated Phase-5 findings, each with a `class` and a `fixed`
+flag; `lessonsWritten` the `/wrapup` Step 5 outcome (`LESSON-` ids, or the string
+`NO_ENTRY`). `lessons.acknowledged`, written by `ack-check --record`, belongs to
+the same record. Absent means not recorded: the emitter prints `-` or `0` for
+what it derives from a missing key, and nothing reads any of them for control
+flow.
+
 The `repos` block is the canonical registry for this pipeline run. Every cd/commit/push/PR/merge operation reads the target repo's `path` or `worktree` from here — never from cwd inference. `touched: true` means at least one task targets this repo; untouched repos skip Phases 4–8. `mergeOrder` is the list of touched repo ids in the order Phase 8 will merge them (primary is always a member).
 
 **Single-repo mode**: `repos` contains exactly one entry with `primary: true, touched: true`, and `mergeOrder` is `[that-one-id]`. All phase logic still reads from `repos` — there is no separate code path.
@@ -199,6 +217,89 @@ The `snapshotBranch` and `snapshotPR` fields on each `repos.<id>` entry are **de
 8. **On completion**: After Phase 8 (Wrapup) finishes, set `"completed": true` in the state file.
 
 Each phase below has a one-line **Gate** reminder. The full protocol above applies to every gate.
+
+## Run-outcome telemetry (REQ-648)
+
+Every terminal appends one flat JSON line to `~/Library/Logs/adlc-run-outcomes.log`
+(`$ADLC_RUN_OUTCOMES_LOG`). `tools/delegate/run_outcome.py` builds it from the
+primary-path state; you never compute a field. You supply only the terminal, the
+engine (`solo` for a direct `/proceed`, `legacy` in subagent mode), a halt token,
+and, at Phase 5, the consolidated findings. Each fence below runs
+`"$DELEGATE_TOOLS"/emit-run-outcome.sh`, which always exits 0: relay the one line
+it prints and continue, because telemetry never halts the pipeline (BR-3).
+`<state>` is the primary-path `pipeline-state.json` named under "Pipeline State
+Tracking" (the worktree's copy when that spec directory does not exist on the
+primary checkout).
+
+**R1 — the harness stamp** (Step 0 item 8, before item 8a's push). `<mode>` is
+`--fresh` on a fresh run and empty on a resume: the same decision Step 0 item 7
+makes for the lessons, read from the progress record and never from whether a
+`harness` key exists (LESSON-719). `--fresh` also clears the `validateAttempts`,
+`verify` and `lessonsWritten` an earlier run of this REQ left behind.
+
+**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+"$DELEGATE_TOOLS"/emit-run-outcome.sh record-harness --state "<state>" --toolkit-root "$ADLC_TOOLKIT_ROOT" <mode>
+```
+
+**R2 — a validation attempt** (Phases 1 and 3, before each `/validate`). The
+attempt number is absolute, so a repeated call never double-counts.
+
+**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+"$DELEGATE_TOOLS"/emit-run-outcome.sh record-validate --state "<state>" --phase <1|3> --attempt <n>
+```
+
+**R3 — the Phase-5 findings** (Step B, then again before Phase 5's end-of-phase
+log). One JSON object per consolidated finding: `severity`, `file`, `title`, the
+`class` its reviewer gave it, `lessonId` when it matched a lesson in the Phase-5
+set, and `fixed` (`true` only once its fix commit has landed). `--loops` is `1`
+when Step D re-verified, else `0`. The engine normalises the severity scale and
+the class tiers; pass what the reviewers reported.
+
+**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+"$DELEGATE_TOOLS"/emit-run-outcome.sh record-verify --state "<state>" --loops <0|1> --findings - <<'ADLC_VERIFY_JSON'
+[{"severity":"Major","file":"<path>","title":"<title>","class":"<defect-pattern>","fixed":false}]
+ADLC_VERIFY_JSON
+```
+
+**R4 — carry the run's state** (Phase 8 Step 8b, before `/wrapup`). It copies
+every key of the worktree copy that the primary-path copy lacks, so the record
+the line is built from survives teardown; the primary-path copy's own keys win.
+
+**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+"$DELEGATE_TOOLS"/emit-run-outcome.sh record-carry --state "<state>" --from "<repos[primary].worktree>/.adlc/specs/REQ-xxx-<slug>/pipeline-state.json"
+```
+
+**R5 — the line itself.** Run it once at each terminal this run reaches: after
+Step 8b for `merged`, after Step 8c's note for `pr-ready`, at each legitimate
+halt before you stop (`blocked`, with the halt's token below), and on a `failed`
+terminal. A resumed run that reaches another terminal emits again; readers keep
+the latest line per REQ. Halt tokens: `validation-exhausted` (halt #1),
+`reflector-questions` (#2), `merge-conflict` (#3), `other` (#4, a failed lane
+check). A `failed` terminal passes `setup-error`, `no-worktree` or `no-pr`.
+
+**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
+"$DELEGATE_TOOLS"/emit-run-outcome.sh --state "<state>" --terminal <merged|pr-ready|blocked|failed> --engine <solo|legacy> --reason "<token, or empty>"
+```
 
 ---
 
@@ -331,6 +432,8 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
    <!-- /retrieval-status -->
 
    Declared for `tools/lint-skills`'s `retrieval-status-parity` check (BUG-194). That commit is also the lite branch's first, which is what lets item 8a's draft PR open (LESSON-390).
+
+   **Then stamp the harness (REQ-648 BR-10)**: run **Run-outcome telemetry** R1, before item 8a pushes anything, so the stamp names the toolkit that ran this pipeline even when `/wrapup` or `/sprint` later pulls the toolkit clone itself.
 8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR through the forge adapter (so the step works on GitHub or Azure DevOps — REQ-520), making this REQ's intent — and, after `/architect`, its footprint — visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
    ```bash
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -356,8 +459,9 @@ Each phase below has a one-line **Gate** reminder. The full protocol above appli
 
 Run `/validate` against the REQ spec. APPROVED → mark `approved`, advance.
 NEEDS REVISION → fix FAILs and re-validate (up to 3 loops); remaining
-blockers are legitimate halt #1. End-of-phase log: "Spec validated and
-approved." Full step list in companion.
+blockers are legitimate halt #1. Before each attempt, record it
+(**Run-outcome telemetry** R2, `--phase 1`). End-of-phase log: "Spec validated
+and approved." Full step list in companion.
 
 **Lite lane:** skipped, and recorded as skipped at Step 0 (`proceed/phases-lite.md`).
 
@@ -383,7 +487,8 @@ this phase runs, and `/architect` designs around the code already on the branch.
 **Gate**: `currentPhase` must be `3`. After completion: append `3`, set `currentPhase=4`.
 
 Re-invoke `/validate` (it auto-detects the architecture+tasks phase). Same
-3-loop fix protocol as Phase 1; unresolved blockers are legitimate halt #1.
+3-loop fix protocol as Phase 1, each attempt recorded (R2, `--phase 3`);
+unresolved blockers are legitimate halt #1.
 End-of-phase log: "Architecture and tasks validated."
 
 **Lite lane:** skipped, and recorded as skipped at Step 0.
@@ -432,7 +537,7 @@ escalates (trigger `implementer`). See `proceed/phases-lite.md` "Phase 4 (lite)"
 
 **Goal**: Self-assess AND multi-agent review the implementation, then fix all findings in a single consolidated pass.
 
-**Lite lane:** none of the rest of this phase runs: no delegate pre-pass, no skill flag or telemetry, no reflector, no panel. Run `proceed/phases-lite.md` "Phase 5 (lite)" instead: one `lite-reviewer` pass over the diff against `origin/<integrationBranch>` with the fresh retrieval set, one fix pass, then the lane check on the fixed, pushed diff. A non-empty `reversals:` section escalates (trigger `reversal`), and so does a non-empty `out_of_lane:` (trigger `implementer`); `unmet` and `partial` rows in `coverage` are must-fix findings; a non-empty `questions:` is legitimate halt #2.
+**Lite lane:** none of the rest of this phase runs: no delegate pre-pass, no skill flag or telemetry, no reflector, no panel. Run `proceed/phases-lite.md` "Phase 5 (lite)" instead (its findings are recorded with R3 too): one `lite-reviewer` pass over the diff against `origin/<integrationBranch>` with the fresh retrieval set, one fix pass, then the lane check on the fixed, pushed diff. A non-empty `reversals:` section escalates (trigger `reversal`), and so does a non-empty `out_of_lane:` (trigger `implementer`); `unmet` and `partial` rows in `coverage` are must-fix findings; a non-empty `questions:` is legitimate halt #2.
 
 **Gather diffs per repo** (prerequisite): for each touched repo, compute the diff inside its worktree (`git -C <worktree> diff main...HEAD` plus the list of changed files). The reviewers receive per-repo diffs + file lists, plus the cross-repo architecture.md so they can reason about contracts spanning repos.
 
@@ -581,8 +686,12 @@ if [ -f .adlc/partials/lessons.sh ]; then . .adlc/partials/lessons.sh; else . "$
 # <state> = the primary-path pipeline-state.json; <tasks> = the primary worktree's .adlc/specs/REQ-xxx-*/tasks.
 # One --worktree per touched repo, each with its own --base (one --base serves all when they share it):
 # a trailer in any touched repo's commits acknowledges the lesson.
-adlc_lessons ack-check --state "<state>" --root "<primary worktree>" --worktree "<worktree>" --base "origin/<integrationBranch>" --tasks-dir "<tasks>"
+adlc_lessons ack-check --state "<state>" --root "<primary worktree>" --worktree "<worktree>" --base "origin/<integrationBranch>" --tasks-dir "<tasks>" --record
 ```
+
+`--record` also writes the acknowledged ids to `lessons.acknowledged`, the source of the run-outcome line's `lessons_cited` (REQ-648); the output is unchanged.
+
+**Record the consolidation (REQ-648 BR-4)** before Step C: run **Run-outcome telemetry** R3 with `--loops 0` and every consolidated finding, `fixed: false` on each.
 
 Add each printed `Applicable lesson not acknowledged: LESSON-xxx — <title>` line (at most 5, then a `(+N more applicable lessons not listed)` line) to the consolidated list as an **Info** finding. Info never blocks and is not fixed in Step C; it tells the next reader which lessons the change did not say it applied. A `domain`- or `tags`-only match is never listed.
 
@@ -593,6 +702,8 @@ Add each printed `Applicable lesson not acknowledged: LESSON-xxx — <title>` li
 4. **User-facing questions from reflector**: if any, surface them to the user as a numbered list and wait for answers before continuing.
 
 **Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the (repo, dimension) pairs that had fixes: e.g., if correctness fixes landed only in the api repo, rerun correctness-reviewer for that repo only. In subagent mode, re-run the corresponding reviewer checklists inline.
+
+**Record the fixes (REQ-648 BR-4)**: run R3 again with the same list, `fixed: true` on each finding whose fix commit landed in Step C, and `--loops 1` when Step D re-verified.
 
 **End-of-phase log**: Emit the combined verify summary across repos — per-repo findings, dedupe count, how many fixed, any deferred, and the `Lessons loaded (phase5): …` line (BR-10; `adlc_lessons log-line --state "<state>" --key phase5 --root "<worktree>"` recomputes it, with a `(stale: N lessons newer than this set)` suffix when lessons landed since). If reflector surfaced user-facing questions, halt here (legitimate halt #2). Otherwise continue to Phase 6.
 
@@ -637,11 +748,13 @@ added commits, re-run the lane check before leaving it.
 <!-- companion: proceed/phases-6-8-ship.md -->
 **Gate**: `currentPhase` must be `8` and `7` must be in `completedPhases`. After completion: append `8`, set `"completed": true`.
 
-Merge in `mergeOrder`, run `/wrapup` from the primary (deploys + knowledge
-capture), tear down each touched-repo worktree via the absolute path in
+Merge in `mergeOrder`, carry the worktree copy's state into the primary-path
+copy (**Run-outcome telemetry** R4), run `/wrapup` from the primary (deploys +
+knowledge capture), tear down each touched-repo worktree via the absolute path in
 state, then write the terminal record: `completed:true`, `currentPhase:8`, `8`
 appended to `completedPhases`, a phase-8 `phaseHistory` entry, and
-`repos[<id>].merged:true`. **Topology decides who merges, not whether the
+`repos[<id>].merged:true`. Then emit the run-outcome line (R5, `merged`; on
+`pr-ready`, after the Step 8c note). **Topology decides who merges, not whether the
 close-out runs** — a single-repo REQ owes the same close-out as a cross-repo
 one (BUG-193). Terminal claim MUST be tagged exactly one of
 `{merged, pr-ready, blocked, failed}` — untagged claims are a protocol

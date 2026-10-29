@@ -434,3 +434,48 @@ def test_delegation_tools_untouched():
     diff = subprocess.run(["git", "-C", str(REPO_ROOT), "diff", "--quiet", "origin/main", "--",
                            "tools/delegate/emit-telemetry.sh", "tools/delegate/check-delegation.sh"])
     assert diff.returncode == 0, "REQ-648 must not modify emit-telemetry.sh or check-delegation.sh"
+
+
+# --- record-carry: the primary-path copy is complete before teardown ---------------
+
+def test_record_carry_fills_missing_keys_only(tmp_path):
+    primary = _write(tmp_path, {"req": "REQ-648", "lessons": {"step0": {"lessons": []}},
+                                "harness": {"version": "5.4.0", "sha": "c013262"},
+                                "completed": True, "currentPhase": 8}, name="primary.json")
+    worktree = _write(tmp_path, _state(completed=False, currentPhase=7, validateAttempts={"phase1": 2}),
+                      name="worktree.json")
+    out = _run("record-carry", "--state", str(primary), "--from", str(worktree))
+    assert out.returncode == 0, out.stderr
+    data = json.loads(primary.read_text())
+    assert data["completed"] is True and data["currentPhase"] == 8, "the primary copy's keys win"
+    assert data["startedAt"] == "2026-10-29T11:00:00Z" and "repos" in data, "missing keys are carried"
+    assert data["validateAttempts"] == {"phase1": 2}
+    rec = RO.build_record(data, "merged", "solo", now=NOW)
+    assert rec["repo"] == "adlc-toolkit" and rec["elapsed_s"] == "3600" and rec["validate_retries"] == "1"
+    again = _run("record-carry", "--state", str(primary), "--from", str(worktree))
+    assert "nothing" in again.stdout
+    assert _run("record-carry", "--state", str(primary), "--from", str(tmp_path / "gone.json")).returncode == 1
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_record_harness_fresh_restamps_and_clears_a_prior_run(tmp_path):
+    """LESSON-719: fresh vs resume comes from the caller's progress record, not
+    from whether the key exists — a fresh re-run must not inherit the old stamp."""
+    old_root, new_root = tmp_path / "old", tmp_path / "new"
+    _git_repo(old_root, version="1.0.0")
+    new_sha = _git_repo(new_root, version="2.0.0")
+    state = _write(tmp_path, _state(validateAttempts={"phase1": 3}, verify={"findings": [], "loops": 1},
+                                    lessonsWritten="NO_ENTRY", lessons={"step0": {}}))
+    _run("record-harness", "--state", str(state), "--toolkit-root", str(old_root))
+    assert json.loads(state.read_text())["harness"]["version"] == "1.0.0"
+    # a resume keeps everything
+    _run("record-harness", "--state", str(state), "--toolkit-root", str(new_root))
+    kept = json.loads(state.read_text())
+    assert kept["harness"]["version"] == "1.0.0" and kept["validateAttempts"] == {"phase1": 3}
+    # a fresh Step 0 re-stamps and clears the earlier run's records, nothing else
+    assert _run("record-harness", "--state", str(state), "--toolkit-root", str(new_root), "--fresh").returncode == 0
+    fresh = json.loads(state.read_text())
+    assert fresh["harness"] == {"version": "2.0.0", "sha": new_sha}
+    for key in ("validateAttempts", "verify", "lessonsWritten"):
+        assert key not in fresh, key
+    assert fresh["lessons"] == {"step0": {}} and fresh["req"] == "REQ-648"

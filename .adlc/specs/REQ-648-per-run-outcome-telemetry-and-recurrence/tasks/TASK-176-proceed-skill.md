@@ -1,7 +1,7 @@
 ---
 id: TASK-176
 title: "/proceed and pipeline-runner: record harness, validateAttempts and verify; emit at every terminal and halt"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
@@ -25,6 +25,9 @@ lane's Phase 5, and `agents/pipeline-runner.md`'s terminal contract.
 - `proceed/phases-6-8-ship.md` — Step 8b emit after the terminal record; Step 8c pr-ready emit; merge-conflict halt emit
 - `proceed/phases-lite.md` — Phase 5 (lite) persists `verify` after the `lite-reviewer` pass
 - `agents/pipeline-runner.md` — the runner's emit (engine `legacy`) at its terminal; `verify`/`validateAttempts` in subagent mode
+- `tools/delegate/run_outcome.py` — `record-carry` (Step 8b keeps the primary-path copy complete before teardown) and `record-harness --fresh` (LESSON-719: fresh vs resume from the progress record)
+- `tools/delegate/emit-run-outcome.sh` — passes `record-carry` through
+- `tools/delegate/tests/test_run_outcome.py` — the two new cases
 
 ## Acceptance Criteria
 
