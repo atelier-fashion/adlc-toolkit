@@ -101,7 +101,11 @@ export function translatePosix(ere) {
   if (/\[:[a-z]+:\]/.test(src)) {
     throw new BuildError(`partials/intake.sh: untranslated POSIX class in redaction regex: ${src}`);
   }
-  new RegExp(src, 'y'); // throws on a regex JS cannot compile
+  try {
+    new RegExp(src, 'y');
+  } catch (e) {
+    throw new BuildError(`partials/intake.sh: redaction regex does not compile in JS: ${src} (${e.message})`);
+  }
   return src;
 }
 
@@ -110,44 +114,66 @@ export function translatePosix(ere) {
 // each position, which is what sed's leftmost-longest rule does with the whole chain. A
 // JS regex would instead take the first alternative that matches, so a variable named
 // `AKIA…_API_KEY=secret` would lose only its prefix and send the secret.
-export function topLevelAlternatives(ere) {
-  let body = ere;
-  if (body.startsWith('(') && body.endsWith(')')) {
-    let depth = 0;
-    let wraps = true;
-    for (let i = 0; i < body.length; i += 1) {
-      if (body[i] === '[') {
-        i = body.indexOf(']', i + (body[i + 1] === '^' ? 3 : 2));
-        continue;
-      }
-      if (body[i] === '(') depth += 1;
-      if (body[i] === ')') depth -= 1;
-      if (depth === 0 && i < body.length - 1) wraps = false;
+// Index of the `]` closing the bracket expression that opens at `i`, aware of a leading
+// `^`, a literal `]` first in the set, and `[:class:]` atoms. Throws on an unclosed one.
+function bracketEnd(ere, i) {
+  let j = i + 1;
+  if (ere[j] === '^') j += 1;
+  if (ere[j] === ']') j += 1;
+  while (j < ere.length) {
+    if (ere[j] === '[' && ere[j + 1] === ':') {
+      const close = ere.indexOf(':]', j + 2);
+      if (close < 0) break;
+      j = close + 2;
+      continue;
     }
-    if (wraps) body = body.slice(1, -1);
+    if (ere[j] === ']') return j;
+    j += 1;
   }
-  const parts = [];
+  throw new BuildError(`partials/intake.sh: unbalanced bracket in redaction regex: ${ere}`);
+}
+
+// Walk `ere` at top level, calling visit(char, depth, index) for every character outside
+// bracket expressions and escapes, and returning the depth at the end.
+function walk(ere, visit) {
   let depth = 0;
-  let cur = '';
-  for (let i = 0; i < body.length; i += 1) {
-    const c = body[i];
+  for (let i = 0; i < ere.length; i += 1) {
+    const c = ere[i];
+    if (c === '\\') {
+      i += 1;
+      continue;
+    }
     if (c === '[') {
-      const end = body.indexOf(']', i + (body[i + 1] === '^' ? 3 : 2));
-      if (end < 0) throw new BuildError(`partials/intake.sh: unbalanced bracket in redaction regex: ${ere}`);
-      cur += body.slice(i, end + 1);
-      i = end;
+      i = bracketEnd(ere, i);
       continue;
     }
     if (c === '(') depth += 1;
     if (c === ')') depth -= 1;
-    if (c === '|' && depth === 0) {
-      parts.push(cur);
-      cur = '';
-      continue;
-    }
-    cur += c;
+    visit(c, depth, i);
   }
-  parts.push(cur);
+  return depth;
+}
+
+export function topLevelAlternatives(ere) {
+  let body = ere;
+  if (body.startsWith('(') && body.endsWith(')')) {
+    let wraps = true;
+    walk(body, (c, depth, i) => {
+      if (depth === 0 && i < body.length - 1) wraps = false;
+    });
+    if (wraps) body = body.slice(1, -1);
+  }
+  const cuts = [];
+  const depth = walk(body, (c, d, i) => {
+    if (c === '|' && d === 0) cuts.push(i);
+  });
+  const parts = [];
+  let from = 0;
+  for (const at of cuts) {
+    parts.push(body.slice(from, at));
+    from = at + 1;
+  }
+  parts.push(body.slice(from));
   if (depth !== 0 || parts.some((x) => !x)) {
     throw new BuildError(`partials/intake.sh: cannot split redaction regex: ${ere}`);
   }
@@ -272,7 +298,7 @@ function invokedDirectly() {
   try {
     return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
   } catch {
-    return false;
+    return resolve(process.argv[1]) === fileURLToPath(import.meta.url);
   }
 }
 

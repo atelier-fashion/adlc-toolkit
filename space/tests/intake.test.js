@@ -310,13 +310,50 @@ test('headings with odd spacing, case or comments are read as a reader sees them
   assert.ok(intake.ensureSections(fenced, sections).includes('\n## Open Questions\n\nNot covered'));
 });
 
-test('gap sections are matched to the template and unknown ones dropped', async () => {
+test('gap sections are matched to the template, and an unknown one is kept, not dropped', async () => {
   const gaps = [
     { section: 'business  rules', severity: 'blocking', question: 'Who?', justification: 'Undefined.' },
-    { section: 'Pricing', severity: 'assumption', question: 'How much?', justification: 'Unstated.' },
+    { section: ' Permissions ', severity: 'blocking', question: 'Can guests archive?', justification: 'Unstated.' },
   ];
   const result = await run('Notes.\n', mockFetch(toolResponse({ requirement_md: fullRequirement(), gaps })));
-  assert.deepEqual(result.gaps.map((g) => g.section), ['Business Rules']);
+  assert.deepEqual(result.gaps.map((g) => g.section), ['Business Rules', 'Permissions']);
+  assert.ok(result.requirement_md.includes('- [ ] [Permissions] Can guests archive?'), 'a blocking gap is never lost');
+});
+
+test('the tool schema asks for a template section', () => {
+  const req = intake.buildRequest('x\n', CONFIG, toolkit, '2026-10-29');
+  const section = req.body.tools[0].input_schema.properties.gaps.items.properties.section;
+  assert.deepEqual(section.enum, toolkit.templateSections);
+});
+
+test('an unclosed comment or fence does not swallow appended sections or blocking gaps', async () => {
+  for (const tail of ['<!--\nnote never closed\n', '```\ncode never closed\n', '~~~~\n```\nstill open\n']) {
+    const md = '## Description\n\nx\n' + tail;
+    const gaps = [GAPS[0]];
+    const result = await run('Notes.\n', mockFetch(toolResponse({ requirement_md: md, gaps })));
+    const after = result.requirement_md.slice(result.requirement_md.indexOf(tail) + tail.length);
+    for (const s of toolkit.requiredSections.filter((x) => x !== 'Description')) {
+      assert.ok(intake.ensureSections(result.requirement_md, [s]) === result.requirement_md, `${s} visible after ${JSON.stringify(tail)}`);
+    }
+    assert.ok(after.includes('- [ ] [Business Rules] Who may archive a project?'), JSON.stringify(tail));
+  }
+});
+
+test('comments and fences are read the way a renderer reads them', () => {
+  const S = ['Description', 'Open Questions'];
+  const has = (md) => !intake.ensureSections(md, S).includes('Not covered');
+  assert.ok(has('## Description <!-- hint -->\n\n##   Open Questions ##\n'), 'trailing comment and closing hashes');
+  assert.ok(has('   ## Description\n## Open Questions\n'), 'up to three leading spaces');
+  assert.ok(has('<!-- a --> ok\n## Description\n## Open Questions\n'), 'a one-line comment closes');
+  assert.ok(!has('## Description\n<!-- a --> <!-- b\n## Open Questions\n-->\n'), 'a reopened comment hides the heading');
+  assert.ok(!has('## Description\n````\n```\n## Open Questions\n````\n'), 'a shorter fence does not close a longer one');
+  assert.ok(has('## Description\n``` foo `x`\n## Open Questions\n'), 'a backtick info string with a backtick is not a fence');
+});
+
+test('ensureOpenQuestions keeps the list tight and the trailing newline', () => {
+  const md = '## Open Questions\n\n- [ ] Existing?\n';
+  const out = intake.ensureOpenQuestions(md, [GAPS[0]]);
+  assert.equal(out, '## Open Questions\n\n- [ ] Existing?\n- [ ] [Business Rules] Who may archive a project?\n');
 });
 
 test('the key is scrubbed from errors whatever its shape', async () => {

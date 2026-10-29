@@ -146,8 +146,8 @@ maintainer's go-ahead.
 2. **Build and check.** `node space/build.mjs` regenerates `space/toolkit-data.js` from
    `templates/requirement-template.md`, the marked gap rules in `spec/SKILL.md`, the
    budget and redaction chain in `partials/intake.sh`, the install lines in `README.md`
-   and `VERSION`. At a tag it must change nothing, because step 2 regenerated it after
-   the `VERSION` bump and step 3 checked it:
+   and `VERSION`. At a tag it must change nothing, because release step 2 regenerated it
+   after the `VERSION` bump and release step 3 ran `--check`:
 
    ```bash
    node space/build.mjs --check

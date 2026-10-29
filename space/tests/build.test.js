@@ -175,6 +175,12 @@ test('redaction regex translated from intake.sh', async () => {
   assert.deepEqual(topLevelAlternatives('(a|b(c|d)|[|x]e)'), ['a', 'b(c|d)', '[|x]e']);
   assert.deepEqual(topLevelAlternatives('(a)|(b)'), ['(a)', '(b)']);
   assert.throws(() => topLevelAlternatives('(a|'), BuildError);
+  // Malformed input fails fast instead of hanging, and escapes are not split points.
+  assert.throws(() => topLevelAlternatives('(a[bc)'), BuildError);
+  assert.throws(() => topLevelAlternatives('a[b'), BuildError);
+  assert.deepEqual(topLevelAlternatives('(a\\|b|c)'), ['a\\|b', 'c']);
+  assert.deepEqual(topLevelAlternatives('([[:space:]|x]|y)'), ['[[:space:]|x]', 'y']);
+  assert.throws(() => translatePosix('a{2,1}'), BuildError);
 });
 
 test('gap sections are the template headings minus intake.sh exclusions', async () => {

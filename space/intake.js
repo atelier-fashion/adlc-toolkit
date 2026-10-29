@@ -156,7 +156,8 @@
     ].join('\n');
   }
 
-  var TOOL = {
+  function intakeTool(toolkit) {
+    return {
     name: TOOL_NAME,
     description: 'Record the draft requirement and its classified gap list.',
     input_schema: {
@@ -168,7 +169,7 @@
           items: {
             type: 'object',
             properties: {
-              section: { type: 'string' },
+              section: { type: 'string', enum: toolkit.templateSections },
               severity: { type: 'string', enum: SEVERITIES },
               question: { type: 'string', description: 'A specific unanswered question, not a topic label.' },
               justification: { type: 'string', description: 'One sentence explaining the severity.' },
@@ -179,7 +180,8 @@
       },
       required: ['requirement_md', 'gaps'],
     },
-  };
+    };
+  }
 
   // The request without the key. runIntake adds x-api-key at send time.
   function buildRequest(redactedSource, config, toolkit, today) {
@@ -195,32 +197,65 @@
         max_tokens: config.max_tokens,
         system: systemPrompt(toolkit, today),
         messages: [{ role: 'user', content: segment(redactedSource, toolkit) }],
-        tools: [TOOL],
+        tools: [intakeTool(toolkit)],
         tool_choice: { type: 'tool', name: TOOL_NAME },
       },
     };
   }
 
   // The ## headings of a markdown document that a reader would see: not inside an HTML
-  // comment or a code fence, and with any run of spaces after the hashes.
-  function visibleHeadings(md) {
+  // comment or a code fence, with up to three leading spaces, any run of spaces after the
+  // hashes, and an optional closing run of hashes. Comments are tracked left to right
+  // within a line, and a fence closes only on the same character with a run at least as
+  // long (CommonMark). `open` reports a comment or fence still open at the end, so a
+  // caller appending sections can close it first.
+  function scanMarkdown(md) {
     var out = [];
     var inComment = false;
-    var inFence = false;
+    var fence = null;
     md.split('\n').forEach(function (line, i) {
-      if (!inComment && /^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        return;
+      if (!inComment) {
+        var f = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+        if (fence) {
+          if (f && f[1].charAt(0) === fence.charAt(0) && f[1].length >= fence.length && !f[2].trim()) fence = null;
+          return;
+        }
+        if (f && !(f[1].charAt(0) === '`' && f[2].indexOf('`') >= 0)) {
+          fence = f[1];
+          return;
+        }
       }
-      if (inFence) return;
-      if (!inComment && line.indexOf('<!--') >= 0) inComment = line.indexOf('-->', line.indexOf('<!--')) < 0;
-      else if (inComment && line.indexOf('-->') >= 0) inComment = false;
-      else if (!inComment) {
-        var m = line.match(/^##[ \t]+(.+?)[ \t]*$/);
-        if (m) out.push({ name: m[1], line: i });
+      var visible = '';
+      var rest = line;
+      while (rest.length) {
+        if (inComment) {
+          var close = rest.indexOf('-->');
+          if (close < 0) {
+            rest = '';
+          } else {
+            rest = rest.slice(close + 3);
+            inComment = false;
+          }
+        } else {
+          var open = rest.indexOf('<!--');
+          if (open < 0) {
+            visible += rest;
+            rest = '';
+          } else {
+            visible += rest.slice(0, open);
+            rest = rest.slice(open + 4);
+            inComment = true;
+          }
+        }
       }
+      var m = visible.match(/^ {0,3}##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/);
+      if (m) out.push({ name: m[1], line: i });
     });
-    return out;
+    return { headings: out, open: inComment ? '-->' : fence };
+  }
+
+  function visibleHeadings(md) {
+    return scanMarkdown(md).headings;
   }
 
   function sameName(a, b) {
@@ -236,6 +271,9 @@
   // AC-1: every template section is present, whatever the model returned.
   function ensureSections(md, sections) {
     var out = md.replace(/\s+$/, '');
+    // A comment or fence the model left open would hide everything appended after it.
+    var open = scanMarkdown(out).open;
+    if (open) out += '\n' + open;
     sections.forEach(function (name) {
       if (!hasHeading(out, name)) out += '\n\n## ' + name + '\n\n' + NOT_COVERED;
     });
@@ -271,8 +309,10 @@
       return l.trim() !== '';
     });
     if (content.length === 1 && content[0].trim() === NOT_COVERED) head = head.slice(0, start + 1);
+    var gap = head.length === start + 1 ? [''] : [];
     var tail = lines.slice(end);
-    return head.concat([''], add, tail.length ? [''] : [], tail).join('\n');
+    var out = head.concat(gap, add, tail.length ? [''] : [], tail).join('\n');
+    return /\n$/.test(md) && !/\n$/.test(out) ? out + '\n' : out;
   }
 
   function isText(v) {
@@ -292,21 +332,21 @@
     if (!call || !call.input || !isText(call.input.requirement_md)) {
       throw new Error('the response did not contain a requirement');
     }
-    // A gap names a template section (the System Model's Gap.section). Match it to the
-    // template's spelling; a gap naming no template section is dropped like any other
-    // malformed gap.
+    // A gap names a template section (the System Model's Gap.section), and the tool
+    // schema's enum asks for one. Match it to the template's spelling. A name that is not
+    // a section (a ### subsection, say) is kept as written: dropping it would lose a
+    // blocking question, which is worse than an odd label.
     var canonical = function (section) {
       for (var t = 0; t < toolkit.templateSections.length; t += 1) {
         if (sameName(section, toolkit.templateSections[t])) return toolkit.templateSections[t];
       }
-      return null;
+      return section.replace(/\s+/g, ' ').trim();
     };
     var gaps = (Array.isArray(call.input.gaps) ? call.input.gaps : [])
       .filter(function (gap) {
         return (
           gap &&
           isText(gap.section) &&
-          canonical(gap.section) !== null &&
           SEVERITIES.indexOf(gap.severity) >= 0 &&
           isText(gap.question) &&
           isText(gap.justification)

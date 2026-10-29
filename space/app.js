@@ -131,6 +131,7 @@
       if (!file) return;
       if (file.size > maxUploadBytes(toolkit)) {
         setStatus(file.name + ' is too large to be a ' + toolkit.maxLines + '-line source.', true);
+        ev.target.value = '';
         return;
       }
       file
@@ -141,6 +142,7 @@
         })
         .catch(function () {
           setStatus('Could not read ' + file.name + '.', true);
+          ev.target.value = '';
         });
     });
 
