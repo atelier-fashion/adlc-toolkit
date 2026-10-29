@@ -143,7 +143,7 @@ A vague "Pipeline complete" claim without one of these tags is a protocol violat
 close-out runs.** Both branches below converge on Step 8b, which is not
 optional for either.
 
-- **Single-repo REQ** (one touched repo): the pipeline owns the merge in this phase. Run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (sourcing `partials/forge.sh` in the same fence) from the parent repo path (`repos[<id>].path`), NOT from the worktree. Set `repos[<id>].merged = true` in state immediately. Terminal claim is `merged`. **Then continue to Step 8b** — the merge is not the end of the phase.
+- **Single-repo REQ** (one touched repo): the pipeline owns the merge in this phase. Run `adlc_forge_pr_merge <prUrl> --squash --delete-branch` (sourcing `partials/forge.sh` in the same fence) from the parent repo path (`repos[<id>].path`), NOT from the worktree. The adapter deletes only the remote branch and never hands `--delete-branch` to gh, whose local cleanup removes the worktree holding the branch, and the gitignored state file with it (BUG-252). The worktree is Step 8b's to remove. Set `repos[<id>].merged = true` in state immediately. Terminal claim is `merged`. **Then continue to Step 8b** — the merge is not the end of the phase.
 - **Cross-repo REQ** (multiple touched repos): walk `mergeOrder` from `pipeline-state.json`. For each repo id in order:
   - Skip if `repos[<id>].merged == true` (already merged — recovering from an interrupted run).
   - Merge that repo's PR (`adlc_forge_pr_merge <prUrl> --squash` or the project's configured merge strategy).
@@ -173,7 +173,7 @@ because the REQ touched only one repo:
    A run that merged its PR but left `completed:false` has produced a state
    file that contradicts the repo. Re-read the file after writing and confirm
    the five fields rather than assuming the write landed.
-3. Remove the worktree in each touched repo using the absolute path from state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`. Do NOT use the relative `.worktrees/REQ-xxx` form here.
+3. Remove the worktree in each touched repo using the absolute path from state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`. Do NOT use the relative `.worktrees/REQ-xxx` form here. Then delete the local feature branch the squash-merge left behind (`git -C <repo-path> branch -D <branch>`): the merge deleted only the remote one (BUG-252).
 4. The pipeline is now complete.
 
 **Step 8c — When the terminal is `pr-ready`, name the reconciler.** A

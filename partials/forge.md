@@ -135,14 +135,24 @@ When `--delete-branch` was requested, `pr_merge` additionally emits:
 branch_deleted=<1|0|skipped-fork>
 ```
 
-`1` the remote branch is gone (gh deleted it, or the adapter completed the
-deletion, or it was already absent); `0` it survives and the `warn=` line names
+`1` the remote branch is gone (the adapter deleted it, or it was already absent); `0` it survives and the `warn=` line names
 the exact `git push origin --delete <branch>` to run; `skipped-fork` the head
 branch lives on a fork and is never auto-deleted. **Branch on this field, not on
 `warn=` prose** — BUG-195 was precisely a remediation written as an English
 sentence in a channel every caller parses for `key=value`. Only the *remote* ref
 is the adapter's to clean up; the local branch stays the caller's own cleanup step
 (it may still be checked out).
+
+**`--delete-branch` is never forwarded to gh (BUG-252).** gh's `-d` deletes the
+local branch as well as the remote one, and since gh 2.103.3 it removes the linked
+worktree that has the branch checked out to make the local delete succeed. Run from
+the primary checkout, as `/proceed` Phase 8 does, that deleted
+`.worktrees/REQ-647` and its gitignored `pipeline-state.json`. The GitHub arm
+therefore strips `--delete-branch`/`-d` from the gh argv. Once the PR reads `MERGED`,
+it deletes the remote ref itself with `git push origin --delete`, which touches no
+local ref, on the clean path and on the partial-success path alike. A PR that is not
+`MERGED` after a zero exit (auto-merge, a merge queue) keeps its branch:
+`branch_deleted=0`, because deleting the head of an open PR closes it.
 
 **Capability mismatches (BR-5), explicit:** ADO draft (`--draft`/publish), squash
 (`--squash` + auto-complete `--status completed`), delete-source-branch, and a

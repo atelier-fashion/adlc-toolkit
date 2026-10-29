@@ -366,6 +366,17 @@ Found by the REQ-669 Phase 5 review, before this release shipped.
   it, through the new `partials/session-transcript.sh`. No match, or more than one,
   refuses delegation and drafts from the conversation. Tested by
   `tests/session-transcript.test.sh` under bash, zsh, sh and dash.
+- **A Phase 8 merge no longer removes the REQ's worktree (BUG-252).**
+  `adlc_forge_pr_merge` forwarded `--delete-branch` to `gh pr merge`. gh's `-d`
+  deletes the local branch as well as the remote one, and gh 2.103.3 first removes
+  the linked worktree that has it checked out. During the REQ-647 sprint that deleted
+  `.worktrees/REQ-647`, and its gitignored `pipeline-state.json`, before Step 8b
+  could write the terminal record. The runner contract had assumed git would refuse.
+  The GitHub arm now strips `--delete-branch`/`-d` and deletes only the remote ref,
+  with `git push origin --delete`, once the PR reads `MERGED`. A zero exit that left
+  the PR open (auto-merge, a merge queue) keeps the branch and reports its real
+  `state=`. Step 8b now also deletes the local branch after removing the worktree.
+  Tested by `partials/tests/forge.test.sh` §7c against a real worktree.
 
 ### Re-sync vendored copies
 

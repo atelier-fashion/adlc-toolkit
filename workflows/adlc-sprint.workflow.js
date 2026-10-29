@@ -2060,9 +2060,10 @@ function cleanupAndWatchCIPrompt(id, prs) {
 // --- Phase 8 prompt builders (wrapup / merge + gh re-verification) ----------
 
 // mergePrompt — instruct the IO agent to self-merge a SINGLE-REPO REQ. Per the
-// legacy topology (pipeline-runner.md Phase 8), `gh pr merge --delete-branch`
-// MUST run from the PARENT repo path, not the worktree, because git refuses to
-// delete a branch checked out by a worktree. After a successful merge the agent
+// legacy topology (pipeline-runner.md Phase 8), the merge MUST run from the
+// PARENT repo path, not the worktree. The adapter deletes only the REMOTE branch:
+// gh's own --delete-branch removes the worktree holding the branch, and the
+// gitignored pipeline-state.json with it (BUG-252). After a successful merge the agent
 // sets pipeline-state.json.repos[<repo>].merged = true immediately (resumable,
 // no double-merge). The CRITICAL re-verification gate (gh pr view) is enforced by
 // the SCRIPT in a SEPARATE leaf (see verifyMergedPrompt) — claim ≠ truth (BR-6).
@@ -2090,8 +2091,9 @@ function mergePrompt(id, repo, pr, blockerCleared) {
     '     mergeable due to a MERGE CONFLICT, STOP and report mergeConflict=true —',
     '     do NOT force anything.',
     `  2. Merge from the PARENT repo path (\`${repo.worktree}\`\'s repo root), NOT`,
-    '     the worktree, because git refuses to delete a branch checked out by a',
-    `     worktree: \`adlc_forge_pr_merge ${pr.url} --squash --delete-branch\`.`,
+    '     the worktree. The adapter deletes only the remote branch, so the worktree',
+    '     and its state file survive until the close-out removes them (BUG-252):',
+    `     \`adlc_forge_pr_merge ${pr.url} --squash --delete-branch\`.`,
     '  3. Immediately set pipeline-state.json.repos[<repo>].merged = true.',
     ...clearStep,
     '',
@@ -2749,8 +2751,8 @@ function crossRepoMergePrompt(id, prs) {
     '  1. Confirm OPEN + MERGEABLE + CI green',
     '     (`adlc_forge_pr_view <url> --json state,mergeStateStatus`). On a real MERGE',
     '     CONFLICT, STOP and report mergeConflict=true — do not force.',
-    '  2. Merge from the repo\'s PARENT path (not the worktree — git refuses to',
-    '     delete a branch checked out by a worktree):',
+    '  2. Merge from the repo\'s PARENT path, not the worktree (the adapter deletes',
+    '     only the remote branch, so the worktree survives — BUG-252):',
     '     `adlc_forge_pr_merge <url> --squash --delete-branch`.',
     '  3. Immediately set pipeline-state.json.repos[<repo>].merged = true.',
     '',
