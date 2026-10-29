@@ -1,7 +1,7 @@
 ---
 id: TASK-174
 title: "Reviewer finding format: a required class field and the severity mapping"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
