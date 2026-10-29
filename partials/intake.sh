@@ -329,6 +329,7 @@ adlc_intake_cleanup() {
 # broader [A-Z_]+_(API_KEY|TOKEN) arm subsumes MOONSHOT_API_KEY, so no separate
 # pattern is needed. `-i.bak` (not bare `-i ''`) is the form that works on both BSD
 # and GNU sed; the .bak is removed immediately.
+# Mirrored in tools/adlc/credential_redact.py and pinned by tools/adlc/tests/test_credential_redact.py.
 adlc_intake_redact() {
     _ai_f="$1"
     if [ -z "$_ai_f" ] || [ ! -f "$_ai_f" ] || [ ! -w "$_ai_f" ]; then

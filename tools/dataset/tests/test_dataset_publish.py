@@ -28,6 +28,9 @@ from dataset_helpers import DATASET_DIR, TOOLKIT
 
 CLIENT_RE = re.compile(r"huggingface[_-]hub", re.IGNORECASE)
 REPO_ID = "some-owner/adlc-artifacts"
+ACCOUNT = "some-maintainer"
+#: The calls a run makes before the typed confirmation: one read, nothing sent.
+ACCOUNT_READ = [("HfApi", (), {}), ("whoami", (), {})]
 SECRET_TOKEN = "hf_" + "Q" * 34
 
 FIXTURE_DENYLIST = {
@@ -77,11 +80,18 @@ class FakeHub(object):
         self.remote_files = []
         self.fail = None
         self.exists = True
+        self.account = {"name": ACCOUNT, "type": "user"}
         hub = self
 
         class HfApi(object):
             def __init__(self, *args, **kwargs):
                 hub.calls.append(("HfApi", args, kwargs))
+
+            def whoami(self, *args, **kwargs):
+                hub.calls.append(("whoami", args, kwargs))
+                if hub.fail == "whoami":
+                    raise RuntimeError("Invalid user token.")
+                return hub.account
 
             def create_repo(self, *args, **kwargs):
                 hub.calls.append(("create_repo", args, kwargs))
@@ -230,7 +240,7 @@ def test_refuses_on_mismatched_confirmation(sandbox, dl_path, exported, hub, ter
     assert _publish(sandbox, dl_path, dataset) == publish.EXIT_REFUSED
     assert terminal["asked"] == ["Type the repo id to publish: "]
     assert "does not match %s" % REPO_ID in capsys.readouterr().err
-    assert hub.calls == []
+    assert hub.calls == ACCOUNT_READ
 
 
 def _plant_body_name(dataset):
@@ -259,16 +269,16 @@ def _plant_card_email(dataset):
     return "README.md line", "email"
 
 
-def _plant_revision_org_url(dataset):
+def _plant_revision_repo_name(dataset):
+    # A well-formed rule name, so the schema passes it and the residue pass must not.
     path = dataset / "revision.json"
     path.write_text(path.read_text(encoding="utf-8").replace(
-        '"scrub_replacements":{', '"scrub_replacements":{"https://github.com/acme-org/secret-api":1,'),
-        encoding="utf-8")
+        '"scrub_replacements":{', '"scrub_replacements":{"secret-api":1,'), encoding="utf-8")
     return "revision.json line 1", "denylist"
 
 
 @pytest.mark.parametrize("plant", [_plant_body_name, _plant_escaped_path, _plant_tag_person,
-                                   _plant_card_email, _plant_revision_org_url])
+                                   _plant_card_email, _plant_revision_repo_name])
 def test_refuses_dataset_with_residue(sandbox, dl_path, exported, hub, terminal, capsys, plant):
     _, dataset, _ = exported
     where, detector = plant(dataset)
@@ -371,7 +381,7 @@ def test_refuses_when_dataset_changes_after_confirmation(sandbox, dl_path, expor
     terminal["on_ask"] = edit
     assert _publish(sandbox, dl_path, dataset) == publish.EXIT_REFUSED
     assert "changed after it was checked" in capsys.readouterr().err
-    assert hub.calls == []
+    assert hub.calls == ACCOUNT_READ
 
 
 def test_missing_client_is_an_error_not_a_pass(sandbox, dl_path, exported, terminal, capsys,
@@ -380,6 +390,35 @@ def test_missing_client_is_an_error_not_a_pass(sandbox, dl_path, exported, termi
     monkeypatch.setitem(sys.modules, "huggingface_hub", None)  # import raises ImportError
     assert _publish(sandbox, dl_path, dataset) == publish.EXIT_ERROR
     assert "python3 -m pip install -r tools/dataset/requirements.txt" in capsys.readouterr().err
+    assert terminal["asked"] == []
+
+
+def test_summary_names_the_account_before_the_question(sandbox, dl_path, exported, hub, terminal,
+                                                       capsys):
+    _, dataset, _ = exported
+    seen = []
+    terminal["on_ask"] = lambda: seen.append(capsys.readouterr().out)
+    assert _publish(sandbox, dl_path, dataset) == publish.EXIT_OK
+    assert "publish: account  %s\n" % ACCOUNT in seen[0]
+
+
+@pytest.mark.parametrize("fail, account, message", [
+    ("whoami", None, "reading the Hub account failed (RuntimeError: Invalid user token.)"),
+    (None, {"type": "user"}, "did not name the account"),
+    (None, {"name": ""}, "did not name the account"),
+    (None, ["not", "a", "dict"], "did not name the account"),
+], ids=["no-login", "no-name", "empty-name", "not-a-dict"])
+def test_unreadable_account_is_an_error_before_the_question(sandbox, dl_path, exported, hub,
+                                                            terminal, capsys, fail, account,
+                                                            message):
+    _, dataset, _ = exported
+    hub.fail = fail
+    if account is not None:
+        hub.account = account
+    assert _publish(sandbox, dl_path, dataset) == publish.EXIT_ERROR
+    assert message in capsys.readouterr().err
+    assert terminal["asked"] == []
+    assert hub.calls == ACCOUNT_READ
 
 
 # --- the publish itself (BR-6, BR-7) ----------------------------------------------------
@@ -391,16 +430,17 @@ def test_publishes_on_confirmation_with_stub(sandbox, dl_path, exported, hub, te
     assert _publish(sandbox, dl_path, dataset) == publish.EXIT_OK
     tag = "v1.2.3-" + sha[:12]
     assert re.match(r"^v1\.2\.3-[0-9a-f]{12}$", tag)
-    assert [c[0] for c in hub.calls] == ["HfApi", "repo_exists", "list_repo_refs",
+    assert [c[0] for c in hub.calls] == ["HfApi", "whoami", "repo_exists", "list_repo_refs",
                                          "list_repo_files", "create_repo", "create_commit",
                                          "create_tag"]
     assert hub.calls[0][1:] == ((), {})
-    assert hub.calls[4][1:] == ((REPO_ID,), {"repo_type": "dataset", "exist_ok": True})
-    commit = hub.calls[5]
+    assert hub.calls[1][1:] == ((), {})
+    assert hub.calls[5][1:] == ((REPO_ID,), {"repo_type": "dataset", "exist_ok": True})
+    commit = hub.calls[6]
     assert commit[1] == (REPO_ID,)
     assert (commit[2]["repo_type"], commit[2]["commit_message"]) == (
         "dataset", "Export %s (toolkit 1.2.3)" % sha[:12])
-    assert hub.calls[6][1:] == ((REPO_ID,), {"tag": tag, "repo_type": "dataset",
+    assert hub.calls[7][1:] == ((REPO_ID,), {"tag": tag, "repo_type": "dataset",
                                              "revision": FakeHub.OID})
     # The committed bytes are the checked files, read before the confirmation.
     assert sorted(hub.uploaded) == sorted(publish.DATASET_FILES)
@@ -431,7 +471,7 @@ def test_refuses_when_tag_exists(sandbox, dl_path, exported, hub, terminal, caps
     assert _publish(sandbox, dl_path, dataset) == publish.EXIT_REFUSED
     assert "tag v1.2.3-%s already exists" % sha[:12] in capsys.readouterr().err
     # Refused before anything is created on the Hub.
-    assert [c[0] for c in hub.calls] == ["HfApi", "repo_exists", "list_repo_refs"]
+    assert [c[0] for c in hub.calls] == ["HfApi", "whoami", "repo_exists", "list_repo_refs"]
     assert hub.uploaded is None
 
 
@@ -455,10 +495,10 @@ def test_stale_remote_files_deleted_in_the_same_commit(sandbox, dl_path, exporte
 
 @pytest.mark.parametrize("fail, message, calls", [
     ("create_commit", "uploading failed (RuntimeError: upload broke)",
-     ["HfApi", "repo_exists", "list_repo_refs", "list_repo_files", "create_repo",
+     ["HfApi", "whoami", "repo_exists", "list_repo_refs", "list_repo_files", "create_repo",
       "create_commit"]),
     ("create_tag", "by hand failed (RuntimeError: tag broke)",
-     ["HfApi", "repo_exists", "list_repo_refs", "list_repo_files", "create_repo",
+     ["HfApi", "whoami", "repo_exists", "list_repo_refs", "list_repo_files", "create_repo",
       "create_commit",
       "create_tag"]),
 ])
@@ -512,9 +552,17 @@ def _bad_reference_status(dataset):
     (_rev(lambda d: d.update(scrub_replacements=[])), "scrub_replacements must map rules"),
     (_rev(lambda d: d["scrub_replacements"].update(email=False)),
      "scrub_replacements must map rules"),
+    (_rev(lambda d: d["scrub_replacements"].update({"https://example.com/x": 1})),
+     "scrub_replacements must map rules"),
+    (_rev(lambda d: d["scrub_replacements"].update(total=1)), "scrub_replacements must map rules"),
+    (_rev(lambda d: d.update(scrub_replacements={})), "scrub_replacements must map rules"),
+    (_rev(lambda d: d.update(source_commit=d["source_commit"] + "\n")),
+     "source_commit is not a full commit SHA"),
+    (_rev(lambda d: d.update(toolkit_version="1.2.3\n")), "toolkit_version is not a version"),
     (_bad_reference_status, "references is not a list of {id, status} objects"),
 ], ids=["short-sha", "upper-sha", "shell-version", "float-version", "extra-key", "missing-key",
         "bool-count", "negative-count", "missing-kind", "list-replacements", "bool-replacement",
+        "url-rule", "total-rule", "no-rules", "newline-sha", "newline-version",
         "bad-reference-status"])
 def test_refuses_malformed_revision_or_record(sandbox, dl_path, exported, hub, terminal, capsys,
                                               edit, message):
@@ -706,7 +754,7 @@ def test_new_repo_skips_tag_and_file_listing(sandbox, dl_path, exported, hub, te
     _, dataset, _ = exported
     hub.exists = False
     assert _publish(sandbox, dl_path, dataset) == publish.EXIT_OK
-    assert [c[0] for c in hub.calls] == ["HfApi", "repo_exists", "create_repo", "create_commit",
+    assert [c[0] for c in hub.calls] == ["HfApi", "whoami", "repo_exists", "create_repo", "create_commit",
                                          "create_tag"]
 
 
