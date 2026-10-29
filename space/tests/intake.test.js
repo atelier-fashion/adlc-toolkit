@@ -28,7 +28,7 @@ function lines(n) {
 
 // A complete requirement in the template's shape, so tests can remove pieces of it.
 function fullRequirement() {
-  return toolkit.templateSections.map((s) => `## ${s}\n\nText for ${s}.`).join('\n\n') + '\n';
+  return toolkit.requiredSections.map((s) => `## ${s}\n\nText for ${s}.`).join('\n\n') + '\n';
 }
 
 function toolResponse(input, extra = {}) {
@@ -195,9 +195,11 @@ test('every template section present', async () => {
   const partial = '---\nid: REQ-xxx\n---\n\n## Description\n\nOnly a description.\n';
   const f = mockFetch(toolResponse({ requirement_md: partial, gaps: [] }));
   const result = await run('Notes.\n', f);
-  for (const s of toolkit.templateSections) {
+  for (const s of toolkit.requiredSections) {
     assert.ok(result.requirement_md.split('\n').includes(`## ${s}`), s);
   }
+  assert.ok(result.requirement_md.includes('## Provenance'));
+  assert.ok(!result.requirement_md.includes('## Retrieved Context'), 'the Space runs no retrieval');
   assert.ok(result.requirement_md.includes('Only a description.'));
 });
 

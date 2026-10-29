@@ -36,6 +36,35 @@ export function templateSections(template) {
     .map((l) => l.replace(/^##\s*/, '').replace(/\s*$/, ''));
 }
 
+// The sections an intake result must carry: every heading outside an HTML comment, plus
+// a commented-out heading whose comment says it is for intake only (`## Provenance`).
+// Other commented headings (`## Retrieved Context`) are omitted, as the template says
+// to when the skill has not run retrieval, and the Space runs none.
+export function requiredSections(template) {
+  const out = [];
+  let comment = null;
+  for (const line of template.split('\n')) {
+    if (comment === null && line.trim().startsWith('<!--')) comment = [];
+    if (comment !== null) {
+      comment.push(line);
+      if (line.includes('-->')) {
+        const text = comment.join('\n');
+        if (/intake only/i.test(text)) {
+          const h = comment.find((l) => l.startsWith('## '));
+          if (h) out.push(h.slice(3).trim());
+        }
+        comment = null;
+      }
+      continue;
+    }
+    if (line.startsWith('## ')) out.push(line.slice(3).trim());
+  }
+  if (!out.includes('Provenance')) {
+    throw new BuildError('templates/requirement-template.md: no intake-only ## Provenance section found');
+  }
+  return out;
+}
+
 // The lines between the intake-gap-rules markers in spec/SKILL.md, verbatim, with the
 // blank lines that pad the markers removed.
 export function gapRules(skill) {
@@ -111,6 +140,7 @@ export function collect(root) {
     version: read(root, 'VERSION').trim(),
     template,
     templateSections: sections,
+    requiredSections: requiredSections(template),
     gapSections: sections.filter((s) => !excluded.includes(s)),
     gapRules: gapRules(read(root, 'spec/SKILL.md')),
     segmentLines,

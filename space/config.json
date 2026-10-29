@@ -1,0 +1,4 @@
+{
+  "model": "claude-sonnet-5-5",
+  "max_tokens": 16000
+}

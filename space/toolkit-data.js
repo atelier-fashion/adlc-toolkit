@@ -16,6 +16,17 @@
       "Provenance",
       "Retrieved Context"
     ],
+    "requiredSections": [
+      "Description",
+      "System Model",
+      "Business Rules",
+      "Acceptance Criteria",
+      "External Dependencies",
+      "Assumptions",
+      "Open Questions",
+      "Out of Scope",
+      "Provenance"
+    ],
     "gapSections": [
       "System Model",
       "Business Rules",

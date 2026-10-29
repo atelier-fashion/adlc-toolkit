@@ -156,6 +156,17 @@ test('gap sections are the template headings minus intake.sh exclusions', async 
   assert.ok(d.gapSections.includes('Business Rules'));
 });
 
+test('required sections are the uncommented headings plus intake-only Provenance', async () => {
+  const { requiredSections, BuildError } = await build();
+  const d = require('../toolkit-data.js');
+  assert.ok(d.requiredSections.includes('Provenance'));
+  assert.ok(!d.requiredSections.includes('Retrieved Context'));
+  assert.ok(d.requiredSections.includes('Open Questions'));
+  const tpl = '## A\n<!--\nOPTIONAL — intake only\n## P\n-->\n<!--\n## R\n-->\n## B\n';
+  assert.throws(() => requiredSections(tpl), BuildError); // no Provenance
+  assert.deepEqual(requiredSections(tpl.replace('## P', '## Provenance')), ['A', 'Provenance', 'B']);
+});
+
 test('install commands come from README', () => {
   const d = require('../toolkit-data.js');
   const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
