@@ -1,7 +1,7 @@
 ---
 id: TASK-178
 title: "lint-skills harness-skip covers the run-outcome fence; architecture.md and CHANGELOG entries"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
@@ -21,8 +21,8 @@ dependencies" and a CHANGELOG `[Unreleased]` entry.
 
 - `tools/lint-skills/check.py` — `HARNESS_SKIP_RUN_OUTCOME_RE`; `check_harness_skip` matches either call
 - `tools/lint-skills/tests/test_check.py` — run-outcome fence without the line fires; with it, clean; a commented-out call does not count
-- `tools/lint-skills/tests/fixtures/harness-skip-run-outcome-missing/SKILL.md` — new fixture
-- `tools/lint-skills/tests/fixtures/harness-skip-run-outcome-ok/SKILL.md` — new fixture
+- `tools/lint-skills/tests/fixtures/harness-skip-run-outcome-missing.md` — new fixture
+- `tools/lint-skills/tests/fixtures/harness-skip-run-outcome-ok.md` — new fixture
 - `.adlc/context/architecture.md` — "Key cross-cutting dependencies" entry beside the delegation telemetry one
 - `CHANGELOG.md` — `[Unreleased]` entry
 
