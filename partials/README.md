@@ -181,6 +181,19 @@ behavior. Examples:
   could not reach a `/sprint` runner's transcript and matched older sessions that
   named the REQ (LESSON-733). Tested by `tests/session-transcript.test.sh` under
   bash, zsh, sh and dash.
+- `adlc-home.sh` — the toolkit's machine-state home, `ADLC_HOME` (REQ-654).
+  Defines `adlc_home` (prints `$ADLC_HOME`, trailing slashes removed, or
+  `$HOME/.claude` when it is unset; rc 1 with a line naming `ADLC_HOME` when it is
+  set but empty or relative, never a fall-through to the default),
+  `adlc_home_source` (`env` or `default`) and `adlc_machine_config`
+  (`$ADLC_CONFIG`, else `<home>/adlc/config.yml`). `id-alloc.sh` (counters, lock
+  dirs, ledger) and `forge.sh` (machine config, delegate venv) load it once, at
+  load time, from beside themselves under bash and zsh and through the two-level
+  convention otherwise, behind a `[ -f ]` pre-check, so the load is never fatal
+  and a missing resolver is reported by the call that needs a home. The same rule
+  lives in `tools/adlc/adlc_home.py` and `tools/delegate/_machine_config.py`;
+  `tools/adlc/tests/test_adlc_home.py` holds the three equal. Tested by
+  `tests/adlc-home.test.sh` under bash, zsh, sh and dash.
 
 Skills invoke a model-2 partial like this, the fence's ToolkitRoot root line
 first (conventions.md "Bash in skills", REQ-669 ADR-1). The root line resolves

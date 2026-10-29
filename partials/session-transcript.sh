@@ -66,15 +66,20 @@ adlc_transcript_find() {
     *) echo "usage: adlc_transcript_find adlc-transcript-mark-<16 hex>" >&2; return 2 ;;
   esac
 
-  if [ -z "${HOME:-}" ] || [ ! -d "${HOME%/}/.claude/projects" ]; then
-    echo "session transcript: no ~/.claude/projects — REFUSING to delegate; draft from the conversation" >&2
+  # Claude Code's own transcripts directory: not toolkit machine state, so it does
+  # not move with ADLC_HOME (REQ-654 ADR-1). Named once, and only with HOME set, so
+  # a `set -u` caller with HOME unset never expands it.
+  _adlc_tf_dir=""
+  if [ -n "${HOME:-}" ]; then _adlc_tf_dir="${HOME%/}/.claude/projects/"; fi  # adlc-home: claude-code
+  if [ -z "$_adlc_tf_dir" ] || [ ! -d "$_adlc_tf_dir" ]; then
+    echo "session transcript: no ~/.claude/projects — REFUSING to delegate; draft from the conversation" >&2  # adlc-home: claude-code
     return 1
   fi
 
   # Trailing slash: follow ~/.claude/projects if it is itself a symlink. -type f
   # skips symlinked files. find exits non-zero when grep matches nothing in a batch;
   # the match list, not the status, is the answer.
-  _adlc_tf_hits=$(find "${HOME%/}/.claude/projects/" -maxdepth 5 -type f -name '*.jsonl' -mmin -60 \
+  _adlc_tf_hits=$(find "$_adlc_tf_dir" -maxdepth 5 -type f -name '*.jsonl' -mmin -60 \
     -exec grep -lF -e "$_adlc_tf_mark" {} + 2>/dev/null)
   _adlc_tf_n=0
   if [ -n "$_adlc_tf_hits" ]; then
@@ -86,7 +91,7 @@ adlc_transcript_find() {
       echo "session transcript: no transcript holds this run's mark — REFUSING to delegate; draft from the conversation" >&2
       return 1 ;;
     1)
-      echo "session transcript: this run's own transcript is ${_adlc_tf_hits#"${HOME%/}"/.claude/projects/}" >&2
+      echo "session transcript: this run's own transcript is ${_adlc_tf_hits#"$_adlc_tf_dir"}" >&2
       printf '%s\n' "$_adlc_tf_hits"
       return 0 ;;
     *)

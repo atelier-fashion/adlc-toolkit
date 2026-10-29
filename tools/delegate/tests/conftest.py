@@ -24,3 +24,15 @@ def partials_dir():
         # git repo. Skip cleanly with an actionable message instead.
         pytest.skip(f"git rev-parse failed — partials tests need a git repo: {e}")
     return os.path.join(root, "partials")
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_adlc_home(monkeypatch):
+    """Keep the runner's own machine-state home out of every test (REQ-654).
+
+    The suites here redirect ``HOME`` to a sandbox and expect the config to
+    resolve under it. An ``ADLC_HOME`` exported in the developer's shell would
+    outrank that sandbox and point a case at the real machine. A test that
+    needs one sets it itself.
+    """
+    monkeypatch.delenv("ADLC_HOME", raising=False)

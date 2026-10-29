@@ -18,13 +18,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def _no_inherited_toolkit_env(monkeypatch):
     """Keep the runner's own install out of every test.
 
-    The doctor reads plugins from ``$CLAUDE_CONFIG_DIR`` when it is set, and the
-    config readers take a loader from ``$ADLC_TOOLKIT_ROOT``. Either one,
+    The doctor reads plugins from ``$CLAUDE_CONFIG_DIR`` when it is set, the
+    config readers take a loader from ``$ADLC_TOOLKIT_ROOT``, and machine state
+    resolves through ``$ADLC_HOME`` (REQ-654). Either one,
     inherited from the shell running pytest, would point a sandboxed case at the
     real machine. A test that needs one sets it itself.
     """
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("ADLC_TOOLKIT_ROOT", raising=False)
+    # REQ-654: the machine-state home, the config override and the repos root
+    # each redirect what a sandboxed case reads; none may come from the runner.
+    monkeypatch.delenv("ADLC_HOME", raising=False)
+    monkeypatch.delenv("ADLC_CONFIG", raising=False)
+    monkeypatch.delenv("ADLC_REPOS_ROOT", raising=False)
 
 
 @pytest.fixture(scope="session")

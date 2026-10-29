@@ -7,7 +7,9 @@
 #   out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 #
 # Provider resolution (BR-2): per-project .adlc/config.yml forge.provider >
-# machine ~/.claude/adlc/config.yml forge.provider > auto (origin URL). `auto` on
+# machine <ADLC_HOME>/adlc/config.yml forge.provider > auto (origin URL).
+# ADLC_HOME defaults to ~/.claude (REQ-654); both it and the delegate venv come from
+# partials/adlc-home.sh, loaded below. `auto` on
 # an unrecognized host fails loud (never a silent GitHub default). Resolution and
 # the key-shaped-auth refusal live in tools/adlc/forge_config.py (no shell YAML
 # parsing — REQ-515 ADR-3); the no-config fast path stays pure-shell.
@@ -48,6 +50,25 @@
 # Auth header: `Authorization: Basic base64(:$PAT)`. A future REQ implements this
 # behind the same adapter functions without changing any call site.
 
+# --- the machine-state home (REQ-654 BR-1) -----------------------------------
+# The same non-fatal load as id-alloc.sh: the adlc-home.sh beside this file (bash
+# and zsh can name it), then the vendored copy, then ToolkitRoot's, each proven with
+# [ -f ] first. A missing resolver is reported by the call that needs a home.
+if [ -n "${BASH_VERSION:-}" ]; then
+  _ADLC_FORGE_DIR=$(dirname -- "${BASH_SOURCE}")
+elif [ -n "${ZSH_VERSION:-}" ]; then
+  # ${(%):-%x} expands to the path of the file currently being sourced under zsh.
+  _ADLC_FORGE_DIR=$(dirname -- "${(%):-%x}")
+else
+  _ADLC_FORGE_DIR=""
+fi
+if ! command -v adlc_home >/dev/null 2>&1; then
+  if [ -n "$_ADLC_FORGE_DIR" ] && [ -f "$_ADLC_FORGE_DIR/adlc-home.sh" ]; then . "$_ADLC_FORGE_DIR/adlc-home.sh"; fi
+fi
+if ! command -v adlc_home >/dev/null 2>&1 && { [ -f .adlc/partials/adlc-home.sh ] || { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -f "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh" ]; }; }; then
+  if [ -f .adlc/partials/adlc-home.sh ]; then . .adlc/partials/adlc-home.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh"; fi
+fi
+
 # --- internal: resolve provider into ADLC_FORGE_PROVIDER --------------------
 # Echoes the provider; exports ADLC_FORGE_PROVIDER. rc!=0 on unrecognized auto.
 # Honors the mock override (ADLC_FORGE_MOCK_PROVIDER) so the offline matrix can
@@ -68,7 +89,17 @@ adlc_forge_provider() {
   # Config file present anywhere in the precedence chain -> Python resolver
   # (handles project>machine>auto + fail-loud). Otherwise pure-shell auto.
   adlc_fg_cfg_proj="$adlc_fg_repo/.adlc/config.yml"
-  adlc_fg_cfg_mach="${ADLC_CONFIG:-${HOME:-}/.claude/adlc/config.yml}"
+  # The machine config (REQ-654): $ADLC_CONFIG, else <ADLC_HOME>/adlc/config.yml.
+  # An unusable ADLC_HOME fails loud here, naming the variable, rather than reading
+  # a default the operator did not choose (BR-2).
+  if [ -n "${ADLC_CONFIG:-}" ]; then
+    adlc_fg_cfg_mach=$ADLC_CONFIG
+  elif command -v adlc_machine_config >/dev/null 2>&1; then
+    adlc_fg_cfg_mach=$(adlc_machine_config) || return 2
+  else
+    echo "forge: partials/adlc-home.sh is not loaded, so the machine config cannot be located (REQ-654) — re-run /init (/adlc:init on the plugin install) to vendor it, or set ADLC_CONFIG" >&2
+    return 2
+  fi
   if [ -f "$adlc_fg_cfg_proj" ] || [ -f "$adlc_fg_cfg_mach" ]; then
     # The resolver's stderr is CAPTURED and re-emitted, never discarded (BR-4,
     # LESSON-008). It carries two things an operator must see: the fail-loud
@@ -112,9 +143,11 @@ adlc_forge_provider() {
 
 # THE ONE INTERPRETER RULE (REQ-609 BR-8, ADR-2).
 #
-#   Prefer $HOME/.claude/delegate-venv/bin/python3 when it is a regular
+#   Prefer <ADLC_HOME>/delegate-venv/bin/python3 when it is a regular
 #   executable file AND that venv carries a `yaml` package directory under
-#   lib/python*/site-packages/; otherwise python3 from $PATH.
+#   lib/python*/site-packages/; otherwise python3 from $PATH. ADLC_HOME defaults
+#   to ~/.claude (REQ-654 ADR-3); when it cannot be resolved, python3 from $PATH,
+#   and the caller that needs the home reports why.
 #
 # Written out at three sites, because a partial cannot import Python and a
 # Python module cannot be sourced by sh. The other two:
@@ -150,9 +183,13 @@ adlc_forge_provider() {
 #     passed as find's starting POINT, where it is a literal, and `-maxdepth 3`
 #     keeps the walk to `lib/<interpreter>/site-packages/yaml`.
 _adlc_forge_python() {
-  adlc_fpy_venv="${HOME:-}/.claude/delegate-venv"
+  adlc_fpy_home=""
+  if command -v adlc_home >/dev/null 2>&1; then
+    adlc_fpy_home=$(adlc_home 2>/dev/null) || adlc_fpy_home=""
+  fi
+  adlc_fpy_venv="$adlc_fpy_home/delegate-venv"
   adlc_fpy_exe="$adlc_fpy_venv/bin/python3"
-  if [ -f "$adlc_fpy_exe" ] && [ -x "$adlc_fpy_exe" ] && [ -d "$adlc_fpy_venv/lib" ]; then
+  if [ -n "$adlc_fpy_home" ] && [ -f "$adlc_fpy_exe" ] && [ -x "$adlc_fpy_exe" ] && [ -d "$adlc_fpy_venv/lib" ]; then
     adlc_fpy_yaml=$(find -L "$adlc_fpy_venv/lib" -maxdepth 3 -type d \
                       -path '*/python*/site-packages/yaml' 2>/dev/null)
     if [ -n "$adlc_fpy_yaml" ]; then

@@ -296,3 +296,23 @@ def test_agents_render_invalid_config_returns_2(tmp_path):
     root = _fake_root(tmp_path, _REAL)
     rc = agents_render.main(["render", "--root", root, "--config", cfgpath])
     assert rc == 2
+
+
+# --- REQ-654 BR-2: the machine config follows ADLC_HOME ----------------------
+
+def test_config_path_follows_adlc_home(tmp_path, monkeypatch):
+    import agents_render
+    monkeypatch.delenv("ADLC_CONFIG", raising=False)
+    monkeypatch.setenv("ADLC_HOME", str(tmp_path / "home"))
+    assert agents_render._config_path() == str(tmp_path / "home" / "adlc" / "config.yml")
+    monkeypatch.setenv("ADLC_CONFIG", str(tmp_path / "explicit.yml"))
+    assert agents_render._config_path() == str(tmp_path / "explicit.yml")
+
+
+def test_config_path_refuses_an_unusable_adlc_home(monkeypatch):
+    import agents_render
+    import pytest
+    monkeypatch.delenv("ADLC_CONFIG", raising=False)
+    monkeypatch.setenv("ADLC_HOME", "relative/home")
+    with pytest.raises(agents_render.ConfigError, match="ADLC_HOME"):
+        agents_render._config_path()

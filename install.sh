@@ -9,10 +9,15 @@
 # derived $REPO_ROOT (BR-3). Delegation is never enabled by default (BR-9).
 #
 # Usage:
-#   ./install.sh                 # fresh / repair install (symlinks, adlc shim, PATH)
+#   ./install.sh                 # fresh / repair install (symlinks, skills view, adlc shim, PATH)
 #   ./install.sh --repair        # same as default; re-derives paths after a clone move
 #   ./install.sh --dry-run       # print the action plan, change nothing
 #   ./install.sh --with-delegation   # also run the (opt-in) delegation install
+#
+# Machine state lives under ADLC_HOME, default ~/.claude (REQ-654): the config, the
+# delegate venv and the skills view. Claude Code's mount (~/.claude/skills and
+# ~/.claude/agents) is installed whatever ADLC_HOME says; a skills-only view of the
+# clone is mounted at ~/.agents/skills for the other harnesses.
 #
 # Ends with an embedded `adlc doctor` report.
 
@@ -27,7 +32,7 @@ for arg in "$@"; do
         --repair)          MODE="install" ;;   # repair == idempotent reinstall
         --with-delegation) WITH_DELEGATION=1 ;;
         -h|--help)
-            sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -69,21 +74,48 @@ else
     exit 1
 fi
 
-CLAUDE_DIR="$HOME/.claude"
+# --- ADLC_HOME (REQ-654 BR-1, BR-2) -----------------------------------------
+# Machine state lives under ADLC_HOME, default ~/.claude, resolved by the same
+# partial every skill uses — the copy beside THIS script, so the rule cannot drift.
+# Resolved and validated before any mutation (LESSON-017): an ADLC_HOME that is set
+# but empty or relative stops the install here, naming the variable, with nothing
+# changed. With ADLC_HOME unset every path below is the one it always was.
+if [ ! -f "$SCRIPT_DIR/partials/adlc-home.sh" ]; then
+    echo "ERROR: $SCRIPT_DIR/partials/adlc-home.sh not found — run install.sh from a complete toolkit clone." >&2
+    exit 1
+fi
+. "$SCRIPT_DIR/partials/adlc-home.sh"
+if ! ADLC_HOME_DIR="$(adlc_home)"; then
+    echo "install.sh: nothing changed — fix ADLC_HOME and re-run." >&2
+    exit 1
+fi
+
+# Claude Code's own directory: its skills and agents mounts, installed on every
+# run whatever ADLC_HOME says (REQ-654 BR-3, BR-6). ~/.claude/skills is also the
+# compatibility alias the ToolkitRoot line and every vendored partial resolve
+# through, so it must point at the clone root, never at the skills-only view.
+CLAUDE_DIR="$HOME/.claude"  # adlc-home: claude-code
 BIN_DIR="$HOME/bin"
+# The skills-only view (ADR-4) and the mount the other harnesses read (ADR-5).
+SKILLS_VIEW="$ADLC_HOME_DIR/adlc/skills-view"
+AGENTS_MOUNT="$HOME/.agents/skills"
 ACTIONS=0   # count of real mutations performed (for the BR-1 summary)
 
+PLANS=0     # count of planned mutations (--dry-run)
 note()  { printf '%s\n' "$*"; }
-plan()  { printf '  would: %s\n' "$*"; }
+plan()  { PLANS=$((${PLANS:-0} + 1)); printf '  would: %s\n' "$*"; }
 acted() { ACTIONS=$((ACTIONS + 1)); printf '  done: %s\n' "$*"; }
 
 # --- atomic write helper (BR-2) -------------------------------------------
-# atomic_write <target-path> <content-as-single-arg> : backup existing, write a
-# temp file in the target dir, fsync via rename. Content is passed by argument
-# (NOT a pipe) so the acted() counter increments in the caller's shell, not a
-# lost subshell — keeping the BR-1 "actions taken" summary honest.
+# atomic_write <target-path> <content-as-single-arg> [generated] : backup existing,
+# write a temp file in the target dir, fsync via rename. Content is passed by
+# argument (NOT a pipe) so the acted() counter increments in the caller's shell,
+# not a lost subshell — keeping the BR-1 "actions taken" summary honest. A third
+# argument `generated` skips the backup: the file is this installer's own output
+# with no user content, and a .bak of it would only keep a stale clone path on
+# disk after a --repair (REQ-654 AC-9).
 atomic_write() {
-    target="$1"; content="$2"
+    target="$1"; content="$2"; generated="${3:-}"
     if [ "$DRY" -eq 1 ]; then
         plan "write $target"
         return 0
@@ -91,7 +123,7 @@ atomic_write() {
     mkdir -p "$(dirname "$target")"
     tmp="$(mktemp "${target}.tmp.XXXXXX")"
     printf '%s\n' "$content" > "$tmp"
-    if [ -e "$target" ] && [ ! -L "$target" ]; then
+    if [ -e "$target" ] && [ ! -L "$target" ] && [ "$generated" != "generated" ]; then
         cp -p "$target" "$target.bak"
     fi
     mv "$tmp" "$target"
@@ -120,7 +152,7 @@ ensure_symlink() {
 
 # --- adlc shim (no hardcoded path beyond derived REPO_ROOT, BR-3/BR-11) -----
 # The shim carries THE ONE INTERPRETER RULE (REQ-609 BR-8, ADR-2): prefer
-# $HOME/.claude/delegate-venv/bin/python3 when it is a regular executable file
+# <ADLC_HOME>/delegate-venv/bin/python3 when it is a regular executable file
 # AND that venv carries a `yaml` package directory under lib/python*/site-packages/;
 # otherwise python3 from $PATH. The same rule is written out in
 # tools/adlc/checks.py::_delegate_interpreter and partials/forge.sh::_adlc_forge_python
@@ -135,18 +167,28 @@ ensure_symlink() {
 # the machine that cannot parse the file. The fallback half: the venv exists
 # only after --with-delegation, and a shim that `exec`s a missing interpreter
 # would break `adlc doctor` on exactly the machine that most needs it
-# (LESSON-395). $HOME is expanded by the shim at RUN time, not stamped here.
+# (LESSON-395). $HOME and ADLC_HOME are expanded by the shim at RUN time, not
+# stamped here (REQ-654 ADR-3).
 ensure_adlc_shim() {
     shim="$BIN_DIR/adlc"
     want="#!/usr/bin/env bash
 # The ONE interpreter rule (REQ-609 BR-8, ADR-2) — see install.sh,
 # tools/adlc/checks.py::_delegate_interpreter, partials/forge.sh::_adlc_forge_python.
-_v=\"\$HOME/.claude/delegate-venv/bin/python3\"
+# The venv lives under ADLC_HOME, default ~/.claude, resolved here at run time by
+# partials/adlc-home.sh's rule (REQ-654 ADR-3). An unusable ADLC_HOME means no
+# venv: python3 from PATH, and adlc itself then names the problem.
+_h=\"\$HOME/.claude\"  # adlc-home: default
+if [ -n \"\${ADLC_HOME+x}\" ]; then
+  case \"\$ADLC_HOME\" in /*) _h=\"\${ADLC_HOME%/}\" ;; *) _h=\"\" ;; esac
+fi
+_v=\"\$_h/delegate-venv/bin/python3\"
 _y=\"\"
-for _d in \"\$HOME\"/.claude/delegate-venv/lib/python*/site-packages/yaml; do
-  if [ -d \"\$_d\" ]; then _y=1; fi
-done
-if [ -f \"\$_v\" ] && [ -x \"\$_v\" ] && [ -n \"\$_y\" ]; then
+if [ -n \"\$_h\" ]; then
+  for _d in \"\$_h\"/delegate-venv/lib/python*/site-packages/yaml; do
+    if [ -d \"\$_d\" ]; then _y=1; fi
+  done
+fi
+if [ -n \"\$_h\" ] && [ -f \"\$_v\" ] && [ -x \"\$_v\" ] && [ -n \"\$_y\" ]; then
   exec \"\$_v\" \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\"
 fi
 exec python3 \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\""
@@ -161,7 +203,7 @@ exec python3 \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\""
         plan "write adlc shim $shim -> $REPO_ROOT/tools/adlc/adlc.py (delegate venv python3 when present)"
         return 0
     fi
-    atomic_write "$shim" "$want"
+    atomic_write "$shim" "$want" generated
     chmod +x "$shim"
 }
 
@@ -176,7 +218,7 @@ exec python3 \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\""
 # mutation outside the --with-delegation opt-in (BR-9). It never aborts either
 # — the fallback works, so this is a degraded machine, not a broken install.
 report_venv_pyyaml() {
-    venv="$HOME/.claude/delegate-venv"
+    venv="$ADLC_HOME_DIR/delegate-venv"
     if [ ! -f "$venv/bin/python3" ] || [ ! -x "$venv/bin/python3" ]; then
         note "  ok: no delegate venv — adlc runs \$PATH's python3"
         return 0
@@ -227,7 +269,7 @@ ${PATH_MARKER_END}"
 
 # --- config scaffold (never overwrite existing; delegation off BR-9) -------
 ensure_config() {
-    cfg="$CLAUDE_DIR/adlc/config.yml"
+    cfg="$ADLC_HOME_DIR/adlc/config.yml"
     if [ -f "$cfg" ]; then
         note "  ok: config exists ($cfg) — left untouched"
         return 0
@@ -244,13 +286,221 @@ delegate:
   enabled: false"
 }
 
+# --- the skills-only view (REQ-654 BR-4, ADR-4) ----------------------------
+# One absolute symlink per skill: <view>/<name> -> <clone>/<name> for every
+# <clone>/<name>/SKILL.md at depth one. The view is the toolkit's own machine
+# state, so a link that points elsewhere is repointed (what --repair after a clone
+# move needs) and a link for a name that is no longer a skill is removed. Anything
+# in it that is not a symlink is left alone, with a warning.
+
+# toolkit_skill_names — one name per line. Hidden directories are not matched by
+# the glob, and a name outside the safe charset is skipped, never interpolated.
+toolkit_skill_names() {
+    for tsn_d in "$REPO_ROOT"/*/; do
+        tsn_n="$(basename "$tsn_d")"
+        case "$tsn_n" in
+            *[!A-Za-z0-9._-]*|[!A-Za-z0-9]*) continue ;;
+        esac
+        if [ -f "$REPO_ROOT/$tsn_n/SKILL.md" ]; then printf '%s\n' "$tsn_n"; fi
+    done
+    return 0
+}
+
+# is_toolkit_skill <name> — membership by pattern, not a `| grep -q` pipeline:
+# under `pipefail` an early-exiting grep can make the pipeline fail on a match.
+NL='
+'
+is_toolkit_skill() {
+    case "$NL$SKILL_NAMES$NL" in
+        *"$NL$1$NL"*) return 0 ;;
+    esac
+    return 1
+}
+
+# link_entry <target> <link> <verb> — create or repoint one symlink, or plan it.
+link_entry() {
+    if [ "$DRY" -eq 1 ]; then
+        plan "$3 $2 -> $1"
+        return 0
+    fi
+    ln -sfn "$1" "$2"
+    acted "$3 $2 -> $1"
+}
+
+# unlink_entry <link> <why> — remove one symlink this installer made, or plan it.
+unlink_entry() {
+    if [ "$DRY" -eq 1 ]; then
+        plan "remove $1 ($2)"
+        return 0
+    fi
+    rm -f "$1"
+    acted "removed $1 ($2)"
+}
+
+ensure_skills_view() {
+    esv_before=$((ACTIONS + PLANS))
+    if [ ! -d "$SKILLS_VIEW" ]; then
+        if [ "$DRY" -eq 1 ]; then
+            plan "create skills view $SKILLS_VIEW"
+        else
+            mkdir -p "$SKILLS_VIEW"
+            acted "created skills view $SKILLS_VIEW"
+        fi
+    fi
+    while IFS= read -r esv_n; do
+        [ -n "$esv_n" ] || continue
+        esv_link="$SKILLS_VIEW/$esv_n"
+        esv_want="$REPO_ROOT/$esv_n"
+        if [ -L "$esv_link" ]; then
+            if [ "$(readlink "$esv_link")" != "$esv_want" ]; then
+                link_entry "$esv_want" "$esv_link" "repointed view link"
+            fi
+        elif [ -e "$esv_link" ]; then
+            note "  WARN: $esv_link is not a symlink — left alone; move it aside to let install.sh manage it"
+        else
+            link_entry "$esv_want" "$esv_link" "linked view entry"
+        fi
+    done <<ESV_EOF
+$SKILL_NAMES
+ESV_EOF
+    for esv_e in "$SKILLS_VIEW"/*; do
+        [ -L "$esv_e" ] || continue
+        esv_n="$(basename "$esv_e")"
+        if ! is_toolkit_skill "$esv_n"; then
+            unlink_entry "$esv_e" "no longer a skill"
+        fi
+    done
+    if [ $((ACTIONS + PLANS)) -eq "$esv_before" ]; then
+        note "  ok: $SKILLS_VIEW current ($(printf '%s\n' "$SKILL_NAMES" | grep -c .) skills)"
+    fi
+}
+
+# --- the ~/.agents/skills mount (REQ-654 BR-5, ADR-5) -----------------------
+# Classified before it is touched, and the state found is always printed, so
+# --dry-run names it. Nothing the user owns is replaced: in a directory that
+# already exists (or that a symlink of theirs leads to) every toolkit skill gets
+# its own link to the view entry, a name already taken by a non-toolkit entry is
+# skipped and reported, and ownership is told by a link's TARGET, never its name.
+
+# mount_per_skill <dir> — one link per toolkit skill inside <dir>.
+mount_per_skill() {
+    mps_dir="$1"
+    mps_taken=""
+    while IFS= read -r mps_n; do
+        [ -n "$mps_n" ] || continue
+        mps_e="$mps_dir/$mps_n"
+        mps_want="$SKILLS_VIEW/$mps_n"
+        if [ -L "$mps_e" ]; then
+            mps_t="$(readlink "$mps_e")"
+            if [ "$mps_t" = "$mps_want" ]; then
+                continue
+            fi
+            case "$mps_t" in
+                */adlc/skills-view/"$mps_n")
+                    link_entry "$mps_want" "$mps_e" "repointed mount link"
+                    continue
+                    ;;
+            esac
+        fi
+        if [ -e "$mps_e" ] || [ -L "$mps_e" ]; then
+            mps_taken="$mps_taken $mps_n"
+            continue
+        fi
+        link_entry "$mps_want" "$mps_e" "linked mount entry"
+    done <<MPS_EOF
+$SKILL_NAMES
+MPS_EOF
+    for mps_e in "$mps_dir"/*; do
+        [ -L "$mps_e" ] || continue
+        mps_n="$(basename "$mps_e")"
+        mps_t="$(readlink "$mps_e")"
+        case "$mps_t" in
+            "$SKILLS_VIEW/$mps_n"|*/adlc/skills-view/"$mps_n") ;;
+            *) continue ;;
+        esac
+        if ! is_toolkit_skill "$mps_n"; then
+            unlink_entry "$mps_e" "no longer a skill"
+        fi
+    done
+    if [ -n "$mps_taken" ]; then
+        note "  skipped (name taken by a non-toolkit entry, left untouched):$mps_taken"
+    fi
+}
+
+ensure_agents_mount() {
+    eam_m="$AGENTS_MOUNT"
+    if [ -L "$eam_m" ]; then
+        eam_t="$(readlink "$eam_m")"
+        if [ "$eam_t" = "$SKILLS_VIEW" ]; then
+            note "  found: $eam_m is a symlink to the skills view"
+            note "  ok: $eam_m -> $SKILLS_VIEW"
+            return 0
+        fi
+        if [ -d "$eam_m" ]; then
+            note "  found: $eam_m is a symlink to a directory ($eam_t)"
+            mount_per_skill "$eam_m"
+            return 0
+        fi
+        case "$eam_t" in
+            */adlc/skills-view)
+                note "  found: $eam_m is a dangling symlink to an earlier skills view ($eam_t)"
+                link_entry "$SKILLS_VIEW" "$eam_m" "repointed"
+                ;;
+            *)
+                note "  found: $eam_m is a dangling symlink to $eam_t, which install.sh did not make"
+                note "  WARN: left alone; move it aside and re-run to mount the skills view there"
+                ;;
+        esac
+        return 0
+    fi
+    if [ -d "$eam_m" ]; then
+        note "  found: $eam_m is a directory you own"
+        mount_per_skill "$eam_m"
+        return 0
+    fi
+    if [ -e "$eam_m" ]; then
+        note "  found: $eam_m is a file, not a directory"
+        note "  WARN: left alone; move it aside and re-run to mount the skills view there"
+        return 0
+    fi
+    note "  found: $eam_m is absent"
+    if [ "$DRY" -eq 1 ]; then
+        plan "symlink $eam_m -> $SKILLS_VIEW"
+        return 0
+    fi
+    mkdir -p "$(dirname "$eam_m")"
+    ln -s "$SKILLS_VIEW" "$eam_m"
+    acted "symlinked $eam_m -> $SKILLS_VIEW"
+}
+
 # --- run -------------------------------------------------------------------
+# Preflight first: nothing below it mutates until every input is known good
+# (LESSON-017). The skill list is read once and every later step uses it.
+SKILL_NAMES="$(toolkit_skill_names)"
+if [ -z "$SKILL_NAMES" ]; then
+    echo "ERROR: no <dir>/SKILL.md found under $REPO_ROOT — not a toolkit clone." >&2
+    exit 1
+fi
+if [ -L "$SKILLS_VIEW" ] || { [ -e "$SKILLS_VIEW" ] && [ ! -d "$SKILLS_VIEW" ]; }; then
+    echo "ERROR: $SKILLS_VIEW exists and is not a directory install.sh made. Move it aside, then re-run." >&2
+    exit 1
+fi
+
 note "ADLC toolkit installer  (mode: $MODE)"
 note "  repo root: $REPO_ROOT"
+note "  ADLC_HOME: $ADLC_HOME_DIR ($(adlc_home_source))"
 note ""
 note "symlinks:"
 ensure_symlink "$REPO_ROOT" "$CLAUDE_DIR/skills"
 ensure_symlink "$REPO_ROOT/agents" "$CLAUDE_DIR/agents"
+if [ "$ADLC_HOME_DIR" != "$CLAUDE_DIR" ]; then
+    ensure_symlink "$REPO_ROOT" "$ADLC_HOME_DIR/skills"
+    ensure_symlink "$REPO_ROOT/agents" "$ADLC_HOME_DIR/agents"
+fi
+note "skills view:"
+ensure_skills_view
+note "agents mount (~/.agents/skills):"
+ensure_agents_mount
 note "adlc CLI:"
 ensure_adlc_shim
 note "PATH:"

@@ -12,7 +12,7 @@ delegate twin. One loader, one verdict. ADR-3 is amended by REQ-609 BR-14.
 
 Resolves the active forge provider with precedence:
 
-    per-project .adlc/config.yml  >  machine ~/.claude/adlc/config.yml  >  auto
+    per-project .adlc/config.yml  >  machine <ADLC_HOME>/adlc/config.yml  >  auto
 
 ``auto`` detects the provider from the ``origin`` remote URL:
 
@@ -206,7 +206,7 @@ def _plugin_key():
     """
     config = os.environ.get("CLAUDE_CONFIG_DIR", "")
     if not os.path.isabs(config):
-        config = os.path.join(os.path.expanduser("~"), ".claude")
+        config = os.path.join(os.path.expanduser("~"), ".claude")  # adlc-home: claude-code
     cache = os.path.realpath(os.path.join(config, "plugins", "cache"))
     roots = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))]
     if os.path.isabs(os.environ.get(_ROOT_ENV, "")):
@@ -343,22 +343,6 @@ def _clean_report_value(v):
 
 # --- config file paths -----------------------------------------------------
 
-def _machine_config_path():
-    """Machine config path: ``$ADLC_CONFIG`` or the default.
-
-    Defers to the loader's spelling so the two consumers cannot drift apart
-    about which file they are reading (REQ-609 BR-8); the inline fallback is
-    only for the no-loader sentinel.
-    """
-    loader = _loader()
-    if loader is not None:
-        return loader.default_config_path()
-    override = os.environ.get("ADLC_CONFIG")
-    if override:
-        return override
-    return os.path.join(os.path.expanduser("~"), ".claude", "adlc", "config.yml")
-
-
 def _project_config_path(repo_dir):
     """Per-project config path under ``<repo_dir>/.adlc/config.yml``."""
     return os.path.join(repo_dir, ".adlc", "config.yml")
@@ -393,14 +377,15 @@ def parse_forge_config(path=None):
     ``delegate:``, a top level that is not a mapping — refuses here exactly as
     it refuses for the delegate consumer (REQ-609 BR-2).
     """
-    if path is None:
-        path = _machine_config_path()
-
     loader = _loader()
     if loader is None:
         _note_dependency_missing()
         return {}
 
+    # A None path is the machine config, located by the loader itself, so the two
+    # consumers cannot drift apart about which file they read (REQ-609 BR-8). It
+    # is $ADLC_CONFIG, else <ADLC_HOME>/adlc/config.yml, and an unusable
+    # ADLC_HOME comes back as a `home-invalid` refusal, never a default (REQ-654).
     outcome = loader.load_machine_config(path)
     if outcome.kind == loader.KIND_ABSENT:
         return {}
@@ -573,7 +558,7 @@ def resolve_provider(repo_dir=".", cfg_project=None, cfg_machine=None):
     if cfg_project is None:
         cfg_project = parse_forge_config(_project_config_path(repo_dir))
     if cfg_machine is None:
-        cfg_machine = parse_forge_config(_machine_config_path())
+        cfg_machine = parse_forge_config()
 
     for cfg, source in ((cfg_project, "project-config"), (cfg_machine, "machine-config")):
         provider = (cfg.get("provider") or "").strip().lower()

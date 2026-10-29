@@ -29,6 +29,8 @@ import os
 import stat
 import subprocess
 
+import pytest
+
 # The slice of install.sh under test: the output helpers, `atomic_write`, and
 # `ensure_adlc_shim`, evaluated verbatim.
 _SLICE_START = "note()"
@@ -99,6 +101,7 @@ def _sandbox(tmp_path, repo_root, with_venv, dry=False, venv_has_yaml=True):
         "ACTIONS=0\n"
         'BIN_DIR="%s"\n'
         'REPO_ROOT="%s"\n'
+        'ADLC_HOME_DIR="$HOME/.claude"\n'
         "%s\n"
         "ensure_adlc_shim\n"
         "echo '--- second run ---'\n"
@@ -113,12 +116,15 @@ def _sandbox(tmp_path, repo_root, with_venv, dry=False, venv_has_yaml=True):
     return home / "bin" / "adlc", home, marker, out
 
 
-def _run_shim(shim, home):
-    """Run the generated shim the way a user would: `adlc` with their own HOME."""
-    return subprocess.run(
-        [str(shim), "doctor"], capture_output=True, text=True,
-        env=dict(os.environ, HOME=str(home)),
-    )
+def _run_shim(shim, home, **extra):
+    """Run the generated shim the way a user would: `adlc` with their own HOME.
+
+    ``extra`` adds to the environment; ``ADLC_HOME`` is removed unless given, so
+    the developer's own never decides a case (REQ-654)."""
+    env = dict(os.environ, HOME=str(home))
+    env.pop("ADLC_HOME", None)
+    env.update(extra)
+    return subprocess.run([str(shim), "doctor"], capture_output=True, text=True, env=env)
 
 
 def test_shim_prefers_venv_when_present(tmp_path, repo_root):
@@ -170,7 +176,11 @@ def test_shim_expands_home_at_run_time_not_install_time(tmp_path, repo_root):
     """
     shim, home, _marker, _gen = _sandbox(tmp_path, repo_root, with_venv=True)
     text = shim.read_text()
-    assert '_v="$HOME/.claude/delegate-venv/bin/python3"' in text
+    # REQ-654 ADR-3: the venv's directory is ADLC_HOME, resolved by the shim
+    # itself at run time, default $HOME/.claude.
+    assert '_h="$HOME/.claude"' in text
+    assert '_v="$_h/delegate-venv/bin/python3"' in text
+    assert "ADLC_HOME" in text
     assert str(home) not in text
     assert text.count("tools/adlc/adlc.py") == 2   # venv branch + fallback
 
@@ -224,6 +234,7 @@ def _report_venv(tmp_path, repo_root, with_venv, venv_has_yaml):
         "ACTIONS=0\n"
         'BIN_DIR="%s"\n'
         'REPO_ROOT="%s"\n'
+        'ADLC_HOME_DIR="$HOME/.claude"\n'
         "%s\n"
         "report_venv_pyyaml\n"
         % (home / "bin", fake_repo, _shim_functions(repo_root))
@@ -266,3 +277,41 @@ def test_install_report_is_quiet_when_no_venv_exists(tmp_path, repo_root):
     assert out.returncode == 0, out.stderr
     assert "python3" in out.stdout
     assert "no PyYAML" not in out.stdout
+
+
+# --- REQ-654 ADR-3: the shim resolves ADLC_HOME at run time ------------------
+
+def test_shim_prefers_the_venv_under_adlc_home(tmp_path, repo_root):
+    """With ADLC_HOME set, the venv there is the interpreter, and the one under
+    $HOME/.claude is not (benign half: unset, it is — the tests above)."""
+    shim, home, marker, _gen = _sandbox(tmp_path, repo_root, with_venv=True)
+    alt = tmp_path / "alt home"
+    alt_marker = tmp_path / "alt-venv-ran"
+    _write_exec(alt / "delegate-venv" / "bin" / "python3",
+                '#!/bin/sh\nprintf \'%%s\\n\' "$*" > "%s"\nexec /usr/bin/env python3 "$@"\n'
+                % alt_marker)
+    (alt / "delegate-venv" / "lib" / "python3.9" / "site-packages" / "yaml").mkdir(parents=True)
+    run = _run_shim(shim, home, ADLC_HOME=str(alt) + "/")
+    assert run.returncode == 0, run.stderr
+    assert alt_marker.exists(), "the ADLC_HOME venv was not the one that ran"
+    assert not marker.exists(), "the $HOME/.claude venv ran despite ADLC_HOME"
+
+
+@pytest.mark.parametrize("bad", ["", "relative/home"])
+def test_shim_with_an_unusable_adlc_home_runs_path_python3(tmp_path, repo_root, bad):
+    """An unusable ADLC_HOME means no venv — never the default's — and adlc runs."""
+    shim, home, marker, _gen = _sandbox(tmp_path, repo_root, with_venv=True)
+    run = _run_shim(shim, home, ADLC_HOME=bad)
+    assert run.returncode == 0, run.stderr
+    assert not marker.exists()
+    assert "ADLC_MAIN ['doctor']" in run.stdout
+
+
+def test_shim_rewrite_keeps_no_backup(tmp_path, repo_root):
+    """The shim is the installer's own output: re-stamping it leaves no .bak that
+    would keep an old clone path on disk after a --repair (REQ-654 AC-9)."""
+    shim, _home, _marker, _gen = _sandbox(tmp_path, repo_root, with_venv=False)
+    shim.write_text("#!/usr/bin/env bash\nexec python3 /old/clone/tools/adlc/adlc.py\n")
+    _shim2, _home2, _marker2, gen2 = _sandbox(tmp_path, repo_root, with_venv=False)
+    assert "done: wrote" in gen2.stdout
+    assert not (shim.parent / "adlc.bak").exists()

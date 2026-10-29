@@ -29,7 +29,13 @@ contains() { # contains <desc> <needle> <haystack>
   esac
 }
 
+# REQ-654: forge.sh loads partials/adlc-home.sh beside itself under bash and zsh,
+# but dash cannot name the file being sourced and falls to ToolkitRoot. A fence's
+# root line would have set it; this harness sets it for the load only, to the
+# checkout under test, and unsets it again so every case below runs as before.
+ADLC_TOOLKIT_ROOT=$(CDPATH= cd -- "$PARTIALS/.." && pwd); export ADLC_TOOLKIT_ROOT
 . "$PARTIALS/forge.sh"
+unset ADLC_TOOLKIT_ROOT
 
 # ===========================================================================
 # 1. Mock op matrix: every op x both providers, happy path
@@ -216,6 +222,26 @@ printf 'forge:\n  provider: azure-devops\n  auth: ADO_PAT\n' > "$cfg_repo/.adlc/
 check "project config overrides remote" "azure-devops" \
   "$(ADLC_FORGE_REPO="$cfg_repo" adlc_forge_provider "$cfg_repo" 2>/dev/null)"
 
+# --- REQ-654 BR-1: machine_config_under_adlc_home ---------------------------
+# The machine config is <ADLC_HOME>/adlc/config.yml: its forge.provider overrides
+# a github remote when ADLC_HOME names it, and a config under $HOME/.claude is not
+# read then. An unusable ADLC_HOME fails loud, naming it (BR-2).
+mc_repo=$(mk_repo "https://github.com/o/r.git")
+mkdir -p "$mc_repo/tools/adlc" "$mc_repo/tools/delegate"
+cp "$ROOT/tools/adlc/forge_config.py" "$mc_repo/tools/adlc/"
+cp "$ROOT/tools/delegate/_machine_config.py" "$mc_repo/tools/delegate/"
+MC_HOME="$SBX/mc home"
+mkdir -p "$MC_HOME/adlc"
+printf 'forge:\n  provider: azure-devops\n  auth: ADO_PAT\n' > "$MC_HOME/adlc/config.yml"
+check "machine_config_under_adlc_home: ADLC_HOME's config is read" "azure-devops" \
+  "$(ADLC_HOME=$MC_HOME; export ADLC_HOME; unset ADLC_CONFIG; adlc_forge_provider "$mc_repo" 2>/dev/null)"
+check "machine_config_under_adlc_home: benign — ADLC_HOME unset ignores it" "github" \
+  "$(unset ADLC_HOME ADLC_CONFIG; HOME="$SBX/no-config-home"; export HOME; adlc_forge_provider "$mc_repo" 2>/dev/null)"
+err=$(ADLC_HOME=relative; export ADLC_HOME; unset ADLC_CONFIG; adlc_forge_provider "$mc_repo" 2>&1 >/dev/null)
+contains "machine_config_under_adlc_home: a relative ADLC_HOME fails loud" "ADLC_HOME" "$err"
+check "machine_config_under_adlc_home: ADLC_CONFIG still outranks an invalid home" "azure-devops" \
+  "$(ADLC_HOME=relative; ADLC_CONFIG="$MC_HOME/adlc/config.yml"; export ADLC_HOME ADLC_CONFIG; adlc_forge_provider "$mc_repo" 2>/dev/null)"
+
 # ===========================================================================
 # 6b. THE ONE INTERPRETER RULE (REQ-609 BR-8, ADR-2)
 # ===========================================================================
@@ -287,6 +313,24 @@ HOME=$FAKEHOME; export HOME
 
 rm -rf "$FAKEVENV"
 check "interpreter rule: no venv at all falls back" "python3" "$(_adlc_forge_python)"
+
+# --- REQ-654 ADR-3: the venv lives under ADLC_HOME --------------------------
+# The rule's directory is <ADLC_HOME>/delegate-venv. With ADLC_HOME set, a venv
+# under $HOME/.claude is NOT the one (benign half: unset, it still is), and an
+# unusable ADLC_HOME means no venv: python3 from $PATH, as at the other two sites.
+AHOME="$SBX/adlc home"
+mkdir -p "$AHOME/delegate-venv/bin" "$AHOME/delegate-venv/lib/python3.9/site-packages/yaml" \
+         "$FAKEVENV/bin" "$FAKEVENV/lib/python3.9/site-packages/yaml"
+printf '#!/bin/sh\nexit 0\n' > "$AHOME/delegate-venv/bin/python3"
+printf '#!/bin/sh\nexit 0\n' > "$FAKEVENV/bin/python3"
+chmod +x "$AHOME/delegate-venv/bin/python3" "$FAKEVENV/bin/python3"
+check "interpreter rule (REQ-654): ADLC_HOME's venv is the one" \
+  "$AHOME/delegate-venv/bin/python3" "$(ADLC_HOME=$AHOME; export ADLC_HOME; _adlc_forge_python)"
+check "interpreter rule (REQ-654): benign — ADLC_HOME unset is \$HOME/.claude's venv" \
+  "$FAKEVENV/bin/python3" "$(unset ADLC_HOME; _adlc_forge_python)"
+check "interpreter rule (REQ-654): a relative ADLC_HOME means python3" \
+  "python3" "$(ADLC_HOME=rel; export ADLC_HOME; _adlc_forge_python)"
+rm -rf "$FAKEVENV" "$AHOME"
 HOME=$REALHOME; export HOME
 
 # ===========================================================================

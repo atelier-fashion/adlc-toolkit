@@ -616,6 +616,43 @@ a general markdown linter and NOT a general shell linter.
     `builtin_collision_static` reports it. Add the name to
     `BUILTIN_COLLISION_NAMES`, then dual-spell the lines this check names.
 
+19. **ADLC home (`adlc-home`)** (REQ-654 BR-13, ADR-9): no new literal
+    home-directory `.claude` path in code. The toolkit's machine state (the id
+    counters and their locks, the reservations ledger, the machine config, the
+    delegate venv, the skills view) lives under `ADLC_HOME`, default
+    `~/.claude`, and code reads it through `adlc_home` in
+    `partials/adlc-home.sh` or `tools/adlc/adlc_home.py`. A literal written
+    anywhere else silently closes that seam again (LESSON-012).
+
+    The surface is `ADLC_HOME_SURFACES`: `partials/*.sh`, `tools/**` (code
+    files, walked as toolkit-path walks them), `install.sh` and `scripts/*`.
+    The spellings are `ADLC_HOME_SHELL_RE` (`~/.claude`, `$HOME/.claude` in every
+    brace, default, quoted and escaped form, and `$<var>/.claude` for a variable
+    whose name holds `home`) and, in Python, `ADLC_HOME_PY_JOIN_RE`
+    (`expanduser("~")`, `Path.home()` or a `*home*` name joined with
+    `".claude"`). `.claude` must end the component, so `.claude-plugin` and
+    `.claude.json` never match, and a repo-relative `.claude/worktrees` is not a
+    home path.
+
+    Not checked: `#` comment lines, Python docstrings (found with `ast`), the
+    `tests/` and `fixtures/` trees, this lint's own `check.py`, the canonical root
+    line and REQ-669's default-expansion token
+    `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/`. A line that keeps a literal
+    on purpose says why with a marker on the line: `# adlc-home: claude-code`
+    (a path Claude Code owns: its config dir and plugin cache, `settings.json`,
+    `CLAUDE.md`, its skills and agents mounts), `# adlc-home: alias` (one of the
+    two compatibility aliases, `~/.claude/skills` and
+    `~/.claude/adlc/plugin-root`) or `# adlc-home: default` (a resolver's
+    default arm, or a message that names the default for a human). Any other
+    marker kind is a finding, so a typo cannot exempt a line. The marker is the
+    only exemption mechanism, so every exemption is visible where it is made.
+
+    Distinct from `toolkit-path`, which is about toolkit reads on the plugin
+    surface, and from REQ-666's planned `no-harness-path`, which is about skill
+    text. `scan_adlc_home` returns the files read per surface, and
+    `test_every_surface_is_scanned` fails if any surface read nothing. Fixture
+    trees are in `tests/fixtures/adlc-home/`.
+
 ## Usage
 
 ```sh

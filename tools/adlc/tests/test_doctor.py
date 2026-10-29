@@ -116,3 +116,44 @@ def test_crashing_check_becomes_fail_not_exception():
     outcomes = doctor.run_checks(_profile(), registry=reg)
     assert outcomes[0].result is Result.FAIL
     assert "RuntimeError" in outcomes[0].detail
+
+
+# --- REQ-654 BR-2 / AC-3: an unusable ADLC_HOME stops the doctor ------------
+
+@pytest.mark.parametrize("bad", ["", "relative/path"])
+def test_invalid_adlc_home_exits_naming_it(monkeypatch, capsys, bad):
+    """Set but empty, or set and relative: exit 2 naming ADLC_HOME, before any
+    check runs, and never a report about ~/.claude."""
+    monkeypatch.setenv("ADLC_HOME", bad)
+    monkeypatch.setattr(doctor, "build_profile",
+                        lambda: pytest.fail("a check ran against an unusable ADLC_HOME"))
+    rc = doctor.main([])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ADLC_HOME" in captured.err
+    assert captured.out == ""
+
+
+@pytest.mark.parametrize("bad", ["", "relative/path"])
+def test_invalid_adlc_home_cli_exits_non_zero(tmp_path, bad):
+    """The same through the real CLI, as AC-3 spells it."""
+    import os
+    import subprocess
+    import sys
+    adlc_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "adlc.py")
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp_path),
+           "ADLC_HOME": bad}
+    out = subprocess.run([sys.executable, adlc_py, "doctor"], env=env,
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode != 0
+    assert "ADLC_HOME" in out.stderr
+    assert out.stdout == ""
+
+
+def test_valid_adlc_home_runs_the_checks(tmp_path, monkeypatch, capsys):
+    """Benign: an absolute ADLC_HOME is accepted and the selected check runs."""
+    monkeypatch.setenv("ADLC_HOME", str(tmp_path / "home"))
+    rc = doctor.main(["--checks", "counters"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[PASS] counters" in out
