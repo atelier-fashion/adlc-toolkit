@@ -123,14 +123,14 @@ directory is put on the Bash tool's PATH.
 
 ## Acceptance Criteria
 
-- [ ] On macOS, a sandbox HOME with no toolkit symlinks and no machine state can run the two BR-1 commands. After them, `/adlc:init` scaffolds `.adlc/` in a throwaway repo, `/adlc:spec` writes a REQ, `/adlc:status` lists it, and `adlc doctor` reports no failures for the plugin route.
-- [ ] In that sandbox, a lite REQ runs end to end through `/adlc:proceed` in a throwaway GitHub repo: spec, implement, review, PR and wrapup. No step reads from `~/.claude/skills`, checked with filesystem access logging or a guard that fails on the read.
+- [x] On macOS, a sandbox HOME with no toolkit symlinks and no machine state can run the two BR-1 commands. After them, `/adlc:init` scaffolds `.adlc/` in a throwaway repo, `/adlc:spec` writes a REQ, `/adlc:status` lists it, and `adlc doctor` reports no failures for the plugin route.
+- [x] In that sandbox, a lite REQ runs end to end through `/adlc:proceed` in a throwaway GitHub repo: spec, implement, review, PR and wrapup. No step reads from `~/.claude/skills`, checked with filesystem access logging or a guard that fails on the read.
 - [x] On a symlink-only machine, `partials/tests/run.sh`, the `tools/` test suites and `tools/lint-skills` pass. `./install.sh` reports zero actions.
 - [x] On a machine with both routes active, `adlc doctor` prints the doubled-install finding with a fix. On a symlink-only machine and on a plugin-only machine, it prints no such finding.
 - [x] New and changed shell passes `partials/tests/run.sh` under bash 3.2, zsh and dash.
 - [x] The README, `.adlc/context/project-overview.md`, `.adlc/context/architecture.md` and the CHANGELOG describe both install routes, and no sentence in them still says the install layer has no versioning.
 - [x] A fixture with `plugin.json` version different from `VERSION` fails the BR-12 lint, and so does a fixture with a skill missing from the manifest. A fixture with a literal `~/.claude/skills/partials/x.sh` read in a new partial fails the BR-13 lint.
-- [ ] After a test release bumps `VERSION`, `claude plugin update` in the sandbox installs the new version, and `/adlc:template-drift` names it as the baseline.
+- [x] After a test release bumps `VERSION`, `claude plugin update` in the sandbox installs the new version, and `/adlc:template-drift` names it as the baseline.
 - [ ] The Claude directory submission is filed, and its reference is recorded in the CHANGELOG entry for the release.
 - [x] Each BR-16 behavior is recorded as verified, with the Claude Code version, or the README marks it unverified.
 
@@ -149,19 +149,12 @@ directory is put on the Bash tool's PATH.
 
 ## Deferred
 
-Shipped in PR #196 (8ade64f) without the maintainer half of TASK-131, which
-needs credentials and accounts the pipeline does not hold:
+Shipped in PR #196 (8ade64f). The model-backed end-to-end run passed on 2026-10-29
+(`verification.md`, "End-to-end with a model"). Still waiting on the maintainer:
 
-- **Model-backed and GitHub end-to-end cases** (acceptance criteria 1 and 2):
-  `sh tools/adlc/tests/e2e/plugin-sandbox.sh --with-model --throwaway-repo OWNER/adlc-e2e-YYYYMMDD --keep`,
-  with a model token (`claude setup-token` or `ANTHROPIC_API_KEY`) and a
-  `GH_TOKEN` scoped to a throwaway repo whose name contains `e2e`. Offline, the
-  sandbox reports no FAIL (INCOMPLETE, the model cases skipped).
-- **The first plugin release and `claude plugin update`** (criterion 8), per
-  `RELEASING.md`.
-- **The Claude directory submission** (criterion 9), which also answers OQ-4.
-- **Unverified:** which skill a bare `/review` reaches, and the directory-install
-  route (BR-20). The dual spelling is correct either way.
+- **The first plugin release**, per `RELEASING.md`.
+- **The Claude directory submission** (acceptance criterion 9), which also answers OQ-4
+  and the directory-install route (BR-20).
 
 ## Open Questions
 

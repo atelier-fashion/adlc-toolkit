@@ -252,6 +252,13 @@ Found by the REQ-669 Phase 5 review, before this release shipped.
 - **End-to-end sandbox.** GitHub access is a scoped `GH_TOKEN` only, and later cases
   get no GitHub credentials. A suite that exits 0 but prints `FAIL` lines is a FAIL.
   `plugin-sandbox.selftest.sh` tests the harness itself.
+- **`adlc doctor` no longer reads a probe ref as an HTTP 403.** The `reservations`
+  check's classifier matched `403` anywhere in git's stderr, which echoes the random
+  probe ref, so about one run in 300 a server-policy decline was reported as `auth`. It
+  now matches `403` only as a standalone number.
+- **`/template-drift` takes its baseline only from Step 0a's fence.** A model that read
+  `plugin.json` by hand skipped the fence's manifest checks; the step now says to run
+  the fence as written and use its printed line.
 - **No keychain prompts from the e2e sandbox.** Each sandbox HOME's `.gitconfig` resets
   `credential.helper`, so Xcode git's `osxkeychain` helper no longer raises a "Keychain
   Not Found" dialog after every push, which stalled the run until it was dismissed.

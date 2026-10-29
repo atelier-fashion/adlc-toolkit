@@ -559,3 +559,46 @@ transcript (no model turn needed). Then confirm it in a Bash tool call from the 
 which needs a logged-in CLI. Until then the PATH clause of `plugin-route` rests on an
 unrecorded observation.
 
+## End-to-end with a model (TASK-131, 2026-10-29)
+
+`sh tools/adlc/tests/e2e/plugin-sandbox.sh --with-model --throwaway-repo <owner>/adlc-e2e-20261029 --keep`
+on macOS, Claude Code 2.1.258, from `main` at adc2d98, with a model OAuth token and a
+`GH_TOKEN` scoped to the throwaway repo alone.
+
+**First run: 23 of 25 checks passed, `RESULT: FAIL (2 checks failed)`.**
+
+| Case | Result | What it showed |
+|---|---|---|
+| `init_spec_status_doctor` | 7/7 | The two BR-1 commands install `adlc@adlc-toolkit` 5.4.0. `/adlc:init` scaffolds `.adlc/`, `/adlc:spec` writes a REQ, `/adlc:status` lists it, and `adlc doctor` reports `route=plugin` with no FAIL (AC-1). |
+| `lite_req_end_to_end_with_read_guard` | 5/5 | With `~/.claude/skills` and `~/.claude/agents` mode 000, `/adlc:spec --lite` and `/adlc:proceed` take a lite REQ to a merged PR in the throwaway repo and leave a lesson. 13 partials sourced from ToolkitRoot, and no tool call in 10 transcripts names either guarded directory (AC-2, BR-2). |
+| `symlink_only_regressions` | 6/7 | The symlink route installs, `./install.sh --dry-run` reports zero actions, and the partials, Node and lint suites pass. **FAIL:** one pytest case, below. |
+| `printed_next_steps_runnable` | 2/2 | All 9 printed next steps, typed as printed for the plugin install, reach `/adlc:<skill>`. Typed bare: `/init` reached Claude Code's built-in `/init`, while `/review` and `/status` reached nothing. That confirms ADR-5's refutation (TASK-133) and settles the open `/review` question: a bare `/review` never reaches the bundled `code-review` skill. |
+| `test_release_update` | 3/4 | After a test release (5.4.1-e2e), `claude plugin update` installs the new version and Step 0a's fence names it as the baseline (AC-8). **FAIL:** `template_drift_skill_run`, below. |
+
+**The two failures, both real defects, both fixed:**
+
+1. **`suite_pytest`:** `test_reservations_fail_names_server_policy_layer` failed with
+   `reservation namespace not writable (auth)`. `_classify_git_failure` read a bare
+   `"403" in stderr` as HTTP auth, and git's rejection echoes the probe ref
+   `refs/adlc/ids/_probe/<16 random hex>`, so about one nonce in 300 turned a
+   server-policy decline into `auth`. That is a product bug: the doctor mislabels it on
+   any machine. Now `403` matches only as a standalone number. The forced-nonce test
+   `test_reservations_server_policy_with_403_in_the_probe_nonce` failed before the fix
+   and passes after.
+2. **`template_drift_skill_run`:** the model reported the right baseline, but it read
+   `plugin.json` with its own `cat` instead of running Step 0a's fence. That skips the
+   fence's manifest checks (LESSON-716), which are what turn a missing or malformed
+   manifest into `unverified-baseline`. Step 0a now says to run the fence as written
+   before any other read of ToolkitRoot, and that its printed line is the header's only
+   baseline source.
+
+**Re-run of the two cases on the fixed tree** (`--ref` of the working-tree snapshot,
+`--case test_release_update --case symlink_only_regressions`): `symlink_only_regressions`
+7/7, `test_release_update` 4/4, `RESULT: PASS`. `template_drift_skill_run` now shows a
+Bash tool result printing `baseline: adlc plugin 5.4.1-e2e`.
+
+**Harness fix found on the way:** Xcode git's `osxkeychain` credential helper raised a
+modal "Keychain Not Found" dialog after every push under the sandbox HOME, stalling the
+run. Fixed in PR #200 (2811f13): each sandbox HOME's `.gitconfig` resets
+`credential.helper`.
+

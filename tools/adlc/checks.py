@@ -35,6 +35,7 @@ operator pastes the line into a shell.
 
 import glob
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -734,7 +735,11 @@ def _classify_git_failure(stderr: str) -> str:
     catch-all connectivity bucket.
     """
     s = (stderr or "").lower()
-    if ("authentication failed" in s or "permission denied" in s or "403" in s
+    # 403 only as a standalone number: git echoes refs and object ids in its
+    # stderr, and a hex token such as the doctor's random probe ref can hold
+    # "403" (one nonce in about 300).
+    if ("authentication failed" in s or "permission denied" in s
+            or re.search(r"\b403\b", s)
             or "could not read username" in s or "invalid username or password" in s):
         return "auth"
     if ("pre-receive hook declined" in s or "[remote rejected]" in s
