@@ -1,0 +1,19 @@
+{
+  "organization": "atelier-fashion",
+  "organization_repo": {"placeholder": "consumer-repo-7"},
+  "public_repos": ["adlc-toolkit"],
+  "repos": [
+    {"name": "admin-api", "placeholder": "consumer-repo-1", "match": "token", "aliases": []},
+    {"name": "atelier-map", "placeholder": "consumer-repo-2", "match": "token", "aliases": []},
+    {"name": "atelier-web", "placeholder": "consumer-repo-3", "match": "token", "aliases": []},
+    {"name": "embolden-website", "placeholder": "consumer-repo-4", "match": "token", "aliases": ["Embolden"]},
+    {"name": "infrastructure", "placeholder": "consumer-repo-5", "match": "repo-context", "aliases": []},
+    {"name": "teton-code", "placeholder": "consumer-repo-6", "match": "token", "aliases": ["Teton", "tetond"]}
+  ],
+  "people": [
+    {"name": "Brett Luelling", "placeholder": "the maintainer"},
+    {"name": "Brett", "placeholder": "the maintainer"},
+    {"name": "Luelling", "placeholder": "the maintainer"}
+  ],
+  "email_allowlist": ["noreply@anthropic.com", "noreply@github.com", "git@github.com"]
+}

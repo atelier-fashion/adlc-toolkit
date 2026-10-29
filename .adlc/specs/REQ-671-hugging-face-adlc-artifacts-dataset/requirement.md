@@ -1,10 +1,10 @@
 ---
 id: REQ-671
 title: "Public Hugging Face dataset of the toolkit's own ADLC artifacts, exported through a fail-closed scrub, with a companion blog post"
-status: draft
+status: complete
 deployable: true
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-29
 component: "adlc/knowledge"
 domain: "adlc"
 stack: ["python", "markdown", "hugging-face-hub"]
@@ -54,13 +54,13 @@ None of that belongs in a dataset.
 
 | Entity | Field | Type | Constraints |
 |--------|-------|------|-------------|
-| ArtifactRecord | id | string | `REQ-`, `TASK-`, `LESSON-`, `BUG-` or `ASSUME-` id; unique within the dataset revision |
+| ArtifactRecord | id | string | `REQ-`, `LESSON-`, `BUG-` or `ASSUME-` id; a task is `<REQ>/<TASK>` and an architecture doc `<REQ>/architecture`, because TASK numbers repeat across REQs (architecture ADR-4); unique within the dataset revision |
 | ArtifactRecord | kind | enum | `requirement`, `architecture`, `task`, `lesson`, `bug`, `assumption` |
 | ArtifactRecord | parent_req | string | the owning REQ for `architecture` and `task`; empty otherwise |
 | ArtifactRecord | title, status, created, updated | string | from frontmatter; empty when absent |
 | ArtifactRecord | component, domain, stack, concerns, tags, lane | string / list | from frontmatter; empty when absent |
 | ArtifactRecord | body | string | scrubbed markdown body |
-| ArtifactRecord | references | list of string | ids cited in the body, each flagged `resolved` or `dangling` against the revision |
+| ArtifactRecord | references | list of `{id, status}` | ids cited in the body or any frontmatter value, each flagged `resolved` or `dangling` against the revision |
 | ArtifactRecord | source_path | string | repo-relative path |
 | DatasetRevision | toolkit_version, source_commit | string | the `VERSION` and full commit SHA the export was built from |
 | ScrubReport | files_on_disk, files_scanned, records_emitted | number | per kind |
@@ -91,8 +91,11 @@ None of that belongs in a dataset.
   - (a) Credential-shaped strings are replaced, using the same pattern chain `/spec` intake uses (informed by REQ-415).
   - (b) Absolute local paths under `/Users/`, `/home/` or `/private/` are replaced with a placeholder that keeps the repo-relative tail.
   - (c) Email addresses are replaced, except bot addresses on an explicit allow list.
-  - (d) Every DenyList entry is replaced with a generic placeholder such as `consumer-repo-1`. Each private repo maps to one placeholder used consistently across the dataset.
-  - (e) Commit SHAs and pull-request URLs that point into a DenyList repository are removed.
+  - (d) Every DenyList entry is replaced with a generic placeholder such as `consumer-repo-1`. Each private repo maps to one placeholder used consistently across the dataset. An entry is matched as a whole word, case-insensitively, with `-`, `_`, a space or nothing between its parts, and an entry may list aliases (a product or client name) that map to the same placeholder. An entry that is also an ordinary English word, such as `infrastructure`, is marked `repo-context` and is replaced wherever it is not plain prose: next to `/`, `@`, `#`, a backtick, `=` or any other character a word in a sentence does not touch, followed by `.git`, as a whole table cell, or anywhere on a line that also carries a commit SHA, a `#<number>` reference or another private-repository hit (architecture ADR-5). The organization's own name is also a private consumer repository; it is replaced in the same repository contexts, and kept where it is followed by `/<name>` or used as plain prose. The report lists every remaining plain-prose occurrence of a `repo-context` entry by file and line for the maintainer's review.
+  - (e) GitHub URLs, with or without a scheme, that point into a DenyList repository or into the maintainer's personal account are removed. A commit SHA (7 to 40 hex characters, either case) is removed when it sits on the same line as a private-repository hit, because a bare SHA cannot otherwise be attributed to a repository.
+  - (f) A GitHub URL, or an `<organization>/<name>` reference, that names any repository in the organization's namespace other than the public `adlc-toolkit` is treated as a DenyList hit even when `<name>` is not on the DenyList. The DenyList is the floor, not the boundary.
+  - (g) The maintainer's personal name, first, last or full, is replaced with `the maintainer`.
+  - A record holding a private key is excluded, not redacted line by line, because the key's body lines match nothing on their own.
 - [ ] BR-4: The scrub proves its own scope. The report compares files scanned against files on disk at the source commit for each kind, and any mismatch refuses the export. Every file under `.adlc/` at the source commit is either mapped to a kind or listed in the report by name as excluded, with a reason. Examples of excluded files are context docs, research notes, adversary reports, verification notes, `pipeline-state.json` and counter files. A file that is neither mapped nor listed refuses the export. `.adlc/context/architecture.md` is a context doc, not a REQ's architecture record. "Zero findings" and "zero files scanned" produce different report lines (informed by LESSON-620, LESSON-571).
 - [ ] BR-5: The scrub scans every raw line, including frontmatter, before parsing fields. A line it cannot parse is a finding, not something to skip (informed by LESSON-716).
 - [ ] BR-6: Publishing is a separate, explicit maintainer step that runs only after the maintainer has read the local preview and the ScrubReport. Neither CI nor the export step publishes on its own.
@@ -105,15 +108,22 @@ None of that belongs in a dataset.
 
 ## Acceptance Criteria
 
-- [ ] An export at a fixed commit produces one record per artifact file on disk for each kind. The ScrubReport's counts match `find` counts for that commit.
-- [ ] Fixtures carry a fake AWS key, a home-directory path, a personal email, a DenyList repo name and a PR URL into a DenyList repo. Each ends up replaced or excluded as BR-3 says, and the report lists each one.
-- [ ] Making one file unreadable to the export refuses it with the scope-mismatch reason.
+Before merge:
+
+- [ ] An export at a fixed commit produces one record per artifact file in that commit's tree for each kind. The ScrubReport's counts match `git ls-tree` counts for that commit.
+- [ ] Fixtures carry a fake AWS key, a home-directory path, a personal email, a DenyList repo name, a `repo-context` entry used both as a repo and as a plain word, a PR URL into a DenyList repo, an organization URL to a repo not on the DenyList, and the maintainer's name. Each ends up replaced or excluded as BR-3 says, and the report lists each one.
+- [ ] Making one file fail to read or decode refuses the export with the scope-mismatch reason.
 - [ ] Adding an unrecognized file under `.adlc/` refuses the export. The current tree, with its context docs, research notes and counter files, exports with each of those files listed as excluded.
 - [ ] An export of the current tree with no planted fixtures is not refused, and its report says how many findings each rule replaced.
 - [ ] The dataset card covers every BR-9 topic.
 - [ ] The documented re-export command, run on a later commit, produces a new revision tagged with that commit.
 - [ ] Two exports of the same commit are byte-identical.
-- [ ] Searching the export for every DenyList entry and for `/Users/` returns nothing.
+- [ ] Searching the export for every whole-word DenyList entry, for every `repo-context` entry in a repository context, for an organization URL other than `adlc-toolkit`, for the maintainer's name and for `/Users/` returns nothing.
+- [ ] The export loads with the Hugging Face `datasets` library from the local files, and its columns match the card's schema.
+- [ ] The article draft is in the repo, and the number script run against the local export reproduces every number in it.
+
+At publish, a maintainer step after merge (BR-6):
+
 - [ ] The published dataset loads with the Hugging Face `datasets` library, and its columns match the card's schema.
 - [ ] Running the article's number script against the published revision reproduces every number in the article.
 - [ ] The dataset URL and article URL are recorded in the README.
@@ -128,14 +138,15 @@ None of that belongs in a dataset.
 
 - Republishing content that is already public in this MIT-licensed repo is acceptable to the copyright holder, Atelier Fashion, once private repo names and paths are scrubbed.
 - The public repo name `atelier-fashion/adlc-toolkit` and the organization name are not private. They stay in the dataset, and only private sibling repos go on the DenyList.
+- The private sibling repos are `admin-api`, `atelier-web`, `atelier-map`, `infrastructure`, `teton-code` and `embolden-website`, plus the consumer repo that shares the organization's name (maintainer, 2026-10-29). The product name "Teton Code" and the client name "Embolden" are scrubbed with them, because either next to a placeholder would reverse it (maintainer, at verify).
 
 ## Open Questions
 
-- [ ] Which license should the dataset carry: MIT to match the repo, or a data license such as CC-BY-4.0?
-- [ ] Should the per-repo statistics tables that compare the toolkit with private sibling repos be dropped entirely, or kept with placeholder names?
-- [ ] Which Hugging Face account or organization owns the dataset? It should match REQ-670's answer.
-- [ ] Should the maintainer's personal name, which appears in four artifact files, stay or go on the DenyList?
-- [ ] Should the public GitHub repo get the same scrub so the two sources agree? This REQ assumes no: the repo is out of scope and the dataset is stricter.
+- [x] License: MIT, to match the repo (maintainer, 2026-10-29). The same text is already available under MIT on GitHub.
+- [x] Per-repo statistics tables stay, with placeholder names from BR-3(d) (maintainer, 2026-10-29).
+- [ ] Which Hugging Face account or organization owns the dataset? It should match REQ-670's answer. This does not block implementation: the publish step takes the dataset repo id as an argument, and the maintainer names it at publish time.
+- [x] The maintainer's personal name goes: BR-3(g) replaces it (maintainer, 2026-10-29).
+- [x] The public GitHub repo does not get the same scrub. It is out of scope, and the dataset is stricter.
 
 ## Out of Scope
 
