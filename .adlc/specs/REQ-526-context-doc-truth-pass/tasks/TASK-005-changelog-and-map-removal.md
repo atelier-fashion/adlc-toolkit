@@ -39,13 +39,13 @@ Two edits to CHANGELOG.md plus the `/map` removal (BR-2, BR-4):
 - [ ] CHANGELOG epoch list reads 1, 2, 3, 4, 5 in source order
 - [ ] `[5.0.0]`'s body entries are byte-identical to before (only the summary list reordered)
 - [ ] `map/` is absent from the repo (`test ! -d map`)
-- [ ] `grep -rn 'atelier' README.md install.sh` returns no project-specific *skill* reference (atelier-fashion as an example consumer/PR-owner is fine; a live `/map` skill ref is not)
+- [ ] `grep -rn 'atelier' README.md install.sh` returns no project-specific *skill* reference (`atelier-fashion` as an example consumer/PR-owner is fine; a live `/map` skill ref is not)
 - [ ] CHANGELOG carries a `/map` tombstone migration note
 
 ## Technical Notes
 
 Reorder is a pure swap of two list items + relabeling `5.` → `4.` and `4.` → `5.` so the
 visible numerals are sequential. Use `git rm -r map` (not a plain `rm`) so the deletion is
-staged. The grep for `atelier` will still legitimately match atelier-fashion mentions in
+staged. The grep for `atelier` will still legitimately match `atelier-fashion` mentions in
 README install examples and CHANGELOG PR attributions — those are not project-specific
 *skills* and are acceptable; the criterion is specifically "no project-specific skill ref".

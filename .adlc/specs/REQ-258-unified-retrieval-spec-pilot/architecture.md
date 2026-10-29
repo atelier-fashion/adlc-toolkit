@@ -38,7 +38,7 @@ The feature is **pure markdown choreography**. No application code, no services,
 - Grep is cheap; reading frontmatter of ~100 files is tractable. Reading full bodies of only the top 15 keeps token budget bounded.
 - Graceful for cold-start: empty directory yields zero candidates, skill proceeds with the cold-start note per BR-9.
 
-**Performance note**: At ~300 total docs (atelier-fashion's projected corpus after backfill), the frontmatter peek is ~300 × ~15 lines = ~4500 lines of metadata, well within context budget. Beyond ~1000 docs this approach needs revisiting, but we're nowhere near that ceiling.
+**Performance note**: At ~300 total docs (`atelier-fashion`'s projected corpus after backfill), the frontmatter peek is ~300 × ~15 lines = ~4500 lines of metadata, well within context budget. Beyond ~1000 docs this approach needs revisiting, but we're nowhere near that ceiling.
 
 ### D-3: Template changes are additive, no migration
 
@@ -54,7 +54,7 @@ The feature is **pure markdown choreography**. No application code, no services,
 **Decision**: `.adlc/context/taxonomy.md` is scaffolded by `/init` in each consumer project. Each project defines its own legal values for `component`, `domain`, `stack`, `concerns`. The toolkit provides a canonical *template* (`templates/taxonomy-template.md`) with example dimensions but NOT prescribed values.
 
 **Rationale**:
-- `component: API/auth` makes sense for atelier-fashion; it's meaningless for a different project.
+- `component: API/auth` makes sense for `atelier-fashion`; it's meaningless for a different project.
 - Avoids the toolkit enforcing a vocabulary that doesn't match every codebase.
 - Matches the existing pattern where templates live at toolkit root, copies live in consumer projects.
 
@@ -129,7 +129,7 @@ Consumer projects that have already run `/init`:
 ## Deferred Work (for downstream REQs)
 
 - Integration into `/architect`, `/bugfix`, `/review` — each a separate REQ.
-- Retroactive tagging via `/retag` — separate REQ; user has queued ~290 files of atelier-fashion corpus.
+- Retroactive tagging via `/retag` — separate REQ; user has queued ~290 files of `atelier-fashion` corpus.
 - Assumption / decision corpora extension — separate REQ when deemed valuable.
 - Telemetry ("which retrieved docs were cited") — v2.
 - Embedding-based retrieval — only if tag ceiling becomes limiting.

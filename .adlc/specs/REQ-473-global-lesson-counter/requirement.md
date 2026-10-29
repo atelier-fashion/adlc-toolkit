@@ -21,7 +21,7 @@ resolves to exactly one work item across every repo on the machine
 policy). LESSON ids are the lone holdout — `/wrapup` Step 4 and `/bugfix`'s
 lesson-capture step still allocate from a **per-project** `.adlc/.next-lesson`,
 so every ADLC repo on the machine mints LESSON numbers from its own independent
-sequence: atelier-fashion at LESSON-233, **infrastructure at LESSON-312**,
+sequence: `atelier-fashion` at LESSON-233, **`infrastructure` at LESSON-312**,
 atelier-web at LESSON-067, admin-api at LESSON-034, adlc-toolkit at LESSON-023.
 These low ranges overlap massively (LESSON-001..023 exist in four-plus repos at
 once), so a bare `LESSON-NNN` reference is deeply ambiguous across repos — far
@@ -54,7 +54,7 @@ Existing LESSON files are left in place as frozen history in every repo. The
 low ranges already collide heavily across repos (e.g. LESSON-001..023 exist in
 four-plus repos) — but those collisions are pre-existing and are NOT
 retroactively renumbered. The global counter simply fast-forwards past the
-machine-wide high-water mark (**312, in infrastructure → seed 313**), exactly as
+machine-wide high-water mark (**312, in `infrastructure` → seed 313**), exactly as
 the REQ counter did across the REQ-264..379 gap, so every *future* LESSON id is
 globally unique. The ASSUME counter (`.adlc/.next-assume`) stays **per-project**
 — it is only minted by `/wrapup` within a single repo and has no cross-repo
@@ -158,7 +158,7 @@ _Not applicable — local developer tooling, no auth surface._
 - [ ] `grep -rn '\.adlc/\.next-assume' --include=SKILL.md` is unchanged from
   `main` — ASSUME stays per-project (regression guard for BR-9).
 - [ ] Operational: `~/.claude/.global-next-lesson` seeded to `313` (machine-wide
-  max LESSON file = 312, in the infrastructure repo; verified by cross-repo scan
+  max LESSON file = 312, in the `infrastructure` repo; verified by cross-repo scan
   across all `.adlc/` repos under the repos root).
 - [ ] Operational: `~/.claude/.global-next-bug` corrected from `65` to `67`
   (global max BUG file = 066; eliminates the latent BUG-065/066 re-mint). No
@@ -175,7 +175,7 @@ _Not applicable — local developer tooling, no auth surface._
   (informed by LESSON-023)
 - Extensive LESSON collisions ALREADY exist across the machine's ADLC repos
   (the per-project counters overlap — LESSON-001..023 exist in four-plus repos;
-  the machine-wide max is 312 in infrastructure). The no-renumber migration
+  the machine-wide max is 312 in `infrastructure`). The no-renumber migration
   freezes all existing files as history; fast-forwarding the global counter past
   the machine-wide max (312) guarantees every FUTURE id is unique without
   touching history — the REQ-380 intentional-gap precedent. (informed by
@@ -203,7 +203,7 @@ _Not applicable — local developer tooling, no auth surface._
   decision).
 - Migrating or deleting existing per-project `.adlc/.next-lesson` files (left in
   place, simply ignored).
-- atelier-fashion's `CLAUDE.md` narrative (a consumer-repo doc; REQ-441 likewise
+- `atelier-fashion`'s `CLAUDE.md` narrative (a consumer-repo doc; REQ-441 likewise
   did not touch it — optional follow-up).
 
 ## Retrieved Context

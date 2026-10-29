@@ -55,7 +55,7 @@ _No data model — documentation and distribution-content REQ. Section intention
 
 ## Open Questions
 
-- [ ] `/map` relocation target: atelier-fashion repo's project-local skills, a separate personal skills repo, or deletion? Default if unanswered: move to the atelier project's own skill directory with a tombstone note in CHANGELOG.
+- [ ] `/map` relocation target: `atelier-fashion` repo's project-local skills, a separate personal skills repo, or deletion? Default if unanswered: move to the atelier project's own skill directory with a tombstone note in CHANGELOG.
 
 ## Out of Scope
 

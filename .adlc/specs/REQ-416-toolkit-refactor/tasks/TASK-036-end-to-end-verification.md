@@ -52,7 +52,7 @@ loop back to the relevant TASK-031..035 for fix.)
       no `ADLC_DISABLE_KIMI`, returns 1 with `ADLC_DISABLE_KIMI=1`, returns
       2 with `ask-kimi` removed from PATH.
 - [ ] `/proceed` dry-run on a synthetic REQ in a sandbox repo
-      (atelier-fashion or a temp `/init`-bootstrapped repo) reaches at
+      (`atelier-fashion` or a temp `/init`-bootstrapped repo) reaches at
       least Phase 4 without errors. The sandbox can stop short of actual
       implementation — what's tested is that the new SKILL.md + companions
       load and dispatch correctly.
