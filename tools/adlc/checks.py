@@ -18,8 +18,9 @@ anything imported here, because the `pyyaml` check below exists precisely to
 report on a machine where PyYAML is missing, and a check that cannot load
 without the thing it diagnoses cannot report it.
 
-Checks know the install route (REQ-669 ADR-7). The four that inspect the
-``install.sh`` symlink install are ``applies_to`` the symlink route only, so a
+Checks know the install route (REQ-669 ADR-7). The six that inspect what
+``install.sh`` builds (REQ-654 added the skills view and the ``~/.agents/skills``
+mount to REQ-669's four) are ``applies_to`` the symlink route only, so a
 plugin-only machine SKIPs them with a notice. ``plugin-route`` reports the route
 and checks the plugin's wiring, and ``doubled-install`` fires when both routes
 are installed at once (BR-11). A remediation that runs ``install.sh`` is printed
@@ -42,6 +43,7 @@ import subprocess
 import sys
 import time
 
+import adlc_home
 import toolkit_root
 from doctor import (PLUGIN_MARKETPLACE, PLUGIN_NAME, ROUTE_PLUGIN, Check, PluginInstall,
                     Profile, Result, detect_plugin_install, plugin_manifest,
@@ -67,7 +69,22 @@ _PROBE_TIMEOUT_SECONDS = 20
 # --- helpers ---------------------------------------------------------------
 
 def _claude_home() -> str:
-    return os.path.join(os.path.expanduser("~"), ".claude")
+    """Claude Code's own directory: its skills and agents mounts live here.
+
+    Not machine state (REQ-654 ADR-1): ``install.sh`` keeps Claude Code's mount at
+    ``~/.claude`` whatever ``ADLC_HOME`` says, so the symlink checks and the
+    doubled-install test read it here. Machine state is :func:`_adlc_home`.
+    """
+    return os.path.join(os.path.expanduser("~"), ".claude")  # adlc-home: claude-code
+
+
+def _adlc_home() -> str:
+    """The machine-state home (REQ-654 BR-1): counters, venv, config, skills view.
+
+    ``doctor.main`` refuses an unusable ``ADLC_HOME`` before any check runs, so
+    from a check this raises only when the check is called directly (a test).
+    """
+    return adlc_home.adlc_home()
 
 
 def _resolves_into_checkout(link_path: str) -> bool:
@@ -87,9 +104,11 @@ def _resolves_into_checkout(link_path: str) -> bool:
 
 # --- the ONE interpreter rule (REQ-609 BR-8, ADR-2) ------------------------
 #
-# THE RULE: prefer `$HOME/.claude/delegate-venv/bin/python3` when it is a
+# THE RULE: prefer `<ADLC_HOME>/delegate-venv/bin/python3` when it is a
 # regular executable file AND that venv carries a `yaml` package directory
 # under `lib/python*/site-packages/`; otherwise `python3` from `$PATH`.
+# ADLC_HOME defaults to ~/.claude (REQ-654 ADR-3); when it cannot be resolved
+# there is no venv to prefer, and the caller that needs the home says why.
 #
 # It is written out at THREE sites, because a shell partial cannot import
 # Python and a Python module cannot be sourced by `sh`. The other two:
@@ -109,8 +128,12 @@ def _resolves_into_checkout(link_path: str) -> bool:
 # auto-detection. The venv directory is tested, never an interpreter spawned,
 # so the two shell sites can ask the identical question.
 
-def _delegate_venv() -> str:
-    return os.path.join(_claude_home(), "delegate-venv")
+def _delegate_venv():
+    """``<ADLC_HOME>/delegate-venv``, or ``None`` when the home cannot be resolved."""
+    try:
+        return os.path.join(_adlc_home(), "delegate-venv")
+    except adlc_home.AdlcHomeError:
+        return None
 
 
 def _venv_has_pyyaml(venv: str) -> bool:
@@ -133,6 +156,8 @@ def _venv_has_pyyaml(venv: str) -> bool:
 def _venv_state() -> str:
     """``ready`` | ``no-pyyaml`` | ``absent`` for the delegate venv."""
     venv = _delegate_venv()
+    if venv is None:
+        return "absent"
     exe = os.path.join(venv, "bin", "python3")
     if not (os.path.isfile(exe) and os.access(exe, os.X_OK)):
         return "absent"
@@ -161,12 +186,12 @@ def _delegate_interpreter() -> str:
 def _machine_config_path() -> str:
     """The machine config path, spelled as ``_machine_config.default_config_path``.
 
-    Inlined rather than imported: this module must load on a machine that has
-    no delegation install at all (LESSON-395), which is exactly the machine the
-    `pyyaml` check exists to report on.
+    ``adlc_home.machine_config_path``, not ``_machine_config``: this module must
+    load on a machine that has no delegation install at all (LESSON-395), which
+    is exactly the machine the `pyyaml` check exists to report on. The two
+    spellings are pinned equal by ``tests/test_adlc_home.py``.
     """
-    return os.environ.get("ADLC_CONFIG") or os.path.join(
-        _claude_home(), "adlc", "config.yml")
+    return adlc_home.machine_config_path()
 
 
 def _partial_path(profile: Profile, name: str) -> str:
@@ -200,7 +225,7 @@ def _read_text(path: str):
 #: The skill the doubled-install finding traces through both spellings.
 _SAMPLE_SKILL = "spec"
 
-#: SKIP notice of the four checks that inspect the install.sh symlink install.
+#: SKIP notice of the six checks that inspect what install.sh builds.
 _SYMLINK_ROUTE_ONLY = ("plugin route: this check inspects the install.sh symlink "
                        "install, which the plugin route does not use")
 
@@ -256,13 +281,13 @@ def _pointer_problem(root: str):
     text = _read_text(pointer)
     if text is None:
         state = "missing" if not os.path.lexists(pointer) else "unreadable"
-        return ("~/.claude/adlc/plugin-root is %s, so skill text read without "
+        return ("~/.claude/adlc/plugin-root is %s, so skill text read without "  # adlc-home: alias
                 "substitution cannot find this copy (ToolkitRoot arm 3)" % state)
     value = text[:-1] if text.endswith("\n") else text
     if not value or "\n" in value or not os.path.isabs(value):
-        return "~/.claude/adlc/plugin-root does not hold one absolute path"
+        return "~/.claude/adlc/plugin-root does not hold one absolute path"  # adlc-home: alias
     if os.path.realpath(value) != root:
-        return "~/.claude/adlc/plugin-root names %s, not this copy" % value
+        return "~/.claude/adlc/plugin-root names %s, not this copy" % value  # adlc-home: alias
     return ""
 
 
@@ -278,7 +303,7 @@ def _local_pointer_note(root: str) -> str:
     value = (text[:-1] if text and text.endswith("\n") else text) or ""
     held = value if value and "\n" not in value and os.path.isabs(value) else "absent"
     return ("the SessionStart hook records only a plugin-cache copy, so skill text "
-            "read without substitution resolves through ~/.claude/adlc/plugin-root "
+            "read without substitution resolves through ~/.claude/adlc/plugin-root "  # adlc-home: alias
             "(%s), not this local-path copy" % held)
 
 
@@ -376,7 +401,7 @@ def check_plugin_route(profile: Profile):
 
     if problems:
         return Result.FAIL, f"{head}: " + "; ".join(problems), "\n".join(fixes)
-    pointer_note = ("~/.claude/adlc/plugin-root names this copy" if cached
+    pointer_note = ("~/.claude/adlc/plugin-root names this copy" if cached  # adlc-home: alias
                     else _local_pointer_note(root))
     return (
         Result.PASS,
@@ -440,18 +465,18 @@ def check_doubled_install(profile: Profile):
     sym = _symlink_install()
     if sym is None:
         return (Result.PASS,
-                f"no install.sh symlink install at ~/.claude/skills (adlc plugin: {plugin.state})",
+                f"no install.sh symlink install at ~/.claude/skills (adlc plugin: {plugin.state})",  # adlc-home: claude-code
                 "")
     _skills, target, _agents = sym
     if plugin.state == "absent":
         return (Result.PASS,
-                f"symlink install only: ~/.claude/skills -> {target}; {plugin.detail}", "")
+                f"symlink install only: ~/.claude/skills -> {target}; {plugin.detail}", "")  # adlc-home: claude-code
     keys = plugin.keys or [f"{PLUGIN_NAME}@{PLUGIN_MARKETPLACE}"]
     fixes = _doubled_fixes(sym, keys)
     if plugin.state != "present":
         return (
             Result.FAIL,
-            f"the symlink install is active (~/.claude/skills -> {target}), and whether "
+            f"the symlink install is active (~/.claude/skills -> {target}), and whether "  # adlc-home: claude-code
             f"the adlc plugin is installed too cannot be told: {plugin.detail}",
             "\n".join(["claude plugin details adlc   # if Claude Code lists the plugin, "
                        "the install is doubled; then run one of the next two lines"] + fixes),
@@ -462,7 +487,7 @@ def check_doubled_install(profile: Profile):
     return (
         Result.FAIL,
         f"both installs are active{same}. Bare /{_SAMPLE_SKILL} reaches the personal copy "
-        f"at ~/.claude/skills ({os.path.join(target, _SAMPLE_SKILL, 'SKILL.md')}); "
+        f"at ~/.claude/skills ({os.path.join(target, _SAMPLE_SKILL, 'SKILL.md')}); "  # adlc-home: claude-code
         f"/adlc:{_SAMPLE_SKILL} reaches the plugin ({', '.join(plugin.keys)}) at "
         f"{plugin_copies}. A bare name reaches a plugin skill only when nothing else "
         "owns it (skills docs; measured for the plugin-only case in REQ-669 "
@@ -473,27 +498,373 @@ def check_doubled_install(profile: Profile):
 
 # --- symlink checks --------------------------------------------------------
 
+def _mount_homes():
+    """Every directory install.sh keeps a skills/agents pair in (REQ-654 ADR-6).
+
+    Claude Code's ``~/.claude`` always; ``ADLC_HOME`` too when it names another
+    directory. One entry when the home is the default, two when it is not.
+    """
+    homes = [_claude_home()]
+    try:
+        home = _adlc_home()
+    except adlc_home.AdlcHomeError:
+        return homes
+    if os.path.realpath(home) != os.path.realpath(homes[0]):
+        homes.append(home)
+    return homes
+
+
 def check_skills_symlink(profile: Profile):
-    link = os.path.join(_claude_home(), "skills")
-    if _resolves_into_checkout(link):
-        return Result.PASS, f"{link} -> {os.path.realpath(link)}", ""
+    links = [os.path.join(h, "skills") for h in _mount_homes()]
+    bad = [link for link in links if not _resolves_into_checkout(link)]
+    if not bad:
+        return Result.PASS, "; ".join(
+            f"{link} -> {os.path.realpath(link)}" for link in links), ""
     return (
         Result.FAIL,
-        f"{link} is missing, dangling, or not a symlink into a git checkout",
-        "ln -sfn %s %s" % (_q(profile.repo_root), _q(link)),
+        "; ".join(f"{link} is missing, dangling, or not a symlink into a git checkout"
+                  for link in bad),
+        "\n".join("ln -sfn %s %s" % (_q(profile.repo_root), _q(link)) for link in bad),
     )
 
 
 def check_agents_symlink(profile: Profile):
-    link = os.path.join(_claude_home(), "agents")
     target = os.path.join(profile.repo_root, "agents")
-    if os.path.islink(link) and os.path.realpath(link) == os.path.realpath(target):
-        return Result.PASS, f"{link} -> {os.path.realpath(link)}", ""
+    links = [os.path.join(h, "agents") for h in _mount_homes()]
+    bad = [link for link in links
+           if not (os.path.islink(link)
+                   and os.path.realpath(link) == os.path.realpath(target))]
+    if not bad:
+        return Result.PASS, "; ".join(
+            f"{link} -> {os.path.realpath(link)}" for link in links), ""
     return (
         Result.FAIL,
-        f"{link} does not resolve to {target}",
-        "ln -sfn %s %s" % (_q(target), _q(link)),
+        "; ".join(f"{link} does not resolve to {target}" for link in bad),
+        "\n".join("ln -sfn %s %s" % (_q(target), _q(link)) for link in bad),
     )
+
+
+# --- the skills view and the ~/.agents/skills mount (REQ-654 BR-9, ADR-8) ---
+#
+# Both inspect what install.sh builds, so both SKIP on the plugin route with the
+# other symlink-route checks. The tree they compare against is the clone
+# Claude Code's mount points at (install.sh builds the view from the same
+# REPO_ROOT), else the tree this doctor runs from.
+
+#: A skill directory name the view may link (install.sh's `toolkit_skill_names`).
+_SKILL_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _skills_view() -> str:
+    return os.path.join(_adlc_home(), "adlc", "skills-view")
+
+
+def _agents_mount() -> str:
+    return os.path.join(os.path.expanduser("~"), ".agents", "skills")
+
+
+def _view_source(profile: Profile) -> str:
+    sym = _symlink_install()
+    return sym[1] if sym else os.path.realpath(profile.repo_root)
+
+
+def _toolkit_skills(root: str):
+    """Sorted names of ``<root>/<name>/SKILL.md`` at depth one, as install.sh lists them."""
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return []
+    return sorted(n for n in entries
+                  if _SKILL_NAME_RE.fullmatch(n)
+                  and os.path.isfile(os.path.join(root, n, "SKILL.md")))
+
+
+def _install_fix(profile: Profile, why: str) -> str:
+    """The verbatim fix that runs install.sh, from any directory (LESSON-572)."""
+    if _install_sh_ok(profile):
+        return "%s   # %s" % (_q(os.path.join(profile.repo_root, "install.sh")), why)
+    return ("claude plugin details adlc   # route detection failed: if Claude Code lists "
+            "adlc, this machine uses the plugin route and install.sh is not the fix")
+
+
+def check_skills_view(profile: Profile):
+    """FAIL unless every skill has exactly its link in the view and nothing dangles."""
+    view = _skills_view()
+    source = _view_source(profile)
+    names = _toolkit_skills(source)
+    why = "rebuilds the skills view"
+    if os.path.islink(view) or not os.path.isdir(view):
+        return (Result.FAIL,
+                f"skills view {view} is missing; Copilot, Codex, Gemini and Cursor read the "
+                "toolkit's skills through it (~/.agents/skills)",
+                _install_fix(profile, why))
+    problems = []
+    for name in names:
+        link = os.path.join(view, name)
+        want = os.path.realpath(os.path.join(source, name))
+        if not os.path.islink(link):
+            problems.append(f"{name}: no link" if not os.path.lexists(link)
+                            else f"{name}: not a symlink")
+        elif not os.path.exists(link):
+            problems.append(f"{name}: dangling")
+        elif os.path.realpath(link) != want:
+            problems.append(f"{name}: points at {os.path.realpath(link)}")
+    try:
+        extra = sorted(e for e in os.listdir(view)
+                       if os.path.islink(os.path.join(view, e)) and e not in names)
+    except OSError:
+        extra = []
+    problems += [f"{e}: not a skill in {source}" for e in extra]
+    if problems:
+        return (Result.FAIL,
+                f"skills view {view} is out of date ({'; '.join(problems)}). A skill "
+                "directory added to the clone reaches ~/.agents/skills only after "
+                "install.sh runs (REQ-654 BR-6)",
+                _install_fix(profile, why))
+    return (Result.PASS,
+            f"{view}: {len(names)} skills linked into {source}; a newly added skill "
+            "appears there after the next install.sh run", "")
+
+
+def check_agents_skills_mount(profile: Profile):
+    """``~/.agents/skills`` is the view, or a directory holding the per-skill links."""
+    mount = _agents_mount()
+    view = _skills_view()
+    source = _view_source(profile)
+    why = "mounts the skills view at ~/.agents/skills"
+    if os.path.islink(mount) and os.path.realpath(mount) == os.path.realpath(view):
+        return Result.PASS, f"{mount} -> {view}", ""
+    if os.path.isdir(mount):
+        missing, broken, taken = [], [], []
+        for name in _toolkit_skills(source):
+            entry = os.path.join(mount, name)
+            if not os.path.lexists(entry):
+                missing.append(name)
+            elif (os.path.islink(entry) and os.path.realpath(entry)
+                  == os.path.realpath(os.path.join(source, name))):
+                continue
+            elif os.path.islink(entry) and os.readlink(entry).endswith(
+                    "/adlc/skills-view/" + name):
+                broken.append(name)
+            else:
+                taken.append(name)
+        note = (f"; names taken by your own entries, left alone: {', '.join(taken)}"
+                if taken else "")
+        if missing or broken:
+            parts = ([f"no link for {', '.join(missing)}"] if missing else []) + \
+                    ([f"dangling links for {', '.join(broken)}"] if broken else [])
+            return (Result.FAIL,
+                    f"{mount} is your directory, and {'; '.join(parts)}{note}",
+                    _install_fix(profile, why))
+        return (Result.PASS,
+                f"{mount} is your directory and holds a link to every toolkit skill{note}",
+                "")
+    if os.path.islink(mount):
+        target = os.readlink(mount)
+        if target.endswith("/adlc/skills-view"):
+            return (Result.FAIL, f"{mount} is a dangling link to an earlier skills view ({target})",
+                    _install_fix(profile, why))
+        return (Result.FAIL,
+                f"{mount} is a dangling link to {target}, which install.sh did not make",
+                "mv %s %s && %s" % (_q(mount), _q(mount + ".bak"),
+                                    _install_fix(profile, why)))
+    if os.path.lexists(mount):
+        return (Result.FAIL, f"{mount} is a file, not a directory",
+                "mv %s %s && %s" % (_q(mount), _q(mount + ".bak"),
+                                    _install_fix(profile, why)))
+    return (Result.FAIL,
+            f"{mount} is absent: Copilot, Codex, Gemini and Cursor see none of the "
+            "toolkit's skills", _install_fix(profile, why))
+
+
+# --- consumer-sync (REQ-654 BR-8, BR-9, ADR-8) ------------------------------
+#
+# Every consumer repo whose vendored .adlc/partials/ is behind the canonical
+# copies, machine-wide. A stale vendored partial is the hazard that made moving
+# the toolkit's home unsafe (LESSON-441), so a stale one FAILs. The baseline is
+# established before anything is compared (BUG-204): a checkout that is not
+# clean-and-current is compared through origin/<default>, and with no
+# trustworthy baseline the verdict is withheld, never guessed (LESSON-581).
+# Read-only: no fetch, and nothing is written to any repo, .git included.
+
+def _git_out(root: str, *args):
+    """``git -C root args`` stdout stripped, or ``None`` on a non-zero exit."""
+    try:
+        # --no-optional-locks: `status` and `diff` otherwise refresh the index,
+        # a write into a repo this check promises not to touch.
+        out = subprocess.run(["git", "--no-optional-locks", "-C", root] + list(args),
+                             capture_output=True, timeout=_PROBE_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out.stdout.decode("utf-8", "replace").strip() if out.returncode == 0 else None
+
+
+def _main_worktree(path: str):
+    """The main worktree of the git repo holding ``path``, or ``None``."""
+    common = _git_out(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        return None
+    return os.path.dirname(os.path.realpath(common))
+
+
+def _repos_root(profile: Profile):
+    """``(root, how)``: ``$ADLC_REPOS_ROOT``, else id-alloc's default, or ``(None, why)``."""
+    env = os.environ.get("ADLC_REPOS_ROOT")
+    if env:
+        return env, "$ADLC_REPOS_ROOT"
+    main = _main_worktree(os.getcwd()) or _main_worktree(profile.repo_root)
+    if main:
+        return os.path.dirname(main), "the parent of %s (id-alloc's default)" % main
+    return None, "not inside a git repo and the toolkit is not a checkout; set ADLC_REPOS_ROOT"
+
+
+def _consumers(root: str, toolkit: str):
+    out = []
+    try:
+        children = sorted(os.listdir(root))
+    except OSError:
+        return out
+    skip = {os.path.realpath(toolkit)}
+    main = _main_worktree(toolkit)
+    if main:
+        skip.add(os.path.realpath(main))
+    for name in children:
+        path = os.path.join(root, name)
+        if name.startswith(".") or not os.path.isdir(path):
+            continue
+        if not os.path.lexists(os.path.join(path, ".git")):
+            continue
+        if not os.path.isdir(os.path.join(path, ".adlc", "partials")):
+            continue
+        if os.path.realpath(path) in skip:
+            continue
+        out.append(path)
+    return out
+
+
+def _disk_partials(root: str):
+    """``{name: bytes}`` for ``<root>/partials/*.sh``."""
+    out = {}
+    pdir = os.path.join(root, "partials")
+    try:
+        names = sorted(os.listdir(pdir))
+    except OSError:
+        return out
+    for name in names:
+        path = os.path.join(pdir, name)
+        if name.endswith(".sh") and os.path.isfile(path):
+            try:
+                with open(path, "rb") as fh:
+                    out[name] = fh.read()
+            except OSError:
+                continue
+    return out
+
+
+class _Baseline:
+    """What the canonical partials are compared from, named (BUG-204)."""
+
+    def __init__(self, label, source, partials, unverified=""):
+        self.label = label            # e.g. "main, clean, 0 behind origin/main ..."
+        self.source = source          # "the working tree" | "origin/main" | "adlc plugin 5.4.0"
+        self.partials = partials      # {name: bytes}
+        self.unverified = unverified  # non-empty: why no verdict can be trusted
+
+
+def _consumer_baseline(profile: Profile) -> _Baseline:
+    root = profile.repo_root
+    if not os.path.lexists(os.path.join(root, ".git")):
+        manifest = plugin_manifest(root)
+        version = manifest.get("version") if manifest else None
+        if isinstance(version, str) and re.fullmatch(r"[0-9A-Za-z.+-]+", version):
+            name = f"adlc plugin {version}"
+            return _Baseline(name, name, _disk_partials(root))
+        return _Baseline("a toolkit copy with no .git and no readable plugin version",
+                         "the copy on disk", _disk_partials(root),
+                         unverified="no adlc plugin version could be read from "
+                                    ".claude-plugin/plugin.json")
+    branch = _git_out(root, "symbolic-ref", "--quiet", "--short", "HEAD") or "detached HEAD"
+    head_ref = _git_out(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    default = head_ref[len("origin/"):] if head_ref and head_ref.startswith("origin/") else "main"
+    dirty = bool(_git_out(root, "status", "--porcelain", "--", "partials"))
+    ref = "origin/" + default
+    has_ref = _git_out(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is not None
+    behind = _git_out(root, "rev-list", "--count", "HEAD.." + ref) if has_ref else None
+    label = "%s%s, %s" % (branch, ", partials/ dirty" if dirty else "",
+                          "%s behind %s as of the last fetch" % (behind, ref)
+                          if has_ref else "no %s ref" % ref)
+    if not has_ref:
+        return _Baseline(label, "the working tree", _disk_partials(root),
+                         unverified="no %s ref to establish the baseline (no remote, or "
+                                    "never fetched: git -C %s fetch origin)" % (ref, _q(root)))
+    same = _git_out(root, "diff", "--quiet", "HEAD", ref, "--", "partials") is not None
+    if branch == default and not dirty and behind == "0" and same:
+        return _Baseline(label, "the working tree", _disk_partials(root))
+    listing = _git_out(root, "ls-tree", "--name-only", ref, "partials/") or ""
+    partials = {}
+    for path in listing.splitlines():
+        name = path.split("/", 1)[-1]
+        if not (name.endswith(".sh") and "/" not in name):
+            continue
+        try:
+            shown = subprocess.run(["git", "-C", root, "show", "%s:%s" % (ref, path)],
+                                   capture_output=True, timeout=_PROBE_TIMEOUT_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if shown.returncode == 0:
+            partials[name] = shown.stdout
+    if not partials:
+        return _Baseline(label, ref, {}, unverified="%s carries no partials/*.sh" % ref)
+    return _Baseline(label, ref, partials)
+
+
+def _stale_files(consumer: str, canonical: dict):
+    out = []
+    vdir = os.path.join(consumer, ".adlc", "partials")
+    for name in sorted(canonical):
+        path = os.path.join(vdir, name)
+        if not os.path.isfile(path):
+            out.append(name + " (missing)")
+            continue
+        try:
+            with open(path, "rb") as fh:
+                if fh.read() != canonical[name]:
+                    out.append(name)
+        except OSError:
+            out.append(name + " (unreadable)")
+    return out
+
+
+def check_consumer_sync(profile: Profile):
+    root, how = _repos_root(profile)
+    if root is None:
+        return Result.SKIP, f"no repos root ({how})", ""
+    consumers = _consumers(root, profile.repo_root)
+    if not consumers:
+        return (Result.SKIP,
+                f"no consumer under {root} ({how}) has a vendored .adlc/partials/", "")
+    base = _consumer_baseline(profile)
+    if base.unverified:
+        differ = [c for c in consumers if _stale_files(c, base.partials)]
+        return (Result.SKIP,
+                f"unverified-baseline: {base.unverified}. Baseline {base.label}; "
+                f"{len(consumers)} consumer(s) under {root}, {len(differ)} differ from "
+                f"{base.source}{': ' + ', '.join(differ) if differ else ''}. No verdict "
+                "is asserted until the baseline can be trusted", "")
+    stale = [(c, _stale_files(c, base.partials)) for c in consumers]
+    stale = [(c, files) for c, files in stale if files]
+    if not stale:
+        return (Result.PASS,
+                f"{len(consumers)} consumer(s) under {root} in sync with {base.source} "
+                f"(baseline {base.label})", "")
+    skill = "/adlc:template-drift" if profile.route == ROUTE_PLUGIN else "/template-drift"
+    detail = "; ".join("%s is stale (%d file%s: %s)" % (c, len(f), "" if len(f) == 1 else "s",
+                                                        ", ".join(f)) for c, f in stale)
+    return (Result.FAIL,
+            f"{detail}. Compared against {base.source} (baseline {base.label}); a stale "
+            "vendored partial is read before the canonical copy, so its fixes never run "
+            "there (LESSON-441)",
+            "\n".join("cd %s && claude -p %s" % (_q(c), _q(skill)) for c, _f in stale))
 
 
 # --- toolkit clone health --------------------------------------------------
@@ -1029,7 +1400,7 @@ def check_pyyaml(profile: Profile):
     # `--user` only outside the venv. A failed route detection gets the same,
     # since it may be the plugin route.
     if not _install_sh_ok(profile):
-        user = "" if interp == os.path.join(venv, "bin", "python3") else " --user"
+        user = "" if venv and interp == os.path.join(venv, "bin", "python3") else " --user"
         installer = "%s -m pip install%s %s" % (
             _q(interp), user, _q(_pyyaml_requirement(profile.repo_root)))
     else:
@@ -1100,11 +1471,12 @@ def check_delegate_gate(profile: Profile):
                 # The plugin ships no delegation CLIs, and install.sh from its
                 # copy would double the install, so the config edit is the fix.
                 # A failed route detection may be the plugin route.
-                fix = ("set delegate.enabled: false in ~/.claude/adlc/config.yml   "
-                       "# the adlc plugin does not install the delegation CLIs")
+                fix = ("set delegate.enabled: false in %s   "
+                       "# the adlc plugin does not install the delegation CLIs"
+                       % _q(_machine_config_path()))
             else:
                 fix = ("./install.sh --with-delegation   # installs the delegate shims, "
-                       "or set delegate.enabled: false in ~/.claude/adlc/config.yml")
+                       "or set delegate.enabled: false in %s" % _q(_machine_config_path()))
             return (
                 Result.FAIL,
                 "delegation config sets enabled: true but adlc-read is not on PATH",
@@ -1130,7 +1502,7 @@ def _lock_is_stale(lock_dir: str) -> bool:
 
 
 def check_counters(profile: Profile):
-    base = _claude_home()
+    base = _adlc_home()
     problems = []
     fixes = []
     for name in _COUNTERS:
@@ -1197,13 +1569,32 @@ def check_template_version(profile: Profile):
     )
 
 
-# --- claude-code (report-only, never fails the verdict) --------------------
+# --- harness:<name> (report-only, never fails the verdict, REQ-654 BR-9) ----
+#
+# One check per harness `adlc harness detect` knows, built from its table so the
+# two can never disagree about the harness set. The former `claude-code` check
+# is `harness:claude` now (REQ-519 open question 2, resolved the same way): a
+# present binary is reported with its version and mount state, an absent one
+# SKIPs, and nothing here is ever a FAIL. Whether ~/.agents/skills reaches the
+# toolkit is `agents-skills-mount`'s question, which does fail.
 
-def check_claude_code(profile: Profile):
-    cc = shutil.which("claude")
-    if not cc:
-        return Result.SKIP, "claude CLI not detected on PATH (report-only)", ""
-    return Result.PASS, f"claude -> {cc} (report-only; not gated)", ""
+def _harness_check(name: str):
+    def run(profile: Profile):
+        import harness
+        p = harness.probe(name, profile.repo_root)
+        if p.state != "present":
+            return (Result.SKIP,
+                    f"{p.binary} not detected on PATH (report-only)", "")
+        return (Result.PASS,
+                f"{p.binary} -> {p.path} (version: {p.version}; skills mount: "
+                f"{p.mount}) (report-only; not gated)", "")
+    run.__name__ = "check_harness_" + name
+    return run
+
+
+def _harness_checks():
+    import harness
+    return [Check("harness:" + name, _harness_check(name)) for name in harness.NAMES]
 
 
 # --- registry (report order) ----------------------------------------------
@@ -1211,13 +1602,19 @@ def check_claude_code(profile: Profile):
 REGISTRY = [
     # Reports the route every later check is gated on, so it runs first (ADR-7).
     Check("plugin-route", check_plugin_route),
-    # The four checks of the install.sh symlink install SKIP on the plugin route.
+    # The six checks of what install.sh builds SKIP on the plugin route: these
+    # two, the view and the mount below, toolkit-clean and path-shims.
     Check("skills-symlink", check_skills_symlink,
           applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
     Check("agents-symlink", check_agents_symlink,
           applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
     # Runs on both routes: either one can find the other installed (BR-11).
     Check("doubled-install", check_doubled_install),
+    # What install.sh builds for the non-Claude harnesses (REQ-654 BR-9).
+    Check("skills-view", check_skills_view,
+          applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
+    Check("agents-skills-mount", check_agents_skills_mount,
+          applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
     Check("toolkit-clean", check_toolkit_clean,
           applies_to=_on_symlink_route, skip_notice=_SYMLINK_ROUTE_ONLY),
     Check("path-shims", check_path_shims,
@@ -1240,5 +1637,6 @@ REGISTRY = [
         skip_notice="launchctl is macOS-only",
     ),
     Check("template-version", check_template_version),
-    Check("claude-code", check_claude_code),
-]
+    # Machine-wide: every consumer's vendored partials against the canonical ones.
+    Check("consumer-sync", check_consumer_sync),
+] + _harness_checks()

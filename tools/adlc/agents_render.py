@@ -69,7 +69,7 @@ _HAS_DIGIT_RE = re.compile(r"[0-9]")
 # Header comment marking model: as derived (BR-1). Kept in sync with TASK-001.
 _HEADER_COMMENT = (
     "<!-- model: is rendered by `adlc agents render` from tier: + "
-    "~/.claude/adlc/config.yml; do not hand-edit. -->"
+    "~/.claude/adlc/config.yml; do not hand-edit. -->"  # adlc-home: default
 )
 
 
@@ -81,12 +81,22 @@ class ConfigError(Exception):
 # Config reading (flat, no PyYAML — mirrors _common.parse_delegate_config)
 # --------------------------------------------------------------------------
 def _config_path(path=None):
+    """``path``, else the machine config: ``$ADLC_CONFIG``, else
+    ``<ADLC_HOME>/adlc/config.yml`` (REQ-654). An unusable ``ADLC_HOME`` is a
+    :class:`ConfigError` naming the variable, never a read of the default."""
     if path:
         return path
     override = os.environ.get("ADLC_CONFIG")
     if override:
+        # A set ADLC_CONFIG never consults the home (REQ-654 BR-2), so it needs
+        # no resolver: this module is also loaded alone, by lint-skills' drift
+        # check, from a tree that may carry nothing else.
         return override
-    return os.path.join(os.path.expanduser("~"), ".claude", "adlc", "config.yml")
+    import adlc_home  # sibling, pure stdlib
+    try:
+        return adlc_home.machine_config_path()
+    except adlc_home.AdlcHomeError as exc:
+        raise ConfigError(str(exc))
 
 
 def _strip_inline(value):

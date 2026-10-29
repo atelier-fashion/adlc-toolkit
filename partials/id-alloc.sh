@@ -14,12 +14,19 @@
 # max+1 -> fast-forward the local counter, all inside the existing mkdir lock with its
 # symlink/TOCTOU guards intact. The local counter is a CACHE, not an authority.
 # Machine state needs no installer (REQ-669 BR-6): the plugin route never runs
-# install.sh, so `~/.claude` may not exist yet. adlc_alloc_id creates it with
-# `mkdir -p "$HOME/.claude"` before it takes the lock (the lock mkdir needs its
-# parent), and an absent counter bootstraps from the local scan as it always has.
+# install.sh, so the home may not exist yet. adlc_alloc_id creates the lock's parent
+# directory before it takes the lock (the lock mkdir needs it), and an absent counter
+# bootstraps from the local scan as it always has.
+#
+# The machine-global counters, their lock dirs and the reservations ledger live under
+# ADLC_HOME, default ~/.claude (REQ-654 BR-1), resolved by partials/adlc-home.sh. This
+# file sources that partial once, at load: its own directory first (bash and zsh can
+# name it), then the two-level convention. With ADLC_HOME unset every path is the
+# literal it always was, so a consumer still carrying a pre-REQ-654 copy of this file
+# reads and writes exactly the same counters (REQ-654 BR-3, AC-11).
 #
 # Functions exported:
-#   adlc_id_kind_counter <kind>   -> prints the ~/.claude counter path for the kind
+#   adlc_id_kind_counter <kind>   -> prints the <ADLC_HOME> counter path for the kind
 #   adlc_id_kind_lockdir <kind>   -> prints the mkdir-lock dir path for the kind
 #   adlc_id_kind_prefix  <kind>   -> prints the id prefix (REQ|BUG|LESSON)
 #   adlc_id_kind_scan    <kind>   -> prints "<find-path-glob> <find-type>" for bootstrap
@@ -58,6 +65,41 @@
 # extracted number (`grep -qx` in id-recheck.sh). There is NO substring/`grep <id>`
 # membership test keyed on a bare id, so REQ-120 vs REQ-1200 cannot cross-match
 # (cf. renumber.py's _id_boundary_re/_id_boundary_ere; LESSON-016 substring buckets).
+
+# --- the machine-state home (REQ-654 BR-1) ------------------------------------------
+# Loaded once, here, from the first of three candidates that exists: the adlc-home.sh
+# beside this file (bash and zsh can name the file being sourced, as id-recheck.sh
+# finds id-alloc.sh), then the vendored .adlc/partials/ copy, then ToolkitRoot's. Every
+# candidate is proven with [ -f ] before it is sourced, the last one included, so the
+# load can never be fatal under sh: most of this file (adlc_main_worktree, the list
+# helpers) needs no home, and a missing resolver is reported loudly by _adlc_id_home
+# at the one call that does. ToolkitRoot's operand is not reached with neither
+# ADLC_TOOLKIT_ROOT nor HOME set (a `set -u` caller would abort on it).
+if [ -n "${BASH_VERSION:-}" ]; then
+  _ADLC_ALLOC_DIR=$(dirname -- "${BASH_SOURCE}")
+elif [ -n "${ZSH_VERSION:-}" ]; then
+  # ${(%):-%x} expands to the path of the file currently being sourced under zsh.
+  _ADLC_ALLOC_DIR=$(dirname -- "${(%):-%x}")
+else
+  _ADLC_ALLOC_DIR=""
+fi
+if ! command -v adlc_home >/dev/null 2>&1; then
+  if [ -n "$_ADLC_ALLOC_DIR" ] && [ -f "$_ADLC_ALLOC_DIR/adlc-home.sh" ]; then . "$_ADLC_ALLOC_DIR/adlc-home.sh"; fi
+fi
+if ! command -v adlc_home >/dev/null 2>&1 && { [ -f .adlc/partials/adlc-home.sh ] || { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -f "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh" ]; }; }; then
+  if [ -f .adlc/partials/adlc-home.sh ]; then . .adlc/partials/adlc-home.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh"; fi
+fi
+
+# _adlc_id_home — the home, or rc 1 with one stderr line. Never a literal fallback:
+# a second spelling of the rule here is the drift the parity test exists to stop.
+_adlc_id_home() {
+  if command -v adlc_home >/dev/null 2>&1; then
+    adlc_home
+    return $?
+  fi
+  echo "ERROR: partials/adlc-home.sh is not loaded, so the machine-state home cannot be resolved (REQ-654) — re-run /init (/adlc:init on the plugin install) to vendor it, or check the toolkit install" >&2
+  return 1
+}
 
 # --- numeric normalizer -------------------------------------------------------------
 # Strip leading zeros so a value is treated as DECIMAL, not octal: in sh/bash/zsh
@@ -122,15 +164,15 @@ adlc_main_worktree() {
   printf '%s\n' "$adlc_mw_top"
 }
 
-# The counter path. req/bug/lesson are machine-global (one file under ~/.claude);
+# The counter path. req/bug/lesson are machine-global (one file under ADLC_HOME);
 # `assume` is PER-REPO (BR-12): the reservation makes the per-project namespace
 # collision-safe across clones without globalizing it. The per-repo counter/lock live
 # under the allocating repo's .adlc/, resolved from the current git worktree.
 adlc_id_kind_counter() {
   case "$1" in
-    req)    echo "$HOME/.claude/.global-next-req" ;;
-    bug)    echo "$HOME/.claude/.global-next-bug" ;;
-    lesson) echo "$HOME/.claude/.global-next-lesson" ;;
+    req|bug|lesson)
+      adlc_ic_home=$(_adlc_id_home) || return 2
+      echo "$adlc_ic_home/.global-next-$1" ;;
     assume)
       adlc_ic_top=$(adlc_main_worktree)
       [ -n "$adlc_ic_top" ] || { echo "adlc_id_kind_counter: assume requires a git repo (main-worktree resolution failed)" >&2; return 2; }
@@ -141,9 +183,9 @@ adlc_id_kind_counter() {
 
 adlc_id_kind_lockdir() {
   case "$1" in
-    req)    echo "$HOME/.claude/.global-next-req.lock.d" ;;
-    bug)    echo "$HOME/.claude/.global-next-bug.lock.d" ;;
-    lesson) echo "$HOME/.claude/.global-next-lesson.lock.d" ;;
+    req|bug|lesson)
+      adlc_il_home=$(_adlc_id_home) || return 2
+      echo "$adlc_il_home/.global-next-$1.lock.d" ;;
     assume)
       adlc_il_top=$(adlc_main_worktree)
       [ -n "$adlc_il_top" ] || { echo "adlc_id_kind_lockdir: assume requires a git repo (main-worktree resolution failed)" >&2; return 2; }
@@ -304,10 +346,13 @@ adlc_reservation_nonce() {
 # self-identification data, NEVER an authority: a missing ledger or missing entry
 # safely degrades to the collision behavior. Symlink refusal mirrors the counter
 # files (LESSON-014); the append runs inside the allocation lock on the alloc path.
-adlc_id_own_ledger() { echo "$HOME/.claude/.adlc-own-reservations"; }
+adlc_id_own_ledger() {
+  adlc_io_home=$(_adlc_id_home) || return 1
+  echo "$adlc_io_home/.adlc-own-reservations"
+}
 
 adlc_record_own_reservation() {
-  adlc_ro_ledger=$(adlc_id_own_ledger)
+  adlc_ro_ledger=$(adlc_id_own_ledger) || return 1
   if [ -L "$adlc_ro_ledger" ]; then
     echo "WARNING: $adlc_ro_ledger is a symlink — refusing to record own reservation (TOCTOU risk, LESSON-014)." >&2
     return 1
@@ -608,9 +653,11 @@ adlc_alloc_id() {
     KIND="$adlc_ai_kind"
     RESERVE_REPO="$adlc_ai_reserve_repo"
     MAXTRIES="${ADLC_RESERVE_MAX_TRIES:-10}"
-    # REQ-669 BR-6: create ~/.claude rather than assume install.sh made it. Without
+    # REQ-669 BR-6: create the home rather than assume install.sh made it. Without
     # it every lock mkdir below fails and allocation dies after the full retry budget.
-    mkdir -p "$HOME/.claude" || { echo "ERROR: cannot create $HOME/.claude for the $KIND counter and lock — aborting" >&2; exit 1; }
+    # The lock's parent IS the home (REQ-654), so nothing is resolved a second time.
+    LOCKPARENT=$(dirname -- "$LOCK")
+    mkdir -p "$LOCKPARENT" || { echo "ERROR: cannot create $LOCKPARENT for the $KIND counter and lock — aborting" >&2; exit 1; }
     if [ -L "$LOCK" ]; then
       echo "ERROR: $LOCK is a symlink — refusing (TOCTOU risk). Inspect manually." >&2
       exit 1

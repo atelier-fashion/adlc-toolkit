@@ -1,0 +1,1 @@
+HOME_DIR = "~/.claude"

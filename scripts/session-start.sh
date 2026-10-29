@@ -19,8 +19,12 @@
 #      (LESSON-718). Such a root leaves the pointer exactly as it was, with one
 #      stderr note when a pointer is there to be left (none when there is no
 #      pointer at all); the config and PATH steps still run.
-#   2. Config. ~/.claude/adlc/config.yml gets install.sh's `ensure_config`
-#      scaffold, delegation off, only when nothing is at that path. The temp file
+#   2. Config. <ADLC_HOME>/adlc/config.yml gets install.sh's `ensure_config`
+#      scaffold, delegation off, only when nothing is at that path. ADLC_HOME
+#      defaults to ~/.claude (REQ-654), so by default this is
+#      ~/.claude/adlc/config.yml, beside the pointer; a set ADLC_HOME that is
+#      empty or not absolute writes no config and says so. The rule is
+#      partials/adlc-home.sh's, inlined, because this hook sources nothing. The temp file
 #      is hard-linked into place: `ln` without -f fails when anything is already
 #      there, so a config another writer creates meanwhile is never replaced.
 #      tools/adlc/tests/test_config_scaffold_parity.py pins the two byte-equal.
@@ -150,6 +154,8 @@ adlc_ss_main() {
   adlc_ss_env=${CLAUDE_ENV_FILE-}
   adlc_ss_home=${HOME-}
   adlc_ss_cfgdir=${CLAUDE_CONFIG_DIR-}
+  adlc_ss_ahset=${ADLC_HOME+x}
+  adlc_ss_ahv=${ADLC_HOME-}
   adlc_ss_root_ok "$adlc_ss_root" || return 0
   case $adlc_ss_home in
     /*) ;;
@@ -159,11 +165,33 @@ adlc_ss_main() {
   # CLAUDE_CONFIG_DIR is taken; anything else means the default.
   case $adlc_ss_cfgdir in
     /*) ;;
-    *) adlc_ss_cfgdir="$adlc_ss_home/.claude" ;;
+    *) adlc_ss_cfgdir="$adlc_ss_home/.claude" ;;  # adlc-home: claude-code
   esac
-  adlc_ss_dir="$adlc_ss_home/.claude/adlc"
+  # The pointer's directory is the alias the root line's arm 3 reads by literal
+  # (REQ-654 BR-3); it never moves with ADLC_HOME.
+  adlc_ss_dir="$adlc_ss_home/.claude/adlc"  # adlc-home: alias
+  # The config's directory is <ADLC_HOME>/adlc (REQ-654 BR-1): partials/adlc-home.sh's
+  # rule, inlined. Unset is the pointer's directory, so by default 1 and 2 share it.
+  adlc_ss_cdir=$adlc_ss_dir
+  if [ -n "$adlc_ss_ahset" ]; then
+    case $adlc_ss_ahv in
+      /*)
+        adlc_ss_ah=$adlc_ss_ahv
+        while :; do
+          case $adlc_ss_ah in
+            ?*/) adlc_ss_ah=${adlc_ss_ah%/} ;;
+            *) break ;;
+          esac
+        done
+        adlc_ss_cdir="${adlc_ss_ah%/}/adlc"
+        ;;
+      *)
+        adlc_ss_cdir=
+        adlc_ss_note "ADLC_HOME is set but is not an absolute path; config not written"
+        ;;
+    esac
+  fi
 
-  # 1 and 2 share the directory.
   if mkdir -p "$adlc_ss_dir"; then
     adlc_ss_ptr="$adlc_ss_dir/plugin-root"
     if ! adlc_ss_cache_copy "$adlc_ss_root" "$adlc_ss_cfgdir"; then
@@ -171,27 +199,36 @@ adlc_ss_main() {
       # is left as it was; this session's unsubstituted skill text resolves
       # through it, so say so. With no pointer there is nothing to report.
       if [ -e "$adlc_ss_ptr" ] || [ -L "$adlc_ss_ptr" ]; then
-        adlc_ss_note "the plugin root is not a plugin-cache copy (a --plugin-dir or local-path checkout); ~/.claude/adlc/plugin-root left as it was"
+        adlc_ss_note "the plugin root is not a plugin-cache copy (a --plugin-dir or local-path checkout); ~/.claude/adlc/plugin-root left as it was"  # adlc-home: alias
       fi
     elif [ -d "$adlc_ss_ptr" ]; then
-      adlc_ss_note "~/.claude/adlc/plugin-root is a directory; plugin root not recorded"
+      adlc_ss_note "~/.claude/adlc/plugin-root is a directory; plugin root not recorded"  # adlc-home: alias
     elif printf '%s\n' "$adlc_ss_real" | cmp -s - "$adlc_ss_ptr"; then
       : # already current: no write
     elif ! adlc_ss_write "$adlc_ss_ptr" "$adlc_ss_real"; then
-      adlc_ss_note "could not write ~/.claude/adlc/plugin-root; plugin root not recorded"
+      adlc_ss_note "could not write ~/.claude/adlc/plugin-root; plugin root not recorded"  # adlc-home: alias
     fi
-    adlc_ss_cfg="$adlc_ss_dir/config.yml"
-    if [ -e "$adlc_ss_cfg" ] || [ -L "$adlc_ss_cfg" ]; then
-      : # present, in any form: never touched
-    elif adlc_ss_create "$adlc_ss_cfg" "$adlc_ss_scaffold"; then
-      :
-    elif [ -e "$adlc_ss_cfg" ] || [ -L "$adlc_ss_cfg" ]; then
-      : # another writer got there first, and its file stands
-    else
-      adlc_ss_note "could not write ~/.claude/adlc/config.yml; delegation stays at its default"
-    fi
+  elif [ "$adlc_ss_cdir" = "$adlc_ss_dir" ]; then
+    adlc_ss_note "could not create ~/.claude/adlc; plugin root and config not written"  # adlc-home: alias
+    adlc_ss_cdir=
   else
-    adlc_ss_note "could not create ~/.claude/adlc; plugin root and config not written"
+    adlc_ss_note "could not create ~/.claude/adlc; plugin root not recorded"  # adlc-home: alias
+  fi
+  if [ -n "$adlc_ss_cdir" ]; then
+    if [ "$adlc_ss_cdir" = "$adlc_ss_dir" ] || mkdir -p "$adlc_ss_cdir"; then
+      adlc_ss_cfg="$adlc_ss_cdir/config.yml"
+      if [ -e "$adlc_ss_cfg" ] || [ -L "$adlc_ss_cfg" ]; then
+        : # present, in any form: never touched
+      elif adlc_ss_create "$adlc_ss_cfg" "$adlc_ss_scaffold"; then
+        :
+      elif [ -e "$adlc_ss_cfg" ] || [ -L "$adlc_ss_cfg" ]; then
+        : # another writer got there first, and its file stands
+      else
+        adlc_ss_note "could not write the machine config (ADLC_HOME/adlc/config.yml, default ~/.claude/adlc/config.yml); delegation stays at its default"  # adlc-home: default
+      fi
+    else
+      adlc_ss_note "could not create the ADLC_HOME adlc directory; config not written"
+    fi
   fi
 
   # 3. Unset means nothing to do, and no file is created.

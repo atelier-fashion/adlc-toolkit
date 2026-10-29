@@ -27,9 +27,20 @@ if [ ! -f "$REPO_ROOT/tools/delegate/adlc-read" ]; then
     echo "ERROR: could not resolve canonical repo root (tried $REPO_ROOT). Re-run install.sh from the repo's tools/delegate/ directory." >&2
     exit 1
 fi
-VENV_DIR="$HOME/.claude/delegate-venv"
+# REQ-654 BR-1: the delegation install's own files (the venv, the launchctl
+# helper) are machine state, under ADLC_HOME (default ~/.claude, so every path is
+# the one it always was). Resolved before any mutation (LESSON-017) by the partial
+# in THIS checkout, so the rule cannot drift from the one the skills use.
+ADLC_HOME_PARTIAL="$SCRIPT_DIR/../../partials/adlc-home.sh"
+if [ ! -f "$ADLC_HOME_PARTIAL" ]; then
+    echo "ERROR: $ADLC_HOME_PARTIAL not found — run install.sh from a complete toolkit clone." >&2
+    exit 1
+fi
+. "$ADLC_HOME_PARTIAL"
+ADLC_HOME_DIR=$(adlc_home) || exit 1
+VENV_DIR="$ADLC_HOME_DIR/delegate-venv"
 # Legacy venv name (REQ-522 rename) — removed on upgrade so it does not linger.
-LEGACY_VENV_DIR="$HOME/.claude/kimi-venv"
+LEGACY_VENV_DIR="$ADLC_HOME_DIR/kimi-venv"
 BIN_DIR="$HOME/bin"
 PATH_MARKER="# added by adlc-toolkit delegate install.sh"
 
@@ -103,7 +114,7 @@ fi
 # --- venv ---------------------------------------------------------------
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating venv at $VENV_DIR"
-    mkdir -p "$HOME/.claude"
+    mkdir -p "$ADLC_HOME_DIR"
     python3 -m venv "$VENV_DIR"
 fi
 echo "Installing pinned dependencies from requirements.txt into venv"
@@ -187,7 +198,7 @@ fi
 if command -v launchctl >/dev/null 2>&1; then
     AGENT_LABEL="com.adlc-toolkit.delegate-setenv"
     AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
-    AGENT_HELPER="$HOME/.claude/delegate-launchctl-setenv.sh"
+    AGENT_HELPER="$ADLC_HOME_DIR/delegate-launchctl-setenv.sh"
     HELPER_SRC="$REPO_ROOT/tools/delegate/delegate-launchctl-setenv.sh.in"
     PLIST_SRC="$REPO_ROOT/tools/delegate/com.adlc-toolkit.delegate-setenv.plist.in"
 
@@ -196,7 +207,7 @@ if command -v launchctl >/dev/null 2>&1; then
     # both run (validate-before-mutate, LESSON-017). Idempotent on a fresh box.
     LEGACY_AGENT_LABEL="com.adlc-toolkit.kimi-setenv"
     LEGACY_AGENT_PLIST="$HOME/Library/LaunchAgents/$LEGACY_AGENT_LABEL.plist"
-    LEGACY_AGENT_HELPER="$HOME/.claude/kimi-launchctl-setenv.sh"
+    LEGACY_AGENT_HELPER="$ADLC_HOME_DIR/kimi-launchctl-setenv.sh"
     if [ -e "$LEGACY_AGENT_PLIST" ]; then
         launchctl bootout "gui/$(id -u)" "$LEGACY_AGENT_PLIST" 2>/dev/null || true
         launchctl unload "$LEGACY_AGENT_PLIST" 2>/dev/null || true
@@ -224,8 +235,9 @@ if command -v launchctl >/dev/null 2>&1; then
     cp "$HELPER_SRC" "$AGENT_HELPER"
     chmod +x "$AGENT_HELPER"
 
-    # Write plist with $HOME substituted (plist needs absolute path, not $HOME var)
-    sed "s|__HOME__|$HOME|g" "$PLIST_SRC" > "$AGENT_PLIST"
+    # Write plist with the helper's directory substituted (plist needs an absolute
+    # path, not a variable). __ADLC_HOME__ is ADLC_HOME_DIR, where the helper is.
+    sed -e "s|__ADLC_HOME__|$ADLC_HOME_DIR|g" -e "s|__HOME__|$HOME|g" "$PLIST_SRC" > "$AGENT_PLIST"
 
     # Validate the plist BEFORE attempting to load — catches a malformed
     # template / failed substitution at install time rather than at next login.
@@ -260,8 +272,10 @@ fi
 # Hash-validated above (immediately after CLIS, before any side effects).
 # We re-use the captured ROUTING_CONTENT rather than re-reading the file —
 # this closes the file-read-twice TOCTOU window.
-CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-mkdir -p "$HOME/.claude"
+# Claude Code's own files, not machine state: they stay where Claude Code reads
+# them whatever ADLC_HOME says (REQ-654 ADR-1).
+CLAUDE_MD="$HOME/.claude/CLAUDE.md"  # adlc-home: claude-code
+mkdir -p "$HOME/.claude"  # adlc-home: claude-code
 
 # Idempotency anchor: the new block uses `delegate-routing:start` (REQ-522).
 # An existing consumer install may still carry the legacy `kimi-delegation:start`
@@ -280,7 +294,7 @@ else
 fi
 
 # --- settings.json allowlist merge --------------------------------------
-SETTINGS="$HOME/.claude/settings.json"
+SETTINGS="$HOME/.claude/settings.json"  # adlc-home: claude-code
 if [ -f "$SETTINGS" ]; then
     cp "$SETTINGS" "$SETTINGS.bak"
     echo "Backed up $SETTINGS to $SETTINGS.bak"

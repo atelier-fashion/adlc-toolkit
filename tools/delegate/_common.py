@@ -8,7 +8,7 @@ ordered cascade (REQ-515 ADR-2):
 
     1. CLI flags (--model, --base-url)            (per-field)
     2. ADLC_DELEGATE_* environment variables
-    3. config file (~/.claude/adlc/config.yml)    (delegate: block)
+    3. config file (<ADLC_HOME>/adlc/config.yml)  (delegate: block)
     4. legacy key-env continuity (MOONSHOT_API_KEY/KIMI_API_KEY) — key data only
     5. shipped defaults (today's Moonshot/Kimi values)
 
@@ -36,7 +36,7 @@ import re
 import subprocess
 import sys
 
-# The one loader for ~/.claude/adlc/config.yml (REQ-609 ADR-1). Imported at
+# The one loader for <ADLC_HOME>/adlc/config.yml (REQ-609 ADR-1). Imported at
 # module level, but it imports `yaml` lazily inside `load_machine_config`, so
 # nothing here costs a PyYAML import until a config is actually read.
 import _machine_config
@@ -131,6 +131,18 @@ def _config_path():
     return _machine_config.default_config_path()
 
 
+def _config_path_label():
+    """The machine config path for a message. Never raises (REQ-654 BR-2).
+
+    ``_config_path`` raises when ``ADLC_HOME`` is unusable; a refusal message
+    then names the variable instead of a default the operator did not choose.
+    """
+    try:
+        return _config_path()
+    except _machine_config.AdlcHomeError:
+        return _machine_config.HOME_INVALID_PATH + "/adlc/config.yml"
+
+
 # Marks a config that EXISTS but could not be read, parsed, or validated.
 # Distinct from an absent config, which is a legitimate default. Collapsing the
 # two is a fail-OPEN: an unreadable file returned {} and fell through to
@@ -184,8 +196,8 @@ def parse_delegate_config(path=None):
     while every defect — unreadable, undecodable, over-cap, duplicated key,
     unknown key, wrong type — is ``_MALFORMED``, which the cascade refuses.
     """
-    if path is None:
-        path = _config_path()
+    # A None path is resolved by the loader itself, which turns an unusable
+    # ADLC_HOME into a `home-invalid` refusal rather than raising (REQ-654).
     outcome = _machine_config.load_machine_config(path)
     if outcome.kind == _machine_config.KIND_ABSENT:
         return {}
@@ -473,17 +485,17 @@ def require_delegation_enabled(prog, cfg=None):
             "Fix that file, or remove it to fall back to the environment. "
             "(`%s --version` prints the resolved value.)"
             % (prog,
-               _clean_report_value(cfg.get(_MALFORMED_PATH) or _config_path()),
+               _clean_report_value(cfg.get(_MALFORMED_PATH) or _config_path_label()),
                _clean_report_value(cfg.get(_MALFORMED_REASON) or "unreadable"),
                prog)
         )
     sys.exit(
         "%s: delegation is not enabled — refusing to send file contents to a "
         "third-party endpoint.\n"
-        "Enable it with `delegate.enabled: true` in ~/.claude/adlc/config.yml, or "
+        "Enable it with `delegate.enabled: true` in %s, or "
         "ADLC_DELEGATE_ENABLED=1 in the environment.\n"
         "(`%s --version` prints the resolved value. ADLC_DISABLE_DELEGATE=1 forces "
-        "it off regardless.)" % (prog, prog)
+        "it off regardless.)" % (prog, _clean_report_value(_config_path_label()), prog)
     )
 
 

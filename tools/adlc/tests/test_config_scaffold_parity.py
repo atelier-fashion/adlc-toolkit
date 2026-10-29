@@ -57,6 +57,9 @@ def _install_sh_scaffold(install_sh, tmp_path):
     home.mkdir(parents=True)
     # The globals the slice reads, as install.sh sets them above it.
     script = ("set -euo pipefail\nDRY=0\nACTIONS=0\nCLAUDE_DIR=\"$HOME/.claude\"\n"
+              # REQ-654: the config is machine state, under ADLC_HOME_DIR, which
+              # install.sh resolves to $HOME/.claude when ADLC_HOME is unset.
+              "ADLC_HOME_DIR=\"$HOME/.claude\"\n"
               + block + "\nensure_config\n")
     proc = subprocess.run(["bash", "-c", script], env=_sandbox_env(home),
                           capture_output=True, text=True)

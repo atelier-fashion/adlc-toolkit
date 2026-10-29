@@ -718,7 +718,7 @@ def test_doctor_reports_pyyaml_fail_on_a_bare_machine(tmp_path, repo_root):
         [sys.executable, os.path.join(repo_root, "tools", "adlc", "adlc.py"),
          "doctor", "--checks",
          "plugin-route,pyyaml,skills-symlink,doubled-install,forge,counters,"
-         "template-version,claude-code"],
+         "template-version,harness:claude"],
         capture_output=True, text=True, cwd=str(workdir), env=env,
     )
     assert "Traceback" not in out.stderr, out.stderr
@@ -760,13 +760,41 @@ def test_doctor_skips_pyyaml_when_there_is_no_config_and_no_venv(tmp_path, repo_
     assert out.returncode == 0, out.stdout
 
 
-# --- claude-code is report-only (never FAIL) -------------------------------
+# --- harness:<name> is report-only (never FAIL, REQ-654 BR-9) --------------
 
-def test_claude_code_never_fails(tmp_path, monkeypatch):
-    monkeypatch.setattr(checks.shutil, "which", lambda name: None)
-    result, _detail, _rem = checks.check_claude_code(_profile(tmp_path))
-    assert result in (Result.PASS, Result.SKIP)
-    assert result is not Result.FAIL
+def _harness_registry():
+    return {c.id: c for c in checks.REGISTRY if c.id.startswith("harness:")}
+
+
+def test_harness_checks_are_one_per_known_harness():
+    import harness
+    assert sorted(_harness_registry()) == sorted("harness:" + n for n in harness.NAMES)
+    assert "claude-code" not in {c.id for c in checks.REGISTRY}
+
+
+def test_harness_checks_skip_when_absent(tmp_path, monkeypatch):
+    """Absence of every binary is four SKIPs and a SKIP for claude, never a FAIL."""
+    import harness
+    monkeypatch.setattr(harness.shutil, "which", lambda name: None)
+    for cid, check in _harness_registry().items():
+        result, detail, rem = check.run(_profile(tmp_path))
+        assert result is Result.SKIP, (cid, detail)
+        assert rem == ""
+
+
+def test_harness_checks_pass_report_only_when_present(tmp_path, monkeypatch):
+    """Benign: a present binary is reported, with its version, and still never FAILs
+    — even when it is not mounted."""
+    import harness
+    fake = tmp_path / "bin" / "codex"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\necho 'codex-cli 9.9.9'\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake.parent))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    result, detail, _rem = _harness_registry()["harness:codex"].run(_profile(tmp_path))
+    assert result is Result.PASS
+    assert "codex-cli 9.9.9" in detail and "not-mounted" in detail
 
 
 # --- launchctl gated off when delegation inactive --------------------------
@@ -912,3 +940,49 @@ def test_bash_probe_quotes_a_partial_path_holding_a_quote(tmp_path, monkeypatch,
     assert getattr(checks, verdict)(profile) == expected
     assert not (work / "CANARY").exists()
     assert not list(tmp_path.rglob("CANARY"))
+
+
+# --- REQ-654 BR-1: machine state under ADLC_HOME ----------------------------
+
+def test_counters_read_from_adlc_home(tmp_path, monkeypatch):
+    """With ADLC_HOME set the counters are read there, and a broken counter
+    under the default home is not reported (it is not this machine's state)."""
+    default = tmp_path / "home" / ".claude"
+    default.mkdir(parents=True)
+    (default / ".global-next-req").write_text("not-a-number\n")
+    alt = tmp_path / "alt"
+    alt.mkdir()
+    (alt / ".global-next-bug").write_text("garbage\n")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path / "home")))
+    monkeypatch.setenv("ADLC_HOME", str(alt))
+    result, detail, remediation = checks.check_counters(_profile(tmp_path))
+    assert result is Result.FAIL
+    assert ".global-next-bug" in detail and ".global-next-req" not in detail
+    assert str(alt) in remediation
+    monkeypatch.delenv("ADLC_HOME")
+    result, detail, _rem = checks.check_counters(_profile(tmp_path))
+    assert result is Result.FAIL and ".global-next-req" in detail
+
+
+def test_venv_and_config_follow_adlc_home(tmp_path, monkeypatch):
+    """ADR-3: the interpreter rule's venv and the machine config are under ADLC_HOME."""
+    alt = tmp_path / "alt"
+    exe = alt / "delegate-venv" / "bin" / "python3"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("#!/bin/sh\nexit 0\n")
+    exe.chmod(0o755)
+    (alt / "delegate-venv" / "lib" / "python3.9" / "site-packages" / "yaml").mkdir(parents=True)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path / "home")))
+    monkeypatch.setenv("ADLC_HOME", str(alt))
+    assert checks._delegate_interpreter() == str(exe)
+    assert checks._machine_config_path() == str(alt / "adlc" / "config.yml")
+    monkeypatch.setenv("ADLC_CONFIG", str(tmp_path / "explicit.yml"))
+    assert checks._machine_config_path() == str(tmp_path / "explicit.yml")
+
+
+def test_unusable_adlc_home_means_no_venv(tmp_path, monkeypatch):
+    """An unusable home has no venv to prefer: the running interpreter, as at the
+    shim and in forge.sh (ADR-3)."""
+    monkeypatch.setenv("ADLC_HOME", "relative/home")
+    assert checks._venv_state() == "absent"
+    assert checks._delegate_interpreter() == sys.executable

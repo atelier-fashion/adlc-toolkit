@@ -297,12 +297,31 @@ git clone https://github.com/atelier-fashion/adlc-toolkit.git   # or your fork
 cd adlc-toolkit && ./install.sh
 ```
 
-`install.sh` is idempotent and repair-capable: it symlinks `~/.claude/skills` and `~/.claude/agents` to this clone, puts the `adlc` CLI on your PATH (`~/bin/adlc`), scaffolds `~/.claude/adlc/config.yml` (delegation **off** by default), and finishes by running `adlc doctor`. Run it again any time — a healthy machine reports zero actions; a broken one is repaired. Moved the clone? `./install.sh --repair` re-stamps everything to the new location.
+`install.sh` is idempotent and repair-capable: it symlinks `~/.claude/skills` and `~/.claude/agents` to this clone, builds a skills-only view of the clone and mounts it at `~/.agents/skills` for the other agent harnesses (below), puts the `adlc` CLI on your PATH (`~/bin/adlc`), scaffolds `~/.claude/adlc/config.yml` (delegation **off** by default), and finishes by running `adlc doctor`. Run it again any time — a healthy machine reports zero actions; a broken one is repaired. Moved the clone? `./install.sh --repair` re-stamps everything to the new location, the view links included.
 
 ```bash
 adlc doctor                          # full health check
 adlc doctor --checks forge           # just one check (skills use this as a pre-flight)
+adlc harness detect                  # which agent harnesses are installed, and mounted
 ```
+
+### Other agent harnesses: `~/.agents/skills`
+
+Copilot CLI, Codex, Gemini CLI and Cursor read user-level skills from `~/.agents/skills`. `install.sh` mounts a **skills-only view** of the clone there: a directory under `~/.claude/adlc/skills-view/` holding one link per directory that has a `SKILL.md`, so those harnesses never see `tools/`, `partials/`, `templates/` or `.adlc/`. Claude Code's own mount, `~/.claude/skills`, stays a link to the whole clone.
+
+- An edit to an existing skill reaches every harness at once, as it always has. A skill directory you **add or remove** reaches the four other harnesses at the next `./install.sh` run; `adlc doctor`'s `skills-view` check says when the view is behind.
+- If `~/.agents/skills` is absent, it becomes a link to the view. If it is already a directory of your own, `install.sh` adds one link per toolkit skill inside it and touches nothing else: a skill name you already use there is skipped and reported, never overwritten. `--dry-run` names what it found and what it would do.
+- `adlc harness detect` (`--json` for scripts) prints, for each of the five harnesses, whether its binary is on `PATH`, the version it reports, and whether its skills directory reaches this toolkit. Nothing about discovery on the non-Claude harnesses has been verified yet; the mount is the structural half of that.
+
+### `ADLC_HOME`
+
+The toolkit's machine state (the id counters and their locks, the reservations ledger, the machine config, the delegate venv, the skills view) lives under one directory, `ADLC_HOME`, which defaults to `~/.claude`. With it unset, every path is exactly where it has always been: nothing moves. Set it to an absolute path to keep the toolkit's state somewhere else:
+
+```bash
+ADLC_HOME="$HOME/.adlc" ./install.sh     # set it in your shell profile too, so every session sees it
+```
+
+`install.sh` then creates `skills`, `agents`, `adlc/config.yml` and the skills view under that directory, and still links `~/.claude/skills` and `~/.claude/agents` to the clone, because Claude Code reads those and every skill's shell falls back through `~/.claude/skills`. A set `ADLC_HOME` that is empty or relative is an error that names it; nothing falls back to `~/.claude` silently. `ADLC_CONFIG`, when set, still names the config file outright. No migration tool ships: moving existing counters or the venv is a follow-up, not this release.
 
 Other install options:
 
@@ -333,6 +352,13 @@ python3 "$TOOLKIT/tools/adlc/adlc.py" doctor
 # 4. Verify
 readlink ~/.claude/skills            # → absolute path to your adlc-toolkit clone
 ls ~/.claude/skills/review/SKILL.md  # should resolve through the symlink
+
+# 5. Optional: the skills-only view for the other harnesses (see above).
+#    One link per skill directory, then the mount.
+VIEW="$HOME/.claude/adlc/skills-view"
+mkdir -p "$VIEW"
+for d in "$TOOLKIT"/*/; do n=$(basename "$d"); [ -f "$TOOLKIT/$n/SKILL.md" ] && ln -sfn "$TOOLKIT/$n" "$VIEW/$n"; done
+mkdir -p ~/.agents && [ ! -e ~/.agents/skills ] && ln -s "$VIEW" ~/.agents/skills
 ```
 
 Git commands run from inside `~/.claude/skills/` transparently operate on the clone's `.git` directory, so you can use either path interchangeably. Delegation (the `tools/delegate/` CLIs) is a separate opt-in — `./install.sh --with-delegation` or run `tools/delegate/install.sh` directly.
