@@ -80,7 +80,11 @@ The fence tells the two apart by what ToolkitRoot is, not by which arm of the ro
 found it. A root with `.git` is a checkout and gets the checkout checks whichever route
 loaded it, which includes a plugin installed from a local-path marketplace, because that
 runs from its source checkout (`verification.md` N3). A root without `.git` is a released
-copy. Establish the baseline before measuring anything against it:
+copy. Establish the baseline before measuring anything against it. **Run this fence as
+written, in one Bash call, before any other read of ToolkitRoot.** Do not read
+`.claude-plugin/plugin.json` yourself instead: the fence's parse is what turns a missing or
+malformed manifest into `unverified-baseline`, and a version you read by hand skips it
+(LESSON-716).
 
 ```bash
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -110,7 +114,8 @@ fi
 Report the baseline in the header **always**.
 
 **Plugin route (no `.git`).** The fence prints the baseline line. Put it in the header as
-printed: `adlc plugin <version>`. When it says `unverified-baseline`, the manifest is
+printed: `adlc plugin <version>`. That line is the only source of the header's baseline:
+if the fence did not run, run it now rather than report a version from anywhere else. When it says `unverified-baseline`, the manifest is
 missing or unreadable, repeats a key, names another plugin, or has no version string.
 Then downgrade every `stale` verdict to `unverified-baseline`, and say why in the header.
 Never fall back to another copy as the baseline: not the skills symlink's clone, not

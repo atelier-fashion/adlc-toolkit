@@ -824,6 +824,35 @@ def test_reservations_fail_names_server_policy_layer(tmp_path, monkeypatch):
     assert remediation  # copy-pasteable remediation present (BR-5 of REQ-519)
 
 
+def test_reservations_server_policy_with_403_in_the_probe_nonce(tmp_path, monkeypatch):
+    """A probe nonce holding ``403`` is not an HTTP 403.
+
+    git echoes the probe ref in its rejection, so a bare ``"403" in stderr``
+    read about one random nonce in 300 as ``auth`` (the e2e run of 2026-10-29).
+    """
+    repo = _repo_with_remote(tmp_path, "ro403", reject=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    monkeypatch.setattr(checks.os, "urandom", lambda n: bytes.fromhex("a403b40300403000")[:n])
+    result, detail, _rem = checks.check_reservations(_profile(tmp_path))
+    assert result is Result.FAIL
+    assert "server policy" in detail, detail
+
+
+@pytest.mark.parametrize("stderr", [
+    "error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403",
+    "remote: Permission to o/r.git denied to u.\nfatal: unable to access 'https://x/': The requested URL returned error: 403",
+])
+def test_classify_git_failure_still_reads_a_real_403_as_auth(stderr):
+    assert checks._classify_git_failure(stderr) == "auth"
+
+
+def test_classify_git_failure_ignores_403_inside_a_hex_token():
+    stderr = (" ! [remote rejected] 9a403f -> refs/adlc/ids/_probe/0403ab12cd34ef56 "
+              "(pre-receive hook declined)")
+    assert checks._classify_git_failure(stderr) == "server policy"
+
+
 def test_reservations_skip_when_no_remote(tmp_path, monkeypatch):
     repo = tmp_path / "norem"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)

@@ -31,17 +31,17 @@ The maintainer then cuts the real release per `RELEASING.md` and files the direc
 
 ## Acceptance Criteria
 
-The offline half shipped in PR #196. The unchecked items are the maintainer half, deferred and listed in the requirement's Deferred section.
+The offline half shipped in PR #196; the model-backed run passed on 2026-10-29. The unchecked item, the directory submission, is deferred and listed in the requirement's Deferred section.
 
-- [ ] `plugin-sandbox.sh` passes on macOS. After the two commands, `/adlc:init` scaffolds `.adlc/`, `/adlc:spec` writes a REQ file, `/adlc:status` lists it, and `adlc doctor` reports no FAIL.
-- [ ] In the same sandbox a lite REQ completes through `/adlc:proceed`: a REQ with `lane: "lite"`, a PR opened and merged, and a lesson file or the wrapup's no-lesson line. The mode-000 `~/.claude/skills` guard caused no failure, and the transcript shows no attempted read under it.
+- [x] `plugin-sandbox.sh` passes on macOS. After the two commands, `/adlc:init` scaffolds `.adlc/`, `/adlc:spec` writes a REQ file, `/adlc:status` lists it, and `adlc doctor` reports no FAIL.
+- [x] In the same sandbox a lite REQ completes through `/adlc:proceed`: a REQ with `lane: "lite"`, a PR opened and merged, and a lesson file or the wrapup's no-lesson line. The mode-000 `~/.claude/skills` guard caused no failure, and the transcript shows no attempted read under it.
 - [x] On the maintainer's symlink-only checkout, the regressions are clean:
   - `sh partials/tests/run.sh` passes;
   - `python3 -m pytest tools -q` passes;
   - `node --test 'workflows/tests/*.test.js'` passes (the quoted glob; the directory form `node --test workflows/tests/` fails on Node 26, see `workflows/tests/README.md`);
   - `tools/lint-skills/check.sh` passes;
   - `./install.sh --dry-run` reports zero actions.
-- [ ] After a test release bumps `VERSION` and the manifest, `claude plugin update adlc@adlc-toolkit` in the sandbox installs the new version, and `/adlc:template-drift` names it as the baseline.
+- [x] After a test release bumps `VERSION` and the manifest, `claude plugin update adlc@adlc-toolkit` in the sandbox installs the new version, and `/adlc:template-drift` names it as the baseline.
 - [ ] The directory submission is filed, and its reference is in the CHANGELOG release entry and in `verification.md`. Whether a directory install exposes the CLI is recorded, which answers REQ OQ-4.
 - [x] Every BR-16 behavior in `verification.md` carries a Claude Code version, or the README marks it unverified.
 
