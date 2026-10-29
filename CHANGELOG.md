@@ -280,6 +280,15 @@ Found by the REQ-669 Phase 5 review, before this release shipped.
 - **Test-harness fixes.** The intake AC-6 case counts its subshell's failures and
   stubs `adlc-read`, and the session-start doctor case sets
   `PYTHONDONTWRITEBYTECODE=1`.
+- **`/wrapup` delegates only its own transcript (BUG-253).** Step 4 walked from the
+  working tree up to `$HOME` and took the first transcript naming the REQ. A `/sprint`
+  pipeline-runner's transcript sits under the orchestrator's
+  `<session>/subagents/`, which that walk never reaches, so REQ-647's runner was
+  handed an older session that only mentioned the REQ (LESSON-733). Step 4 now prints
+  a random mark in one tool call and, in the next, takes the one transcript that holds
+  it, through the new `partials/session-transcript.sh`. No match, or more than one,
+  refuses delegation and drafts from the conversation. Tested by
+  `tests/session-transcript.test.sh` under bash, zsh, sh and dash.
 
 ### Re-sync vendored copies
 
@@ -301,6 +310,9 @@ plugin install), or re-sync per file and byte for byte rather than trusting a su
   exist, so a project that switches to the plugin re-syncs those eight first. On a
   root that also carries `tools/lint-skills`, `check.sh` reports the retired operand
   in the stale `emit-step-telemetry.sh` and `id-recheck.sh` until they are re-synced.
+- **New partial `session-transcript.sh` (BUG-253).** A project without a vendored
+  copy is not broken: `/wrapup`'s guarded source line falls back to the installed
+  toolkit's copy. `/init` vendors it on the next re-sync.
 - **Workflow runtime (`.adlc/workflows/`).** `adlc-sprint.workflow.js` (the agent
   namespace) and its `README.md` changed.
 - **Templates and `ETHOS.md`** did not change. `templates/config-template.yml` changed
