@@ -1,7 +1,7 @@
 ---
 id: TASK-170
 title: "run_outcome.py: the deterministic RunOutcome emitter and the pipeline-state record writers"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
