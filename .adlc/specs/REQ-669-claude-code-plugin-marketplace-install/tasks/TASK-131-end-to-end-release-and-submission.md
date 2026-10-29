@@ -1,7 +1,7 @@
 ---
 id: TASK-131
 title: "End-to-end sandbox verification, the first plugin release, and the Claude directory submission"
-status: draft
+status: complete
 parent: REQ-669
 created: 2026-10-28
 updated: 2026-10-29
@@ -30,6 +30,8 @@ The maintainer then cuts the real release per `RELEASING.md` and files the direc
 - `.claude-plugin/plugin.json` — the release bump, made by the maintainer per `RELEASING.md`.
 
 ## Acceptance Criteria
+
+The offline half shipped in PR #196. The unchecked items are the maintainer half, deferred and listed in the requirement's Deferred section.
 
 - [ ] `plugin-sandbox.sh` passes on macOS. After the two commands, `/adlc:init` scaffolds `.adlc/`, `/adlc:spec` writes a REQ file, `/adlc:status` lists it, and `adlc doctor` reports no FAIL.
 - [ ] In the same sandbox a lite REQ completes through `/adlc:proceed`: a REQ with `lane: "lite"`, a PR opened and merged, and a lesson file or the wrapup's no-lesson line. The mode-000 `~/.claude/skills` guard caused no failure, and the transcript shows no attempted read under it.
