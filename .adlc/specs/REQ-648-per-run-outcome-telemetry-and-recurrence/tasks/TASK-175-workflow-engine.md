@@ -1,7 +1,7 @@
 ---
 id: TASK-175
 title: "Workflow engine: required FINDINGS.class, verify state-write leaves, validateAttempts, post-terminal emit leaf"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
@@ -13,7 +13,7 @@ repo: adlc-toolkit
 
 Extend `workflows/adlc-sprint.workflow.js`: `FINDING_CLASS_PATTERN` and a required
 `class` (with `pattern`) on `FINDINGS.findings[]`; `reviewPrompt` asks for it and
-states the severity scale; pure `verifyRecordFindings` and `markWorkflowFixed`;
+states the severity scale; pure `verifyEntry`, `markWorkflowFixed` and `runOutcomeArgs`;
 a state-write leaf after consolidation and after re-verify; the attempt number in
 the gate's validate prompt; `emitRunOutcomes(closed, todo)` after
 `closeOutMerged`, one leaf per REQ, never throwing. Update the README and tests.
@@ -21,7 +21,7 @@ the gate's validate prompt; `emitRunOutcomes(closed, todo)` after
 ## Files to Create/Modify
 
 - `workflows/adlc-sprint.workflow.js` — schema, prompts, pure helpers, leaves, top-level emit pass
-- `workflows/tests/helpers.test.js` — `schemaErrors` learns `pattern`; class schema cases; `markWorkflowFixed`; `verifyRecordFindings`; emit/verify prompt determinism
+- `workflows/tests/helpers.test.js` — `schemaErrors` learns `pattern`; class schema cases; `markWorkflowFixed`; `verifyEntry`; `runOutcomeArgs`; the Python-regex parity; leaf wiring order
 - `workflows/README.md` — the run-outcome leaves and the `class` field
 
 ## Acceptance Criteria
@@ -36,9 +36,9 @@ the gate's validate prompt; `emitRunOutcomes(closed, todo)` after
 
 | rule | kind | artifact | benign_path |
 |------|------|----------|-------------|
-| BR-2 | test-case | `workflows/tests/helpers.test.js`: emitRunOutcomePrompt is deterministic and carries TERMINAL.state verbatim | no |
-| BR-4 | test-case | `workflows/tests/helpers.test.js`: markWorkflowFixed marks only re-verified-absent blocking findings | yes |
-| BR-5 | test-case | `workflows/tests/helpers.test.js`: emitRunOutcomePrompt carries TERMINAL.state verbatim | no |
+| BR-2 | test-case | `workflows/tests/helpers.test.js`: the run-outcome leaves are wired after the close-out pass and never read args | no |
+| BR-4 | test-case | `workflows/tests/helpers.test.js`: markWorkflowFixed: only a blocking finding absent after re-verify is fixed | yes |
+| BR-5 | test-case | `workflows/tests/helpers.test.js`: runOutcomeArgs: TERMINAL.state verbatim, the raw reason made shell-inert | no |
 | BR-6 | test-case | `workflows/tests/helpers.test.js`: FINDINGS class is required and pattern-checked | yes |
 | AC-7 | test-case | `workflows/tests/helpers.test.js`: FINDINGS class is required and pattern-checked | yes |
 

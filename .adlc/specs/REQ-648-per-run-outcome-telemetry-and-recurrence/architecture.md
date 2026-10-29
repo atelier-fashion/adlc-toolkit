@@ -154,11 +154,13 @@ byte-equality in every copy (LESSON-441: copies drift, the test is the guard).
   `FINDINGS.findings[].class` is **required** with that `pattern` (LESSON-331:
   closed schema extended in the same change, pinned by a structural test).
 - `reviewPrompt` asks for `class` and states the severity scale.
-- Pure `verifyRecordFindings(consolidated, opts)` maps consolidated findings to
+- Pure `verifyEntry(finding, fixed)` maps a consolidated finding to
   `{severity, file, title, class, lessonId?, fixed}`; pure
-  `markWorkflowFixed(blockingBefore, findingsAfter)` applies BR-4's workflow
-  rule (fixed ⇔ in the blocking subset and absent from the re-verify
-  consolidation, matched on repo + dedupe key or repo + file + class).
+  `markWorkflowFixed(before, after)` applies BR-4's workflow rule (fixed ⇔ in
+  the first consolidation's blocking subset and absent from the re-verify
+  consolidation, matched on repo + dedupe key or repo + file + class; a finding
+  new in the re-verify is appended unfixed); pure `runOutcomeArgs(term)` gives
+  the emit leaf `TERMINAL.state` verbatim and a shell-inert raw reason.
 - `verify()` dispatches a state-write leaf (`verifyStatePrompt`) after the first
   consolidation (`loops: 0`) and, when the fix loop ran, after the re-verify
   (`loops: 1`). The leaf runs `emit-run-outcome.sh record-verify`. A leaf throw

@@ -154,9 +154,20 @@ const TASKS = {
   },
 };
 
+// FINDING_CLASS_PATTERN — REQ-648 BR-6: a finding's `class` names the defect
+// PATTERN, in one of three tiers: a reviewer-emitted kebab-case name of one to six
+// words, a matched lesson id, or a `title-slug:` fallback. The format admits no
+// credential shape, which is why run_outcome.py validates it rather than redacting
+// it (redaction would rewrite `task-…`/`risk-…` slugs into `[REDACTED]`). The
+// Python copy is tools/delegate/run_outcome.py CLASS_RE; the two are held equal by
+// workflows/tests/helpers.test.js (LESSON-441).
+const FINDING_CLASS_PATTERN = '^([a-z0-9]+(-[a-z0-9]+){0,5}|LESSON-[0-9]{3,6}|title-slug:[a-z0-9-]+)$';
+
 // FINDINGS — returned by each Phase-5 panel agent. `dimension` is one of the 6
 // panel dimensions (includes `reflector`). The script consolidates, dedupes,
 // ranks, and applies the Critical-blocks gate over these. (BR-7, ADR-7)
+// `class` is REQUIRED (REQ-648 BR-6) and pattern-checked: the closed schema is
+// extended in the same change as the reviewers that emit it (LESSON-331).
 const FINDINGS = {
   type: 'object',
   additionalProperties: false,
@@ -168,12 +179,13 @@ const FINDINGS = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['severity', 'file', 'title', 'mustFix', 'userFacing'],
+        required: ['severity', 'file', 'title', 'class', 'mustFix', 'userFacing'],
         properties: {
           severity: { type: 'string', enum: ['Critical', 'Major', 'Minor', 'Nit'] },
           file: { type: 'string' },
           line: { type: 'integer' },
           title: { type: 'string' },
+          class: { type: 'string', pattern: FINDING_CLASS_PATTERN },
           detail: { type: 'string' },
           suggestedFix: { type: 'string' },
           mustFix: { type: 'boolean' },
@@ -1042,6 +1054,63 @@ function taskSetsById(taskLessons) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// REQ-648 — run-outcome telemetry helpers (pure JS; the IO lives in the leaves).
+// ---------------------------------------------------------------------------
+
+// verifyEntry — pure JS: one consolidated finding as a `verify.findings` entry
+// (run_outcome.py record-verify normalises severity and class tiers again, so
+// this only selects fields; `lessonId` rides along when the consolidation kept
+// one — escalateByLessons already dropped any id outside the Phase-5 set).
+function verifyEntry(f, fixed) {
+  const out = {
+    severity: f.severity,
+    file: f.file || '',
+    title: f.title || '',
+    class: typeof f.class === 'string' ? f.class : '',
+    fixed: fixed === true,
+  };
+  if (typeof f.lessonId === 'string' && f.lessonId) out.lessonId = f.lessonId;
+  return out;
+}
+
+// markWorkflowFixed — pure JS, REQ-648 BR-4's workflow rule: a finding is
+// `fixed` when it was in the BLOCKING subset of the first consolidation
+// (Critical or mustFix — dedupeAndRank's own gate predicate) and is ABSENT from
+// the re-verify consolidation; every non-blocking finding is `fixed: false`, and
+// the record's `engine: workflow` lets a reader see that asymmetry. A finding is
+// still present when the same repo reports it under the same dedupe key OR the
+// same file + class (titles drift between runs; classes are meant not to). A
+// finding the re-verify raised that the first pass did not is appended, unfixed.
+// `after` absent (no fix loop) → every finding unfixed. Deterministic.
+function markWorkflowFixed(before, after) {
+  const prev = (before && before.findings) || [];
+  if (!after) return prev.map((f) => verifyEntry(f, false));
+  const next = after.findings || [];
+  const same = (a, b) => a.repo === b.repo && (dedupeKey(a) === dedupeKey(b)
+    || ((a.file || '') === (b.file || '') && Boolean(a.class) && a.class === b.class));
+  const matched = new Set();
+  const out = prev.map((f) => {
+    const hit = next.findIndex((g, i) => !matched.has(i) && same(f, g));
+    if (hit >= 0) matched.add(hit);
+    const blocking = f.severity === 'Critical' || f.mustFix === true;
+    return verifyEntry(f, blocking && hit < 0);
+  });
+  next.forEach((g, i) => { if (!matched.has(i)) out.push(verifyEntry(g, false)); });
+  return out;
+}
+
+// runOutcomeArgs — pure JS, REQ-648 BR-5: what the post-terminal emit leaf passes
+// run_outcome.py. `terminal` is TERMINAL.state VERBATIM (no second vocabulary for
+// one fact — REQ-474 BR-6); `reason` is the raw `reason` (else `detail.reason`),
+// reduced to a shell-inert charset and capped, because the Python normaliser maps
+// it onto the closed blocked_reason enum and the leaf embeds it in single quotes.
+function runOutcomeArgs(term) {
+  const raw = (term && (term.reason || (term.detail && term.detail.reason))) || '';
+  const reason = String(raw).replace(/[^A-Za-z0-9 ._:()-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return { terminal: term && term.state, reason };
+}
+
 // Guarded export — load-bearing (see the BEGIN PURE banner): in the Workflow
 // runtime `module` is undefined so this line is SKIPPED (a bare module.exports
 // would throw); under the test loader `module` is defined so the pure logic is
@@ -1059,6 +1128,7 @@ if (typeof module !== 'undefined') module.exports = {
   closeOutEvidenceStatus, closeOutDigest, repoRootFromWorktree, groupMergedByRepo,
   LESSON_QUERY, LESSON_ENTRY, LESSONS, TASK_LESSONS,
   lessonIdsOf, escalateByLessons, lessonsBlock, lessonsLogLine, taskSetsById,
+  FINDING_CLASS_PATTERN, verifyEntry, markWorkflowFixed, runOutcomeArgs,
 };
 // ==== END PURE ====
 
@@ -1374,6 +1444,13 @@ const healed = await unblockHeldReqs(sequenced, todo);
 // of — `state:'merged'`.
 const closed = await closeOutMerged(healed, todo);
 
+// Run-outcome telemetry (REQ-648 BR-2). One post-terminal leaf per REQ, for every
+// REQ regardless of terminal, AFTER the close-out pass so a merged REQ's
+// `lessonsWritten` is already in its state file. Serial and never throwing: the
+// returned terminals are unchanged, and a resume re-emits only for a REQ whose
+// terminal changed (its prompt diverges; the others replay from the journal).
+await emitRunOutcomes(closed);
+
 return { results: closed };
 
 // ===========================================================================
@@ -1459,6 +1536,8 @@ async function runReq(id) {
       label: `${id} phase1-validate-spec`,
       fixLabel: `${id} phase1-fix-spec`,
       target: 'spec',
+      phase: 1, // REQ-648 validateAttempts.phase1
+      statePath: lessonsStatePath(id, worktree, repos),
       validatePrompt: phase1ValidatePrompt(id, worktree),
       fixPrompt: phase1FixPrompt(id, worktree),
     },
@@ -1507,6 +1586,8 @@ async function runReq(id) {
       label: `${id} phase3-validate-arch`,
       fixLabel: `${id} phase3-fix-arch`,
       target: 'arch',
+      phase: 3, // REQ-648 validateAttempts.phase3
+      statePath: lessonsStatePath(id, worktree, repos),
       validatePrompt: phase3ValidatePrompt(id, worktree),
       fixPrompt: phase3FixPrompt(id, worktree),
     },
@@ -1564,7 +1645,11 @@ async function gate(id, P, worktree, spec, ans) {
   for (let i = 1; i <= MAX_GATE_ITERATIONS; i++) {
     // Validate agent — read-only verdict against the VERDICT schema. On resume
     // the user's guidance is appended so the re-validate accounts for the reply.
-    const verdict = await agent(spec.validatePrompt + guidance, {
+    // REQ-648: the attempt number is the loop counter, so the prompt stays
+    // deterministic and record-validate (absolute + monotone) never double-counts
+    // a replay. Absent `phase` (no caller sets one) → no record line.
+    const attempt = spec.phase ? validateAttemptLines(worktree, spec.statePath, spec.phase, i) : '';
+    const verdict = await agent(spec.validatePrompt + attempt + guidance, {
       ...P,
       label: `${spec.label} (attempt ${i}/${MAX_GATE_ITERATIONS})`,
       schema: VERDICT,
@@ -1933,7 +2018,12 @@ function reviewPrompt(id, worktree, member, repo, manifest, candidates, lessonSe
     '',
     'Return the FINDINGS schema object: dimension =',
     `"${member.dimension}", and a findings[] array. For each finding set`,
-    'severity (Critical|Major|Minor|Nit), file, line?, title, detail?,',
+    'severity (Critical|Major|Minor|Nit — map High→Major, Medium→Minor, Low→Nit;',
+    'a test-coverage gap with no other severity is Major), file, line?, title,',
+    'class (REQUIRED, REQ-648: the defect PATTERN, not this instance — lowercase',
+    'kebab-case, one to six words, matching ^[a-z0-9]+(-[a-z0-9]+){0,5}$, e.g.',
+    'unanchored-marker-regex; reuse a class already emitted in this run when the',
+    'pattern repeats, because recurrence counts exact equality), detail?,',
     'suggestedFix?, mustFix (true ⇒ blocks merge), userFacing (reflector only:',
     'true ⇒ a question the human must answer before merge), lessonId?, and',
     'fromCandidate (true ONLY when the finding confirms one of the advisory',
@@ -2322,6 +2412,10 @@ async function verify(id, P, worktree, repos, ans, lessonSet) {
   // level BEFORE dedupe (an id outside the set is dropped, never escalates), and
   // dedupe unions lesson ids across duplicates.
   let consolidated = dedupeAndRank(escalateByLessons(findingsByRepo, lessonSet));
+  // REQ-648 BR-4: persist the consolidation to the primary-path state at the
+  // moment it exists (LESSON-626), before any fix. Never a halt.
+  const firstConsolidation = consolidated;
+  await recordVerify(id, P, worktree, repos, markWorkflowFixed(consolidated, null), 0, 'consolidated');
 
   // Did the resumed user actually answer a reflector question this pass? If so the
   // answer MUST change the artifact even when consolidation does not block (the
@@ -2395,6 +2489,8 @@ async function verify(id, P, worktree, repos, ans, lessonSet) {
     // ones; everything else (including the reflector's, untouched) is kept.
     const merged = mergeReverified(findingsByRepo, reverified);
     consolidated = dedupeAndRank(escalateByLessons(merged, lessonSet));
+    // REQ-648 BR-4: the re-verify point — `fixed` per the workflow rule, loops 1.
+    await recordVerify(id, P, worktree, repos, markWorkflowFixed(firstConsolidation, consolidated), 1, 'reverified');
     // ≤1 loop: we do NOT re-fix here. If it still blocks, the gate stands and the
     // PR phase will carry the unresolved Critical/mustFix forward for the user.
   }
@@ -3066,4 +3162,113 @@ function closeOutPrompt(id, ev, term) {
     'lesson ids written, the NO_ENTRY line, or the failure reason), chorePr (the',
     `close-out PR url when one was opened).${guidance}`,
   ].join('\n');
+}
+
+// ===========================================================================
+// REQ-648 — run-outcome telemetry leaves. The script has no shell, so each state
+// write and the emit run inside a default-subagent leaf that invokes
+// tools/delegate/emit-run-outcome.sh (located through partials/delegate-tools-
+// path.sh, which is what keeps tools/ un-vendored — REQ-433). Every prompt below
+// is built only from the REQ id, the Phase-0 repo records and deterministic
+// script data, never from args.answers, so a resume replays it byte-identically
+// unless that data changed. None of them can halt or throw: telemetry never
+// blocks a REQ (BR-3), and the wrapper itself always exits 0.
+// ===========================================================================
+
+function runOutcomeFenceLines(dir) {
+  return [
+    `Run ONE shell fence from ${dir}: the ToolkitRoot root line, then source`,
+    '`partials/delegate-tools-path.sh` with the guarded two-level spelling (conventions.md',
+    '"Bash in skills"), then call "$DELEGATE_TOOLS"/emit-run-outcome.sh in the SAME',
+    'fence — shell state does not cross fences. The wrapper always exits 0; relay the',
+    'one line it prints (stdout, or a `run-outcome:` line on stderr).',
+  ];
+}
+
+function runOutcomeStateLine(state) {
+  return `    --state "<${state} resolved; the worktree's copy when that spec directory does not exist>"`;
+}
+
+// validateAttemptLines — appended to a gate's validate prompt (REQ-648
+// validateAttempts). `attempt` is the gate's loop counter.
+function validateAttemptLines(worktree, statePath, phase, attempt) {
+  return '\n' + [
+    '',
+    `Before validating, record this attempt (REQ-648): attempt ${attempt} at Phase ${phase}.`,
+    'This state write is the only write you make, and its outcome never changes your verdict.',
+    ...runOutcomeFenceLines(worktree),
+    `  "$DELEGATE_TOOLS"/emit-run-outcome.sh record-validate --phase ${phase} --attempt ${attempt} \\`,
+    runOutcomeStateLine(statePath),
+  ].join('\n');
+}
+
+// verifyStatePrompt — the Phase-5 state-write leaf (REQ-648 BR-4). The entries
+// are JSON in a QUOTED heredoc, so nothing in a finding title is expanded.
+function verifyStatePrompt(id, worktree, repos, entries, loops) {
+  const state = lessonsStatePath(id, worktree, repos);
+  return [
+    `Run-outcome record for ${id} (REQ-648 BR-4): persist the Phase-5 consolidation`,
+    `(${entries.length} finding(s), loops ${loops}) to the primary-path pipeline-state.json.`,
+    'You are READ-ONLY apart from the one state write the command below makes itself.',
+    '',
+    ...runOutcomeFenceLines(worktree),
+    `  "$DELEGATE_TOOLS"/emit-run-outcome.sh record-verify --loops ${loops} --findings - \\`,
+    `${runOutcomeStateLine(state)} <<'ADLC_VERIFY_JSON'`,
+    JSON.stringify(entries),
+    'ADLC_VERIFY_JSON',
+    '',
+    'Pass the JSON line above VERBATIM: do not add, drop, reword or reorder an entry.',
+  ].join('\n');
+}
+
+async function recordVerify(id, P, worktree, repos, entries, loops, label) {
+  try {
+    await agent(verifyStatePrompt(id, worktree, repos, entries, loops), {
+      ...P,
+      label: `${id} phase5-record-verify-${label}`,
+      // Default workflow subagent (no agentType) — a generic IO worker.
+    });
+  } catch (e) {
+    log(`${id} run-outcome: record-verify leaf threw — ${e && e.message ? e.message : String(e)}`);
+  }
+}
+
+// emitRunOutcomePrompt — the post-terminal emit leaf (REQ-648 BR-2, BR-5). The
+// fence runs from the repo root, because the close-out pass may already have
+// removed the feature worktree.
+function emitRunOutcomePrompt(id, term, repos) {
+  const primary = (repos || []).find((r) => r.primary) || (repos || [])[0] || {};
+  const root = repoRootFromWorktree(primary.worktree, id);
+  const dir = root || 'the root of the repository this workflow runs in (git rev-parse --show-toplevel)';
+  const state = lessonsStatePath(id, null, repos);
+  const ro = runOutcomeArgs(term); // not `args` — that is the runtime global
+  return [
+    `Run-outcome line for ${id} (REQ-648): append the one RunOutcome record for its`,
+    `terminal \`${ro.terminal}\`. You are READ-ONLY apart from the log append the`,
+    'command makes itself; change no file and no state.',
+    '',
+    ...runOutcomeFenceLines(dir),
+    `  "$DELEGATE_TOOLS"/emit-run-outcome.sh --terminal ${ro.terminal} --engine workflow \\`,
+    `    --req ${id} --reason '${ro.reason}' \\`,
+    runOutcomeStateLine(state),
+    '',
+    'If no state file exists for this REQ, pass the path the glob would have named;',
+    'the emitter then records the line from --req alone.',
+  ].join('\n');
+}
+
+async function emitRunOutcomes(results) {
+  for (const t of results || []) {
+    if (!t || !t.id) continue; // a crashed item emits nothing (BR-2)
+    const ev = EVIDENCE.get(t.id);
+    try {
+      await agent(emitRunOutcomePrompt(t.id, t, (ev && ev.repos) || []), {
+        phase: t.id,
+        label: `${t.id} run-outcome`,
+        // Default workflow subagent (no agentType) — a generic IO worker.
+      });
+    } catch (e) {
+      log(`${t.id} run-outcome: emit leaf threw — ${e && e.message ? e.message : String(e)}`);
+    }
+  }
 }
