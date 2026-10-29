@@ -138,6 +138,21 @@ is cut per `RELEASING.md`.
   manifest version, the CHANGELOG line with the plugin version, the annotated tag,
   the `claude plugin update` check, and the Claude directory submission through
   claude.ai/directory/manage, with where its reference is recorded.
+- **Lessons reach every pipeline phase (REQ-647).** The phases that act on lessons
+  now retrieve them by the surface they touch, after the spec froze its
+  `## Retrieved Context` (LESSON-604): `/proceed` Step 0, each Phase-4 task (with a
+  recency rule for lessons captured after the spec), Phase 5 (one set for all six
+  agents; the reflector no longer greps its own), `/bugfix` Phase 2
+  (`Prior lessons consulted:`), and the sprint workflow engine's three retrieval
+  leaves. One engine, `tools/adlc/lessons.py`, behind the new partial
+  `partials/lessons.sh` (`adlc_lessons`), does the scoring (the `/spec` Step 1.6 rule),
+  the caps, the 40-line loaded text and the additive `pipeline-state.json.lessons`
+  record. The implementer acknowledges an applied lesson with a `Lessons:` commit
+  trailer; Phase 5 Step B and standalone `/validate` list unacknowledged applicable
+  lessons as Info. In the workflow engine a finding's `lessonId` escalates only when
+  it is in the Phase-5 set, and dedupe unions lesson ids. Retrieval never halts a
+  pipeline. New partial to vendor: `lessons.sh` (re-run `/init`, or `/adlc:init` on
+  the plugin install); `adlc-sprint.workflow.js` and its `README.md` changed again.
 
 ### Changed
 

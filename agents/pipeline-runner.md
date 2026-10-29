@@ -32,7 +32,7 @@ You operate inside an isolated worktree for the entire run. The path is set once
 1. **State is the sole source of truth post-Step-0.** Step 0 reads the launch prompt **once** to populate state. Every phase after Step 0 MUST read the worktree path exclusively from `pipeline-state.json.repos[<id>].worktree`. You MUST NOT infer the worktree from cwd, from the REQ id, from re-reading the launch prompt, or from any naming convention.
 2. **Re-confirm the active worktree at the start of every phase after Step 0.** Read `pipeline-state.json` first thing; do not assume cwd, paths, or context from a prior phase carry over. Shell cwd does not persist between Bash calls — a `cd` issued in one Bash call has no effect on the next — so the safe pattern is to use absolute paths or `git -C <worktree>` form (see rule 3) rather than rely on `cd`.
 3. **Every Bash call MUST use absolute paths or `git -C <worktree>` form.** You MUST NOT rely on inherited cwd. Relative paths are a protocol violation.
-4. **You MUST NOT write to the parent repo's working tree.** The single sanctioned exception is the Phase 8 single-repo PR merge (`adlc_forge_pr_merge`, GitHub backend → `gh pr merge`), which runs from `repos[<id>].path` because git refuses to delete a branch checked out by a worktree. See "Worktree gotchas" under Phase 8 for the operational detail — do not generalize that exception to any other command.
+4. **You MUST NOT write to the parent repo's working tree.** The single sanctioned exception is the Phase 8 single-repo PR merge (`adlc_forge_pr_merge`, GitHub backend → `gh pr merge`), which runs from `repos[<id>].path` because git refuses to delete a branch checked out by a worktree. See "Worktree gotchas" under Phase 8 for the operational detail — do not generalize that exception to any other command. The primary-path `pipeline-state.json` (`<repos[<primary>].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json`) is not working-tree content — it is gitignored — and it is the named target of two writes: the `lessons.*` records `partials/lessons.sh` makes (REQ-647) and the Step 8b terminal record.
 
 ## Pipeline Phases
 
@@ -72,7 +72,7 @@ Since you cannot dispatch review agents, run these checklists yourself:
 - Proper layering (routes -> services -> repositories)?
 - New code has tests? Tests cover error paths?
 - No TODOs, commented-out code, or debug logging left behind?
-- Check `.adlc/knowledge/lessons/` for applicable pitfalls
+- Use the LessonSets recorded in `pipeline-state.json.lessons` — the Phase-5 set, computed before this checklist, with the Step-0 and per-task sets behind it (REQ-647) — for applicable pitfalls, instead of grepping the lessons directory yourself
 
 ### Correctness Review
 - Logic errors, off-by-one, null handling
@@ -91,7 +91,7 @@ Since you cannot dispatch review agents, run these checklists yourself:
 - Mock completeness
 - API response format compliance
 
-After running all checklists, fix Critical and Major issues inline. Commit fixes with `fix(scope): address verify finding [REQ-xxx]`.
+After running all checklists, run `/proceed` Phase 5 Step B's acknowledgement check (`adlc_lessons ack-check`) and list its lines as Info findings; they never block. Then fix Critical and Major issues inline. Commit fixes with `fix(scope): address verify finding [REQ-xxx]`.
 
 **On the lite lane** none of the checklists above run. Run the single checklist in `agents/lite-reviewer.md` instead: five dimensions, a met / partial / unmet row for every BR and AC in the spec, and a `reversals:` section. Then run the lane check (`proceed/phases-lite.md` "The lane check").
 

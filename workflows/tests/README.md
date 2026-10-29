@@ -28,6 +28,7 @@ gate, the BR-12 max-5 bound), so they get real, deterministic unit coverage here
 | `groupCrossRepoReqs` | The **ADR-12** cross-REQ merge grouping (union-find over "shares a touched repo"). |
 | `blocked` / `failed` | The TERMINAL constructors — `state` discriminant, string→`{detail}` normalization, undefined-key omission (closed-schema safe). |
 | `agentTypeFor`, `normalizeAgentNamespace`, `AGENT_NAMESPACES`, `panelMembers` | **REQ-669 ADR-6**: the agent namespace `/sprint` passes as `args.agentNamespace`. `agentTypeFor('reflector', '')` is `reflector`, `agentTypeFor('reflector', 'adlc:')` is `adlc:reflector`, and anything outside the closed allowlist `""` / `"adlc:"` (`'../'`, `'adlc'`, a non-string, and a well-shaped other prefix such as `'other:'`) yields the bare name. A source check asserts every `agentType:` in the engine is `agentTypeFor(<name>, AGENT_NS)` and that `args.agentNamespace` is read at one site, because a wrong agentType fails silently rather than loudly. |
+| `LESSONS`, `TASK_LESSONS`, `escalateByLessons`, `lessonsBlock`, `lessonsLogLine`, `taskSetsById`, `lessonIdsOf` | **REQ-647 BR-6**: a 15-entry unscored and a 10-entry scored `LESSONS` payload validate against the exported literal (a test-local checker, no ajv) and a 16-entry payload or an unknown key is rejected; a `lessonId` outside the Phase-5 set is dropped and never escalates, one inside escalates one level, and a `confidence: low` or superseded lesson keeps the severity with `/review`'s annotation; `dedupeAndRank` unions lesson ids so a duplicate that alone carried the id keeps it and its escalation; the prompt block caps each lesson at 40 lines and is empty when nothing was retrieved; a source check pins that the retrieval prompts never read `args.answers`. |
 | `closeOutEvidenceStatus`, `closeOutDigest`, `repoRootFromWorktree`, `groupMergedByRepo` | The **BUG-249** Step-8b close-out pass: the no-evidence ⇒ `NO_ENTRY` decision, the bounded deterministic evidence digest (byte-identical replay prompts), repo-root recovery from the `<root>/.worktrees/<id>` convention, and per-repo serialization of close-outs. Plus a closed-schema check that `TERMINAL` admits `closeOut`/`closeOutDetail` beside `state:"merged"`. |
 
 ## Running the tests
@@ -41,7 +42,7 @@ dependencies**. Run from the **toolkit repo root** (the directory that contains
 node --test 'workflows/tests/*.test.js'
 ```
 
-Expected: all tests pass (`ℹ pass 58  ℹ fail 0`).
+Expected: all tests pass (`ℹ fail 0`), with a non-zero `ℹ pass` count.
 
 > **Note on Node versions.** The glob form above is the portable invocation. On
 > recent Node (≥ 22) you can also let the runner discover tests by walking the
