@@ -186,3 +186,8 @@ with no code change (BR-9).
 - The maintainer's own machine is on the symlink route and already runs `main`. Keep
   the plugin off it, or `adlc doctor` reports a doubled install. Test the plugin route
   in a sandbox `HOME`.
+- **Optional: refresh the dataset.** The Hugging Face dataset of this repo's `.adlc/`
+  artifacts (REQ-671) is not rebuilt on its own. Once the tag is pushed, re-export
+  from the release with the one command in
+  [`tools/dataset/README.md`](tools/dataset/README.md), then read the report. Publishing
+  the new revision is a separate step, and the maintainer's call.

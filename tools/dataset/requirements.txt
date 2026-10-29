@@ -1,0 +1,5 @@
+# The Hugging Face Hub client, for tools/dataset/publish.py only (REQ-671 BR-10).
+# The export is stdlib and needs nothing from this file. Install it into a
+# virtualenv of its own. Never add it to tools/delegate/requirements.txt: that
+# installer puts its requirements into every delegate venv.
+huggingface_hub==0.26.2
