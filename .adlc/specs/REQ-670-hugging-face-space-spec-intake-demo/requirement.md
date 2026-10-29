@@ -1,10 +1,10 @@
 ---
 id: REQ-670
 title: "Hugging Face Space that turns pasted notes into a draft ADLC requirement and gap list, using the visitor's own Anthropic API key"
-status: draft
+status: approved
 deployable: true
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-10-29
 component: "adlc/spec"
 domain: "adlc"
 stack: ["python", "markdown", "hugging-face-spaces", "anthropic-api"]
