@@ -1,11 +1,11 @@
 ---
-id: TASK-137
+id: TASK-149
 title: "Docs: Space release and deploy steps, architecture entry, changelog"
 status: complete
 parent: REQ-670
 created: 2026-10-29
 updated: 2026-10-29
-dependencies: [TASK-136]
+dependencies: [TASK-148]
 repo: adlc-toolkit
 ---
 

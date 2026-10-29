@@ -24,7 +24,8 @@ The toolkit's template, its gap rules and its source budget (8000 lines) are bui
 
 - The page calls Anthropic's API **from your browser, with your own API key**. You pay for the call, and nothing passes through a server of ours.
 - **Nothing is stored**: no key, no text and no result. There are no logs, no browser storage and no analytics.
-- Credential-shaped strings are removed from your text before it is sent.
+- Some common credential formats are removed from your text before it is sent. Other secrets are not, so check what you paste.
+- Consider a separate key with a low spend limit, and revoke it when you are done.
 - Don't paste anything you may not share with Anthropic.
 
 With no key, the page shows a sample run on a synthetic transcript.

@@ -26,7 +26,9 @@
           You pay for the call. Nothing goes through a server of ours.</li>
         <li><strong>Nothing is stored.</strong> Not your key, not your text, not the result: no logs, no
           browser storage, no analytics. Reloading the page forgets everything.</li>
-        <li>Credential-shaped strings (API keys, tokens) are removed from your text before it is sent.</li>
+        <li>Some common credential formats (API keys, access tokens) are removed from your text before
+          it is sent. Other secrets are not, so check what you paste.</li>
+        <li>Consider a separate key with a low spend limit, and revoke it when you are done.</li>
         <li><strong>Do not paste anything you may not share with Anthropic.</strong></li>
       </ul>
       <p class="model">Model: <code id="model-id">loading…</code>
@@ -35,10 +37,11 @@
 
     <section class="inputs" aria-label="Your source">
       <label for="api-key">Anthropic API key <span class="hint">(leave empty to see the sample run)</span></label>
-      <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+      <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"
+        data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other">
 
       <label for="source">Source <span class="hint">(up to <span id="max-lines"></span> lines)</span></label>
-      <textarea id="source" rows="14" spellcheck="false" placeholder="Paste notes here, or upload a .txt or .md file."></textarea>
+      <textarea id="source" rows="14" spellcheck="false" autocomplete="off" placeholder="Paste notes here, or upload a .txt or .md file."></textarea>
       <div class="row">
         <input id="file" type="file" accept=".txt,.md,text/plain,text/markdown">
         <button id="run" type="button">Draft the requirement</button>

@@ -83,10 +83,20 @@ exits 1, naming each differing field, when the committed file differs. A test ru
 `--check`, and a mutation test proves a changed template fails it (AC-5). This is
 the `tools/adlc/agents_render.py --check` precedent (render plus drift check).
 
-The POSIX ERE regex is translated to a JS `RegExp` by a fixed table
-(`[[:space:]]` → `\s`). The build refuses to emit when any `[[:` class survives
-translation, so a new POSIX class in the chain fails the build rather than
-producing a regex that silently matches nothing.
+The POSIX ERE regex is split into its top-level alternatives, and each is translated
+to a JS `RegExp` by a fixed table (`[[:space:]]` → `[ \t\v\f\r]`, `[^[:space:]]` →
+`[^ \t\n\v\f\r]`). The build refuses to emit when any `[:class:]` survives
+translation, so a new POSIX class in the chain fails the build rather than producing a
+regex that silently matches nothing. `intake.js` then runs the chain the way sed does:
+one line at a time, taking at each position the longest match any alternative gives
+(POSIX leftmost-longest). A single JS regex would cross line breaks and take the first
+alternative that matches, which is not the same chain (Phase 5 finding). A test runs
+the real `adlc_intake_redact` under `sh` on the same inputs and requires identical output.
+
+Two Space files restate toolkit facts for people and stay hand-written: the card
+(`space/README.md`) shows the install commands and the line budget, and the sample's
+output follows the template. Both are pinned by `space/tests/page.test.js` against
+`toolkit-data.js`, so they are test-enforced rather than generated.
 
 The gap rules are prose, so the Space passes them to the model verbatim in the
 system prompt. Adding the markers is the only change to `spec/SKILL.md`. The

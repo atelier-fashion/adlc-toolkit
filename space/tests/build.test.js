@@ -1,4 +1,4 @@
-// space/tests/build.test.js — the BR-3 build step and its drift check (REQ-670 TASK-134).
+// space/tests/build.test.js — the BR-3 build step and its drift check (REQ-670 TASK-146).
 //
 // Each mutation runs against a temp copy of the toolkit inputs, never the checkout, and
 // the unchanged copy passing `--check` is the benign path: a drift check that fails on a
@@ -101,7 +101,37 @@ test('check fails when the redaction chain changes', async () => {
   edit(dir, 'partials/intake.sh', (t) => t.replace('ghp_[A-Za-z0-9]{36,}|', 'ghp_[A-Za-z0-9]{36,}|hf_[A-Za-z0-9]{30,}|'));
   const { rc, err } = await run(dir, ['--check']);
   assert.equal(rc, 1);
-  assert.match(err, /redactPattern/);
+  assert.match(err, /redactAlternatives/);
+});
+
+test('check fails when VERSION changes', async () => {
+  const dir = tempToolkit();
+  edit(dir, 'VERSION', () => '9.9.9\n');
+  const { rc, err } = await run(dir, ['--check']);
+  assert.equal(rc, 1);
+  assert.match(err, /version/);
+});
+
+test('a VERSION that is not X.Y.Z exits 2', async () => {
+  const dir = tempToolkit();
+  edit(dir, 'VERSION', () => '5.4.0\n// injected\n');
+  const { rc, err } = await run(dir);
+  assert.equal(rc, 2);
+  assert.match(err, /VERSION is not X\.Y\.Z/);
+});
+
+test('the CLI runs through a symlinked path and still fails on drift', () => {
+  const { spawnSync } = require('node:child_process');
+  const dir = tempToolkit();
+  fs.copyFileSync(path.join(ROOT, 'space/build.mjs'), path.join(dir, 'space/build.mjs'));
+  edit(dir, 'VERSION', () => '9.9.9\n');
+  const link = fs.mkdtempSync(path.join(os.tmpdir(), 'adlc-space-link-'));
+  temps.push(link);
+  fs.symlinkSync(dir, path.join(link, 'toolkit'));
+  const via = path.join(link, 'toolkit', 'space', 'build.mjs');
+  const r = spawnSync(process.execPath, [via, '--check'], { encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /version/);
 });
 
 test('missing gap-rule markers exit 2, never an empty rule block', async () => {
@@ -131,18 +161,20 @@ test('budget constants come from intake.sh', async () => {
 });
 
 test('redaction regex translated from intake.sh', async () => {
-  const { translatePosix, BuildError } = await build();
+  const { translatePosix, topLevelAlternatives, BuildError } = await build();
   const d = require('../toolkit-data.js');
-  assert.doesNotMatch(d.redactPattern, /\[:[a-z]+:\]/);
-  assert.equal(translatePosix('a[[:space:]]b[^[:space:]]+'), 'a\\sb\\S+');
+  assert.equal(d.redactAlternatives.length, 5);
+  for (const alt of d.redactAlternatives) assert.doesNotMatch(alt, /\[:[a-z]+:\]/);
+  // No translated class can match a newline: sed never sees one inside a line.
+  assert.equal(translatePosix('a[[:space:]]b[^[:space:]]+'), 'a[ \\t\\v\\f\\r]b[^ \\t\\n\\v\\f\\r]+');
+  assert.doesNotMatch('\n', new RegExp(translatePosix('[[:space:]]')));
+  assert.doesNotMatch('\n', new RegExp(translatePosix('[^[:space:]]')));
   assert.throws(() => translatePosix('[[:alpha:]]'), BuildError);
-  // The translated chain matches what the sed chain is for.
-  const re = new RegExp(d.redactPattern, d.redactFlags);
-  const aws = 'AKIA' + 'ABCDEFGHIJKLMNOP';
-  const env = 'MY_API_KEY' + ' = ' + 'value123';
-  assert.equal(`x ${aws} y`.replace(re, '[REDACTED]'), 'x [REDACTED] y');
-  assert.equal(`${env} tail`.replace(re, '[REDACTED]'), '[REDACTED] tail');
-  assert.equal('nothing secret here'.replace(re, '[REDACTED]'), 'nothing secret here');
+  assert.throws(() => translatePosix('[[:space:][:digit:]]'), BuildError);
+  // Top-level split skips nested groups and bracket expressions.
+  assert.deepEqual(topLevelAlternatives('(a|b(c|d)|[|x]e)'), ['a', 'b(c|d)', '[|x]e']);
+  assert.deepEqual(topLevelAlternatives('(a)|(b)'), ['(a)', '(b)']);
+  assert.throws(() => topLevelAlternatives('(a|'), BuildError);
 });
 
 test('gap sections are the template headings minus intake.sh exclusions', async () => {

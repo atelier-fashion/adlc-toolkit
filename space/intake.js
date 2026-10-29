@@ -16,6 +16,8 @@
   var TOOL_NAME = 'record_intake';
   var SEVERITIES = ['blocking', 'assumption'];
   var NOT_COVERED = 'Not covered by the source.';
+  var REDACTED = '[REDACTED]';
+  var MAX_ERROR_CHARS = 500;
 
   // BR-10: five classes, matched positively. Anything not matched is `unclassified`,
   // never a more reassuring class (LESSON-581).
@@ -53,25 +55,50 @@
     };
   }
 
-  function redactRegExp(toolkit) {
-    return new RegExp(toolkit.redactPattern, toolkit.redactFlags);
+  // BR-7: /spec intake's redaction chain, read from partials/intake.sh at build time, run
+  // the way sed runs it: one line at a time, and at each position the longest match any
+  // alternative gives (POSIX leftmost-longest). A single JS regex would cross line breaks
+  // and take the first alternative that matches, so it would neither redact nor count
+  // what /spec does. space/tests/intake.test.js compares this with the real sed chain.
+  function redact(text, toolkit) {
+    var alts = toolkit.redactAlternatives.map(function (src) {
+      return new RegExp(src, 'y');
+    });
+    var count = 0;
+    var out = String(text)
+      .split('\n')
+      .map(function (line) {
+        var acc = '';
+        var i = 0;
+        while (i < line.length) {
+          var best = 0;
+          for (var a = 0; a < alts.length; a += 1) {
+            alts[a].lastIndex = i;
+            var m = alts[a].exec(line);
+            if (m && m[0].length > best) best = m[0].length;
+          }
+          if (best > 0) {
+            acc += REDACTED;
+            count += 1;
+            i += best;
+          } else {
+            acc += line.charAt(i);
+            i += 1;
+          }
+        }
+        return acc;
+      })
+      .join('\n');
+    return { text: out, count: count };
   }
 
-  // BR-7: /spec intake's redaction chain, read from partials/intake.sh at build time.
-  function redact(text, toolkit) {
-    var count = 0;
-    var out = text.replace(redactRegExp(toolkit), function () {
-      count += 1;
-      return '[REDACTED]';
-    });
-    return { text: out, count: count };
+  function removeKey(text, apiKey) {
+    return apiKey ? String(text).split(apiKey).join(REDACTED) : String(text);
   }
 
   // Remove the exact key, then anything key-shaped, from text bound for the page (BR-1).
   function scrubSecrets(text, apiKey, toolkit) {
-    var out = String(text == null ? '' : text);
-    if (apiKey) out = out.split(apiKey).join('[REDACTED]');
-    return out.replace(redactRegExp(toolkit), '[REDACTED]');
+    return redact(removeKey(text == null ? '' : text, apiKey), toolkit).text;
   }
 
   // Cut the source into partials/intake.sh's segments, inside delimiters the source
@@ -92,7 +119,7 @@
         lines
           .slice(start, end)
           .join('\n')
-          .replace(/<(\/?)(source|segment)\b/gi, '&lt;$1$2'),
+          .replace(/<(\s*\/?\s*)(source|segment)\b/gi, '&lt;$1$2'),
       );
       parts.push('</segment>');
     }
@@ -116,7 +143,7 @@
       toolkit.template,
       '</template>',
       '',
-      'Find gaps by these rules, from /spec Step 1.4:',
+      'Find gaps by these rules, from /spec Step 1.4. Bracketed BR ids in them refer to /spec\'s own spec; ignore them.',
       '<gap_rules>',
       toolkit.gapRules,
       '</gap_rules>',
@@ -174,9 +201,35 @@
     };
   }
 
+  // The ## headings of a markdown document that a reader would see: not inside an HTML
+  // comment or a code fence, and with any run of spaces after the hashes.
+  function visibleHeadings(md) {
+    var out = [];
+    var inComment = false;
+    var inFence = false;
+    md.split('\n').forEach(function (line, i) {
+      if (!inComment && /^\s*(```|~~~)/.test(line)) {
+        inFence = !inFence;
+        return;
+      }
+      if (inFence) return;
+      if (!inComment && line.indexOf('<!--') >= 0) inComment = line.indexOf('-->', line.indexOf('<!--')) < 0;
+      else if (inComment && line.indexOf('-->') >= 0) inComment = false;
+      else if (!inComment) {
+        var m = line.match(/^##[ \t]+(.+?)[ \t]*$/);
+        if (m) out.push({ name: m[1], line: i });
+      }
+    });
+    return out;
+  }
+
+  function sameName(a, b) {
+    return a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
   function hasHeading(md, name) {
-    return md.split('\n').some(function (l) {
-      return l.replace(/\s+$/, '') === '## ' + name;
+    return visibleHeadings(md).some(function (h) {
+      return sameName(h.name, name);
     });
   }
 
@@ -192,18 +245,16 @@
   // BR-5: every blocking gap is an open question in the requirement itself.
   function ensureOpenQuestions(md, gaps) {
     var lines = md.split('\n');
+    var headings = visibleHeadings(md);
     var start = -1;
-    for (var i = 0; i < lines.length; i += 1) {
-      if (lines[i].replace(/\s+$/, '') === '## Open Questions') start = i;
-    }
-    if (start < 0) return md;
     var end = lines.length;
-    for (var j = start + 1; j < lines.length; j += 1) {
-      if (/^## /.test(lines[j])) {
-        end = j;
-        break;
+    for (var i = 0; i < headings.length; i += 1) {
+      if (start < 0 && sameName(headings[i].name, 'Open Questions')) {
+        start = headings[i].line;
+        if (i + 1 < headings.length) end = headings[i + 1].line;
       }
     }
+    if (start < 0) return md;
     var body = lines.slice(start + 1, end).join('\n');
     var add = gaps
       .filter(function (gap) {
@@ -215,10 +266,13 @@
     if (!add.length) return md;
     var head = lines.slice(0, end);
     while (head.length > start + 1 && head[head.length - 1].trim() === '') head.pop();
-    var placeholder = head.length === start + 2 && head[start + 1].trim() === NOT_COVERED;
-    if (placeholder) head.pop();
+    // A section holding only the placeholder is not "not covered" once it has questions.
+    var content = head.slice(start + 1).filter(function (l) {
+      return l.trim() !== '';
+    });
+    if (content.length === 1 && content[0].trim() === NOT_COVERED) head = head.slice(0, start + 1);
     var tail = lines.slice(end);
-    return head.concat(add, tail.length ? [''] : [], tail).join('\n');
+    return head.concat([''], add, tail.length ? [''] : [], tail).join('\n');
   }
 
   function isText(v) {
@@ -238,11 +292,21 @@
     if (!call || !call.input || !isText(call.input.requirement_md)) {
       throw new Error('the response did not contain a requirement');
     }
+    // A gap names a template section (the System Model's Gap.section). Match it to the
+    // template's spelling; a gap naming no template section is dropped like any other
+    // malformed gap.
+    var canonical = function (section) {
+      for (var t = 0; t < toolkit.templateSections.length; t += 1) {
+        if (sameName(section, toolkit.templateSections[t])) return toolkit.templateSections[t];
+      }
+      return null;
+    };
     var gaps = (Array.isArray(call.input.gaps) ? call.input.gaps : [])
       .filter(function (gap) {
         return (
           gap &&
           isText(gap.section) &&
+          canonical(gap.section) !== null &&
           SEVERITIES.indexOf(gap.severity) >= 0 &&
           isText(gap.question) &&
           isText(gap.justification)
@@ -250,7 +314,7 @@
       })
       .map(function (gap) {
         return {
-          section: gap.section.trim(),
+          section: canonical(gap.section),
           severity: gap.severity,
           question: gap.question.trim(),
           justification: gap.justification.trim(),
@@ -273,11 +337,16 @@
 
   function failure(cls, detail, apiKey, toolkit) {
     var text = ERROR_LABELS[cls] + (detail ? ': ' + detail : '');
-    return { error: { class: cls, message: scrubSecrets(text, apiKey, toolkit).slice(0, 500) } };
+    return { error: { class: cls, message: scrubSecrets(text, apiKey, toolkit).slice(0, MAX_ERROR_CHARS) } };
   }
 
+  // The visitor's own calendar date, not UTC's.
   function today() {
-    return new Date().toISOString().slice(0, 10);
+    var d = new Date();
+    var pad = function (n) {
+      return (n < 10 ? '0' : '') + n;
+    };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
 
   // One live run. Returns a result, or { error: { class, message } }. Never throws for a
@@ -340,7 +409,7 @@
     // The model never saw the key, so it cannot echo it; strip it anyway, in case a
     // future change ever puts it in reach (BR-1, defense in depth).
     var strip = function (text) {
-      return text.split(apiKey).join('[REDACTED]');
+      return removeKey(text, apiKey);
     };
     return {
       requirement_md: strip(parsed.requirement_md),

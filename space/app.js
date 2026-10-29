@@ -1,5 +1,6 @@
-// space/app.js — the page's DOM layer (REQ-670 ADR-2). Every rule lives in intake.js;
-// this file wires inputs to it and renders what comes back.
+// space/app.js — the page's DOM layer (REQ-670 ADR-2). The intake rules live in intake.js;
+// this file decides what a click does (sample, ask for a source, or run), wires inputs to
+// intake.js, and renders what comes back.
 //
 // Rendering uses textContent and createElement only, so model output and pasted text are
 // shown as text, never parsed as HTML (BR-6). The key is read from its input at click
@@ -42,6 +43,12 @@
     return toolkit.installCommands
       .concat(['', '# then, in Claude Code, inside your repository:', '/adlc:spec --intake notes.md'])
       .join('\n');
+  }
+
+  // Generous: 1 KiB a line over the whole budget. The line budget itself is checked by
+  // runIntake, which refuses without truncating.
+  function maxUploadBytes(toolkit) {
+    return toolkit.maxLines * 1024;
   }
 
   function redactionText(result) {
@@ -117,13 +124,24 @@
         setStatus('The Space configuration could not be loaded, so live runs are off. The sample still works.', true);
       });
 
+    // Uploads become pasted text (LESSON-606). A file far past the budget is refused
+    // before it is read, so a huge or binary file cannot hang the tab.
     $('file').addEventListener('change', function (ev) {
       var file = ev.target.files && ev.target.files[0];
       if (!file) return;
-      file.text().then(function (text) {
-        $('source').value = intake.normalize(text);
-        setStatus('Loaded ' + file.name + ' (' + intake.countLines($('source').value) + ' lines).');
-      });
+      if (file.size > maxUploadBytes(toolkit)) {
+        setStatus(file.name + ' is too large to be a ' + toolkit.maxLines + '-line source.', true);
+        return;
+      }
+      file
+        .text()
+        .then(function (text) {
+          $('source').value = intake.normalize(text);
+          setStatus('Loaded ' + file.name + ' (' + intake.countLines($('source').value) + ' lines).');
+        })
+        .catch(function () {
+          setStatus('Could not read ' + file.name + '.', true);
+        });
     });
 
     $('run').addEventListener('click', function () {
@@ -169,9 +187,10 @@
       doc.body.appendChild(a);
       a.click();
       doc.body.removeChild(a);
+      // Some browsers cancel a download whose URL is revoked at once.
       win.setTimeout(function () {
         win.URL.revokeObjectURL(url);
-      }, 0);
+      }, 10000);
     });
   }
 
@@ -182,6 +201,7 @@
       downloadText: downloadText,
       nextStepText: nextStepText,
       redactionText: redactionText,
+      maxUploadBytes: maxUploadBytes,
       mount: mount,
     };
   } else {

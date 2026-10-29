@@ -1,5 +1,5 @@
 // space/tests/page.test.js — the Space page, its DOM layer, the sample and the card
-// (REQ-670 TASK-136).
+// (REQ-670 TASK-148).
 //
 // Two kinds of evidence. Structural checks read index.html, app.js and intake.js as text:
 // the disclosure comes before the key input, the CSP pins the network, and no script
@@ -94,6 +94,19 @@ function fakePage(fetchReplies) {
 }
 
 const tick = () => new Promise((r) => setImmediate(r));
+const settle = async () => {
+  for (let i = 0; i < 6; i += 1) await tick();
+};
+
+// Every string the fake page holds, for grepping.
+function pageText(els) {
+  const walk = (el) => [el.textContent || '', el.value || '', ...(el.children || []).flatMap(walk)];
+  return Object.values(els).flatMap(walk).join('\n');
+}
+
+function livePage(reply) {
+  return fakePage((url, init) => (url === 'config.json' ? { status: 200, body: config } : reply(url, init)));
+}
 
 function configOnly(url) {
   if (url === 'config.json') return { status: 200, body: config };
@@ -106,7 +119,13 @@ test('disclosure and model id precede the key input', () => {
   const html = read('index.html');
   const key = html.indexOf('id="api-key"');
   assert.ok(key > 0);
-  for (const marker of ['id="disclosure"', 'id="model-id"', 'Anthropic', 'own API key', 'Nothing is stored', 'may not share with Anthropic']) {
+  for (const marker of [
+    'id="disclosure"',
+    'id="model-id"',
+    "straight to <strong>Anthropic's API, under your own API key",
+    'Nothing is stored',
+    'may not share with Anthropic',
+  ]) {
     const at = html.indexOf(marker);
     assert.ok(at > 0 && at < key, `${marker} must come before the key input`);
   }
@@ -248,9 +267,6 @@ test('download matches display and next step has install commands', async () => 
 });
 
 test('rendering uses text nodes, so markup in a result stays text', async () => {
-  const { els, doc, win } = fakePage(configOnly);
-  app.mount(doc, win);
-  await tick();
   const hostile = '<img src=x onerror=alert(1)>';
   const live = fakePage((url) =>
     url === 'config.json'
@@ -263,7 +279,7 @@ test('rendering uses text nodes, so markup in a result stays text', async () => 
               name: 'record_intake',
               input: {
                 requirement_md: `## Description\n\n${hostile}\n`,
-                gaps: [{ section: hostile, severity: 'blocking', question: `${hostile}?`, justification: hostile }],
+                gaps: [{ section: 'Business Rules', severity: 'blocking', question: `${hostile}?`, justification: hostile }],
               },
             }],
           },
@@ -274,11 +290,10 @@ test('rendering uses text nodes, so markup in a result stays text', async () => 
   live.els.source.value = 'Notes.\n';
   live.els['api-key'].value = 'test-key-not-real';
   live.els.run.listeners.click();
-  for (let i = 0; i < 5; i += 1) await tick();
+  await settle();
   assert.ok(live.els.requirement.textContent.includes(hostile), 'shown verbatim, as text');
   const li = live.els.gaps.children[0];
   assert.ok(li.children.some((c) => c.textContent.includes(hostile)));
-  assert.equal(els.gaps.children.length, sample.output.gaps.length);
 });
 
 test('sample carries every required section and well-formed gaps', () => {
@@ -296,4 +311,78 @@ test('sample carries every required section and well-formed gaps', () => {
   for (const gap of sample.output.gaps.filter((g) => g.severity === 'blocking')) {
     assert.ok(intake.ensureOpenQuestions(md, [gap]) === md, gap.question);
   }
+});
+
+test('a failed config.json leaves live runs off and the sample up', async () => {
+  for (const reply of [() => ({ status: 404, body: {} }), () => ({ status: 200, body: { model: 7 } })]) {
+    const { els, doc, win } = fakePage(reply);
+    app.mount(doc, win);
+    await settle();
+    assert.equal(els['model-id'].textContent, 'unavailable');
+    assert.equal(els.run.disabled, true);
+    assert.equal(els.status.className, 'error');
+    assert.equal(els.requirement.textContent, sample.output.requirement_md);
+  }
+});
+
+test('uploads are normalized, oversized ones refused, and read errors reported', async () => {
+  const { els, doc, win } = fakePage(configOnly);
+  app.mount(doc, win);
+  await tick();
+  els.file.listeners.change({ target: { files: [{ name: 'notes.md', size: 10, text: async () => 'a\r\nb\r\n' }] } });
+  await settle();
+  assert.equal(els.source.value, 'a\nb\n');
+  assert.match(els.status.textContent, /notes\.md \(2 lines\)/);
+
+  let read = false;
+  const big = { name: 'big.bin', size: app.maxUploadBytes(toolkit) + 1, text: async () => { read = true; return ''; } };
+  els.file.listeners.change({ target: { files: [big] } });
+  await settle();
+  assert.equal(read, false, 'not read');
+  assert.equal(els.status.className, 'error');
+
+  els.file.listeners.change({ target: { files: [{ name: 'bad.txt', size: 1, text: async () => { throw new Error('io'); } }] } });
+  await settle();
+  assert.match(els.status.textContent, /Could not read bad\.txt/);
+});
+
+test('an error shows its class on the page, and the key appears nowhere on it', async () => {
+  const key = 'sk-ant-' + 'api03-' + 'PAGESENTINEL0123456789abcdef';
+  const { els, doc, win } = livePage(() => ({ status: 401, body: { error: { type: 'authentication_error', message: `invalid x-api-key ${key}` } } }));
+  app.mount(doc, win);
+  await tick();
+  els.source.value = 'Notes.\n';
+  els['api-key'].value = key;
+  els.run.listeners.click();
+  await settle();
+  assert.match(els.status.textContent, /^Invalid API key/);
+  assert.equal(els.status.className, 'error');
+  els['api-key'].value = '';
+  assert.ok(!pageText(els).includes(key));
+  assert.ok(!pageText(els).includes('PAGESENTINEL'));
+});
+
+test('a live run shows its redaction count and downloads what it displays', async () => {
+  const aws = 'AKIA' + 'IOSFODNN7EXAMPLE';
+  const gh = 'ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789AB';
+  const md = toolkit.requiredSections.map((x) => `## ${x}\n\nLive ${x}.`).join('\n\n');
+  const { els, doc, win, calls } = livePage(() => ({
+    status: 200,
+    body: { content: [{ type: 'tool_use', name: 'record_intake', input: { requirement_md: md, gaps: [] } }] },
+  }));
+  app.mount(doc, win);
+  await tick();
+  els.source.value = `keys ${aws}\nand ${gh}\n`;
+  els['api-key'].value = '  test-key-not-real  ';
+  els.run.listeners.click();
+  await settle();
+  assert.equal(calls[1].init.headers['x-api-key'], 'test-key-not-real', 'the key is trimmed');
+  assert.match(els.redactions.textContent, /^2 credential-shaped strings were removed/);
+  assert.ok(els.requirement.textContent.includes('Live Description.'));
+  let blob = null;
+  win.Blob = function (parts) {
+    blob = parts.join('');
+  };
+  els.download.listeners.click();
+  assert.equal(blob, els.requirement.textContent);
 });

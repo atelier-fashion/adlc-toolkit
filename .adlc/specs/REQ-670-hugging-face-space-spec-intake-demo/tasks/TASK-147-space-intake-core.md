@@ -1,11 +1,11 @@
 ---
-id: TASK-135
+id: TASK-147
 title: "Space intake core: budget, redaction, request, parsing, error classes, key scrubbing"
 status: complete
 parent: REQ-670
 created: 2026-10-29
 updated: 2026-10-29
-dependencies: [TASK-134]
+dependencies: [TASK-146]
 repo: adlc-toolkit
 ---
 

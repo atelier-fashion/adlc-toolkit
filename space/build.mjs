@@ -14,7 +14,7 @@
 // Exit codes: 0 ok, 1 drift (--check only), 2 an input is missing or unreadable.
 // Zero dependencies: Node's standard library only.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -86,11 +86,13 @@ function shellInt(intake, name) {
 }
 
 // POSIX ERE bracket classes used by the chain, and their JS equivalents. A class not in
-// this table is a build error, never a silently non-matching regex.
-// The negated form comes first so its inner `[:space:]` is not half-translated.
+// this table is a build error, never a silently non-matching regex. The JS classes leave
+// out the newline on purpose: sed matches one line at a time, so `[[:space:]]` can never
+// cross a line there, and the Space must not either. The negated form comes first so its
+// inner `[:space:]` is not half-translated.
 const POSIX_CLASSES = [
-  ['[^[:space:]]', '\\S'],
-  ['[[:space:]]', '\\s'],
+  ['[^[:space:]]', '[^ \\t\\n\\v\\f\\r]'],
+  ['[[:space:]]', '[ \\t\\v\\f\\r]'],
 ];
 
 export function translatePosix(ere) {
@@ -99,16 +101,65 @@ export function translatePosix(ere) {
   if (/\[:[a-z]+:\]/.test(src)) {
     throw new BuildError(`partials/intake.sh: untranslated POSIX class in redaction regex: ${src}`);
   }
-  new RegExp(src, 'g'); // throws on a regex JS cannot compile
+  new RegExp(src, 'y'); // throws on a regex JS cannot compile
   return src;
 }
 
-export function redactPattern(intake) {
+// Split `(A|B|C)` into its top-level alternatives, skipping nested groups and bracket
+// expressions. The Space runs each alternative separately and keeps the longest match at
+// each position, which is what sed's leftmost-longest rule does with the whole chain. A
+// JS regex would instead take the first alternative that matches, so a variable named
+// `AKIA…_API_KEY=secret` would lose only its prefix and send the secret.
+export function topLevelAlternatives(ere) {
+  let body = ere;
+  if (body.startsWith('(') && body.endsWith(')')) {
+    let depth = 0;
+    let wraps = true;
+    for (let i = 0; i < body.length; i += 1) {
+      if (body[i] === '[') {
+        i = body.indexOf(']', i + (body[i + 1] === '^' ? 3 : 2));
+        continue;
+      }
+      if (body[i] === '(') depth += 1;
+      if (body[i] === ')') depth -= 1;
+      if (depth === 0 && i < body.length - 1) wraps = false;
+    }
+    if (wraps) body = body.slice(1, -1);
+  }
+  const parts = [];
+  let depth = 0;
+  let cur = '';
+  for (let i = 0; i < body.length; i += 1) {
+    const c = body[i];
+    if (c === '[') {
+      const end = body.indexOf(']', i + (body[i + 1] === '^' ? 3 : 2));
+      if (end < 0) throw new BuildError(`partials/intake.sh: unbalanced bracket in redaction regex: ${ere}`);
+      cur += body.slice(i, end + 1);
+      i = end;
+      continue;
+    }
+    if (c === '(') depth += 1;
+    if (c === ')') depth -= 1;
+    if (c === '|' && depth === 0) {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += c;
+  }
+  parts.push(cur);
+  if (depth !== 0 || parts.some((x) => !x)) {
+    throw new BuildError(`partials/intake.sh: cannot split redaction regex: ${ere}`);
+  }
+  return parts;
+}
+
+export function redactAlternatives(intake) {
   const fn = intake.match(/^adlc_intake_redact\(\)[\s\S]*?^}/m);
   if (!fn) throw new BuildError('partials/intake.sh: adlc_intake_redact not found');
   const m = fn[0].match(/sed -i\.bak -E 's\/(.+)\/\[REDACTED\]\/g'/);
   if (!m) throw new BuildError('partials/intake.sh: redaction sed expression not found');
-  return translatePosix(m[1]);
+  return topLevelAlternatives(m[1]).map(translatePosix);
 }
 
 export function sectionExclusions(intake) {
@@ -136,8 +187,10 @@ export function collect(root) {
   const excluded = sectionExclusions(intake);
   const segmentLines = shellInt(intake, 'ADLC_INTAKE_SEGMENT_LINES');
   const maxSegments = shellInt(intake, 'ADLC_INTAKE_MAX_SEGMENTS');
+  const version = read(root, 'VERSION').trim();
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version)) throw new BuildError(`VERSION is not X.Y.Z: ${JSON.stringify(version)}`);
   return {
-    version: read(root, 'VERSION').trim(),
+    version,
     template,
     templateSections: sections,
     requiredSections: requiredSections(template),
@@ -146,8 +199,7 @@ export function collect(root) {
     segmentLines,
     maxSegments,
     maxLines: segmentLines * maxSegments,
-    redactPattern: redactPattern(intake),
-    redactFlags: 'g',
+    redactAlternatives: redactAlternatives(intake),
     installCommands: installCommands(read(root, 'README.md')),
   };
 }
@@ -212,6 +264,18 @@ export function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run when invoked as a script. Compare real paths: under a symlinked directory (macOS
+// /var -> /private/var, or the symlink install) argv[1] and import.meta.url differ as
+// strings, and a plain comparison would exit 0 having checked nothing.
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   process.exitCode = main(process.argv);
 }

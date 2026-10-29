@@ -7,7 +7,7 @@ created: 2026-10-28
 updated: 2026-10-29
 component: "adlc/spec"
 domain: "adlc"
-stack: ["python", "markdown", "hugging-face-spaces", "anthropic-api"]
+stack: ["javascript", "html", "markdown", "hugging-face-spaces", "anthropic-api"]
 concerns: ["security", "privacy", "cost", "developer-experience"]
 tags: ["intake", "hugging-face", "demo", "api-key", "redaction", "spec", "distribution", "gap-list"]
 lane: "full"
@@ -114,10 +114,10 @@ that asks for an API key has to give a guarantee it can prove.
 
 ## Open Questions
 
-- [ ] Should the call go server side, through a Gradio Space where the key passes through the Space process, or browser side, through a static Space that calls the API directly from the visitor's browser? Browser side makes BR-1 hold by construction, because the key never reaches a server. Anthropic supports this with an opt-in browser-access header.
+- [x] Should the call go server side, through a Gradio Space where the key passes through the Space process, or browser side, through a static Space that calls the API directly from the visitor's browser? Browser side makes BR-1 hold by construction, because the key never reaches a server. Anthropic supports this with an opt-in browser-access header. *Resolved: browser side, a static Space (architecture ADR-1).*
 - [ ] Which Hugging Face account or organization owns the Space, a personal account or an Atelier Fashion organization?
-- [ ] Should the Space also accept an OpenAI-compatible endpoint, matching the toolkit's provider-agnostic delegation layer and the multi-harness direction? This REQ assumes Anthropic only for the first release.
-- [ ] Which model should be the default, given that visitors pay for their own runs?
+- [x] Should the Space also accept an OpenAI-compatible endpoint, matching the toolkit's provider-agnostic delegation layer and the multi-harness direction? This REQ assumes Anthropic only for the first release. *Resolved: Anthropic only (ADR-9).*
+- [x] Which model should be the default, given that visitors pay for their own runs? *Resolved: `claude-sonnet-5-5`, set in `space/config.json` (ADR-8).*
 
 ## Out of Scope
 

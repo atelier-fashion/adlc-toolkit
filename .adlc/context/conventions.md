@@ -10,6 +10,8 @@ Every skill and agent is a markdown file. No TypeScript, no Python, no package.j
 
 **Exception — `tools/`:** the `tools/` directory may contain real executable code (e.g. `tools/delegate/`, a set of Python delegation CLIs with its own `install.sh`). It is exempt from the markdown-only rule and from the symlink-install model — those tools are installed by running their `install.sh`, not via the skills symlink. Each `tools/<name>/` subdirectory carries its own README.
 
+**Exception — `space/` and `workflows/`:** both hold zero-dependency JavaScript tested with Node's built-in runner (`node --test 'space/tests/*.test.js'`, `node --test 'workflows/tests/*.test.js'`), with no package manager. `space/` is the static Hugging Face Space for `/spec` intake (REQ-670). It has a build step, `node space/build.mjs`, which generates `space/toolkit-data.js` from the toolkit; `--check` fails on drift. Neither directory holds a `SKILL.md`, so neither is a skill.
+
 ## File and directory naming
 
 - Skill directories: lowercase, single word or hyphenated (`spec`, `bugfix`, `template-drift`)
