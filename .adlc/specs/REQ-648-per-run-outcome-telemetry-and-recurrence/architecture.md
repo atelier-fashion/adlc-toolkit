@@ -44,11 +44,16 @@ Subcommands (argparse; a usage error is rc 2):
   (counts). A missing state file is tolerated only with `--req` (the workflow
   emits for a REQ whose Phase 0 never recorded a path); every derived field is
   then `-`/`0`. Without both, rc 1 with one stderr line.
-- `record-harness --state <abs> --toolkit-root <dir>`: writes `harness` once
-  (an existing `harness` is kept, BR-10 "never re-read"); `version` from
-  `<dir>/VERSION` validated against `^[0-9A-Za-z._+-]{1,64}$`, `sha` from
-  `git -C <dir> rev-parse --short HEAD` validated against `^[0-9a-f]{4,40}$`,
-  each `-` when unresolvable. Prints `harness: <version> <sha>`.
+- `record-harness --state <abs> --toolkit-root <dir> [--fresh]`: writes
+  `harness` once (on a resume an existing `harness` is kept, BR-10 "never
+  re-read"); `version` from `<dir>/VERSION` validated against
+  `^[0-9A-Za-z._+-]{1,64}$`, `sha` from `git -C <dir> rev-parse --short HEAD`
+  validated against `^[0-9a-f]{4,40}$` and read only when `<dir>/.git` exists
+  (`git -C` walks up, and a cache copy inside a git-tracked HOME must not take
+  the outer repo's sha), each `-` when unresolvable. `--fresh`, the same
+  fresh-or-resume decision Step 0 makes for the lessons (LESSON-719), re-stamps
+  it and clears an earlier run's `validateAttempts`, `verify` and
+  `lessonsWritten`. Prints `harness: <version> <sha>`.
 - `record-validate --state <abs> --phase <1|3> --attempt <n>`: sets
   `validateAttempts.phase<N> = max(existing, n)`. Absolute and monotone, so a
   replayed workflow leaf or a repeated call never double-counts.
@@ -56,6 +61,11 @@ Subcommands (argparse; a usage error is rc 2):
   array of findings, normalises each, and replaces `verify.findings`; sets
   `consolidatedAt` (now) and `loops` (given, else kept, else 0).
 - `record-lessons-written --state <abs> (--ids <LESSON-a,LESSON-b> | --no-entry)`.
+- `record-carry --state <primary-path copy> --from <worktree copy>`: copies every
+  top-level key the primary-path copy lacks (`startedAt`, `repos`,
+  `phaseHistory`, …), the primary-path copy's own keys winning. Step 8b runs it
+  before `/wrapup` writes anything there, so the record the line is built from
+  survives teardown and no partial terminal write can shadow a key.
 
 Pure functions (unit-tested): `normalize_severity` (`High→Major`,
 `Medium→Minor`, `Low→Nit`, `Critical` unchanged, unknown → `Minor`),

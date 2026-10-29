@@ -13,6 +13,7 @@
 #   bad_state          — a missing state file: rc 0, one stderr line, log unchanged
 #   bad_terminal       — an out-of-vocabulary terminal: rc 0, one stderr line
 #   record_passthrough — record-validate writes validateAttempts and relays its line
+#   record_carry       — record-carry fills only the keys the primary copy lacks
 #   record_failure     — a record on a missing state: rc 0, one stderr line
 #   no_python          — python3 not on PATH: rc 0, one stderr line, no log
 #   module_missing     — the wrapper copied away from run_outcome.py: rc 0, one line
@@ -83,6 +84,14 @@ check "record_passthrough: rc" 0 "$rc"
 check "record_passthrough: relayed line" "validateAttempts: phase1=2 phase3=0" "$out"
 check "record_passthrough: key written" 1 "$(command grep -c '"phase1": 2' "$STATE")"
 check "record_passthrough: harness kept" 1 "$(command grep -c '"sha": "c013262"' "$STATE")"
+
+# --- record_carry -------------------------------------------------------------
+WSTATE="$SANDBOX/worktree-state.json"
+printf '%s\n' '{"req":"REQ-648","phaseHistory":[{"phase":0}],"harness":{"version":"0.0.1","sha":"0000000"}}' > "$WSTATE"
+out=$("$SUT" "$WRAP" record-carry --state "$STATE" --from "$WSTATE" 2>/dev/null); rc=$?
+check "record_carry: rc" 0 "$rc"
+check "record_carry: relayed line" "carried: phaseHistory" "$out"
+check "record_carry: the primary copy's harness wins" 1 "$(command grep -c '"sha": "c013262"' "$STATE")"
 
 # --- record_failure -----------------------------------------------------------
 err=$("$SUT" "$WRAP" record-verify --state "$SANDBOX/absent.json" --findings - < /dev/null 2>&1 >/dev/null); rc=$?

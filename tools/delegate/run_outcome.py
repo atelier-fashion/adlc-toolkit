@@ -414,7 +414,11 @@ def read_harness(toolkit_root):
     except OSError:
         pass
     sha = "-"
-    if os.path.isdir(toolkit_root):
+    # Only ToolkitRoot's OWN checkout counts: `git -C` walks up, so a root with
+    # no `.git` (the plugin cache copy) inside a git-tracked HOME would
+    # otherwise report the enclosing repo's sha. A linked worktree's `.git` is
+    # a file, hence `exists`, not `isdir`.
+    if os.path.isdir(toolkit_root) and os.path.exists(os.path.join(toolkit_root, ".git")):
         try:
             out = subprocess.run(["git", "-C", toolkit_root, "rev-parse", "--short", "HEAD"],
                                  capture_output=True, text=True, timeout=10)

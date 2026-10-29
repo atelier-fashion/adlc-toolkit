@@ -318,8 +318,7 @@ def test_record_harness_plugin_cache_has_no_sha(tmp_path):
     assert _run("record-harness", "--state", str(state), "--toolkit-root", str(root)).returncode == 0
     harness = json.loads(state.read_text())["harness"]
     assert harness["version"] == "5.4.0"
-    # git may walk up into an enclosing repo; tmp_path is outside any checkout
-    assert harness["sha"] == "-" or RO.SHA_RE.match(harness["sha"])
+    assert harness["sha"] == "-"
     missing = _write(tmp_path, _state(), name="b.json")
     _run("record-harness", "--state", str(missing), "--toolkit-root", str(tmp_path / "nowhere"))
     assert json.loads(missing.read_text())["harness"] == {"version": "-", "sha": "-"}
@@ -479,3 +478,17 @@ def test_record_harness_fresh_restamps_and_clears_a_prior_run(tmp_path):
     for key in ("validateAttempts", "verify", "lessonsWritten"):
         assert key not in fresh, key
     assert fresh["lessons"] == {"step0": {}} and fresh["req"] == "REQ-648"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_record_harness_ignores_an_enclosing_repo(tmp_path):
+    """A ToolkitRoot with no .git of its own, inside some other checkout (the
+    plugin cache under a git-tracked HOME), stamps sha '-', not the outer sha."""
+    outer = tmp_path / "home"
+    _git_repo(outer)
+    cache = outer / ".claude" / "plugins" / "cache" / "adlc"
+    cache.mkdir(parents=True)
+    (cache / "VERSION").write_text("5.4.0\n", encoding="utf-8")
+    assert RO.read_harness(str(cache)) == {"version": "5.4.0", "sha": "-"}
+    # its own checkout — a directory .git, or a linked worktree's .git file — still counts
+    assert RO.SHA_RE.match(RO.read_harness(str(outer))["sha"])
