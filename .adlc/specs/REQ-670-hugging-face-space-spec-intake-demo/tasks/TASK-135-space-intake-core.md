@@ -1,7 +1,7 @@
 ---
 id: TASK-135
 title: "Space intake core: budget, redaction, request, parsing, error classes, key scrubbing"
-status: draft
+status: complete
 parent: REQ-670
 created: 2026-10-29
 updated: 2026-10-29

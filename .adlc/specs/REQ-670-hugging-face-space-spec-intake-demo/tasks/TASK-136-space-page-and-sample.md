@@ -1,7 +1,7 @@
 ---
 id: TASK-136
 title: "Space page: disclosure, model id, key input, sample run, rendering, download, card"
-status: draft
+status: complete
 parent: REQ-670
 created: 2026-10-29
 updated: 2026-10-29

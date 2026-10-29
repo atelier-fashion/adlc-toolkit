@@ -1,7 +1,7 @@
 ---
 id: TASK-134
 title: "Space build step: generate toolkit-data.js from the toolkit, with a --check drift gate"
-status: draft
+status: complete
 parent: REQ-670
 created: 2026-10-29
 updated: 2026-10-29

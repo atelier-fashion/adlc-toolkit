@@ -1,7 +1,7 @@
 ---
 id: TASK-137
 title: "Docs: Space release and deploy steps, architecture entry, changelog"
-status: draft
+status: complete
 parent: REQ-670
 created: 2026-10-29
 updated: 2026-10-29
