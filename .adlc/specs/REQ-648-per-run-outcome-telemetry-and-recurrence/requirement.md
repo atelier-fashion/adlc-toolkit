@@ -1,7 +1,7 @@
 ---
 id: REQ-648
 title: "Per-run outcome telemetry: one record per pipeline run, sprint recurrence report, and an /analyze harness-fidelity dimension"
-status: approved
+status: complete
 deployable: true
 created: 2026-10-26
 updated: 2026-10-29
