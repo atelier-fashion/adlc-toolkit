@@ -41,6 +41,8 @@ derivation table.
 | BR-1 | test-case | `tools/delegate/tests/test_run_outcome.py::test_emitted_line_is_flat_and_complete` | no |
 | BR-1 | test-case | `tools/delegate/tests/test_run_outcome.py::test_redaction_parity_with_emit_telemetry_sed_chain` | no |
 | BR-5 | test-case | `tools/delegate/tests/test_run_outcome.py::test_normalize_blocked_reason_maps_workflow_reasons` | no |
+| BR-5 | test-case | `tools/delegate/tests/test_run_outcome.py::test_merged_terminal_has_empty_blocked_reason` | yes |
+| BR-1 | test-case | `tools/delegate/tests/test_run_outcome.py::test_class_slug_survives_redaction` (redaction leaves a non-credential value untouched) | yes |
 | BR-6 | test-case | `tools/delegate/tests/test_run_outcome.py::test_finding_class_tiers` | no |
 | BR-9 | test-case | `tools/delegate/tests/test_run_outcome.py::test_emitted_line_is_flat_and_complete` | no |
 | BR-10 | test-case | `tools/delegate/tests/test_run_outcome.py::test_record_harness_written_once` | yes |

@@ -37,6 +37,7 @@ by `toolkit_version`, with the exit contract in architecture.md.
 | BR-7 | test-case | `tools/delegate/tests/test_check_run_outcomes.py::test_latest_line_per_req_wins` | yes |
 | BR-8 | test-case | `tools/delegate/tests/test_check_run_outcomes.py::test_summary_exit_contract` | yes |
 | BR-2 | test-case | `tools/delegate/tests/test_check_run_outcomes.py::test_recurrence_lesson_tier_and_no_record` | no |
+| BR-2 | test-case | `tools/delegate/tests/test_check_run_outcomes.py::test_latest_line_per_req_wins` (a resumed run's earlier `blocked` line is not counted once it reaches `merged`) | yes |
 | AC-5 | test-case | `tools/delegate/tests/test_check_run_outcomes.py::test_recurrence_lesson_tier_and_no_record` | no |
 | AC-6 | test-case | `tools/delegate/tests/test_check_run_outcomes.py::test_recurrence_reviewer_and_title_slug_tiers` | no |
 | AC-9 | test-case | `tools/delegate/tests/test_check_run_outcomes.py::test_summary_exit_contract` | yes |
