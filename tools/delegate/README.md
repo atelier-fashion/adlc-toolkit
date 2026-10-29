@@ -394,6 +394,26 @@ line, because `config_error:` marks a *written value* that was refused — a key
 pasted into `api_key_env` — and not "the file is unreadable". The two are
 different operator problems and the output distinguishes them.
 
+## Run-outcome telemetry (REQ-648)
+
+A second log, separate from the delegation log, holds one JSON line per pipeline
+terminal: `$ADLC_RUN_OUTCOMES_LOG`, default `~/Library/Logs/adlc-run-outcomes.log`,
+created mode 0600. Unlike the delegation tools these need only the system
+`python3` (stdlib), not the delegate venv, and they work with delegation off.
+
+| Tool | Role |
+|---|---|
+| `run_outcome.py` | Derives the line from the primary-path `pipeline-state.json` (`emit`), and writes the state keys it reads: `record-harness` (once, at `/proceed` Step 0), `record-validate` (absolute, monotone attempt count), `record-verify` (normalised Phase-5 findings), `record-lessons-written` (`/wrapup` Step 5). Every count, class and retry total is computed here, never by the model. |
+| `emit-run-outcome.sh` | The call-site wrapper (`"$DELEGATE_TOOLS"/emit-run-outcome.sh`). Emits and appends under `umask 077`, or passes a `record-*` subcommand through. **Always exits 0**: a failure is one `run-outcome: <reason>` line on stderr, never a blocked pipeline. Execute it; never source it. |
+| `check-run-outcomes.sh` | The reader. `--recurrence --reqs REQ-a,REQ-b` prints `<class>\t<k>\t<N>\t<tier>` per defect class over the latest line of each listed REQ, then a `no-record` row for each REQ with no line (`/sprint`'s Recurrence section). The default `--window <N>d` prints a TSV grouped by `toolkit_version` (`/analyze` Step 1.10): no log is no output, a log with nothing in the window is `no runs in <N>d window`, and a log none of whose lines parse exits 1. |
+
+The record is flat (every value a string, counts as quoted decimals or `-`), so
+it is read with `awk`, never `jq`. A finding's `class` is a lesson id, a
+reviewer-emitted pattern name, or a `title-slug:` fallback, validated by regex
+rather than redacted, because the redaction chain would rewrite a slug such as
+`task-ordering-race` (it contains `sk-` and twenty more characters).
+`emit-telemetry.sh` and `check-delegation.sh` are not involved.
+
 ## CLAUDE.md routing block
 
 `install.sh` appends the canonical routing block to `~/.claude/CLAUDE.md`, and

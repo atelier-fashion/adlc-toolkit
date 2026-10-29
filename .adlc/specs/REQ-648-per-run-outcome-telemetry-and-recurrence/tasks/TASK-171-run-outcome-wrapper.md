@@ -1,7 +1,7 @@
 ---
 id: TASK-171
 title: "emit-run-outcome.sh wrapper and its four-shell harness"
-status: draft
+status: complete
 parent: REQ-648
 created: 2026-10-29
 updated: 2026-10-29
