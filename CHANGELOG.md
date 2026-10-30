@@ -470,6 +470,12 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **A failed credential redaction no longer reaches the delegate.** `/wrapup` Step 4
+  and `/proceed` Phase 5 called `adlc-read` whether or not `sed` succeeded. Each now
+  skips the call with one stderr line and leaves `invoked` unset, and the
+  `delegate-pre-pass` agent exits at its redaction check instead of leaving the stop
+  to a comment. `partials/tests/redact-fence.test.sh` runs the real fences against a
+  failing `sed`.
 - **`harness_render`: a deny on a command base with every routine entry omitted denied the
   whole command (REQ-656).** The clash check read the surviving allows, so with every
   `git` allow gone a `Shell(git)` deny looked clear. It now reads the routine candidates.
