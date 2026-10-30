@@ -10,11 +10,18 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools" / "lint-skills"))
+import check as _check  # noqa: E402
+
+# REQ-661 BR-6: the placeholder comes from the one constant `companion-templating`
+# matches, so this test and the check cannot name different tokens.
+REQUEST_PLACEHOLDER = "'" + _check.ARGUMENT_PLACEHOLDERS[0] + "'"
 SHELLS = [s for s in ("bash", "zsh", "sh", "dash") if shutil.which(s)]
 SKILLS = sorted(p for p in REPO_ROOT.glob("*/SKILL.md"))
 
@@ -78,7 +85,7 @@ def test_no_arguments_placeholder():
 def _spec_gate_fence() -> list[str]:
     text = _read("spec/SKILL.md")
     for _start, body in _fences(text):
-        if any("adlc_intake_detect '<request>'; gate=$?" in line for line in body):
+        if any(f"adlc_intake_detect {REQUEST_PLACEHOLDER}; gate=$?" in line for line in body):
             return body
     raise AssertionError("/spec Step 1.4's gate fence with the '<request>' placeholder is gone")
 
@@ -91,7 +98,7 @@ def test_spec_intake_gate_takes_a_hostile_literal(tmp_path, shell):
     """AC-2: the request, substituted by the rule, reaches the detector intact
     and an ordinary request is not intake (`intake_gate=1`) on every shell."""
     repo, env = _sandbox(tmp_path, vendored=True)
-    script = "\n".join(_spec_gate_fence()).replace("'<request>'", _single_quote(HOSTILE))
+    script = "\n".join(_spec_gate_fence()).replace(REQUEST_PLACEHOLDER, _single_quote(HOSTILE))
     out = subprocess.run([shell, "-c", script], cwd=repo, env=env,
                          capture_output=True, text=True, timeout=60)
     assert "intake_gate=1" in out.stdout, (out.stdout, out.stderr)
@@ -103,7 +110,7 @@ def test_unescaped_apostrophe_breaks_the_probe(tmp_path, shell):
     """The contrast that makes the rule load-bearing: the same request
     single-quoted without the escape never reaches the detector."""
     repo, env = _sandbox(tmp_path, vendored=True)
-    script = "\n".join(_spec_gate_fence()).replace("'<request>'", "'" + HOSTILE + "'")
+    script = "\n".join(_spec_gate_fence()).replace(REQUEST_PLACEHOLDER, "'" + HOSTILE + "'")
     out = subprocess.run([shell, "-c", script], cwd=repo, env=env,
                          capture_output=True, text=True, timeout=60)
     assert "intake_gate=" not in out.stdout, out.stdout

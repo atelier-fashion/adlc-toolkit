@@ -25,7 +25,7 @@ See `proceed/phases-lite.md`.
 
 **Goal**: Ensure the requirement is complete and well-formed before designing architecture.
 
-1. Record the attempt (REQ-648): `proceed/SKILL.md` **Run-outcome telemetry** R2 with `--phase 1 --attempt <n>`, `<n>` counting from 1. Then invoke the `/validate` skill with the REQ ID
+1. Record the attempt (REQ-648): `proceed/phases-telemetry.md` **Run-outcome telemetry** R2 with `--phase 1 --attempt <n>`, `<n>` counting from 1. Then invoke the `/validate` skill with the REQ ID
 2. If **APPROVED**: set requirement status to `approved` and move to Phase 2
 3. If **NEEDS REVISION**: fix all FAIL items, then re-invoke `/validate` (up to 3 loops), recording each attempt first. When the third fails, emit the run-outcome line (R5, `blocked`, `validation-exhausted`) before halting
 

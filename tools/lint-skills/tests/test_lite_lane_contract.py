@@ -125,5 +125,5 @@ def test_every_consumer_branches_on_every_review_section():
 
 
 def test_override_shape_is_documented_in_the_state_schema():
-    text = _read("proceed/SKILL.md")
+    text = _read("proceed/phases-state.md")  # REQ-661: the state schema moved whole
     assert "`{ at, phase, sha, triggers, pairs, actor }`" in text

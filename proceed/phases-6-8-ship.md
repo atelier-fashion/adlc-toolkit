@@ -157,7 +157,7 @@ because the REQ touched only one repo.
 
 **First, carry the run's state to the primary-path copy (REQ-648)** — before
 `/wrapup` writes anything there, so no partial write can shadow a key:
-`proceed/SKILL.md` **Run-outcome telemetry** R4. It copies every key of the
+`proceed/phases-telemetry.md` **Run-outcome telemetry** R4. It copies every key of the
 worktree copy that the primary-path copy lacks (`startedAt`, `repos`,
 `phaseHistory`, …) and keeps the primary-path copy's own (`lessons`, `harness`,
 `validateAttempts`, `verify`), so the record the run-outcome line is built from
@@ -182,7 +182,7 @@ survives step 3's teardown.
    file that contradicts the repo. Re-read the file after writing and confirm
    the five fields rather than assuming the write landed.
 3. Remove the worktree in each touched repo using the absolute path from state: `git -C <repo-path> worktree remove <repos[<id>].worktree>`. Do NOT use the relative `.worktrees/REQ-xxx` form here. Then delete the local feature branch the squash-merge left behind (`git -C <repo-path> branch -D <branch>`): the merge deleted only the remote one (BUG-252).
-4. Emit the run-outcome line (REQ-648 BR-2): `proceed/SKILL.md`
+4. Emit the run-outcome line (REQ-648 BR-2): `proceed/phases-telemetry.md`
    **Run-outcome telemetry** R5 with `--terminal merged`, engine `solo` (or
    `legacy` in subagent mode). It reads the primary-path copy, so the teardown
    in step 3 cannot change its counts. The pipeline is now complete.

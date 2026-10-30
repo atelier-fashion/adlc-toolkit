@@ -40,6 +40,28 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **Progressive disclosure for oversized skills (REQ-661).** Phase P1b of the
+  multi-harness plan. Every `SKILL.md` is now under the Agent Skills budget of 500
+  lines, and stays there: `/proceed` 764 → 438, `/spec` 622 → 460 and
+  `/template-drift` 572 → 432. Nothing a skill does changes: the text moved, and
+  every fence, marker block and stderr line is byte-identical before and after.
+  - **Companions.** Moved steps live in `<skill>/references/*.md` (`/spec` Step 1.4
+    step 3 and Step 1.6 sub-step 7; `/template-drift` Steps 5 and 6), and for
+    `/proceed` in `proceed/phase-0-setup.md` (Step 0), `proceed/phases-state.md`
+    (Pipeline State Tracking) and `proceed/phases-telemetry.md` (Run-outcome
+    telemetry). Each step keeps its heading in `SKILL.md` with one sentence telling
+    the agent to read the companion and follow it before continuing. The argument
+    fences of `/spec` Step 1.4, the ETHOS line and `/proceed` Phase 5 stay in
+    `SKILL.md`.
+  - **Lint.** `tools/lint-skills` walks every companion with the per-file checks a
+    `SKILL.md` gets, resolves `cross-fence-fn`, `cross-fence-var` and
+    `canonical-helper` across a skill's `SKILL.md` and companions, and gains
+    `skill-line-budget` (a `SKILL.md` of 500 lines or more) and
+    `companion-templating` (an argument placeholder, `$ARGUMENTS` or a bang macro in
+    a companion). Its per-root site lists follow moved content and report a listed
+    site that is missing or whose block moved, instead of passing. `wrapup`
+    (475 lines) is not split; the lesson checks are ready for when it is.
+
 - **Skill text that means the same thing on every harness (REQ-666).** Phase P1a of
   the multi-harness plan. On Claude Code nothing a skill does changes beyond two
   things: the context reads are one shell call the model makes, and a failing
