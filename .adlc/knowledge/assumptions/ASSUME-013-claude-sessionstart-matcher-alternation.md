@@ -1,10 +1,10 @@
 ---
 id: ASSUME-013
 title: "Claude Code reads a plain `startup|resume|clear` SessionStart matcher as three alternatives"
-status: unresolved
+status: validated
 req: REQ-657
 created: 2026-10-30
-resolved:
+resolved: 2026-10-30
 ---
 
 ## Assumption
@@ -24,7 +24,11 @@ hold, the session-start group never fires (the skills' `!` ETHOS line still does
 
 ## Resolution
 
-Supported offline: the Claude Code 2.1.258 bundle splits a matcher of the form
-`^[a-zA-Z0-9_|]+$` on `|` into alternatives. Not yet observed in a live, trusted
-session (the standalone CLI was not logged in, LESSON-747). Resolve with one live
-session start in a project carrying the render, then set `status: validated`.
+Validated for the alternation by REQ-660, on Claude Code 2.1.258: real headless runs with
+the committed matcher fired `SessionStart` with `source: startup`, and again with
+`source: resume` on `--resume`. Those runs were logged out, in an untrusted throwaway
+project, which does not stop the hook from firing. `clear` and the `compact` group were
+not exercised, and interactive sessions were not observed.
+
+Until REQ-660 the hook never fired at all, for a different reason: the rendered command
+held the braced plugin-root token (LESSON-759).

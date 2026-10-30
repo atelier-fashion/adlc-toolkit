@@ -212,7 +212,7 @@ _Permissions: not applicable — single-user machine tooling that reads the user
 
 ## Deferred
 
-Recorded at Phase 1 (2026-10-30), updated at close-out.
+Recorded at Phase 1 (2026-10-30), updated at close-out. REQ-656 landed during this run with every Copilot `hook_payload` field `unsupported`, so its render records `harness=copilot` with a generated id and no path.
 
 - **`codex`, `copilot`, `gemini`, `cursor` parsers, fixtures and AC-8 rows.** `copilot`, `agent`, `codex`, `gemini` and `antigravity` are not on PATH on this machine, so no real transcript can be captured, and a parser written from the survey would be an invented shape. Each flag value refuses. When a harness can be captured, one fixture plus one parser closes its row; discovery already reaches its root.
 - **AC-9 and the non-Claude rows of AC-10.** `n/a`: the CLI is not installed, and REQ-655, REQ-656 and REQ-658 have not landed.
