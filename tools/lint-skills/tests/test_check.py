@@ -201,7 +201,6 @@ def test_canonical_helper_accepts_toolkit_root_spelling(tmp_path):
     sub.mkdir()
     (sub / "SKILL.md").write_text(
         "# The post-REQ-669 telemetry shape.\n\n"
-        "**Provenance-classifying harness (BUG-228):** on such a harness, skip this step's shell.\n\n"
         "```sh\n"
         + _check.TOOLKIT_ROOT_LINE + "\n"
         + _check.guarded_source_line("delegate-gate") + "\n"
@@ -1925,92 +1924,6 @@ def test_toolkit_root_line_on_a_real_skill_rewrite(tmp_path):
     assert sorted(lint(without_root)) == sorted(baseline + ["toolkit-root-line"])
 
 
-def test_harness_skip_clean_when_line_present(tmp_path):
-    """BUG-228: the provenance-classifying-harness line in prose above the gate
-    fence satisfies the check, and a commented-out gate call is not a call."""
-    root = _stage(tmp_path, "harness-skip-ok")
-    result = _run(root)
-    assert " harness-skip:" not in result.stdout, result.stdout
-    assert result.returncode == 0, result.stdout
-
-
-@pytest.mark.parametrize(
-    "fixture", ["harness-skip-missing", "harness-skip-in-fence", "harness-skip-too-far"]
-)
-def test_harness_skip_fires(tmp_path, fixture):
-    """BUG-228: a gate fence without the line, with it only inside a fence, or
-    with it outside the 30-line window draws exactly one `harness-skip` finding
-    on the gate fence's opening line."""
-    root = _stage(tmp_path, fixture)
-    result = _run(root)
-    hs = [ln for ln in result.stdout.splitlines() if " harness-skip:" in ln]
-    assert len(hs) == 1, result.stdout
-    lines = (FIXTURES / f"{fixture}.md").read_text().splitlines()
-    gate = next(i for i, ln in enumerate(lines) if ln.startswith("adlc_delegate_gate_check"))
-    opening = max(i for i in range(gate) if lines[i].startswith("```sh")) + 1
-    assert hs[0].startswith(f"{fixture}/SKILL.md:{opening}: harness-skip:"), hs[0]
-
-
-def test_harness_skip_run_outcome_fires(tmp_path):
-    """REQ-648 BR-3 / AC-12: a fence invoking emit-run-outcome.sh without the
-    BUG-228 line draws exactly one `harness-skip` finding on its opening line,
-    in a SKILL.md and in a /proceed companion phase file alike."""
-    fixture = "harness-skip-run-outcome-missing"
-    lines = (FIXTURES / f"{fixture}.md").read_text().splitlines()
-    call = next(i for i, ln in enumerate(lines) if "emit-run-outcome.sh" in ln and not ln.startswith("#"))
-    opening = max(i for i in range(call) if lines[i].startswith("```sh")) + 1
-    skill_root = tmp_path / "skill"
-    skill_root.mkdir()
-    result = _run(_stage(skill_root, fixture))
-    hs = [ln for ln in result.stdout.splitlines() if " harness-skip:" in ln]
-    assert len(hs) == 1, result.stdout
-    assert hs[0].startswith(f"{fixture}/SKILL.md:{opening}: harness-skip: run-outcome fence"), hs[0]
-    (tmp_path / "phase").mkdir()
-    root = _stage_phase(tmp_path / "phase", fixture, dest_name="phases-6-8-ship.md")
-    (root / "ok").mkdir()
-    shutil.copyfile(FIXTURES / "harness-skip-ok.md", root / "ok" / "SKILL.md")  # keep scanned > 0
-    phase = [ln for ln in _run(root).stdout.splitlines() if " harness-skip:" in ln]
-    assert phase == [ln for ln in phase if ln.startswith(f"proceed/phases-6-8-ship.md:{opening}:")]
-    assert len(phase) == 1, phase
-
-
-def test_harness_skip_run_outcome_clean(tmp_path):
-    """Must-not-fire: the line present, a commented-out mention, and — in a
-    companion phase file — a delegation-gate fence, which that walk leaves to
-    the SKILL.md check (REQ-648 scopes the extra walks to run-outcome fences)."""
-    root = _stage(tmp_path, "harness-skip-run-outcome-ok")
-    result = _run(root)
-    assert " harness-skip:" not in result.stdout, result.stdout
-    assert result.returncode == 0, result.stdout
-    _stage_phase(tmp_path, "harness-skip-missing", dest_name="phases-1-3-validation.md")
-    result = _run(root)
-    assert " harness-skip:" not in result.stdout, result.stdout
-
-
-def test_provenance_safe_fence_clean(tmp_path):
-    """BUG-230: a marked fence inside the grammar (placeholders allowed) and an
-    unmarked fence full of shell syntax draw no `provenance-safe-fence` finding."""
-    root = _stage(tmp_path, "provenance-safe-ok")
-    result = _run(root)
-    assert " provenance-safe-fence:" not in result.stdout, result.stdout
-    assert result.returncode == 0, result.stdout
-
-
-def test_provenance_safe_fence_fires_per_line(tmp_path):
-    """BUG-230: `=`, `$(`, a by-path program, an unrecognised verb and a
-    content-reading git subcommand each draw one finding on their own line; the
-    in-grammar `git status` beside them draws none."""
-    root = _stage(tmp_path, "provenance-safe-bad")
-    result = _run(root)
-    got = [ln for ln in result.stdout.splitlines() if " provenance-safe-fence:" in ln]
-    expected = [
-        _line_of("provenance-safe-bad", needle)
-        for needle in ("--format=%cs", "CUTOFF=", "tools/lint-skills/check.sh", "awk ", "git show")
-    ]
-    assert [int(ln.split(":")[1]) for ln in got] == expected, result.stdout
-    assert f":{_line_of('provenance-safe-bad', 'git status')}:" not in result.stdout
-
-
 # ---------------------------------------------------------------------------
 # REQ-646 ADR-5: lesson-check-order — /wrapup and /bugfix lesson capture order
 # ---------------------------------------------------------------------------
@@ -2118,16 +2031,6 @@ def test_lesson_check_order_rules_block_mismatch_fails(tmp_path):
     assert result.returncode == 1, result.stdout + result.stderr
 
 
-def test_lesson_check_order_missing_harness_line_fails(tmp_path):
-    """BR-15: the harness line BELOW the check fence does not count — one
-    `missing-harness-line` on the check fence's opening line."""
-    root = _stage_lesson_pair(tmp_path, "wrapup-good", "bugfix-no-harness-line")
-    result = _run(root)
-    opening = _lco_fence_opening("bugfix-no-harness-line", "adlc_lesson_check ")
-    assert _lco(result) == [("bugfix/SKILL.md", opening, "missing-harness-line")], result.stdout
-    assert result.returncode == 1, result.stdout + result.stderr
-
-
 def test_lesson_check_order_rule_line_absent_from_question_fails(tmp_path):
     """BR-4: a rule line the `--question` string does not carry is one
     `rules-line-not-in-question`, on that line of the /wrapup block."""
@@ -2138,7 +2041,7 @@ def test_lesson_check_order_rule_line_absent_from_question_fails(tmp_path):
     assert result.returncode == 1, result.stdout + result.stderr
 
 
-HARNESS_LITERAL = "**Provenance-classifying harness (BUG-228):**"
+HARNESS_LITERAL = "**Validate the draft**"  # a prose anchor between the write point and the check fence
 CHECK_CALL = "adlc_lesson_check .adlc/knowledge/lessons/LESSON-<id>-<slug>.md"
 
 
@@ -2174,10 +2077,6 @@ def _write_point_below_check(lines):
     return lines[:c + 1] + ["<!-- lesson-write-point -->"] + lines[c + 1:]
 
 
-def _drop_harness_line(lines):
-    return [ln for ln in lines if HARNESS_LITERAL not in ln]
-
-
 def _drop_rules_block(lines):
     o = lines.index("<!-- lesson-capture-rules -->")
     c = lines.index("<!-- /lesson-capture-rules -->")
@@ -2202,13 +2101,12 @@ def _blank_rules_block(lines):
         (_drop_fence("adlc_lesson_check "), "missing-check-fence"),
         (_drop_fence("adlc_recheck_id lesson"), "missing-recheck-fence"),
         (_write_point_below_check, "check-before-write-point"),
-        (_drop_harness_line, "missing-harness-line"),
         (_drop_rules_block, "rules-block-missing"),
         (_unclose_rules_block, "rules-block-missing"),
         (_blank_rules_block, "rules-block-missing"),
     ],
     ids=[
-        "no-check", "no-recheck", "check-before-wp", "no-harness-line",
+        "no-check", "no-recheck", "check-before-wp",
         "no-block", "unclosed-block", "blank-block",
     ],
 )
@@ -2257,22 +2155,12 @@ def _extra_check_fence_above_write_point(lines):
     """A second check fence, harness line and all, added above the write point."""
     wp = lines.index("<!-- lesson-write-point -->")
     co, cc = _fence_span(lines, "adlc_lesson_check ")
-    return lines[:wp] + [HARNESS_LITERAL + " run none of it.", ""] + lines[co:cc + 1] + [""] + lines[wp:]
-
-
-def _extra_check_fence_far_below(lines):
-    """A second check fence appended more than 30 lines below every harness line."""
-    co, cc = _fence_span(lines, "adlc_lesson_check ")
-    return lines + [""] + ["Filler prose."] * 31 + [""] + lines[co:cc + 1]
+    return lines[:wp] + [HARNESS_LITERAL + " here too.", ""] + lines[co:cc + 1] + [""] + lines[wp:]
 
 
 def _extra_rules_line(lines):
     c = lines.index("<!-- /lesson-capture-rules -->")
     return lines[:c] + ["4. One rule too many."] + lines[c:]
-
-
-def _last_check_opening(lines):
-    return max(i for i, ln in enumerate(lines) if ln.startswith("```sh")) + 1
 
 
 @pytest.mark.parametrize(
@@ -2282,12 +2170,10 @@ def _last_check_opening(lines):
          lambda ls: _fence_span(ls, "adlc_lesson_check ")[0] + 1),
         (_extra_check_fence_above_write_point, "check-before-write-point",
          lambda ls: _fence_span(ls, "adlc_lesson_check ")[0] + 1),
-        (_extra_check_fence_far_below, "missing-harness-line", _last_check_opening),
         (_extra_rules_line, "rules-block-mismatch",
          lambda ls: ls.index("4. One rule too many.") + 1),
     ],
-    ids=["same-fence-recheck-first", "second-check-above-wp", "second-check-no-harness",
-         "extra-trailing-rule"],
+    ids=["same-fence-recheck-first", "second-check-above-wp", "extra-trailing-rule"],
 )
 def test_lesson_check_order_sub_branches(tmp_path, mutate, finding_id, where):
     """The branches a one-fence-each fixture never reaches: a check and a recheck
@@ -2346,18 +2232,15 @@ def test_lesson_check_order_benign_shapes_pass(tmp_path, skill, mutate):
     "fixture, finding_id",
     [
         ("bugfix-fenced-write-point", "check-before-write-point"),
-        ("bugfix-fenced-harness-line", "missing-harness-line"),
     ],
 )
 def test_lesson_check_order_fenced_decoys_do_not_count(tmp_path, fixture, finding_id):
-    """LESSON-404: a write-point marker inside a ```markdown fence, or the harness
-    line inside a ~~~text fence, sits above the check fence and would satisfy
-    the check if fenced lines counted — the only finding is the one the real
-    shape earns, on the check fence's opening line."""
+    """LESSON-404: a write-point marker inside a ```markdown fence sits above the
+    check fence and would satisfy the check if fenced lines counted — the only
+    finding is the one the real shape earns, on the check fence's opening line."""
     text = _lco_text(fixture)
-    # The decoys must really be there, or this test proves nothing.
-    assert ("```markdown\n<!-- lesson-write-point -->\n" in text
-            or "~~~text\n" + HARNESS_LITERAL in text)
+    # The decoy must really be there, or this test proves nothing.
+    assert "```markdown\n<!-- lesson-write-point -->\n" in text
     root = _stage_lesson_pair(tmp_path, "wrapup-good", fixture)
     result = _run(root)
     opening = _lco_fence_opening(fixture, "adlc_lesson_check ")
@@ -2822,21 +2705,6 @@ def test_lesson_question_coverage_escaped_quote(tmp_path, new, flagged):
     assert "is not in the question" in result.stdout, result.stdout
 
 
-@pytest.mark.parametrize("distance, expected", [(30, []), (31, ["missing-harness-line"])])
-def test_lesson_check_order_harness_window_edge(tmp_path, distance, expected):
-    """L10: the harness line counts exactly `HARNESS_SKIP_WINDOW` (30) lines
-    above the check fence's opening and not one line further."""
-    lines = _lco_text("bugfix-good").splitlines()
-    h = next(i for i, ln in enumerate(lines) if HARNESS_LITERAL in ln)
-    co = _fence_span(lines, CHECK_CALL)[0]
-    lines = lines[:h + 1] + ["Filler prose."] * (distance - (co - h)) + lines[h + 1:]
-    opening = _fence_span(lines, CHECK_CALL)[0] + 1
-    harness = next(i for i, ln in enumerate(lines) if HARNESS_LITERAL in ln) + 1
-    assert opening - harness == distance
-    result = _mutated_run(tmp_path, "bugfix", lambda _ls: lines)
-    assert _lco(result) == [("bugfix/SKILL.md", opening, fid) for fid in expected], result.stdout
-
-
 @pytest.mark.parametrize("skill", ["wrapup", "bugfix"])
 def test_lesson_check_order_second_recheck_before_check_fails(tmp_path, skill):
     """L10: a SECOND recheck fence, placed between the write point and the
@@ -2857,7 +2725,7 @@ def test_lesson_check_order_second_recheck_before_check_fails(tmp_path, skill):
 # `{{DISPATCH_SENTENCE}}` placeholder that staging fills from the real block.
 # ---------------------------------------------------------------------------
 
-DISPATCH_CHECK = "dispatch-fallback"
+DISPATCH_CHECK = "dispatch-has-fallback"
 # The skills ADR-6 names, plus /adversary, which dispatches its own agent. Each
 # must name a dispatched agent and carry the sentence, so the repo-clean test is
 # not passing over files the detector cannot see (LESSON-019).
@@ -2866,6 +2734,19 @@ DISPATCHING_FILES = (
     "analyze/SKILL.md", "proceed/SKILL.md", "sprint/SKILL.md", "adversary/SKILL.md",
     "proceed/phase-4-implementation.md", "proceed/phases-lite.md",
 )
+# REQ-666 BR-12: /sprint cannot run without subagents, so it carries the
+# explicit-stop block instead of the paragraph.
+STOP_FILES = ("sprint/SKILL.md",)
+
+
+def _dispatch_stop() -> str:
+    stop, _source = _check.load_dispatch_stop(REPO_ROOT)
+    assert stop, "conventions.md has no readable dispatch-requires-subagents block"
+    return stop
+
+
+def _owed_block(rel: str) -> str:
+    return _dispatch_stop() if rel in STOP_FILES else _dispatch_sentence()
 
 
 def _dispatch_sentence() -> str:
@@ -2931,8 +2812,9 @@ def test_dispatch_fallback_missing_sentence_fires(tmp_path):
 def test_dispatch_fallback_cross_reference_does_not_fire(tmp_path):
     """BR-9 benign path: the reflector named only in cross-references ("see the
     reflector's checklist in `/reflect`", "(the `reflector` agent)"), behind a
-    negation or a time word, as `agent's`, inside a fence, or a Claude Code
-    built-in ("Launch Explore agents") is not a dispatch."""
+    negation or a time word, as `agent's`, or inside a fence is not a toolkit
+    dispatch; a Claude Code built-in ("launch Explore agents") is a generic one,
+    satisfied by the paragraph's leading clause (REQ-666 BR-12)."""
     root = _stage_dispatch(tmp_path, "dispatch-fallback-cross-reference")
     result = _run(root)
     assert _dispatch_findings(result) == [], result.stdout
@@ -2942,7 +2824,8 @@ def test_dispatch_fallback_cross_reference_does_not_fire(tmp_path):
     text = (FIXTURES / "dispatch-fallback-cross-reference.md").read_text()
     assert {"reflector", "security-auditor", "test-auditor"} <= names
     assert all(n in text for n in ("reflector", "security-auditor", "test-auditor"))
-    assert _check.dispatch_mentions(text, names, _dispatch_sentence())[0] == []
+    found = _check.dispatch_mentions(text, names, _dispatch_sentence())[0]
+    assert [m.agent for m in found] == [""], found
 
 
 def test_dispatch_fallback_with_sentence_does_not_fire(tmp_path):
@@ -2971,7 +2854,7 @@ def test_dispatch_fallback_near_miss_sentence_fires(tmp_path):
     """One changed word in the copy is a finding: the comparison is exact
     after whitespace normalization."""
     sentence = _dispatch_sentence()
-    near = sentence.replace("instead of skipping it", "instead of dropping it")
+    near = sentence.replace("never improvise a checklist", "never invent a checklist")
     assert near != sentence
     text = (FIXTURES / "dispatch-fallback-ok.md").read_text()
     text = text.replace("{{DISPATCH_SENTENCE_WRAPPED}}", sentence).replace("{{DISPATCH_SENTENCE}}", near, 1)
@@ -3070,20 +2953,22 @@ def test_dispatch_fallback_repo_clean():
     assert len(names) >= 19, names
     for rel in DISPATCHING_FILES:
         text = (REPO_ROOT / rel).read_text()
-        mentions, _ = _check.dispatch_mentions(text, names, sentence)
+        mentions, _ = _check.dispatch_mentions(text, names, sentence, _dispatch_stop())
         assert mentions, f"{rel}: the detector sees no dispatch, so the clean result proves nothing"
-        assert sentence in " ".join(text.split()), rel
-    # And a skill that does not dispatch a toolkit agent has no mention at all.
+        assert _owed_block(rel) in " ".join(text.split()), rel
+    # A skill that dispatches only a harness built-in has generic mentions alone,
+    # each satisfied by the paragraph's leading clause (REQ-666 BR-3, BR-12).
     bugfix = (REPO_ROOT / "bugfix" / "SKILL.md").read_text()
-    assert "Launch Explore agents" in bugfix
-    assert _check.dispatch_mentions(bugfix, names, sentence)[0] == []
+    assert "If this harness can run subagents, launch Explore agents" in bugfix
+    found = _check.dispatch_mentions(bugfix, names, sentence)[0]
+    assert found and all(m.agent == "" for m in found), found
 
 
 @pytest.mark.parametrize("rel", [r for r in DISPATCHING_FILES if r.endswith("/SKILL.md")])
 def test_dispatch_fallback_fires_when_sentence_removed_from_real_skill(tmp_path, rel):
     """Mutation on the real corpus: removing every copy of the sentence from a
     shipped dispatching skill produces at least one finding for it."""
-    sentence = _dispatch_sentence()
+    sentence = _owed_block(rel)
     text = (REPO_ROOT / rel).read_text()
     assert sentence in text, rel
     sub = tmp_path / rel.split("/")[0]

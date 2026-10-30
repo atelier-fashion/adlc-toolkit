@@ -22,7 +22,7 @@ out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 `adlc_forge_provider [<repo-dir>]` resolves, in precedence order:
 
 1. per-project `.adlc/config.yml` → `forge.provider`
-2. machine `~/.claude/adlc/config.yml` → `forge.provider`
+2. machine `${ADLC_HOME:-$HOME/.claude}/adlc/config.yml` → `forge.provider`
 3. `auto` — detect from the `origin` remote URL
 
 `auto` maps `github.com` → `github`, `dev.azure.com` / `*.visualstudio.com`
@@ -33,7 +33,7 @@ and the fail-loud message live in `tools/adlc/forge_config.py` (no shell YAML
 parsing — REQ-515 ADR-3); the no-config path is pure shell.
 
 **Which interpreter runs the resolver** (REQ-609 BR-8 / ADR-2). `_adlc_forge_python`
-carries the one interpreter rule: prefer `$HOME/.claude/delegate-venv/bin/python3`
+carries the one interpreter rule: prefer `${ADLC_HOME:-$HOME/.claude}/delegate-venv/bin/python3`
 when it is a regular executable file **and** that venv carries a `yaml` package
 directory under `lib/python*/site-packages/`; otherwise `python3` from `$PATH`.
 The same rule is written out in the root `install.sh`'s `adlc` shim and in

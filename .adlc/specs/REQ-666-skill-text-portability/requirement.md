@@ -1,10 +1,10 @@
 ---
 id: REQ-666
 title: "Skill text portability: `$ARGUMENTS` as prose, run-and-read context blocks, one portable dispatch fallback, the Teton-only surface retired, agents vendored, and the lint that keeps it so"
-status: draft
+status: complete
 deployable: false
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-29
 component: "adlc/skills"
 domain: "adlc"
 stack: ["markdown", "sh", "python"]

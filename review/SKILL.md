@@ -16,15 +16,23 @@ This skill is the **pre-push ADLC review gate**. It runs 5 specialized review ag
 
 ## Context
 
-- Current branch: !`git branch --show-current || echo Not a git repo`
-- Committed changes vs main: !`git diff-tree --stat -r main HEAD || echo No diff available`
-- Uncommitted changes: !`git status --short`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Current branch'
+git branch --show-current 2>/dev/null || echo 'Not a git repo'
+echo '--- Committed changes vs main'
+git diff-tree --stat -r main HEAD 2>/dev/null || echo 'No diff available'
+echo '--- Uncommitted changes'
+git status --short 2>/dev/null || echo 'Not a git repo'
+```
 
 **Context files loaded on demand**: `.adlc/context/conventions.md` and recent lessons are loaded by Step 1 below — **skip the Reads if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads `conventions.md` at Phase 0).
 
 ## Input
 
-Scope: $ARGUMENTS
+The scope is the argument: whatever follows `/review` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text). With none, Step 1 reviews the uncommitted changes and the branch's commits.
 
 ## Prerequisites
 
@@ -54,7 +62,7 @@ Read the complete current version of every changed file (not just the diff) to u
 ### Step 3: Launch Review Agents
 Launch **5 formal review agents in parallel** using the Agent tool. Each agent is defined in `$ADLC_TOOLKIT_ROOT/agents/` with its full checklist, model selection, and tool restrictions. Running in parallel minimizes wall-clock time.
 
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
 1. **correctness-reviewer** agent — provide it the list of changed files, the full diff, `conventions.md` content, and recent lessons. Focus: logic errors, null risks, race conditions, edge cases, concurrency bugs. Tell it: "Report findings only. Do not apply fixes."
 2. **quality-reviewer** agent — same inputs. Focus: naming, convention compliance, code duplication, complexity, maintainability. Tell it: "Report findings only. Do not apply fixes."
@@ -96,7 +104,7 @@ Each agent returns structured findings with severity (Critical/Major/Minor/Nit),
    esac
    ```
 
-   Each printed path is a superseding lesson; its id is the `LESSON-<digits>` prefix of the basename. Ignore a hit on the lesson's own file, and a hit on a file Step 1 item 7f listed. Every remaining hit is a `superseded by` id, comma-separated; no output means not superseded. The id reaches `awk` as data (`-v`), so the `case` guards the only place it is substituted. The program is single-quoted and reads only the frontmatter block, found the way `adlc_lesson_check` finds it: a leading BOM and each line's trailing CR are dropped, blank lines and HTML comments are skipped, and the block opens only when the first other line is `---` — a file that opens with anything else, such as a legacy lesson whose `---` lines are horizontal rules in its body, is skipped whole. The match needs a blank after `supersedes:` (the one key spelling the check accepts), and `[^#]*` stops at a trailing `# comment`, so neither a body line nor a comment that mentions the id is a hit. `2>/dev/null` keeps a missing lessons directory quiet — no output, so not superseded. `-exec … {} +` runs nothing when no file matches, where GNU `xargs` would run its command once on empty input; the quoted `-name` never hands the shell an unmatched glob (zsh aborts on one — LESSON-335); and `([^0-9]|$)` stops `LESSON-40` matching `LESSON-404` without a word-boundary escape, which BSD tools silently ignore (LESSON-013). On a provenance-classifying harness (BUG-228), use Claude's own Grep tool with the regex `^supersedes:[ \t][^#]*LESSON-<id>([^0-9]|$)`, `<id>` there being the digits alone (path `.adlc/knowledge/lessons`, glob `LESSON-*.md`, with line numbers), and keep only the hits inside their file's frontmatter block — the block that opens at the file's first non-blank, non-comment line.
+   Each printed path is a superseding lesson; its id is the `LESSON-<digits>` prefix of the basename. Ignore a hit on the lesson's own file, and a hit on a file Step 1 item 7f listed. Every remaining hit is a `superseded by` id, comma-separated; no output means not superseded. The id reaches `awk` as data (`-v`), so the `case` guards the only place it is substituted. The program is single-quoted and reads only the frontmatter block, found the way `adlc_lesson_check` finds it: a leading BOM and each line's trailing CR are dropped, blank lines and HTML comments are skipped, and the block opens only when the first other line is `---` — a file that opens with anything else, such as a legacy lesson whose `---` lines are horizontal rules in its body, is skipped whole. The match needs a blank after `supersedes:` (the one key spelling the check accepts), and `[^#]*` stops at a trailing `# comment`, so neither a body line nor a comment that mentions the id is a hit. `2>/dev/null` keeps a missing lessons directory quiet — no output, so not superseded. `-exec … {} +` runs nothing when no file matches, where GNU `xargs` would run its command once on empty input; the quoted `-name` never hands the shell an unmatched glob (zsh aborts on one — LESSON-335); and `([^0-9]|$)` stops `LESSON-40` matching `LESSON-404` without a word-boundary escape, which BSD tools silently ignore (LESSON-013).
 
    **A lesson file this diff changes carries no standing** (Step 1 item 7f). If the matched lesson's own file is on that list, treat its `confidence` as absent; a superseding hit on that list does not count. When that is what kept an exemption from applying, the finding escalates as today and the report says so: `(matched LESSON-xxx, exemption ignored — lesson changed in this diff)`.
 

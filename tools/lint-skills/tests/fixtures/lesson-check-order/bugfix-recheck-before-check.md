@@ -31,7 +31,7 @@ if ! adlc_recheck_id lesson "$LESSON_ID"; then
 fi
 ```
 
-**Provenance-classifying harness (BUG-228):** on a harness that pins the session, validate in-model and run none of the fence below.
+**Validate the draft** with the schema check below.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"

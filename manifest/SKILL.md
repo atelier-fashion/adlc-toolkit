@@ -18,14 +18,22 @@ Unlike `/status`, which reconstructs its view from the **local** `.adlc/` checko
 
 ## Context
 
-- Current branch: !`git rev-parse --abbrev-ref HEAD || echo not a git repo`
-- Local `origin/feat/*` refs (empty when none are fetched): !`git for-each-ref refs/remotes/origin/feat`
-- gh CLI: !`which gh && echo installed - auth and network checked at run || echo not installed — branch-only`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Current branch'
+git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'not a git repo'
+echo '--- Local origin/feat/* refs (empty when none are fetched)'
+git for-each-ref refs/remotes/origin/feat 2>/dev/null || echo 'not a git repo'
+echo '--- gh CLI'
+which gh 2>/dev/null && echo 'installed - auth and network checked at run' || echo 'not installed — branch-only'
+```
 
 ## Input
 
 Self REQ id(s), resolved in this order (BR-13):
-1. **`$ARGUMENTS`** — one or more REQ ids passed to `/manifest` directly.
+1. **The argument** — one or more REQ ids passed to `/manifest` directly (whatever follows `/manifest` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text)). Substitute it for `<req-ids>` in the collection block below as one single-quoted literal (conventions.md "Bash in skills", "Substituting a value into a fence"); with no argument, leave the placeholder as written: it holds no REQ id, so the next source is used.
 2. **`MANIFEST_SELF`** env var — space-separated REQ ids. This is the **caller contract**: `/proceed` Step 0 and `/sprint` pre-flight set `MANIFEST_SELF` (and `MANIFEST_SKIP_FETCH=1`) **in the same shell invocation** that runs the collection block below, because shell state does not cross fenced blocks.
 3. Fallback: the REQ inferred from the current branch name.
 
@@ -86,7 +94,11 @@ fi
 
 # Self REQ id(s), NEWLINE-separated for portable iteration (no unquoted word-splitting,
 # which zsh does not do). self_disp is the space-joined form for the header line.
-self_nl=$(printf '%s' "${ARGUMENTS:-${MANIFEST_SELF:-}}" | grep -oE 'REQ-[0-9]{3,6}' | sort -u)
+self_args='<req-ids>'
+self_nl=$(printf '%s' "$self_args" | grep -oE 'REQ-[0-9]{3,6}' | sort -u)
+if [ -z "$self_nl" ]; then
+  self_nl=$(printf '%s' "${MANIFEST_SELF:-}" | grep -oE 'REQ-[0-9]{3,6}' | sort -u)
+fi
 if [ -z "$self_nl" ]; then
   self_nl=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -oE 'REQ-[0-9]{3,6}')
 fi

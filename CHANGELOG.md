@@ -40,6 +40,35 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **Skill text that means the same thing on every harness (REQ-666).** Phase P1a of
+  the multi-harness plan. On Claude Code nothing a skill does changes beyond two
+  things: the context reads are one shell call the model makes, and a failing
+  context command no longer aborts the invocation.
+  - **Arguments are prose.** No `SKILL.md` contains `$ARGUMENTS`. Each Input section
+    says the argument is whatever follows the skill name in the invocation, and what
+    the skill does with none. `/spec`'s intake fences and `/manifest`'s self-id fence
+    take a single-quoted `<placeholder>`, filled by one rule in conventions.md "Bash
+    in skills": the value single-quoted, every `'` written `'\''`.
+  - **One run-and-read context block per skill.** The 41 non-ETHOS preamble lines in
+    14 skills are one `# adlc-context` fence each, under `## Context`. Every read
+    prints its notice when the file is absent. The ETHOS line stays, byte-identical.
+  - **One portable dispatch paragraph.** Every step that dispatches agents says what
+    to do when the harness cannot: run each checklist inline from
+    `.adlc/agents/<name>.md`, or from `$ADLC_TOOLKIT_ROOT/agents/<name>.md` with `/init`
+    (`/adlc:init` on the plugin install) named when that directory is absent; an
+    inline audit is read-only. `/sprint` carries an explicit stop instead.
+  - **Agents are vendored.** `/init` copies every `agents/*.md` into `.adlc/agents/`,
+    a checklist store no harness discovers agents from. `/template-drift` reports it
+    as a sixth surface, `agents`, in partials posture.
+  - **Lint.** `tools/lint-skills` gains `ethos-line` (the ETHOS line once,
+    byte-identical, in every skill), `description-budget` (512 Unicode code points
+    per description; `/adversary` and `/template-drift` trimmed), `skills-ref` (the
+    Agent Skills validator when it is on PATH, one SKIP line otherwise), and
+    `dispatch-has-fallback` and `no-harness-path`, which absorb REQ-669's
+    `dispatch-fallback` and `toolkit-path` and widen them.
+  - **Lane check.** `.adlc/agents/**`, `.github/agents/**` and `.github/hooks/**` are
+    default blocked paths, and a test pins every glob the harness adapters need.
+
 - **The Claude Code plugin route (REQ-669).** This repo is both a marketplace and
   the plugin. A user installs with two commands:
 
@@ -278,6 +307,13 @@ is cut per `RELEASING.md`.
 
 ### Changed
 
+- **The settings template pre-approves the context reads (REQ-666 BR-15).**
+  `templates/claude-settings-template.json` gains `Bash(cat:*)`, `Bash(grep:*)`,
+  `Bash(git rev-parse:*)`, `Bash(git for-each-ref:*)`, `Bash(git diff-tree:*)`,
+  `Bash(gcloud config get-value:*)` and `Bash(gcloud run services list:*)`, so no
+  skill invocation gains a prompt. A project whose `.claude/settings.json` predates
+  this release prompts for them until it takes the additions.
+
 - **`claude-code` is now `harness:claude` (REQ-654).** Doctor's report-only
   `claude-code` check is generalized to five `harness:<name>` checks, one per
   harness `adlc harness detect` knows, each PASS when present and SKIP when absent,
@@ -434,6 +470,34 @@ Found by the REQ-669 Phase 5 review, before this release shipped.
   `state=`. Step 8b now also deletes the local branch after removing the worktree.
   Tested by `partials/tests/forge.test.sh` §7c against a real worktree.
 
+### Reversed decisions (REQ-666 BR-6)
+
+None of the five harnesses the toolkit now targets classifies shell provenance, so
+the surface built for Teton Code's classifier is retired in one change:
+
+- **BUG-228**: reversed. The `**Provenance-classifying harness (BUG-228):**` line
+  above every delegating step and run-outcome fence, and the `harness-skip` lint
+  check that required it, are gone.
+- **BUG-230**: reversed in part. Its `provenance-safe-fence` check, its `#
+  provenance-safe` markers, `/analyze`'s condensed inline checklist, its skill-wide
+  "Shell on a provenance-classifying harness" rule and its Step 1.8/1.9/1.10 skips are
+  gone. Its read-only rule for inline audits and its Step 2a git spellings are kept.
+- **REQ-646 BR-15 / ADR-8**: reversed. `lesson-check-order` no longer has the
+  `missing-harness-line` rule, and the lesson-capture steps no longer carry an
+  in-model validation branch.
+- **REQ-648 BR-3**: reversed in part. The run-outcome fences no longer carry the
+  skip line; BR-8 and BR-10 are unchanged.
+
+The `adlc-read` timeout guidance (at least 120 s) is kept, in
+`partials/delegate-gate.md` and conventions.md. Lessons and bugs that record the
+Teton work are history and are not edited; LESSON-662 and LESSON-663 are
+superseded by this release's lesson.
+
+**Re-run `/init` (`/adlc:init` on the plugin install) in every consumer project.**
+Without `.adlc/agents/`, a dispatch paragraph's inline arm falls back to
+ToolkitRoot's `agents/`, which a worktree-sandboxed or session-jailed read cannot
+reach, and `/analyze` no longer carries its own condensed checklist.
+
 ### Re-sync vendored copies
 
 ⚠️ **`/template-drift` will report vendored copies as `stale` in every consumer
@@ -484,10 +548,11 @@ reconciles:
   and now keeps REQ-669's root line and default-expansion spelling unchanged, names
   their two `.claude` literals as compatibility aliases, and keeps toolkit reads on
   ToolkitRoot.
-- **REQ-666**'s `no-harness-path` check absorbs `toolkit-path` and its exception list.
-  It keeps the ToolkitRoot root line, or replaces it for both routes in one change.
-  Its vendoring of agents into `.adlc/agents/` meets REQ-669 BR-9 if it keeps
-  `$ADLC_TOOLKIT_ROOT/agents/` as the second source.
+- **REQ-666** landed second and reconciled: `no-harness-path` absorbs `toolkit-path`
+  and lifts its exception list whole, the ToolkitRoot root line is unchanged, and the
+  dispatch paragraph's inline arm keeps `$ADLC_TOOLKIT_ROOT/agents/` as the second
+  source after `.adlc/agents/`, which meets REQ-669 BR-9. `adlc-home` stays as the
+  code-side machine-state check and leaves toolkit paths to `no-harness-path`.
 - **REQ-648** (draft): BR-10 should read `harness.{version,sha}` from
   `$ADLC_TOOLKIT_ROOT` on the plugin route. The version comes from `VERSION`. The sha
   is `-` because the cache copy has no `.git`, though `installed_plugins.json` records

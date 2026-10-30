@@ -14,12 +14,19 @@ You are scanning this project's API and infrastructure for cost and performance 
 
 ## Context
 
-- Architecture: !`cat .adlc/context/architecture.md || echo No architecture context found`
-- Project overview: !`cat .adlc/context/project-overview.md || echo No project overview found`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Architecture'
+cat .adlc/context/architecture.md 2>/dev/null || echo 'No architecture context found'
+echo '--- Project overview'
+cat .adlc/context/project-overview.md 2>/dev/null || echo 'No project overview found'
+```
 
 ## Input
 
-Focus: $ARGUMENTS
+The focus is the argument: whatever follows `/optimize` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), a dimension or an area. With none, Step 1 scans all dimensions.
 
 ## Prerequisites
 
@@ -35,7 +42,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 ### Step 2: Launch Scanner Agents
 Launch 3 formal scanner agents in parallel using the Agent tool. Each agent is defined in `$ADLC_TOOLKIT_ROOT/agents/` with its full scanning checklist and model selection (sonnet for deep analysis).
 
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
 1. **api-cost-scanner** agent — provide the focus scope and architecture.md for caching context
 2. **db-perf-scanner** agent — provide the focus scope

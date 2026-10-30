@@ -14,16 +14,25 @@ You are closing out a completed feature after it has been merged. This skill ens
 
 ## Context
 
-- Active specs: !`grep -rlx -e status:.approved -e status:.in-progress -e status:.complete --include requirement.md .adlc/specs || echo No specs found`
-- Knowledge directory: !`ls .adlc/knowledge/ || echo No knowledge directory`
-- Current branch: !`git branch --show-current || echo Not a git repo`
-- Recent merges: !`git log --oneline --merges -10 || echo No merge history`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Active specs'
+grep -rlx -e status:.approved -e status:.in-progress -e status:.complete --include requirement.md .adlc/specs 2>/dev/null || echo 'No specs found'
+echo '--- Knowledge directory'
+ls .adlc/knowledge/ 2>/dev/null || echo 'No knowledge directory'
+echo '--- Current branch'
+git branch --show-current 2>/dev/null || echo 'Not a git repo'
+echo '--- Recent merges'
+git log --oneline --merges -10 2>/dev/null || echo 'No merge history'
+```
 
 ## Input
 
-Target: $ARGUMENTS
+The target is the argument: whatever follows `/wrapup` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text).
 
-`$ARGUMENTS` is a REQ id, optionally followed by `--close-out`. Strip the flag before any REQ-id parsing; its meaning is defined under **Close-out mode** below.
+It is a REQ id, optionally followed by `--close-out`. With no REQ id, Step 1 infers it. Strip the flag before any REQ-id parsing; its meaning is defined under **Close-out mode** below.
 
 ## Prerequisites
 
@@ -152,8 +161,6 @@ Evaluate whether any decisions, patterns, or lessons should be persisted:
 
 #### Lessons Learned
 
-**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
-
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
 ```sh
@@ -192,7 +199,7 @@ esac
 
 1. Locate **this run's own** Claude Code transcript — **self-marked discovery** (BUG-253, replacing the REQ-423 ancestor walk). Two fences, run as **two separate tool calls**: the first prints a fresh random mark, and by the time the second runs, that output is a tool result in exactly one transcript — this conversation's, wherever the harness keeps it. The second finds that one file. A command that is still running is not yet in its own transcript, so the two must never be combined into one call.
 
-   **Why not walk the directories.** REQ-423 climbed from the working tree to `$HOME`, took each ancestor's `~/.claude/projects/<encoded>` directory, and picked the first JSONL whose tail named the REQ id. Under `/sprint` a `pipeline-runner` is a subagent: its transcript is `~/.claude/projects/<orchestrator's encoded cwd>/<session>/subagents/agent-<id>.jsonl`, which no ancestor of the runner's worktree reaches. The repo root's directory meanwhile holds older sessions that name the REQ too, so REQ-647's runner was handed a 2026-10-27 session that only mentioned it (LESSON-733). An id anchor proves a transcript mentions the work, not that it is the run; concurrent runners even share one session id. The mark is the only signal no other transcript can carry.
+   **Why not walk the directories.** REQ-423 climbed from the working tree to `$HOME`, took each ancestor's `~/.claude/projects/<encoded>` directory, and picked the first JSONL whose tail named the REQ id. Under `/sprint` a `pipeline-runner` is a subagent: its transcript is `~/.claude/projects/<orchestrator's encoded cwd>/<session>/subagents/agent-<id>.jsonl`, which no ancestor of the runner's worktree reaches. The repo root's directory meanwhile holds older sessions that name the REQ too, so REQ-647's runner was handed a 2026-10-27 session that only mentioned it (LESSON-733). An id anchor proves a transcript mentions the work, not that it is the run; concurrent runners even share one session id. The mark is the only signal no other transcript can carry. <!-- adlc-home: claude-code -->
 
    **A miss refuses; it never falls back.** If no transcript holds the mark, or more than one does (a forked copy), `adlc_transcript_find` returns 1 with nothing on stdout, `$JSONL` stays empty, and control falls through to **Fallback drafting** — Claude writes the lesson from the conversation it actually ran. Do not reach for another session's transcript: a well-formed lesson about other work is worse than no delegation (LESSON-483). Each call emits exactly one stderr line saying what it chose or refused; `partials/session-transcript.sh` carries the contract.
 
@@ -274,7 +281,7 @@ esac
      Drop or rewrite each token that fails, and log it. If no token survives, `evidence` no longer cites anything: rewrite it from a moment you can verify, or the answer is `NO_ENTRY` (rule 1) — `adlc_lesson_check` would reject the draft anyway.
    - **`generalizes` / `supersedes` ids (REQ-646 BR-8)** → every id the draft proposes in either list must match `^LESSON-[0-9]{3,6}$` AND exist: `find .adlc/knowledge/lessons -maxdepth 1 -type f -name '<id>-*' | head -1` must print a path (a `find`, not a bare glob — zsh aborts on an unmatched glob, LESSON-335). Justify each proposed `supersedes` id against the draft's `evidence`: a `supersedes` entry switches off `/review`'s escalation for the lesson it names (REQ-646 BR-6), so keep it only when the evidence shows that lesson is wrong or replaced, not merely related. Drop any id that fails a check (a list left empty is written `[]`). The wrapup log records, for both lists, the ids the delegate proposed and the ids kept.
    Note any drops or rewrites in the wrapup log so the audit trail shows what the delegate proposed vs. what shipped.
-5. Claude reads the validated draft and edits it for accuracy, voice, and scope — the draft's `kind`, `evidence` and `confidence` stay only where the capture rules in **Fallback drafting** below support them. Then allocate the id with the allocation fence in **Fallback drafting** (`~/.claude/.global-next-lesson` atomic counter, `LESSON-xxx-slug.md` naming) and write the file at **Write and check**, the shared write point both paths use, which validates it before the pre-push recheck. If the proposal is a single `NO_ENTRY: <reason>` line and you agree nothing transferable survived, allocate nothing and write no file; that line goes in Step 5's `### Lessons captured`.
+5. Claude reads the validated draft and edits it for accuracy, voice, and scope — the draft's `kind`, `evidence` and `confidence` stay only where the capture rules in **Fallback drafting** below support them. Then allocate the id with the allocation fence in **Fallback drafting** (`${ADLC_HOME:-$HOME/.claude}/.global-next-lesson` atomic counter, `LESSON-xxx-slug.md` naming) and write the file at **Write and check**, the shared write point both paths use, which validates it before the pre-push recheck. If the proposal is a single `NO_ENTRY: <reason>` line and you agree nothing transferable survived, allocate nothing and write no file; that line goes in Step 5's `### Lessons captured`.
 6. The success line `/wrapup: Lessons Learned drafted via the delegate` is emitted at **Write and check**, **only after the check returns rc 0** — so a transcript showing the line is proof the delegated path produced a lesson that passed the schema check. A `NO_ENTRY` outcome (the delegate's, or the repair loop's) emits no success line. The `trap` from step 2 cleans up the temp file.
 
 **Fallback drafting** (gate fails — `adlc-read` not on PATH, or `ADLC_DISABLE_DELEGATE=1`, or not opted in):
@@ -297,7 +304,7 @@ A /wrapup lesson has a contrast only when a Phase-5 finding or a failing test ba
 - Log notable lessons to `.adlc/knowledge/lessons/` if they'd help future work. A `NO_ENTRY` outcome (rule 3) allocates no id and writes no file: its line goes in Step 5's `### Lessons captured`, and none of the blocks below, up to and including the pre-push recheck, runs.
 - Use the lesson template (check `.adlc/templates/lesson-template.md` first, fall back to `$ADLC_TOOLKIT_ROOT/templates/lesson-template.md`)
 - **Filename format is `LESSON-xxx-slug.md`** (e.g., `LESSON-041-signed-url-ttl-mismatch.md`). This is the ONLY permitted naming scheme — do not use date-prefixed names (`2026-MM-DD-…md`) or bare numeric prefixes (`034-…md`). Slugs are lowercase kebab-case, ≤6 words.
-- **Allocate the next ID atomically via the global `~/.claude/.global-next-lesson` counter** (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004; directory scans also race against concurrent `/sprint` pipelines — LESSON-110). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock with its LESSON-014 symlink pre-check. The lock path `~/.claude/.global-next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
+- **Allocate the next ID atomically via the global `${ADLC_HOME:-$HOME/.claude}/.global-next-lesson` counter** (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004; directory scans also race against concurrent `/sprint` pipelines — LESSON-110). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock with its LESSON-014 symlink pre-check. The lock path `${ADLC_HOME:-$HOME/.claude}/.global-next-lesson.lock.d` is shared with `/bugfix` so concurrent `/wrapup` and `/bugfix` runs mutually exclude. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
   ```bash
   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
   if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-alloc.sh"; fi
@@ -316,8 +323,6 @@ A /wrapup lesson has a contrast only when a Phase-5 finding or a failing test ba
 Write `.adlc/knowledge/lessons/LESSON-<id>-<slug>.md` from the lesson template, `<id>` being the zero-padded `LESSON_NUM` just allocated. Fill every field the template carries: `kind`, `evidence` and `confidence` are required and follow the capture rules above; `enforcement` stays `none` unless a lint, test, script or hook enforces the lesson; `generalizes` / `supersedes` hold only ids that passed the BR-8 check (delegated path, item 4) or that you confirmed exist the same way. `## Lesson` and `## Applies When` must be non-empty (`## Applies When` is the cue). Write a **new** file only: a capture step never edits an existing lesson, so a refinement of LESSON-A is a new lesson carrying `generalizes: [LESSON-A]` or `supersedes: [LESSON-A]` (BR-2).
 
 Then validate the file you just wrote with `adlc_lesson_check` — the return-code contract and rule table live in `partials/lesson-check.md`.
-
-**Provenance-classifying harness (BUG-228):** if your shell tool pins the session when it cannot classify a command (Teton Code's `shell` does), the fence below runs a partial by path and would pin the turn. There, validate in-model against the rule table in `partials/lesson-check.md`, apply the same repair loop, and write `lesson check: in-model (provenance-classifying harness)` in the summary slot (Step 5's `### Lessons captured`); run none of the fence below.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -377,8 +382,6 @@ A REQ that started on the lite lane and escalated to the full lane owes one less
 #### Record the lessons outcome (REQ-648)
 
 Step 4's lesson outcome is now settled: the `LESSON-xxx` lines, or the one `NO_ENTRY:` line, that Step 5's `### Lessons captured` slot will carry. Record it in the primary repo path's `pipeline-state.json`, the file Step 3 item 5 writes (in close-out mode, the primary-path copy named in Close-out mode rule 3). Pass every `LESSON-xxx` written, comma-separated, with `--ids`, or `--no-entry` when the slot holds a `NO_ENTRY:` line. It is the source of the run-outcome line's `lessons_written`. Skip it when the spec directory has no `pipeline-state.json` (a standalone `/wrapup`); the wrapper always exits 0.
-
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"

@@ -13,7 +13,7 @@ You are an autonomous ADLC orchestrator. Given a requirement number (REQ-xxx), y
 This skill supports two modes:
 
 1. **Main conversation mode** (default): Dispatches formal agents (defined in `$ADLC_TOOLKIT_ROOT/agents/`) for parallelism at Phase 4 (task implementation) and Phase 5 (verify). Use this mode when running `/proceed` directly.
-2. **Subagent mode** (when running as a `pipeline-runner` agent inside `/sprint`): Execute ALL phases sequentially in-context. Do NOT dispatch sub-agents. At Phase 4, implement tasks one at a time. At Phase 5, run the reflector + reviewer checklists sequentially in your own context using the criteria from the agent definitions. Subagents cannot spawn other subagents.
+2. **Subagent mode** (when running as a `pipeline-runner` agent inside `/sprint`): Execute ALL phases sequentially in-context. Do NOT dispatch sub-agents. At Phase 4, implement tasks one at a time. At Phase 5, run the reflector + reviewer checklists sequentially in your own context, read from `.adlc/agents/<name>.md` (the dispatch paragraph's inline arm; `$ADLC_TOOLKIT_ROOT/agents/<name>.md` when `.adlc/agents/` is absent, naming `/init` (`/adlc:init` on the plugin install) as the remediation). Subagents cannot spawn other subagents.
 
 You are in subagent mode if you were explicitly told so in your launch prompt.
 
@@ -40,7 +40,8 @@ For everything else — including every **End-of-phase log** block below, every 
 
 The user provides a requirement ID, e.g., `/proceed REQ-023` or `/proceed 23`.
 
-- Strip a `--full` flag from `$ARGUMENTS` before any REQ-id parsing (the `/wrapup --close-out` precedent). On a lite REQ it escalates to the full lane with `actor: operator` before Phase 4, or at the point of a resume; on a full REQ it logs one line and does nothing (REQ-652 BR-11, `proceed/phases-lite.md` "Step 0 additions").
+- The argument is whatever follows `/proceed` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text). With none, stop and ask which REQ to run.
+- Strip a `--full` flag from the argument before any REQ-id parsing (the `/wrapup --close-out` precedent). On a lite REQ it escalates to the full lane with `actor: operator` before Phase 4, or at the point of a resume; on a full REQ it logs one line and does nothing (REQ-652 BR-11, `proceed/phases-lite.md` "Step 0 additions").
 - Normalize to `REQ-xxx` format (zero-pad to 3 digits if needed)
 - Locate the spec at `.adlc/specs/REQ-xxx-*/requirement.md`
 - If the spec doesn't exist, stop and tell the user to run `/spec` first
@@ -237,8 +238,6 @@ makes for the lessons, read from the progress record and never from whether a
 `harness` key exists (LESSON-719). `--fresh` also clears the `validateAttempts`,
 `verify` and `lessonsWritten` an earlier run of this REQ left behind.
 
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
-
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
@@ -247,8 +246,6 @@ if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-
 
 **R2 — a validation attempt** (Phases 1 and 3, before each `/validate`). The
 attempt number is absolute, so a repeated call never double-counts.
-
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -263,8 +260,6 @@ set, and `fixed` (`true` only once its fix commit has landed). `--loops` is `1`
 when Step D re-verified, else `0`. The engine normalises the severity scale and
 the class tiers; pass what the reviewers reported.
 
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
-
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
@@ -276,8 +271,6 @@ ADLC_VERIFY_JSON
 **R4 — carry the run's state** (Phase 8 Step 8b, before `/wrapup`). It copies
 every key of the worktree copy that the primary-path copy lacks, so the record
 the line is built from survives teardown; the primary-path copy's own keys win.
-
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -292,8 +285,6 @@ terminal. A resumed run that reaches another terminal emits again; readers keep
 the latest line per REQ. Halt tokens: `validation-exhausted` (halt #1),
 `reflector-questions` (#2), `merge-conflict` (#3), `other` (#4, a failed lane
 check). A `failed` terminal passes `setup-error`, `no-worktree` or `no-pr`.
-
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -513,15 +504,7 @@ Main mode dispatches `task-implementer` agents in dependency tiers (parallel
 within a tier); subagent mode runs tasks sequentially in-context. End-of-phase
 log: one line per tier with finished `TASK-xxx [repo] ✓` and any failures.
 
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin
-install (`adlc:<name>`). Before dispatching, check which form the Agent tool
-lists and use that one; do not wait for an error, because a name it does not
-list can silently run a generic agent without the checklist. If neither form
-is listed, say which agent is missing, then read
-`$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this
-skill's base directory) and run its checklist inline, or give its body to a
-general-purpose agent as the prompt, instead of skipping it; a review or audit
-agent stays read-only either way.
+If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
 **Lite lane:** no task files and no `task-implementer` dispatch. Run a fresh
 retrieval for the surfaces about to be touched, implement from the spec's
@@ -542,8 +525,6 @@ escalates (trigger `implementer`). See `proceed/phases-lite.md` "Phase 4 (lite)"
 **Gather diffs per repo** (prerequisite): for each touched repo, compute the diff inside its worktree (`git -C <worktree> diff main...HEAD` plus the list of changed files). The reviewers receive per-repo diffs + file lists, plus the cross-repo architecture.md so they can reason about contracts spanning repos.
 
 **Optional verify candidate-list pre-pass via `adlc-read`** (added by REQ-417): for each touched repo, run an advisory delegate pre-pass before the Step A 6-agent dispatch. The pre-pass produces a per-dimension candidate-findings list (correctness, quality, architecture, test-coverage, security) that is passed only to the 5 reviewer agents — **the reflector receives no advisory block** (reflector's value is independent self-assessment of Claude's own work, which advisory candidates would compromise).
-
-**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
 
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
@@ -662,7 +643,7 @@ Then continue with **Step A — Single-gate parallel dispatch** unchanged.
 
 The six agents match the dimensions covered by `/review` (correctness, quality, architecture, test coverage, security) plus the reflector self-assessment:
 
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
 Every one of the six also receives the **Phase-5 LessonSet's loaded text** computed above (REQ-647 BR-3), under a heading that says it is the pre-computed lesson set for this diff. When a finding matches one of those lessons, the agent cites its id; Step B applies `/review` Step 4's escalation rule (including REQ-646 BR-6's `confidence: low` and superseded exemptions, which the set's `confidence` and `supersededBy` fields carry) exactly as standalone `/review` does.
 
@@ -674,7 +655,7 @@ Every one of the six also receives the **Phase-5 LessonSet's loaded text** compu
 6. **security-auditor** agent — repo id, worktree path, changed files, diff, conventions.md. "Audit security posture only for the diff under review. Report findings only. Do not apply fixes."
 
 **Subagent mode** — sequential inline review:
-For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Use the criteria from the agent definitions in `$ADLC_TOOLKIT_ROOT/agents/`. Do NOT dispatch sub-agents. The Phase-5 LessonSet above is the lesson input to every checklist, the reflector's included: read its loaded text instead of grepping the lessons directory.
+For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Read each checklist from `.adlc/agents/<name>.md`; when `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it and read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` instead, never an improvised checklist. Do NOT dispatch sub-agents. The Phase-5 LessonSet above is the lesson input to every checklist, the reflector's included: read its loaded text instead of grepping the lessons directory.
 
 **Step B — Consolidate**: When all agents return (or all checklists complete in subagent mode), dedupe overlapping findings **within each repo** and also flag cross-repo issues (e.g., API contract drift between an api repo and its consumer). Produce a single ranked list by severity, tagging each finding with the repo id it applies to.
 

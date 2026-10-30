@@ -16,13 +16,21 @@ You are generating a status report of all ADLC work in the current project.
 
 ## Context
 
-- Specs directory: !`ls .adlc/specs/ || echo No specs found`
-- Bugs directory: !`ls .adlc/bugs/ || echo No bugs found`
-- Current branch: !`git branch --show-current || echo Not a git repo`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Specs directory'
+ls .adlc/specs/ 2>/dev/null || echo 'No specs found'
+echo '--- Bugs directory'
+ls .adlc/bugs/ 2>/dev/null || echo 'No bugs found'
+echo '--- Current branch'
+git branch --show-current 2>/dev/null || echo 'Not a git repo'
+```
 
 ## Input
 
-Filter: $ARGUMENTS
+The filter is the argument: whatever follows `/status` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text). With none, report everything.
 
 ## Prerequisites
 

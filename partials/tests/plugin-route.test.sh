@@ -96,12 +96,12 @@ mkdir -p "$SANDBOX/cases" "$SANDBOX/out" "$SANDBOX/work" "$SANDBOX/repos" || exi
 # 1. ToolkitRoot: a copy of the tree at a cache-shaped path
 # ===========================================================================
 # The parts a partial reads: partials, templates, ETHOS.md and the two tool
-# directories; plus workflows/ and .claude-plugin/, which /init and
+# directories; plus workflows/, agents/ (REQ-666 BR-8) and .claude-plugin/, which /init and
 # /template-drift read. Test trees and bytecode are dropped, except workflows/tests,
 # which a real cache copy carries and /init must not vendor.
 mk_root_copy() { # mk_root_copy <dir>
   mkdir -p "$1/tools" \
-    && cp -R "$TOOLKIT/partials" "$TOOLKIT/templates" "$TOOLKIT/workflows" "$TOOLKIT/.claude-plugin" "$1/" \
+    && cp -R "$TOOLKIT/partials" "$TOOLKIT/templates" "$TOOLKIT/workflows" "$TOOLKIT/agents" "$TOOLKIT/.claude-plugin" "$1/" \
     && cp "$TOOLKIT/ETHOS.md" "$1/" \
     && cp -R "$TOOLKIT/tools/adlc" "$TOOLKIT/tools/delegate" "$1/tools/" \
     && rm -rf "$1/partials/tests" "$1/tools/adlc/tests" "$1/tools/delegate/tests" \
@@ -523,8 +523,9 @@ check "case_template_drift_names_plugin_version: same baseline through the point
   "baseline: adlc plugin $TDV ($TDROOT)" "$(out_of td-pointer)"
 no_skills_reads td-pointer
 
-# The Context fence that replaced the `!` line listing the toolkit templates.
-skill_fence "$TD_MD" "**Toolkit templates dir" | as_plugin "$TDROOT" > "$SANDBOX/cases/td-context.sh"
+# The context fence that replaced the `!` line listing the toolkit templates
+# (REQ-666 BR-2 merged it into the skill's one `# adlc-context` fence).
+skill_fence "$TD_MD" "## Context" | as_plugin "$TDROOT" > "$SANDBOX/cases/td-context.sh"
 run_fence td-context "$TDW" "$H"
 check "case_template_drift_names_plugin_version: Context fence names ToolkitRoot" "ToolkitRoot: $TDROOT" "$(line_of td-context ToolkitRoot:)"
 check "case_template_drift_names_plugin_version: Context fence lists ToolkitRoot's templates" "requirement-template.md" \

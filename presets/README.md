@@ -18,7 +18,7 @@ cp "$ADLC_TOOLKIT_ROOT/presets/ios-firebase-cloudrun.yml" .adlc/config.yml
 $EDITOR .adlc/config.yml
 ```
 
-The first line is the toolkit's canonical root line. It sets `ADLC_TOOLKIT_ROOT` to the installed toolkit: on the symlink route the clone that `install.sh` links into `~/.claude`, and on the plugin route the plugin's cache copy (read from `~/.claude/adlc/plugin-root`, which the plugin's session hook writes).
+The first line is the toolkit's canonical root line. It sets `ADLC_TOOLKIT_ROOT` to the installed toolkit: on the symlink route the clone that `install.sh` links into `~/.claude`, and on the plugin route the plugin's cache copy (read from `~/.claude/adlc/plugin-root`, which the plugin's session hook writes). <!-- adlc-home: alias -->
 
 Replace every `<placeholder>` with a real value (project name, GCP project IDs, repo paths, device names). Don't leave placeholders in — skills will fail loudly when they try to use them, but it's faster to just fill them in up front.
 

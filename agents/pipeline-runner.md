@@ -23,7 +23,7 @@ echo "$ADLC_TOOLKIT_ROOT"
 You are running as a subagent. **You CANNOT dispatch sub-agents.** All work must be done sequentially in your own context. This means:
 
 - **Phase 4 (Implement)**: Execute tasks ONE AT A TIME, not in parallel. Follow the dependency order, but implement each task sequentially.
-- **Phase 5 (Verify)**: Run the review and reflection checklists INLINE in your own context. Do not attempt to launch reviewer or reflector agents. Use the checklists below.
+- **Phase 5 (Verify)**: Run the review and reflection checklists INLINE in your own context. Do not attempt to launch reviewer or reflector agents. Use the checklists below, and each agent's full checklist from `.adlc/agents/<name>.md` in the worktree; when `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it and read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` instead. Never improvise a checklist (REQ-666 BR-3, BR-4).
 
 ## Worktree Isolation
 
@@ -55,7 +55,7 @@ Read the spec's frontmatter `lane` at Step 0. A missing `lane` means `full`: run
 - **Step 0**: as above, plus the lane read: record the `lane` object in state, write `status: approved`, record Phases 1–3 as skipped (`"skipped": "lite"`), and mark any sibling repo untouched (a lite REQ is single-repo).
 - **Phases 1–3**: skipped, recorded at Step 0, not run.
 - **Phase 4, Implement**: a fresh retrieval for the surfaces about to be touched, then implement straight from the spec's acceptance criteria (no task files), commit with `[REQ-xxx]`, and run the project's gates.
-- **Phase 5, Verify**: run the `agents/lite-reviewer.md` checklist inline (you cannot dispatch it) over the diff against `origin/<integrationBranch>`, the spec, and the fresh retrieval set. A non-empty `reversals:` section escalates (trigger `reversal`), and so does a non-empty `out_of_lane:` (trigger `implementer`). A non-empty `questions:` needs an operator you do not have: report `blocked` with the questions, as for a reflector question. Fix the rest in one pass (`unmet` and `partial` rows in `coverage` are must-fix), push, then run the lane check.
+- **Phase 5, Verify**: run the `lite-reviewer` checklist inline from `.adlc/agents/lite-reviewer.md` (you cannot dispatch it; `$ADLC_TOOLKIT_ROOT/agents/lite-reviewer.md` when `.adlc/agents/` is absent) over the diff against `origin/<integrationBranch>`, the spec, and the fresh retrieval set. A non-empty `reversals:` section escalates (trigger `reversal`), and so does a non-empty `out_of_lane:` (trigger `implementer`). A non-empty `questions:` needs an operator you do not have: report `blocked` with the questions, as for a reflector question. Fix the rest in one pass (`unmet` and `partial` rows in `coverage` are must-fix), push, then run the lane check.
 - **Phases 6–8**: as above, with the lite PR body, a lane check at the end of Phase 7 if it committed, a lane check immediately before the Phase 8 trial merge, and another after any bounded keep-both resolution commit.
 
 **You are unattended.** No operator is present to answer a question, so a failed lane check **escalates** — on a triaged-lite REQ and on a forced-lite REQ alike — with actor `sprint-runner`. A forced-lite failure, which halts a solo `/proceed` (its legitimate halt #4), **never** ends your run as `blocked` (BUG-207, LESSON-626). Escalation follows `proceed/phases-lite.md` "Escalation": spec `lane: "full"` plus `lane_escalated`, a `lane.escalations` entry, `completedPhases` trimmed to `[0]`, and you continue at Phase 1 of the full lane on the same branch, worktree and PR.
@@ -154,8 +154,6 @@ worktree. Record `harness` at Step 0, each validation attempt, and the Phase-5
 findings exactly as `/proceed`'s **Run-outcome telemetry** section says: in
 subagent mode those records are yours to write too. The wrapper always exits
 0, so it cannot change your terminal.
-
-**Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
