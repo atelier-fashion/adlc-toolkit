@@ -4,7 +4,7 @@ title: "Harness adapter framework — shipping the `claude` adapter only"
 status: complete
 deployable: false
 created: 2026-10-27
-updated: 2026-10-29
+updated: 2026-10-30
 component: "adlc/toolkit"
 domain: "adlc"
 stack: ["python", "yaml", "sh", "markdown", "json"]
@@ -418,6 +418,7 @@ _Permissions: not applicable — single-user machine tooling and project files. 
 
 ## Deferred
 
+- **The `startup|resume|clear` matcher (unverified live, ASSUME-013).** The session-start group relies on Claude Code reading a plain pipe-separated matcher as alternatives; supported by the 2.1.258 bundle, not yet seen in a live trusted session.
 - **`SubagentStart` on `claude` (unverified).** The event exists in Claude Code 2.1.258's hook schema (checked offline in the installed binary), but nothing confirms that a plain-stdout command reaches a subagent's context through it, and no live run was possible. Flipping `subagent_start_hook` to `yes` needs a live check and an `ethos-inject` variant that emits `hookSpecificOutput.additionalContext` JSON; until then subagents keep the skill `!` line and the dispatch prompt (plan M6).
 - **AC-15's grep, scoped (implementation note).** `grep -rn 'if harness == ' tools/adlc` matches REQ-664's probe catalogue (`tools/adlc/harness_probe.py`) and its test double, which exercise each harness's own behaviour by design and are not renderers. None of the framework's modules matches; `tools/adlc/tests/test_harness_framework.py::test_no_renderer_branches_on_a_harness_name` holds that. Moving the probe's per-harness spellings into data is REQ-664's to decide.
 - **AC-17's `claude` user-scope clause (implementation note).** `claude` declares no user-scope permissions path (BR-3: its allowlist travels in the project layer) and `deny_tier_render: {project: confirm}` only (BR-6), so `adlc harness render --harness claude --scope user` writes nothing and prints a render with no routine entry and no fence, every deny entry `deny-unsupported`. The deny-tier-only write is exercised on a fixture adapter that declares a user path and a user mechanism (architecture ADR-8).
