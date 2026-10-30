@@ -40,6 +40,8 @@ CHECK = "no-harness-path"
 FILE_EXCEPTIONS = ("tools/adlc/checks.py", "tools/lint-skills/check.py")
 # REQ-666 ADR-5: the harness probe edits the other harnesses' user files by design.
 PROBE_EXCEPTION = "tools/adlc/harness_probe.py"
+# REQ-660 BR-9: the transcript walk reads the other harnesses' session stores by design.
+TRANSCRIPT_EXCEPTION = "partials/session-transcript.sh"
 
 # spellings/<file> -> the one flagged spelling it holds, on line 3.
 SPELLING_FIXTURES = {
@@ -277,7 +279,8 @@ def test_exception_literals_track_their_sources():
         by_kind.setdefault(e.kind, []).append(e.value)
     assert set(by_kind) == {"line", "token", "file", "comment", "tree", "marker"}
     assert by_kind["marker"] == ["adlc-home"]  # REQ-666 ADR-5: one marker, both checks
-    assert by_kind["line"] == [check.TOOLKIT_ROOT_LINE, check.PROBE_PROJECT_SKILLS_LINE]
+    assert by_kind["line"] == [
+        check.TOOLKIT_ROOT_LINE, check.HOOK_ROOT_LINE, check.PROBE_PROJECT_SKILLS_LINE]
     # REQ-664's line is the probe's, verbatim: drift there is a finding, not a pass.
     probe = (Path(__file__).resolve().parents[2] / "adlc" / "harness_probe.py")
     assert check.PROBE_PROJECT_SKILLS_LINE in probe.read_text(encoding="utf-8").splitlines()
@@ -285,7 +288,7 @@ def test_exception_literals_track_their_sources():
     token, adlc_home_token = by_kind["token"]
     assert check.PARTIAL_SOURCE_OPERAND.startswith(token)
     assert adlc_home_token == "${ADLC_HOME:-$HOME/.claude}"  # REQ-666 BR-13
-    assert by_kind["file"] == ["install.sh", *FILE_EXCEPTIONS, PROBE_EXCEPTION]
+    assert by_kind["file"] == ["install.sh", *FILE_EXCEPTIONS, PROBE_EXCEPTION, TRANSCRIPT_EXCEPTION]
     assert by_kind["tree"] == ["tests", "fixtures"]
 
 
@@ -371,7 +374,7 @@ def test_wired_into_run_and_main(tmp_path, capsys):
 def test_repo_root_clean_and_every_surface_scanned():
     scan = _scan(REPO_ROOT)
     assert scan.findings == [], "\n".join(f.format() for f in scan.findings)
-    assert scan.excepted == tuple(sorted(FILE_EXCEPTIONS + (PROBE_EXCEPTION,)))
+    assert scan.excepted == tuple(sorted(FILE_EXCEPTIONS + (PROBE_EXCEPTION, TRANSCRIPT_EXCEPTION)))
     # Floors from the tree this check landed on: 17 skills, 19 agents, 13 shell
     # partials. A walk that lost most of a family fails here, not only an empty one.
     assert scan.surfaces["*/SKILL.md"] >= 17
@@ -396,6 +399,32 @@ def test_repo_presets_and_templates_are_read_without_the_comment_exemption():
     old = preset.replace('"$ADLC_TOOLKIT_ROOT/presets/', "~/.claude/skills/presets/")
     findings = check.toolkit_path_findings(old, "presets/ios-firebase-cloudrun.yml")
     assert [f.line for f in findings] == [preset.splitlines().index(copy) + 1]
+
+
+# --- partials/session-transcript.sh: the whole-file exception, held to its purpose ---
+
+def test_session_transcript_exception_names_only_its_three_roots():
+    """REQ-660 BR-9: the exception exists for these roots and no others. Cursor has
+    no root (OQ-3), and a second path in this file would pass no-harness-path."""
+    text = (REPO_ROOT / TRANSCRIPT_EXCEPTION).read_text(encoding="utf-8")
+    comments = check._toolkit_path_comment_lines(text, TRANSCRIPT_EXCEPTION)
+    named = [m.group(0) for lineno, line in enumerate(text.splitlines(), 1)
+             if lineno not in comments
+             for m in re.finditer(r"""\.(?:codex|copilot|gemini|cursor)[^"'\s]*""", line)]
+    assert named == [".codex/sessions/", ".copilot/session-state/", ".gemini/tmp/"]
+    assert not [s for s in check.TOOLKIT_PATH_SPELLINGS if s in text]
+
+
+def test_session_transcript_stays_on_the_adlc_home_check():
+    """LESSON-749: no-harness-path sets this file aside, so nothing defers a line to
+    it. The Claude root stays clean only by its marker, and a toolkit path is reported."""
+    text = (REPO_ROOT / TRANSCRIPT_EXCEPTION).read_text(encoding="utf-8")
+    assert check.adlc_home_findings(text, TRANSCRIPT_EXCEPTION) == []
+    unmarked = text.replace("  # adlc-home: claude-code", "")
+    assert [f.check for f in check.adlc_home_findings(unmarked, TRANSCRIPT_EXCEPTION)] == ["adlc-home"]
+    line = 'cat ~/.claude/skills/x\n'
+    assert check.toolkit_path_findings(line, TRANSCRIPT_EXCEPTION) == []
+    assert [f.check for f in check.adlc_home_findings(line, TRANSCRIPT_EXCEPTION)] == ["adlc-home"]
 
 
 # --- tools/adlc/checks.py: the whole-file exception, held to its purpose ------

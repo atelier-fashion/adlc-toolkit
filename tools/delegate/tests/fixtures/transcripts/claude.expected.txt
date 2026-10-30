@@ -1,0 +1,5 @@
+## Human
+Run this exact Bash command once: echo "fixture capture: tool result text" . Then reply with exactly this sentence and nothing else: The command printed the fixture line.
+
+## Assistant
+The command printed the fixture line.

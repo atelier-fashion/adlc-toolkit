@@ -328,7 +328,7 @@ Three things the toolkit depends on have no cross-harness standard: agent defini
 | Source | What it holds | What `claude` renders it into |
 |---|---|---|
 | `templates/permissions.yml` | the **routine** tier (what may be pre-approved) and the **deny** tier (the one-way moves: force-push, `gh pr merge`, `rm -rf`, deploys, `terraform`) | `.claude/settings.json` `allow`, and `ask` for the deny tier, so a person confirms each one-way move |
-| `templates/hooks.yml` | `ethos-inject` (prints `.adlc/ETHOS.md` at session start and after compaction) and `session-record` | the `hooks` block of `.claude/settings.json`, which Copilot CLI and Cursor also read |
+| `templates/hooks.yml` | `ethos-inject` (prints `.adlc/ETHOS.md` at session start and after compaction) and `session-record` (writes the gitignored session sidecar `.adlc/.session/<id>`, which `/wrapup` reads first when it finds the session transcript, then flattens with `extract-chat --format <harness>`) | the `hooks` block of `.claude/settings.json`, which Copilot CLI and Cursor also read |
 | `agents/*.md` | the agent checklists | stamped in place (`model:`); copy harnesses get rendered copies |
 | `templates/instructions/` | `AGENTS.md`, the instruction file every harness reads | `CLAUDE.md` gains an `@AGENTS.md` import and keeps its own lines |
 

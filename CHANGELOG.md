@@ -40,6 +40,31 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **Session sidecar and multi-harness transcript discovery (REQ-660).** Phase 5 of the
+  multi-harness plan. The `session-record` hook now writes `.adlc/.session/<id>` (mode
+  600, gitignored, pruned at 30 days) with the harness, session id, transcript path,
+  working tree and start time. `/wrapup` Step 4 reads those sidecars first, then the
+  Claude, Codex, Copilot and Gemini roots, and accepts a transcript only if it holds
+  the mark this run printed. `extract-chat --format claude|codex|copilot|gemini|cursor`
+  names the record shape: `claude` is proven by a real fixture, and the other four
+  refuse until a real transcript can be captured, so `/wrapup` drafts from the
+  conversation rather than parse a guessed shape.
+  - **The rendered hooks never ran.** Claude Code 2.1.258 does not run a project hook
+    whose command holds the literal braced plugin-root token, and every REQ-657 render
+    carried it, silently. `templates/hooks.yml` now spells the variable unbraced, and
+    `unguarded-source` refuses the braced form in a hook.
+  - **`extract-chat` leaked injected context.** Claude Code's `api-request-blob` records
+    carry a user-role `message` holding injected `<system-reminder>` text, which came
+    out as `## Human` sections and went to the delegate. A record whose `type` is
+    neither `user` nor `assistant` is now dropped.
+  - **Lint.** New `session-gitignore` check; `TOOLKIT_PATH_EXCEPTIONS` gains
+    `HOOK_ROOT_LINE` and `partials/session-transcript.sh`.
+  - **Re-sync (required).** Re-render `.claude/settings.json` with
+    `adlc harness render --harness claude --force`, re-run `/init` for the
+    `.adlc/.session/` gitignore line, and refresh vendored partials with
+    `/template-drift`. Until then a stale `session-transcript.sh` keeps Claude-only
+    discovery and a stale render runs no hooks.
+
 - **Copilot CLI and Cursor harness adapters (REQ-656).** `harness/copilot.yml` renders
   user-level agents, `.github/hooks/adlc.json` and one printed `--allow-tool …
   --deny-tool …` line; `harness/cursor.yml` renders `.cursor/cli.json` and
@@ -54,6 +79,7 @@ is cut per `RELEASING.md`.
   Schema version 2 adds four optional adapter fields; `harness/claude.yml` is unchanged.
   `adlc harness drift` gains `--opted-in`, `adlc harness render` gains `--write-goldens`,
   and `render --scope user` writes a copy harness's agents.
+
 - **Harness adapter framework, shipping the `claude` adapter (REQ-657).** Phase 2a of
   the multi-harness plan. A harness is a data file, `harness/<name>.yml`, loaded by
   one stdlib loader and rendered by one module; nothing branches on a harness name.
@@ -77,7 +103,8 @@ is cut per `RELEASING.md`.
   - **`/init --harness <name>[,…]`** renders the project layer (default `claude`)
     and writes `AGENTS.md`; an existing `CLAUDE.md` only gains `@AGENTS.md`.
     `/template-drift` reports the `harness-config` surface.
-  - **Re-sync (expected).** A consumer whose `.claude/settings.json` came from the old
+  - **Re-sync (required).** A hook rendered before REQ-660 never runs (below), so
+    re-render it. A consumer whose `.claude/settings.json` came from the old
     template reports `harness-config` as `stale` for the missing `hooks` block only:
     no pre-approved command is gained or lost. Re-render with
     `adlc harness render --harness claude --force`, or add the hooks by hand. Claude

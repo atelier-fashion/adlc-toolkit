@@ -94,12 +94,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject",
+            "command": "ADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/session-record.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\" ] || exit 0\nif [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\"; fi\nadlc_session_record",
+            "command": "ADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/session-record.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\" ] || exit 0\nif [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\"; fi\nadlc_session_record",
             "timeout": 10
           }
         ]
@@ -109,7 +109,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject",
+            "command": "ADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject",
             "timeout": 10
           }
         ]

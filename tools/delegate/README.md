@@ -304,6 +304,29 @@ adlc-write --spec "..." --context ref.py --target out.py --force   # overwrite a
 extract-chat ~/.claude/projects/<proj>/<session>.jsonl -o /tmp/chat.txt
 ```
 
+### Transcript formats (`extract-chat --format`)
+
+`/wrapup` chooses the format from the session sidecar `.adlc/.session/<id>`, which the
+`session-record` hook writes, or from the harness root the transcript was found under.
+
+`--format` names the harness that wrote the transcript. It accepts `claude`,
+`codex`, `copilot`, `gemini` and `cursor`; omitting it means `claude`, so every
+existing call is unchanged. An unknown value exits 2 and names the accepted values.
+
+**Only `claude` is proven.** A format gets a parser only with a transcript captured
+from a real session on that harness, kept in `tests/fixtures/transcripts/` with its
+expected output and a provenance note. The other four values exist so `/wrapup` can
+pass a session's harness through unchanged: each exits 1 with one stderr line,
+before the input is opened, and writes nothing to `-o`. `cursor` is not an alias of
+`claude`, because that alias is a claim a fixture has to prove.
+
+The output is `## Human` and `## Assistant` sections. Tool calls, tool results,
+images, data URIs and raw base64 are dropped. So is any record whose `type` is
+present and is neither `user` nor `assistant`, before its `message` is read: Claude
+Code's `api-request-blob` records hold injected context in a user-role `message`,
+which would otherwise come out as `## Human` text. A record with no `type` still
+parses.
+
 ### Output budget (`--max-tokens`)
 
 Both delegate CLIs default `--max-tokens` to **20000**, from one shared constant
