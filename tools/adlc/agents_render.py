@@ -162,7 +162,75 @@ def parse_agents_config(path=None):
             continue
         k, _, v = stripped.partition(":")
         out[cur_sub][k.strip()] = _strip_inline(v)
+    _parse_harness_columns(lines, out)
     return out
+
+
+#: The sub-keys `agents:` may hold (REQ-657 BR-5). Anything else is refused, never
+#: silently ignored.
+_AGENTS_SUBKEYS = ("classes", "overrides", "harness")
+
+
+def _parse_harness_columns(lines, out):
+    """Add ``out["harness"]`` (REQ-657 BR-5) when the ``agents:`` block has one.
+
+    The block is re-read with the adapter framework's closed YAML subset, so an
+    unknown sub-key under ``agents:`` (or under ``agents.harness.<name>``) is an
+    error naming the key, carried in ``out["_error"]`` and raised by
+    :func:`validate_config`. A config without a ``harness:`` block is returned
+    unchanged, so every agent resolves exactly as before.
+    """
+    block = []
+    inside = False
+    for raw in lines:
+        stripped = raw.strip()
+        if not inside:
+            if stripped == "agents:" and not raw[:1].isspace():
+                inside = True
+                block.append("agents:")
+            continue
+        if stripped and not stripped.startswith("#") and not raw[:1].isspace():
+            break
+        block.append(raw)
+    if not inside:
+        return
+    import harness_yaml  # sibling, pure stdlib
+    try:
+        parsed = harness_yaml.loads("\n".join(block), "agents:")
+    except harness_yaml.YamlError as exc:
+        out["_error"] = "the agents: block is outside the supported syntax: %s" % exc
+        return
+    agents = parsed.get("agents") if isinstance(parsed, dict) else None
+    if not isinstance(agents, dict):
+        return
+    for key in agents:
+        if key not in _AGENTS_SUBKEYS:
+            out["_error"] = ("agents.%s: unknown sub-key (allowed: classes, overrides, "
+                             "harness.<name>.classes, harness.<name>.overrides)" % key)
+            return
+    if "harness" not in agents:
+        return
+    columns = {}
+    harnesses = agents["harness"]
+    if not isinstance(harnesses, dict):
+        out["_error"] = "agents.harness: must map a harness name to classes/overrides"
+        return
+    for name, col in harnesses.items():
+        if not isinstance(col, dict):
+            out["_error"] = "agents.harness.%s: must hold classes: and/or overrides:" % name
+            return
+        entry = {"classes": {}, "overrides": {}}
+        for sub, values in col.items():
+            if sub not in ("classes", "overrides"):
+                out["_error"] = ("agents.harness.%s.%s: unknown sub-key (allowed: classes, "
+                                 "overrides)" % (name, sub))
+                return
+            if not isinstance(values, dict):
+                out["_error"] = "agents.harness.%s.%s: must be a mapping" % (name, sub)
+                return
+            entry[sub] = {k: str(v) for k, v in values.items()}
+        columns[name] = entry
+    out["harness"] = columns
 
 
 # --------------------------------------------------------------------------
@@ -185,6 +253,26 @@ def validate_config(config):
     ignored — also a fail-loud condition).
     """
     allowed = ", ".join(_ALIASES) + " (or a full model id like claude-opus-4-8)"
+    if config.get("_error"):
+        raise ConfigError(config["_error"])
+    for name, col in config.get("harness", {}).items():
+        for cls, value in col.get("classes", {}).items():
+            if cls not in _CLASSES:
+                raise ConfigError(
+                    f"agents.harness.{name}.classes: unknown tier class '{cls}'. "
+                    f"Allowed classes: {', '.join(_CLASSES)}."
+                )
+            if not _value_ok(value):
+                raise ConfigError(
+                    f"agents.harness.{name}.classes.{cls}: invalid model alias '{value}'. "
+                    f"Allowed: {allowed}."
+                )
+        for agent, value in col.get("overrides", {}).items():
+            if not _value_ok(value):
+                raise ConfigError(
+                    f"agents.harness.{name}.overrides.{agent}: invalid model alias "
+                    f"'{value}'. Allowed: {allowed}."
+                )
     for cls, value in config.get("classes", {}).items():
         if cls not in _CLASSES:
             raise ConfigError(
@@ -207,8 +295,20 @@ def validate_config(config):
 # --------------------------------------------------------------------------
 # Resolution (BR-2 precedence: override > class > shipped default)
 # --------------------------------------------------------------------------
-def resolve_model(agent, config):
-    """Resolve ``agent``'s model: override > class mapping > shipped default."""
+def resolve_model(agent, config, harness=None):
+    """Resolve ``agent``'s model: override > class mapping > shipped default.
+
+    With ``harness`` (REQ-657 BR-5) its column comes first: H's override > H's
+    class > default override > default class > shipped default. A harness with no
+    column resolves exactly as the default.
+    """
+    column = config.get("harness", {}).get(harness) if harness else None
+    if column:
+        if agent in column.get("overrides", {}):
+            return column["overrides"][agent]
+        tier = _SHIPPED_DEFAULTS[agent][0]
+        if tier in column.get("classes", {}):
+            return column["classes"][tier]
     overrides = config.get("overrides", {})
     if agent in overrides:
         return overrides[agent]
@@ -351,7 +451,87 @@ def check_drift(root, config=None):
 
 
 # --------------------------------------------------------------------------
-# CLI entry — `adlc agents render [--check] [--config PATH] [--root PATH]`
+# Copy renders for other harnesses (REQ-657 BR-4, ADR-9)
+# --------------------------------------------------------------------------
+def harness_model(adapter, resolved, notices):
+    """The model id a copy carries, or ``None`` to omit ``model:`` (BR-5)."""
+    if resolved == "inherit":
+        return None
+    if resolved in _ALIASES:
+        mapped = adapter["tier_map"].get(resolved, "unverified")
+        if mapped == "unverified":
+            notice = (f"{adapter['name']}: tier_map {resolved} is unverified — model: omitted "
+                      f"for agents that resolve to it")
+            if notice not in notices:
+                notices.append(notice)
+            return None
+        return mapped
+    return resolved  # a full model id from the escape hatch, written as-is
+
+
+def _copy_dir(adapter):
+    import harness_adapter
+    spec = adapter["paths"]["agents"]
+    return harness_adapter.expand_user_path(spec["user"])
+
+
+def plan_copies(adapter, root, config):
+    """``[(agent, path, text)]`` for every canonical agent, plus stderr notices."""
+    import harness_render
+    validate_config(config)
+    notices = []
+    out = []
+    dest = _copy_dir(adapter)
+    for name, path in _iter_agents(root):
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        model = harness_model(adapter, resolve_model(name, config, adapter["name"]), notices)
+        rendered = harness_render.render_agent_copy(adapter, name, text, model, notices)
+        out.append((name, os.path.join(dest, name + ".md"), rendered))
+    return out, notices
+
+
+def render_copies(adapter, root, config, write=True):
+    """Write the copies atomically; ``[(agent, path, changed)]``. Idempotent."""
+    plans, notices = plan_copies(adapter, root, config)
+    for notice in notices:
+        sys.stderr.write(notice + "\n")
+    report = []
+    for name, path, text in plans:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                current = fh.read()
+        except FileNotFoundError:
+            current = None
+        changed = current != text
+        if changed and write:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            _atomic_write(path, text)
+        report.append((name, path, changed))
+    return report
+
+
+def check_copy_drift(adapter, root, config=None):
+    """``[(agent, why)]`` where a copy differs from a fresh render. Read-only."""
+    if config is None:
+        config = parse_agents_config()
+    plans, _notices = plan_copies(adapter, root, config)
+    drift = []
+    for name, path, text in plans:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                current = fh.read()
+        except FileNotFoundError:
+            drift.append((name, "missing"))
+            continue
+        if current != text:
+            drift.append((name, "differs"))
+    return drift
+
+
+# --------------------------------------------------------------------------
+# CLI entry — `adlc agents render [--check] [--config PATH] [--root PATH]
+#                                 [--harness NAME] [--adapter-path FILE]`
 # --------------------------------------------------------------------------
 def _repo_root():
     """Toolkit checkout root, resolving through the skills symlink via git."""
@@ -378,6 +558,11 @@ def main(argv=None):
                           help="report drift only; write nothing (non-zero exit on drift)")
     p_render.add_argument("--config", default=None, help="path to config.yml")
     p_render.add_argument("--root", default=None, help="toolkit checkout root")
+    p_render.add_argument("--harness", default=None,
+                          help="render for this harness's adapter (default: the in-place "
+                               "stamp Claude Code's agents mount serves)")
+    p_render.add_argument("--adapter-path", default=None,
+                          help="load a test-only adapter from this file (REQ-657 BR-1)")
 
     ns = parser.parse_args(argv)
     if ns.action != "render":
@@ -385,6 +570,41 @@ def main(argv=None):
         return 2
 
     root = ns.root or _repo_root()
+    if ns.harness or ns.adapter_path:
+        import harness_adapter
+        try:
+            adapter = harness_adapter.resolve_adapter(ns.harness, ns.adapter_path)
+        except harness_adapter.AdapterError as exc:
+            sys.stderr.write(f"adlc agents render: {exc}\n")
+            return 2
+        spec = adapter["paths"].get("agents", {})
+        mode = spec.get("mode", "unsupported")
+        if mode == "rendered" and "user" in spec:
+            try:
+                config = parse_agents_config(ns.config)
+                if ns.check:
+                    drift = check_copy_drift(adapter, root, config)
+                    if drift:
+                        sys.stderr.write(f"agent copy drift for {adapter['name']}:\n")
+                        for name, why in drift:
+                            sys.stderr.write(f"  {name}: {why}\n")
+                        return 1
+                    print(f"no agent copy drift for {adapter['name']}")
+                    return 0
+                report = render_copies(adapter, root, config, write=True)
+            except ConfigError as exc:
+                sys.stderr.write(f"adlc agents render: {exc}\n")
+                return 2
+            changed = [r for r in report if r[2]]
+            for name, path, _c in changed:
+                print(f"  {name}: {path}")
+            print(f"rendered {len(report)} agents for {adapter['name']}, {len(changed)} changed")
+            return 0
+        if mode != "mounted":
+            print(f"{adapter['name']}: agents surface is {mode} — nothing to render")
+            return 0
+        # mounted: the mount serves the canonical files, so this is the in-place
+        # stamp below, byte for byte (ADR-9).
     try:
         config = parse_agents_config(ns.config)
         if ns.check:

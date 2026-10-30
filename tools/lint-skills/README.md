@@ -722,6 +722,38 @@ a general markdown linter and NOT a general shell linter.
     (`arg-templating` covers bare `$<digit>` everywhere). Tests:
     `tests/test_skill_units.py`.
 
+## REQ-657: the harness adapter framework's checks
+
+- **`allowlist-fidelity`** renders `templates/permissions.yml` at project scope
+  through every shipped adapter (`harness/*.yml`) and prints one line per
+  `(harness, entry, command)`: `exact`, `widened:<spelling>`, `inexpressible`,
+  `deny-unsupported` or `residual:exact-deny` (there is no `narrowed`). It fails on a
+  non-`exact` verdict the adapter's `accepted_fidelity` does not list at that scope,
+  on a rendered allow that matches a deny-tier command (plain, `git -C . …`,
+  `NAME=1 …` or `bash -lc '…'`) in a shape whose `deny_under_allow` record is not a
+  valid pass, on a `source: probe` record that differs from REQ-664's result file
+  (`.adlc/research/harness-probes/<name>.json`), and on a `fence.partial-source`
+  rendered as a first-token wildcard. The report ends with the declared residuals.
+- **`render-parity`** calls the function `adlc harness render --check` calls and
+  reports every golden under `harness/<name>/rendered/` and every in-tree render
+  (the agents' `model:` lines, the toolkit's `.claude/settings.json`) that is
+  `drifted` or `missing-golden`.
+- **`unguarded-source`** also walks `templates/hooks.yml` and every committed hook
+  render, one hook-command line at a time.
+- **`retired-settings-template`** reports a skill, companion, agent, partial or
+  partial doc that still names the deleted Claude settings template.
+- **`sync-surface-parity`** knows the seventh surface, `harness-config`.
+
+<!-- declared-residuals -->
+**Declared residuals (REQ-657 BR-18).** Allowlist and prefix-deny matching cannot be made a gate, and the adapter framework does not pretend it can. `allowlist-fidelity` closes spellings, not this list:
+
+- Allowlist matching is spelling-level. The lint evaluates a closed set of spellings; a deny-tier command reached in any other spelling is not seen.
+- Allows that execute their arguments (`find -exec`, `awk`, `sed e`, `npx`, `npm run` / `npm exec`, `git rebase --exec`, `git fetch --upload-pack`) and `gh api` can reach a deny-tier command in a spelling the deny does not match.
+- Semantic equivalents of a deny-tier command (`git restore`, `git checkout -f`, `git worktree remove --force`, `gcloud` deploys, `npm publish`) are outside the deny tier.
+- This is the same exposure Claude's template has today (Rule A grandfathers it); no adapter makes it worse, and none claims to close it.
+- The allowlist is never the gate (Rule B). The orchestrator's structural gates (REQ-659) are.
+<!-- /declared-residuals -->
+
 ## Skill units and companions (REQ-661)
 
 A skill **unit** is a `SKILL.md` and its companions: `<skill>/references/*.md`

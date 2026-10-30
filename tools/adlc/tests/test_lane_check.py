@@ -297,6 +297,8 @@ _BLOCKED_EXAMPLES = [
     ".adlc/tools/adlc/lane_check.py", ".adlc/workflows/adlc-sprint.workflow.js",
     ".adlc/agents/reflector.md", ".github/agents/x.md", ".github/hooks/adlc.json",
     ".claude/settings.json", ".claude/settings.local.json", ".claude/agents/x.md",
+    "harness/claude.yml", "harness/claude/rendered/settings.json",
+    "templates/permissions.yml", "templates/hooks.yml",
     ".mcp.json", "CLAUDE.md", "AGENTS.md",
     # git hooks and package-manager config
     ".husky/pre-commit", ".githooks/pre-push", ".pre-commit-config.yaml",
@@ -346,6 +348,44 @@ def test_req666_blocked_globs(glob, path):
     assert lc.glob_match(path, glob, ignore_case=True)
     _counted, failures = lc.evaluate([path], lc.effective_config())
     assert ("blocked-path", path) in failures
+
+
+# REQ-657 BR-14 / AC-12: the four paths this REQ adds, each blocking a lite PR,
+# and the CI and harness-config globs pinned as present whatever this REQ does.
+_REQ657_BLOCKED = [
+    ("harness/**", "harness/claude.yml"),
+    ("harness/**", "harness/claude/rendered/settings.json"),
+    ("templates/permissions.yml", "templates/permissions.yml"),
+    ("templates/hooks.yml", "templates/hooks.yml"),
+    (".claude/settings*.json", ".claude/settings.json"),
+]
+REQ657_ADDED = ("harness/**", "templates/permissions.yml", "templates/hooks.yml",
+                ".claude/settings*.json")
+
+
+@pytest.mark.parametrize("glob, path", _REQ657_BLOCKED)
+def test_req657_blocked_globs(glob, path):
+    assert glob in lc.DEFAULT_BLOCKED_PATHS
+    assert lc.glob_match(path, glob, ignore_case=True)
+    _counted, failures = lc.evaluate([path], lc.effective_config())
+    assert ("blocked-path", path) in failures
+
+
+def test_req657_adds_only_its_four_paths():
+    """AC-12: the tuple gains exactly these four from REQ-657, and the CI and
+    harness-config globs it relies on were already present."""
+    for glob in REQ657_ADDED:
+        assert lc.DEFAULT_BLOCKED_PATHS.count(glob) == 1, glob
+    for glob in (".cursor/**", ".codex/**", ".gemini/**", ".github/**"):
+        assert glob in lc.DEFAULT_BLOCKED_PATHS, glob
+
+
+@pytest.mark.parametrize("path", ["templates/requirement-template.md", "harnesses.md",
+                                  "docs/harness/notes.md", "templates/permissions.md"])
+def test_req657_globs_do_not_overreach(path):
+    """Benign path: nearby files outside the four globs stay countable."""
+    _counted, failures = lc.evaluate([path], lc.effective_config())
+    assert ("blocked-path", path) not in failures
 
 
 def test_req666_globs_documented_in_lane_check_md():

@@ -579,8 +579,8 @@ def hook_config(harness: str, commands: Sequence[str]) -> Dict:
 
 #: The four routine classes, each an explicit entry list. Pinned by
 #: tests/test_harness_probe_pins.py as a subset of the routine allow entries of
-#: templates/claude-settings-template.json (templates/permissions.yml once REQ-657
-#: lands); never read at run time.
+#: the committed `claude` render of templates/permissions.yml (REQ-657); never read
+#: at run time.
 ROUTINE_SET: Dict[str, Tuple[str, ...]] = {
     "git read": ("git status", "git diff", "git log", "git show", "git branch",
                  "git merge-base", "git config --get"),

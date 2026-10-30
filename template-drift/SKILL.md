@@ -11,9 +11,10 @@ You are checking whether the project's local copies of every **vendored sync sur
 ## Vendored sync surfaces
 
 <!-- sync-surfaces: template-drift -->
-`/template-drift` checks drift on **all six** of these surfaces. The first five are physically copied
-into the project by `/init` (see `init/SKILL.md`'s matching `<!-- sync-surfaces: init -->` list); the
-sixth is a `/template-drift`-only check for a drift *symptom* `/init` deliberately does NOT copy.
+`/template-drift` checks drift on **all seven** of these surfaces. Six are written into the project
+by `/init` (see `init/SKILL.md`'s matching `<!-- sync-surfaces: init -->` list); the seventh,
+`workflow-test-landmine`, is a `/template-drift`-only check for a drift *symptom* `/init`
+deliberately does NOT copy.
 
 - `templates` — `.adlc/templates/*.md` vs `$ADLC_TOOLKIT_ROOT/templates/*.md` (Step 2, template-posture)
 - `partials` — `.adlc/partials/*.sh` vs `$ADLC_TOOLKIT_ROOT/partials/*.sh` (Step 3, partials-posture)
@@ -21,6 +22,7 @@ sixth is a `/template-drift`-only check for a drift *symptom* `/init` deliberate
 - `ethos` — `.adlc/ETHOS.md` vs `$ADLC_TOOLKIT_ROOT/ETHOS.md` (Step 3c, template-posture + missing-principle)
 - `workflow-runtime` — `.adlc/workflows/adlc-sprint.workflow.js` + `README.md` vs `$ADLC_TOOLKIT_ROOT/workflows/` (Step 3d, partials-posture)
 - `workflow-test-landmine` — stale `*.test.js`/`*.spec.js` under `.adlc/` from an older `/init` (Step 3b, always stale; template-drift-only)
+- `harness-config` — the rendered project layer (`.claude/settings.json`) vs a fresh `adlc harness render` (Step 3g, template-posture + missing deny-tier rule)
 <!-- /sync-surfaces -->
 
 **Cross-reference invariant (BR-4):** every surface `/init` copies MUST have a matching check here.
@@ -33,7 +35,7 @@ Adding a new vendored surface to `/init` without adding a check here is a silent
 
 ## Context
 
-This skill checks six vendored sync surfaces (see "Vendored sync surfaces" above): templates, partials, agents, ethos, workflow-runtime, and the workflow-test landmine.
+This skill checks seven vendored sync surfaces (see "Vendored sync surfaces" above): templates, partials, agents, ethos, workflow-runtime, the workflow-test landmine, and harness-config.
 
 Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
 
@@ -344,6 +346,24 @@ done
 
 If every file is `synced`, report `agents` as `clean` (one line). If `.adlc/agents/` does not exist, every agent prints `missing`; report the surface as `missing` and recommend `/init` (`/adlc:init` on the plugin install).
 
+### Step 3g: Detect Harness-Config Drift (the rendered allowlist and hooks)
+
+The seventh surface is the harness project layer `/init` Step 8 renders (REQ-657 BR-11): `.claude/settings.json`, from the toolkit's `templates/permissions.yml` and `templates/hooks.yml` through `harness/claude.yml`. It is **re-rendered, not diffed against a copy**: `adlc harness drift` renders the project layer fresh and compares it with the project's file by set, with **template posture**, because a project may legitimately add its own commands:
+
+- `synced` — every canonical rule and hook is present, and nothing else differs;
+- `customized` — nothing canonical is missing; the project added entries (named);
+- `stale` — something canonical is missing: a routine rule, the `defaultMode`, a hook, or the whole `hooks` block (a project initialised before REQ-657 shows exactly that, and nothing else);
+- `missing` — the file is absent.
+
+**Every deny-tier rule the project copy lacks is named explicitly, whatever the classification** (the REQ-525 "missing principle" rule applied to the allowlist): a missing `ask` entry means a one-way move that no longer stops for a person. The Step 0a baseline rules apply: the render is made from ToolkitRoot, so when Step 0a warned that the baseline is not clean and current, downgrade every `stale` here to `unverified-baseline` (BUG-204, BUG-203).
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" harness drift --harness claude
+```
+
+The command is read-only and exits 1 when anything is `stale` or `missing`. Its reconciliation is a re-render, never a hand copy: `adlc harness render --harness claude --force` overwrites the file (project additions are lost, so offer it only for a `stale` file and say so), or the user adds the named missing entries by hand.
+
 ### Step 3e: Classify Each Surface's Drift Across the Pipeline (promotion state)
 
 Per-branch results are not yet an answer. A surface stale on `main` but in sync on
@@ -401,7 +421,7 @@ When in doubt, classify as "needs human review" — do not silently reconcile.
 
 ### Step 5: Produce the Drift Report
 
-Read `template-drift/references/drift-report.md` and follow it before you continue. It holds the report's shape: the summary covering all six surfaces, the per-branch tables with their verdicts, and the per-file sections. Nothing in this file replaces it.
+Read `template-drift/references/drift-report.md` and follow it before you continue. It holds the report's shape: the summary covering all seven surfaces, the per-branch tables with their verdicts, and the per-file sections. Nothing in this file replaces it.
 
 ### Step 6: Offer Reconciliation Actions
 
@@ -410,7 +430,7 @@ Read `template-drift/references/reconciliation.md` and follow it before you cont
 ### Step 7: Recommend Follow-Up
 
 At the end of the report:
-- If all six surfaces are in sync or intentionally customized: "All vendored surfaces (templates, partials, agents, ethos, workflow runtime, workflow tests) are in sync or intentionally customized. No action needed."
+- If all seven surfaces are in sync or intentionally customized: "All vendored surfaces (templates, partials, agents, ethos, workflow runtime, workflow tests, harness config) are in sync or intentionally customized. No action needed."
 - If drift remains after user-approved actions: list what's still drifted (by surface) and suggest running `/template-drift` again after a toolkit update.
 - If intentional customizations were found (templates or ethos): remind the user to update their project CLAUDE.md or a project-local NOTES file so future toolkit updates don't accidentally overwrite them during a merge.
 - If a **missing ETHOS principle** was found and NOT reconciled: warn explicitly that every skill is running an outdated constitution until it is copied.
@@ -427,6 +447,6 @@ At the end of the report:
 
 - Use `diff -u` for readable unified diffs. Fall back to `git diff --no-index` if preferred.
 - `wc -l` on the diff output is a decent proxy for drift size, but prefer counting `^+` and `^-` lines excluding the `+++`/`---` headers.
-- When running under `/status`, this skill should produce a one-line summary only that still names **all six surfaces** (e.g. "Templates: 2 drifted, 1 missing. Partials: 1 stale, 0 missing. Agents: 1 stale, 0 missing. ETHOS: drifted (1 missing principle). Workflow runtime: 1 stale. Workflow tests: 1 stale (Jest landmine)."). A clean surface is shown as `clean` rather than dropped (BR-3 — never silently omit a surface). Detect this mode by checking whether the argument contains `--brief`. The "Workflow tests" clause may be omitted only when no landmine files are found; the other five surfaces are always reported (clean or drifted).
+- When running under `/status`, this skill should produce a one-line summary only that still names **all seven surfaces** (e.g. "Templates: 2 drifted, 1 missing. Partials: 1 stale, 0 missing. Agents: 1 stale, 0 missing. ETHOS: drifted (1 missing principle). Workflow runtime: 1 stale. Workflow tests: 1 stale (Jest landmine). Harness config: stale (hooks missing)."). A clean surface is shown as `clean` rather than dropped (BR-3 — never silently omit a surface). Detect this mode by checking whether the argument contains `--brief`. The "Workflow tests" clause may be omitted only when no landmine files are found; the other six surfaces are always reported (clean or drifted).
 - Partial comparison uses `diff -q` (quiet, exit-code-only) rather than `diff -u` because per-file unified diffs are not actionable for partials — the only remediation is "copy from toolkit". Show the diff only if the user asks for `--verbose`.
 - Do not invoke `/template-drift` recursively against the adlc-toolkit's own `.adlc/` (would always report drift against itself by construction).

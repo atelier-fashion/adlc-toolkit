@@ -39,27 +39,22 @@ def test_fence_byte_identical_to_partials_readme():
 
 
 def _routine_allow_entries():
-    perms = os.path.join(TOOLKIT, "templates", "permissions.yml")
-    template = os.path.join(TOOLKIT, "templates", "claude-settings-template.json")
-    if os.path.exists(template):
-        with open(template, encoding="utf-8") as fh:
-            return "claude", set(json.load(fh)["permissions"]["allow"])
-    # REQ-657 replaces the template with permissions.yml; this test is re-pointed
-    # in that change. Until then a textual membership check is the floor.
-    return "yml", open(perms, encoding="utf-8").read()
+    # REQ-657 deleted the settings template: the routine tier lives in
+    # templates/permissions.yml, and its committed `claude` render is the golden
+    # harness/claude/rendered/settings.json, which render-parity holds equal to it.
+    golden = os.path.join(TOOLKIT, "harness", "claude", "rendered", "settings.json")
+    with open(golden, encoding="utf-8") as fh:
+        return set(json.load(fh)["permissions"]["allow"])
 
 
 def test_routine_set_subset_of_template():
     """AC-7: the four classes are a subset of the routine allow entries."""
     assert list(hp.ROUTINE_SET) == ["git read", "git write", "gh read", "shell utilities"]
-    kind, source = _routine_allow_entries()
+    source = _routine_allow_entries()
     for cls, entries in hp.ROUTINE_SET.items():
         assert entries, cls
         for entry in entries:
-            if kind == "claude":
-                assert ("Bash(%s:*)" % entry in source or "Bash(%s)" % entry in source), entry
-            else:
-                assert entry in source, entry
+            assert ("Bash(%s:*)" % entry in source or "Bash(%s)" % entry in source), entry
     # The ask tier is never in the routine set (plan Rule B).
     flat = [e for c in hp.ROUTINE_SET.values() for e in c]
     assert not any("--force" in e or e.startswith("rm") or "merge" == e for e in flat)
@@ -127,6 +122,6 @@ def test_module_imports_only_stdlib():
         assert (builtin or in_stdlib) and not site, (name, origin)
         assert not os.path.realpath(origin).startswith(os.path.join(TOOLKIT, "tools")), name
     source = open(MODULE, encoding="utf-8").read()
-    for forbidden in ("permissions.yml\"", "claude-settings-template.json\"",
+    for forbidden in ("permissions.yml\"", "claude-settings-" + "template.json\"",
                       "partials/README.md\"", "intake.sh\""):
         assert forbidden not in source, forbidden

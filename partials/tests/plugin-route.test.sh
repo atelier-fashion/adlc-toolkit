@@ -101,7 +101,7 @@ mkdir -p "$SANDBOX/cases" "$SANDBOX/out" "$SANDBOX/work" "$SANDBOX/repos" || exi
 # which a real cache copy carries and /init must not vendor.
 mk_root_copy() { # mk_root_copy <dir>
   mkdir -p "$1/tools" \
-    && cp -R "$TOOLKIT/partials" "$TOOLKIT/templates" "$TOOLKIT/workflows" "$TOOLKIT/agents" "$TOOLKIT/.claude-plugin" "$1/" \
+    && cp -R "$TOOLKIT/partials" "$TOOLKIT/templates" "$TOOLKIT/workflows" "$TOOLKIT/agents" "$TOOLKIT/.claude-plugin" "$TOOLKIT/harness" "$1/" \
     && cp "$TOOLKIT/ETHOS.md" "$1/" \
     && cp -R "$TOOLKIT/tools/adlc" "$TOOLKIT/tools/delegate" "$1/tools/" \
     && rm -rf "$1/partials/tests" "$1/tools/adlc/tests" "$1/tools/delegate/tests" \
@@ -434,7 +434,9 @@ mkdir -p "$SYMHOME/.claude" && ln -s "$SYMROOT" "$SYMHOME/.claude/skills" || exi
 # ===========================================================================
 INIT_MD="$TOOLKIT/init/SKILL.md"
 for s in 6 7 8 9; do
-  skill_fence "$INIT_MD" "### Step $s:" > "$SANDBOX/init-step$s.fence"
+  # Step 8 carries the `--harness` placeholder (REQ-657 BR-11); with no flag in the
+  # argument the model writes '' for it, so the harness list defaults to claude.
+  skill_fence "$INIT_MD" "### Step $s:" | sed "s/'<harnesses>'/''/" > "$SANDBOX/init-step$s.fence"
   as_plugin "$CACHE" < "$SANDBOX/init-step$s.fence" > "$SANDBOX/cases/init-plugin-$s.sh"
   cp "$SANDBOX/init-step$s.fence" "$SANDBOX/cases/init-symlink-$s.sh"
 done

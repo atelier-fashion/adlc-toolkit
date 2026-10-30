@@ -9,7 +9,7 @@ Companion to `template-drift/SKILL.md` (REQ-661). Its Step 5 sends you here once
 
 ### Step 5: Produce the Drift Report
 
-Emit a summary table, then per-file detail. The report covers **all six surfaces** (templates, partials, agents, ethos, workflow-runtime, workflow-test-landmine). Templates and ethos classify drift as intentional/accidental (template-posture); partials and workflow-runtime classify drift only as `synced`/`stale`/`missing` (partials-posture); the workflow-test landmine is always `stale`. **Every surface gets a line even when clean** — a checked-and-clean surface is reported `clean`, never silently omitted (Ethos #5).
+Emit a summary table, then per-file detail. The report covers **all seven surfaces** (templates, partials, agents, ethos, workflow-runtime, workflow-test-landmine, harness-config). Templates, ethos and harness-config classify drift as intentional/accidental (template-posture); partials and workflow-runtime classify drift only as `synced`/`stale`/`missing` (partials-posture); the workflow-test landmine is always `stale`. **Every surface gets a line even when clean** — a checked-and-clean surface is reported `clean`, never silently omitted (Ethos #5).
 
 ```
 ## Template Drift Report — [date]

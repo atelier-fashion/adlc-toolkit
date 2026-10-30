@@ -40,6 +40,35 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **Harness adapter framework, shipping the `claude` adapter (REQ-657).** Phase 2a of
+  the multi-harness plan. A harness is a data file, `harness/<name>.yml`, loaded by
+  one stdlib loader and rendered by one module; nothing branches on a harness name.
+  - **Sources.** `templates/permissions.yml` (two tiers: `routine` and `deny`, the
+    one-way moves) replaces `templates/claude-settings-template.json`, which is
+    deleted; `templates/hooks.yml` holds `ethos-inject` and `session-record` (a stub
+    partial until REQ-660). The `claude` render reproduces the old template's
+    `allow`, `ask` and `defaultMode` sets and its `_comment`, withholds the
+    partial-sourcing fence (Rule A), and adds a `hooks` block. The golden render is
+    `harness/claude/rendered/settings.json`; the toolkit's own `.claude/settings.json`
+    is that render (it gains `git rev-parse`, `git for-each-ref`, `git diff-tree`,
+    `cat`, `grep` and the two `gcloud` reads it lacked, and the hooks).
+  - **Verbs.** `adlc harness render | install | doctor | drift`, `--adapter-path`
+    for test adapters, `adlc agents render --harness <name>` with per-harness tier
+    columns (`agents.harness.<name>.classes`), and the doctor check
+    `render-currency:<name>` with data-driven `doctor_rows`.
+  - **Lint.** `allowlist-fidelity`, `render-parity`, `retired-settings-template`, and
+    `unguarded-source` over the hook commands; `sync-surface-parity` gains
+    `harness-config`. The lane check blocks `harness/**`, both templates and
+    `.claude/settings*.json`.
+  - **`/init --harness <name>[,…]`** renders the project layer (default `claude`)
+    and writes `AGENTS.md`; an existing `CLAUDE.md` only gains `@AGENTS.md`.
+    `/template-drift` reports the `harness-config` surface.
+  - **Re-sync (expected).** A consumer whose `.claude/settings.json` came from the old
+    template reports `harness-config` as `stale` for the missing `hooks` block only:
+    no pre-approved command is gained or lost. Re-render with
+    `adlc harness render --harness claude --force`, or add the hooks by hand. Claude
+    Code applies a committed allowlist only in a trusted workspace (ASSUME-010).
+
 - **Progressive disclosure for oversized skills (REQ-661).** Phase P1b of the
   multi-harness plan. Every `SKILL.md` is now under the Agent Skills budget of 500
   lines, and stays there: `/proceed` 764 → 438, `/spec` 622 → 460 and

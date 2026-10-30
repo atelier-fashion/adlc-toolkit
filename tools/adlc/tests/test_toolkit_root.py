@@ -338,6 +338,16 @@ def _probe_data(name, value):
     return value in (harness_probe.FENCE, harness_probe.CLAUDE_PROJECT_SKILLS)
 
 
+def _adapter_surface_name(name, value):
+    """REQ-657: ``harness_adapter.py`` names ``skills`` as one of the five adapter
+    surfaces (a schema key, which every adapter declares ``mounted``), never as a
+    directory it reads. Only that exact module-level constant is exempt."""
+    if name != "harness_adapter.py" or value != "skills":
+        return False
+    import harness_adapter
+    return "skills" in harness_adapter.SURFACES
+
+
 def test_no_skills_dir_reads_outside_the_doctor_symlink_checks():
     """Only the doctor's symlink-route checks build a ``~/.claude/skills`` path.
 
@@ -352,7 +362,8 @@ def test_no_skills_dir_reads_outside_the_doctor_symlink_checks():
             continue
         for func, value in _code_strings(os.path.join(adlc_dir, name)):
             if (value == "skills" or ".claude/skills" in value) \
-                    and not _probe_data(name, value):
+                    and not _probe_data(name, value) \
+                    and not (func is None and _adapter_surface_name(name, value)):
                 hits.append((name, func))
     assert ("checks.py", "check_skills_symlink") in hits, "non-vacuity"
     assert [h for h in hits if h[0] != "checks.py"] == []
