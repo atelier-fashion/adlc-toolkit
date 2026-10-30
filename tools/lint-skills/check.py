@@ -60,14 +60,18 @@ order:
 * ``check_skills_ref`` (REQ-666 BR-11) — ``skills-ref validate`` on every skill
   when the validator is on PATH, over a staged copy without
   ``SKILLS_REF_HARNESS_KEYS``; one SKIP line when it is not.
+* ``check_session_gitignore`` — ``session-gitignore`` (REQ-660 BR-7, BR-15) —
+  ``.adlc/.session/`` as a whole line inside a fence of ``init/SKILL.md``'s
+  ``### Step 5``, the gitignore lines ``/init`` writes.
 
 Each one is gated, so a root it does not apply to yields zero findings, never a
 crash. Model drift, sync-surface, retrieval-status and lesson-rules parity
 degrade to zero findings outside the toolkit checkout. ``check_lane_vocabulary``
 is inert unless ``partials/lane-check.md`` or ``proceed/phases-lite.md`` exists.
-The three REQ-669 checks and the three REQ-666 per-root checks are inert unless the root is a plugin root
+The three REQ-669 checks, the three REQ-666 per-root checks and ``session-gitignore`` are inert unless the root is a plugin root
 (``is_plugin_root``: it carries ``.claude-plugin/`` or is a versioned skills
-root); once armed, a missing manifest is a finding, not a skip. Toolkit-path
+root); once armed, a missing manifest is a finding, not a skip. ``session-gitignore``
+is also inert on a root with no ``init/SKILL.md``. Toolkit-path
 and builtin-collision walk their surfaces with one shared walker,
 ``_scan_surfaces``.
 
@@ -333,6 +337,11 @@ DELEGATE_GATE_ANCHORS = ("ADLC_DISABLE_DELEGATE",)
 # skills' quotes them; `partials/tests/toolkit-root.test.sh` runs the documented
 # copy under every shell `run.sh` drives.
 TOOLKIT_ROOT_LINE = 'ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"'
+# REQ-660 ADR-8: the same line for a hook command, unbraced. Claude Code never runs
+# a project hook whose command holds the braced token (measured on 2.1.258), so
+# templates/hooks.yml and the renders carry this spelling and no other.
+PLUGIN_ROOT_TOKEN = "${CLAUDE_PLUGIN_ROOT}"
+HOOK_ROOT_LINE = TOOLKIT_ROOT_LINE.replace(PLUGIN_ROOT_TOKEN, "$CLAUDE_PLUGIN_ROOT")
 
 # REQ-669 BR-5: the guarded source keeps REQ-610's shape; only the fallback
 # operand changes, to `"$ADLC_TOOLKIT_ROOT/partials/<name>.sh"`.
@@ -915,6 +924,8 @@ TOOLKIT_PATH_EXCEPTIONS = (
     # route. Exempt only when the line, leading indentation aside, equals
     # TOOLKIT_ROOT_LINE; a trailing space or comment makes it a variant again.
     ToolkitPathException("line", TOOLKIT_ROOT_LINE),
+    # REQ-660 ADR-8: the root line as a hook command spells it, under the same rule.
+    ToolkitPathException("line", HOOK_ROOT_LINE),
     # REQ-664: `adlc harness probe` writes Claude Code's project-local skills
     # directory into the throwaway repository it builds under the temp root. It
     # is joined to that repository, never to a home, and is not a toolkit read.
@@ -950,6 +961,12 @@ TOOLKIT_PATH_EXCEPTIONS = (
     # user files (trust entries, a policy file) and read their session stores, by
     # design, as the doctor inspects the symlink install by design.
     ToolkitPathException("file", "tools/adlc/harness_probe.py"),
+    # REQ-660 BR-9: /wrapup's transcript walk reads the Codex, Copilot and Gemini
+    # session stores, those harnesses' own data directories. An `adlc-home` marker
+    # would mislabel them, so the file is set aside here and `adlc-home` still reads
+    # it, its marked Claude root included. Whole-file, so tests/test_toolkit_path.py
+    # holds it to those three roots.
+    ToolkitPathException("file", "partials/session-transcript.sh"),
     # A line that names its kind with REQ-654's marker (`adlc-home: claude-code`,
     # `alias` or `default`) keeps its literal on purpose; one marker for both checks.
     ToolkitPathException("marker", "adlc-home"),
@@ -4396,6 +4413,69 @@ def check_ethos_lines(root: Path) -> list[Finding]:
     return findings
 
 
+# REQ-660 BR-7, BR-15 / AC-12 `session-gitignore`: a session sidecar names a local
+# transcript path, so `.adlc/.session/` has to stay in the gitignore lines `/init`
+# writes or sidecars start leaking into consumer commits through a later edit.
+# Those lines are the fence in Step 5, so nothing else in the file can satisfy
+# the check: not a mention in prose, not a longer line, not another step
+# (LESSON-404). The site is one file today; a move updates it in the same change
+# (REQ-661 BR-10).
+SESSION_GITIGNORE_CHECK = "session-gitignore"
+SESSION_GITIGNORE_SITE = "init/SKILL.md"
+SESSION_GITIGNORE_LINE = ".adlc/.session/"
+SESSION_GITIGNORE_STEP_RE = re.compile(r"^### Step 5\b")
+
+
+def check_session_gitignore_line(text: str, rel: str = SESSION_GITIGNORE_SITE) -> list[Finding]:
+    """One ``init/SKILL.md``: ``SESSION_GITIGNORE_LINE`` as a whole line inside a
+    fence of the ``### Step 5`` section. The section runs to the next heading of
+    level 3 or above outside a fence: the gitignore comments in the fence read as
+    headings, and a heading shown in a fence is not the real anchor (LESSON-404).
+    The comparison is exact because a leading space is part of a gitignore pattern,
+    so an indented line would be written and ignore nothing."""
+    lines = text.splitlines()
+    fenced = _any_fence_line_numbers(lines)
+    start = next((n for n, line in enumerate(lines, start=1)
+                  if n not in fenced and SESSION_GITIGNORE_STEP_RE.match(line)), None)
+    if start is None:
+        return [Finding(
+            rel, 1, SESSION_GITIGNORE_CHECK,
+            f"no `### Step 5` section, so `{SESSION_GITIGNORE_LINE}` cannot be found in the "
+            "gitignore lines this skill writes — restore the section, or update "
+            "SESSION_GITIGNORE_STEP_RE if it moved (REQ-660 BR-15)")]
+    for n, line in enumerate(lines[start:], start=start + 1):
+        if n in fenced:
+            if line == SESSION_GITIGNORE_LINE:
+                return []
+            continue
+        heading = MD_HEADING_RE.match(line)
+        if heading and len(heading.group(1)) <= 3:
+            break
+    return [Finding(
+        rel, start, SESSION_GITIGNORE_CHECK,
+        f"the Step 5 gitignore fence has no `{SESSION_GITIGNORE_LINE}` line — session "
+        "sidecars would reach consumer commits; restore it as a whole line inside the "
+        "fence (REQ-660 BR-7, BR-15)")]
+
+
+def check_session_gitignore(root: Path) -> list[Finding]:
+    """REQ-660 BR-15 per root: armed by ``is_plugin_root`` and the site existing, so a
+    consumer repo or a fixture plugin root holding no `/init` is never read; the
+    real tree's site is held by ``test_real_tree_passes``. Once armed, an unreadable
+    site is a finding, never a skip (REQ-661 BR-10, LESSON-019)."""
+    if not is_plugin_root(root) or not (root / SESSION_GITIGNORE_SITE).is_file():
+        return []
+    try:
+        text = (root / SESSION_GITIGNORE_SITE).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return [Finding(
+            SESSION_GITIGNORE_SITE, 1, SESSION_GITIGNORE_CHECK,
+            f"could not read the site ({exc.strerror or 'I/O error'}), so "
+            f"`{SESSION_GITIGNORE_LINE}` is unchecked — restore the file, or update "
+            "SESSION_GITIGNORE_SITE if it moved (REQ-660 BR-15)")]
+    return check_session_gitignore_line(text)
+
+
 def check_skill_line_budget(text: str, rel: str) -> list[Finding]:
     """REQ-661 BR-2: a ``SKILL.md`` of ``SKILL_LINE_BUDGET`` lines or more, counted
     as ``wc -l`` counts (newlines), is one finding at line 1. Runs on every
@@ -4763,6 +4843,8 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_adlc_home(root))
     # Per-root (REQ-666 BR-2): the ETHOS line once, byte-identical, in every skill.
     findings.extend(check_ethos_lines(root))
+    # Per-root (REQ-660 BR-15): `.adlc/.session/` in the gitignore lines /init writes.
+    findings.extend(check_session_gitignore(root))
     # Per-root (REQ-666 BR-7, BR-11): the description budget and the skills-ref validator.
     findings.extend(check_description_budget(root))
     findings.extend(check_skills_ref(root))
@@ -5023,6 +5105,14 @@ def check_render_parity(root: Path) -> list[Finding]:
 def _hook_command_findings(rel: str, numbered: list[tuple[int, str]]) -> list[Finding]:
     findings = []
     for lineno, line in numbered:
+        # Before the comment skip: a comment line inside a command is command text,
+        # and the token stops the hook from there too (ADR-8).
+        if PLUGIN_ROOT_TOKEN in line:
+            findings.append(Finding(
+                rel, lineno, "unguarded-source",
+                f"a hook command holds `{PLUGIN_ROOT_TOKEN}`, and Claude Code never "
+                f"runs a project hook that does; spell the root line `{HOOK_ROOT_LINE}` "
+                "(REQ-660 ADR-8)"))
         if line.lstrip().startswith("#"):
             continue
         if CANONICAL_SOURCE_RE.match(line) or not DOT_SOURCE_PARTIAL_RE.search(line):

@@ -134,6 +134,9 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 # Claude Code per-user permission overrides (team settings live in .claude/settings.json)
 .claude/settings.local.json
 
+# ADLC session sidecars (per-session transcript pointers written by a hook, per-worktree)
+.adlc/.session/
+
 # ADLC ID counters are global (${ADLC_HOME:-$HOME/.claude}/.global-next-req, .global-next-bug and .global-next-lesson) — not per-project
 # Legacy per-project counters (deprecated, no longer read/written — ignored if present)
 .adlc/.next-bug

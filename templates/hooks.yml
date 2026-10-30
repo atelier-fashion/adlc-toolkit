@@ -7,7 +7,11 @@
 # `hook_timeout_unit`.
 #
 # Each command resolves its partial through the canonical two-level guarded
-# spelling after the ToolkitRoot root line (conventions.md "Bash in skills"); the
+# spelling after the ToolkitRoot root line (conventions.md "Bash in skills"), with
+# one difference from a fence: the plugin root is UNBRACED here. Claude Code never
+# runs a project hook whose command holds the braced token (measured on 2.1.258,
+# REQ-660 ADR-8), and a project hook gets no substitution, so the variable is empty
+# either way and the pointer-file arm serves the plugin route. The
 # line before the source exits 0 when the partial is absent at both levels, so a
 # hook never fails a session. tools/lint-skills' unguarded-source walks this file.
 # The ETHOS `!` line in every SKILL.md stays: this hook is additive (plan M6).
@@ -16,18 +20,18 @@ hooks:
     events: [session-start, session-compact, subagent-start]
     timeout_s: 10
     command: |
-      ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+      ADLC_TOOLKIT_ROOT="$CLAUDE_PLUGIN_ROOT"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
       [ -f .adlc/partials/ethos-inject.sh ] || [ -f "$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh" ] || exit 0
       if [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . "$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh"; fi
       adlc_ethos_inject
-  # The command names the partial REQ-660 ships; until it lands, the stub of the
-  # same name writes `.adlc/.session/<id>` with `harness=` and `session_id=` only.
-  # The sidecar's fields, format, mode, pruning and gitignore line are REQ-660's.
+  # The command runs the partial REQ-660 ships, which writes the session sidecar
+  # `.adlc/.session/<id>` and prunes old ones. The sidecar's fields, format, mode
+  # and pruning are that partial's contract; this entry only names it (REQ-660 BR-8).
   - id: session-record
     events: [session-start]
     timeout_s: 10
     command: |
-      ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+      ADLC_TOOLKIT_ROOT="$CLAUDE_PLUGIN_ROOT"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
       [ -f .adlc/partials/session-record.sh ] || [ -f "$ADLC_TOOLKIT_ROOT/partials/session-record.sh" ] || exit 0
       if [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . "$ADLC_TOOLKIT_ROOT/partials/session-record.sh"; fi
       adlc_session_record

@@ -57,6 +57,23 @@ def test_render_parity_reports_drift(tmp_path):
     assert findings[0].check == "render-parity" and "drifted" in findings[0].message
 
 
+def test_hook_command_must_not_hold_the_braced_plugin_root():
+    """REQ-660 ADR-8: Claude Code never runs a project hook holding the braced token."""
+    bad = check._hook_command_findings("templates/hooks.yml", [(3, check.TOOLKIT_ROOT_LINE)])
+    assert [f.check for f in bad] == ["unguarded-source"]
+    assert "never runs" in bad[0].message
+    assert check._hook_command_findings("templates/hooks.yml", [(3, check.HOOK_ROOT_LINE)]) == []
+    commented = "# " + check.TOOLKIT_ROOT_LINE
+    assert check._hook_command_findings("templates/hooks.yml", [(3, commented)]) != []
+    assert check.HOOK_ROOT_LINE != check.TOOLKIT_ROOT_LINE
+
+
+def test_real_hook_sources_hold_no_braced_plugin_root():
+    assert check.check_hook_sources(REPO_ROOT) == []
+    lines = (REPO_ROOT / "templates/hooks.yml").read_text().splitlines()
+    assert any(line.strip() == check.HOOK_ROOT_LINE for line in lines)
+
+
 def test_unguarded_source_walks_hooks(tmp_path):
     good = check.guarded_source_line("ethos-inject")
     (tmp_path / "templates").mkdir()
