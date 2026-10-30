@@ -48,7 +48,7 @@ pass:
 | Per-agent model | alias | `model:` | `model` | `model` | `model` |
 | **Hooks** | settings.json | `.github/hooks/*.json`, `~/.copilot/hooks/`, **also reads `.claude/settings.json`**; 14 events incl. `subagentStart` | `.codex/hooks.json` / `[hooks]`; 12 events incl. `SubagentStart` | `hooks` in `.gemini/settings.json`; 11 events, **no subagent-start** | `.cursor/hooks.json`, `~/.cursor/hooks.json`, **also reads `.claude/settings*.json`**; 18+ events incl. `subagentStart` |
 | Hook can inject context | `SessionStart` (incl. `compact` matcher) | `sessionStart`, `subagentStart` `additionalContext` | `SessionStart`, `UserPromptSubmit` | `SessionStart`, `BeforeAgent` | `sessionStart` `additional_context` |
-| **Project-local config needs a trusted path** | no | hooks/MCP/plugins: yes (`--trust-folder` headless) | yes (`projects.<path>.trust_level`; untrusted skips config, hooks, rules) | yes (`trustedFolders.json`; untrusted disables settings, hooks, commands, auto-accept) | yes (`--trust` headless) |
+| **Project-local config needs a trusted path** | `permissions.allow`: yes (`projects.<path>.hasTrustDialogAccepted` in `.claude.json`; ASSUME-010, invalidated 2026-10-29 by REQ-664's probe) | hooks/MCP/plugins: yes (`--trust-folder` headless) | yes (`projects.<path>.trust_level`; untrusted skips config, hooks, rules) | yes (`trustedFolders.json`; untrusted disables settings, hooks, commands, auto-accept) | yes (`--trust` headless) |
 | **Command allowlist, repo-committable** | `.claude/settings.json` `Bash(git status:*)` | **no** — user file, session flags `--allow-tool 'shell(git:*)'`, or `allowed-tools:` in SKILL.md | `.codex/rules/*.rules` `prefix_rule` | `.gemini/settings.json` `tools.allowed: ["run_shell_command(git)"]` | `.cursor/cli.json` `Shell(git)`; `.cursor/permissions.json` |
 | Allowlist granularity | prefix on the fence text | subcommand prefix | token prefix; control flow → whole script as one `bash -lc` | prefix; chained parts checked separately | command base |
 | Sandbox default | none | OS sandbox off by default | `workspace-write`, **`.git` read-only** | prompts for every shell cmd; optional seatbelt/docker | auto-review classifier (IDE); headless full write |
@@ -216,8 +216,10 @@ The orchestrator is a shell program, not a model. Per REQ it:
 2. **Trusts the path** (M4): Codex writes
    `[projects."<wt>"] trust_level = "trusted"` into the user config before
    launch and removes it after; Gemini appends to `trustedFolders.json`;
-   Copilot passes `--trust-folder`; Cursor passes `--trust`; Claude needs
-   nothing. Trust is per-run and revoked on cleanup.
+   Copilot passes `--trust-folder`; Cursor passes `--trust`; Claude reads
+   `projects.<path>.hasTrustDialogAccepted` from its user `.claude.json`
+   (ASSUME-010: the earlier "Claude needs nothing" was invalidated by
+   REQ-664's probe). Trust is per-run and revoked on cleanup.
 3. **Builds the prompt itself** (M9): it inlines the `proceed/SKILL.md` body,
    the phase files, `.adlc/ETHOS.md`, the REQ id, the worktree path, and the
    unattended block `/sprint` already injects today (worktree path,

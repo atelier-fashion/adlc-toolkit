@@ -1,0 +1,54 @@
+# Test-only adapter (REQ-657 AC-3/4/7/8/13). Its name is not one adlc harness detect
+# knows, so it loads only through --adapter-path, and the binary cross-check is
+# skipped. Tests rewrite single keys of a copy (the basename must stay fake.yml).
+name: fake
+schema_version: 1
+binary: fake
+paths:
+  agents:
+    user: $HOME/.fake/agents
+    mode: rendered
+  permissions:
+    project: .fake/permissions.json
+    mode: rendered
+  hooks:
+    project: .fake/hooks.json
+    mode: rendered
+  skills:
+    user: $HOME/.agents/skills
+    mode: mounted
+formats:
+  agents: claude-agent-md
+  permissions: rules-json
+  hooks: claude-settings-json
+tool_map:
+  Read: read_file
+  Grep: grep
+  Glob: glob
+  Bash: unsupported
+tier_map:
+  opus: fake-large-1
+  sonnet: fake-mid-1
+  haiku: unverified
+deny_tier_render:
+  project: unsupported
+trust:
+  mechanism: flag
+  detail: --trust
+hook_events:
+  session-start: sessionStart
+  session-compact: unsupported
+  subagent-start: unsupported
+hook_timeout_unit: ms
+hook_payload:
+  session_id: sessionId
+  cwd: cwd
+  transcript_path: unsupported
+capabilities:
+  deny: "no"
+  subagent_start_hook: "no"
+  compact_rehook: "no"
+  agent_tool_restriction: enforced
+  readonly_marker: "readonly: true"
+  allowlist_granularity: command-base
+  committable_allowlist: "yes"

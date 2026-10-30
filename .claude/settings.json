@@ -8,6 +8,13 @@
       "Bash(git log:*)",
       "Bash(git show:*)",
       "Bash(git branch:*)",
+      "Bash(git merge-base:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git for-each-ref:*)",
+      "Bash(git diff-tree:*)",
+      "Bash(git config --get:*)",
+      "Bash(git config user.email)",
+      "Bash(git config user.name)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
@@ -16,50 +23,50 @@
       "Bash(git checkout:*)",
       "Bash(git rebase:*)",
       "Bash(git merge:*)",
-      "Bash(git merge-base:*)",
       "Bash(git worktree:*)",
       "Bash(git stash:*)",
       "Bash(git restore:*)",
-      "Bash(git config --get:*)",
-      "Bash(git config user.email)",
-      "Bash(git config user.name)",
       "Bash(gh pr view:*)",
       "Bash(gh pr diff:*)",
       "Bash(gh pr list:*)",
       "Bash(gh pr checks:*)",
-      "Bash(gh pr create:*)",
-      "Bash(gh pr ready:*)",
-      "Bash(gh pr review:*)",
-      "Bash(gh pr edit:*)",
-      "Bash(gh pr comment:*)",
       "Bash(gh issue list:*)",
       "Bash(gh issue view:*)",
       "Bash(gh run list:*)",
       "Bash(gh run view:*)",
       "Bash(gh run watch:*)",
-      "Bash(gh api:*)",
       "Bash(gh auth status:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr ready:*)",
+      "Bash(gh pr review:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh api:*)",
       "Bash(npm test:*)",
       "Bash(npm run:*)",
       "Bash(npm ci)",
       "Bash(npm install:*)",
       "Bash(npx:*)",
       "Bash(ls:*)",
-      "Bash(mkdir:*)",
       "Bash(find:*)",
       "Bash(readlink:*)",
-      "Bash(pwd)",
       "Bash(which:*)",
       "Bash(test:*)",
       "Bash(date:*)",
       "Bash(echo:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(pwd)",
+      "Bash(mkdir:*)",
       "Bash(cp:*)",
       "Bash(touch:*)",
       "Bash(sed:*)",
       "Bash(awk:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(wc:*)"
+      "Bash(gcloud config get-value:*)",
+      "Bash(gcloud run services list:*)"
     ],
     "ask": [
       "Bash(git push --force)",
@@ -78,6 +85,35 @@
       "Bash(./deploy.sh:*)",
       "Bash(terraform apply:*)",
       "Bash(terraform destroy:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/session-record.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\" ] || exit 0\nif [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\"; fi\nadlc_session_record",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

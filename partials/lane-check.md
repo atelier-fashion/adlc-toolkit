@@ -142,9 +142,12 @@ The defaults are in `tools/adlc/lane_check.py`. The blocks below mirror them;
   `**/.env*`, `**/*.pem`, `**/*.key`, `**/*.entitlements`
 - pipeline and agent config: `.adlc/config.yml`, `.adlc/partials/**`,
   `.adlc/tools/**`, `.adlc/workflows/**`, `.adlc/agents/**`, `.github/agents/**`,
-  `.github/hooks/**`, `.claude/**`, `.mcp.json`, `**/CLAUDE.md`, `**/AGENTS.md`
-  (REQ-666 BR-10: the vendored agent checklists, and the agent and hook config
-  the harness adapters write, which the CI glob above already covers)
+  `.github/hooks/**`, `.claude/**`, `harness/**`, `templates/permissions.yml`,
+  `templates/hooks.yml`, `.claude/settings*.json`, `.mcp.json`, `**/CLAUDE.md`,
+  `**/AGENTS.md` (REQ-666 BR-10: the vendored agent checklists, and the agent and
+  hook config the harness adapters write, which the CI glob above already covers;
+  REQ-657 BR-14: the adapters and their goldens and the permission and hook
+  sources, so a lite PR cannot widen an allowlist or soften a hook)
 - git hooks and package-manager config: `.husky/**`, `.githooks/**`,
   `.pre-commit-config.yaml`, `lefthook.yml`, `.gitmodules`, `**/.npmrc`,
   `**/.yarnrc*`, `lefthook.yaml`, `.lefthook.yml`, `.lefthook.yaml`,

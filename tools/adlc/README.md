@@ -38,6 +38,7 @@ adlc --version
 | `renumber` | Rename an artifact id repo-wide, collision-safe, dry-run by default (REQ-518). |
 | `harness detect` | Read-only: which agent harnesses are installed, and whether each one's skills directory reaches this toolkit (REQ-654, below). |
 | `harness probe` | The plan's §6 experiments against one installed harness, with one committed JSON result per harness (REQ-664, below). |
+| `harness render \| install \| doctor \| drift` | The adapter framework: render any surface through `harness/<name>.yml`, write a harness's user-level surfaces, `render-currency:<name>`, and the project layer's template-posture drift (REQ-657, below). |
 
 Each is one entry in the data-driven `SUBCOMMANDS` table (REQ-519 BR-11).
 
@@ -411,6 +412,66 @@ from the existing result file only when its `harness_version` and
 Each probe keeps its own `ran_at`. `adlc harness detect` shows the file's `date`
 as `last_probe`.
 
+
+## The harness adapter framework (REQ-657)
+
+A harness is data: `harness/<name>.yml`, validated by one loader
+(`harness_adapter.py`) and rendered by one module (`harness_render.py`). Three
+canonical sources go through it: `agents/*.md`, `templates/permissions.yml` (the
+**routine** tier and the **deny** tier, the one-way moves) and `templates/hooks.yml`
+(`ethos-inject`, `session-record`). Only `harness/claude.yml` ships. Nothing in
+`tools/adlc` branches on a harness name; a new harness is an adapter file, golden
+renders under `harness/<name>/rendered/`, its `accepted_fidelity`, and, only for a
+new file format, one renderer in `harness_render.FORMATS`.
+
+| Command | Does | Writes |
+|---|---|---|
+| `adlc harness render --harness <name> [--surface S] [--scope project\|user\|exec] [--dry-run] [--force]` | renders any surface of an adapter; `project` is the caller's git top level (LESSON-397) | only the paths the adapter declares for that scope, atomically; a second run reports `zero actions`. `--scope exec` prints structured entries and writes nothing |
+| `adlc harness render --check` | the toolkit's parity check: every golden and every in-tree render (agents' `model:` lines, the toolkit's own `.claude/settings.json`) against a fresh render, with a unified diff | nothing |
+| `adlc harness install --harness <name>` / `--all` | a harness's **user-level** surfaces only; `--all` iterates the harnesses `detect` reports present | `claude`: nothing (agents are the mount, the allowlist and hooks travel in the project layer) |
+| `adlc harness doctor [--harness <name>]` | `harness:<name>` and `render-currency:<name>` | nothing |
+| `adlc harness drift [--harness <name>] [--json]` | `/template-drift`'s `harness-config` step: the project's rendered files against a fresh render, with template posture (`synced` / `customized` / `stale` / `missing`), naming every missing deny-tier rule | nothing; exit 1 on `stale` or `missing` |
+
+`--adapter-path <file>` is accepted by every `adlc harness` verb and by `adlc agents
+render`, and is the only way a test-only adapter loads; `install --all` refuses it
+and `/init` cannot pass it.
+
+**The YAML subset** (`harness_yaml.py`, pure stdlib because the doctor loads
+adapters without the venv, LESSON-395): block mappings and sequences, one-line flow
+sequences and mappings, plain / single- / double-quoted scalars, integers, `|` and
+`|-` block scalars, `#` comments. Tabs, anchors, aliases, tags, `>` folding,
+document markers, `?` keys and a key given twice (in any spelling) are loud errors
+naming the line (LESSON-716).
+
+**Write modes.** `create` (the default) keeps an existing file unless `--force`;
+`merge` (JSON only) refreshes the surface's `owned_keys`, unions their lists, and
+keeps every other key. `CLAUDE.md` is never rewritten: it gains one `@AGENTS.md`
+line when it has none.
+
+**`render-currency:<name>`** (one framework check, registered for every detect name)
+loads the adapter, compares every user-level surface it renders with a fresh render
+(for a `mounted` agents surface, the canonical `model:` stamp), and evaluates the
+adapter's `doctor_rows` (`path-exists`, `marker-present`, `equals-render`) from the
+data. A FAIL names a remediation to run verbatim; an absent binary SKIPs.
+`adlc doctor --checks render-currency:<name>` and `adlc harness doctor` call the same
+function.
+
+**Per-harness tier columns.** `agents.harness.<name>.classes` / `.overrides` sit
+beside `agents.classes` / `.overrides`; H's override > H's class > default override
+> default class > shipped default, then the adapter's `tier_map` (`unverified`
+omits `model:` with one stderr notice). An unknown sub-key under `agents:` is an
+error. A `mounted` agents surface (Claude's) is the in-place stamp and resolves
+through the default column, so a `claude` column, present or absent, changes nothing.
+
+<!-- declared-residuals -->
+**Declared residuals (REQ-657 BR-18).** Allowlist and prefix-deny matching cannot be made a gate, and the adapter framework does not pretend it can. `allowlist-fidelity` closes spellings, not this list:
+
+- Allowlist matching is spelling-level. The lint evaluates a closed set of spellings; a deny-tier command reached in any other spelling is not seen.
+- Allows that execute their arguments (`find -exec`, `awk`, `sed e`, `npx`, `npm run` / `npm exec`, `git rebase --exec`, `git fetch --upload-pack`) and `gh api` can reach a deny-tier command in a spelling the deny does not match.
+- Semantic equivalents of a deny-tier command (`git restore`, `git checkout -f`, `git worktree remove --force`, `gcloud` deploys, `npm publish`) are outside the deny tier.
+- This is the same exposure Claude's template has today (Rule A grandfathers it); no adapter makes it worse, and none claims to close it.
+- The allowlist is never the gate (Rule B). The orchestrator's structural gates (REQ-659) are.
+<!-- /declared-residuals -->
 
 ## `adlc agents render` (REQ-516)
 

@@ -1,0 +1,208 @@
+# templates/permissions.yml — the semantic allowlist (REQ-657 BR-6).
+#
+# Two tiers and no third: `routine` is what a harness may pre-approve, `deny` names
+# the one-way moves. Each harness adapter renders this file into its own syntax
+# (`adlc harness render`); `deny_tier_render` decides how the deny tier reaches a
+# human (Claude: the `ask` list). The allowlist is a convenience for the routine
+# tier, never the gate: a deny-tier command can still be reached in a spelling the
+# matcher does not see (tools/lint-skills/README.md, "Declared residuals").
+#
+# Entries are argv prefixes (token lists), never shell text: the renderer, not the
+# author, spells fences and `git -C` per harness. `match: exact` renders without a
+# prefix wildcard where the format can express it.
+default_mode: acceptEdits
+comment: "ADLC pipeline allowlist — copied into each project's .claude/settings.json by /init. Reduces permission prompts during /proceed by pre-approving the routine read/write/git/gh/test/agent operations the pipeline fires. Destructive or production-impact operations remain on the ask list."
+
+entries:
+  # ---------------------------------------------------------------- routine
+  - id: git.read
+    tier: routine
+    note: read-only git the pipeline runs constantly
+    commands:
+      - [git, status]
+      - [git, diff]
+      - [git, log]
+      - [git, show]
+      - [git, branch]
+      - [git, merge-base]
+      - [git, rev-parse]
+      - [git, for-each-ref]
+      - [git, diff-tree]
+      - [git, config, --get]
+  - id: git.config.identity
+    tier: routine
+    match: exact
+    note: reads the commit identity; exact, so `git config user.email <value>` still asks
+    commands:
+      - [git, config, user.email]
+      - [git, config, user.name]
+  - id: git.write
+    tier: routine
+    note: branch-local git writes; force and destructive forms are in the deny tier
+    commands:
+      - [git, add]
+      - [git, commit]
+      - [git, push]
+      - [git, pull]
+      - [git, fetch]
+      - [git, checkout]
+      - [git, rebase]
+      - [git, merge]
+      - [git, worktree]
+      - [git, stash]
+      - [git, restore]
+  - id: gh.read
+    tier: routine
+    note: read-only GitHub CLI calls
+    commands:
+      - [gh, pr, view]
+      - [gh, pr, diff]
+      - [gh, pr, list]
+      - [gh, pr, checks]
+      - [gh, issue, list]
+      - [gh, issue, view]
+      - [gh, run, list]
+      - [gh, run, view]
+      - [gh, run, watch]
+      - [gh, auth, status]
+  - id: gh.pr.create
+    tier: routine
+    note: opening and editing a PR; merging and closing are in the deny tier
+    commands:
+      - [gh, pr, create]
+      - [gh, pr, ready]
+      - [gh, pr, review]
+      - [gh, pr, edit]
+      - [gh, pr, comment]
+  - id: gh.api
+    tier: routine
+    note: the REQ-518 id reads; `gh api` executes its arguments (a declared residual)
+    commands:
+      - [gh, api]
+  - id: test.npm
+    tier: routine
+    note: test runners
+    commands:
+      - [npm, test]
+      - [npm, run]
+  - id: npm.ci
+    tier: routine
+    match: exact
+    note: a clean install from the lockfile
+    commands:
+      - [npm, ci]
+  - id: npm.install
+    tier: routine
+    note: dependency install and one-off tool runs
+    commands:
+      - [npm, install]
+      - [npx]
+  - id: shell.read
+    tier: routine
+    note: shell utilities the run-and-read context blocks and the pipeline use (REQ-666 added cat and grep)
+    commands:
+      - [ls]
+      - [find]
+      - [readlink]
+      - [which]
+      - [test]
+      - [date]
+      - [echo]
+      - [cat]
+      - [grep]
+      - [head]
+      - [tail]
+      - [wc]
+  - id: shell.pwd
+    tier: routine
+    match: exact
+    note: the working directory
+    commands:
+      - [pwd]
+  - id: shell.write
+    tier: routine
+    note: shell utilities that write inside the project
+    commands:
+      - [mkdir]
+      - [cp]
+      - [touch]
+      - [sed]
+      - [awk]
+  - id: gcloud.read
+    tier: routine
+    note: read-only gcloud the context blocks run (REQ-666)
+    commands:
+      - [gcloud, config, get-value]
+      - [gcloud, run, services, list]
+  - id: fence.partial-source
+    tier: routine
+    note: the partial-sourcing fence; rendered per scope, never as a first-token wildcard (BR-8)
+    commands:
+      - [if, "[", -f, .adlc/partials/]
+
+  # ---------------------------------------------------------------- deny
+  - id: git.push.force
+    tier: deny
+    match: exact
+    note: rewrites a remote branch
+    commands:
+      - [git, push, --force]
+      - [git, push, -f]
+  - id: git.push.force-main
+    tier: deny
+    note: rewrites main
+    commands:
+      - [git, push, --force, main]
+      - [git, push, --force, origin, main]
+  - id: git.reset.hard
+    tier: deny
+    note: discards work
+    commands:
+      - [git, reset, --hard]
+  - id: git.clean
+    tier: deny
+    note: deletes untracked files
+    commands:
+      - [git, clean, -f]
+      - [git, clean, -fd]
+  - id: git.branch.force-delete
+    tier: deny
+    note: deletes a branch whatever its merge state
+    commands:
+      - [git, branch, -D]
+  - id: gh.merge
+    tier: deny
+    note: merges a PR
+    commands:
+      - [gh, pr, merge]
+  - id: gh.pr.close
+    tier: deny
+    note: closes a PR
+    commands:
+      - [gh, pr, close]
+  - id: gh.release
+    tier: deny
+    note: publishes a release
+    commands:
+      - [gh, release]
+  - id: rm.recursive
+    tier: deny
+    note: recursive delete
+    commands:
+      - [rm, -rf]
+  - id: rm.force
+    tier: deny
+    note: forced delete
+    commands:
+      - [rm, -f]
+  - id: deploy
+    tier: deny
+    note: production deploy
+    commands:
+      - [./deploy.sh]
+  - id: terraform
+    tier: deny
+    note: infrastructure changes
+    commands:
+      - [terraform, apply]
+      - [terraform, destroy]
