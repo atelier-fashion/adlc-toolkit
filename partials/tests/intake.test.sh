@@ -2,9 +2,10 @@
 # partials/tests/intake.test.sh — AC test matrix for partials/intake.sh (REQ-594 TASK-005).
 #
 # Fully offline: sandbox fixtures under mktemp -d, no network, no adlc-read invocation.
-# The delegate is never called here — the delegation contract lives in spec/SKILL.md
-# prose; what this harness owns is the partial's behavior plus the two validation
-# regexes the SKILL.md specifies (see section 7's coupling note).
+# The delegate is never called here — the delegation contract lives in
+# spec/references/intake-source-read.md prose (moved out of spec/SKILL.md by
+# REQ-661); what this harness owns is the partial's behavior plus the two
+# validation regexes that companion specifies (see section 7's coupling note).
 #
 # Run under BOTH shells (BR-9 / cross-shell AC):
 #   bash partials/tests/intake.test.sh
@@ -337,11 +338,11 @@ check "sections count" "5" "$(printf '%s\n' "$SECTIONS" | grep -c .)"
 # ===========================================================================
 # 7. AC-7 citation-validation regexes
 #
-# COUPLING NOTE: these regexes are specified in spec/SKILL.md Step 1.4 sub-step 3.5,
-# not in this partial — the validation is Claude's to perform on delegate output.
-# They are asserted here so that a future divergence between the documented regex
-# and a tested one is visible rather than silent. If Step 1.4's regexes change,
-# change these too.
+# COUPLING NOTE: these regexes are specified in spec/references/intake-source-read.md
+# (/spec Step 1.4 step 3, item 5 "Citation post-validation"), not in this partial —
+# the validation is Claude's to perform on delegate output. They are asserted here
+# so that a future divergence between the documented regex and a tested one is
+# visible rather than silent. If that companion's regexes change, change these too.
 # ===========================================================================
 req_ok()    { printf '%s' "$1" | grep -qE '^REQ-[0-9]{3,6}$'; }
 lesson_ok() { printf '%s' "$1" | grep -qE '^LESSON-[0-9]{3,6}$'; }
