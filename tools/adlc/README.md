@@ -419,18 +419,20 @@ A harness is data: `harness/<name>.yml`, validated by one loader
 (`harness_adapter.py`) and rendered by one module (`harness_render.py`). Three
 canonical sources go through it: `agents/*.md`, `templates/permissions.yml` (the
 **routine** tier and the **deny** tier, the one-way moves) and `templates/hooks.yml`
-(`ethos-inject`, `session-record`). Only `harness/claude.yml` ships. Nothing in
-`tools/adlc` branches on a harness name; a new harness is an adapter file, golden
-renders under `harness/<name>/rendered/`, its `accepted_fidelity`, and, only for a
-new file format, one renderer in `harness_render.FORMATS`.
+(`ethos-inject`, `session-record`). `harness/claude.yml`, `harness/copilot.yml` and
+`harness/cursor.yml` ship. Nothing in `tools/adlc` branches on a harness name; a new
+harness is an adapter file, golden renders under `harness/<name>/rendered/`, its
+`accepted_fidelity`, and, only for a new file format, one renderer in
+`harness_render.FORMATS`.
 
 | Command | Does | Writes |
 |---|---|---|
 | `adlc harness render --harness <name> [--surface S] [--scope project\|user\|exec] [--dry-run] [--force]` | renders any surface of an adapter; `project` is the caller's git top level (LESSON-397) | only the paths the adapter declares for that scope, atomically; a second run reports `zero actions`. `--scope exec` prints structured entries and writes nothing |
 | `adlc harness render --check` | the toolkit's parity check: every golden and every in-tree render (agents' `model:` lines, the toolkit's own `.claude/settings.json`) against a fresh render, with a unified diff | nothing |
+| `adlc harness render --write-goldens [--harness <name>]` | rewrites `harness/<name>/rendered/` from a fresh render, after a change to `templates/permissions.yml`, `templates/hooks.yml` or an adapter | the goldens only |
 | `adlc harness install --harness <name>` / `--all` | a harness's **user-level** surfaces only; `--all` iterates the harnesses `detect` reports present | `claude`: nothing (agents are the mount, the allowlist and hooks travel in the project layer) |
 | `adlc harness doctor [--harness <name>]` | `harness:<name>` and `render-currency:<name>` | nothing |
-| `adlc harness drift [--harness <name>] [--json]` | `/template-drift`'s `harness-config` step: the project's rendered files against a fresh render, with template posture (`synced` / `customized` / `stale` / `missing`), naming every missing deny-tier rule | nothing; exit 1 on `stale` or `missing` |
+| `adlc harness drift [--harness <name>] [--opted-in] [--json]` | `/template-drift`'s `harness-config` step: the project's rendered files against a fresh render, with template posture (`synced` / `customized` / `stale` / `missing`), naming every missing deny-tier rule. `--opted-in` adds each shipped adapter the project already has a file of | nothing; exit 1 on `stale` or `missing` |
 
 `--adapter-path <file>` is accepted by every `adlc harness` verb and by `adlc agents
 render`, and is the only way a test-only adapter loads; `install --all` refuses it
@@ -442,6 +444,25 @@ sequences and mappings, plain / single- / double-quoted scalars, integers, `|` a
 `|-` block scalars, `#` comments. Tabs, anchors, aliases, tags, `>` folding,
 document markers, `?` keys and a key given twice (in any spelling) are loud errors
 naming the line (LESSON-716).
+
+**The Copilot CLI and Cursor adapters (REQ-656).** Their facts are the vendor docs as read
+on 2026-10-30; no run has happened, and the end-to-end check is owed (the spec's
+Deferred section). Every value a probe would decide is unverified.
+
+| | `copilot` | `cursor` |
+|---|---|---|
+| `adlc agents render --harness <name>` | writes `$HOME/.copilot/agents/<name>.agent.md`, tools through `tool_map`, `model:` omitted while `tier_map` reads `unverified` | a no-op: exit 0, and one line naming `~/.claude/agents` (`via:claude`) |
+| `adlc harness render --harness <name>` | writes `.github/hooks/adlc.json` and `AGENTS.md`, and prints the `--allow-tool … --deny-tool …` line; `--scope user` writes the agent copies too | writes `.cursor/cli.json`, `.cursor/permissions.json` and `AGENTS.md` |
+| `adlc harness install --harness <name>` | the agent copies | nothing to write |
+| `harness:<name>` (report-only) | the `~/.agents/skills` view | `~/.claude/skills` and `~/.claude/agents` as sources, and the double skill discovery |
+| `render-currency:<name>` | FAILs when a copy is missing or differs; fix: `adlc agents render --harness copilot` | no user-level surface, so it passes |
+
+Both checks SKIP without the binary. Both report the `deny_under_allow` shapes, recomputed
+against the REQ-664 result file: a hand-set `pass` with no matching result reads
+`unverified`. Schema version 2 adds four optional fields: `paths.<surface>.also` (a further
+file on a surface, with its own format), `hook_output` (a hook whose output a harness
+takes only as JSON), `fidelity_notes` (sentences the report prints) and
+`doctor_rows[].fact` (a row reported under `harness:<name>`, never judged).
 
 **Write modes.** `create` (the default) keeps an existing file unless `--force`;
 `merge` (JSON only) refreshes the surface's `owned_keys`, unions their lists, and

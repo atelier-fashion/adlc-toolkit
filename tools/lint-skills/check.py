@@ -49,6 +49,9 @@ order:
   default keeps its literal only with an ``adlc-home: <kind>`` marker on the line
   (``ADLC_HOME_MARKER_KINDS``). A line holding a toolkit path is left to
   ``no-harness-path``, so each line is reported once.
+* ``check_harness_loss_tables`` — ``harness-loss-table`` (REQ-656 BR-11, BR-17) —
+  each ``<!-- harness-loss: <name> -->`` block in the README carries its rows, agrees
+  with its adapter and a fresh render, and states the declared residuals.
 * ``check_ethos_lines`` — ``ethos-line`` (REQ-666 BR-2) — the ETHOS line,
   read from conventions.md, exactly once and byte-identical in every skill, and
   no other inline bang command in a skill's prose.
@@ -4768,6 +4771,8 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_render_parity(root))
     findings.extend(check_hook_sources(root))
     findings.extend(check_retired_settings_template(root))
+    # Per-root (REQ-656 BR-11, BR-17): the README's loss tables against the adapters.
+    findings.extend(check_harness_loss_tables(root))
     return findings, scanned
 
 
@@ -4803,6 +4808,163 @@ def _import_harness_engine(root: Path):
     except Exception:  # pragma: no cover - defensive import guard
         return None
     return harness_adapter, harness_render
+
+
+HARNESS_LOSS_CHECK = "harness-loss-table"
+#: Every harness whose README section this check holds. REQ-655 and REQ-658 add theirs.
+LOSS_TABLE_HARNESSES = ("copilot", "cursor")
+#: Rows every section carries (REQ-656 BR-11), then each harness's own.
+LOSS_ROWS = ("Committed allowlist", "Allowlist granularity", "Deny-tier rendering",
+             "Shared-base fail-closed", "Read-only reviewers", "ETHOS in subagents",
+             "Subagent nesting depth", "/sprint workflow engine", "Transcript schema",
+             "Explicit skill invocation", "Headless deny status", "Fences, not commands",
+             "git -C")
+LOSS_EXTRA_ROWS = {"cursor": ("Deny width", "Shell(npm) width", "Double skill discovery",
+                              "IDE permissions file")}
+#: BR-17's statements, each found case-insensitively in the section's residuals block.
+RESIDUAL_STATEMENTS = ("matching is spelling-level", "find -exec", "awk system()", "sed e",
+                       "npx", "npm run", "git rebase --exec", "git fetch --upload-pack",
+                       "gh api", "git restore", "git checkout -f",
+                       "git worktree remove --force", "gcloud", "npm publish", "`;`",
+                       "`&&`", "`$()`", "unverified", "env-prefix", "shell-opener",
+                       "prompt count", "the allowlist is not the gate", "REQ-659")
+FALSE_RESIDUAL_CLAIMS = (
+    (re.compile(r"allowlist\s+is\s+the\s+gate", re.I), "claims the allowlist is the gate"),
+    (re.compile(r"chained[- ]commands?(?:\s+matching)?\s+(?:is|are)\s+verified", re.I),
+     "claims Copilot's chained-command matching is verified"),
+)
+_LOSS_OPEN_RE = re.compile(r"^<!-- harness-loss: ([a-z]+) -->$")
+_LOSS_ROW_RE = re.compile(r"^\|\s*(?P<label>[^|]+?)\s*\|\s*(?P<value>.+?)\s*\|$")
+
+
+def _loss_blocks(text: str) -> dict[str, tuple[int, list[str]]]:
+    """``{harness: (line number, block lines)}`` of the ``harness-loss`` marker blocks."""
+    lines = text.splitlines()
+    blocks: dict[str, tuple[int, list[str]]] = {}
+    for i, line in enumerate(lines):
+        m = _LOSS_OPEN_RE.match(line.strip())
+        if m:
+            close = "<!-- /harness-loss: %s -->" % m.group(1)
+            end = next((j for j in range(i + 1, len(lines)) if lines[j].strip() == close), None)
+            blocks[m.group(1)] = (i + 1, lines[i + 1:end] if end is not None else lines[i + 1:])
+    return blocks
+
+
+def _loss_rows(block: list[str]) -> dict[str, str]:
+    rows: dict[str, str] = {}
+    for line in block:
+        m = _LOSS_ROW_RE.match(line.strip())
+        if m and not set(m.group("label")) <= set("-: "):
+            rows[m.group("label").replace("`", "")] = m.group("value")
+    return rows
+
+
+def _loss_fact_problems(adapter, hr, perms, result, rows: dict[str, str]) -> list[str]:
+    """What the table says that the adapter and a fresh render do not (BR-11)."""
+    caps = adapter["capabilities"]
+    scope = hr.gated_scope(adapter)
+    _rules, findings, _extras = hr.render_permissions(adapter, perms, scope, result)
+    problems = []
+
+    def need(label, text, why):
+        if label in rows and text.lower() not in rows[label].lower():
+            problems.append(f"row `{label}` must say {text!r}: {why}")
+
+    def refuse(label, text, why):
+        if label in rows and text.lower() in rows[label].lower():
+            problems.append(f"row `{label}` must not say {text!r}: {why}")
+
+    committed = caps["committable_allowlist"]
+    if "Committed allowlist" in rows and \
+            not rows["Committed allowlist"].lower().startswith(committed):
+        problems.append(f"row `Committed allowlist` must start {committed!r}: the adapter "
+                        f"declares committable_allowlist: {committed}")
+    gran = caps["allowlist_granularity"]
+    words = {"command-base": "command base"}.get(gran, "subcommand prefix")
+    need("Allowlist granularity", words, f"the adapter declares {gran}")
+    if gran == "command-base":
+        refuse("Allowlist granularity", "subcommand", "a command base has no subcommand")
+    if scope == "printed":
+        need("Deny-tier rendering", "--deny-tool", "the printed line carries the deny tier")
+    else:
+        need("Deny-tier rendering", "`deny`", "the project render carries the deny tier")
+    refuse("Deny-tier rendering", "no deny", "the deny tier is rendered")
+    omitted = [f.command for f in findings
+               if f.verdict == "inexpressible" and "would wrap deny-tier" in f.detail]
+    if omitted:
+        need("Shared-base fail-closed", "omitted", "the render omits them")
+        need("Shared-base fail-closed", "prompt", "an omitted entry prompts")
+        refuse("Shared-base fail-closed", "is allowed", "the render omits it")
+        refuse("Shared-base fail-closed", "are allowed", "the render omits them")
+        for command in dict.fromkeys(omitted):
+            if gran == "command-base":
+                need("Shared-base fail-closed", "Shell(%s)" % command.split()[0],
+                     "the render omits that base")
+            elif command == "git -C":
+                need("Shared-base fail-closed", "git -C", "the render omits that prefix")
+            else:
+                need("Shared-base fail-closed", command + ":*", "the render omits that prefix")
+    else:
+        need("Shared-base fail-closed", "none", "the render omits nothing")
+    if adapter["paths"].get("agents", {}).get("mode", "").startswith("via:"):
+        need("Read-only reviewers", "unverified", "OQ-2 settles a via: agents surface")
+    if result is None:
+        need("Headless deny status", "unverified", "no REQ-664 result file exists")
+    for f in findings:
+        if f.verdict.startswith("widened:") and f.entry in ("rm.recursive", "terraform"):
+            need("Deny width", f.verdict.split(":", 1)[1], "the render widens it")
+    if "Shell(npm) width" in rows:
+        need("Shell(npm) width", "npm publish", "the entry admits it")
+    return problems
+
+
+def check_harness_loss_tables(root: Path, readme: Path | None = None) -> list[Finding]:
+    """REQ-656 BR-11, BR-17: each README loss table agrees with its adapter and a fresh
+    render, and carries the declared residuals, so the table cannot outlive the
+    adapter (LESSON-012, LESSON-019). The facts are derived here, never copied."""
+    engine = _import_harness_engine(root)
+    path = readme or root / "README.md"
+    if engine is None or not path.is_file():
+        return []
+    ha, hr = engine
+    names = [n for n in LOSS_TABLE_HARNESSES if (root / "harness" / (n + ".yml")).is_file()]
+    if not names:
+        return []
+    rel = path.name
+    blocks = _loss_blocks(path.read_text(encoding="utf-8", errors="replace"))
+    perms = ha.load_permissions(ha.permissions_path(str(root)))
+    findings: list[Finding] = []
+    for name in names:
+        if name not in blocks:
+            findings.append(Finding(rel, 1, HARNESS_LOSS_CHECK,
+                                    f"no `harness-loss: {name}` block (REQ-656 BR-11)"))
+            continue
+        lineno, block = blocks[name]
+        rows = _loss_rows(block)
+        for label in LOSS_ROWS + LOSS_EXTRA_ROWS.get(name, ()):
+            if label not in rows:
+                findings.append(Finding(rel, lineno, HARNESS_LOSS_CHECK,
+                                        f"{name}: the table has no `{label}` row (BR-11)"))
+        adapter = ha.load_adapter(str(root / "harness" / (name + ".yml")), toolkit=str(root))
+        result = hr.load_result_file(str(root / ".adlc" / "research" / "harness-probes"
+                                         / (name + ".json")))
+        for problem in _loss_fact_problems(adapter, hr, perms, result, rows):
+            findings.append(Finding(rel, lineno, HARNESS_LOSS_CHECK, f"{name}: {problem}"))
+        text = "\n".join(block)
+        if "Declared residuals" not in text:
+            findings.append(Finding(rel, lineno, HARNESS_LOSS_CHECK,
+                                    f"{name}: no Declared residuals block (BR-17)"))
+        else:
+            low = text.lower()
+            for statement in RESIDUAL_STATEMENTS:
+                if statement.lower() not in low:
+                    findings.append(Finding(rel, lineno, HARNESS_LOSS_CHECK,
+                                            f"{name}: the residuals omit {statement!r} (BR-17)"))
+        for pattern, why in FALSE_RESIDUAL_CLAIMS:
+            if pattern.search(text):
+                findings.append(Finding(rel, lineno, HARNESS_LOSS_CHECK,
+                                        f"{name}: the section {why} (BR-17)"))
+    return findings
 
 
 def check_allowlist_fidelity(root: Path) -> list[Finding]:
@@ -4896,10 +5058,15 @@ def check_hook_sources(root: Path) -> list[Finding]:
             hooks = doc.get("hooks", {}) if isinstance(doc, dict) else {}
             for groups in (hooks.values() if isinstance(hooks, dict) else []):
                 for group in groups or []:
-                    for hook in (group or {}).get("hooks", []) or []:
-                        command = hook.get("command", "") if isinstance(hook, dict) else ""
+                    if isinstance(group, dict) and "bash" in group:
+                        # Copilot's entries are flat: the command is the `bash` key.
+                        commands = [group["bash"]]
+                    else:
+                        commands = [hook.get("command", "") if isinstance(hook, dict) else ""
+                                    for hook in (group or {}).get("hooks", []) or []]
+                    for command in commands:
                         findings.extend(_hook_command_findings(
-                            rel, [(1, ln) for ln in command.split("\n")]))
+                            rel, [(1, ln) for ln in str(command).split("\n")]))
     return findings
 
 

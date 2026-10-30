@@ -3,15 +3,15 @@
 `harness/claude.yml` is data. `tools/adlc/harness_adapter.py` validates it (an
 unknown key, a missing canonical hook event or a literal home path is a loud error),
 and `tools/adlc/harness_render.py` renders the toolkit's canonical sources through
-it. It is the only adapter that ships; Copilot and Cursor (REQ-656), Codex (REQ-655)
-and Gemini CLI (REQ-658) add theirs as data files against the same schema.
+it. Copilot CLI and Cursor (REQ-656) ship beside it, with their own READMEs here; Codex
+(REQ-655) and Gemini CLI (REQ-658) add theirs as data files against the same schema.
 
 | Surface | Where | How |
 |---|---|---|
 | permissions | `.claude/settings.json` (project) | rendered from `templates/permissions.yml`: the routine tier as `allow`, the deny tier as `ask` (`deny_tier_render: {project: confirm}`) |
 | hooks | `.claude/settings.json` (project) | rendered from `templates/hooks.yml`: `SessionStart` (`startup\|resume\|clear`) runs `ethos-inject` and `session-record`; `SessionStart` with the `compact` matcher re-runs `ethos-inject`. Copilot CLI and Cursor read this file as-is (`read_by`), so the commands carry no `--harness` argument |
 | instructions | `CLAUDE.md` (project) | `@AGENTS.md` plus the Claude-specific lines; an existing file only gains the import line |
-| agents, skills | `~/.claude/agents`, `~/.claude/skills` | `mounted`: install.sh's symlinks serve the canonical files, so `adlc agents render --harness claude` is the in-place `model:` stamp |
+| agents, skills | `$HOME/.claude/agents`, `$HOME/.claude/skills` | `mounted`: install.sh's symlinks serve the canonical files, so `adlc agents render --harness claude` is the in-place `model:` stamp |
 
 `rendered/settings.json` is the golden render. `adlc harness render --check` and the
 `render-parity` lint hold it, and the toolkit's own `.claude/settings.json`, equal to

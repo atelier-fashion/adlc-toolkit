@@ -9,12 +9,14 @@ the other (LESSON-397).
 * ``render``   writes any surface of any adapter at a scope (default ``project``),
   atomically and idempotently; ``--dry-run`` writes nothing; ``--check`` is the
   toolkit's parity check (goldens + in-tree renders, BR-13) and is read-only;
-  ``--scope exec`` prints the structured exec entries and writes nothing.
+  ``--write-goldens`` rewrites the goldens; ``--scope exec`` prints the structured
+  exec entries and writes nothing; ``--scope user`` writes a copy harness's agents.
 * ``install``  writes a harness's user-level surfaces only (BR-3); ``--all``
   iterates the harnesses ``adlc harness detect`` reports present.
 * ``doctor``   runs ``harness:<name>`` and ``render-currency:<name>`` (BR-15).
 * ``drift``    classifies the project's rendered files with template posture for
-  ``/template-drift`` (ADR-11); read-only.
+  ``/template-drift`` (ADR-11); read-only. ``--opted-in`` adds each shipped adapter
+  the project has the main file of.
 
 ``--adapter-path <file>`` is the only way a non-detect adapter loads; ``install
 --all`` refuses it. Pure standard library.
@@ -45,22 +47,43 @@ def project_root():
     return os.getcwd()
 
 
-def _result_for(adapter, root):
-    path = os.path.join(root, ".adlc", "research", "harness-probes", adapter["name"] + ".json")
-    return hr.load_result_file(path)
-
-
-def _report_findings(findings, remedies, err):
+def _report_findings(adapter, findings, remedies, err, summary=True):
     shown = [f for f in findings if f.verdict != "exact"]
     for f in shown:
         err.write("fidelity: %s\n" % f.format())
+    for line in hr.fidelity_summary(adapter, findings) if summary else ():
+        err.write("fidelity: %s\n" % line)
     for remedy in dict.fromkeys(remedies):
         err.write("remedy: %s\n" % remedy)
 
 
+def _agent_copies(adapter, toolkit, args, out, err):
+    """``--scope user`` writes a copy harness's agents; a project render never does,
+    so `/init` writes nothing under the home directory (REQ-656 ADR-9). The number
+    written, or ``None`` on a bad tier config."""
+    spec = adapter["paths"].get("agents", {})
+    if spec.get("mode") != "rendered" or "user" not in spec:
+        return 0
+    if args.scope != "user":
+        out.write("agents: user-level copies are not part of a project render; run `adlc "
+                  "harness install --harness %s`\n" % adapter["name"])
+        return 0
+    import agents_render
+    try:
+        report = agents_render.render_copies(adapter, toolkit, agents_render.parse_agents_config(),
+                                             write=not args.dry_run)
+    except agents_render.ConfigError as exc:
+        err.write("adlc harness render: %s\n" % exc)
+        return None
+    changed = sum(1 for r in report if r[2])
+    out.write("  agents     %s %d copies under %s, %d changed\n"
+              % (adapter["name"], len(report), spec["user"], changed))
+    return 0 if args.dry_run else changed
+
+
 def cmd_render(args, out=sys.stdout, err=sys.stderr):
     toolkit = ha.toolkit_dir()
-    if args.check:
+    if args.check or args.write_goldens:
         if args.adapter_path:
             paths = [args.adapter_path]
         elif args.harness:
@@ -68,6 +91,12 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
         else:
             paths = None
         try:
+            if args.write_goldens:
+                written = hr.write_goldens(toolkit, paths)
+                for rel in written:
+                    out.write("  written    %s\n" % rel)
+                out.write("goldens: %d written\n" % len(written))
+                return 0
             results = hr.parity(toolkit, paths)
         except ha.AdapterError as exc:
             err.write("adlc harness render: %s\n" % exc)
@@ -90,7 +119,7 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
         err.write("adlc harness render: %s\n" % exc)
         return 2
     root = project_root()
-    result = _result_for(adapter, toolkit)
+    result = hr.result_for(adapter, toolkit)
     surfaces = (args.surface,) if args.surface else None
     if args.scope == "exec":
         try:
@@ -100,7 +129,7 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
             return 2
         out.write(hr.dumps_json({"harness": adapter["name"], "scope": "exec",
                                  "entries": entries}))
-        _report_findings(findings, [], err)
+        _report_findings(adapter, findings, [], err, summary=False)
         return 0
     try:
         plans, printed = hr.plan_surfaces(adapter, args.scope, root, toolkit, surfaces, result)
@@ -117,6 +146,11 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
     except hr.RenderError as exc:
         err.write("adlc harness render: %s\n" % exc)
         return 2
+    if not surfaces or "agents" in surfaces:
+        copies = _agent_copies(adapter, toolkit, args, out, err)
+        if copies is None:
+            return 2
+        written += copies
     for plan in plans:
         if plan.write_mode == "prepend-import" and not args.dry_run:
             current = hr.read_text(plan.path) or ""
@@ -129,13 +163,13 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
         if surface == "permissions":
             body, findings, remedies = hr.printed_text(adapter, toolkit, result)
             out.write("printed %s (apply it yourself; nothing is written):\n%s" % (surface, body))
-            _report_findings(findings, remedies, err)
+            _report_findings(adapter, findings, remedies, err)
     if (not surfaces or "permissions" in surfaces) and "permissions" in adapter["paths"]:
         spec = adapter["paths"]["permissions"]
         if spec["mode"] == "rendered" and args.scope in spec:
             perms = ha.load_permissions(ha.permissions_path(toolkit))
             _rules, findings, extras = hr.render_permissions(adapter, perms, args.scope, result)
-            _report_findings(findings, extras["remedies"], err)
+            _report_findings(adapter, findings, extras["remedies"], err)
         elif args.scope == "user" and spec["mode"] == "rendered":
             perms = ha.load_permissions(ha.permissions_path(toolkit))
             rules, findings, extras = hr.render_permissions(adapter, perms, "user", result)
@@ -144,7 +178,7 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
                       "rule(s), routine none:\n" % (adapter["name"], len(rules)))
             fmt = adapter["formats"].get("permissions", "rules-json")
             out.write(hr.FORMATS[fmt](rules, extras, None))
-            _report_findings(findings, [], err)
+            _report_findings(adapter, findings, [], err, summary=False)
     if args.dry_run:
         out.write("dry-run: nothing written\n")
     elif written == 0:
@@ -253,25 +287,43 @@ def cmd_doctor(args, out=sys.stdout, err=sys.stderr):
     return 1 if fails else 0
 
 
+def _drift_adapters(args, root, toolkit):
+    """The adapters to compare. ``--opted-in`` adds each shipped adapter the project
+    already has a file of, so a harness nobody asked for is never reported ``missing``
+    (REQ-656 BR-14)."""
+    adapters = [ha.resolve_adapter(args.harness or "claude", args.adapter_path, toolkit)]
+    if args.opted_in:
+        named = {a["name"] for a in adapters}
+        for path in ha.shipped_adapter_paths(toolkit):
+            adapter = ha.load_adapter(path, toolkit=toolkit)
+            if adapter["name"] not in named and hr.opted_in(adapter, root, toolkit):
+                adapters.append(adapter)
+    return adapters
+
+
 def cmd_drift(args, out=sys.stdout, err=sys.stderr):
     toolkit = ha.toolkit_dir()
+    root = project_root()
     try:
-        adapter = ha.resolve_adapter(args.harness or "claude", args.adapter_path, toolkit)
+        adapters = _drift_adapters(args, root, toolkit)
     except ha.AdapterError as exc:
         err.write("adlc harness drift: %s\n" % exc)
         return 2
-    rows = hr.drift(adapter, project_root(), toolkit)
+    rows = []
+    for adapter in adapters:
+        rows.extend((adapter["name"], r, c, d) for r, c, d in hr.drift(adapter, root, toolkit))
     if args.json:
-        out.write(hr.dumps_json([{"path": r, "classification": c, "details": d}
-                                 for r, c, d in rows]))
+        out.write(hr.dumps_json([{"harness": n, "path": r, "classification": c, "details": d}
+                                 for n, r, c, d in rows]))
     else:
-        for rel, cls, details in rows:
-            out.write("harness-config %s %s: %s\n" % (adapter["name"], rel, cls))
+        for name, rel, cls, details in rows:
+            out.write("harness-config %s %s: %s\n" % (name, rel, cls))
             for d in details:
                 out.write("  - %s\n" % d)
         if not rows:
-            out.write("harness-config %s: no project-layer file to compare\n" % adapter["name"])
-    return 1 if any(c in ("stale", "missing") for _r, c, _d in rows) else 0
+            out.write("harness-config %s: no project-layer file to compare\n"
+                      % adapters[0]["name"])
+    return 1 if any(c in ("stale", "missing") for _n, _r, c, _d in rows) else 0
 
 
 def build_parser():
@@ -285,6 +337,8 @@ def build_parser():
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--force", action="store_true", help="overwrite a create-mode file")
     r.add_argument("--check", action="store_true", help="parity only; write nothing")
+    r.add_argument("--write-goldens", action="store_true",
+                   help="rewrite harness/<name>/rendered/ from a fresh render")
     i = sub.add_parser("install", help="write a harness's user-level surfaces")
     i.add_argument("--harness")
     i.add_argument("--all", action="store_true")
@@ -296,6 +350,8 @@ def build_parser():
     t = sub.add_parser("drift", help="template-posture drift of the project layer")
     t.add_argument("--harness")
     t.add_argument("--adapter-path")
+    t.add_argument("--opted-in", action="store_true",
+                   help="also compare each shipped adapter the project has a file of")
     t.add_argument("--json", action="store_true")
     return parser
 

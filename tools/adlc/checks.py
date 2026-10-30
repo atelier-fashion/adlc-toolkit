@@ -1587,9 +1587,20 @@ def _harness_check(name: str):
                     f"{p.binary} not detected on PATH (report-only)", "")
         return (Result.PASS,
                 f"{p.binary} -> {p.path} (version: {p.version}; skills mount: "
-                f"{p.mount}) (report-only; not gated)", "")
+                f"{p.mount}){_harness_facts(name)} (report-only; not gated)", "")
     run.__name__ = "check_harness_" + name
     return run
+
+
+def _harness_facts(name: str) -> str:
+    """The adapter's ``doctor_rows`` facts, as text to report (REQ-656 BR-10)."""
+    import harness_adapter
+    import harness_doctor
+    try:
+        adapter = harness_adapter.resolve_adapter(name)
+    except harness_adapter.AdapterError:
+        return ""
+    return "".join("; " + line for line in harness_doctor.fact_lines(adapter))
 
 
 def _harness_checks():
