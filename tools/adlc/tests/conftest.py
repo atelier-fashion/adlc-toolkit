@@ -5,6 +5,7 @@ Inserts the parent dir (tools/adlc) onto sys.path so `import adlc`,
 """
 import os
 import shutil
+import site
 import subprocess
 import sys
 import types
@@ -12,6 +13,26 @@ import types
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+#: The runner's user site, resolved before any test moves ``HOME``.
+_USER_BASE = site.getuserbase()
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_home(monkeypatch, tmp_path_factory):
+    """Point ``HOME`` at a throwaway directory for every test (BUG-256).
+
+    Code under test reaches machine state through ``~`` in-process and through
+    the shell partials it runs, so a test that forgets its own sandbox writes to
+    the real home: ``test_reserve_new_id_won_pushes_ref`` appended to the real
+    ``.adlc-own-reservations`` on every run (LESSON-758). A test that needs a
+    particular home sets ``HOME`` itself, and that wins.
+
+    Moving ``HOME`` also moves the user site a child ``python3`` searches, which
+    hides a PyYAML installed there, so the child keeps the runner's: read only.
+    """
+    monkeypatch.setenv("PYTHONUSERBASE", _USER_BASE)
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("sandbox-home")))
 
 
 @pytest.fixture(autouse=True)
