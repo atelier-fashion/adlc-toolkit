@@ -207,6 +207,16 @@ _Permissions: not applicable — single-user tooling. Section omitted deliberate
 - Editing lessons or bugs under `.adlc/` that record the Teton work; they stay as history.
 - Windows.
 
+## Deferred
+
+Open verification items, each a manual run this REQ's unattended pipeline could
+not perform (PR #217 lists them):
+
+- AC-1's §6.10 evidence: `arg-substitution` in `.adlc/research/harness-probes/claude.json` is `unknown` (`binary-exit-1`); rerun the probe with a logged-in `claude` (ASSUME-011).
+- AC-4: `/review` inside a Claude Code subagent, with and without `.adlc/agents/`.
+- AC-10: one `tools/lint-skills` run with the real `skills-ref` validator installed, which also settles OQ-2 against its key list.
+- AC-14: `/spec`, `/architect`, `/review` and `/wrapup` end to end on Claude Code.
+
 ## Retrieved Context
 
 - REQ-610 (spec, score 11): Guard the two-level partial-sourcing pattern so a missing repo-local partial is not fatal under POSIX sh
