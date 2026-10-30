@@ -1090,14 +1090,11 @@ def test_repo_root_unguarded_source_and_root_line_clean():
     top-level ``*/SKILL.md`` is walked, so the zero is over the whole corpus
     and not over an empty walk (REQ-595 BR-5, LESSON-019).
 
-    A nested worktree under ``.claude/worktrees/`` is another checkout's tree
-    and is left out of both sides of the comparison.
+    A nested worktree under ``.claude/worktrees/`` is another checkout's tree;
+    the walk itself leaves it out (BUG-254), so no output line is filtered here.
     """
     result = _run(REPO_ROOT)
-    own = [
-        ln for ln in result.stdout.splitlines()
-        if ln.strip() and not ln.startswith(".claude/")
-    ]
+    own = [ln for ln in result.stdout.splitlines() if ln.strip()]
     for check_id in ("unguarded-source", "toolkit-root-line", "canonical-helper", "sentinel"):
         hits = [ln for ln in own if f": {check_id}:" in ln]
         assert hits == [], "\n".join(hits)
@@ -1334,6 +1331,47 @@ def test_descendant_worktrees_still_skipped(tmp_path):
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "", result.stdout
+    assert "scanned 1 SKILL.md file(s)" in result.stderr, result.stderr
+
+
+def test_nested_session_worktree_skipped(tmp_path):
+    """BUG-254: a desktop-app session worktree at `.claude/worktrees/<name>/`
+    below the scan root is another checkout and is not walked. Its planted
+    violation is not reported and its SKILL.md is not counted. A SKILL.md
+    elsewhere under `.claude/` is still walked, so only the
+    `.claude/worktrees` pair is skipped, not all of `.claude/`.
+    """
+    nested = tmp_path / ".claude" / "worktrees" / "x" / "alpha"
+    nested.mkdir(parents=True)
+    shutil.copyfile(FIXTURES / "corrupt-sentinel.md", nested / "SKILL.md")
+    project = tmp_path / ".claude" / "skills" / "beta"
+    project.mkdir(parents=True)
+    shutil.copyfile(FIXTURES / "clean.md", project / "SKILL.md")
+    real = tmp_path / "realskill"
+    real.mkdir()
+    shutil.copyfile(FIXTURES / "clean.md", real / "SKILL.md")
+
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "", result.stdout
+    assert "scanned 2 SKILL.md file(s)" in result.stderr, result.stderr
+
+
+def test_root_inside_session_worktree_still_scanned(tmp_path):
+    """BUG-254 bound (LESSON-019, REQ-436 ADR-5): the skip applies below the
+    scan root only. A root that itself sits inside `.claude/worktrees/<name>`
+    (every desktop-app session lints from there) is scanned in full, so its
+    planted violation is reported rather than a vacuous exit 255.
+    """
+    root = tmp_path / ".claude" / "worktrees" / "x"
+    skill = root / "alpha"
+    skill.mkdir(parents=True)
+    shutil.copyfile(FIXTURES / "corrupt-sentinel.md", skill / "SKILL.md")
+
+    result = _run(root)
+    assert 0 < result.returncode < 255, result.stdout + result.stderr
+    assert "alpha/SKILL.md:" in result.stdout, result.stdout
+    assert "sentinel" in result.stdout, result.stdout
     assert "scanned 1 SKILL.md file(s)" in result.stderr, result.stderr
 
 
