@@ -1,0 +1,21 @@
+{
+  "adversary.agent.md": "read, search, execute",
+  "api-cost-scanner.agent.md": "read, search, execute",
+  "architecture-mapper.agent.md": "read, search",
+  "architecture-reviewer.agent.md": "read, search, execute",
+  "code-quality-auditor.agent.md": "read, search, execute",
+  "convention-auditor.agent.md": "read, search, execute",
+  "correctness-reviewer.agent.md": "read, search, execute",
+  "db-perf-scanner.agent.md": "read, search, execute",
+  "delegate-pre-pass.agent.md": "execute",
+  "feature-tracer.agent.md": "read, search",
+  "integration-explorer.agent.md": "read, search",
+  "latency-scanner.agent.md": "read, search, execute",
+  "lite-reviewer.agent.md": "read, search, execute",
+  "pipeline-runner.agent.md": null,
+  "quality-reviewer.agent.md": "read, search, execute",
+  "reflector.agent.md": "read, search, execute",
+  "security-auditor.agent.md": "read, search, execute",
+  "task-implementer.agent.md": null,
+  "test-auditor.agent.md": "read, search, execute"
+}

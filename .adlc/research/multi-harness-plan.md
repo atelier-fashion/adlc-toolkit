@@ -509,3 +509,7 @@ Toolkit: `partials/id-alloc.sh`, `partials/forge.sh`, `partials/lane-check.sh`,
 | m2 Codex nesting "documented single level" | corrected to undocumented here and in `codex-portability.md` |
 | m3 `/proceed` "re-invokes itself" | removed |
 | m4 rendered `~/.claude/agents` | symlink stays; render stamps in place |
+| REQ-656, docs recheck of 2026-10-30, Copilot hook context | §1 and §2d say `additionalContext`; the hook set was plain stdout, which the Copilot docs say is not injected. The Copilot render wraps ETHOS in that JSON (`hook_output`) |
+| REQ-656, docs recheck of 2026-10-30, `.cursor/permissions.json` | §1 and §2b list it beside `cli.json` as an allowlist; it is the IDE's file (`terminalAllowlist`, `mcpAllowlist`, `autoRun`), with no deny key, and it ignores unknown keys. It carries the allow set only |
+| REQ-656, docs recheck of 2026-10-30, ETHOS in Cursor subagents | §2d and §4 say hook. Cursor's reader of Claude-format hooks does not map `SubagentStart`, and the `claude` render has none, so no hook path reaches a Cursor subagent; §1's `subagentStart` is native-format only |
+| REQ-656, `subcommand` granularity | §4's "subcommand" is REQ-657's `token-prefix`: `subcommand` caps at two tokens, which would turn `gh pr view` into `gh pr` and every `--deny-tool` into two tokens |

@@ -30,7 +30,9 @@ import harness_yaml  # noqa: E402
 
 #: The schema versions this loader reads. A bump adds optional fields; a field
 #: every adapter must carry is added to ``harness/claude.yml`` by the bumping REQ.
-KNOWN_SCHEMA_VERSIONS = (1,)
+#: Version 2 (REQ-656) adds ``paths.<surface>.also``, ``hook_output``,
+#: ``fidelity_notes`` and ``doctor_rows[].fact``, each refused under version 1.
+KNOWN_SCHEMA_VERSIONS = (1, 2)
 
 SURFACES = ("agents", "permissions", "hooks", "instructions", "skills")
 SCOPES = ("project", "user")
@@ -53,6 +55,12 @@ FIDELITY_VERDICTS = ("inexpressible", "deny-unsupported", "residual:exact-deny")
 GRANDFATHERED = ("claude", "prefix")
 #: Tokens that, alone, are a first-token wildcard over every shell line (BR-8).
 FIRST_TOKEN_WILDCARDS = ("if", "sh", "bash", "zsh")
+#: First tokens no rendered routine allow may have: each one runs its arguments as
+#: a command, so an allow on it is a wildcard allow (REQ-656 BR-2).
+FORBIDDEN_FIRST_TOKENS = FIRST_TOKEN_WILDCARDS + ("env", "xargs", "eval", "exec", "sudo", "time",
+                                                  "command", "nohup", "node")
+#: ...and the same for any token starting with one of these (``python3``).
+FORBIDDEN_FIRST_TOKEN_PREFIXES = ("python",)
 
 #: Every format an adapter may name, with what the loader needs to know of it.
 #: ``harness_render.FORMATS`` implements each one; a test holds the two equal.
@@ -64,18 +72,31 @@ FORMATS = {
     "agents-md": {"json": False, "surfaces": ("instructions",), "renders_exact": False},
     "claude-md-import": {"json": False, "surfaces": ("instructions",),
                          "renders_exact": False},
+    # Copilot CLI (REQ-656). The allowlist is a printed line: Copilot has no committed
+    # form. A bare `shell(<argv>)` is at most as wide as `shell(<argv>:*)`, so an
+    # exact routine entry stays bare; a deny is always spelled `:*` (ADR-2).
+    "copilot-tool-flags": {"json": False, "surfaces": ("permissions",),
+                           "renders_exact": True},
+    "copilot-hooks-json": {"json": True, "surfaces": ("hooks",), "renders_exact": False},
+    "copilot-agent-md": {"json": False, "surfaces": ("agents",), "renders_exact": False,
+                         "agent_suffix": ".agent.md"},
+    # Cursor (REQ-656): the CLI's permissions file and the IDE's, which is not the
+    # same schema and has no deny key (ADR-6).
+    "cursor-cli-json": {"json": True, "surfaces": ("permissions",), "renders_exact": False},
+    "cursor-terminal-allowlist": {"json": True, "surfaces": ("permissions",),
+                                  "renders_exact": False},
 }
 
 _TOP_KEYS = {
     "name", "schema_version", "binary", "paths", "formats", "tool_map", "tier_map",
     "accepted_fidelity", "deny_tier_render", "default_mode_map", "exec", "trust",
     "sandbox_can_reach_common_gitdir", "hook_events", "hook_timeout_unit",
-    "hook_payload", "doctor_rows", "capabilities",
+    "hook_payload", "doctor_rows", "capabilities", "hook_output", "fidelity_notes",
 }
 _REQUIRED_TOP = ("name", "schema_version", "binary", "paths", "formats", "tool_map",
                  "tier_map", "deny_tier_render", "trust", "hook_events", "hook_payload",
                  "capabilities")
-_SURFACE_KEYS = {"user", "project", "mode", "write_mode", "owned_keys", "read_by"}
+_SURFACE_KEYS = {"user", "project", "mode", "write_mode", "owned_keys", "read_by", "also"}
 _CAP_KEYS = {"deny", "subagent_start_hook", "compact_rehook", "agent_tool_restriction",
              "allowlist_granularity", "committable_allowlist", "git_c_spelling",
              "never_restore", "deny_under_allow", "fence_broad_spelling",
@@ -86,6 +107,8 @@ _DUA_KEYS = ("mechanism", "result", "harness_version", "source")
 _LITERAL_HOME_RE = re.compile(r"(^/(Users|home|root|var|private)/)|(^~)")
 _ID_RE = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 _TOKEN_BAD_RE = re.compile(r"[\s;|&`]|\$\(")
+_HOOK_OUTPUT_RE = re.compile(r"^json:[A-Za-z_][A-Za-z0-9_]*$")
+HOOK_IDS = ("ethos-inject", "session-record")
 
 
 class AdapterError(ValueError):
@@ -227,6 +250,20 @@ def _enum(src, field, value, allowed):
     return value
 
 
+def _project_path(src, field, value):
+    ppath = _need_str(src, field, value)
+    if ppath.startswith("/") or ppath.startswith("~") or "$" in ppath or \
+            ".." in ppath.split("/"):
+        raise AdapterError(src, field, "%r must be repo-relative" % ppath)
+    return ppath
+
+
+def _need_schema_2(src, field, version):
+    if version < 2:
+        raise AdapterError(src, field, "needs schema_version 2 (this adapter declares %d)"
+                           % version)
+
+
 def _unknown(src, prefix, mapping, allowed):
     for key in mapping:
         if key not in allowed:
@@ -323,10 +360,21 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
             if "/../" in upath + "/" or upath.endswith("/.."):
                 raise AdapterError(src, field + ".user", "must not contain '..'")
         if "project" in spec:
-            ppath = _need_str(src, field + ".project", spec["project"])
-            if ppath.startswith("/") or ppath.startswith("~") or "$" in ppath or \
-                    ".." in ppath.split("/"):
-                raise AdapterError(src, field + ".project", "%r must be repo-relative" % ppath)
+            _project_path(src, field + ".project", spec["project"])
+        if "also" in spec:
+            _need_schema_2(src, field + ".also", data["schema_version"])
+            if mode != "rendered" or "project" not in spec:
+                raise AdapterError(src, field + ".also", "only a rendered surface with a project "
+                                   "path adds a further file")
+            for k, item in enumerate(_need_list(src, field + ".also", spec["also"])):
+                ifield = "%s.also[%d]" % (field, k)
+                _need_map(src, ifield, item)
+                _unknown(src, ifield + ".", item, {"project", "format"})
+                _project_path(src, ifield + ".project", item.get("project"))
+                ifmt = _need_str(src, ifield + ".format", item.get("format"))
+                if ifmt not in FORMATS or surface not in FORMATS[ifmt]["surfaces"]:
+                    raise AdapterError(src, ifield + ".format", "format %r does not render the "
+                                       "%s surface" % (ifmt, surface))
         wmode = spec.get("write_mode", "create")
         _enum(src, field + ".write_mode", wmode, WRITE_MODES)
         if mode in ("rendered", "printed"):
@@ -434,13 +482,30 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
         _enum(src, "hook_payload." + item, item, PAYLOAD_ITEMS)
         _need_str(src, "hook_payload." + item, fieldname)
 
+    if "hook_output" in data:
+        _need_schema_2(src, "hook_output", data["schema_version"])
+        for hook, how in _need_map(src, "hook_output", data["hook_output"]).items():
+            _enum(src, "hook_output." + hook, hook, HOOK_IDS)
+            if not isinstance(how, str) or not _HOOK_OUTPUT_RE.match(how):
+                raise AdapterError(src, "hook_output." + hook, "%r is not json:<key>" % (how,))
+
+    if "fidelity_notes" in data:
+        _need_schema_2(src, "fidelity_notes", data["schema_version"])
+        for k, note in enumerate(_need_list(src, "fidelity_notes", data["fidelity_notes"])):
+            _need_str(src, "fidelity_notes[%d]" % k, note)
+
     for k, row in enumerate(_need_list(src, "doctor_rows", data.get("doctor_rows", []))):
         field = "doctor_rows[%d]" % k
         _need_map(src, field, row)
-        _unknown(src, field + ".", row, {"id", "kind", "target", "remediation"})
+        _unknown(src, field + ".", row, {"id", "kind", "target", "remediation", "fact"})
         _need_str(src, field + ".id", row.get("id"))
         _enum(src, field + ".kind", row.get("kind"), DOCTOR_ROW_KINDS)
         _need_str(src, field + ".remediation", row.get("remediation"))
+        if "fact" in row:
+            _need_schema_2(src, field + ".fact", data["schema_version"])
+            _need_str(src, field + ".fact", row["fact"])
+            if row.get("kind") != "path-exists":
+                raise AdapterError(src, field + ".fact", "only a path-exists row states a fact")
         target = row.get("target")
         if row.get("kind") == "marker-present":
             tmap = _need_map(src, field + ".target", target)

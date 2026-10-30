@@ -240,7 +240,7 @@ them has not yet landed in this project. The two lists MUST stay in agreement:
 - `partials` — `cp "$ADLC_TOOLKIT_ROOT/partials"/*.sh .adlc/partials/`
 - `agents` — `cp "$ADLC_TOOLKIT_ROOT/agents"/*.md .adlc/agents/`
 - `workflow-runtime` — `cp "$ADLC_TOOLKIT_ROOT/workflows"/*.workflow.js` + `README.md` → `.adlc/workflows/`
-- `harness-config` — `adlc harness render --harness <name>` → each named harness's project layer (Step 8; `claude`: `.claude/settings.json`)
+- `harness-config` — `adlc harness render --harness <name>` → each named harness's project layer (Step 8; `claude`: `.claude/settings.json`; `copilot`: `.github/hooks/adlc.json`; `cursor`: `.cursor/cli.json`, `.cursor/permissions.json`)
 <!-- /sync-surfaces -->
 
 (Note: `/template-drift` checks one additional surface — `workflow-test-landmine`, a stale
@@ -299,7 +299,12 @@ printf '%s\n' "$harnesses" | tr ',' '\n' | while IFS= read -r harness; do
 done
 ```
 
-The render prints one line per file (`written`, `unchanged` or `kept`), and on stderr every allowlist entry the harness cannot express, with the user-level remedy where one exists. When `CLAUDE.md` kept its lines, tell the user the follow-up: harness-neutral lines belong in `AGENTS.md`, and `CLAUDE.md` keeps only the Claude-specific ones below its `@AGENTS.md` line.
+The render prints one line per file (`written`, `unchanged` or `kept`), and on stderr every allowlist entry the harness cannot express, what will prompt because of it, and the user-level remedy where one exists. When `CLAUDE.md` kept its lines, tell the user the follow-up: harness-neutral lines belong in `AGENTS.md`, and `CLAUDE.md` keeps only the Claude-specific ones below its `@AGENTS.md` line.
+
+**Copilot CLI and Cursor (REQ-656).** Each is rendered only when the flag names it. Neither writes a second instruction file: `AGENTS.md` is the one both read.
+
+- `copilot` writes `.github/hooks/adlc.json` and **prints** one `copilot --allow-tool … --deny-tool …` line, because Copilot has no committed allowlist. Show that line to the user verbatim and tell them to paste it into a shell alias or profile, and say which commands will prompt: the report names them. A line labelled "WIDENING, not applied" is a separate remedy; never add it to the paste-ready line. The rendered agents are user-level, so this step does not write them: the render prints the command that does (`adlc harness install --harness copilot`).
+- `cursor` writes `.cursor/cli.json` and `.cursor/permissions.json`. Cursor reads its agents and hooks from Claude Code's paths, so a project needs `.claude/settings.json` too: use `--harness claude,cursor`. `--harness cursor` alone leaves that surface unserved, and the session starts without the ETHOS hook. Tell the user `git` and `gh` will prompt, and that a denied one-way move (`rm`, `terraform`, `./deploy.sh`) is run from their own shell.
 
 Customize for project-specific commands (e.g., add `Bash(cd app && ./deploy.sh:*)` for iOS deploys) by editing `.claude/settings.json` directly; `/template-drift` reports those additions as `customized`, never as drift to undo.
 

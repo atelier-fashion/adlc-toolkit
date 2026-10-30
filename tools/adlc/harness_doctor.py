@@ -10,6 +10,10 @@ code, and nothing here branches on a harness name.
 ``adlc doctor --checks render-currency:<name>`` and ``adlc harness doctor`` both
 call :func:`render_currency`, so the two cannot hold separate check code.
 
+A row carrying a ``fact`` is not judged: ``checks.py`` reports it under the
+``harness:<name>`` row, which never fails. ``capabilities.deny_under_allow`` is
+recomputed against the REQ-664 result file and reported, also never failing.
+
 Results are ``(status, detail, remediation)`` with status ``PASS`` / ``FAIL`` /
 ``SKIP``; ``checks.py`` turns them into its ``Result``. Every FAIL carries a
 remediation that, run verbatim, fixes it (REQ-519 BR-5, LESSON-572). An absent
@@ -100,6 +104,8 @@ def row_outcomes(adapter, toolkit, project_root=None):
     project_root = project_root or _project_root()
     out = []
     for row in adapter.get("doctor_rows", []):
+        if "fact" in row:
+            continue
         kind = row["kind"]
         ok = False
         detail = ""
@@ -125,6 +131,52 @@ def row_outcomes(adapter, toolkit, project_root=None):
         out.append((row["id"], "PASS" if ok else "FAIL", detail,
                     "" if ok else row["remediation"]))
     return out
+
+
+def _display(target):
+    return "~" + target[len("$HOME"):] if target.startswith("$HOME") else target
+
+
+def fact_lines(adapter, project_root=None):
+    """The ``harness:<name>`` statements: each ``doctor_rows`` entry with a ``fact``.
+
+    A fact is reported, never judged, so a machine without the path still passes
+    (REQ-654 BR-9). Only ``path-exists`` carries one today.
+    """
+    project_root = project_root or _project_root()
+    out = []
+    for row in adapter.get("doctor_rows", []):
+        if "fact" in row and row["kind"] == "path-exists":
+            found = os.path.exists(_expand_target(row["target"], project_root))
+            out.append("%s %s: %s" % (_display(row["target"]),
+                                      "exists" if found else "is absent", row["fact"]))
+    return out
+
+
+def deny_under_allow_status(adapter, result):
+    """``[(shape, status, why)]`` for the ``source: probe`` records, recomputed against
+    the REQ-664 result file: a hand-set ``pass`` with no matching result reads
+    ``unverified`` (REQ-656 BR-10). Report-only."""
+    out = []
+    for shape, rec in adapter["capabilities"].get("deny_under_allow", {}).items():
+        if rec["source"] != "probe":
+            continue
+        if rec["result"] != "pass":
+            out.append((shape, "unverified", ""))
+            continue
+        problem = hr.probe_record_problem(shape, rec, result)
+        out.append((shape, "unverified", problem) if problem else (shape, "pass", ""))
+    return out
+
+
+def _deny_under_allow_detail(adapter, toolkit):
+    path = os.path.join(toolkit, ".adlc", "research", "harness-probes",
+                        adapter["name"] + ".json")
+    rows = deny_under_allow_status(adapter, hr.load_result_file(path))
+    if not rows:
+        return None
+    return "deny_under_allow: " + ", ".join(
+        "%s=%s%s" % (shape, status, " (%s)" % why if why else "") for shape, status, why in rows)
 
 
 def render_currency(name, adapter_path=None, toolkit=None, project_root=None):
@@ -153,6 +205,9 @@ def render_currency(name, adapter_path=None, toolkit=None, project_root=None):
             remedies.append(remedy)
         else:
             passes.append("row %s: %s" % (row_id, detail))
+    # Report-only, on either path: a stale agent copy must not hide this.
+    dua = _deny_under_allow_detail(adapter, toolkit)
+    report = [dua] if dua else []
     if fails:
-        return "FAIL", "; ".join(fails), "\n".join(dict.fromkeys(remedies))
-    return "PASS", "; ".join(passes), ""
+        return "FAIL", "; ".join(fails + report), "\n".join(dict.fromkeys(remedies))
+    return "PASS", "; ".join(passes + report), ""

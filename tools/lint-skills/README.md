@@ -724,20 +724,34 @@ a general markdown linter and NOT a general shell linter.
 
 ## REQ-657: the harness adapter framework's checks
 
-- **`allowlist-fidelity`** renders `templates/permissions.yml` at project scope
-  through every shipped adapter (`harness/*.yml`) and prints one line per
+- **`allowlist-fidelity`** renders `templates/permissions.yml` at the scope each
+  adapter's allowlist lives at (`project`, or `printed` for Copilot CLI) through every
+  shipped adapter (`harness/*.yml`) and prints one line per
   `(harness, entry, command)`: `exact`, `widened:<spelling>`, `inexpressible`,
-  `deny-unsupported` or `residual:exact-deny` (there is no `narrowed`). It fails on a
+  `deny-unsupported` or `residual:exact-deny` (there is no `narrowed`), then, per
+  adapter, what will prompt, what has no hard deny, what was widened and the adapter's
+  `fidelity_notes`. It fails on a
   non-`exact` verdict the adapter's `accepted_fidelity` does not list at that scope,
-  on a rendered allow that matches a deny-tier command (plain, `git -C . …`,
+  on a rendered allow whose first token runs its arguments (`env`, `xargs`, `sudo`,
+  `python*`, …), on a rendered allow that matches a deny-tier command (plain, `git -C . …`,
   `NAME=1 …` or `bash -lc '…'`) in a shape whose `deny_under_allow` record is not a
-  valid pass, on a `source: probe` record that differs from REQ-664's result file
+  valid pass, on a `source: probe` record reading `pass` that differs from REQ-664's result file
   (`.adlc/research/harness-probes/<name>.json`), and on a `fence.partial-source`
   rendered as a first-token wildcard. The report ends with the declared residuals.
 - **`render-parity`** calls the function `adlc harness render --check` calls and
   reports every golden under `harness/<name>/rendered/` and every in-tree render
   (the agents' `model:` lines, the toolkit's `.claude/settings.json`) that is
-  `drifted` or `missing-golden`.
+  `drifted` or `missing-golden`. A printed surface's golden is
+  `printed-permissions.txt`; a copy harness's is `agents.json`, each agent's file name
+  and `tools:` line, so a body edit to `agents/*.md` does not touch `harness/**`.
+  `adlc harness render --write-goldens` rewrites them.
+- **`harness-loss-table`** (REQ-656) holds each `<!-- harness-loss: <name> -->` block in
+  the root `README.md` to its adapter. It derives the expected facts from the adapter
+  and a fresh render (committed allowlist, granularity, deny mechanism, the omitted
+  bases and prefixes, the widths) and fails on a missing row, a contradicted fact, a
+  missing declared-residuals statement, a claim that the allowlist is the gate, or a
+  claim that Copilot's chained-command matching is verified. `LOSS_TABLE_HARNESSES`
+  names the harnesses it holds.
 - **`unguarded-source`** also walks `templates/hooks.yml` and every committed hook
   render, one hook-command line at a time.
 - **`retired-settings-template`** reports a skill, companion, agent, partial or

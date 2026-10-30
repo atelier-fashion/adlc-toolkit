@@ -477,17 +477,20 @@ def _copy_dir(adapter):
 
 def plan_copies(adapter, root, config):
     """``[(agent, path, text)]`` for every canonical agent, plus stderr notices."""
+    import harness_adapter
     import harness_render
     validate_config(config)
     notices = []
     out = []
     dest = _copy_dir(adapter)
+    fmt = harness_adapter.FORMATS.get(adapter["formats"].get("agents"), {})
+    suffix = fmt.get("agent_suffix", ".md")
     for name, path in _iter_agents(root):
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         model = harness_model(adapter, resolve_model(name, config, adapter["name"]), notices)
         rendered = harness_render.render_agent_copy(adapter, name, text, model, notices)
-        out.append((name, os.path.join(dest, name + ".md"), rendered))
+        out.append((name, os.path.join(dest, name + suffix), rendered))
     return out, notices
 
 
@@ -599,6 +602,17 @@ def main(argv=None):
             for name, path, _c in changed:
                 print(f"  {name}: {path}")
             print(f"rendered {len(report)} agents for {adapter['name']}, {len(changed)} changed")
+            return 0
+        if mode.startswith("via:"):
+            # The other harness's path is data, read from its adapter (REQ-656 BR-9).
+            try:
+                via = harness_adapter.resolve_adapter(mode[len("via:"):])
+            except harness_adapter.AdapterError as exc:
+                sys.stderr.write(f"adlc agents render: {exc}\n")
+                return 2
+            where = via["paths"].get("agents", {}).get("user", mode)
+            where = where.replace("$HOME", "~", 1)
+            print(f"{adapter['name']} reads {where} directly ({mode}) — nothing to render")
             return 0
         if mode != "mounted":
             print(f"{adapter['name']}: agents surface is {mode} — nothing to render")

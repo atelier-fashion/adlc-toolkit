@@ -1,0 +1,24 @@
+{
+  "terminalAllowlist": [
+    "npm",
+    "npx",
+    "ls",
+    "find",
+    "readlink",
+    "which",
+    "test",
+    "date",
+    "echo",
+    "cat",
+    "grep",
+    "head",
+    "tail",
+    "wc",
+    "pwd",
+    "mkdir",
+    "cp",
+    "touch",
+    "sed",
+    "awk"
+  ]
+}

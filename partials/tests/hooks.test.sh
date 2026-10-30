@@ -25,6 +25,11 @@
 #       records harness=codex from the payload's `sid` key.
 #   case_rendered_sources_guarded: every rendered command sources its partial with
 #       the one canonical guarded spelling.
+#   case_copilot_*: the commands harness/copilot/rendered/adlc.json carries. With
+#       ETHOS present the output parses as one JSON object whose additionalContext
+#       equals the file, quotes, backslashes, tabs and control bytes included
+#       (REQ-656 BR-5); absent, it prints nothing; session-record is passed
+#       --harness copilot, and with no partial at either level both exit 0 silently.
 #
 # Runs under whatever shell run.sh hands it ($ADLC_TEST_SHELL):
 #   ADLC_TEST_SHELL=dash sh partials/tests/hooks.test.sh
@@ -161,9 +166,69 @@ for f in "$SANDBOX"/*.cmd; do
   check "case_rendered_sources_guarded: $(basename "$f") has one canonical source line" "1" "$n"
 done
 
+# --- the Copilot render (REQ-656 BR-5) ----------------------------------------
+COPILOT="$TOOLKIT/harness/copilot/rendered/adlc.json"
+python3 - "$COPILOT" "$SANDBOX" <<'PY' || { echo "hooks.test.sh: could not read the copilot render" >&2; exit 1; }
+import json, sys
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["version"] == 1
+for event, tag in (("sessionStart", "cs"), ("subagentStart", "ca")):
+    for hook in doc["hooks"][event]:
+        name = "ethos" if "adlc_ethos_inject" in hook["bash"] else "record"
+        with open("%s/%s-%s.cop" % (sys.argv[2], tag, name), "w", encoding="utf-8") as fh:
+            fh.write(hook["bash"])
+PY
+COP_ETHOS=$(cat "$SANDBOX/cs-ethos.cop")
+COP_RECORD=$(cat "$SANDBOX/cs-record.cop")
+check "case_copilot_subagent_same_command: both events carry one ethos-inject" \
+  "$COP_ETHOS" "$(cat "$SANDBOX/ca-ethos.cop")"
+
+new_project copilot
+mkdir -p "$PROJ/.adlc"
+printf 'He said "stop" \\ then\ttabbed\n\nlast line, no newline \001' > "$PROJ/.adlc/ETHOS.md"
+run_hook "$COP_ETHOS" "" "$TOOLKIT"
+check "case_copilot_ethos_json: exit 0" "0" "$RC"
+check "case_copilot_ethos_json: stderr empty" "" "$ERR"
+printf '%s' "$OUT" > "$SANDBOX/cop.out"
+PARSED=$(python3 - "$SANDBOX/cop.out" "$PROJ/.adlc/ETHOS.md" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+want = open(sys.argv[2], encoding="utf-8").read().replace("\x01", "")
+print("ok" if list(doc) == ["additionalContext"] and
+      doc["additionalContext"].rstrip("\n") == want.rstrip("\n") else "differs")
+PY
+)
+check "case_copilot_ethos_json: one object, additionalContext is the file" "ok" "$PARSED"
+
+new_project copilot-noethos
+mkdir -p "$PROJ/.adlc"
+run_hook "$COP_ETHOS" "" "$TOOLKIT"
+check "case_copilot_ethos_absent: exit 0" "0" "$RC"
+check "case_copilot_ethos_absent: prints nothing" "" "$OUT$ERR"
+
+new_project copilot-bad-key
+mkdir -p "$PROJ/.adlc"
+printf 'x\n' > "$PROJ/.adlc/ETHOS.md"
+run_hook "$(printf '%s' "$COP_ETHOS" | sed 's/additionalContext/badkey-/')" "" "$TOOLKIT"
+check "case_copilot_ethos_bad_key: a key outside the charset prints nothing" "" "$OUT"
+
+new_project copilot-record
+mkdir -p "$PROJ/.adlc"
+run_hook "$COP_RECORD" '{"session_id":"cop-1"}' "$TOOLKIT"
+check "case_copilot_record_harness: --harness copilot reaches the partial" "harness=copilot
+session_id=cop-1" "$(cat "$PROJ/.adlc/.session/cop-1" 2>/dev/null)"
+
+mkdir -p "$SANDBOX/bare-copilot" && cd "$SANDBOX/bare-copilot" || exit 1
+for cmd in "$COP_ETHOS" "$COP_RECORD"; do
+  OUT=$(HOME="$SANDBOX/no-home" "$SUT" -c "$cmd" </dev/null 2>&1); RC=$?
+  check "case_copilot_partial_absent: exit 0 with no partial at either level" "0" "$RC"
+  check "case_copilot_partial_absent: silent" "" "$OUT"
+done
+cd "$SANDBOX" || exit 1
+
 echo "hooks.test.sh: $CASES cases executed"
-if [ "$CASES" -lt 30 ]; then
-  echo "hooks.test.sh: FAIL — expected at least 30 cases, ran $CASES ($SUT)"
+if [ "$CASES" -lt 42 ]; then
+  echo "hooks.test.sh: FAIL — expected at least 42 cases, ran $CASES ($SUT)"
   exit 1
 fi
 if [ "$FAILS" -eq 0 ]; then
