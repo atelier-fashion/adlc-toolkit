@@ -253,3 +253,11 @@ _Permissions: not applicable — no runtime actors. Section omitted deliberately
 - REQ-436 (spec, score 8): Extract analyze telemetry helper to a sourceable POSIX partial (fix cross-block + local defects)
 - LESSON-013 (lesson, score 8): BSD grep \b word-boundary in -E silently fails on macOS — use -wF instead
 - REQ-425 (spec, score 8): Pre-merge detection of corrupted shell constructs in SKILL.md files (catches REQ-424-style substitution disasters before they ship)
+
+## Deferred
+
+Recorded at `/wrapup` (2026-10-29), from REQ-661's Phase 5:
+
+- **BR-16 / AC-6 / AC-15, in part.** The dogfood executed every moved fence under `sh` and `zsh` from the split text and from `7d3bf2c`, and confirmed each skill reaches the same fences in the same order (PR #220). It did not run each split skill end to end: a full `/spec` run allocates a real REQ id and pushes a reservation ref, `/proceed` Step 0 creates worktrees and PRs, and `/template-drift` Step 0 fetches in the consumer repo. A full `/spec` intake run (a file-path argument, through the `## Provenance` section) and a full `/template-drift` run in a consumer, on the split text, remain to be recorded. ASSUME-012 tracks the assumption this rests on.
+- **`partials/tests/source-guard.test.sh` does not walk `<skill>/references/*.md`**, so its per-fence corpus run no longer executes the four moved `/spec` fences, and the COUPLING NOTE in `partials/tests/intake.test.sh` still names `spec/SKILL.md` Step 1.4 sub-step 3.5, now in `spec/references/intake-source-read.md`. Both need a `partials/` edit, which BR-11 kept out of this REQ.
+- **OQ-4**: a CI job for `skill-line-budget`; the toolkit has no hosted CI.
