@@ -461,7 +461,8 @@ def cmd_lane(reqfile):
 # in tools/lint-skills/check.py, character for character (a lint test compares them).
 # A line that also carries /adlc:<name> prints both spellings (TASK-133), so it is
 # counted as dual-spelled, not as a bare instruction.
-SHIPPED = ["*/SKILL.md", "proceed/*.md", "agents/*.md", "partials/*.sh", "partials/*.md",
+# "*/references/*.md": the skills' companions (REQ-661), which the lint reads too.
+SHIPPED = ["*/SKILL.md", "*/references/*.md", "proceed/*.md", "agents/*.md", "partials/*.sh", "partials/*.md",
            "scripts/*", "hooks/*", "workflows/*.js", "workflows/*.md", "templates/*",
            "presets/*", "ETHOS.md", "tools/adlc/*.py", "tools/delegate/*"]
 INSTR_VERB = (r"(?i)\b(?:run|re-run|rerun|re-runs|reruns|running|re-running|invoke|type|"

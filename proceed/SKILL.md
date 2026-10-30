@@ -26,7 +26,7 @@ You are in subagent mode if you were explicitly told so in your launch prompt.
 3. **Merge conflicts during rebase** (Phase 8 / wrapup) — surface conflicts and wait.
 4. **The lane check fails on a forced-lite REQ in a solo run** (lite lane, `proceed/phases-lite.md` "The lane check") — list the failing rules as a numbered question: escalate, or keep lite. In subagent mode (a `/sprint` runner, with no operator present) the same failure escalates instead and never halts (REQ-652 BR-8).
 
-Before you stop at any of the four, emit the run-outcome line (**Run-outcome telemetry** R5, `blocked`, with that halt's token).
+Before you stop at any of the four, emit the run-outcome line (**Run-outcome telemetry** R5 in `proceed/phases-telemetry.md`, `blocked`, with that halt's token).
 
 For everything else — including every **End-of-phase log** block below, every agent dispatch, every commit, every PR creation, every CI wait — you **continue immediately** to the next step without asking the user. Prompt only for tool-level permissions on truly destructive operations (these are governed by `.claude/settings.json`, not this skill).
 
@@ -104,343 +104,17 @@ Execute these phases in order. Each phase has a validation gate — if validatio
 
 ## Pipeline State Tracking
 
-**CRITICAL**: You MUST maintain a state file to track pipeline progress. This prevents phases from being skipped during long-running pipelines.
-
-**State file location**: `.adlc/specs/REQ-xxx-*/pipeline-state.json`
-
-**Schema**:
-```json
-{
-  "req": "REQ-xxx",
-  "branch": "feat/REQ-xxx-short-description",
-  "startedAt": "2026-03-27T10:00:00Z",
-  "completed": false,
-  "currentPhase": 0,
-  "completedPhases": [],
-  "phaseHistory": [
-    { "phase": 0, "name": "Create Worktree", "completedAt": "2026-03-27T10:01:00Z" }
-  ],
-  "repos": {
-    "web": {
-      "primary": true,
-      "path": "/absolute/path/to/web",
-      "worktree": "/absolute/path/to/web/.worktrees/REQ-xxx",
-      "branch": "feat/REQ-xxx-short-description",
-      "touched": true,
-      "prUrl": null,
-      "merged": false,
-      "snapshotBranch": null,
-      "snapshotPR": null
-    },
-    "api": {
-      "primary": false,
-      "path": "/absolute/path/to/api",
-      "worktree": "/absolute/path/to/api/.worktrees/REQ-xxx",
-      "branch": "feat/REQ-xxx-short-description",
-      "touched": true,
-      "prUrl": null,
-      "merged": false,
-      "snapshotBranch": null,
-      "snapshotPR": null
-    }
-  },
-  "mergeOrder": ["api", "web"],
-  "phase4": {
-    "currentTask": null,
-    "completedTasks": [],
-    "failedTasks": []
-  },
-  "conflictsResolved": [],
-  "closeOut": { "status": "ok", "at": "2026-03-27T10:45:00Z" },
-  "harness": { "version": "5.4.0", "sha": "c013262" },
-  "validateAttempts": { "phase1": 1, "phase3": 2 },
-  "verify": { "findings": [ { "severity": "Major", "file": "partials/forge.sh", "title": "…", "class": "unanchored-marker-regex", "lessonId": "LESSON-404", "fixed": true } ], "loops": 1, "consolidatedAt": "2026-03-27T10:36:00Z" },
-  "lessonsWritten": ["LESSON-605"],
-  "lane": {
-    "initial": "lite",
-    "current": "full",
-    "forced": false,
-    "skippedPhases": [1, 2, 3],
-    "escalations": [ { "at": "2026-03-27T10:30:00Z", "phase": 5, "trigger": "blocked-path", "detail": "packages/domain/src/page.ts", "actor": "solo" } ],
-    "overrides": []
-  },
-  "lessons": {
-    "step0": { "query": { "components": ["adlc/proceed"], "domain": "adlc", "stack": [], "concerns": [], "tags": [] }, "lessons": [ { "id": "LESSON-604", "title": "…", "path": ".adlc/knowledge/lessons/LESSON-604-….md", "component": "adlc/proceed", "score": 11, "kind": "process" } ], "cap": 10, "retrievedAt": "2026-03-27T10:01:00Z" },
-    "tasks": { "TASK-012": { "query": { "components": ["adlc/partials/forge", "adlc/partials"] }, "lessons": [ { "id": "LESSON-582", "newerThanSpec": true } ], "cap": 15, "retrievedAt": "2026-03-27T10:20:00Z" } },
-    "phase5": { "query": { "components": ["adlc/proceed"] }, "lessons": [], "cap": 15, "retrievedAt": "2026-03-27T10:35:00Z" }
-  }
-}
-```
-
-`lane` is optional and additive (REQ-652): written at Step 0 only when the spec carries a `lane` key. Absent means the full lane, and a state file without it parses and runs unchanged. `initial` and `current` are the lane the run started on and the one it is on now; `skippedPhases` lists the phases a lite run recorded as skipped; `escalations` gets one entry per escalation, appended before the pipeline continues; `overrides` gets one entry, `{ at, phase, sha, triggers, pairs, actor }`, each time the operator answers halt #4 with "keep lite", where `pairs` are the exact `<trigger>: <detail>` strings the operator saw and `sha` the commit they saw them at; a later check halts again on any pair not listed or whose file changed since, and a `check-error` is never overridden. The spec frontmatter is the authority on the lane when a run starts, because state files are gitignored and machine-local; once the object exists, `lane.current` decides every lane branch of that run (each phase's "Lite lane" note included), so a lost escalation commit cannot put an escalated REQ back on the lite lane.
-
-`lessons` is optional and additive (REQ-647): one LessonSet per retrieval point — `step0` at Step 0 item 7, `tasks["TASK-xxx"]` before each Phase-4 task, `phase5` before Phase 5 Step A — each `{ query, lessons[], cap, retrievedAt }` without the loaded text. `partials/lessons.sh` writes it, at the moment the set is computed, to the **primary repo path's** copy (`<repos[<primary>].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json`, the same target as Step 8b's terminal record, because the worktree copy is deleted at teardown; when that spec directory does not exist on the primary checkout, the worktree's copy). Absent means "no lessons recorded"; `/status`, resume and both sprint engines read a file without it unchanged, and nothing reads it for control flow. Retrieval is never a gate: a `lessons: unavailable — <reason>` result is logged and the phase continues without lessons. Contract: `partials/lessons.md`.
-
-`closeOut` is optional and additive (BUG-249): written by the Step 8b close-out
-actor — `/wrapup --close-out` writes `status: "ok"`; the orchestrator that invoked it
-writes `status: "failed", reason: "<why>"` when the mode exits non-zero. Absent means
-"close-out not recorded"; nothing reads it for control flow. `/status` reports
-`failed` under its Stale Pipeline State heading.
-
-`harness`, `validateAttempts`, `verify` and `lessonsWritten` are optional and
-additive (REQ-648): the facts the run-outcome line is derived from, each written
-by code at the moment it occurs (**Run-outcome telemetry** below), to the
-primary-path copy, as `lessons` is. `harness` is the toolkit's `{version, sha}`
-at Step 0, before any pull; `validateAttempts` the attempt counts at Phases 1 and
-3; `verify` the consolidated Phase-5 findings, each with a `class` and a `fixed`
-flag; `lessonsWritten` the `/wrapup` lesson outcome (recorded at the end of its Step 4) (`LESSON-` ids, or the string
-`NO_ENTRY`). `lessons.acknowledged`, written by `ack-check --record`, belongs to
-the same record. Absent means not recorded: the emitter prints `-` or `0` for
-what it derives from a missing key, and nothing reads any of them for control
-flow.
-
-The `repos` block is the canonical registry for this pipeline run. Every cd/commit/push/PR/merge operation reads the target repo's `path` or `worktree` from here — never from cwd inference. `touched: true` means at least one task targets this repo; untouched repos skip Phases 4–8. `mergeOrder` is the list of touched repo ids in the order Phase 8 will merge them (primary is always a member).
-
-**Single-repo mode**: `repos` contains exactly one entry with `primary: true, touched: true`, and `mergeOrder` is `[that-one-id]`. All phase logic still reads from `repos` — there is no separate code path.
-
-The `phase4` block tracks task-level progress during implementation so that a mid-Phase-4 context compression can resume from the exact task in progress rather than restarting the phase. `currentTask` holds the TASK-xxx ID being worked on right now; `completedTasks` holds IDs of tasks whose status is `complete` and whose commit has landed; `failedTasks` holds IDs that hit unrecoverable errors and were surfaced to the user. Other phases do not need sub-state.
-
-The `conflictsResolved` array is the audit record for every merge or rebase conflict that was **resolved** during this run — by the runner, by the user on a halt, or by anyone else — one entry per event, appended **at the moment of resolution, before the pipeline continues** (BUG-212). It is not a control-flow input: nothing reads it to decide what to do next, which is exactly why it was never written before — the only record of a mid-run resolution was the runner's closing narrative, and a runner that said nothing left no trace. Entry schema is in `agents/pipeline-runner.md` ("Conflict resolution record"). **Additive and optional**: a state file without the key parses and processes unchanged, and absent reads as "no conflicts were resolved", never as a missing value. A *clean* auto-rebase is not a resolution and appends nothing; a `blocked` halt that was never resumed appends nothing either — the entry records that a conflict was *resolved*, not that one occurred (`blockers` already records that).
-
-The `snapshotBranch` and `snapshotPR` fields on each `repos.<id>` entry are **deprecated as of REQ-380**. The skill no longer writes them; they remain in the schema for read-back compatibility with state files written between REQ-362 and REQ-380. A missing or null value is the expected state on all new runs. Snapshot promotion (the `staging → main` PR creation that previously ran in Phase 8a) is now handled out-of-band by a per-project workflow on staging-tip CI greenness; consult the project's CI configuration.
-
-**Gate Protocol — follow exactly**:
-
-1. **Initialize** the state file at the start of Step 0 with `currentPhase: 0, completedPhases: [], completed: false, repos: {...resolved from config...}, mergeOrder: [...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`
-2. **Before starting any phase**: read `pipeline-state.json`. Verify `currentPhase` equals the phase you're about to start AND the previous phase is in `completedPhases`. If either check fails, **STOP** — you skipped a phase. Go back and complete it.
-3. **After completing any phase**: append the phase number to `completedPhases`, append an entry to `phaseHistory` with the completion timestamp, set `currentPhase` to the next phase number.
-3a. **Skipped phases still pass through the gate (REQ-652 ADR-5)**: a lite run appends `1`, `2` and `3` to `completedPhases` at Step 0, each with a `phaseHistory` entry carrying `"skipped": "lite"`, so rule 2 holds unchanged at Phase 4. An escalation appends an `{ "event": "escalated" }` history entry, trims `completedPhases` to `[0]` and sets `currentPhase` to `1`; `phaseHistory` stays append-only.
-4. **Phase 4 task-level writes**: When starting a task, set `phase4.currentTask` to its TASK-xxx ID. When its commit lands (in the task's target-repo worktree), append the ID to `phase4.completedTasks` and clear `currentTask`. On unrecoverable failure surfaced to the user, append to `phase4.failedTasks` instead.
-5. **Worktree paths are immutable post-Step-0**: once Step 0 records `repos[<id>].worktree`, every subsequent phase (1–8) MUST read the path from state and MUST NOT re-derive it from cwd, the REQ id, or any naming convention. This applies on the happy path, not just on resume. (Step 0 itself reads cwd exactly once — at item 2 of Step 0 — to initialize the registry, then freezes the path into state; the prohibition starts from the moment Step 0 completes.)
-5b. **Resume from interruption**: If the state file already exists when you start, read it and resume from `currentPhase`. Step 0's lane read still runs first (it is resume-safe): it reads `lane.current` from state rather than the spec, and it handles a `--full` passed on this invocation before the next phase starts. Trust `repos` as the source of truth for worktree paths. If `currentPhase` is 4 and `phase4.currentTask` is non-null, resume that specific task (re-read its file, use `repos[<task.repo>].worktree` for every git/file operation, re-check whether its commit already landed, continue or restart as appropriate) before moving to the next task in the dependency graph. Never replay tasks already in `completedTasks`.
-6. **If context has been compressed**: re-read `pipeline-state.json` before doing anything and treat it as the source of truth for `currentPhase`, `repos`, and `phase4`. Do not rely on memory of which phase, task, or repo you're in.
-7. **Per-repo writes during Phases 6–8**: when a PR is created, write its URL to `repos[id].prUrl`. When a PR merges, set `repos[id].merged = true`. These writes let a mid-Phase-8 interruption resume merges in order without double-merging.
-8. **On completion**: After Phase 8 (Wrapup) finishes, set `"completed": true` in the state file.
-
-Each phase below has a one-line **Gate** reminder. The full protocol above applies to every gate.
+Read `proceed/phases-state.md` and follow it before you continue. It holds the state file's location and schema, what each key means, and the Gate Protocol every phase below applies at its **Gate** line. Nothing in this file replaces it.
 
 ## Run-outcome telemetry (REQ-648)
 
-Every terminal appends one flat JSON line to `~/Library/Logs/adlc-run-outcomes.log`
-(`$ADLC_RUN_OUTCOMES_LOG`). `tools/delegate/run_outcome.py` builds it from the
-primary-path state; you never compute a field. You supply only the terminal, the
-engine (`solo` for a direct `/proceed`, `legacy` in subagent mode), a halt token,
-and, at Phase 5, the consolidated findings. Each fence below runs
-`"$DELEGATE_TOOLS"/emit-run-outcome.sh`, which always exits 0: relay the one line
-it prints and continue, because telemetry never halts the pipeline (BR-3).
-`<state>` is the primary-path `pipeline-state.json` named under "Pipeline State
-Tracking" (the worktree's copy when that spec directory does not exist on the
-primary checkout).
-
-**R1 — the harness stamp** (Step 0 item 8, before item 8a's push). `<mode>` is
-`--fresh` on a fresh run and empty on a resume: the same decision Step 0 item 7
-makes for the lessons, read from the progress record and never from whether a
-`harness` key exists (LESSON-719). `--fresh` also clears the `validateAttempts`,
-`verify` and `lessonsWritten` an earlier run of this REQ left behind.
-
-```sh
-ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
-"$DELEGATE_TOOLS"/emit-run-outcome.sh record-harness --state "<state>" --toolkit-root "$ADLC_TOOLKIT_ROOT" <mode>
-```
-
-**R2 — a validation attempt** (Phases 1 and 3, before each `/validate`). The
-attempt number is absolute, so a repeated call never double-counts.
-
-```sh
-ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
-"$DELEGATE_TOOLS"/emit-run-outcome.sh record-validate --state "<state>" --phase <1|3> --attempt <n>
-```
-
-**R3 — the Phase-5 findings** (Step B, then again before Phase 5's end-of-phase
-log). One JSON object per consolidated finding: `severity`, `file`, `title`, the
-`class` its reviewer gave it, `lessonId` when it matched a lesson in the Phase-5
-set, and `fixed` (`true` only once its fix commit has landed). `--loops` is `1`
-when Step D re-verified, else `0`. The engine normalises the severity scale and
-the class tiers; pass what the reviewers reported.
-
-```sh
-ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
-"$DELEGATE_TOOLS"/emit-run-outcome.sh record-verify --state "<state>" --loops <0|1> --findings - <<'ADLC_VERIFY_JSON'
-[{"severity":"Major","file":"<path>","title":"<title>","class":"<defect-pattern>","fixed":false}]
-ADLC_VERIFY_JSON
-```
-
-**R4 — carry the run's state** (Phase 8 Step 8b, before `/wrapup`). It copies
-every key of the worktree copy that the primary-path copy lacks, so the record
-the line is built from survives teardown; the primary-path copy's own keys win.
-
-```sh
-ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
-"$DELEGATE_TOOLS"/emit-run-outcome.sh record-carry --state "<state>" --from "<repos[primary].worktree>/.adlc/specs/REQ-xxx-<slug>/pipeline-state.json"
-```
-
-**R5 — the line itself.** Run it once at each terminal this run reaches: after
-Step 8b for `merged`, after Step 8c's note for `pr-ready`, at each legitimate
-halt before you stop (`blocked`, with the halt's token below), and on a `failed`
-terminal. A resumed run that reaches another terminal emits again; readers keep
-the latest line per REQ. Halt tokens: `validation-exhausted` (halt #1),
-`reflector-questions` (#2), `merge-conflict` (#3), `other` (#4, a failed lane
-check). A `failed` terminal passes `setup-error`, `no-worktree` or `no-pr`.
-
-```sh
-ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
-"$DELEGATE_TOOLS"/emit-run-outcome.sh --state "<state>" --terminal <merged|pr-ready|blocked|failed> --engine <solo|legacy> --reason "<token, or empty>"
-```
+Read `proceed/phases-telemetry.md` and follow it before you continue. It holds the five fences, R1 to R5, that the steps below name as **Run-outcome telemetry** R*n*. Nothing in this file replaces it.
 
 ---
 
 ### Step 0: Resolve Repos + Create Worktrees + Preflight + Load Shared Context (ALWAYS FIRST)
 
-**Before doing anything else**, resolve the repository set, isolate each touched repo in a git worktree, and prime the shared context so subskills don't re-read the same files:
-
-1. **Preflight** — verify all prerequisite files exist in the **primary** repo (stop with a clear message if any are missing):
-   - `.adlc/context/project-overview.md` — run `/init` (`/adlc:init` on the plugin install) if missing
-   - `.adlc/context/architecture.md` — run `/init` (`/adlc:init` on the plugin install) if missing
-   - `.adlc/context/conventions.md` — run `/init` (`/adlc:init` on the plugin install) if missing
-   - `.adlc/specs/REQ-xxx-*/requirement.md` — run `/spec` if missing
-2. **Resolve repo registry**:
-   - Read `.adlc/config.yml` if it exists. If absent or has no `repos` block, use single-repo mode: the registry is `{ <cwd-repo-id>: { primary: true, path: <cwd>, touched: true } }` where the repo id is the basename of the cwd.
-   - In cross-repo mode: the primary entry's `path` is cwd. Resolve each sibling's `path` to an absolute path (relative paths are relative to the primary repo root). Verify each path exists and is a git repo (`git -C <path> rev-parse --git-dir`). If any sibling is missing, stop with a clear error listing the missing repos.
-3. **Determine touched repos** (best-effort at Step 0; confirmed after Phase 2):
-   - If tasks already exist under `.adlc/specs/REQ-xxx-*/tasks/`, read each task's `repo:` field to compute the touched set.
-   - If tasks don't exist yet (fresh pipeline), assume every configured repo is potentially touched and create worktrees in all of them. Post-Phase-2, untouched repos will be marked `touched: false` and their worktrees removed.
-   - The primary is always touched (even if no primary tasks — it hosts the spec and state file).
-4. **Determine the integration branch, then fetch it in each touched repo.** The base for feature branches is NOT always `main` (LESSON-036 — sprinted runners that hardcoded `main` in a staging-first repo paid a mid-pipeline rebase + PR-retarget every time). Resolve `<integration-branch>` in this order — the first rule that applies wins, and every other skill that needs the integration branch (`/sprint`, `/bugfix`, `/wrapup`, `/template-drift`, the `pipeline-runner` agent) uses this same rule rather than inventing a second one:
-   1. **The config names it.** Read `.adlc/config.yml`. If it declares `branches.integration`, that value (a branch name such as `dev`, `staging` or `main`) is `<integration-branch>` outright — do **not** consult the signals in rule 2. This is how a repo whose model the signals cannot express tells the pipeline where feature work integrates: a `dev` → `staging` → `main` promotion pipeline declares a `gcp.staging_project` like any staging-first repo, but its PRs must target `dev`, and its head-ref check will refuse a PR into `staging`. In cross-repo mode read each touched repo's own `.adlc/config.yml`; a sibling with no config or no key falls through to rule 2 for that repo alone.
-   2. **Otherwise detect the branch model from signals**; **any one** signal is sufficient:
-      - `.adlc/config.yml` declares a `gcp.staging_project` (or otherwise indicates a staging-first deploy), OR
-      - a `.github/workflows/*` enforces a `verify-head-ref` / branch-protection head-ref check, OR
-      - `CLAUDE.md` describes a "two-branch" / "staging-first" / "staging → main promotion" pipeline.
-
-      If any signal is present, `<integration-branch>` is the project's integration branch (`staging` unless the project names another); otherwise `<integration-branch>` is `main`.
-
-   **Always fetch before reasoning about any ref or spec presence** (never trust a stale local ref — LESSON-036):
-   ```bash
-   git -C <repo-path> fetch origin
-   ```
-   Do NOT `git checkout <integration-branch>` in `<repo-path>` — it may be checked out in another worktree and fail. The worktree (step 5) is created directly from `origin/<integration-branch>`. Feature branches and the Phase 6 PR base MUST use `<integration-branch>`, never a hardcoded `main`.
-
-   **Step 4 advisory — in-flight manifest (non-blocking, REQ-482).** With `origin` now fetched and **before** the worktree is created, surface what else is in flight across sessions so you can spot overlaps before starting. **In subagent mode (`/sprint` pipeline-runner): SKIP this** — `/sprint` already built the manifest once for the batch in its pre-flight. Otherwise invoke `/manifest`, prefixing the same shell call with the hand-off vars so it reuses this fetch and marks the current REQ as self: `MANIFEST_SELF="REQ-xxx" MANIFEST_SKIP_FETCH=1` (substitute the concrete REQ id). Display the in-flight table and any coarse `component`/`domain` overlap involving the current REQ. This is **purely advisory**: it MUST NOT block, halt, reorder, or gate the pipeline; it is NOT one of the four legitimate halt points; a manifest-build failure is ignored with a one-line note and the pipeline continues (BR-7, BR-8, BR-9). The worktree-collision gate (step 4b) is unchanged.
-
-   **Step 4 pre-push REQ-id recheck (REQ-545 — closes the REQ-518 BR-4 gap for the REQ kind).** With `origin` now fetched and **before** any worktree, branch, or push is created, re-verify this REQ's id against the remote. The id was allocated by `/spec`; between allocation and this branch push, a colleague on another machine may have pushed the same `feat/REQ-xxx` — catching it here is far cheaper than at PR/merge time. **Unlike the manifest advisory above, this runs identically in solo `/proceed` and in `/sprint` pipeline-runner subagent mode (BR-5) — do NOT skip it in subagent mode.** A collision halts with the partial's renumber instruction; this is classified alongside the worktree-collision gate (step 4b) — a **pre-flight precondition halt, NOT one of the four legitimate mid-pipeline halt points**. Source `partials/id-recheck.sh` (the guarded spelling from conventions.md "Bash in skills") and call `adlc_recheck_id` **in the same fenced block** (LESSON-329 — a function sourced in one fence is undefined in the next). See `partials/id-recheck.sh` for the exact-id probe + degraded short-circuit contract:
-   ```bash
-   # WHY (REQ-518 BR-4): re-verify an allocated id against the remote at every point it is
-   # about to become a remote footprint. `/proceed` creating feat/REQ-xxx is exactly such a
-   # point; this call site closes the gap left when REQ-518 TASK-004 wired only the /bugfix +
-   # /wrapup call sites. Derivation + renumber message live in partials/id-recheck.sh.
-   #
-   # BRANCH is the feat/REQ-xxx-<slug> this run will create — the SAME slug step 4b derives
-   # (no new slug logic). Self-exemption (BR-3): if the remote already carries this EXACT full
-   # branch name, the footprint is ours — a resume whose Step-8a draft push already ran, or a
-   # crashed prior session of this same work item (id+slug identity => same work item). Skip
-   # the recheck and reuse. A hit with the same id but a DIFFERENT slug, or a merged-artifact
-   # hit for another work item, is NOT exempted here and still halts below. <repo-path> is the
-   # primary repo path (item 4's `git -C <repo-path> fetch origin`).
-   BRANCH="feat/REQ-xxx-<slug>"
-   if [ -n "$(git -C <repo-path> ls-remote --heads origin "refs/heads/$BRANCH" 2>/dev/null)" ]; then
-     echo "id recheck: remote already carries this pipeline's own '$BRANCH' (resume / crash-recovery) — skipping self-collision halt (REQ-545 BR-3)." >&2
-   else
-     ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-     if [ -f .adlc/partials/id-recheck.sh ]; then . .adlc/partials/id-recheck.sh; else . "$ADLC_TOOLKIT_ROOT/partials/id-recheck.sh"; fi
-     # OWN_SPEC_DIR is this REQ's own spec dir basename (REQ-xxx-<dirslug>) from the
-     # invoking repo — passed so the recheck recognizes the REQ's OWN merged spec as
-     # self (specs merge BEFORE /proceed in the normal flow; without this the
-     # merged-artifact probe false-halts on the work item itself — BUG-145). find,
-     # not a bare glob: zsh aborts on an unmatched glob (LESSON-335).
-     OWN_SPEC_DIR=$(find <repo-path>/.adlc/specs -maxdepth 1 -name 'REQ-xxx-*' -type d 2>/dev/null | head -1 | awk -F/ '{print $NF}')
-     if ! adlc_recheck_id req "REQ-xxx" "$OWN_SPEC_DIR"; then
-       echo "Halting: REQ-xxx already exists on the remote — renumber before creating the feat/REQ-xxx branch (see message above)." >&2
-       exit 1
-     fi
-   fi
-   ```
-   A degraded/unreachable remote is handled inside the partial (it warns `DEGRADED — proceeding WITHOUT remote verification` and returns success — BR-4); the recheck can only fail to FIND a collision, never invent one, so a degraded derivation never blocks.
-4a. **Parse the declared worktree path (primary repo only)** — scan the launch prompt for the dispatch-line contract. The format is normative in `REQ-263 architecture.md` ("The dispatch-line contract" section); do not change the regex or format here without updating that document.
-   - Regex: `^WORKTREE PATH \(mandatory\): (.+)$` (entire line, capture group is the absolute path).
-   - If multiple lines match the regex, use the **first** match and ignore the rest. (This makes parser behavior deterministic if a future change accidentally embeds free-text content that matches.)
-   - If present, use the captured path **verbatim** as the primary repo's worktree path. Do not modify, normalize, or append to it. Compute `<primary-worktree-path>` = the captured value.
-   - If absent (e.g., a direct `/proceed REQ-xxx` invocation by a user), fall back to deriving `<primary-worktree-path>` = `<primary-repo-path>/.worktrees/REQ-xxx` (where REQ-xxx is the concrete REQ id, not a literal placeholder). This preserves existing behavior for direct invocations.
-   - Sibling repo worktree paths are always derived: for each sibling repo `s`, `<sibling-worktree-path[s]>` = `<sibling-repo-path[s]>/.worktrees/REQ-xxx` from `.adlc/config.yml` — the dispatch line declares only the primary path.
-4b. **Validate against `git worktree list` before adding** — for **each** touched repo (primary and every sibling), run:
-   ```bash
-   git -C <repo-path> worktree list --porcelain
-   ```
-   Parse the line-oriented output: blocks separated by blank lines. Each block contains `worktree <abs-path>`, `HEAD <sha>`, and either `branch <ref>` or `detached`. Locked or prunable worktrees may add extra lines (`locked [<reason>]`, `prunable <reason>`) — ignore those; the only fields that matter for collision detection are `worktree` and `branch`. The first block is always the repo's primary working tree (the repo root) — it will not match any `<repo-path>/.worktrees/REQ-xxx` target path, so it is harmlessly skipped. Continue scanning every subsequent block.
-
-   Compute `<expected-branch-ref>` = `refs/heads/feat/REQ-xxx-<slug>` where `<slug>` is the same slug `/proceed` would derive for this REQ (the value that becomes `repos[<id>].branch` in state). For a fresh run, derive the slug from the REQ title per the project's branch-naming convention; for a resume, read it from `repos[<id>].branch`. Then for each per-repo target path (`<primary-worktree-path>` for primary, `<sibling-worktree-path[s]>` for each sibling), classify the registration state:
-   - **No match** (target path not registered in any block): proceed to step 5 (`git worktree add` as normal).
-   - **Match on `<expected-branch-ref>`** (same path, same branch): treat as resume per ADR-2 — record the path in state and **skip** the `git worktree add` for this repo. No halt, no re-add.
-   - **Match on a different branch ref** (or a `detached` block at the target path): halt the pipeline immediately with a clear error naming the repo, the target path, the conflicting ref (or `detached HEAD`), and the cleanup commands the user must run. **Quote the substituted `<branch>` and `<path>` values with single quotes** in the surfaced commands so a user copy-paste cannot execute injected shell from a hostile branch name:
-     ```
-     Worktree collision in <repo-id>: '<path>' is already registered to '<other-branch>'
-     (or detached HEAD), but REQ-xxx requires '<expected-branch-ref>'. Resolve with:
-
-       git -C '<repo-path>' worktree remove '<path>'                # add --force if the worktree has uncommitted work you intend to discard
-       git -C '<repo-path>' branch -D '<other-branch>'              # -D already forces deletion regardless of merge status; verify with `git log main..'<other-branch>'` first if you may have unmerged work to keep
-
-     Then retry.
-     ```
-     This is a fail-loud halt and is a **precondition error** — it does **NOT** count toward the four legitimate halt points listed in the Autonomous Execution Contract. The four-halt quota begins counting only once the pipeline is past Step 0. The same error format applies whether the colliding repo is primary or sibling.
-5. Create a worktree in each touched repo on the same branch name (skip any repo where step 4b classified the registration as a same-branch resume):
-   ```bash
-   git -C <repo-path> worktree add -b <branch-name> <worktree-path> origin/<integration-branch>
-   ```
-   - The new feature branch is cut from `origin/<integration-branch>` (the ref resolved in step 4 — `branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`), NOT from local `main`/`HEAD` (LESSON-036). The `-b` creates the branch; the explicit `origin/<integration-branch>` start-point makes the base deterministic regardless of what is checked out in the repo path.
-   - `<worktree-path>` is the **absolute** path resolved in 4a (`<primary-worktree-path>` for primary, `<sibling-worktree-path[s]>` for each sibling) — do **NOT** substitute a relative `.worktrees/REQ-xxx` here, even though the convention happens to produce an equivalent location. The whole point of the contract is that the orchestrator-declared absolute path is honored verbatim.
-   - `<branch-name>` is `<expected-branch-ref>` from 4b with the `refs/heads/` prefix stripped — i.e., literally `feat/REQ-xxx-<slug>`. Pass the bare branch name (not the full ref) to `git worktree add -b`. (On a same-branch resume, step 4b already skipped this add — the existing worktree/branch is reused as-is.)
-
-   Record each repo's absolute `worktree` path and `branch` in the state file's `repos` block. The recorded path is **immutable** for the rest of the run — Phases 1–8 read it from `repos[<id>].worktree`, never re-derive from cwd.
-6. Change your working directory to the **primary repo's worktree** — orchestration (state file reads/writes, spec edits, PR coordination) happens there. Task implementation in Phase 4 will `cd` into the target repo's worktree per task.
-7. **Load shared context ONCE from the primary** — use the Read tool to load these into conversation context so every subskill can reference them without re-reading:
-   - `.adlc/context/architecture.md`
-   - `.adlc/context/conventions.md`
-   - `.adlc/context/project-overview.md`
-   - `.adlc/specs/REQ-xxx-*/requirement.md`
-   - `.adlc/config.yml` (if present)
-
-   **Then compute the Step-0 LessonSet (REQ-647 BR-1).** The spec's `## Retrieved Context` was frozen when the spec was written; this set is the REQ-vintage background the orchestrator carries, scored by the `/spec` Step 1.6 rule over `.adlc/knowledge/lessons/` with the REQ's own frontmatter as the query, top 10. It is not the per-surface set (that is Phase 4's, BR-1a). Decide fresh or resume from the progress record, not from whether a `lessons` key exists (LESSON-719): a run whose worktree `pipeline-state.json` existed before this invocation is a resume and passes `--reuse`, which keeps a recorded `lessons.step0` instead of recomputing it; any other run passes `--fresh`, which clears a previous run's `lessons` first. `<state>` is the primary-path copy named under "Pipeline State Tracking" (`lessons`):
-
-   ```sh
-   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-   if [ -f .adlc/partials/lessons.sh ]; then . .adlc/partials/lessons.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lessons.sh"; fi
-   # <worktree> = the primary worktree; <spec> = its .adlc/specs/REQ-xxx-*/requirement.md;
-   # <state> = <repos[primary].path>/.adlc/specs/REQ-xxx-*/pipeline-state.json; <mode> = --fresh | --reuse
-   adlc_lessons select --set step0 --root "<worktree>" --spec "<spec>" --state-out "<state>" <mode>
-   ```
-
-   The first stdout line is the Step 0 log line (`Lessons loaded (step0): …`, BR-10); emit it, then keep the loaded text below it as background context for the run. A return of 2 prints one `lessons: unavailable — <reason>` line: emit that instead and continue — retrieval never halts the pipeline.
-8. **Initialize `pipeline-state.json`** in the primary's spec directory with `currentPhase: 0, completedPhases: [], completed: false, startedAt: <now>, integrationBranch: <integration-branch>, repos: {...resolved registry with absolute paths, worktrees, branches, touched flags...}, mergeOrder: [...from config.yml or declared order, filtered to touched repos...], phase4: { currentTask: null, completedTasks: [], failedTasks: [] }`. `integrationBranch` is the value resolved in step 4 — Phase 6 (PR base) and Phase 8 (merge target) MUST read it from state, never re-derive or assume `main`. If the file already exists, read it and resume from `currentPhase` (and from `phase4.currentTask` if mid-Phase-4) — do NOT recreate worktrees that already exist.
-
-   **Then read the lane (REQ-652), before item 8a.** Run `proceed/phases-lite.md` "Step 0 additions": read `lane` from the spec in the primary worktree (absent ⇒ `full`), record the `lane` object in state when the spec has the key (on a resume, the existing object's `lane.current` wins over the spec), handle `--full`, and, while `lane.current` is `lite` and `3` is not yet in `completedPhases` (a fresh run, or a resume of an interrupted Step 0), write `status: approved`, commit it, and record Phases 1–3 as skipped. A lite REQ skips both normal writers of `approved` (Phase 1 and `/architect`), and one left `draft` is invisible to `/spec` retrieval (BR-18):
-
-   <!-- retrieval-status: lifecycle-write -->
-   - `approved` — written here on a lite REQ
-   <!-- /retrieval-status -->
-
-   Declared for `tools/lint-skills`'s `retrieval-status-parity` check (BUG-194). That commit is also the lite branch's first, which is what lets item 8a's draft PR open (LESSON-390).
-
-   **Then stamp the harness (REQ-648 BR-10)**: run **Run-outcome telemetry** R1, before item 8a pushes anything, so the stamp names the toolkit that ran this pipeline even when `/wrapup` or `/sprint` later pulls the toolkit clone itself.
-8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR through the forge adapter (so the step works on GitHub or Azure DevOps — REQ-520), making this REQ's intent — and, after `/architect`, its footprint — visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
-   ```bash
-   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
-   git -C <worktree> push -u origin <branch-name>
-   adlc_forge_pr_create -R <owner/repo> --draft --base <integration-branch> --head <branch-name> --title "[WIP] REQ-xxx: <short title>" --body "Draft opened at Step 0 by /proceed; body filled in at Phase 6."
-   ```
-   Then record `repos[<id>].prUrl`, `prNumber`, and `prCreatedAt` (from `adlc_forge_pr_view <n> --json number,url,createdAt`) into `pipeline-state.json`. The base is `<integration-branch>` from step 4 — never hardcode `main` (LESSON-036). **Resume-safe**: if `repos[<id>].prNumber` is already set, reuse it — never open a second PR. In subagent mode (`/sprint` pipeline-runner) this still runs per REQ. The PR is `--draft` (not review-ready); Phase 6 flips it to ready. (If GitHub rejects the draft because the branch has no commits yet, defer to the Phase 6 fallback once commits land — LESSON-004.)
-9. When the pipeline completes (all PRs merged in Phase 8), clean up every worktree using the absolute path recorded in state — read `repos[<id>].worktree` for each touched repo and pass that value to `git worktree remove`. Do NOT use the relative `.worktrees/REQ-xxx` form here — the contract requires the recorded absolute path:
-   ```bash
-   git -C <repo-path> worktree remove <repos[<id>].worktree>
-   ```
-
-**Preflight verified** — when you invoke subskills in later phases, they may skip their own prerequisite checks (already validated here) AND they may skip re-reading `architecture.md` / `conventions.md` / `project-overview.md` (already in context). Treat the Step 0 loads as authoritative for the rest of the pipeline.
-
-**After completing Step 0**: Update `pipeline-state.json` — add `0` to `completedPhases`, add Step 0 to `phaseHistory`, set `currentPhase` to `1`. **On a lite run** the lane read in item 8 has already done this update and gone further: `completedPhases` is `[0, 1, 2, 3]` and `currentPhase` is `4`. Do not reset it to `1`.
+Read `proceed/phase-0-setup.md` and follow it before you continue. It holds Step 0 in full: items 1 to 9, the lane read, the harness stamp, the draft PR, and the state update that completes the step. Nothing in this file replaces it.
 
 ---
 
@@ -451,7 +125,7 @@ if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-
 Run `/validate` against the REQ spec. APPROVED → mark `approved`, advance.
 NEEDS REVISION → fix FAILs and re-validate (up to 3 loops); remaining
 blockers are legitimate halt #1. Before each attempt, record it
-(**Run-outcome telemetry** R2, `--phase 1`). End-of-phase log: "Spec validated
+(**Run-outcome telemetry** R2 in `proceed/phases-telemetry.md`, `--phase 1`). End-of-phase log: "Spec validated
 and approved." Full step list in companion.
 
 **Lite lane:** skipped, and recorded as skipped at Step 0 (`proceed/phases-lite.md`).
@@ -672,7 +346,7 @@ adlc_lessons ack-check --state "<state>" --root "<primary worktree>" --worktree 
 
 `--record` also writes the acknowledged ids to `lessons.acknowledged`, the source of the run-outcome line's `lessons_cited` (REQ-648); the output is unchanged.
 
-**Record the consolidation (REQ-648 BR-4)** before Step C: run **Run-outcome telemetry** R3 with `--loops 0` and every consolidated finding, `fixed: false` on each.
+**Record the consolidation (REQ-648 BR-4)** before Step C: run **Run-outcome telemetry** R3 (`proceed/phases-telemetry.md`) with `--loops 0` and every consolidated finding, `fixed: false` on each.
 
 Add each printed `Applicable lesson not acknowledged: LESSON-xxx — <title>` line (at most 5, then a `(+N more applicable lessons not listed)` line) to the consolidated list as an **Info** finding. Info never blocks and is not fixed in Step C; it tells the next reader which lessons the change did not say it applied. A `domain`- or `tags`-only match is never listed.
 
@@ -730,7 +404,7 @@ added commits, re-run the lane check before leaving it.
 **Gate**: `currentPhase` must be `8` and `7` must be in `completedPhases`. After completion: append `8`, set `"completed": true`.
 
 Merge in `mergeOrder`, carry the worktree copy's state into the primary-path
-copy (**Run-outcome telemetry** R4), run `/wrapup` from the primary (deploys +
+copy (**Run-outcome telemetry** R4, `proceed/phases-telemetry.md`), run `/wrapup` from the primary (deploys +
 knowledge capture), tear down each touched-repo worktree via the absolute path in
 state, then write the terminal record: `completed:true`, `currentPhase:8`, `8`
 appended to `completedPhases`, a phase-8 `phaseHistory` entry, and

@@ -12,6 +12,7 @@ adlc-toolkit/
 ├── hooks/hooks.json            # The plugin's one SessionStart hook
 ├── scripts/                    # session-start.sh (the hook) and adlc (the CLI shim on the plugin route)
 ├── <skill>/SKILL.md            # One directory per skill (spec/, architect/, proceed/, etc.)
+├── <skill>/references/*.md     # A skill's companions, read when SKILL.md says (REQ-661)
 ├── agents/<agent>.md           # Specialized subagent definitions
 ├── templates/*.md              # Canonical templates (copied into consumer projects by /init)
 ├── partials/                   # Shared snippets (ethos macro, delegate gate, trial-merge) sourced by SKILL.md files
@@ -24,7 +25,7 @@ adlc-toolkit/
 
 ## Skill anatomy
 
-Every skill is a single markdown file at `<skill-name>/SKILL.md` with this shape:
+Every skill is a markdown file at `<skill-name>/SKILL.md`, under 500 lines (`tools/lint-skills`' `skill-line-budget`, REQ-661), with this shape:
 
 1. **Frontmatter**: `name`, `description`, optional `argument-hint`
 2. **Title + one-line framing** — what the skill does
@@ -36,6 +37,13 @@ Every skill is a single markdown file at `<skill-name>/SKILL.md` with this shape
 8. **Quality checklist**: post-run self-check items
 
 Skills are pure markdown — no code, no package dependencies. The harness loads them at invocation time and the model executes the instructions in-context. The text is written so Claude Code, Copilot CLI, Codex, Gemini CLI and Cursor read it the same way (REQ-666): no `$ARGUMENTS`, no `!` line but the ETHOS one, no harness home path, and a fallback at every agent dispatch.
+
+**Companions (REQ-661).** A skill over the budget keeps its detail in companion files one level below the skill directory, `<skill>/references/*.md` (the Agent Skills layout; no nesting), and `/proceed` keeps its `proceed/phase*.md` files beside `SKILL.md` instead (one layout per skill). A `SKILL.md` plus its companions is a **skill unit**. Two contracts are in force:
+
+- **Read-and-follow (load-bearing).** The step's heading (for `/spec`, its numbered sub-step's title) stays in `SKILL.md` at the step's old position, followed by one sentence: "Read `<companion>` and follow it before you continue.", a clause naming what the file holds, and "Nothing in this file replaces it." The companion is the only copy of the step: on a harness that honours the Agent Skills layout the agent reads it with its file tool when it reaches the pointer, so `SKILL.md` carries no summary that could be executed instead. A section moves whole, or a whole numbered sub-step of one, with its prose, fences and marker blocks. Under this contract: `spec/references/intake-source-read.md` (Step 1.4 step 3), `spec/references/retrieval-body-read.md` (Step 1.6 sub-step 7), `template-drift/references/drift-report.md` (Step 5), `template-drift/references/reconciliation.md` (Step 6), `proceed/phases-state.md` (Pipeline State Tracking), `proceed/phases-telemetry.md` (Run-outcome telemetry), `proceed/phase-0-setup.md` (Step 0) and `proceed/phases-lite.md`, whose sections `SKILL.md` tells the agent to run.
+- **Summary plus companion (documentation-only marker).** `proceed/phases-1-3-validation.md`, `proceed/phase-4-implementation.md` and `proceed/phases-6-8-ship.md`, each named by a `<!-- companion: … -->` marker under the phase heading, as described under the pipeline shape below.
+
+A companion is read with a file tool and never preprocessed, so the preprocessing Claude Code applies to `SKILL.md` stays there: a fence or sentence that consumes the skill argument (the `'<request>'` placeholder fences of `/spec` Step 1.4, `/manifest`'s `'<req-ids>'`) and the ETHOS `!` line never move (`companion-templating`, `ethos-line`). `tools/lint-skills` walks every companion with the per-file checks a `SKILL.md` gets, treats the unit as one scope for the cross-fence checks and `canonical-helper`, and keeps its per-root site lists pointing at the file that holds each block. A reference by skill and step name ("`/proceed` Step 0 item 4") stays valid because the heading stays; a reference that named the file a section left names its new file.
 
 ## Agent anatomy
 
@@ -113,14 +121,14 @@ Create PR → PR cleanup + CI (+ lane check) → lane check → merge → /wrapu
                     on the same branch, worktree and PR
 ```
 
-`proceed/SKILL.md` keeps Step 0, the Pipeline State Tracking gate protocol, and Phase 5 (Verify, with the delegate pre-pass gate) inline, but extracts the thinner phases to companion files referenced via `<!-- companion: <path> -->` markers in SKILL.md:
+`proceed/SKILL.md` keeps Phase 5 (Verify, with the delegate pre-pass gate) inline. Since REQ-661, Step 0, Pipeline State Tracking (the state schema and the Gate Protocol) and Run-outcome telemetry live in read-and-follow companions (`proceed/phase-0-setup.md`, `proceed/phases-state.md`, `proceed/phases-telemetry.md`; see "Companions" under Skill anatomy), and the thinner phases are extracted to companion files referenced via `<!-- companion: <path> -->` markers in SKILL.md:
 
 - `proceed/phases-1-3-validation.md` — Phases 1–3 (spec validation, architect, architecture/tasks validation)
 - `proceed/phase-4-implementation.md` — Phase 4 (implement)
 - `proceed/phases-6-8-ship.md` — Phases 6–8 (PR creation, cleanup/CI, wrapup/merge)
 - `proceed/phases-lite.md` — the lite lane (REQ-652): Step 0 additions, Phases 4 and 5 on the lite lane, the lane check, escalation, and the lite PR body
 
-The companion marker is documentation-only — Claude Code does not auto-load referenced files. SKILL.md's inline summary is sufficient to execute each extracted phase; the companion holds the full step list for maintainers and for in-depth reference. Phase 5 is intentionally not extracted (ADR-3 of REQ-416) because the delegate pre-pass gate-handoff is load-bearing.
+The companion marker is documentation-only — Claude Code does not auto-load referenced files. SKILL.md's inline summary is sufficient to execute each extracted phase; the companion holds the full step list for maintainers and for in-depth reference. `phases-lite.md` is the exception among the four: `SKILL.md` tells the agent to run its sections, so it is read-and-follow. Phase 5 is intentionally not extracted (ADR-3 of REQ-416, kept by REQ-661 OQ-1) because the delegate pre-pass gate-handoff is load-bearing.
 
 ## Workflow engine
 

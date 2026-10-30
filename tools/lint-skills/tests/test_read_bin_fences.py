@@ -56,7 +56,9 @@ EXPECTED_FENCES = {
     "agents/delegate-pre-pass.md": 2,
     "analyze/SKILL.md": 1,
     "proceed/SKILL.md": 1,
-    "spec/SKILL.md": 2,
+    # REQ-661: /spec's two delegated reads moved, whole, into its companions.
+    "spec/references/intake-source-read.md": 1,
+    "spec/references/retrieval-body-read.md": 1,
     "wrapup/SKILL.md": 1,
 }
 
@@ -68,7 +70,8 @@ EXPECTED_NONZERO_EXIT = {
     "agents/delegate-pre-pass.md": False,
     "analyze/SKILL.md": True,
     "proceed/SKILL.md": True,
-    "spec/SKILL.md": True,
+    "spec/references/intake-source-read.md": True,
+    "spec/references/retrieval-body-read.md": True,
     "wrapup/SKILL.md": True,
 }
 
@@ -78,7 +81,8 @@ EXPECTED_LABEL = {
     "agents/delegate-pre-pass.md": "delegate-pre-pass:",
     "analyze/SKILL.md": "/analyze:",
     "proceed/SKILL.md": "/proceed:",
-    "spec/SKILL.md": "/spec:",
+    "spec/references/intake-source-read.md": "/spec:",
+    "spec/references/retrieval-body-read.md": "/spec:",
     "wrapup/SKILL.md": "/wrapup:",
 }
 

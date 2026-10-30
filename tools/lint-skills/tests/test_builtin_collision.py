@@ -212,6 +212,7 @@ def test_one_finding_per_line_naming_every_bare_name():
 SURFACE_PLANTS = {
     "*/SKILL.md": ("beta/SKILL.md", "# beta\n\nRun `/init` first.\n"),
     "proceed/phase*.md": ("proceed/phase-9.md", "Do NOT re-run `/review`.\n"),
+    "*/references/*.md": ("alpha/references/two.md", "Then run `/init` first.\n"),
     "agents/*.md": ("agents/two.md", "# two\n\nTell the user to run `/init` first.\n"),
     "partials/*.sh": ("partials/two.sh", 'echo "run /init to vendor partials" >&2\n'),
     "partials/*.md": ("partials/two.md", "Projects that haven't re-run `/init` fall back.\n"),

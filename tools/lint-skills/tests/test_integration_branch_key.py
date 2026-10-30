@@ -31,7 +31,8 @@ KEY = "branches.integration"
 #: Adding a new resolution site means adding it here — the point is that no
 #: site may silently drift back to "two-branch → staging, else main".
 RESOLUTION_SITES = (
-    "proceed/SKILL.md",
+    # REQ-661: /proceed Step 0, the rule's home, lives in its companion.
+    "proceed/phase-0-setup.md",
     "sprint/SKILL.md",
     "agents/pipeline-runner.md",
     "template-drift/SKILL.md",
@@ -52,7 +53,7 @@ def test_resolution_site_names_the_key(rel):
 
 def test_proceed_step4_reads_key_before_signals():
     """The key is rule 1; the three legacy signals follow it, in step 4."""
-    text = _read("proceed/SKILL.md")
+    text = _read("proceed/phase-0-setup.md")
     step4 = text.index("4. **Determine the integration branch")
     key_at = text.index(KEY, step4)
     staging_signal = text.index("`gcp.staging_project`", step4)
