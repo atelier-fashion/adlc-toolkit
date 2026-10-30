@@ -468,8 +468,13 @@ def test_reserve_new_id_won_pushes_ref(tmp_path, monkeypatch):
     _add_bare_remote(tmp_path, repo)
     monkeypatch.chdir(repo)
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    state = os.path.join(os.environ["HOME"], ".claude")
+    os.makedirs(state)
     assert renumber.reserve_new_id("REQ-700") == "won"
     assert "refs/adlc/ids/req/700" in _ls_reservations(repo, "req")
+    # BUG-256: the won reservation lands in the sandbox ledger, never the real one.
+    with open(os.path.join(state, ".adlc-own-reservations"), encoding="utf-8") as fh:
+        assert fh.read().startswith("req 700 ")
 
 
 def test_reserve_new_id_degraded_when_no_remote(tmp_path, monkeypatch):
