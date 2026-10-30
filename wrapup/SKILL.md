@@ -172,7 +172,7 @@ trap '"$DELEGATE_TOOLS"/skill-flag.sh clear "$flag" 2>/dev/null || true' EXIT  #
 ```
 
 The telemetry state (`start_s`, `invoked`, `exit`, `reason`) is persisted to the
-flag-file sidecar via `skill-flag.sh mark`, NOT to shell variables, because
+flag file via `skill-flag.sh mark`, NOT to shell variables, because
 SKILL.md fenced blocks do not share shell state (single-fence-safe telemetry,
 REQ-522 BR-4). The resolution block reads it back with `skill-flag.sh read`.
 
@@ -193,15 +193,15 @@ esac
 
 **Delegated drafting** (gate passes — `adlc-read` is on PATH and `ADLC_DISABLE_DELEGATE` is not `1`):
 
-**MANDATORY — no agent discretion.** When the gate passes AND step 1 resolved a transcript, invoking `adlc-read` to draft the lessons is required, not optional. Exactly two non-delegated outcomes are acceptable on the gate-pass path: (a) `adlc-read` was actually invoked and exited non-zero (→ `api-error` fallback), or (b) step 1's discovery legitimately produced no transcript — no transcript holds the run's mark, or more than one does — so there was nothing to delegate. Case (b) never reaches the call site, so `invoked` is never marked and the resolver records `fallback`/`gate=fail`; it is therefore NOT rewritten into a `ghost-skip` (that rewrite keys on `gate=pass`). Drafting the lessons-learned yourself from a transcript you *did* resolve, *instead of* calling `adlc-read` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+**MANDATORY — no agent discretion.** When the gate passes AND step 1 resolved a transcript, invoking `adlc-read` to draft the lessons is required, not optional. Exactly three non-delegated outcomes are acceptable on the gate-pass path: (a) `adlc-read` was actually invoked and exited non-zero (→ `api-error` fallback), (b) step 1's discovery legitimately produced no transcript — no transcript holds the run's mark, or more than one does — so there was nothing to delegate, or (c) `extract-chat` refused the transcript because no real fixture has proven its format, or failed on it. Cases (b) and (c) never reach the call site, so `invoked` is never marked and the resolver records `fallback`/`gate=fail`; it is therefore NOT rewritten into a `ghost-skip` (that rewrite keys on `gate=pass`). Drafting the lessons-learned yourself from a transcript you *did* resolve, *instead of* calling `adlc-read` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
 
-   **Close-out mode (BUG-249):** skip this step — do not run the discovery blocks (1a and 1b). Mark the sidecar's `jsonl` empty (`"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl ""`, in a fence that re-sources `partials/delegate-tools-path.sh`) so step 2 falls through to **Fallback drafting**, and draft there from the evidence the caller supplied (Close-out mode rule 4).
+   **Close-out mode (BUG-249):** skip this step — do not run the discovery blocks (1a and 1b). Mark the flag file's `jsonl` empty (`"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl ""`, in a fence that re-sources `partials/delegate-tools-path.sh`) so step 2 falls through to **Fallback drafting**, and draft there from the evidence the caller supplied (Close-out mode rule 4).
 
-1. Locate **this run's own** Claude Code transcript — **self-marked discovery** (BUG-253, replacing the REQ-423 ancestor walk). Two fences, run as **two separate tool calls**: the first prints a fresh random mark, and by the time the second runs, that output is a tool result in exactly one transcript — this conversation's, wherever the harness keeps it. The second finds that one file. A command that is still running is not yet in its own transcript, so the two must never be combined into one call.
+1. Locate **this run's own** transcript — **self-marked discovery** (BUG-253, replacing the REQ-423 ancestor walk). Two fences, run as **two separate tool calls**: the first prints a fresh random mark, and by the time the second runs, that output is a tool result in exactly one transcript — this conversation's, wherever the harness keeps it. The second finds that one file, on any harness: first through the session sidecars in `.adlc/.session/`, which the session-start hook writes, then across the harness roots (REQ-660). The mark is the one acceptance check on both rungs, so a sidecar never licenses a file that does not hold it. A command that is still running is not yet in its own transcript, so the two must never be combined into one call.
 
    **Why not walk the directories.** REQ-423 climbed from the working tree to `$HOME`, took each ancestor's `~/.claude/projects/<encoded>` directory, and picked the first JSONL whose tail named the REQ id. Under `/sprint` a `pipeline-runner` is a subagent: its transcript is `~/.claude/projects/<orchestrator's encoded cwd>/<session>/subagents/agent-<id>.jsonl`, which no ancestor of the runner's worktree reaches. The repo root's directory meanwhile holds older sessions that name the REQ too, so REQ-647's runner was handed a 2026-10-27 session that only mentioned it (LESSON-733). An id anchor proves a transcript mentions the work, not that it is the run; concurrent runners even share one session id. The mark is the only signal no other transcript can carry. <!-- adlc-home: claude-code -->
 
-   **A miss refuses; it never falls back.** If no transcript holds the mark, or more than one does (a forked copy), `adlc_transcript_find` returns 1 with nothing on stdout, `$JSONL` stays empty, and control falls through to **Fallback drafting** — Claude writes the lesson from the conversation it actually ran. Do not reach for another session's transcript: a well-formed lesson about other work is worse than no delegation (LESSON-483). Each call emits exactly one stderr line saying what it chose or refused; `partials/session-transcript.sh` carries the contract.
+   **A miss refuses; it never falls back.** If no transcript holds the mark, or more than one does (a forked copy), `adlc_transcript_find` returns 1 with nothing on stdout, `$JSONL` stays empty, and control falls through to **Fallback drafting** — Claude writes the lesson from the conversation it actually ran. Do not reach for another session's transcript: a well-formed lesson about other work is worse than no delegation (LESSON-483). Each call emits exactly one `/wrapup: session JSONL —` stderr line saying what it chose or refused and by which rung; `partials/session-transcript.sh` carries the contract.
 
    Step 1a — print the mark (its own tool call):
    ```bash
@@ -218,21 +218,28 @@ esac
    # <mark> is the LITERAL line step 1a printed (adlc-transcript-mark-<16 hex>) — thread it
    # in; fenced blocks share no shell state. rc 1 (no match, or several) leaves JSONL empty.
    JSONL=$(adlc_transcript_find "<mark>") || JSONL=""
-   # Persist the chosen transcript path to the flag sidecar so step 2's separate
-   # fenced block can read it — SKILL.md fenced blocks do not share shell state
-   # (REQ-522 BR-4). An empty JSONL (no transcript holds the mark) is persisted as empty.
+   # A vendored partial older than REQ-660 has no adlc_transcript_format: it found a
+   # Claude transcript, and step 2 reads the empty format as claude.
+   FORMAT=$(adlc_transcript_format "$JSONL" 2>/dev/null) || FORMAT=""
+   # Persist the chosen transcript path and its format to the flag file so step 2's
+   # separate fenced block can read them — SKILL.md fenced blocks do not share shell
+   # state (REQ-522 BR-4). An empty JSONL (no transcript holds the mark) is persisted as empty.
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl "$JSONL"
+   "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" format "$FORMAT"
    ```
 2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when step 1b refused (no transcript, or more than one, holds the mark), `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
    ```bash
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
    if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
    if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
-   # Re-read the transcript path step 1 persisted to the sidecar (fenced blocks
+   # Re-read the transcript path step 1 persisted to the flag file (fenced blocks
    # do not share shell state — REQ-522 BR-4). The gate partial is re-sourced
    # for the same reason: it exports ADLC_READ_BIN, the resolved binary (PATH,
    # or $HOME/bin/adlc-read in GUI-launched sessions whose PATH lacks ~/bin).
    JSONL=$("$DELEGATE_TOOLS"/skill-flag.sh read "$flag" jsonl)
+   # An absent format means claude; close-out mode never writes one (REQ-660 BR-13).
+   FORMAT=$("$DELEGATE_TOOLS"/skill-flag.sh read "$flag" format)
+   [ -n "$FORMAT" ] || FORMAT=claude
    if [ -z "$JSONL" ]; then
        # No candidate JSONL — skip delegation entirely; fall through to Fallback drafting.
        # Skip its standard stderr emit since step 1b's refusal line already logged.
@@ -240,7 +247,8 @@ esac
    else
        TMPFILE=$(mktemp -t adlc-wrapup.XXXXXX) || exit 1
        trap 'rm -f "$TMPFILE"' EXIT
-       if ! extract-chat "$JSONL" -o "$TMPFILE"; then
+       # A format with no proven parser exits non-zero here: Fallback drafting (ADR-5).
+       if ! extract-chat "$JSONL" -o "$TMPFILE" --format "$FORMAT"; then
            # Combined single-line log replaces the standard fallback line (BR-4: one line per invocation).
            echo "/wrapup: extract-chat failed — Claude drafting lesson directly" >&2
            # Fall through to Fallback drafting (skip its stderr emit since we already logged).
@@ -350,7 +358,7 @@ if ! adlc_recheck_id lesson "$LESSON_ID"; then
 fi
 ```
 
-**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback drafting path completes, before continuing to Convention Updates. Emit telemetry ONLY by sourcing and calling the shared resolver in the SAME fenced block — it derives `mode`/`reason`/`gate_result`/`duration_ms` from the flag-file sidecar the steps above `mark`ed, so no shell variable crosses a fence boundary (REQ-522 BR-4). Never hand-construct a telemetry line:
+**Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback drafting path completes, before continuing to Convention Updates. Emit telemetry ONLY by sourcing and calling the shared resolver in the SAME fenced block — it derives `mode`/`reason`/`gate_result`/`duration_ms` from the flag file the steps above `mark`ed, so no shell variable crosses a fence boundary (REQ-522 BR-4). Never hand-construct a telemetry line:
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"

@@ -307,13 +307,14 @@ def test_init_vendors_agents_and_drift_reports_them(tmp_path, shell):
 
 # --- BR-6, BR-14, BR-17 / AC-6, AC-15: the docs moved with the code ---------
 
-NEW_CHECKS = ("ethos-line", "description-budget", "skills-ref", "dispatch-has-fallback", "no-harness-path")
+NEW_CHECKS = ("ethos-line", "description-budget", "skills-ref", "dispatch-has-fallback", "no-harness-path",
+              "session-gitignore")
 RETIRED_CHECKS = ("harness-" + "skip", "provenance-" + "safe-fence", "missing-" + "harness-line")
 
 
 def test_lint_readme_lists_new_checks_only():
-    """BR-14: the README's numbered list documents the five new checks and none
-    of the retired ones, numbered without a gap."""
+    """BR-14: the README's numbered list documents the new checks (REQ-666's five,
+    REQ-660's one) and none of the retired ones, numbered without a gap."""
     readme = _read("tools/lint-skills/README.md")
     section = readme[readme.index("## What it checks"):readme.index("## Usage")]
     numbers = [int(n) for n in re.findall(r"^(\d+)\. \*\*", section, flags=re.M)]

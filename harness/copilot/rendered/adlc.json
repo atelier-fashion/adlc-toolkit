@@ -4,19 +4,19 @@
     "sessionStart": [
       {
         "type": "command",
-        "bash": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject --harness copilot --context-key additionalContext",
+        "bash": "ADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject --harness copilot --context-key additionalContext",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "bash": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/session-record.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\" ] || exit 0\nif [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\"; fi\nadlc_session_record --harness copilot",
+        "bash": "ADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/session-record.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\" ] || exit 0\nif [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\"; fi\nadlc_session_record --harness copilot",
         "timeoutSec": 10
       }
     ],
     "subagentStart": [
       {
         "type": "command",
-        "bash": "ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject --harness copilot --context-key additionalContext",
+        "bash": "ADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject --harness copilot --context-key additionalContext",
         "timeoutSec": 10
       }
     ]

@@ -2,8 +2,11 @@
 """extract-chat — clean a Claude Code session JSONL transcript into readable text.
 
 Emits only human prompts and assistant natural-language replies, stripping tool
-calls, tool results, system prompts, and binary/base64 blobs. Pure local
-transformation — no API call, no MOONSHOT_API_KEY needed.
+calls, tool results, system prompts, harness-internal records, and binary/base64
+blobs. Pure local transformation — no API call, no MOONSHOT_API_KEY needed.
+
+`--format` names the harness that wrote the transcript. Only `claude` has a
+parser; the other values refuse until a captured transcript proves their shape.
 """
 import argparse
 import json
@@ -84,6 +87,14 @@ def _iter_turns(fh):
             continue
         if not isinstance(record, dict):
             continue
+        # Any other `type` is harness-internal, and is dropped before `message`
+        # is read: Claude Code's `api-request-blob` holds injected context in a
+        # user-role `message`, which would otherwise come out as `## Human` text
+        # (REQ-660 ADR-6). A record with no `type` still parses; older
+        # transcripts carry none.
+        rtype = record.get("type")
+        if rtype is not None and rtype not in ("user", "assistant"):
+            continue
         message = record.get("message")
         if not isinstance(message, dict):
             continue
@@ -101,6 +112,15 @@ def _iter_turns(fh):
         yield role, text
 
 
+# Every value `--format` accepts. The flag takes all five so `/wrapup` can pass a
+# session's harness through unchanged; a name with no `_PARSERS` entry refuses
+# (REQ-660 ADR-5). An entry lands only with a transcript captured from a real
+# session (BR-11), so `cursor` is not an alias of `claude` until one proves the
+# shapes identical.
+FORMATS = ("claude", "codex", "copilot", "gemini", "cursor")
+_PARSERS = {"claude": _iter_turns}
+
+
 def _build_parser():
     parser = argparse.ArgumentParser(
         # No prefix abbreviation. The pre-parse argv scan (`wants_version`)
@@ -116,6 +136,9 @@ def _build_parser():
     parser.add_argument("jsonl_path", help="path to the .jsonl session transcript")
     parser.add_argument("-o", "--output", metavar="PATH",
                         help="write output here instead of stdout")
+    parser.add_argument("--format", choices=FORMATS, default="claude",
+                        help="harness that wrote the transcript (default: claude); "
+                             "only claude has a parser, the others exit non-zero")
     return parser
 
 
@@ -126,7 +149,7 @@ def _build_parser():
 # for a command the user did not write. Complete by exact spelling only because
 # the parser sets `allow_abbrev=False`; kept honest by a test that derives the
 # same set from the parser itself.
-_VERSION_VALUE_FLAGS = frozenset({"-o", "--output"})
+_VERSION_VALUE_FLAGS = frozenset({"-o", "--output", "--format"})
 _KNOWN_FLAGS = _VERSION_VALUE_FLAGS | frozenset({"-h", "--help"})
 
 
@@ -155,6 +178,14 @@ def main(argv=None):
 
     args = _build_parser().parse_args(argv)
 
+    # Before the input is opened: a refusal reads nothing and writes nothing.
+    parse_turns = _PARSERS.get(args.format)
+    if parse_turns is None:
+        print("extract-chat: --format %s has no parser: no real %s transcript has "
+              "been captured to prove its shape" % (args.format, args.format),
+              file=sys.stderr)
+        return 1
+
     try:
         fh = open(args.jsonl_path, "r", encoding="utf-8", errors="replace")
     except OSError as exc:
@@ -164,7 +195,7 @@ def main(argv=None):
 
     chunks = []
     with fh:
-        for role, text in _iter_turns(fh):
+        for role, text in parse_turns(fh):
             header = "## Human" if role == "user" else "## Assistant"
             chunks.append("%s\n%s" % (header, text))
 

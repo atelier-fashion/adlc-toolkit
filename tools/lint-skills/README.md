@@ -539,6 +539,7 @@ a general markdown linter and NOT a general shell linter.
     | marker | a line carrying `adlc-home: claude-code`, `adlc-home: alias` or `adlc-home: default` (in Markdown as an HTML comment) | REQ-654's marker, one mechanism for both checks: the line keeps its literal on purpose and says why. An unknown kind is `adlc-home`'s finding |
     | comment | a whole-line HTML comment in a Markdown file | the agents' rendered `model:` header names the machine config's default location (REQ-666) |
     | file | `tools/adlc/harness_probe.py` | REQ-664's §6 probes edit the other harnesses' user files and read their session stores by design (REQ-666) |
+    | file | `partials/session-transcript.sh` | REQ-660 BR-9: `/wrapup`'s transcript walk reads the Codex, Copilot and Gemini session stores, those harnesses' own data directories, which an `adlc-home` marker would mislabel. The exception is whole-file, so `test_session_transcript_exception_names_only_its_three_roots` holds it to those three roots, and `adlc-home` still reads the file |
     | comment | `#` in shell, Python and the shell fences of a Markdown file; `//` and `/* … */` in JavaScript, except under `presets/` and `templates/` (`TOOLKIT_PATH_INSTRUCTION_DIRS`) | a comment is not a read. A Markdown heading is not a comment, and a trailing comment does not exempt its code line. In a preset or a template a `#` line is the user's instruction (the preset header says `#   cp "$ADLC_TOOLKIT_ROOT/presets/<x>.yml" .adlc/config.yml`), so no comment line there is exempt |
     | tree | `tests/` and `fixtures/`, at any depth below the root | they plant the spellings on purpose |
 
@@ -722,6 +723,24 @@ a general markdown linter and NOT a general shell linter.
     (`arg-templating` covers bare `$<digit>` everywhere). Tests:
     `tests/test_skill_units.py`.
 
+23. **Session gitignore (`session-gitignore`)** (REQ-660 BR-7, BR-15, AC-12): a
+    session sidecar under `.adlc/.session/` names a local transcript path, so the
+    line has to stay in the gitignore lines `init/SKILL.md` writes or sidecars
+    start reaching consumer commits through a later edit. The check reads the
+    `### Step 5` section of `SESSION_GITIGNORE_SITE`, from that heading to the
+    next heading of level 3 or above outside a fence (the gitignore comments in
+    the fence read as headings), and requires `.adlc/.session/` as a whole line
+    inside a fence there, compared exactly because a leading space is part of a
+    gitignore pattern. A mention in prose, a longer line that contains it and a
+    copy in another step do not satisfy it (LESSON-404). A missing line is one
+    finding on the Step 5 heading; a missing heading or an unreadable file is one
+    finding naming the file, never a skip. Per root, armed by `is_plugin_root` and
+    the site existing, so a plugin root holding no `init/SKILL.md` is inert. On
+    the real tree `test_real_tree_passes` reads the site itself, so deleting the
+    file cannot disarm the guard. That test also holds this repo's own
+    `.gitignore`, which the check does not read. Tests:
+    `tests/test_session_gitignore.py`.
+
 ## REQ-657: the harness adapter framework's checks
 
 - **`allowlist-fidelity`** renders `templates/permissions.yml` at the scope each
@@ -754,6 +773,9 @@ a general markdown linter and NOT a general shell linter.
   names the harnesses it holds.
 - **`unguarded-source`** also walks `templates/hooks.yml` and every committed hook
   render, one hook-command line at a time.
+  It also fails a hook command holding the braced `${CLAUDE_PLUGIN_ROOT}`, because
+  Claude Code never runs a project hook that does (REQ-660 ADR-8). A hook spells the
+  root line `HOOK_ROOT_LINE`, the canonical line with that token unbraced.
 - **`retired-settings-template`** reports a skill, companion, agent, partial or
   partial doc that still names the deleted Claude settings template.
 - **`sync-surface-parity`** knows the seventh surface, `harness-config`.

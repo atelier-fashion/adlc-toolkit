@@ -11,6 +11,9 @@
 # ADLC pipeline state (ephemeral, per-worktree)
 .adlc/specs/*/pipeline-state.json
 
+# ADLC session sidecars (per-session transcript pointers written by a hook, per-worktree)
+.adlc/.session/
+
 # macOS Finder / iCloud duplicate suffix pattern (e.g. "CLAUDE 2.md", "Dockerfile 2")
 * [0-9].*
 * [0-9]
