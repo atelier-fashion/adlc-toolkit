@@ -14,7 +14,7 @@ You are setting up the `.adlc/` directory structure for spec-driven development.
 
 ## Input
 
-Target: $ARGUMENTS
+The target is the argument: whatever follows `/init` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), a directory to initialize. With none, the current working directory.
 
 ## Instructions
 
@@ -59,12 +59,14 @@ If a `CLAUDE.md`, `README.md`, or `package.json` exists, extract this info autom
     task-template.md
   partials/              # Copies of $ADLC_TOOLKIT_ROOT/partials/*.sh — shared shell snippets sourced by SKILL.md files
     ethos-include.sh
+  agents/                # Copies of $ADLC_TOOLKIT_ROOT/agents/*.md — the checklists a dispatch paragraph runs inline (no harness discovers agents here)
+    reflector.md
   workflows/             # Copies of $ADLC_TOOLKIT_ROOT/workflows/ RUNTIME files only — Dynamic Workflow scripts used by the workflow engine
     adlc-sprint.workflow.js   # ONE self-contained file: meta first, schemas + pure helpers inlined behind // ==== BEGIN/END PURE ==== (runtime has no require)
     README.md            # NOTE: workflows/tests/ is intentionally NOT copied — those are toolkit-internal node:test files (CommonJS require) that break Jest in "type":"module" consumer repos (see Step 6)
 ```
 
-**Why the local copies of ETHOS.md, templates, partials, and workflows?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `$ADLC_TOOLKIT_ROOT/ETHOS.md`, `$ADLC_TOOLKIT_ROOT/templates/*.md`, `$ADLC_TOOLKIT_ROOT/partials/*.sh`, and `$ADLC_TOOLKIT_ROOT/workflows/*` become unreadable by subagents and any tool that uses `Read` mid-skill. That holds on both install routes: the clone behind the skills symlink is outside the project, and so is the plugin's cache copy, which is not an allowed working directory either (REQ-669 `verification.md` N2). Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
+**Why the local copies of ETHOS.md, templates, partials, agents, and workflows?** Claude Code's sandbox blocks the `Read` tool from accessing paths outside the current working directory. When a skill runs inside a git worktree (e.g., `.claude/worktrees/<name>/`), `$ADLC_TOOLKIT_ROOT/ETHOS.md`, `$ADLC_TOOLKIT_ROOT/templates/*.md`, `$ADLC_TOOLKIT_ROOT/partials/*.sh`, `$ADLC_TOOLKIT_ROOT/agents/*.md`, and `$ADLC_TOOLKIT_ROOT/workflows/*` become unreadable by subagents and any tool that uses `Read` mid-skill. That holds on both install routes: the clone behind the skills symlink is outside the project, and so is the plugin's cache copy, which is not an allowed working directory either (REQ-669 `verification.md` N2). Keeping copies under `.adlc/` makes the toolkit work identically in main checkouts and worktrees.
 
 **ToolkitRoot.** `$ADLC_TOOLKIT_ROOT` is the running install's toolkit directory: the plugin's cache copy on the plugin route, or the clone behind the skills symlink on the symlink route. Every fence below that reads a toolkit file resolves it with the canonical root line as its first line (conventions.md "Bash in skills", REQ-669 ADR-1). Fenced blocks share no shell state, so each fence carries its own copy of that line, and `/init` copies from whichever install is running (REQ-669 ADR-8).
 
@@ -130,7 +132,7 @@ Add the following entries to the project's `.gitignore` (create it if it doesn't
 # Claude Code per-user permission overrides (team settings live in .claude/settings.json)
 .claude/settings.local.json
 
-# ADLC ID counters are global (~/.claude/.global-next-req, ~/.claude/.global-next-bug, ~/.claude/.global-next-lesson) — not per-project
+# ADLC ID counters are global (${ADLC_HOME:-$HOME/.claude}/.global-next-req, .global-next-bug and .global-next-lesson) — not per-project
 # Legacy per-project counters (deprecated, no longer read/written — ignored if present)
 .adlc/.next-bug
 .adlc/.next-req
@@ -145,7 +147,7 @@ Copy the canonical ETHOS.md and all templates from the toolkit into the project 
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 # Verify source exists. ToolkitRoot is the plugin's cache copy on the plugin
 # route, or the clone behind the skills symlink on the symlink route.
-if [ ! -f "$ADLC_TOOLKIT_ROOT/ETHOS.md" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/templates" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/partials" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/workflows" ]; then
+if [ ! -f "$ADLC_TOOLKIT_ROOT/ETHOS.md" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/templates" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/partials" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/agents" ] || [ ! -d "$ADLC_TOOLKIT_ROOT/workflows" ]; then
   echo "ERROR: adlc toolkit not found at $ADLC_TOOLKIT_ROOT (ToolkitRoot). Install it by either route. Plugin route: claude plugin marketplace add atelier-fashion/adlc-toolkit, then claude plugin install adlc@adlc-toolkit. Symlink route: clone adlc-toolkit and run its ./install.sh."
   exit 1
 fi
@@ -165,6 +167,15 @@ cp "$ADLC_TOOLKIT_ROOT/templates"/*.md .adlc/templates/
 mkdir -p .adlc/partials
 cp "$ADLC_TOOLKIT_ROOT/partials"/*.sh .adlc/partials/
 chmod +x .adlc/partials/*.sh
+
+# Copy agent checklists (overwrite — canonical is source of truth), every
+# agents/*.md by glob. A dispatch paragraph's inline arm reads
+# .adlc/agents/<name>.md when the harness cannot run subagents or the skill runs
+# inside one (REQ-666 BR-8), because a worktree-sandboxed or session-jailed read
+# cannot reach ToolkitRoot. A checklist store only: no harness is configured to
+# discover agents here, so nothing is registered twice.
+mkdir -p .adlc/agents
+cp "$ADLC_TOOLKIT_ROOT/agents"/*.md .adlc/agents/
 
 # Copy workflows (overwrite — canonical is source of truth). These are the
 # Dynamic Workflow scripts the workflow engine runs (e.g.,
@@ -209,11 +220,11 @@ if grep -q '"jest"' package.json 2>/dev/null || find . -maxdepth 1 -name 'jest.c
 fi
 ```
 
-If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, `.adlc/partials/*.sh`, or `.adlc/workflows/adlc-sprint.workflow.js`, confirm before overwriting. Use `/template-drift` to surface what differs (it also flags a stale `.adlc/workflows/tests/` left by an older `/init` — the Jest landmine fixed above). Typical drift (stale copies) should be overwritten silently.
+If the user has previously made intentional customizations to their local `.adlc/ETHOS.md`, `.adlc/templates/*.md`, `.adlc/partials/*.sh`, `.adlc/agents/*.md`, or `.adlc/workflows/adlc-sprint.workflow.js`, confirm before overwriting. Use `/template-drift` to surface what differs (it also flags a stale `.adlc/workflows/tests/` left by an older `/init` — the Jest landmine fixed above). Typical drift (stale copies) should be overwritten silently.
 
 #### Vendored sync surfaces (drift-detection contract with `/template-drift`)
 
-The four surfaces this step copies are the project's **vendored sync surfaces** — copied once at
+The five surfaces this step copies are the project's **vendored sync surfaces** — copied once at
 init time, never auto-updated afterward. `/template-drift` is the tool that detects when a toolkit
 update to any of them has not yet landed in this project. The two lists MUST stay in agreement:
 **every surface added here must get a matching check in `/template-drift`** (see its
@@ -224,6 +235,7 @@ update to any of them has not yet landed in this project. The two lists MUST sta
 - `ethos` — `cp "$ADLC_TOOLKIT_ROOT/ETHOS.md" .adlc/ETHOS.md`
 - `templates` — `cp "$ADLC_TOOLKIT_ROOT/templates"/*.md .adlc/templates/`
 - `partials` — `cp "$ADLC_TOOLKIT_ROOT/partials"/*.sh .adlc/partials/`
+- `agents` — `cp "$ADLC_TOOLKIT_ROOT/agents"/*.md .adlc/agents/`
 - `workflow-runtime` — `cp "$ADLC_TOOLKIT_ROOT/workflows"/*.workflow.js` + `README.md` → `.adlc/workflows/`
 <!-- /sync-surfaces -->
 

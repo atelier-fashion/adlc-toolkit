@@ -102,7 +102,7 @@ def test_end_of_phase_logs_name_lessons():
 
 def test_bugfix_phase2_consults_lessons_first():
     phase2 = _section(_read("bugfix/SKILL.md"), "### Phase 2: Analyze", "### Phase 3: Fix")
-    assert phase2.index("1. **Consult prior lessons first** (REQ-647 BR-5).") < phase2.index("2. Launch Explore agents")
+    assert phase2.index("1. **Consult prior lessons first** (REQ-647 BR-5).") < phase2.index("2. If this harness can run subagents, launch Explore agents")
     assert "adlc_lessons select --set bugfix" in phase2
     assert "`Prior lessons consulted:`" in phase2
     assert "keeps the top 5" in phase2

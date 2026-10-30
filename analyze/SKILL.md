@@ -14,12 +14,19 @@ You are performing a comprehensive codebase health audit for the current project
 
 ## Context
 
-- Architecture: !`cat .adlc/context/architecture.md || echo No architecture context found`
-- Conventions: !`cat .adlc/context/conventions.md || echo No conventions found`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Architecture'
+cat .adlc/context/architecture.md 2>/dev/null || echo 'No architecture context found'
+echo '--- Conventions'
+cat .adlc/context/conventions.md 2>/dev/null || echo 'No conventions found'
+```
 
 ## Input
 
-Scope: $ARGUMENTS
+The scope is the argument: whatever follows `/analyze` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), a directory, an area or a focus dimension. With none, Step 1 audits the whole project.
 
 ## Prerequisites
 
@@ -27,16 +34,13 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 
 ## Instructions
 
-**Shell on a provenance-classifying harness (BUG-230).** If your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it (Teton Code's `shell` does), the only shell commands you may run in this whole skill are the lines of its `# provenance-safe` fences, with their `<placeholders>` filled in. Do everything else (finding files, searching, reading, counting) with your harness's own `glob`, `grep` and `read` tools. Never write your own `find … -name '…'`, `xargs`, `awk`, `$(…)`, quoted argument or `--flag=value`, and never run a build tool, test runner, package manager or interpreter: each is unclassifiable, and one pins the rest of the turn. Verification runs on 2026-09-28 pinned on exactly two improvised commands, `cargo test --workspace` and `find crates -name '*.rs' | xargs wc -l`. Every command this skill prescribes stayed in reach.
-
 ### Step 1: Determine Scope
 1. If given a specific directory or area, focus the audit there
 2. If given a focus area (e.g., "security", "testing", "performance"), prioritize that dimension
 3. If no argument, audit the entire project
 
-To size the scope, list files with your harness's `glob` tool, then count lines over the paths it returned, named explicitly (never a glob or a pipe):
+To size the scope, list files with your harness's file-search tool, then count lines over the paths it returned:
 ```bash
-# provenance-safe (BUG-230)
 wc -l <file> <file>
 ```
 
@@ -45,8 +49,6 @@ wc -l <file> <file>
 Before launching the audit agents, produce a one-paragraph "project shape" summary to pass as extra context to each agent in Step 2.
 
 **Shared telemetry-resolve helper** — `_adlc_emit_step_telemetry` is sourced from `partials/emit-step-telemetry.sh` at each emit point (Step 1.5 and Step 1.6), immediately before the call, in the same fenced block. It is deliberately **not** defined inline here: SKILL.md fenced shell blocks do not share shell state across steps, so a function defined in one block is undefined when called from another (see `.adlc/context/conventions.md` "Bash in skills" and the `lint-skills` `cross-fence-fn` check that enforces this). The helper derives ALL of its state (`start_s`, `invoked`, `exit`, `reason`) from the flag-file sidecar that the steps below `mark`, never from caller shell vars (single-fence-safe telemetry, REQ-522 BR-4). The partial self-sources `delegate-tools-path.sh`, so call sites do not separately source the resolver. A future change to mode-resolution logic or the `emit-step-telemetry.sh` signature is applied in that one partial.
-
-**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
 
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
@@ -106,8 +108,6 @@ _adlc_emit_step_telemetry analyze Step-1.5
 ### Step 1.6: Optional audit candidate-list pre-pass via adlc-read
 
 Before launching the audit agents, optionally produce a per-dimension candidate-findings list to pass as advisory context to each agent in Step 2.
-
-**Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
 
 **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
@@ -175,8 +175,6 @@ _adlc_emit_step_telemetry analyze Step-1.6
 
 ### Step 1.8: Delegation-fidelity audit
 
-**Provenance-classifying harness (BUG-230):** on a harness that pins the session on a shell command it cannot classify (Teton Code), skip this step — its shell expands `$DELEGATE_TOOLS` and runs a helper by path, both unclassifiable — and put `/analyze: delegation-fidelity audit unavailable on this harness` in the report.
-
 Self-check the ADLC skill telemetry log for ghost-skips (gate passed but `adlc-read` was not actually invoked). This audits delegation behavior across all skills, not the codebase. Runs in addition to the 4 standard dimensions (code-quality, convention, security, test) and surfaces findings under a new `delegation-fidelity` dimension.
 
 **Gate (silent skip on older installs):**
@@ -230,8 +228,6 @@ Append the resulting `delegation-fidelity` block to the audit report alongside t
 
 ### Step 1.9: SKILL.md corruption audit
 
-**Provenance-classifying harness (BUG-230):** on a harness that pins the session on a shell command it cannot classify (Teton Code), skip this step — `tools/lint-skills/check.sh` is a program named by path, which such a classifier refuses by design — and put `/analyze: skill-md-corruption audit unavailable on this harness` in the report.
-
 Run the `tools/lint-skills/` linter over the repo's `SKILL.md` files to surface findings under a new `skill-md-corruption` audit dimension. Defends against the REQ-424 failure class — literal-but-broken shell constructs that escape verify because review is prose-only.
 
 **Gate (silent skip on older installs):**
@@ -267,8 +263,6 @@ skill-md-corruption: <file>:<line>: <check-name>: <message>
 Append the resulting `skill-md-corruption` block to the audit report alongside the standard 4 dimensions surfaced by Step 2's agents and the `delegation-fidelity` dimension from Step 1.8. The agent dispatch in Step 2 is unchanged — this is a parallel self-check, not an extra agent.
 
 ### Step 1.10: Harness-fidelity audit
-
-**Provenance-classifying harness (BUG-230):** on a harness that pins the session on a shell command it cannot classify (Teton Code), skip this step — its shell expands `$DELEGATE_TOOLS` and runs a helper by path, both unclassifiable — and put `/analyze: harness-fidelity audit unavailable on this harness` in the report.
 
 Summarise the run-outcome log (REQ-648): one line per pipeline terminal, written by `tools/delegate/emit-run-outcome.sh`. This audits how the toolkit's own pipeline performed under each toolkit version, not the codebase, and surfaces under a `harness-fidelity` dimension beside `delegation-fidelity`. It is how "did a harness change reduce Major findings?" gets an answer: compare the rows of two versions.
 
@@ -306,7 +300,7 @@ Append the `harness-fidelity` block to the audit report beside `delegation-fidel
 ### Step 2: Launch Audit Agents + Repo Hygiene Scan (parallel)
 In a single message, launch the 4 audit agents AND run the repo hygiene bash checks below in parallel. The agents live in `$ADLC_TOOLKIT_ROOT/agents/` with their full audit checklists, model selection (sonnet for deep analysis, haiku for pattern matching), and tool restrictions.
 
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
 1. **code-quality-auditor** agent — provide the audit scope determined in Step 1
 2. **convention-auditor** agent — provide the audit scope and conventions.md content
@@ -318,43 +312,34 @@ If Step 1.6's delegated path ran, include the relevant per-dimension candidates 
 
 Each agent returns structured findings with severity, file paths, and descriptions.
 
-**No agent-dispatch tool (BUG-230).** When your harness cannot launch agents — Teton Code has no such tool, and subagent mode forbids it — run the four audits yourself, one dimension at a time, in your own context, over the Step 1 scope. Do not stop the turn after the scope reads; Step 2 is where the audit happens. Use each agent definition's full checklist when your file tool can reach it (`agents/<name>.md` in the toolkit, `$ADLC_TOOLKIT_ROOT/agents/<name>.md` in a consumer project); a harness whose read tool is jailed to the session root — Teton's is — cannot reach the second, so work from the condensed checklist below. Search with your harness's own `grep`/`glob` tools rather than shell (the test auditor's `find … -name '…'` probe would pin a provenance-classifying harness). Produce the same per-dimension findings (severity, file path, description) the agents would.
+**Inline audits (BUG-230, kept).** When the paragraph above sends you inline, run the four audits yourself, one dimension at a time, in your own context, over the Step 1 scope, from each vendored checklist. Do not stop the turn after the scope reads; Step 2 is where the audit happens. Produce the same per-dimension findings (severity, file path, description) the agents would.
 
-**The audit is a read-only static review — run nothing that builds, tests or installs.** No test runner, build tool, package manager or interpreter (`cargo test`, `npm test`, `pytest`, `go test`, `make`, `npm audit`, `cargo audit`, …): a provenance-classifying harness treats every one of them as opaque and pins the session on the first call, and Teton's 30 s shell default kills most of them anyway. Judge coverage from the test files you can see, and where a finding would need a run to confirm — failing tests, a vulnerable dependency — report it as a candidate and name the exact command the user should run. (Observed 2026-09-28: every call this step prescribes stayed in reach, and an improvised `cargo test --workspace` pinned the turn.)
-
-- **Code quality**: dead code (unused exports, unreachable branches, commented-out blocks); duplication (copy-pasted logic, near-duplicate functions); complexity (3+ nesting levels, functions over ~50 lines, files over ~300 lines or with unrelated responsibilities); inconsistent patterns (same operation done different ways, mixed error handling); maintenance markers (TODO/FIXME/HACK with no ticket).
-- **Convention** — against `conventions.md` only, never rules from another project: naming, logging through the project logger, configuration (hardcoded URLs/ports/limits, magic numbers, secrets in source), API response shape, error handling (empty catches, swallowed errors), import/export style.
-- **Security**: input validation at boundaries; authentication and authorization (missing checks, ownership, token expiry); data exposure (PII in logs, sensitive fields in responses, stack traces to clients); rate limiting on expensive or auth endpoints; error-message leakage; dependency vulnerabilities (name the audit command for the stack for the user to run; do not run it here).
-- **Test**: coverage gaps (no test file — check every layout the project uses before reporting — untested error paths, untested routes); mock completeness; test quality (implementation-detail assertions, vacuous tests, real network or database calls); determinism (timing, clock, unseeded randomness); integration coverage.
+**The audit is a read-only static review — run nothing that builds, tests or installs.** No test runner, build tool, package manager or interpreter (`cargo test`, `npm test`, `pytest`, `go test`, `make`, `npm audit`, `cargo audit`, …). Judge coverage from the test files you can see, and where a finding would need a run to confirm — failing tests, a vulnerable dependency — report it as a candidate and name the exact command the user should run.
 
 ### Step 2a: Repo Hygiene Checks
 Run these bash checks directly (do not spawn an agent). Adapt the commands to the repo — skip remote checks if no `origin`, pick the correct default branch (`main` or `master`), etc.
 
-Every command below is written to be **provably in reach** for a harness that classifies shell provenance (BUG-230): only `git` subcommands that print names or metadata, no `=`, no quotes, no `$`, no redirects, no pipes, no parentheses. It runs unchanged on every harness — do the date arithmetic and grouping yourself from the output rather than adding `awk`, `$(…)` or `--format=…` back, each of which pins a Teton session (`lint-skills`' `provenance-safe-fence` check holds these fences to that). Substitute `<default>` with the branch the first command names (without `origin/`); skip the `origin` commands when the repo has no `origin`.
+Every command below is a `git` subcommand that prints names or metadata, so it runs unchanged on every harness and needs no quoting. Do the date arithmetic and grouping yourself from the output. Substitute `<default>` with the branch the first command names (without `origin/`); skip the `origin` commands when the repo has no `origin`.
 
 **Default branch:**
 ```bash
-# provenance-safe (BUG-230)
 git rev-parse --abbrev-ref origin/HEAD
 ```
 
 **Stale branches (local and remote, no commits in 90+ days)** — each tip prints with its `Date:` and refs; report the ones older than 90 days before today:
 ```bash
-# provenance-safe (BUG-230)
 git log --no-walk --branches --decorate --date short
 git log --no-walk --remotes --decorate --date short
 ```
 
 **Branches already merged into the default branch (safe to delete)** — drop `<default>` itself, `master`, `HEAD` and the checked-out branch from the list:
 ```bash
-# provenance-safe (BUG-230)
 git branch --merged <default>
 git branch -r --merged origin/<default>
 ```
 
 **Duplicate files (identical content)** — the diff from git's empty tree to `HEAD` lists every tracked file with its blob hash (fourth column); files sharing a hash are identical:
 ```bash
-# provenance-safe (BUG-230)
 git diff-tree -r --no-commit-id 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD
 ```
 

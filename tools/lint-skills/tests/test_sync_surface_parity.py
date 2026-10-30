@@ -310,3 +310,23 @@ def test_current_gate_is_not_stale_against_itself():
     import difflib
     current = (REPO_ROOT / "partials" / "delegate-gate.sh").read_text(encoding="utf-8")
     assert not list(difflib.unified_diff(current.splitlines(), current.splitlines(), lineterm=""))
+
+def test_agents_surface_parity(tmp_path):
+    """REQ-666 BR-8/BR-9: `agents` is a copied surface in both real blocks, and
+    the check fires when either list drops it (benign: both lists agree)."""
+    init_block = check.parse_sync_surface_block(
+        (REPO_ROOT / "init" / "SKILL.md").read_text(encoding="utf-8"), "init")
+    drift_block = check.parse_sync_surface_block(
+        (REPO_ROOT / "template-drift" / "SKILL.md").read_text(encoding="utf-8"),
+        "template-drift")
+    assert "agents" in init_block and "agents" in drift_block
+    assert "agents" in check.INIT_COPIED_SURFACES
+    copied = ["ethos", "templates", "partials", "agents", "workflow-runtime"]
+    assert check.check_sync_surface_parity(
+        _build_root(tmp_path / "ok", copied, copied + ["workflow-test-landmine"])) == []
+    unchecked = check.check_sync_surface_parity(
+        _build_root(tmp_path / "td", copied, [s for s in copied if s != "agents"]))
+    assert any("agents" in f.message and f.file == "template-drift/SKILL.md" for f in unchecked)
+    uncopied = check.check_sync_surface_parity(
+        _build_root(tmp_path / "init", [s for s in copied if s != "agents"], copied))
+    assert any("agents" in f.message and f.file == "init/SKILL.md" for f in uncopied)

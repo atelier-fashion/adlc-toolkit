@@ -14,14 +14,21 @@ You are designing architecture and breaking a requirement into implementable tas
 
 ## Context
 
-- Task template: !`cat .adlc/templates/task-template.md || echo No task template found — run /init, or /adlc:init on the plugin install, to vendor .adlc/templates`
-- Active specs: !`grep -rlx -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs || echo No active specs`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Task template'
+cat .adlc/templates/task-template.md 2>/dev/null || echo 'No task template found — run /init (/adlc:init on the plugin install) to vendor .adlc/templates'
+echo '--- Active specs'
+grep -rlx -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs 2>/dev/null || echo 'No active specs'
+```
 
 **Context files loaded on demand**: `.adlc/context/architecture.md` and `.adlc/context/conventions.md` are loaded by Step 1 below — **skip the Read if they are already in the current conversation** (e.g., when invoked from `/proceed`, which preloads them at Phase 0).
 
 ## Input
 
-Requirement: $ARGUMENTS
+The requirement is the argument: whatever follows `/architect` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), a REQ id such as `REQ-023` or `23`. With none, ask the user which requirement to architect.
 
 ## Prerequisites
 
@@ -40,7 +47,7 @@ Before proceeding, verify that `.adlc/context/architecture.md` and `.adlc/contex
 ### Step 2: Explore the Codebase
 1. Launch 3 formal exploration agents in parallel using the Agent tool. Each agent is defined in `$ADLC_TOOLKIT_ROOT/agents/` with model selection (haiku for fast exploration) and read-only tool restrictions.
 
-   Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+   If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
    - **feature-tracer** agent — provide the requirement description and key terms to search for similar existing implementations
    - **architecture-mapper** agent — provide the requirement and current architecture.md to map all files and layers that will be affected

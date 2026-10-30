@@ -14,6 +14,7 @@ into failures (tools/adlc/README.md "Running the tests").
 import contextlib
 import io
 import os
+from pathlib import Path
 import re
 import stat
 import subprocess
@@ -294,6 +295,7 @@ _BLOCKED_EXAMPLES = [
     # pipeline and agent config
     ".adlc/config.yml", ".adlc/partials/forge.sh",
     ".adlc/tools/adlc/lane_check.py", ".adlc/workflows/adlc-sprint.workflow.js",
+    ".adlc/agents/reflector.md", ".github/agents/x.md", ".github/hooks/adlc.json",
     ".claude/settings.json", ".claude/settings.local.json", ".claude/agents/x.md",
     ".mcp.json", "CLAUDE.md", "AGENTS.md",
     # git hooks and package-manager config
@@ -322,6 +324,35 @@ _BLOCKED_EXAMPLES = [
 def test_default_blocked_paths_block(path):
     _counted, failures = lc.evaluate([path], lc.effective_config())
     assert ("blocked-path", path) in failures
+
+
+# REQ-666 BR-10 / AC-9: each glob the multi-harness adapters and the vendored
+# checklists need, pinned in the tuple and exercised by a path under it.
+_REQ666_BLOCKED = [
+    (".adlc/agents/**", ".adlc/agents/reflector.md"),
+    (".github/agents/**", ".github/agents/x.md"),
+    (".github/hooks/**", ".github/hooks/adlc.json"),
+    (".codex/**", ".codex/config.toml"),
+    (".gemini/**", ".gemini/settings.json"),
+    (".cursor/**", ".cursor/rules/x.mdc"),
+    (".github/**", ".github/workflows/ci.yml"),
+    (".adlc/partials/**", ".adlc/partials/forge.sh"),
+]
+
+
+@pytest.mark.parametrize("glob, path", _REQ666_BLOCKED)
+def test_req666_blocked_globs(glob, path):
+    assert glob in lc.DEFAULT_BLOCKED_PATHS
+    assert lc.glob_match(path, glob, ignore_case=True)
+    _counted, failures = lc.evaluate([path], lc.effective_config())
+    assert ("blocked-path", path) in failures
+
+
+def test_req666_globs_documented_in_lane_check_md():
+    """AC-9: the partial's documented defaults list the same paths."""
+    doc = (Path(__file__).resolve().parents[3] / "partials" / "lane-check.md").read_text(encoding="utf-8")
+    for glob, _path in _REQ666_BLOCKED:
+        assert f"`{glob}`" in doc, glob
 
 
 def test_every_default_blocked_pattern_has_an_example():

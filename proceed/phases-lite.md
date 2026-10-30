@@ -157,15 +157,7 @@ none can be counted as a ghost-skip.
    - **Subagent mode**, or a harness with no agent tool: run the checklist in
      `agents/lite-reviewer.md` inline in your own context over the same inputs.
 
-   Agent names are bare on the symlink install and `adlc:`-prefixed on the
-   plugin install (`adlc:<name>`). Before dispatching, check which form the
-   Agent tool lists and use that one; do not wait for an error, because a name
-   it does not list can silently run a generic agent without the checklist. If
-   neither form is listed, say which agent is missing, then read
-   `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of
-   this skill's base directory) and run its checklist inline, or give its body
-   to a general-purpose agent as the prompt, instead of skipping it; a review
-   or audit agent stays read-only either way.
+   If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
    If the review reports that no retrieval set was provided, run Phase 4 step 1
    again and repeat the review.

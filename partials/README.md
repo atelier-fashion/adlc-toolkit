@@ -23,11 +23,8 @@ that expands a `$VAR` is refused headless (REQ-669 `verification.md` N1).
 Prefer this form only when the partial has to *compute* something. A partial
 that only prints a file is better written at the call site as the `test`/`cat`
 chain the ethos block uses (see conventions.md "Ethos"), reading the project's
-vendored copy only: a host that classifies what a preamble could have read
-treats `sh <file>` as opaque and a `~/` path as outside the session root —
-Teton Code pins the session to its local tier on either (BUG-218) — while
-`cat <in-root file>` is provably in reach. `ethos-include.sh` is kept for
-vendored copies that still call it.
+vendored copy only, so the line names no path outside the session root and runs
+no interpreter. `ethos-include.sh` is kept for vendored copies that still call it.
 
 This form needs **no** `[ -f ]` guard: `sh <file>` is an ordinary command, so
 an absent copy fails with exit 127 rather than killing the shell. Model 2 below
@@ -141,9 +138,8 @@ behavior. Examples:
   `adlc_lesson_check <lesson-file>`, run by `/wrapup` Step 4 and `/bugfix` Phase 6
   Step 4 on the v2 lesson file the capture step **just wrote**. It returns **0** when
   the file passes, **1** on a violation (one `<field>: <reason>` line per violation
-  on stderr), or **2** on a usage error. The rules, the repair loop, the
-  provenance-classifying-harness (BUG-228) fallback and the deviations from ADR-3
-  are in the companion `lesson-check.md`. Tested by `tests/lesson-check.test.sh`
+  on stderr), or **2** on a usage error. The rules, the repair loop and the
+  deviations from ADR-3 are in the companion `lesson-check.md`. Tested by `tests/lesson-check.test.sh`
   under bash, zsh, sh and dash.
 - `lane-check.sh` — the lite lane's mechanical diff check (REQ-652). Defines
   `adlc_lane_check <worktree> <base-ref>`, run by `/proceed` on a lite REQ after
@@ -173,7 +169,7 @@ behavior. Examples:
 - `session-transcript.sh` — finds this conversation's Claude Code transcript
   for `/wrapup` Step 4's delegated draft (BUG-253). `adlc_transcript_mark` prints
   `adlc-transcript-mark-<16 hex>`; in a **later** tool call,
-  `adlc_transcript_find <mark>` searches `~/.claude/projects/` (depth 5, so a
+  `adlc_transcript_find <mark>` searches `~/.claude/projects/` (depth 5, so a <!-- adlc-home: claude-code -->
   subagent's `<session>/subagents/agent-<id>.jsonl` is in reach; last 60 minutes)
   for it. **0** one transcript holds it, path on stdout; **1** none or several do,
   so the caller drafts from the conversation and never falls back to another
@@ -183,7 +179,7 @@ behavior. Examples:
   bash, zsh, sh and dash.
 - `adlc-home.sh` — the toolkit's machine-state home, `ADLC_HOME` (REQ-654).
   Defines `adlc_home` (prints `$ADLC_HOME`, trailing slashes removed, or
-  `$HOME/.claude` when it is unset; rc 1 with a line naming `ADLC_HOME` when it is
+  `$HOME/.claude` when it is unset; rc 1 with a line naming `ADLC_HOME` when it is <!-- adlc-home: default -->
   set but empty or relative, never a fall-through to the default),
   `adlc_home_source` (`env` or `default`) and `adlc_machine_config`
   (`$ADLC_CONFIG`, else `<home>/adlc/config.yml`). `id-alloc.sh` (counters, lock

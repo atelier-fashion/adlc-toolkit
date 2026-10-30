@@ -14,11 +14,17 @@ You are validating ADLC artifacts to ensure quality before advancing to the next
 
 ## Context
 
-- Active specs: !`grep -rlx -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs || echo No active specs`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Active specs'
+grep -rlx -e status:.draft -e status:.approved -e status:.in-progress --include requirement.md .adlc/specs 2>/dev/null || echo 'No active specs'
+```
 
 ## Input
 
-Target: $ARGUMENTS
+The target is the argument: whatever follows `/validate` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), a REQ, TASK or BUG id. With none, Step 1 works out what to validate.
 
 ## Prerequisites
 

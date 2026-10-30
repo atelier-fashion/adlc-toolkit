@@ -141,8 +141,10 @@ The defaults are in `tools/adlc/lane_check.py`. The blocks below mirror them;
 - security: `**/auth/**`, `**/security/**`, `**/*.rules`, `firestore.rules`,
   `**/.env*`, `**/*.pem`, `**/*.key`, `**/*.entitlements`
 - pipeline and agent config: `.adlc/config.yml`, `.adlc/partials/**`,
-  `.adlc/tools/**`, `.adlc/workflows/**`, `.claude/**`, `.mcp.json`,
-  `**/CLAUDE.md`, `**/AGENTS.md`
+  `.adlc/tools/**`, `.adlc/workflows/**`, `.adlc/agents/**`, `.github/agents/**`,
+  `.github/hooks/**`, `.claude/**`, `.mcp.json`, `**/CLAUDE.md`, `**/AGENTS.md`
+  (REQ-666 BR-10: the vendored agent checklists, and the agent and hook config
+  the harness adapters write, which the CI glob above already covers)
 - git hooks and package-manager config: `.husky/**`, `.githooks/**`,
   `.pre-commit-config.yaml`, `lefthook.yml`, `.gitmodules`, `**/.npmrc`,
   `**/.yarnrc*`, `lefthook.yaml`, `.lefthook.yml`, `.lefthook.yaml`,

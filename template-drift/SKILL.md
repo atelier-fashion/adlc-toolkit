@@ -1,6 +1,6 @@
 ---
 name: template-drift
-description: Detect drift across ALL the sync surfaces `/init` vendors into a project — `.adlc/templates/*.md`, `.adlc/partials/*.sh`, `.adlc/ETHOS.md`, and the workflow runtime (`.adlc/workflows/adlc-sprint.workflow.js` + `README.md`) — against the canonical copies in the running toolkit install (ToolkitRoot: the plugin's cache copy, whose baseline is named `adlc plugin <version>`, or the clone behind the skills symlink). Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template, partial, ETHOS, or workflow-engine updates have landed in this project yet. Reports a per-file diff summary, flags intentional customizations from accidental staleness for templates and ETHOS (template-posture), and reports partial and workflow-runtime drift as `stale` (shared executable code — no customization classification). For ETHOS, always names any canonical principle missing from the project copy. Also flags stale `node:test`/`*.test.js` files left under `.adlc/workflows/` by an older `/init` (a Jest landmine in `"type":"module"` repos).
+description: Detect drift between the copies `/init` vendored into a project's `.adlc/` (templates, partials, agents, ETHOS, workflow runtime) and the running toolkit install. Use when the user says "check template drift", "template drift", "are my templates out of date", or wants to know whether toolkit template, partial, agent, ETHOS, or workflow-engine updates have landed in this project yet. Reports each file synced, stale, missing or customized, and flags stale `*.test.js` files under `.adlc/workflows/`.
 argument-hint: Optional template name (e.g., "requirement-template") to scope the check to a single file
 ---
 
@@ -11,12 +11,13 @@ You are checking whether the project's local copies of every **vendored sync sur
 ## Vendored sync surfaces
 
 <!-- sync-surfaces: template-drift -->
-`/template-drift` checks drift on **all five** of these surfaces. The first four are physically copied
+`/template-drift` checks drift on **all six** of these surfaces. The first five are physically copied
 into the project by `/init` (see `init/SKILL.md`'s matching `<!-- sync-surfaces: init -->` list); the
-fifth is a `/template-drift`-only check for a drift *symptom* `/init` deliberately does NOT copy.
+sixth is a `/template-drift`-only check for a drift *symptom* `/init` deliberately does NOT copy.
 
 - `templates` — `.adlc/templates/*.md` vs `$ADLC_TOOLKIT_ROOT/templates/*.md` (Step 2, template-posture)
 - `partials` — `.adlc/partials/*.sh` vs `$ADLC_TOOLKIT_ROOT/partials/*.sh` (Step 3, partials-posture)
+- `agents` — `.adlc/agents/*.md` vs `$ADLC_TOOLKIT_ROOT/agents/*.md` (Step 3f, partials-posture)
 - `ethos` — `.adlc/ETHOS.md` vs `$ADLC_TOOLKIT_ROOT/ETHOS.md` (Step 3c, template-posture + missing-principle)
 - `workflow-runtime` — `.adlc/workflows/adlc-sprint.workflow.js` + `README.md` vs `$ADLC_TOOLKIT_ROOT/workflows/` (Step 3d, partials-posture)
 - `workflow-test-landmine` — stale `*.test.js`/`*.spec.js` under `.adlc/` from an older `/init` (Step 3b, always stale; template-drift-only)
@@ -32,31 +33,40 @@ Adding a new vendored surface to `/init` without adding a check here is a silent
 
 ## Context
 
-This skill checks five vendored sync surfaces (see "Vendored sync surfaces" below): templates, partials, ethos, workflow-runtime, and the workflow-test landmine.
+This skill checks six vendored sync surfaces (see "Vendored sync surfaces" above): templates, partials, agents, ethos, workflow-runtime, and the workflow-test landmine.
 
-- Project templates dir: !`ls .adlc/templates/ || echo No .adlc/templates/ directory — run /init, or /adlc:init on the plugin install, first`
-- Project ETHOS: !`test -f .adlc/ETHOS.md && echo present || echo absent — run /init, or /adlc:init on the plugin install`
-- Project workflow runtime: !`ls .adlc/workflows/ || echo no .adlc/workflows/ runtime — run /init, or /adlc:init on the plugin install`
-- Current directory: !`pwd`
-
-**Toolkit templates dir — run this fence before Step 0a.** It names ToolkitRoot, the running install's toolkit directory (the plugin's cache copy on the plugin route, the clone behind the skills symlink on the symlink route), and lists its templates. It is a fence, not a `!` line: a `!` line cannot read under the plugin root, which is not an allowed working directory, and a `!` line that uses a `$VAR` is refused under `claude -p`, which silently drops the whole skill (REQ-669 `verification.md` N1, N2).
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
 
 ```sh
+# adlc-context
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+echo '--- Project templates dir'
+ls .adlc/templates/ 2>/dev/null || echo 'No .adlc/templates/ directory — run /init (/adlc:init on the plugin install) first'
+echo '--- Project ETHOS'
+test -f .adlc/ETHOS.md && echo 'present' || echo 'absent — run /init (/adlc:init on the plugin install)'
+echo '--- Project agent checklists'
+ls .adlc/agents/ 2>/dev/null || echo 'no .adlc/agents/ — run /init (/adlc:init on the plugin install)'
+echo '--- Project workflow runtime'
+ls .adlc/workflows/ 2>/dev/null || echo 'no .adlc/workflows/ runtime — run /init (/adlc:init on the plugin install)'
+echo '--- Current directory'
+pwd
+echo '--- Toolkit templates'
 echo "ToolkitRoot: $ADLC_TOOLKIT_ROOT"
-ls "$ADLC_TOOLKIT_ROOT/templates/" || echo "Toolkit templates not found at $ADLC_TOOLKIT_ROOT/templates/"
+ls "$ADLC_TOOLKIT_ROOT/templates/" 2>/dev/null || echo "Toolkit templates not found at $ADLC_TOOLKIT_ROOT/templates/"
 ```
+
+The fence names ToolkitRoot, the running install's toolkit directory (the plugin's cache copy on the plugin route, the clone behind the skills symlink on the symlink route), and lists its templates. It reads the toolkit from a fence because a preamble line cannot read under the plugin root, which is not an allowed working directory, and one that uses a `$VAR` is refused under `claude -p`, which silently drops the whole skill (REQ-669 `verification.md` N1, N2).
 
 The steps below name toolkit files as `$ADLC_TOOLKIT_ROOT/<path>`. Bash calls share no shell state, so a command you run that reads one starts with the same root line, or uses the absolute ToolkitRoot path this fence printed. A command you **propose to the user** always uses that absolute path, written out where Step 5 and Step 6 show `<ToolkitRoot>`: `$ADLC_TOOLKIT_ROOT` is not set in the user's shell.
 
 ## Input
 
-Scope: $ARGUMENTS (optional — single template name to check; otherwise all templates)
+The scope is the argument: whatever follows `/template-drift` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), optionally one template name. With none, every template is checked.
 
 ## Prerequisites
 
 1. `.adlc/templates/` must exist in the current project. If it does not, stop and tell the user: "This project has no local templates — it uses toolkit templates directly. No drift to check." (New projects per the `/init` Step 6 policy don't copy templates locally.)
-2. `$ADLC_TOOLKIT_ROOT/templates/` must exist (the Context fence lists it). If it does not, stop and tell the user: "The adlc toolkit was not found at <ToolkitRoot>. On the plugin route, reinstall it with `claude plugin install adlc@adlc-toolkit`. On the symlink route, check that the skills symlink points at a toolkit clone, and re-run that clone's `./install.sh`."
+2. `$ADLC_TOOLKIT_ROOT/templates/` must exist (the context fence lists it). If it does not, stop and tell the user: "The adlc toolkit was not found at <ToolkitRoot>. On the plugin route, reinstall it with `claude plugin install adlc@adlc-toolkit`. On the symlink route, check that the skills symlink points at a toolkit clone, and re-run that clone's `./install.sh`."
 
 ## Instructions
 
@@ -310,6 +320,30 @@ done
 
 If `.adlc/workflows/` does not exist at all, report `workflow-runtime` as `missing` and recommend `/init` (`/adlc:init` on the plugin install). If both files are identical, report `workflow-runtime` as `clean` (one line).
 
+### Step 3f: Detect Agent-Checklist Drift (the inline arm's checklists)
+
+The sixth surface is `.adlc/agents/`, the agent checklists `/init` copies so a dispatch paragraph's inline arm can read them where ToolkitRoot is out of reach (REQ-666 BR-8). **Partials posture**, for the reason Step 3 gives: a checklist is the review or implementation contract, and a consumer-modified one would silently weaken it. Every difference is `stale`, with no customization track. That includes a copy whose only difference is the `model:` line that `adlc agents render` stamps (REQ-516): the copy is a snapshot, and `stale` is correct. The Step 0a baseline rule applies as it does to partials (BUG-204). `find`, not a glob, so an empty or absent directory does not abort zsh (LESSON-335):
+
+```sh
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+find "$ADLC_TOOLKIT_ROOT/agents" -maxdepth 1 -name '*.md' 2>/dev/null | sort | while IFS= read -r f; do
+  agent_md=$(basename "$f")
+  if [ ! -f ".adlc/agents/$agent_md" ]; then
+    echo "$agent_md: missing (toolkit has it, project does not — run /init (/adlc:init on the plugin install))"
+  elif diff -q ".adlc/agents/$agent_md" "$f" >/dev/null 2>&1; then
+    echo "$agent_md: synced"
+  else
+    echo "$agent_md: stale (agent checklist diverged from toolkit — copy from toolkit)"
+  fi
+done
+find .adlc/agents -maxdepth 1 -name '*.md' 2>/dev/null | sort | while IFS= read -r f; do
+  agent_md=$(basename "$f")
+  [ -f "$ADLC_TOOLKIT_ROOT/agents/$agent_md" ] || echo "$agent_md: missing upstream (not in the toolkit — flag it, do not delete)"
+done
+```
+
+If every file is `synced`, report `agents` as `clean` (one line). If `.adlc/agents/` does not exist, every agent prints `missing`; report the surface as `missing` and recommend `/init` (`/adlc:init` on the plugin install).
+
 ### Step 3e: Classify Each Surface's Drift Across the Pipeline (promotion state)
 
 Per-branch results are not yet an answer. A surface stale on `main` but in sync on
@@ -367,7 +401,7 @@ When in doubt, classify as "needs human review" — do not silently reconcile.
 
 ### Step 5: Produce the Drift Report
 
-Emit a summary table, then per-file detail. The report covers **all five surfaces** (templates, partials, ethos, workflow-runtime, workflow-test-landmine). Templates and ethos classify drift as intentional/accidental (template-posture); partials and workflow-runtime classify drift only as `synced`/`stale`/`missing` (partials-posture); the workflow-test landmine is always `stale`. **Every surface gets a line even when clean** — a checked-and-clean surface is reported `clean`, never silently omitted (Ethos #5).
+Emit a summary table, then per-file detail. The report covers **all six surfaces** (templates, partials, agents, ethos, workflow-runtime, workflow-test-landmine). Templates and ethos classify drift as intentional/accidental (template-posture); partials and workflow-runtime classify drift only as `synced`/`stale`/`missing` (partials-posture); the workflow-test landmine is always `stale`. **Every surface gets a line even when clean** — a checked-and-clean surface is reported `clean`, never silently omitted (Ethos #5).
 
 ```
 ## Template Drift Report — [date]
@@ -464,7 +498,7 @@ Promotion-carried actions must state **which branch the PR is based on**. "Copy 
 is not an action in a multi-branch repo; "branch off `origin/staging`, copy, PR to
 `staging`" is.
 
-With that routing settled, offer a specific action for each reconcilable item, across **all five surfaces**: each **accidental** template drift, each **missing locally** template; each **accidental** or **missing-principle** ETHOS drift; **every** `stale` or `missing` partial (no customization escape hatch — see Step 3); **every** `stale` or `missing` workflow-runtime file (no customization escape hatch — see Step 3d); and **every** stale workflow test file from Step 3b. Format as a numbered list so the user can approve selectively:
+With that routing settled, offer a specific action for each reconcilable item, across **all six surfaces**: each **accidental** template drift, each **missing locally** template; each **accidental** or **missing-principle** ETHOS drift; **every** `stale` or `missing` partial (no customization escape hatch — see Step 3); **every** `stale` or `missing` agent checklist (see Step 3f); **every** `stale` or `missing` workflow-runtime file (no customization escape hatch — see Step 3d); and **every** stale workflow test file from Step 3b. Format as a numbered list so the user can approve selectively:
 
 ```
 ## Proposed Actions
@@ -516,7 +550,7 @@ For **intentional** template or ETHOS drift, do not propose reconciliation — j
 ### Step 7: Recommend Follow-Up
 
 At the end of the report:
-- If all five surfaces are in sync or intentionally customized: "All vendored surfaces (templates, partials, ethos, workflow runtime, workflow tests) are in sync or intentionally customized. No action needed."
+- If all six surfaces are in sync or intentionally customized: "All vendored surfaces (templates, partials, agents, ethos, workflow runtime, workflow tests) are in sync or intentionally customized. No action needed."
 - If drift remains after user-approved actions: list what's still drifted (by surface) and suggest running `/template-drift` again after a toolkit update.
 - If intentional customizations were found (templates or ethos): remind the user to update their project CLAUDE.md or a project-local NOTES file so future toolkit updates don't accidentally overwrite them during a merge.
 - If a **missing ETHOS principle** was found and NOT reconciled: warn explicitly that every skill is running an outdated constitution until it is copied.
@@ -533,6 +567,6 @@ At the end of the report:
 
 - Use `diff -u` for readable unified diffs. Fall back to `git diff --no-index` if preferred.
 - `wc -l` on the diff output is a decent proxy for drift size, but prefer counting `^+` and `^-` lines excluding the `+++`/`---` headers.
-- When running under `/status`, this skill should produce a one-line summary only that still names **all five surfaces** (e.g. "Templates: 2 drifted, 1 missing. Partials: 1 stale, 0 missing. ETHOS: drifted (1 missing principle). Workflow runtime: 1 stale. Workflow tests: 1 stale (Jest landmine)."). A clean surface is shown as `clean` rather than dropped (BR-3 — never silently omit a surface). Detect this mode by checking whether `$ARGUMENTS` contains `--brief`. The "Workflow tests" clause may be omitted only when no landmine files are found; the other four surfaces are always reported (clean or drifted).
+- When running under `/status`, this skill should produce a one-line summary only that still names **all six surfaces** (e.g. "Templates: 2 drifted, 1 missing. Partials: 1 stale, 0 missing. Agents: 1 stale, 0 missing. ETHOS: drifted (1 missing principle). Workflow runtime: 1 stale. Workflow tests: 1 stale (Jest landmine)."). A clean surface is shown as `clean` rather than dropped (BR-3 — never silently omit a surface). Detect this mode by checking whether the argument contains `--brief`. The "Workflow tests" clause may be omitted only when no landmine files are found; the other five surfaces are always reported (clean or drifted).
 - Partial comparison uses `diff -q` (quiet, exit-code-only) rather than `diff -u` because per-file unified diffs are not actionable for partials — the only remediation is "copy from toolkit". Show the diff only if the user asks for `--verbose`.
 - Do not invoke `/template-drift` recursively against the adlc-toolkit's own `.adlc/` (would always report drift against itself by construction).

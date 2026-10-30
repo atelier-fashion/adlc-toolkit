@@ -105,7 +105,10 @@ def test_repo_root_and_ok_fixture_are_clean(tmp_path):
 def test_check_is_wired_into_run_and_main(tmp_path):
     root = _stage(tmp_path, "version-mismatch")
     (root / "alpha").mkdir()
-    (root / "alpha" / "SKILL.md").write_text("---\nname: alpha\n---\n# alpha\n", encoding="utf-8")
+    # A complete skill (REQ-666: the ETHOS line), so the only finding is this check's.
+    ethos, _ = check.load_ethos_line(check.LINT_TOOLKIT_ROOT)
+    (root / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\n---\n# alpha\n\n" + ethos + "\n", encoding="utf-8")
     findings, scanned = check.run(root)
     assert scanned == 1
     assert [f.check for f in findings] == ["plugin-manifest"]

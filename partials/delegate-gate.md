@@ -157,6 +157,12 @@ defined under an absolute-path name cannot intercept either.
 
 ### What a call site does with it
 
+**Timeout.** The `adlc-read` call is a network round trip over a multi-file
+corpus and routinely takes longer than 30 s. Claude Code's Bash tool defaults to
+120 s. When your shell tool takes a per-call timeout, give that call at least
+120 s rather than the tool's default. A killed call is a non-zero exit, so it
+falls through to the fallback, but only after wasting the wait.
+
 A delegated-invocation fence MUST source this partial **in the same fenced block**
 as the invocation — fenced blocks do not share shell state, so the export from the
 gate-check fence does not reach the invocation fence — and then satisfy three
@@ -252,54 +258,6 @@ absolute-path guard does not narrow this case (it narrows the honest-but-stale
 copy that exports a bare command name, which the guard rejects). Pinning the vendored partials
 to a digest and having `/template-drift` verify it is a follow-up, not something
 this contract relies on.
-
-## Provenance-classifying harnesses (BUG-228)
-
-Some harnesses decide, before running a shell command, what that command could
-have read, and they pin the session to a local tier when they can't prove it.
-Teton Code's `shell` tool is one (its REQ-614/619 grammar,
-`crates/tetond/src/harness/tools/shell_provenance.rs`). On such a harness **none
-of a delegating step's shell blocks can be written to pass**, and the answer is
-the correct one:
-
-- `adlc-read` is not a verb the grammar recognises, whether it is spelled by
-  name or through `$ADLC_READ_BIN`. A tool that reads files and sends their
-  bytes to a third-party endpoint is exactly what the classifier exists to
-  refuse.
-- The partials and `skill-flag.sh` run by path, and a program named by path is
-  `Unknown` on purpose: a repo-local executable's reach is whatever its unread
-  contents do. So "move the sequence into one vendored in-root script" pins the
-  same way. `sh <file>`, `.` and `source` are opaque.
-- `$`, quotes, `{`, `*` and friends refuse the whole command before any verb
-  is looked at, and an `X=1 cmd` assignment refuses as well.
-
-Teton also gives shell children an allowlisted environment (`PATH`, `HOME`,
-`TMPDIR`, locale, …), so a script cannot detect it, and `ADLC_DELEGATE_*` and
-the delegate's API-key variable never reach `adlc-read` there anyway.
-
-So the rule lives in the skill text, where the model reads it. Every delegating
-step carries the line **`**Provenance-classifying harness (BUG-228):**`**
-immediately before its "Before the gate check" block. It tells the model to run
-none of the step's shell blocks on such a harness and to take the fallback path
-with the harness's own file-read tool, which is provenance-aware. The step's
-one BR-4 line then goes in the reply (`delegate skipped: provenance-classifying
-harness`), not to stderr, because an `echo … >&2` is itself a redirect the
-grammar refuses. No telemetry record is written for that step: every
-`skill-flag.sh` and `emit-step-telemetry.sh` call is a by-path program, so the
-REQ-424 sidecar cannot run there without pinning. On Claude Code and any other
-harness that runs shell unclassified, nothing changes, and the telemetry
-contract holds as written.
-
-`lint-skills`' **`harness-skip`** check enforces the line: every fence that
-calls `adlc_delegate_gate_check` must have it in the 30 lines above it, in
-prose rather than in a fence.
-
-**Timeout.** On a harness that runs the delegated path, the `adlc-read` call is
-a network round trip over a multi-file corpus and routinely takes longer than
-30 s. Claude Code's Bash tool defaults to 120 s. When your shell tool takes a
-per-call timeout, give that call at least 120 s rather than the tool's default.
-A killed call is a non-zero exit, so it falls through to the fallback, but only
-after wasting the wait.
 
 ## Canonical stderr emit pattern
 

@@ -229,6 +229,13 @@ DEFAULT_BLOCKED_PATHS = (
     ".adlc/partials/**",
     ".adlc/tools/**",
     ".adlc/workflows/**",
+    # REQ-666 BR-10: the vendored agent checklists a dispatch paragraph runs
+    # inline, and the per-harness agent and hook config the P2–P4 adapters write
+    # (`.github/**` already covers the last two; they are named so the tuple
+    # documents the targets).
+    ".adlc/agents/**",
+    ".github/agents/**",
+    ".github/hooks/**",
     ".claude/**",
     ".mcp.json",
     "**/CLAUDE.md",

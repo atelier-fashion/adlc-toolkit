@@ -36,8 +36,10 @@ SKILL_STAND_IN = "SKILL.fixture.md"
 sys.path.insert(0, str(LINT_DIR))
 import check  # noqa: E402
 
-CHECK = "toolkit-path"
+CHECK = "no-harness-path"
 FILE_EXCEPTIONS = ("tools/adlc/checks.py", "tools/lint-skills/check.py")
+# REQ-666 ADR-5: the harness probe edits the other harnesses' user files by design.
+PROBE_EXCEPTION = "tools/adlc/harness_probe.py"
 
 # spellings/<file> -> the one flagged spelling it holds, on line 3.
 SPELLING_FIXTURES = {
@@ -272,21 +274,23 @@ def test_exception_literals_track_their_sources():
     by_kind = {}
     for e in check.TOOLKIT_PATH_EXCEPTIONS:
         by_kind.setdefault(e.kind, []).append(e.value)
-    assert set(by_kind) == {"line", "token", "file", "comment", "tree"}
+    assert set(by_kind) == {"line", "token", "file", "comment", "tree", "marker"}
+    assert by_kind["marker"] == ["adlc-home"]  # REQ-666 ADR-5: one marker, both checks
     assert by_kind["line"] == [check.TOOLKIT_ROOT_LINE, check.PROBE_PROJECT_SKILLS_LINE]
     # REQ-664's line is the probe's, verbatim: drift there is a finding, not a pass.
     probe = (Path(__file__).resolve().parents[2] / "adlc" / "harness_probe.py")
     assert check.PROBE_PROJECT_SKILLS_LINE in probe.read_text(encoding="utf-8").splitlines()
     # The token is the ADR-2 operand's prefix, so the two cannot drift apart.
-    (token,) = by_kind["token"]
+    token, adlc_home_token = by_kind["token"]
     assert check.PARTIAL_SOURCE_OPERAND.startswith(token)
-    assert by_kind["file"] == ["install.sh", *FILE_EXCEPTIONS]
+    assert adlc_home_token == "${ADLC_HOME:-$HOME/.claude}"  # REQ-666 BR-13
+    assert by_kind["file"] == ["install.sh", *FILE_EXCEPTIONS, PROBE_EXCEPTION]
     assert by_kind["tree"] == ["tests", "fixtures"]
 
 
 def test_readme_quotes_the_exception_list_by_name():
     readme = (LINT_DIR / "README.md").read_text(encoding="utf-8")
-    assert "`toolkit-path`" in readme
+    assert "`no-harness-path`" in readme
     assert "TOOLKIT_PATH_EXCEPTIONS" in readme
     assert "REQ-666" in readme
     for e in check.TOOLKIT_PATH_EXCEPTIONS:
@@ -358,7 +362,7 @@ def test_wired_into_run_and_main(tmp_path, capsys):
     assert [(f.file, f.line) for f in findings if f.check == CHECK] == [
         ("partials/literal-read-path.sh", 5)]
     assert check.main(["--root", str(root)]) > 0
-    assert "partials/literal-read-path.sh:5: toolkit-path: " in capsys.readouterr().out
+    assert "partials/literal-read-path.sh:5: no-harness-path: " in capsys.readouterr().out
 
 
 # --- BR-13 / BR-2: the real tree --------------------------------------------
@@ -366,7 +370,7 @@ def test_wired_into_run_and_main(tmp_path, capsys):
 def test_repo_root_clean_and_every_surface_scanned():
     scan = _scan(REPO_ROOT)
     assert scan.findings == [], "\n".join(f.format() for f in scan.findings)
-    assert scan.excepted == FILE_EXCEPTIONS
+    assert scan.excepted == tuple(sorted(FILE_EXCEPTIONS + (PROBE_EXCEPTION,)))
     # Floors from the tree this check landed on: 17 skills, 19 agents, 13 shell
     # partials. A walk that lost most of a family fails here, not only an empty one.
     assert scan.surfaces["*/SKILL.md"] >= 17
