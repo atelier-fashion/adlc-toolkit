@@ -4,14 +4,14 @@ title: "source-guard.test.sh does not walk skill companions, so the moved /spec 
 status: resolved
 severity: medium
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 component: "partials/tests"
 domain: "adlc"
 stack: ["posix-sh"]
 concerns: ["test-coverage"]
 tags: ["source-guard", "companions", "references", "progressive-disclosure", "corpus-walk"]
-introduced_by: []
-attribution: none
+introduced_by: [REQ-661]
+attribution: manual
 ---
 
 ## Description
@@ -82,7 +82,10 @@ stops reaching them.
 
 Attribution: `git blame` on the root-cause ranges names three REQs — REQ-610 and
 REQ-669 (the walk lines) and REQ-661 (the moved fences). Per `/bugfix` Phase 2
-step 7, `introduced_by` is left unset pending an operator selection.
+step 7, nothing was written until the operator chose: REQ-661, recorded as
+`attribution: manual` (2026-10-30). The walk lines were correct for the corpus
+they were written against; the defect appeared when REQ-661 moved fences out of
+it.
 
 ## Resolution
 
