@@ -37,42 +37,7 @@ Every skill begins with:
 !`test -s .adlc/ETHOS.md && cat .adlc/ETHOS.md || echo No ethos found — run /init, or /adlc:init on the plugin install, to vendor .adlc/ETHOS.md`
 ```
 
-The line reads the **project's vendored copy only**: `/init` writes `.adlc/ETHOS.md` into every consumer project and `/template-drift` keeps it current, and the `test -s` is REQ-416 H1 — an empty copy must fall through to the notice, not swallow the ethos. It deliberately names **no path outside the session root and runs no interpreter** (BUG-218): a host that classifies what a skill preamble could have read — Teton Code's REQ-614/619 grammar is the one that bit — treats `sh <file>` as opaque and an out-of-root path such as `~/.claude/skills/ETHOS.md` as unprovable, and either one pins the session to its local tier for every skill that carries the line. `test`, `cat` and `echo` over an in-root file are provably in reach. `partials/ethos-include.sh` still exists for consumer projects whose vendored skills predate this line; do not reintroduce it, or a `~/` fallback, at a call site. Never hardcode the ethos body inside a skill.
-
-**Every `!`…`` preamble stays inside the same grammar (BUG-220).** The ethos line
-was the first fix; the other context lines pinned the session just the same,
-because the classifier rejects a command *before* it looks at the verb when the
-command contains any of `' " ` $ \ > < { } ! * ? [` — so `2>/dev/null`, a
-quoted `echo "…"`, a `--format="…"` and a `*.md` glob are each enough. A
-preamble that has to pass is written with: no quoting, no redirection, no globs,
-no `$`, no parentheses or `;` (segment breaks); only recognised verbs (`test`,
-`cat`, `ls`, `find` without `-exec`, `grep`, `echo`, `pwd`, `which`, and
-`git status|log|branch|remote|tag|rev-parse|diff-tree|worktree|for-each-ref`);
-paths inside the session root only — a `~/…` fallback in *any* segment makes the
-whole line unprovable even when it never runs, so the toolkit-copy fallbacks
-went with the ethos one; and no `| head`, `| tail` or `| grep` after a
-producer, because a content-reading verb with no file argument is scored as a
-read of the whole root and that scan is bounded by entry count (a Rust `target/`
-is enough to exhaust it) — and a content-reading verb whose file argument does
-**not exist** is scored the same way, because the classifier cannot tell
-`cat missing` from `grep -r pattern`; so on a project that has not run `/init`
-the `cat .adlc/context/…` lines pin until it does, while a `test -s` or `ls`
-probe of an absent path never does (name-only verbs scan nothing). `echo` takes its message unquoted: em dashes and
-slashes are fine, `(`, `)` and `;` are not. `grep` over a directory scopes the
-scan to that directory (`--include requirement.md`, with a space, keeps `=` out
-of the line). The same grammar governs any **fence** a skill expects a Teton model to run:
-mark it `# provenance-safe` on its first line and `lint-skills`'
-`provenance-safe-fence` check holds every line to these rules (BUG-230,
-`/analyze` Step 2a). Date arithmetic, grouping and filtering move out of
-`awk`/`$(…)` and into the model: `git log --no-walk --branches --decorate
---date short` instead of `for-each-ref --format=…`, and a `git diff-tree`
-from the empty tree instead of `cksum | awk` for duplicate detection. A
-skill step that needs agent dispatch must also say what to do without it,
-since Teton has no agent tool and its `read` is jailed to the session root,
-so the toolkit's `agents/*.md` (under ToolkitRoot, outside the session root on
-either install route) is unreachable there. `/canary`'s `gcloud` lines and `/template-drift`'s toolkit
-listing are the known exceptions: those verbs and paths are outside the grammar
-by nature, and those two skills pin a Teton session by design.
+The line reads the **project's vendored copy only**: `/init` writes `.adlc/ETHOS.md` into every consumer project and `/template-drift` keeps it current, and the `test -s` is REQ-416 H1 — an empty copy must fall through to the notice, not swallow the ethos. It names no path outside the session root and runs no interpreter (BUG-218), so it reads the same in a main checkout, a worktree and a subagent. It is the one `!` preamble line a skill keeps: on Claude Code it is the only path that reaches a skill invoked inside a subagent (plan M6), and `tools/lint-skills`' `ethos-line` check holds it byte-identical, exactly once, in every `SKILL.md`. Every other context read is a run-and-read fence (see "Context loading pattern"). `partials/ethos-include.sh` still exists for consumer projects whose vendored skills predate this line; do not reintroduce it, or a `~/` fallback, at a call site. Never hardcode the ethos body inside a skill.
 
 ## Delegation pattern (provider-agnostic)
 
@@ -163,25 +128,9 @@ never via shell variables, because fenced blocks do not share shell state (REQ-5
 The shared resolver `_adlc_emit_step_telemetry <skill> <step>` in
 `partials/emit-step-telemetry.sh` reads those marks back and emits one telemetry record.
 
-**A delegating step never runs its shell under a provenance-classifying harness
-(BUG-228).** The preamble grammar above cannot be stretched to cover these
-blocks. `adlc-read` is not a recognised verb (it reads files and sends them to a
-third party, which is exactly what Teton Code's classifier exists to refuse).
-The partials and `skill-flag.sh` run by path, and a program named by path is
-`Unknown` by design, so a vendored "one script, plain args" wrapper pins exactly
-the same way. Teton's shell children get an allowlisted environment, so no
-script can detect the harness either. The rule therefore lives in the skill
-text: every delegating step carries the line `**Provenance-classifying harness
-(BUG-228):**` just before its "Before the gate check" block, telling the model
-to skip all of the step's shell and take the fallback path with its own
-file-read tool. That step writes no telemetry record on such a harness, and on
-every other harness the REQ-424/REQ-522 contract is unchanged. `lint-skills`'
-`harness-skip` check requires the line within 30 lines above every
-`adlc_delegate_gate_check` fence, and above every fence that invokes
-`emit-run-outcome.sh` (REQ-648), whose step replies `run-outcome skipped:
-provenance-classifying harness` instead. Where the delegated path does run, give the
-`adlc-read` call a shell timeout of at least 120 s (Claude Code's Bash default).
-Teton's 30 s default killed the call that surfaced this bug.
+**Timeout.** Give the delegated `adlc-read` call a shell timeout of at least
+120 s (Claude Code's Bash default): it is a network round trip over a multi-file
+corpus, and a killed call only falls through to the fallback after the wait.
 
 See `partials/delegate-gate.md` for the full protocol — return-code contract, the
 canonical stderr emit templates parameterized by `<skill>` and `<purpose>`, and the BR-4
@@ -218,11 +167,15 @@ Full contract: `partials/forge.md`.
 
 ## Context loading pattern
 
-Skills load context via `!bash` macros under a `## Context` section. Read the consumer project's `.adlc/...` copy; a `!` preamble names no path outside the session root (see "Ethos injection pattern"), so a step that needs the toolkit's own copy reads it in a fence, from `$ADLC_TOOLKIT_ROOT/...` after the root line (see "Bash in skills"). Example:
+A skill loads its context with one **run-and-read fence** under its `## Context` heading (REQ-666 BR-2). Its first line is the marker comment `# adlc-context`; the sentence before it tells the model to run the block first, with its shell tool, and read the output before continuing. Each read is a label and the command with its notice:
 
-```markdown
-- Conventions: !`cat .adlc/context/conventions.md 2>/dev/null || echo "No conventions found"`
+```sh
+# adlc-context
+echo '--- Conventions'
+cat .adlc/context/conventions.md 2>/dev/null || echo 'No conventions found'
 ```
+
+Every command ends in `|| echo '<notice>'`, so an absent file prints the notice and the fence exits 0; a failing command never aborts the invocation, as a `!` line's did on Claude Code. Read the consumer project's `.adlc/...` copy; a fence that also lists a toolkit file starts with the root line and reads `$ADLC_TOOLKIT_ROOT/...` (see "Bash in skills"). Compose the reads from commands `templates/claude-settings-template.json` already pre-approves (`cat`, `grep`, `ls`, `test`, `find`, `echo`, `pwd`, `which`, read-only `git` subcommands), or add the command there in the same change, so no invocation gains a prompt. The ETHOS line is the one `!` preamble line a skill keeps (see "Ethos injection pattern"); `tools/lint-skills`' `ethos-line` check flags any other inline bang command in a skill's prose.
 
 Never hardcode paths; always allow the skill to degrade gracefully when a file is absent.
 
@@ -257,6 +210,8 @@ Replace `init` with `review` or `status` for the other names, and keep the words
 - Avoid `cd` — prefer absolute paths so commands work from any working directory
 - **Never write a destructive command whose safety depends on a variable being non-empty.** `rm -rf "$(dirname "$VAR")"` becomes `rm -rf .` the moment `$VAR` is empty, and a guard sitting a few lines above it in a SKILL.md is one careless edit from being bypassed. Put the guards in a partial, next to the deletion, where they cannot drift from it — check the path is non-empty, that it lives under a real temp root, and that its basename is one the toolkit itself created. `partials/intake.sh`'s `adlc_intake_cleanup` is the reference (REQ-594).
 
+**Substituting a value into a fence (REQ-666 BR-1).** A skill never writes `$ARGUMENTS`: Claude Code substitutes it before the model reads the file, and every other harness shows the model the literal string. Its Input section says in prose that the argument is whatever follows the skill name in the invocation (Claude Code also appends an `ARGUMENTS:` line when nothing in the text receives it), and what the skill does with none. A fence that needs a value the model holds, such as the request, carries an angle-bracket placeholder inside single quotes (`adlc_intake_detect '<request>'`), and the model replaces the placeholder **and its quotes** with the value as one single-quoted literal, every `'` in the value written `'\''`. So `it's $5` becomes `'it'\''s $5'`. Where the command reads stdin, a quoted-delimiter here-doc (`<<'EOF'`) is the alternative and needs no escaping. Never substitute into double quotes: a backtick or `$` in the value would run. An unescaped apostrophe ends the quote early, and the command becomes a syntax error that runs nothing, which for `/spec`'s intake probe silently skips the intake gate. The `${1}`/`$(0)` dodges stay, because Claude Code substitutes `$0`–`$9` whether or not `$ARGUMENTS` appears (`arg-templating`, LESSON-335).
+
 **Fenced blocks do not share shell state across steps.** Each ```sh fenced block in a SKILL.md may be an independent shell invocation — shell functions and non-exported variables defined in one fenced block are NOT visible in another (the Claude Code Bash-tool contract: "the working directory persists between commands, but shell state does not"). Therefore a shared shell **function** MUST be sourced from a `partials/*.sh` at *each* call site, in the **same fenced block as the invocation**, and MUST NEVER be defined in one fenced block and invoked from another (the silent-`command not found` telemetry-loss class — REQ-436, REQ-424). The canonical pattern is `partials/delegate-gate.sh` and `partials/emit-step-telemetry.sh`: a function-exporting partial sourced with the guarded two-level spelling (below) immediately before it is called. This is enforced structurally, not by prose/honor-system (LESSON-012): the `tools/lint-skills` `cross-fence-fn` check flags any function defined in one fence but invoked from a different fenced block in the same SKILL.md.
 
 **Resolve ToolkitRoot with the root line (REQ-669 ADR-1).** The toolkit runs from one of two installs: the symlink route (`~/.claude/skills` pointing at a clone) or the Claude Code plugin route (a cache copy under `~/.claude/plugins/cache/`). A fence that reads a toolkit-owned file (a partial, a tool, a template) first resolves that directory, ToolkitRoot, with exactly one canonical line. Write it byte-exact, on its own line, before the fence's first `$ADLC_TOOLKIT_ROOT`:
@@ -290,12 +245,16 @@ The fallback operand is double-quoted because ToolkitRoot is a path, and `$HOME`
 
 - **Parallel review**: dispatch 5–6 review agents in a single message (`correctness-reviewer`, `quality-reviewer`, `architecture-reviewer`, `test-auditor`, `security-auditor`, `reflector`). Read-only mandate: every agent must be told "Report findings only. Do not apply fixes."
 - **Parallel implementation**: `task-implementer` agents dispatched one per independent task. Group into dependency tiers.
-- **Subagent mode**: when a skill runs inside a subagent (e.g., via `/sprint`'s `pipeline-runner`), do NOT dispatch further subagents. Execute sequentially in-context instead.
-- **Dispatch on both installs (REQ-669 ADR-6, BR-9)**: on the symlink install the toolkit's agents are offered by bare name (`reflector`); on the plugin install Claude Code offers them as `<plugin>:<agent>` (`adlc:reflector`, REQ-669 `verification.md` row 7). A name the session does not offer does not fail loudly: on the fork path it silently became a generic `general-purpose` agent, without the checklist (row 7, evidence E3). So every step that dispatches a toolkit agent carries the canonical dispatch sentence below, once per step, and never relies on a dispatch error to trigger the fallback. The text between the two markers is the only copy: `tools/lint-skills`' `dispatch-fallback` check reads it from here and requires it, whitespace-normalized, in every `##`/`###` step of a `SKILL.md`, `proceed/phase*.md` or `partials/*.md` that names a dispatched agent. Edit it here and nowhere else, then copy it into each step the check names.
+- **Subagent mode**: when a skill runs inside a subagent (e.g., via `/sprint`'s `pipeline-runner`), do NOT dispatch further subagents. Execute sequentially in-context instead, reading each checklist from `.adlc/agents/<name>.md` (the dispatch paragraph's inline arm).
+- **Dispatch on every harness (REQ-666 BR-3, BR-4; REQ-669 ADR-6, BR-9)**: a harness may have no agent tool at all, a Claude Code subagent cannot dispatch further, and the two install routes offer the toolkit's agents under different names (bare on the symlink install, `adlc:<name>` on the plugin install, REQ-669 `verification.md` row 7), where a name the session does not offer silently becomes a generic `general-purpose` agent without the checklist (row 7, evidence E3). So every step that dispatches agents carries the canonical **dispatch paragraph** below, copied whole, and never relies on a dispatch error to trigger the fallback. Its inline arm reads the checklist from the project's vendored copy, `.adlc/agents/<name>.md` (`/init` writes it, REQ-666 BR-8), because a harness whose reads are jailed to the session root, and a Claude Code subagent in a worktree, cannot reach the install. A step that cannot run without subagents (`/sprint`) carries the **explicit-stop block** instead. The text between each pair of markers is the only copy: `tools/lint-skills`' `dispatch-has-fallback` check reads both blocks from here and requires one of them, whitespace-normalized, in every `##`/`###` step of a `SKILL.md`, `proceed/phase*.md` or `partials/*.md` that names a dispatched toolkit agent; a step that dispatches any other agent (a harness built-in such as Explore, or "launch 3 agents using the Agent tool") owes at least the paragraph's leading clause, "If this harness can run subagents", with an inline arm that fits it. Edit the blocks here and nowhere else, then copy them into each step the check names.
 
 <!-- dispatch-fallback-sentence -->
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 <!-- /dispatch-fallback-sentence -->
+
+<!-- dispatch-requires-subagents -->
+This step requires a harness that can run subagents: if this harness cannot, or you are a subagent, stop here and say so, and run each REQ with `/proceed` instead. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and stop.
+<!-- /dispatch-requires-subagents -->
 
 The workflow engine names its agents in code instead, so it cannot carry the sentence: `/sprint` passes `args.agentNamespace` (`adlc:` on the plugin route, `""` otherwise) and every `agentType` goes through the pure `agentTypeFor(name, ns)` helper (`workflows/README.md`).
 

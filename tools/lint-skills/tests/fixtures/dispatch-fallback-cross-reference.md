@@ -11,7 +11,8 @@ not; see the reflector's checklist in `/reflect` for what that pass covers.
 ## Instructions
 
 ### Step 1: Trace the code
-1. Launch Explore agents to trace the code path.
+1. If this harness can run subagents, launch Explore agents to trace the code path;
+   if it cannot, trace it yourself with your search and read tools.
 2. Read the files they name.
 
 ### Step 2: Review in your own context

@@ -23,14 +23,15 @@ order:
   manifests agree with ``VERSION``, the skill directories, ``agents/`` and each
   other, the name avoids ``PLUGIN_RESERVED_NAME_PREFIXES``, and there is no
   top-level ``bin`` of any kind.
-* ``check_toolkit_path`` (REQ-669 BR-13, ADR-9) — no literal toolkit read path
-  (``TOOLKIT_PATH_SPELLINGS``, and in Python ``TOOLKIT_PATH_PY_JOIN_RE``) on
-  the plugin-reachable surface (``TOOLKIT_PATH_SURFACES``) outside
-  ``TOOLKIT_PATH_EXCEPTIONS``, the one exception list REQ-666's
-  ``no-harness-path`` lifts whole. Comment lines are exempt except under
+* ``check_toolkit_path`` — ``no-harness-path`` (REQ-666 BR-13, ADR-5; it
+  absorbed REQ-669's ``toolkit-path``) — no literal harness home path on the
+  plugin-reachable surface (``TOOLKIT_PATH_SURFACES``): any of the five
+  harnesses' homes in Markdown text, and a toolkit path
+  (``TOOLKIT_PATH_SPELLINGS``, in Python ``TOOLKIT_PATH_PY_JOIN_RE``) or
+  ``OTHER_HARNESS_SPELLINGS`` in code, outside ``TOOLKIT_PATH_EXCEPTIONS``. Comment lines are exempt except under
   ``TOOLKIT_PATH_INSTRUCTION_DIRS`` (``presets/``, ``templates/``), where a
   comment is the user's instruction.
-* ``check_builtin_collision`` (REQ-669 BR-10, ADR-5) — on toolkit-path's surface
+* ``check_builtin_collision`` (REQ-669 BR-10, ADR-5) — on no-harness-path's surface
   plus the e2e audit's extra families and the root ``README.md`` and
   ``RELEASING.md`` (``BUILTIN_COLLISION_SURFACES``), no instruction-style bare
   ``/<name>`` for a name in ``BUILTIN_COLLISION_NAMES`` unless the line also
@@ -46,13 +47,22 @@ order:
   in the code of ``ADLC_HOME_SURFACES``: machine state is read through
   ``ADLC_HOME``. A Claude Code-owned path, a compatibility alias or the spelled
   default keeps its literal only with an ``adlc-home: <kind>`` marker on the line
-  (``ADLC_HOME_MARKER_KINDS``).
+  (``ADLC_HOME_MARKER_KINDS``). A line holding a toolkit path is left to
+  ``no-harness-path``, so each line is reported once.
+* ``check_ethos_lines`` — ``ethos-line`` (REQ-666 BR-2) — the ETHOS line,
+  read from conventions.md, exactly once and byte-identical in every skill, and
+  no other inline bang command in a skill's prose.
+* ``check_description_budget`` (REQ-666 BR-7) — every skill description at most
+  ``DESCRIPTION_BUDGET`` Unicode code points; the total is printed to stderr.
+* ``check_skills_ref`` (REQ-666 BR-11) — ``skills-ref validate`` on every skill
+  when the validator is on PATH, over a staged copy without
+  ``SKILLS_REF_HARNESS_KEYS``; one SKIP line when it is not.
 
 Each one is gated, so a root it does not apply to yields zero findings, never a
 crash. Model drift, sync-surface, retrieval-status and lesson-rules parity
 degrade to zero findings outside the toolkit checkout. ``check_lane_vocabulary``
 is inert unless ``partials/lane-check.md`` or ``proceed/phases-lite.md`` exists.
-The three REQ-669 checks are inert unless the root is a plugin root
+The three REQ-669 checks and the three REQ-666 per-root checks are inert unless the root is a plugin root
 (``is_plugin_root``: it carries ``.claude-plugin/`` or is a versioned skills
 root); once armed, a missing manifest is a finding, not a skip. Toolkit-path
 and builtin-collision walk their surfaces with one shared walker,
@@ -151,43 +161,34 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    runs ``sh <file>`` as an ordinary command (exit 127 on absence, never fatal).
    This check walks ``agents/*.md`` and ``proceed/phase*.md`` as well (see
    ``find_phase_files``); neither extra walk feeds the scanned count.
-10. ``check_harness_skip`` — every shell fence that calls
-    ``adlc_delegate_gate_check`` needs ``HARNESS_SKIP_LITERAL`` on a prose line
-    within ``HARNESS_SKIP_WINDOW`` lines above it (BUG-228), telling a
-    provenance-classifying harness (Teton Code) to skip the step's shell
-    rather than pin the session on an unclassifiable command. A fence that
-    invokes ``emit-run-outcome.sh`` owes the same line (REQ-648 BR-3); that
-    half also walks ``agents/*.md`` and ``proceed/phase*.md``.
-11. ``check_provenance_safe_fence`` — a shell fence whose first body line is
-    ``# provenance-safe`` keeps every line inside the grammar such a harness
-    can prove in reach: no unmodelled character, no ``=``, no program named by
-    path, and only recognised verbs (BUG-230).
-12. ``check_lesson_check_order`` — ``wrapup/SKILL.md`` and ``bugfix/SKILL.md``
+10. ``check_lesson_check_order`` — ``wrapup/SKILL.md`` and ``bugfix/SKILL.md``
     only (REQ-646 ADR-5): the lesson write point, the ``adlc_lesson_check``
     fence and the ``adlc_recheck_id lesson`` fence come in that file order,
-    each check fence has the harness line above it, and the file carries a
+    and the file carries a
     non-empty capture-rules block with a ``Granularity:`` line. Markers count
     only on their own line outside every fenced block (LESSON-404).
-13. ``check_lesson_question_coverage`` — ``wrapup/SKILL.md`` only (REQ-646
+11. ``check_lesson_question_coverage`` — ``wrapup/SKILL.md`` only (REQ-646
     BR-4): every capture-rules line occurs, verbatim and in block order, in the
     double-quoted ``--question`` of the ``command "$ADLC_READ_BIN"`` call, and
     none holds a character that double quotes would interpret.
-14. ``check_toolkit_root_line`` — REQ-669 ADR-1: a shell fence that reads
+12. ``check_toolkit_root_line`` — REQ-669 ADR-1: a shell fence that reads
     ``$ADLC_TOOLKIT_ROOT`` carries ``TOOLKIT_ROOT_LINE`` byte-exact before the
     first read. A read with no root line above it in the same fence (including
     one that leans on an earlier fence's root line) is a finding, and so is any
     other line that assigns the variable. Walks the same markdown families as
     ``check_unguarded_source`` (``SKILL.md``, ``agents/*.md``,
     ``proceed/phase*.md``, ``partials/*.md``), not ``partials/*.sh``.
-15. ``check_dispatch_fallback`` — REQ-669 ADR-6 / BR-9: a ``##``/``###`` step
-    whose prose dispatches a toolkit agent (``**<name>** agent``, a dispatch
-    verb followed by ``<name> agent``, or ``launch … agents`` beside a toolkit
-    agent name) carries the canonical dispatch sentence, whitespace-normalized.
+13. ``check_dispatch_fallback`` — ``dispatch-has-fallback`` (REQ-666 BR-3,
+    BR-12; REQ-669 ADR-6 / BR-9): a ``##``/``###`` step whose prose dispatches a
+    toolkit agent (``**<name>** agent``, a dispatch verb followed by ``<name>
+    agent``, or ``launch … agents`` beside a toolkit agent name) carries the
+    canonical dispatch paragraph or the explicit-stop block,
+    whitespace-normalized; a step whose imperative dispatches any other agent
+    owes at least ``DISPATCH_LEADING_CLAUSE``.
     The sentence is read once per run from the scan root's
     ``.adlc/context/conventions.md`` block (``load_dispatch_sentence``), never
     pinned here, and the names from ``agents/*.md``. A cross-reference, a
-    negated or time-qualified verb, ``agent's``, a fence and a Claude Code
-    built-in are not dispatches. Walks ``SKILL.md`` plus ``proceed/phase*.md``
+    negated or time-qualified verb, ``agent's`` and a fence are not dispatches. Walks ``SKILL.md`` plus ``proceed/phase*.md``
     and ``partials/*.md``.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
@@ -214,7 +215,10 @@ import json
 import os
 import posixpath
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Iterable, NamedTuple
 
@@ -414,16 +418,25 @@ TOOLKIT_ROOT_ASSIGN_RE = re.compile(
     r"(?:^|[;&|({]|\bthen\b|\belse\b|\bdo\b)\s*(?:(?:export|readonly)\s+)?ADLC_TOOLKIT_ROOT="
 )
 
-# REQ-669 ADR-6 / BR-9 `dispatch-fallback`. The canonical dispatch sentence is NOT
-# pinned here: conventions.md 'Agent dispatch patterns' holds the one copy, between
-# these two line-start markers, and the check reads it from there, so the lint and
-# the docs cannot drift apart (LESSON-019). The scan root's own conventions.md is
+# REQ-666 BR-3/BR-12 `dispatch-has-fallback` (REQ-669 ADR-6 / BR-9's
+# `dispatch-fallback`, renamed and widened). The canonical dispatch paragraph and
+# the explicit-stop block are NOT pinned here: conventions.md 'Agent dispatch
+# patterns' holds the one copy of each, between line-start markers, and the check
+# reads them from there, so the lint and the docs cannot drift apart (LESSON-019). The scan root's own conventions.md is
 # the source whenever the root has one; only a root with none (a fixture root)
 # falls back to the copy in the checkout this lint lives in. The agent names come
 # from `agents/*.md` the same way.
-DISPATCH_FALLBACK_CHECK = "dispatch-fallback"
+DISPATCH_FALLBACK_CHECK = "dispatch-has-fallback"
 DISPATCH_SENTENCE_OPEN_RE = re.compile(r"^<!--\s*dispatch-fallback-sentence\s*-->\s*$")
 DISPATCH_SENTENCE_CLOSE_RE = re.compile(r"^<!--\s*/dispatch-fallback-sentence\s*-->\s*$")
+# The explicit-stop block a step carries instead when it cannot run without
+# subagents (`/sprint`, REQ-666 BR-12).
+DISPATCH_STOP_OPEN_RE = re.compile(r"^<!--\s*dispatch-requires-subagents\s*-->\s*$")
+DISPATCH_STOP_CLOSE_RE = re.compile(r"^<!--\s*/dispatch-requires-subagents\s*-->\s*$")
+# The paragraph's leading clause. A step that dispatches an agent with no toolkit
+# checklist (a harness built-in such as Explore, or "launch 3 agents using the
+# Agent tool") owes at least this clause, with an inline arm that fits it.
+DISPATCH_LEADING_CLAUSE = "if this harness can run subagents"
 CONVENTIONS_REL = ".adlc/context/conventions.md"
 LINT_TOOLKIT_ROOT = SCRIPT_DIR.parents[1]
 AGENT_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -443,6 +456,20 @@ DISPATCH_NOT_AN_ORDER_RE = re.compile(
 # A word that ends an agent mention: `agent` or `agents`, not `agent's`, `agent-…`
 # or `agentic`.
 AGENT_WORD = r"agents?(?![\w'’-])"
+# REQ-666 BR-12: an instruction to dispatch that names no toolkit agent. "using the
+# Agent tool" in any form, or a dispatch verb whose clause ends in `agent`/`agents`
+# as a word of its own (never the tail of `subagents` or `sub-agents`).
+# Only an imperative counts: the base verb at the start of a clause (paragraph or
+# list-item start, after sentence punctuation or a comma, or after bold markup),
+# optionally behind "then"/"now"/"first"/"next"/"also". So "dispatched via the
+# Agent tool", "the dispatch prompt" and "when dispatching the audit agent in
+# Step 2" (descriptions and cross-references) are not instructions.
+AGENT_TOOL_RE = re.compile(r"(?i:\b(?:using|with)\s+the\s+`?Agent`?\s+tool\b)")
+GENERIC_DISPATCH_RE = re.compile(
+    r"(?:^(?:\d+[.)]\s+|[-*+]\s+)?|[.;:!?,]\s+|\*\*\s*)"
+    r"(?i:(?:then|now|first|next|also)\s+)?(?i:launch|dispatch|spawn)\b"
+    rf"[^.;:!?]{{0,80}}?(?<![\w-]){AGENT_WORD}"
+)
 
 # A bare $<digit> — Skill argument templating substitutes $0–$9 (and
 # $ARGUMENTS) across the whole SKILL.md body, clobbering shell positionals and
@@ -502,34 +529,6 @@ FORGE_DIRECT_GH_RE = re.compile(
 # parameter-expansion operator, so ANY default is flagged, not just the bare
 # name; same structural posture as `forge-direct-gh` (LESSON-012 — prose in a
 # skill is the honor system, only a check keeps this from rotting back).
-# BUG-228: the line every delegating step carries so a provenance-classifying
-# harness (Teton Code) skips the step's shell instead of pinning the session.
-HARNESS_SKIP_LITERAL = "**Provenance-classifying harness (BUG-228):**"
-HARNESS_SKIP_WINDOW = 30
-HARNESS_SKIP_GATE_RE = re.compile(r"^\s*adlc_delegate_gate_check\b")
-# REQ-648 BR-3: the run-outcome fences run a helper by path too
-# (`"$DELEGATE_TOOLS"/emit-run-outcome.sh`), which pins such a harness the same
-# way, so they owe the same line. Matched anywhere on a non-comment fence line.
-HARNESS_SKIP_RUN_OUTCOME_RE = re.compile(r"emit-run-outcome\.sh\b")
-
-# BUG-230: a shell fence whose first body line is this marker is one a
-# provenance-classifying harness (Teton Code) must be able to prove in reach, so
-# every line of it stays inside that grammar: no unmodelled character, no `=`
-# (read as an env assignment), no segment separator, no program named by path,
-# and only verbs the classifier recognises. The verb set is the one
-# conventions.md's preamble paragraph states (BUG-220), not a copy of Teton's
-# tables: a narrower allowlist can only refuse more.
-PROVENANCE_SAFE_MARKER = "# provenance-safe"
-PROVENANCE_SAFE_FORBIDDEN = set("'\"`$\\><{}!*?[]=();|&")
-PROVENANCE_SAFE_PLACEHOLDER_RE = re.compile(r"<[A-Za-z][A-Za-z0-9_-]*>")
-# `wc` is on Teton's READS_CONTENT table: with explicit in-root files it is
-# `rooted` (observed in a live `/analyze` turn, 2026-09-28).
-PROVENANCE_SAFE_VERBS = {"test", "cat", "ls", "find", "grep", "echo", "pwd", "which", "wc"}
-PROVENANCE_SAFE_GIT = {
-    "status", "log", "branch", "remote", "tag", "rev-parse", "diff-tree",
-    "worktree", "for-each-ref",
-}
-
 READ_BIN_FALLBACK_LITERAL = "ADLC_READ_BIN:-"
 
 # REQ-609 (verify C1/C2): the other two halves of the same call-site contract.
@@ -615,12 +614,13 @@ READ_BIN_COMMAND_PREFIX_RE = re.compile(r"(?:^|[;&|(]|\s)command\s+$")
 # symptom `/init` deliberately does NOT copy (so it may appear in template-drift's
 # checked list with no matching `/init` copy entry — see check_sync_surface_parity).
 SYNC_SURFACES = frozenset(
-    {"templates", "partials", "ethos", "workflow-runtime", "workflow-test-landmine"}
+    {"templates", "partials", "agents", "ethos", "workflow-runtime", "workflow-test-landmine"}
 )
-# The four surfaces `/init` actually copies (every one MUST have a template-drift
-# check). `workflow-test-landmine` is intentionally excluded — it is not copied.
+# The five surfaces `/init` actually copies (every one MUST have a template-drift
+# check; `agents` is REQ-666 BR-8/BR-9). `workflow-test-landmine` is
+# intentionally excluded — it is not copied.
 INIT_COPIED_SURFACES = frozenset(
-    {"templates", "partials", "ethos", "workflow-runtime"}
+    {"templates", "partials", "agents", "ethos", "workflow-runtime"}
 )
 
 # A surface-list marker block: `<!-- sync-surfaces: <which> -->` ... `<!-- /sync-surfaces -->`.
@@ -753,7 +753,10 @@ PLUGIN_PATH_PREFIX = "./"
 # there, or worse, the clone of a doubled machine. Every read goes through
 # ToolkitRoot instead. REQ-666's `no-harness-path` is a superset of this check
 # and absorbs it, with TOOLKIT_PATH_EXCEPTIONS lifted whole (BR-18).
-TOOLKIT_PATH_CHECK = "toolkit-path"
+TOOLKIT_PATH_CHECK = "no-harness-path"
+# REQ-666 BR-13 / ADR-5: `toolkit-path` is absorbed by `no-harness-path`, which
+# keeps its surfaces, walk, arming and exception list and widens the spellings.
+NO_HARNESS_PATH_CHECK = TOOLKIT_PATH_CHECK
 # The scanned surface (ADR-9), one entry per family. `scan_toolkit_path` counts
 # the files it read under each entry, so a family that walked nothing is visible
 # rather than a silent green (LESSON-019). `tools/**` means code files only:
@@ -791,6 +794,17 @@ TOOLKIT_PATH_SPELLINGS = (
     "${HOME}/.claude/agents",
     "${HOME:-}/.claude/agents",
 )
+# REQ-666 BR-13: the four other harness homes, flagged on every surface, in the
+# same four forms as the toolkit spellings above.
+OTHER_HARNESS_HOMES = (".codex", ".copilot", ".gemini", ".cursor")
+OTHER_HARNESS_SPELLINGS = tuple(
+    f"{lead}/{home}" for home in OTHER_HARNESS_HOMES
+    for lead in ("~", "$HOME", "${HOME}", "${HOME:-}")
+)
+# Markdown families: skill, companion, agent and partial-doc TEXT names no harness
+# home at all, so any home `.claude` path there is a finding too (ADLC_HOME_SHELL_RE,
+# below). In code a general `.claude` home path is `adlc-home`'s to judge.
+NO_HARNESS_PATH_TEXT_SUFFIX = ".md"
 # Python only: a path built from parts rather than spelled whole, such as
 # `os.path.join(home, ".claude", "skills")`, `Path.home() / ".claude" / "agents"`
 # or `".claude/skills"`. A quoted `.claude` followed by a quoted `skills` or
@@ -831,6 +845,10 @@ TOOLKIT_PATH_EXCEPTIONS = (
     # are searched, so the rest of the line is still checked; an unquoted or
     # `${HOME}` variant is not this literal and stays a finding.
     ToolkitPathException("token", '"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/'),
+    # REQ-666 BR-13: REQ-654's default-expansion spelling of the machine-state
+    # home, which names the path through the variable that owns it, the literal
+    # being only its default. Text uses it for counters, locks and the config.
+    ToolkitPathException("token", "${ADLC_HOME:-$HOME/.claude}"),
     # The symlink installer. It creates and inspects `~/.claude/skills` and
     # `~/.claude/agents` by definition; the plugin route never runs it.
     ToolkitPathException("file", "install.sh"),
@@ -846,6 +864,13 @@ TOOLKIT_PATH_EXCEPTIONS = (
     # polices (this list, TOOLKIT_ROOT_LINE, the source operands, the messages)
     # and it locates its own checkout from `__file__`, never from a home path.
     ToolkitPathException("file", "tools/lint-skills/check.py"),
+    # REQ-664's `adlc harness probe`: its §6 probes edit the other harnesses' own
+    # user files (trust entries, a policy file) and read their session stores, by
+    # design, as the doctor inspects the symlink install by design.
+    ToolkitPathException("file", "tools/adlc/harness_probe.py"),
+    # A line that names its kind with REQ-654's marker (`adlc-home: claude-code`,
+    # `alias` or `default`) keeps its literal on purpose; one marker for both checks.
+    ToolkitPathException("marker", "adlc-home"),
     # Comment lines: `#` in shell, Python and the shell fences of a Markdown
     # file (never a Markdown heading); `//` and `/* … */` in JavaScript. A
     # comment is not a read. A trailing comment on a code line is not a comment
@@ -1708,23 +1733,6 @@ def check_read_bin_fallback(text: str, rel: str) -> list[Finding]:
     return findings
 
 
-def _shell_fence_line_numbers(fences) -> set[int]:
-    """Every line a shell fence occupies — opening, body and closing line.
-
-    ``fences`` is a materialised ``_iter_fences`` result. ``harness-skip``
-    passes it to ``_harness_line_above`` so a copy of the line inside a shell
-    fence does not count; ``lesson-check-order`` passes the wider
-    ``_any_fence_line_numbers`` instead.
-    """
-    out: set[int] = set()
-    for _lang, _idx, body_start, body in fences:
-        opening = body_start - 1
-        out.add(opening)
-        out.update(lineno for lineno, _ in body)
-        out.add((body[-1][0] if body else opening) + 1)
-    return out
-
-
 def _walk_fences(lines: list[str]):
     """Yield ``(opening, info, body, closing)`` for each TOP-LEVEL fenced block
     — backticks or tildes, any info string (``markdown``, ``text``, none).
@@ -1820,70 +1828,6 @@ def _shell_line_code(line: str) -> tuple[str, str]:
     return line, "".join(masked)
 
 
-def _harness_line_above(lines: list[str], fence_lines: set[int], opening: int) -> bool:
-    """True when ``HARNESS_SKIP_LITERAL`` sits on a prose line within
-    ``HARNESS_SKIP_WINDOW`` lines above the fence opening at ``opening``
-    (1-based). One window, one literal, for every check that needs it (BUG-228).
-    ``fence_lines`` names the lines that are not prose.
-    """
-    lo = max(1, opening - HARNESS_SKIP_WINDOW)
-    return any(
-        HARNESS_SKIP_LITERAL in lines[n - 1]
-        for n in range(lo, opening)
-        if n not in fence_lines
-    )
-
-
-def check_harness_skip(text: str, rel: str, gate: bool = True) -> list[Finding]:
-    """BUG-228: every delegating step tells a provenance-classifying harness to skip it.
-
-    No spelling of a delegating step's shell passes Teton Code's REQ-614/619
-    classifier — ``adlc-read`` is an unrecognised verb and the partials run by
-    path, both ``Unknown`` by design — and one ``Unknown`` pins the session to
-    its local tier, killing the turn. The only pin-free outcome is for the model
-    not to run those blocks, and the only place that can say so is the skill
-    text: Teton hands shell children an allowlisted environment, so no script
-    can detect the harness.
-
-    So every fence that calls ``adlc_delegate_gate_check`` must have
-    ``HARNESS_SKIP_LITERAL`` on a **prose** line within ``HARNESS_SKIP_WINDOW``
-    lines above its opening. A copy inside a fence is not read as an
-    instruction and does not count, and a commented-out gate call is not a call.
-
-    REQ-648 BR-3: so must every fence that invokes ``emit-run-outcome.sh``,
-    whose step then replies ``run-outcome skipped: provenance-classifying
-    harness`` instead. ``gate=False`` checks only that second kind: the
-    ``agents/*.md`` and ``proceed/phase*.md`` walks carry run-outcome fences,
-    and the delegation gate's own documentation there is out of this check's
-    scope.
-    """
-    fences = list(_iter_fences(text))
-    fence_lines = _shell_fence_line_numbers(fences)
-    lines = text.splitlines()
-    findings: list[Finding] = []
-    for _lang, _idx, body_start, body in fences:
-        calls = [line for _, line in body if not line.lstrip().startswith("#")]
-        opening = body_start - 1
-        if gate and any(HARNESS_SKIP_GATE_RE.match(line) for line in calls):
-            kind = ("delegation-gate fence", "the step's 'Before the gate check' block (see "
-                    "partials/delegate-gate.md)")
-        elif any(HARNESS_SKIP_RUN_OUTCOME_RE.search(line) for line in calls):
-            kind = ("run-outcome fence", "the fence, telling the step to reply 'run-outcome "
-                    "skipped: provenance-classifying harness' (REQ-648 BR-3)")
-        else:
-            continue
-        if not _harness_line_above(lines, fence_lines, opening):
-            findings.append(
-                Finding(
-                    rel, opening, "harness-skip",
-                    "%s without the provenance-classifying harness line in the %d "
-                    "lines above it — add '%s' before %s"
-                    % (kind[0], HARNESS_SKIP_WINDOW, HARNESS_SKIP_LITERAL, kind[1]),
-                )
-            )
-    return findings
-
-
 class LessonRulesBlock(NamedTuple):
     """The ``<!-- lesson-capture-rules -->`` block of one file.
 
@@ -1955,11 +1899,6 @@ def check_lesson_check_order(text: str, rel: str) -> list[Finding]:
     example inside an outer ```` ````markdown ```` fence calls nothing. A call
     is searched in the line's code only (``_shell_line_code``): a ``#``
     comment, whole-line or trailing, and a quoted string call nothing.
-
-    Every check fence also needs ``HARNESS_SKIP_LITERAL`` on a prose line — not
-    inside any fenced block — in the ``HARNESS_SKIP_WINDOW`` lines above it
-    (``missing-harness-line``, BR-15): the fence runs a partial by path and
-    would pin a provenance-classifying harness.
 
     The file must carry a non-empty ``<!-- lesson-capture-rules -->`` block
     (``rules-block-missing``) holding a line that starts ``Granularity:``
@@ -2036,17 +1975,6 @@ def check_lesson_check_order(text: str, rel: str) -> list[Finding]:
                     "loop can still delete the draft, so recheck only a lesson "
                     "that passed the check (REQ-646 BR-3)",
                 ))
-
-    for opening, _call in checks:
-        if not _harness_line_above(lines, fenced, opening):
-            findings.append(_lesson_finding(
-                rel, opening, "missing-harness-line",
-                f"`adlc_lesson_check` fence without '{HARNESS_SKIP_LITERAL}' on a "
-                f"prose line in the {HARNESS_SKIP_WINDOW} lines above it — the "
-                "fence runs a partial by path and would pin a "
-                "provenance-classifying harness; say how to validate in-model "
-                "there (REQ-646 BR-15)",
-            ))
 
     block = parse_lesson_rules_block(text)
     if block is None:
@@ -2255,58 +2183,6 @@ def check_lesson_rules_parity(root: Path) -> list[Finding]:
     )]
 
 
-def check_provenance_safe_fence(text: str, rel: str) -> list[Finding]:
-    """BUG-230: a fence marked ``# provenance-safe`` stays provably in reach.
-
-    Such a fence is one the skill promises will not pin a session on a harness
-    that classifies what a shell command could read (Teton Code). The grammar
-    that promise depends on refuses a whole command on any quote, ``$``,
-    redirect, glob or brace, reads any ``=`` as an environment assignment, and
-    returns ``Unknown`` for a program named by path or a verb it does not
-    recognise. A later edit that "tidies" a hygiene check back to
-    ``$(date …)`` or ``--format=…`` pins every Teton ``/analyze`` again, and
-    nothing but this check would notice.
-
-    ``<placeholder>`` tokens are stripped first: the model substitutes them
-    before running the line. Comment lines are skipped.
-    """
-    findings: list[Finding] = []
-    for _lang, _idx, _start, body in _iter_fences(text):
-        first = next((ln for _, ln in body if ln.strip()), "")
-        if not first.strip().startswith(PROVENANCE_SAFE_MARKER):
-            continue
-        for lineno, line in body:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            probe = PROVENANCE_SAFE_PLACEHOLDER_RE.sub("x", stripped)
-            bad = sorted(set(probe) & PROVENANCE_SAFE_FORBIDDEN)
-            words = probe.split()
-            verb = words[0]
-            if bad:
-                why = "uses %s, which the classifier refuses" % " ".join(repr(c) for c in bad)
-            elif "/" in verb:
-                why = "names its program by path"
-            elif verb == "git":
-                sub = words[1] if len(words) > 1 else ""
-                why = "" if sub in PROVENANCE_SAFE_GIT else "runs 'git %s', not a name-only subcommand" % sub
-            elif verb not in PROVENANCE_SAFE_VERBS:
-                why = "runs '%s', a verb outside the recognised set" % verb
-            else:
-                why = ""
-            if verb == "find" and "-exec" in words:
-                why = "runs 'find -exec'"
-            if why:
-                findings.append(
-                    Finding(
-                        rel, lineno, "provenance-safe-fence",
-                        "line in a '# provenance-safe' fence %s — keep it inside "
-                        "the preamble grammar (conventions.md, BUG-220/BUG-230)" % why,
-                    )
-                )
-    return findings
-
-
 def check_unguarded_source(text: str, rel: str, whole_file: bool = False) -> list[Finding]:
     """REQ-610 BR-3/BR-5 (ADR-2): a partial must be sourced with the ``[ -f ]``
     guard, and the retired two-level spelling must appear nowhere in the file.
@@ -2493,7 +2369,8 @@ def _normalize_ws(text: str) -> str:
     return " ".join(text.split())
 
 
-def parse_dispatch_sentence_block(text: str) -> str | None:
+def parse_dispatch_sentence_block(text: str, open_re=DISPATCH_SENTENCE_OPEN_RE,
+                                  close_re=DISPATCH_SENTENCE_CLOSE_RE) -> str | None:
     """Return the canonical dispatch sentence from conventions.md's
     ``<!-- dispatch-fallback-sentence -->`` block, whitespace-normalized.
 
@@ -2504,11 +2381,11 @@ def parse_dispatch_sentence_block(text: str) -> str | None:
     lines = text.splitlines()
     fenced = _any_fence_line_numbers(lines)
     for i, line in enumerate(lines):
-        if (i + 1) in fenced or not DISPATCH_SENTENCE_OPEN_RE.match(line):
+        if (i + 1) in fenced or not open_re.match(line):
             continue
         body: list[str] = []
         for item in lines[i + 1:]:
-            if DISPATCH_SENTENCE_CLOSE_RE.match(item):
+            if close_re.match(item):
                 sentence = _normalize_ws(" ".join(body))
                 return sentence or None
             body.append(item.strip().lstrip(">"))
@@ -2516,7 +2393,8 @@ def parse_dispatch_sentence_block(text: str) -> str | None:
     return None
 
 
-def load_dispatch_sentence(root: Path) -> tuple[str | None, str]:
+def load_dispatch_sentence(root: Path, open_re=DISPATCH_SENTENCE_OPEN_RE,
+                           close_re=DISPATCH_SENTENCE_CLOSE_RE) -> tuple[str | None, str]:
     """``(sentence, source label)`` for one run.
 
     The scan root's ``.adlc/context/conventions.md`` is the source whenever it
@@ -2534,7 +2412,13 @@ def load_dispatch_sentence(root: Path) -> tuple[str | None, str]:
         text = source.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None, label
-    return parse_dispatch_sentence_block(text), label
+    return parse_dispatch_sentence_block(text, open_re, close_re), label
+
+
+def load_dispatch_stop(root: Path) -> tuple[str | None, str]:
+    """``(stop block, source label)``: the explicit-stop block, read like the
+    paragraph (REQ-666 BR-12)."""
+    return load_dispatch_sentence(root, DISPATCH_STOP_OPEN_RE, DISPATCH_STOP_CLOSE_RE)
 
 
 def load_agent_names(root: Path) -> frozenset[str]:
@@ -2553,7 +2437,7 @@ def load_agent_names(root: Path) -> frozenset[str]:
 
 class DispatchMention(NamedTuple):
     line: int      # 1-based line where the mention starts
-    agent: str     # the toolkit agent it names
+    agent: str     # the toolkit agent it names; "" for a generic dispatch (REQ-666)
     section: int   # index into the file's regions (see _dispatch_regions)
 
 
@@ -2649,6 +2533,7 @@ def _dispatch_patterns(names: frozenset[str]):
 
 def dispatch_mentions(
     text: str, names: frozenset[str], sentence: str | None = None,
+    stop: str | None = None,
 ) -> tuple[list[DispatchMention], list[tuple[str, str]]]:
     """Every toolkit-agent dispatch the prose of ``text`` names.
 
@@ -2660,17 +2545,16 @@ def dispatch_mentions(
     list form, so they are not mentions; neither is a verb after "not", "never",
     "without", "before" or "after".
     """
-    if not names:
-        return [], []
-    bold, verb, launch, word = _dispatch_patterns(names)
+    bold, verb, launch, word = _dispatch_patterns(names or frozenset({"\x00"}))
     mentions: list[DispatchMention] = []
     region_text: list[tuple[str, str]] = []
     for index, (kind, paragraphs) in enumerate(_dispatch_regions(text.splitlines())):
         joined = [_paragraph_text(p) for p in paragraphs]
         region_text.append((kind, " ".join(t for t, _ in joined)))
         for p_index, (ptext, starts) in enumerate(joined):
-            if sentence:
-                ptext = ptext.replace(sentence, " " * len(sentence))
+            for block in (sentence, stop):
+                if block:
+                    ptext = ptext.replace(block, " " * len(block))
             found: list[tuple[int, str]] = []
             for m in bold.finditer(ptext):
                 found.append((m.start(), m.group("name")))
@@ -2686,6 +2570,15 @@ def dispatch_mentions(
                 named = word.search(nearby)
                 if named:
                     found.append((m.start(), named.group("name")))
+            if not found:
+                # REQ-666 BR-12: an instruction to dispatch that names no toolkit agent.
+                for pattern in (AGENT_TOOL_RE, GENERIC_DISPATCH_RE):
+                    for m in pattern.finditer(ptext):
+                        if not DISPATCH_NOT_AN_ORDER_RE.search(ptext[:m.start()]):
+                            found.append((m.start(), ""))
+                            break
+                    if found:
+                        break
             for pos, agent in sorted(found):
                 mentions.append(DispatchMention(_line_at(starts, pos), agent, index))
     return mentions, region_text
@@ -2693,50 +2586,73 @@ def dispatch_mentions(
 
 def check_dispatch_fallback(
     text: str, rel: str, sentence: str | None, names: frozenset[str],
-    source: str = CONVENTIONS_REL,
+    source: str = CONVENTIONS_REL, stop: str | None = None,
 ) -> list[Finding]:
-    """REQ-669 ADR-6 / BR-9: every step that dispatches a toolkit agent carries
-    the canonical dispatch sentence.
+    """REQ-666 BR-3/BR-12 (``dispatch-has-fallback``; REQ-669 ADR-6 / BR-9's
+    ``dispatch-fallback``): every step that dispatches agents says what to do
+    when it cannot.
 
-    A step is a ``##`` or ``###`` region (``_dispatch_regions``). For each step
-    with at least one ``dispatch_mentions`` hit, the step's prose, whitespace-
-    normalized, must contain ``sentence``; otherwise one finding at the first
-    mention. A mention above the first ``##``/``###`` heading (a file's
-    introduction) is satisfied by the sentence anywhere in the file. When the
-    sentence could not be read (``None``) a file with any mention gets one
-    finding saying so, rather than passing unchecked.
+    A step is a ``##`` or ``###`` region (``_dispatch_regions``). A step with a
+    mention that names a toolkit agent must contain, whitespace-normalized, the
+    canonical dispatch paragraph (``sentence``) or the explicit-stop block
+    (``stop``). A step whose mentions name no toolkit agent (a harness built-in,
+    "launch 3 agents using the Agent tool") must contain at least the
+    paragraph's leading clause, ``DISPATCH_LEADING_CLAUSE``, or one of the two
+    blocks. One finding per step, at its first mention. A mention above the
+    first ``##``/``###`` heading (a file's introduction) is satisfied anywhere
+    in the file. When the paragraph could not be read (``None``) a file with
+    any mention gets one finding saying so, rather than passing unchecked.
     """
-    mentions, regions = dispatch_mentions(text, names, sentence)
+    mentions, regions = dispatch_mentions(text, names, sentence, stop)
     if not mentions:
         return []
     if sentence is None:
         first = mentions[0]
+        what = f"the `{first.agent}` agent" if first.agent else "an agent"
         return [Finding(
             rel, first.line, DISPATCH_FALLBACK_CHECK,
-            f"names the `{first.agent}` agent as dispatched, but the canonical "
-            f"dispatch sentence could not be read from {source}: its "
+            f"names {what} as dispatched, but the canonical dispatch paragraph "
+            f"could not be read from {source}: its "
             "`<!-- dispatch-fallback-sentence -->` block is missing, unclosed or "
-            "empty (conventions.md 'Agent dispatch patterns', REQ-669 ADR-6)",
+            "empty (conventions.md 'Agent dispatch patterns', REQ-666 BR-3)",
         )]
     whole_file = " ".join(t for _, t in regions)
+    blocks = [b for b in (sentence, stop) if b]
     findings: list[Finding] = []
     reported: set[int] = set()
+    by_section: dict[int, list[DispatchMention]] = {}
     for mention in mentions:
-        if mention.section in reported:
+        by_section.setdefault(mention.section, []).append(mention)
+    for section, found in by_section.items():
+        kind, prose = regions[section]
+        scope = whole_file if kind == "file" else prose
+        if any(b in scope for b in blocks):
             continue
-        kind, prose = regions[mention.section]
-        if sentence in (whole_file if kind == "file" else prose):
+        toolkit = [m for m in found if m.agent]
+        if not toolkit and DISPATCH_LEADING_CLAUSE in scope.lower():
             continue
-        reported.add(mention.section)
+        if section in reported:
+            continue
+        reported.add(section)
+        first = toolkit[0] if toolkit else found[0]
         where = "this file" if kind == "file" else "this step"
-        findings.append(Finding(
-            rel, mention.line, DISPATCH_FALLBACK_CHECK,
-            f"{where} dispatches the `{mention.agent}` agent without the canonical "
-            "dispatch sentence, so on the other install route the name can miss and "
-            "silently run a generic agent; copy the sentence from the "
-            f"`<!-- dispatch-fallback-sentence -->` block in {source} into "
-            f"{where} (conventions.md 'Agent dispatch patterns', REQ-669 ADR-6, BR-9)",
-        ))
+        if toolkit:
+            msg = (f"{where} dispatches the `{first.agent}` agent without the canonical "
+                   "dispatch paragraph, so a harness with no agent tool, a subagent, or "
+                   "the other install route has no checklist to run; copy the paragraph "
+                   f"from the `<!-- dispatch-fallback-sentence -->` block in {source} "
+                   f"into {where} (or the `<!-- dispatch-requires-subagents -->` block "
+                   "where it cannot run without subagents; conventions.md 'Agent "
+                   "dispatch patterns', REQ-666 BR-3, BR-12)")
+        else:
+            msg = (f"{where} tells the model to dispatch an agent without saying what to "
+                   "do when this harness cannot run subagents; start the instruction "
+                   "with 'If this harness can run subagents, …; if it cannot, or you "
+                   "are a subagent, …' (or carry the "
+                   "`<!-- dispatch-requires-subagents -->` block; conventions.md "
+                   "'Agent dispatch patterns', REQ-666 BR-12)")
+        findings.append(Finding(rel, first.line, DISPATCH_FALLBACK_CHECK, msg))
+    findings.sort(key=lambda f: f.line)
     return findings
 
 
@@ -3534,8 +3450,12 @@ def _toolkit_path_comment_lines(text: str, rel: str) -> set[int]:
     lines = text.splitlines()
     suffix = posixpath.splitext(rel)[1]
     if suffix == ".md":
-        return {lineno for _lang, _idx, _start, body in _iter_fences(text)
-                for lineno, line in body if led_by(line, "#")}
+        # REQ-666: a whole-line HTML comment is a comment too (the rendered agent
+        # `model:` header names the machine config's default location).
+        html = {i for i, line in enumerate(lines, 1)
+                if line.strip().startswith("<!--") and line.strip().endswith("-->")}
+        return html | {lineno for _lang, _idx, _start, body in _iter_fences(text)
+                       for lineno, line in body if led_by(line, "#")}
     if suffix != ".js":
         return {i for i, line in enumerate(lines, 1) if led_by(line, "#")}
     out: set[int] = set()
@@ -3568,27 +3488,36 @@ def toolkit_path_findings(text: str, rel: str) -> list[Finding]:
     exact_lines = _toolkit_path_exceptions("line")
     tokens = _toolkit_path_exceptions("token")
     python = posixpath.splitext(rel)[1] == ".py"
+    text_surface = posixpath.splitext(rel)[1] == NO_HARNESS_PATH_TEXT_SUFFIX
+    marker_kinds = set(ADLC_HOME_MARKER_KINDS)
     findings: list[Finding] = []
     for lineno, line in enumerate(text.splitlines(), 1):
         if lineno in comments or line.lstrip() in exact_lines:
+            continue
+        marker = ADLC_HOME_MARKER_RE.search(line)
+        if marker and marker.group(1) in marker_kinds:
             continue
         probe = line
         for token in tokens:
             # NUL cannot occur in any spelling, so removal never splices a new one.
             probe = probe.replace(token, "\0")
         hits = [s for s in TOOLKIT_PATH_SPELLINGS if s in probe]
+        hits.extend(s for s in OTHER_HARNESS_SPELLINGS if s in probe)
+        if text_surface and not hits:
+            hits.extend(m.group(0) for m in ADLC_HOME_SHELL_RE.finditer(probe))
         if python:
             hits.extend(m.group(0) for m in TOOLKIT_PATH_PY_JOIN_RE.finditer(probe))
         if not hits:
             continue
-        named = ", ".join(f"`{h}`" for h in hits)
+        named = ", ".join(f"`{h}`" for h in dict.fromkeys(hits))
         findings.append(Finding(
             rel, lineno, TOOLKIT_PATH_CHECK,
-            f"literal toolkit path {named} — the plugin route has no such directory. "
-            "Read through ToolkitRoot: `$ADLC_TOOLKIT_ROOT/…` after a fence's root "
-            "line, the default-expansion spelling in a partial, or "
-            "`tools/adlc/toolkit_root.py` in Python (REQ-669 BR-13, ADR-9; "
-            "exceptions: TOOLKIT_PATH_EXCEPTIONS)",
+            f"literal harness home path {named} — no harness but one has it, and the "
+            "plugin route has no toolkit directory under it. Read toolkit files "
+            "through ToolkitRoot (`$ADLC_TOOLKIT_ROOT/…` after a fence's root line, "
+            "the default-expansion spelling in a partial, `tools/adlc/toolkit_root.py` "
+            "in Python), and name machine state as `${ADLC_HOME:-$HOME/.claude}/…` "
+            "(REQ-666 BR-13, ADR-5; REQ-669 BR-13; exceptions: TOOLKIT_PATH_EXCEPTIONS)",
         ))
     return findings
 
@@ -3767,6 +3696,7 @@ def adlc_home_findings(text: str, rel: str) -> list[Finding]:
         comments |= _python_docstring_lines(text)
     token = '"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/'
     findings: list[Finding] = []
+    defer_toolkit = not toolkit_path_excepted_file(rel)
     for lineno, line in enumerate(text.splitlines(), 1):
         marker = ADLC_HOME_MARKER_RE.search(line)
         if marker and marker.group(1) not in ADLC_HOME_MARKER_KINDS:
@@ -3778,6 +3708,14 @@ def adlc_home_findings(text: str, rel: str) -> list[Finding]:
         if lineno in comments or line.lstrip() == TOOLKIT_ROOT_LINE:
             continue
         probe = line.replace(token, "\0")
+        # REQ-666 ADR-5: a line holding a toolkit path (`.claude/skills`,
+        # `.claude/agents`) is `no-harness-path`'s to report, so each line is
+        # reported by one check only. Not in a file `no-harness-path` sets aside
+        # whole (install.sh, the doctor, the probe): there this check still owns
+        # the line, or nothing would read it.
+        if defer_toolkit and (any(s in probe for s in TOOLKIT_PATH_SPELLINGS)
+                              or TOOLKIT_PATH_PY_JOIN_RE.search(probe)):
+            continue
         hits = [m.group(0) for m in ADLC_HOME_SHELL_RE.finditer(probe)]
         if python:
             hits.extend(m.group(0) for m in ADLC_HOME_PY_JOIN_RE.finditer(probe))
@@ -3886,6 +3824,236 @@ def scan_builtin_collision(root: Path) -> BuiltinCollisionScan:
     return BuiltinCollisionScan(scan.findings, scan.surfaces)
 
 
+# REQ-666 BR-2 / AC-3 `ethos-line`: the ETHOS `!` line is the one preamble line a
+# skill keeps (plan M6), byte-identical, exactly once, in every `*/SKILL.md`.
+# Every other context read is a run-and-read fence. The line is NOT pinned here:
+# conventions.md 'Ethos injection pattern' holds the one copy and the check reads
+# it from there, as `dispatch-has-fallback` reads its paragraph (LESSON-019).
+ETHOS_LINE_CHECK = "ethos-line"
+# An inline bang command in prose: what a context read looked like before REQ-666.
+INLINE_BANG_RE = re.compile(r"!`[^`\n]+`")
+
+
+def load_ethos_line(root: Path) -> tuple[str | None, str]:
+    """``(line, source label)``: the first line of conventions.md that starts with
+    a bang command reading ``.adlc/ETHOS.md``. The scan root's copy is the source
+    whenever the root has one, so deleting the line cannot disarm the check; only
+    a root with no conventions.md reads the lint checkout's."""
+    local = root / CONVENTIONS_REL
+    if local.is_file():
+        source, label = local, CONVENTIONS_REL
+    else:
+        source, label = LINT_TOOLKIT_ROOT / CONVENTIONS_REL, f"the lint checkout's {CONVENTIONS_REL}"
+    try:
+        text = source.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, label
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("!`") and ".adlc/ETHOS.md" in stripped:
+            return stripped, label
+    return None, label
+
+
+def check_ethos_line(text: str, rel: str, ethos: str) -> list[Finding]:
+    """One SKILL.md: the ETHOS line exactly once and byte-identical, and no other
+    inline bang command in prose. Fenced lines are not read (an example in a
+    fence is not a preamble)."""
+    lines = text.splitlines()
+    fenced = _any_fence_line_numbers(lines)
+    exact: list[int] = []
+    findings: list[Finding] = []
+    near = 0
+    for n, line in enumerate(lines, start=1):
+        if n in fenced:
+            continue
+        stripped = line.strip()
+        if stripped == ethos:
+            exact.append(n)
+        elif stripped.startswith("!`") and "ETHOS" in stripped:
+            near += 1
+            findings.append(Finding(
+                rel, n, ETHOS_LINE_CHECK,
+                "an ETHOS line that differs from the canonical one in conventions.md "
+                "'Ethos injection pattern' — restore it byte-for-byte (REQ-666 BR-2)"))
+        elif INLINE_BANG_RE.search(line):
+            findings.append(Finding(
+                rel, n, ETHOS_LINE_CHECK,
+                "an inline bang command other than the ETHOS line — move the read into "
+                "the skill's `# adlc-context` fence (conventions.md 'Context loading "
+                "pattern', REQ-666 BR-2)"))
+    if not exact and not near:
+        findings.append(Finding(
+            rel, 1, ETHOS_LINE_CHECK,
+            "no ETHOS line — every skill carries the canonical line from conventions.md "
+            "'Ethos injection pattern' under its `## Ethos` heading (REQ-666 BR-2)"))
+    for n in exact[1:]:
+        findings.append(Finding(
+            rel, n, ETHOS_LINE_CHECK,
+            f"a second copy of the ETHOS line (first at line {exact[0]}) — keep exactly one "
+            "(REQ-666 BR-2)"))
+    findings.sort(key=lambda f: f.line)
+    return findings
+
+
+def check_ethos_lines(root: Path) -> list[Finding]:
+    """REQ-666 BR-2 per root: armed like `plugin-manifest` (``is_plugin_root``), so a
+    fixture root or a consumer repo is never read. Walks the loader's
+    ``*/SKILL.md`` set. A conventions copy without the line is one finding on it."""
+    if not is_plugin_root(root):
+        return []
+    ethos, label = load_ethos_line(root)
+    if ethos is None:
+        return [Finding(CONVENTIONS_REL, 1, ETHOS_LINE_CHECK,
+                        f"no ETHOS line could be read from {label} 'Ethos injection "
+                        "pattern', so no skill can be checked against it (REQ-666 BR-2)")]
+    findings: list[Finding] = []
+    for d in _plugin_root_skill_dirs(root):
+        path = root / d / "SKILL.md"
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        findings.extend(check_ethos_line(text, f"{d}/SKILL.md", ethos))
+    return findings
+
+
+# REQ-666 BR-7 / AC-7 `description-budget`: every harness loads every skill
+# description at session start, and Claude Code truncates its listing at 1 536
+# characters for `description` plus `when_to_use`, so one budget keeps the
+# listing cheap everywhere (OQ-1). Unicode code points (`len(str)`), never bytes.
+DESCRIPTION_BUDGET_CHECK = "description-budget"
+DESCRIPTION_BUDGET = 512
+
+
+def skill_description(text: str) -> tuple[str, int] | None:
+    """``(description, 1-based line)`` from a SKILL.md frontmatter block, its
+    surrounding quotes removed; ``None`` when there is no frontmatter or no
+    ``description:`` key."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for n, line in enumerate(lines[1:], start=2):
+        if line.strip() == "---":
+            return None
+        if line.startswith("description:"):
+            value = line[len("description:"):].strip()
+            # Read the value the way a YAML loader does (LESSON-716): a block
+            # scalar (`>`, `|`, with a chomping indicator) or a plain scalar
+            # continued on indented lines is the joined text of those lines, so a
+            # long description cannot hide behind a line break.
+            rest: list[str] = []
+            for more in lines[n:]:
+                if more.strip() == "---" or (more and not more[0].isspace()):
+                    break
+                rest.append(more.strip())
+            if value in (">", "|", ">-", "|-", ">+", "|+"):
+                joiner = "\n" if value.startswith("|") else " "
+                return joiner.join(r for r in rest if r), n
+            if rest and value[:1] not in "\"'":
+                value = " ".join([value] + [r for r in rest if r])
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            return value, n
+    return None
+
+
+def check_description_budget(root: Path) -> list[Finding]:
+    """Per root, armed like `plugin-manifest`: a description over
+    ``DESCRIPTION_BUDGET`` code points is a finding; the per-skill total is
+    printed to stderr whenever the check runs."""
+    if not is_plugin_root(root):
+        return []
+    findings: list[Finding] = []
+    total = count = 0
+    for d in _plugin_root_skill_dirs(root):
+        try:
+            text = (root / d / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        found = skill_description(text)
+        if found is None:
+            continue
+        desc, line = found
+        count += 1
+        total += len(desc)
+        if len(desc) > DESCRIPTION_BUDGET:
+            findings.append(Finding(
+                f"{d}/SKILL.md", line, DESCRIPTION_BUDGET_CHECK,
+                f"description is {len(desc)} Unicode code points, over the "
+                f"{DESCRIPTION_BUDGET} budget — keep the key use case first and trim "
+                "the rest (REQ-666 BR-7)"))
+    print(f"{DESCRIPTION_BUDGET_CHECK}: {count} skill description(s), {total} code points "
+          f"in all (budget {DESCRIPTION_BUDGET} each)", file=sys.stderr)
+    return findings
+
+
+# REQ-666 BR-11 / AC-10 `skills-ref`: the Agent Skills reference validator, when
+# it is on PATH. Never a hard dependency (REQ-425 BR-1): without it the check
+# prints one SKIP line and adds nothing. The validator rejects keys outside the
+# Agent Skills spec, and `argument-hint` is one Claude Code reads at the top
+# level, so each skill is validated from a copy, staged under the system temp
+# directory, whose frontmatter omits SKILLS_REF_HARNESS_KEYS (ADR-7). The copy
+# keeps the skill's directory name, so a `name:` mismatch still fails.
+SKILLS_REF_CHECK = "skills-ref"
+SKILLS_REF_BIN = "skills-ref"
+SKILLS_REF_HARNESS_KEYS = ("argument-hint",)
+SKILLS_REF_TIMEOUT = 60
+
+
+def _skills_ref_copy(text: str) -> str:
+    """``text`` with the top-level frontmatter keys in SKILLS_REF_HARNESS_KEYS
+    removed; the body is untouched."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return text
+    out = [lines[0]]
+    i = 1
+    while i < len(lines) and lines[i].strip() != "---":
+        if not any(lines[i].startswith(k + ":") for k in SKILLS_REF_HARNESS_KEYS):
+            out.append(lines[i])
+        i += 1
+    return "\n".join(out + lines[i:])
+
+
+def check_skills_ref(root: Path) -> list[Finding]:
+    """Per root, armed like `plugin-manifest`."""
+    if not is_plugin_root(root):
+        return []
+    exe = shutil.which(SKILLS_REF_BIN)
+    if exe is None:
+        print(f"{SKILLS_REF_CHECK}: SKIP — the skills-ref validator is not on PATH "
+              "(install it with: pip install skills-ref); no finding", file=sys.stderr)
+        return []
+    findings: list[Finding] = []
+    with tempfile.TemporaryDirectory(prefix="adlc-skills-ref.") as tmp:
+        for d in _plugin_root_skill_dirs(root):
+            rel = f"{d}/SKILL.md"
+            try:
+                text = (root / d / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            staged = Path(tmp) / d
+            staged.mkdir()
+            (staged / "SKILL.md").write_text(_skills_ref_copy(text), encoding="utf-8")
+            try:
+                out = subprocess.run([exe, "validate", str(staged)], capture_output=True,
+                                     text=True, timeout=SKILLS_REF_TIMEOUT, check=False)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                findings.append(Finding(rel, 1, SKILLS_REF_CHECK,
+                                        f"skills-ref validate did not complete: {type(exc).__name__}"))
+                continue
+            if out.returncode != 0:
+                said = " ".join((out.stdout + " " + out.stderr).split())
+                # Never an absolute path in a finding (BUG-054): the validator may
+                # print the temp dir as given or resolved (/var vs /private/var).
+                for staged_root in sorted({os.path.realpath(tmp), tmp}, key=len, reverse=True):
+                    said = said.replace(staged_root, "<staged>")
+                findings.append(Finding(rel, 1, SKILLS_REF_CHECK,
+                                        f"skills-ref validate failed: {said[:300]} (REQ-666 BR-11)"))
+    return findings
+
+
 def check_builtin_collision(root: Path) -> list[Finding]:
     """Per-root ``builtin-collision`` findings (see ``scan_builtin_collision``)."""
     return scan_builtin_collision(root).findings
@@ -3912,6 +4080,7 @@ def run(root: Path) -> tuple[list[Finding], int]:
     # REQ-669 ADR-6: the canonical dispatch sentence and the agent names, read
     # ONCE per run from the root's conventions.md and agents/ (see the loaders).
     dispatch_sentence, dispatch_source = load_dispatch_sentence(root)
+    dispatch_stop, _stop_source = load_dispatch_stop(root)
     agent_names = load_agent_names(root)
     findings: list[Finding] = []
     scanned = 0
@@ -3941,12 +4110,10 @@ def run(root: Path) -> tuple[list[Finding], int]:
         findings.extend(check_cross_fence_var(text, rel))
         findings.extend(check_forge_direct_gh(text, rel))
         findings.extend(check_read_bin_fallback(text, rel))
-        findings.extend(check_harness_skip(text, rel))
-        findings.extend(check_provenance_safe_fence(text, rel))
         findings.extend(check_unguarded_source(text, rel))
         findings.extend(check_toolkit_root_line(text, rel))
         findings.extend(check_dispatch_fallback(
-            text, rel, dispatch_sentence, agent_names, dispatch_source))
+            text, rel, dispatch_sentence, agent_names, dispatch_source, dispatch_stop))
         # REQ-646 ADR-5: both gate on `rel`'s directory name (wrapup / bugfix).
         findings.extend(check_lesson_check_order(text, rel))
         findings.extend(check_lesson_question_coverage(text, rel))
@@ -3967,8 +4134,6 @@ def run(root: Path) -> tuple[list[Finding], int]:
             continue
         findings.extend(check_read_bin_fallback(agent_text, agent_rel))
         findings.extend(check_unguarded_source(agent_text, agent_rel))
-        # REQ-648 BR-3: pipeline-runner's terminal emit is a run-outcome fence.
-        findings.extend(check_harness_skip(agent_text, agent_rel, gate=False))
         # REQ-669 ADR-1: the root line is owed wherever a fence reads the root.
         findings.extend(check_toolkit_root_line(agent_text, agent_rel))
     # REQ-610 ADR-3: a third separate walk, `find_phase_files`: `proceed/phase*.md`
@@ -3987,14 +4152,13 @@ def run(root: Path) -> tuple[list[Finding], int]:
             continue
         findings.extend(check_unguarded_source(phase_text, phase_rel))
         findings.extend(check_toolkit_root_line(phase_text, phase_rel))
-        # REQ-648 BR-3: the companions' Phase 1/3/5/8 run-outcome fences.
-        findings.extend(check_harness_skip(phase_text, phase_rel, gate=False))
         # REQ-669 ADR-6: /proceed's Phase 4 and lite Phase 5 dispatch steps live
         # in its companion files, and a partials/*.md companion doc can carry a
         # dispatch step too, so the sentence is owed in both (conventions.md
         # 'Agent dispatch patterns').
         findings.extend(check_dispatch_fallback(
-            phase_text, phase_rel, dispatch_sentence, agent_names, dispatch_source))
+            phase_text, phase_rel, dispatch_sentence, agent_names, dispatch_source,
+            dispatch_stop))
     # REQ-610: partials sourcing partials — no fences, the whole file is executable.
     # `toolkit-root-line` does not walk them: a partial reads the root through the
     # ADR-2 default-expansion spelling and never carries the root line.
@@ -4027,6 +4191,11 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_lane_vocabulary(root))
     # Per-root (REQ-654 BR-13): no new literal home-directory .claude path in code.
     findings.extend(check_adlc_home(root))
+    # Per-root (REQ-666 BR-2): the ETHOS line once, byte-identical, in every skill.
+    findings.extend(check_ethos_lines(root))
+    # Per-root (REQ-666 BR-7, BR-11): the description budget and the skills-ref validator.
+    findings.extend(check_description_budget(root))
+    findings.extend(check_skills_ref(root))
     return findings, scanned
 
 

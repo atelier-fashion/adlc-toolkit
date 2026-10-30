@@ -1,6 +1,6 @@
 ---
 name: adversary
-description: Adversarial review of any artifact — a spec, architecture doc, task breakdown, diff/PR, plan, README, or plain prose claim. Assumes the artifact is wrong, broken, or incomplete, tries to prove it, and reports only the findings that survive its own refutation attempts. Read-only and artifact-agnostic. Use when the user says "attack this", "adversary", "red-team this spec/plan/PR", "try to break this", "what's wrong with this requirement", or wants a skeptical-by-default pass that hunts omissions, not just bugs in what was written.
+description: Adversarial review of any artifact — a spec, architecture doc, task breakdown, diff/PR, plan, README, or prose claim. Assumes it is wrong, broken, or incomplete, tries to prove it, and reports only the findings that survive its own refutation. Read-only. Use when the user says "attack this", "adversary", "red-team this spec/plan/PR", "try to break this", "what's wrong with this requirement", or wants a skeptical-by-default pass that hunts omissions, not just bugs.
 argument-hint: A REQ-xxx id, a PR number, a file path, or inline text to attack
 ---
 
@@ -26,9 +26,9 @@ This skill reads the **target artifact at full fidelity** — it does NOT delega
 
 ## Input
 
-Target: $ARGUMENTS
+The target is the argument: whatever follows `/adversary` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text).
 
-The target is **polymorphic** (see Step 1). One target per invocation. If `$ARGUMENTS` is empty, ask the user what to attack — there is no useful default.
+The target is **polymorphic** (see Step 1). One target per invocation. If there is no argument, ask the user what to attack — there is no useful default.
 
 ## Prerequisites
 
@@ -41,7 +41,7 @@ The target is **polymorphic** (see Step 1). One target per invocation. If `$ARGU
 
 ### Step 1: Resolve and classify the target (BR-1)
 
-Resolve `$ARGUMENTS` to a concrete artifact using **strict** sanitization for every externally-derived token (LESSON-008 — a hostile id/path must never reach a shell or a file read):
+Resolve the argument to a concrete artifact using **strict** sanitization for every externally-derived token (LESSON-008 — a hostile id/path must never reach a shell or a file read):
 
 1. **REQ id** — if the argument matches `^REQ-[0-9]{3,6}$` exactly, resolve it to its spec directory by globbing `.adlc/specs/<id>-*/`. Do NOT widen the regex. Read `requirement.md` (and `architecture.md` / `tasks/` if present). Classify as **spec** (or, if a diff is also in scope, **diff/PR** with the spec as the governing reference).
 2. **PR number** — if the argument is all digits (`^[0-9]+$`), treat it as a PR number and resolve via `gh pr view <n> --json title,body,files` plus `gh pr diff <n>` (requires `gh`; degrade per Prerequisites). Classify as **diff/PR**.
@@ -66,7 +66,7 @@ Read the target at full fidelity first. Then attack:
 - **When the Agent tool and the `adversary` agent (`agents/adversary.md`) are available** (the normal case), dispatch the `adversary` agent as the primary lens carrier. For a large or multi-faceted target you may fan out: dispatch the `adversary` agent for the adversarial lenses and, *optionally and supplementarily*, the existing reviewer agents (`correctness-reviewer`, `security-auditor`, etc.) as additional executors for the diff/PR correctness surface. Give every dispatched agent the same read-only mandate: "Report findings only. Do not modify the target."
 - **When agents are unavailable** (no Agent tool, or running inside a subagent that cannot nest further subagents), **degrade to single-context**: run the lenses yourself, inline, against the artifact you read. Same lenses, same protocol — only the execution venue changes. This is the same soft-fallback philosophy as the delegation gates.
 
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+If this harness can run subagents, dispatch these agents in parallel; if it cannot, or you are a subagent, run each checklist inline from `.adlc/agents/<name>.md`. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and run its checklist inline. When `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) where your file tool can reach it; never improvise a checklist. An inline run of a review or audit agent is read-only: report findings, apply no fixes, and run no test runner, build tool, package manager or interpreter.
 
 ### Step 4: Mandatory self-refutation (BR-3)
 

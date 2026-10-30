@@ -14,14 +14,23 @@ You are a sprint orchestrator that launches multiple `/proceed` pipelines in par
 
 ## Context
 
-- Current directory: !`pwd`
-- Existing worktrees: !`git worktree list || echo Not a git repo`
-- Available specs: !`ls .adlc/specs/ || echo No specs found`
-- Pipeline state files (read each one before Step 1; an empty list means no active pipelines): !`find .adlc/specs -name pipeline-state.json`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- Current directory'
+pwd
+echo '--- Existing worktrees'
+git worktree list 2>/dev/null || echo 'Not a git repo'
+echo '--- Available specs'
+ls .adlc/specs/ 2>/dev/null || echo 'No specs found'
+echo '--- Pipeline state files (read each one before Step 1; an empty list means no active pipelines)'
+find .adlc/specs -name pipeline-state.json 2>/dev/null || echo 'No specs directory'
+```
 
 ## Input
 
-Target REQs: $ARGUMENTS
+The target REQs are the argument: whatever follows `/sprint` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), REQ ids and optionally `--workflow`. With none, Step 1 picks every eligible REQ.
 
 ## Prerequisites
 
@@ -42,7 +51,7 @@ Before proceeding, verify:
 **Decide which engine to run:**
 
 1. **Detect Dynamic Workflows availability**: the engine is *available* only if the `Workflow` tool is invocable in this session. Dynamic Workflows is research-preview and plan-gated, so it can be absent (headless/cron runs, non-qualifying plans). If you cannot invoke the `Workflow` tool, treat it as unavailable.
-2. **Read the `--workflow` flag** from `$ARGUMENTS`. Strip the flag token from the argument list before any REQ-ID parsing downstream, so it is never mistaken for a REQ id.
+2. **Read the `--workflow` flag** from the argument. Strip the flag token from the argument list before any REQ-ID parsing downstream, so it is never mistaken for a REQ id.
 3. **Select the engine**: choose `workflow` only when *available* **AND** (`--workflow` was passed **OR** the workflow engine has graduated to the default). Otherwise choose `legacy` — with no behavior change from today's `/sprint`.
 
 If the user passed `--workflow` but the `Workflow` tool is unavailable, say so explicitly and fall back to `legacy` rather than failing.
@@ -69,7 +78,7 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
    Workflow({
      scriptPath: <SCRIPT_PATH from step 1>,
      args: {
-       reqs: <normalized REQ-id list from $ARGUMENTS, with --workflow stripped>,
+       reqs: <normalized REQ-id list from the argument, with --workflow stripped>,
        integrationBranch: <resolved integration branch for the primary repo, by /proceed step 4's rule: branches.integration from .adlc/config.yml when declared, else "staging" in two-branch repos, else "main">,
        agentNamespace: <AGENT_NAMESPACE from step 1: "adlc:" or "">,
        answers: {}
@@ -162,7 +171,7 @@ Ask the user to confirm the sprint lineup before proceeding.
 
 For each eligible REQ, launch a **pipeline-runner** agent (defined in `$ADLC_TOOLKIT_ROOT/agents/`) using the Agent tool with `run_in_background: true`.
 
-Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`). Before dispatching, check which form the Agent tool lists and use that one; do not wait for an error, because a name it does not list can silently run a generic agent without the checklist. If neither form is listed, say which agent is missing, then read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` (the toolkit root is the parent of this skill's base directory) and run its checklist inline, or give its body to a general-purpose agent as the prompt, instead of skipping it; a review or audit agent stays read-only either way.
+This step requires a harness that can run subagents: if this harness cannot, or you are a subagent, stop here and say so, and run each REQ with `/proceed` instead. Agent names are bare on the symlink install and `adlc:`-prefixed on the plugin install (`adlc:<name>`): before dispatching, check which form the Agent tool lists and use that one, and do not wait for an error, because a name it does not list can silently run a generic agent without the checklist; if neither form is listed, say which agent is missing and stop.
 
 **Agent prompt for each REQ** (the orchestrator computes `<absolute-path>` as `<repo-path>/.worktrees/REQ-xxx` and substitutes it verbatim):
 
@@ -198,7 +207,7 @@ Background `pipeline-runner` agents send an automatic notification when they fin
 
 2. **When an agent-completion notification arrives** (the platform delivers one per background agent): re-read every `pipeline-state.json` under `.adlc/specs/REQ-*/` and update the dashboard. Only redraw when state has actually changed — don't spam the user with identical dashboards.
 
-   **Verify the agent's terminal-state claim before accepting it.** A pipeline-runner's final report MUST lead with one of `{merged, pr-ready, blocked, failed}` (see `$ADLC_TOOLKIT_ROOT/agents/pipeline-runner.md` Terminal state contract). The orchestrator MUST NOT trust the claim at face value:
+   **Verify the agent's terminal-state claim before accepting it.** A pipeline-runner's final report MUST lead with one of `{merged, pr-ready, blocked, failed}` (see `.adlc/agents/pipeline-runner.md` Terminal state contract, or `$ADLC_TOOLKIT_ROOT/agents/pipeline-runner.md` when `.adlc/agents/` is absent). The orchestrator MUST NOT trust the claim at face value:
    - For `merged` and `pr-ready` claims: run `adlc_forge_pr_view <prUrl> --json state,mergedAt` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; forge-neutral per REQ-520) against every touched-repo PR before updating the dashboard.
      - If the agent claimed `merged` but the PR is `OPEN`: treat the claim as `pr-ready` and merge the PR per Step 5.
      - If the agent claimed `pr-ready` but the PR is `MERGED`: just move on (agent was conservative, no harm done).
@@ -238,7 +247,7 @@ Completed: 0/3 | Blocked: 0 | Running: 3
 
 **Ordering enforcement (REQ-483).** When `/manifest`'s verdict (Step 2 pre-flight) shows footprint overlaps in the batch, merge the overlapping REQs in its **deterministic order** (earliest-published first, lower REQ tiebreak — BR-8) instead of as-they-complete, and gate **each** merge: `git -C <worktree> fetch origin <integrationBranch>` (refresh the tip), source `partials/trial-merge.sh`, then `adlc_trial_merge "<worktree>" origin/<integrationBranch>` before `adlc_forge_pr_merge`. **rc=1** → hold that REQ (`blocked`, surfaced for rebase); **rc=0** → merge; **rc=2/3** → `failed` (setup error, not a conflict). For overlapping **single-repo** REQs (whose pipeline-runners would otherwise self-merge as they complete), the orchestrator MUST hold the later-ranked one until the earlier merges — do not let both self-merge, or both could pass a stale-tip gate and collide at merge. Non-overlapping REQs still merge as they complete (parallel-by-default). Serializes **merges**, never implementation; computed in orchestrator code, not delegated (BR-10).
 
-**Who actually performs the merge depends on REQ topology** (see `$ADLC_TOOLKIT_ROOT/agents/pipeline-runner.md` Phase 8):
+**Who actually performs the merge depends on REQ topology** (see `.adlc/agents/pipeline-runner.md` Phase 8, or `$ADLC_TOOLKIT_ROOT/agents/pipeline-runner.md` when `.adlc/agents/` is absent):
 
 - **Single-repo REQ** (one touched repo in `pipeline-state.repos`): the pipeline-runner agent already merged its own PR in its Phase 8 and reports `merged`. The orchestrator's job here is to **verify** (per Step 4 verify gate) and move on — do NOT re-merge. If verification shows the PR is still `OPEN` despite the `merged` claim, fall through to the cross-repo flow below and merge it yourself.
 - **Cross-repo REQ** (multiple touched repos): the pipeline-runner stops at Phase 7 and reports `pr-ready`. The orchestrator owns merge sequencing and walks the per-REQ `mergeOrder` itself.
@@ -252,8 +261,6 @@ The sequential flow when the orchestrator is the merge actor (cross-repo, or sin
    - Remove the close-out worktree and the REQ's feature worktree(s) by the absolute paths recorded in state; `git fetch --prune`.
    - If the close-out fails, write `closeOut:{status:"failed", reason:"<why>"}` into the same state file, surface `close-out: failed — <why>` in the dashboard and summary, and move on — the merge stands.
    - **Emit the run-outcome line (REQ-648 BR-2).** You performed the merge, so the `merged` line is yours: the runner's last line for this REQ said `pr-ready` (or claimed a merge that verification showed did not happen), and readers keep the latest line per REQ. Run it whether the close-out succeeded or failed; `<state>` is the primary repo path's `pipeline-state.json`.
-
-     **Provenance-classifying harness (BUG-228):** skip this fence and reply `run-outcome skipped: provenance-classifying harness`.
 
      ```sh
      ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"

@@ -265,38 +265,14 @@ a general markdown linter and NOT a general shell linter.
    lived in all three families. Like the agents walk, neither extra walk feeds
    the `scanned N SKILL.md file(s)` count, so a companion file can never mask a
    dead skill walk (REQ-595 BR-5).
-10. **Harness skip (`harness-skip`)**: every fence that calls
-    `adlc_delegate_gate_check` must have the literal
-    `**Provenance-classifying harness (BUG-228):**` on a **prose** line within
-    the 30 lines above its opening. That line tells the model not to run the
-    step's shell on a harness that pins a session on an unclassifiable command
-    (Teton Code), and to take the fallback path instead. No spelling of those
-    blocks passes such a classifier (`adlc-read` is an unrecognised verb, the
-    partials run by path), and the harness cannot be detected from a script, so
-    the skill text is the only place the rule can live (see
-    `partials/delegate-gate.md`). A copy inside a fence does not count, and a
-    commented-out gate call is not a call. SKILL.md files only.
-11. **Provenance-safe fence (`provenance-safe-fence`)**: a shell fence whose
-    first body line is `# provenance-safe` promises that a harness classifying
-    shell reach (Teton Code) can prove every line of it in reach. So each
-    non-comment line must avoid every character that grammar refuses
-    (`' " ` $ \ > < { } ! * ? [ ] ( ) ; | &`) and `=` (read as an environment
-    assignment). Its verb must also be one the grammar recognises: `test`,
-    `cat`, `ls`, `find` without `-exec`, `grep`, `echo`, `pwd`, `which`, `wc`, or
-    `git status|log|branch|remote|tag|rev-parse|diff-tree|worktree|for-each-ref`.
-    A program named by path is a finding. `<placeholder>` tokens are stripped
-    first, because the model substitutes them before running the line.
-    Unmarked fences are not read. `/analyze` Step 2a is the first user
-    (BUG-230), and every spelling in it was run through Teton's real
-    classifier.
-12. **Lesson check order (`lesson-check-order`)**: the two lesson-capture steps
+10. **Lesson check order (`lesson-check-order`)**: the two lesson-capture steps
     (`/wrapup` Step 4, `/bugfix` Phase 6 Step 4) write the lesson, then validate
     it, then recheck its id, in that file order (REQ-646 ADR-5). Runs on
     `wrapup/SKILL.md` and `bugfix/SKILL.md` only, keyed on the directory name.
     A marker counts only on a line that is the marker and nothing else, outside
     every fenced block (```` ``` ```` or `~~~`, any language): a backticked or
     prose mention, or a copy inside an example fence, is a decoy (LESSON-404).
-    The harness line likewise counts only on a prose line. Fences nest
+    Fences nest
     length-aware: a fence closes only on a line of its own character (backtick
     or tilde), at least as long as its opening run, with nothing else on it,
     and an unclosed fence runs to EOF — so a ```` ````markdown ```` fence holds
@@ -329,7 +305,6 @@ a general markdown linter and NOT a general shell linter.
     | `missing-recheck-fence` | no top-level shell fence calls `adlc_recheck_id lesson` in a line's code (comments and quoted strings excluded) |
     | `check-before-write-point` | no write point sits above the first `adlc_lesson_check` call (reported on each check fence above the first write point) |
     | `recheck-before-check` | an `adlc_recheck_id lesson` call sits above the first `adlc_lesson_check` call, in another fence or the same one |
-    | `missing-harness-line` | `**Provenance-classifying harness (BUG-228):**` is not on a prose line in the 30 lines above a check fence (BR-15; same literal and window as `harness-skip`) |
     | `rules-block-missing` | no own-line `<!-- lesson-capture-rules -->` … `<!-- /lesson-capture-rules -->` block outside a fenced block, or it is unclosed or holds only blank lines |
     | `rules-block-missing-granularity` | the block has no line starting `Granularity:` |
     | `rules-block-mismatch` | the two files' blocks differ byte-for-byte (reported once, on `bugfix/SKILL.md`, at the first differing line — including a line one copy has and the other lacks) |
@@ -343,7 +318,7 @@ a general markdown linter and NOT a general shell linter.
     block is already `rules-block-missing` on its own file, so it is not also a
     mismatch.
 
-13. **Lane vocabulary (`lane-vocabulary`)** (REQ-652 BR-17, ADR-13): the lite
+11. **Lane vocabulary (`lane-vocabulary`)** (REQ-652 BR-17, ADR-13): the lite
     lane's closed sets (lane `lite`/`full`, the escalation triggers, the actors,
     and the lane check's `pass`/`escalate`/`error`) are defined once, in the
     `<!-- lane-vocabulary -->` block of `partials/lane-check.md`. The block's
@@ -365,7 +340,7 @@ a general markdown linter and NOT a general shell linter.
     `retrieval-status-parity` check's `LIFECYCLE_WRITE_SITES`, because a lite
     REQ gets `status: approved` from `/proceed` Step 0 (BR-18).
 
-14. **Plugin manifest (`plugin-manifest`)** (REQ-669 BR-1, BR-12, BR-20,
+12. **Plugin manifest (`plugin-manifest`)** (REQ-669 BR-1, BR-12, BR-20,
     ADR-3): this repo is both the Claude Code marketplace and the plugin, and
     the check keeps `.claude-plugin/plugin.json` and
     `.claude-plugin/marketplace.json` in step with the tree. Each of these is
@@ -403,7 +378,7 @@ a general markdown linter and NOT a general shell linter.
     plugin.json's `repository`. `test_readme_install_check_fires_on_drift` edits
     each side in turn and expects a problem.
 
-15. **Toolkit root line (`toolkit-root-line`)** (REQ-669 ADR-1, BR-3, BR-4):
+13. **Toolkit root line (`toolkit-root-line`)** (REQ-669 ADR-1, BR-3, BR-4):
     every shell fence that reads `$ADLC_TOOLKIT_ROOT` carries the canonical
     root line, byte-exact, on its own line before the first read:
 
@@ -436,13 +411,25 @@ a general markdown linter and NOT a general shell linter.
     `test_conventions_documents_root_line_and_spelling_byte_exact` pins that
     copy to `TOOLKIT_ROOT_LINE`.
 
-16. **Dispatch fallback (`dispatch-fallback`)** (REQ-669 ADR-6, BR-9, BR-4):
-    the toolkit's agents are offered by bare name on the symlink install and as
-    `adlc:<name>` on the plugin install, and a name the session does not offer
+14. **Dispatch has fallback (`dispatch-has-fallback`)** (REQ-666 BR-3, BR-12;
+    REQ-669 ADR-6, BR-9, BR-4; it absorbed REQ-669's `dispatch-fallback`): a
+    harness may have no agent tool, a subagent cannot dispatch further, and the
+    toolkit's agents are offered by bare name on the symlink install and as
+    `adlc:<name>` on the plugin install, where a name the session does not offer
     can silently become a generic agent instead of failing. So every step that
-    dispatches a toolkit agent carries the canonical dispatch sentence, which
-    tells the model to use the form the Agent tool lists and, when neither form
-    is listed, to say so and run `$ADLC_TOOLKIT_ROOT/agents/<name>.md` inline.
+    dispatches a toolkit agent carries the canonical dispatch paragraph, which
+    says to dispatch when the harness can and otherwise run each checklist inline
+    from `.adlc/agents/<name>.md` (`$ADLC_TOOLKIT_ROOT/agents/<name>.md`, naming
+    `/init` (`/adlc:init` on the plugin install), when that directory is absent),
+    to use the name form the Agent tool lists, and to keep an inline audit
+    read-only. A step that cannot run without subagents (`/sprint`) carries the
+    explicit-stop block, `<!-- dispatch-requires-subagents -->`, instead. A step
+    that dispatches an agent with no toolkit checklist ("Launch Explore agents",
+    "launch 3 agents using the Agent tool") owes at least the paragraph's leading
+    clause, "If this harness can run subagents", with an inline arm that fits.
+    Only an imperative counts as such an instruction: the base verb at the start
+    of a clause, or "using the Agent tool"; "dispatched via the Agent tool" and
+    "the dispatch prompt" do not.
 
     The sentence is **not** copied into `check.py`. It lives once, between the
     line-start markers `<!-- dispatch-fallback-sentence -->` and
@@ -492,8 +479,20 @@ a general markdown linter and NOT a general shell linter.
     mention and carries the sentence, so a clean run cannot be vacuous
     (LESSON-019).
 
-17. **Toolkit path (`toolkit-path`)** (REQ-669 BR-13, BR-2, ADR-9): no literal
-    toolkit read path on the plugin-reachable surface. The plugin route has no
+15. **No harness path (`no-harness-path`)** (REQ-666 BR-13, ADR-5; REQ-669
+    BR-13, BR-2, ADR-9; it absorbed REQ-669's `toolkit-path` and lifted
+    `TOOLKIT_PATH_EXCEPTIONS` whole): no literal harness home path on the
+    plugin-reachable surface. In the Markdown families (`*/SKILL.md`,
+    `proceed/phase*.md`, `agents/*.md`, `partials/*.md`, and Markdown under
+    `presets/` and `templates/`) that is any home of the five harnesses:
+    `~/.claude`, `$HOME/.claude` in every brace and default form, and the same
+    for `.codex`, `.copilot`, `.gemini` and `.cursor`. In code it is the toolkit
+    spellings below and the four other harness homes (`OTHER_HARNESS_SPELLINGS`);
+    a general `~/.claude` path in code is item 17's (`adlc-home`), which leaves
+    a line holding a toolkit spelling to this check, so each line is reported
+    once. Text names machine state through REQ-654's default-expansion spelling,
+    `${ADLC_HOME:-$HOME/.claude}/…`. The rest of this item is the toolkit part,
+    unchanged from `toolkit-path`: no literal toolkit read path. The plugin route has no
     `~/.claude/skills` and no `~/.claude/agents`, so a read through either
     names a file that is not there, or the clone on a doubled machine. Reads go
     through ToolkitRoot: `$ADLC_TOOLKIT_ROOT/…` after a fence's root line, the
@@ -532,6 +531,10 @@ a general markdown linter and NOT a general shell linter.
     | file | `install.sh` | the symlink installer, which the plugin route never runs |
     | file | `tools/adlc/checks.py` | the doctor's route checks inspect the symlink install on purpose (ADR-7). The exception is whole-file, so a test holds it to that purpose (below) |
     | file | `tools/lint-skills/check.py` | the lint's own rule table: it spells every pattern it polices |
+    | token | `${ADLC_HOME:-$HOME/.claude}` | REQ-654's default-expansion spelling of the machine-state home (REQ-666): the path is named through the variable that owns it, the literal is only its default |
+    | marker | a line carrying `adlc-home: claude-code`, `adlc-home: alias` or `adlc-home: default` (in Markdown as an HTML comment) | REQ-654's marker, one mechanism for both checks: the line keeps its literal on purpose and says why. An unknown kind is `adlc-home`'s finding |
+    | comment | a whole-line HTML comment in a Markdown file | the agents' rendered `model:` header names the machine config's default location (REQ-666) |
+    | file | `tools/adlc/harness_probe.py` | REQ-664's §6 probes edit the other harnesses' user files and read their session stores by design (REQ-666) |
     | comment | `#` in shell, Python and the shell fences of a Markdown file; `//` and `/* … */` in JavaScript, except under `presets/` and `templates/` (`TOOLKIT_PATH_INSTRUCTION_DIRS`) | a comment is not a read. A Markdown heading is not a comment, and a trailing comment does not exempt its code line. In a preset or a template a `#` line is the user's instruction (the preset header says `#   cp "$ADLC_TOOLKIT_ROOT/presets/<x>.yml" .adlc/config.yml`), so no comment line there is exempt |
     | tree | `tests/` and `fixtures/`, at any depth below the root | they plant the spellings on purpose |
 
@@ -564,11 +567,7 @@ a general markdown linter and NOT a general shell linter.
     `test_repo_root_clean_and_every_surface_scanned` fails if any surface read
     nothing (LESSON-019). Fixture trees are in `tests/fixtures/toolkit-path/`.
 
-    REQ-666's `no-harness-path` check is a superset of this one: it adds the
-    other harness homes. When it lands it absorbs `toolkit-path` and lifts
-    `TOOLKIT_PATH_EXCEPTIONS` whole (REQ-669 BR-18).
-
-18. **Built-in collision (`builtin-collision`)** (REQ-669 BR-10, ADR-5,
+16. **Built-in collision (`builtin-collision`)** (REQ-669 BR-10, ADR-5,
     TASK-133): a skill name Claude Code also owns is never printed bare as an
     instruction. Claude Code 2.1.258 resolves a bare `/<name>` to the first
     command whose name matches exactly, so on the plugin install a bare `/init`
@@ -596,7 +595,7 @@ a general markdown linter and NOT a general shell linter.
     the text appears: Markdown prose, a quoted runtime string, or a `!` preamble
     line that allows neither backticks nor parentheses.
 
-    The surface is `BUILTIN_COLLISION_SURFACES`. It is toolkit-path's surface
+    The surface is `BUILTIN_COLLISION_SURFACES`. It is no-harness-path's surface
     (`*/SKILL.md`, `proceed/phase*.md`, `agents/*.md`, `partials/*.sh`,
     `partials/*.md`, `workflows/*.js`, `tools/**`, `presets/*`, `templates/*`)
     plus the shipped families the e2e audit also reads: `proceed/*.md`,
@@ -607,8 +606,8 @@ a general markdown linter and NOT a general shell linter.
     read: its released entries record what shipped and are not rewritten, so a
     bare instruction in a new `[Unreleased]` entry is fixed by hand. Each
     surface is listed once. The check is
-    walked and armed like `toolkit-path` (`is_plugin_root`), and a file two
-    surfaces yield is read once. Of toolkit-path's exceptions only the `tests/`
+    walked and armed like `no-harness-path` (`is_plugin_root`), and a file two
+    surfaces yield is read once. Of no-harness-path's exceptions only the `tests/`
     and `fixtures/` trees apply. The doctor's remediations in
     `tools/adlc/checks.py` are printed to the user, so they are checked.
     Fixture trees are in `tests/fixtures/builtin-collision/`.
@@ -617,7 +616,7 @@ a general markdown linter and NOT a general shell linter.
     `builtin_collision_static` reports it. Add the name to
     `BUILTIN_COLLISION_NAMES`, then dual-spell the lines this check names.
 
-19. **ADLC home (`adlc-home`)** (REQ-654 BR-13, ADR-9): no new literal
+17. **ADLC home (`adlc-home`)** (REQ-654 BR-13, ADR-9): no new literal
     home-directory `.claude` path in code. The toolkit's machine state (the id
     counters and their locks, the reservations ledger, the machine config, the
     delegate venv, the skills view) lives under `ADLC_HOME`, default
@@ -626,7 +625,7 @@ a general markdown linter and NOT a general shell linter.
     anywhere else silently closes that seam again (LESSON-012).
 
     The surface is `ADLC_HOME_SURFACES`: `partials/*.sh`, `tools/**` (code
-    files, walked as toolkit-path walks them), `install.sh` and `scripts/*`.
+    files, walked as no-harness-path walks them), `install.sh` and `scripts/*`.
     The spellings are `ADLC_HOME_SHELL_RE` (`~/.claude`, `$HOME/.claude` in every
     brace, default, quoted and escaped form, and `$<var>/.claude` for a variable
     whose name holds `home`) and, in Python, `ADLC_HOME_PY_JOIN_RE`
@@ -648,11 +647,46 @@ a general markdown linter and NOT a general shell linter.
     marker kind is a finding, so a typo cannot exempt a line. The marker is the
     only exemption mechanism, so every exemption is visible where it is made.
 
-    Distinct from `toolkit-path`, which is about toolkit reads on the plugin
-    surface, and from REQ-666's planned `no-harness-path`, which is about skill
-    text. `scan_adlc_home` returns the files read per surface, and
+    Distinct from `no-harness-path` (item 15), which owns every harness home in
+    text and the toolkit and foreign-harness paths in code; a code line holding a
+    toolkit spelling is left to it. `scan_adlc_home` returns the files read per surface, and
     `test_every_surface_is_scanned` fails if any surface read nothing. Fixture
     trees are in `tests/fixtures/adlc-home/`.
+
+18. **ETHOS line (`ethos-line`)** (REQ-666 BR-2, AC-3): the ETHOS `!` line is
+    the one preamble line a skill keeps (plan M6). The check reads the canonical
+    line from `.adlc/context/conventions.md` "Ethos injection pattern" (the
+    scan root's copy, or the lint checkout's for a root with none; a copy
+    without the line is one finding, so deleting it cannot disarm the check)
+    and requires it exactly once, byte-identical, outside any fence, in every
+    `*/SKILL.md`. A missing line, a line that starts like it but differs, and a
+    second copy are each a finding, and so is any other inline bang command in a
+    skill's prose: context reads belong in the `# adlc-context` fence. Per root,
+    armed like `plugin-manifest` (`is_plugin_root`). Tests:
+    `tests/test_ethos_line.py`.
+
+19. **Description budget (`description-budget`)** (REQ-666 BR-7, AC-7): every
+    harness loads every skill description at session start, and Claude Code
+    truncates its listing at 1 536 characters for `description` plus
+    `when_to_use`. Each `description:` (quotes removed) must be at most
+    `DESCRIPTION_BUDGET` (512) Unicode code points, counted with `len(str)`,
+    never bytes. The check prints `description-budget: <N> skill
+    description(s), <total> code points in all` to stderr whenever it runs.
+    Per root, armed like `plugin-manifest`. Tests:
+    `tests/test_description_budget.py`.
+
+20. **Skills reference validator (`skills-ref`)** (REQ-666 BR-11, AC-10): when
+    a `skills-ref` executable is on PATH, every `*/SKILL.md` is validated with
+    `skills-ref validate <dir>` and a non-zero exit is a finding. The validator
+    rejects keys outside the Agent Skills spec, and `argument-hint` is one Claude
+    Code reads at the top level, so each skill is validated from a copy staged
+    under the system temp directory (removed afterwards) whose frontmatter
+    omits `SKILLS_REF_HARNESS_KEYS`; the directory name is kept, so a `name:`
+    mismatch still fails. Without the validator the check prints one `skills-ref:
+    SKIP` line naming `pip install skills-ref` and adds no finding, so the lint
+    stays offline and stdlib-only (REQ-425 BR-1). Per root, armed like
+    `plugin-manifest`. Tests: `tests/test_skills_ref.py`, with a fake validator.
+    The run against the real validator is a manual, recorded step.
 
 ## Usage
 
@@ -709,6 +743,9 @@ pytest tools/delegate/tests/ tools/lint-skills/tests/ -q
 ## Constraints
 
 - Python 3 stdlib only (`argparse`, `json`, `os`, `posixpath`, `re`,
-  `pathlib`, `sys`). No third-party packages. No network.
+  `pathlib`, `shutil`, `subprocess`, `sys`, `tempfile`). No third-party packages.
+  No network.
 - POSIX `sh`-compatible wrapper. Tested on macOS and Linux.
-- Read-only against the repo. No temp files, no logs, no cache.
+- Read-only against the repo. No logs, no cache, and no temp files except the
+  `skills-ref` check's staged copies, which live under the system temp directory
+  only while the installed validator runs (item 20).

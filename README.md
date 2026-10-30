@@ -93,7 +93,7 @@ The plugin's design rests on how Claude Code loads plugins. A claim marked **ver
 | `/manifest` | Remote-derived view of all in-flight ADLC work — open PRs + pushed `feat/REQ-*` branches, with advisory component/domain + file-footprint overlap and a deterministic merge order (REQ-483) |
 | `/analyze` | Codebase health audit |
 | `/optimize` | API cost & performance scanner |
-| `/template-drift` | Detect drift between a project's local `.adlc/templates/` and the canonical toolkit templates. On the plugin route it names the plugin version it compares against (`adlc plugin <version>`) |
+| `/template-drift` | Detect drift between the copies `/init` vendored into a project's `.adlc/` (templates, partials, agent checklists, ETHOS, workflow runtime) and the canonical toolkit copies. On the plugin route it names the plugin version it compares against (`adlc plugin <version>`) |
 
 On the plugin route each skill is `/adlc:<skill>`.
 
@@ -313,6 +313,13 @@ Copilot CLI, Codex, Gemini CLI and Cursor read user-level skills from `~/.agents
 - An edit to an existing skill reaches every harness at once, as it always has. A skill directory you **add or remove** reaches the four other harnesses at the next `./install.sh` run; `adlc doctor`'s `skills-view` check says when the view is behind.
 - If `~/.agents/skills` is absent, it becomes a link to the view. If it is already a directory of your own, `install.sh` adds one link per toolkit skill inside it and touches nothing else: a skill name you already use there is skipped and reported, never overwritten. `--dry-run` names what it found and what it would do.
 - `adlc harness detect` (`--json` for scripts) prints, for each of the five harnesses, whether its binary is on `PATH`, the version it reports, and whether its skills directory reaches this toolkit. Nothing about discovery on the non-Claude harnesses has been verified yet; the mount is the structural half of that.
+- The skill **text** is written for all five (REQ-666): the argument is described in prose rather than as `$ARGUMENTS`, context loads through one fence the model runs first, every agent dispatch says what to do on a harness without subagents (run the checklist inline from the project's `.adlc/agents/`, which `/init` vendors), and no skill names a harness home path. What is lost until the per-harness adapters ship:
+
+  | On a non-Claude harness | Effect |
+  |---|---|
+  | the ETHOS `!` line | shown as literal text; the model may run its command or skip it, so the ethos can be missing from the skill's context |
+  | agent dispatch | runs inline, one checklist at a time, where the harness has no subagents |
+  | the plugin route's `adlc:` names | not applicable: those harnesses read the skills view, which has no namespace |
 
 ### `ADLC_HOME`
 

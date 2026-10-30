@@ -14,13 +14,21 @@ You are writing a requirement spec following the spec-driven ADLC process.
 
 ## Context
 
-- ADLC context: !`cat .adlc/context/project-overview.md || echo No project overview found`
-- Requirement template: !`cat .adlc/templates/requirement-template.md || echo No requirement template found — run /init, or /adlc:init on the plugin install, to vendor .adlc/templates`
-- Taxonomy: !`cat .adlc/context/taxonomy.md || echo No taxonomy found — consider running /init, or /adlc:init on the plugin install, to scaffold one`
+Run this block first, with your shell tool, and read its output before you continue. Each read prints a notice instead of failing when its file is absent.
+
+```sh
+# adlc-context
+echo '--- ADLC context'
+cat .adlc/context/project-overview.md 2>/dev/null || echo 'No project overview found'
+echo '--- Requirement template'
+cat .adlc/templates/requirement-template.md 2>/dev/null || echo 'No requirement template found — run /init (/adlc:init on the plugin install) to vendor .adlc/templates'
+echo '--- Taxonomy'
+cat .adlc/context/taxonomy.md 2>/dev/null || echo 'No taxonomy found — consider running /init (/adlc:init on the plugin install) to scaffold one'
+```
 
 ## Input
 
-Feature request: $ARGUMENTS
+The feature request is the argument: whatever follows `/spec` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text). With none, ask the user what to build.
 
 **Lane flags — read and strip these before anything else** (REQ-652 BR-4). The argument may carry `--lite` or `--full`, each a standalone token, to force the REQ's lane instead of letting Step 1.7 triage it. Read them from the argument above and remove every occurrence of both tokens, before the Prerequisites check and before Step 1.4's intake gate:
 
@@ -49,12 +57,12 @@ The gap list is the point. A spec written from a transcript will always contain 
 
 **This step runs before Step 1.5** because Step 1.5 derives the retrieval query from the request, and a distilled statement is better tag input than a raw transcript. It runs **before Step 2** because an interactive blocking-gap halt must not burn a REQ id — `adlc_alloc_id` mutates a shared machine-global counter and pushes a remote reservation ref.
 
-1. **Activation gate (BR-1).** Intake activates only when the input is unstructured. Source the partial and call the detector in the same fenced block (BR-10 — the `cross-fence-fn` rule). The detector gets the feature request with `--lite` and `--full` already stripped (**Input**), here and in step 2's fence:
+1. **Activation gate (BR-1).** Intake activates only when the input is unstructured. Source the partial and call the detector in the same fenced block (BR-10 — the `cross-fence-fn` rule). The detector gets the feature request with `--lite` and `--full` already stripped (**Input**), here and in step 2's fence: substitute it for `<request>`, quotes included, as one single-quoted literal with every `'` in it written `'\''` (conventions.md "Bash in skills", "Substituting a value into a fence"). Never double-quote it: a backtick or `$` in the request would run.
 
    ```sh
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
    if [ -f .adlc/partials/intake.sh ]; then . .adlc/partials/intake.sh; else . "$ADLC_TOOLKIT_ROOT/partials/intake.sh"; fi
-   adlc_intake_detect "$ARGUMENTS"; gate=$?
+   adlc_intake_detect '<request>'; gate=$?
    echo "intake_gate=$gate  reason=${ADLC_INTAKE_REASON:-none}  kind=${ADLC_INTAKE_KIND:-none}  inline=${ADLC_INTAKE_INLINE:-0}"
    # This fence is a GATE PROBE only — step 2 re-derives everything in its own shell.
    # For an inline source, detect materializes a temp dir; discard this probe's copy
@@ -75,7 +83,7 @@ The gap list is the point. A spec written from a transcript will always contain 
    ```sh
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
    if [ -f .adlc/partials/intake.sh ]; then . .adlc/partials/intake.sh; else . "$ADLC_TOOLKIT_ROOT/partials/intake.sh"; fi
-   adlc_intake_detect "$ARGUMENTS" || exit 0
+   adlc_intake_detect '<request>' || exit 0
    adlc_intake_segment "$ADLC_INTAKE_PATH" || exit $?
    adlc_intake_redact "$ADLC_INTAKE_CORPUS" || exit $?
    echo "INTAKE_CORPUS=$ADLC_INTAKE_CORPUS"
@@ -94,8 +102,6 @@ The gap list is the point. A spec written from a transcript will always contain 
    **Thread the echoed values forward as literals.** Later fenced blocks cannot read them as variables — substitute the actual printed values into the commands below, the same way the telemetry `flag` path is threaded through Step 1.6. Writing `"$ADLC_INTAKE_CORPUS"` in a later block would silently expand to an empty string.
 
 3. **Read the source body — gated delegation, hard fallback (BR-5).**
-
-   **Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
 
    **Before the gate check**, create the telemetry flag and capture the start time:
 
@@ -228,7 +234,7 @@ The gap list is the point. A spec written from a transcript will always contain 
    /spec: intake found <N> blocking gap(s) — written to Open Questions, not answered (non-interactive mode)
    ```
 
-7. **Carry the result into Step 3, and clean up.** Retain the distilled feature request (it replaces `$ARGUMENTS` as the input Step 1.5 tags and Step 3 writes from), the classified gap list with dispositions, and the provenance triple — source **basename**, `kind`, and intake date. Step 3 persists all three.
+7. **Carry the result into Step 3, and clean up.** Retain the distilled feature request (it replaces the argument as the input Step 1.5 tags and Step 3 writes from), the classified gap list with dispositions, and the provenance triple — source **basename**, `kind`, and intake date. Step 3 persists all three.
 
    Then remove the temp files, substituting the literals echoed in step 2. The corpus holds a redacted copy of the source and there is no `trap` that can span fenced blocks, so this is the only cleanup:
 
@@ -245,7 +251,7 @@ The gap list is the point. A spec written from a transcript will always contain 
 
 Before retrieval fires, derive a structured query from the feature request. This query drives both context loading (Step 1.6) and the self-tagging of the new REQ (Step 3).
 
-1. Read the feature request in `$ARGUMENTS` alongside any grounding context already in conversation. Extract likely area signals:
+1. Read the feature request (the argument) alongside any grounding context already in conversation. Extract likely area signals:
    - **component** — which narrow area this touches (e.g., `API/auth`, `iOS/SwiftUI`, `adlc/spec`)
    - **domain** — broader problem domain (e.g., `auth`, `payments`, `ui`, `adlc`)
    - **stack** — tech layers implicated (e.g., `express`, `firestore`, `swiftui`, `markdown`)
@@ -272,7 +278,7 @@ Before retrieval fires, derive a structured query from the feature request. This
    Confirm or edit any field before retrieval fires.
    ```
 4. **Non-interactive / pipeline mode** — detect this when ANY of:
-   - `$ARGUMENTS` already contains explicit tag values (e.g., a caller passed `component: X` or `tags: [...]` in the prompt)
+   - The argument already contains explicit tag values (e.g., a caller passed `component: X` or `tags: [...]` in the prompt)
    - The invocation prompt explicitly says "invoked from /proceed" or "pipeline mode" or supplies an inherited query object
    - Running inside a subagent context that cannot receive further user input (e.g., dispatched via the Agent tool)
 
@@ -362,8 +368,6 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
 6. **Take the top 15 globally** across all corpora. There are no per-corpus quotas (no minimum-lesson floor, no maximum-bug cap). If fewer than 15 candidates survive filtering, take what is available.
 
 7. **Body-read of top-15 docs** — gated delegation, hard fallback.
-
-   **Provenance-classifying harness (BUG-228):** if your shell tool classifies each command's reach and pins the session to a local tier when it cannot prove it — Teton Code's `shell` does — run none of this step's shell blocks (telemetry, gate, or `adlc-read`). Go straight to the fallback path, reading with your harness's own file-read tool, and say in your reply that the delegate was skipped for this reason instead of running the fallback's stderr emit or the telemetry emit. No spelling of those blocks classifies as in-reach (`adlc-read` is not a recognised verb and the partials run by path), so any one of them pins the turn — see `partials/delegate-gate.md` "Provenance-classifying harnesses".
 
    **Before the gate check**, create a skill-invocation flag and capture the start time for telemetry (REQ-424 ghost-skip detection):
 
@@ -478,12 +482,7 @@ Run a weighted-score retrieval over three corpora using the query from Step 1.5.
    its command once on empty input; the quoted `-name` never hands the shell an
    unmatched glob (zsh aborts on one — LESSON-335); and `([^0-9]|$)` stops
    `LESSON-40` matching `LESSON-404` without a word-boundary escape, which BSD
-   tools silently ignore (LESSON-013). On a provenance-classifying harness
-   (BUG-228), where the shell form would pin the session, use Claude's own Grep
-   tool with the regex `^supersedes:[ \t][^#]*LESSON-<id>([^0-9]|$)`, `<id>` there
-   being the digits alone (path `.adlc/knowledge/lessons`, glob `LESSON-*.md`,
-   with line numbers), and keep only the hits inside their file's frontmatter
-   block — the block that opens at the file's first non-blank, non-comment line.
+   tools silently ignore (LESSON-013).
 
    **This changes nothing about retrieval.** A superseded lesson keeps its score,
    its rank, and its place in the top 15; sub-steps 3–6 are not re-run, and neither
@@ -532,7 +531,7 @@ Retain the lane, `lane_reason` and `lane_forced` for Step 3 and Step 4.
 **A missing `lane` means `full`** (REQ-652 BR-12). Every reader treats a spec without the field as a full-lane REQ, so every spec written before this step existed keeps its behavior. Only `lite` and `full` are lane values; never write the field empty.
 
 ### Step 2: Determine the Next REQ ID
-1. Use the **global** atomic counter file `~/.claude/.global-next-req` (shared across all repos for unique IDs) — but the counter is now a **cache, not the authority**: the remote is the source of truth (REQ-518). Allocation derives the remote high-water, takes `max(remote, local)`, allocates `max + 1`, and fast-forwards the local counter — all inside the existing `mkdir` lock with its symlink/TOCTOU guards intact.
+1. Use the **global** atomic counter file `${ADLC_HOME:-$HOME/.claude}/.global-next-req` (shared across all repos for unique IDs) — but the counter is now a **cache, not the authority**: the remote is the source of truth (REQ-518). Allocation derives the remote high-water, takes `max(remote, local)`, allocates `max + 1`, and fast-forwards the local counter — all inside the existing `mkdir` lock with its symlink/TOCTOU guards intact.
 2. Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — one parameterized helper replaces the three near-identical inline blocks; the lock block + its REQ-416/LESSON-014 rationale live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
    ```bash
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
