@@ -30,8 +30,9 @@ started_at=2026-10-30T20:43:33Z
 ```
 
 - The file is mode 0600 and the transcript it names exists.
-- `claude --resume <id>` rewrote the same file with the same `started_at`, and there
-  was still one sidecar.
+- `claude --resume <id>` fired the hook with `source: resume`. The sidecar's mtime changed,
+  so it was rewritten rather than left alone, it kept `started_at`, and there was still
+  one sidecar.
 - `git status --porcelain` was empty.
 - Both `SessionStart` hooks exited 0, and `ethos-inject`'s stdout reached the session.
 
