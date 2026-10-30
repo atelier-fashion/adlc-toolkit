@@ -91,3 +91,27 @@ def test_name_mismatch_fires_with_validator(tmp_path):
 def test_staged_copy_drops_only_the_harness_keys():
     text = "---\nname: a\nargument-hint: x\ndescription: d\n---\nargument-hint: body line stays\n"
     assert _check._skills_ref_copy(text) == "---\nname: a\ndescription: d\n---\nargument-hint: body line stays\n"
+
+
+# REQ-661 BR-7: the validator sees the skill directory once, companions included.
+FAKE_NEEDS_COMPANION = FAKE.replace(
+    'echo "Valid skill: $dir"',
+    'if [ -f "$dir/.want-companion" ] && [ ! -f "$dir/references/step.md" ]; then '
+    'echo "companion not staged" >&2; exit 1; fi\necho "Valid skill: $dir"')
+
+
+def test_companions_are_staged_with_their_skill(tmp_path):
+    """A skill whose companion was not staged fails the fake; the real staging
+    copies `references/` beside the SKILL.md, so it is clean. A second skill
+    whose name mismatches is the positive control in the same run."""
+    root = _root(tmp_path, {"alpha": "alpha", "beta": "gamma"})
+    (root / "alpha" / "references").mkdir()
+    (root / "alpha" / "references" / "step.md").write_text("# step\n", encoding="utf-8")
+    env = _env(tmp_path, with_validator=True)
+    exe = Path(env["PATH"].split(os.pathsep)[0]) / "skills-ref"
+    exe.write_text(FAKE_NEEDS_COMPANION.replace(
+        'if [ -f "$dir/.want-companion" ]', 'if [ "$base" = alpha ]'))
+    out = _run(root, env)
+    found = [ln for ln in out.stdout.splitlines() if ": skills-ref:" in ln]
+    assert [ln.split(":")[0] for ln in found] == ["beta/SKILL.md"], out.stdout
+    assert "companion not staged" not in out.stdout

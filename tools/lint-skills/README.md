@@ -265,7 +265,8 @@ a general markdown linter and NOT a general shell linter.
    lived in all three families. Like the agents walk, neither extra walk feeds
    the `scanned N SKILL.md file(s)` count, so a companion file can never mask a
    dead skill walk (REQ-595 BR-5).
-10. **Lesson check order (`lesson-check-order`)**: the two lesson-capture steps
+10. **Lesson check order (`lesson-check-order`)** (keyed on the skill unit since
+    REQ-661, see "Skill units and companions"): the two lesson-capture steps
     (`/wrapup` Step 4, `/bugfix` Phase 6 Step 4) write the lesson, then validate
     it, then recheck its id, in that file order (REQ-646 ADR-5). Runs on
     `wrapup/SKILL.md` and `bugfix/SKILL.md` only, keyed on the directory name.
@@ -336,9 +337,10 @@ a general markdown linter and NOT a general shell linter.
     and so is a `LANE_SITES` file that no longer exists. The check is per-root
     and inert unless `partials/lane-check.md` or `proceed/phases-lite.md`
     exists; either one arms it, so deleting the vocabulary file alone does not
-    disarm it. The same change adds `proceed/SKILL.md` to the
+    disarm it. The same change adds `/proceed` Step 0 to the
     `retrieval-status-parity` check's `LIFECYCLE_WRITE_SITES`, because a lite
-    REQ gets `status: approved` from `/proceed` Step 0 (BR-18).
+    REQ gets `status: approved` from it (BR-18); since REQ-661 that site is
+    `proceed/phase-0-setup.md`, where Step 0 now lives.
 
 12. **Plugin manifest (`plugin-manifest`)** (REQ-669 BR-1, BR-12, BR-20,
     ADR-3): this repo is both the Claude Code marketplace and the plugin, and
@@ -483,7 +485,7 @@ a general markdown linter and NOT a general shell linter.
     BR-13, BR-2, ADR-9; it absorbed REQ-669's `toolkit-path` and lifted
     `TOOLKIT_PATH_EXCEPTIONS` whole): no literal harness home path on the
     plugin-reachable surface. In the Markdown families (`*/SKILL.md`,
-    `proceed/phase*.md`, `agents/*.md`, `partials/*.md`, and Markdown under
+    `proceed/phase*.md`, `*/references/*.md`, `agents/*.md`, `partials/*.md`, and Markdown under
     `presets/` and `templates/`) that is any home of the five harnesses:
     `~/.claude`, `$HOME/.claude` in every brace and default form, and the same
     for `.codex`, `.copilot`, `.gemini` and `.cursor`. In code it is the toolkit
@@ -500,8 +502,10 @@ a general markdown linter and NOT a general shell linter.
     Python.
 
     The surface is `TOOLKIT_PATH_SURFACES`, one entry per family: `*/SKILL.md`,
-    `proceed/phase*.md`, `agents/*.md`, `partials/*.sh`, `partials/*.md`,
-    `workflows/*.js`, `tools/**`, `presets/*` and `templates/*`. In `tools/**`
+    `proceed/phase*.md`, `*/references/*.md`, `agents/*.md`, `partials/*.sh`, `partials/*.md`,
+    `workflows/*.js`, `tools/**`, `presets/*` and `templates/*`. The two
+    companion families come from `skill_companions`, the helper the per-file
+    walk uses, so both read the same companion set (REQ-661 BR-7). In `tools/**`
     only code files are read: `.py`, `.sh`, `.js`, and any other non-Markdown
     file that opens with `#!`. The presets and templates ship in the plugin and
     are what a user copies from, so a path in them is one the user types. The
@@ -596,7 +600,7 @@ a general markdown linter and NOT a general shell linter.
     line that allows neither backticks nor parentheses.
 
     The surface is `BUILTIN_COLLISION_SURFACES`. It is no-harness-path's surface
-    (`*/SKILL.md`, `proceed/phase*.md`, `agents/*.md`, `partials/*.sh`,
+    (`*/SKILL.md`, `proceed/phase*.md`, `*/references/*.md`, `agents/*.md`, `partials/*.sh`,
     `partials/*.md`, `workflows/*.js`, `tools/**`, `presets/*`, `templates/*`)
     plus the shipped families the e2e audit also reads: `proceed/*.md`,
     `workflows/*.md`, `scripts/*`, `hooks/*`, `ETHOS.md` and `tools/delegate/*`.
@@ -662,8 +666,12 @@ a general markdown linter and NOT a general shell linter.
     `*/SKILL.md`. A missing line, a line that starts like it but differs, and a
     second copy are each a finding, and so is any other inline bang command in a
     skill's prose: context reads belong in the `# adlc-context` fence. Per root,
-    armed like `plugin-manifest` (`is_plugin_root`). Tests:
-    `tests/test_ethos_line.py`.
+    armed like `plugin-manifest` (`is_plugin_root`). The same walk reads each
+    skill's companions in companion mode (REQ-661 BR-7): a companion carries
+    **zero** ETHOS lines, because only `SKILL.md` is preprocessed, so a copy
+    there is a finding; the near-line and inline-bang rules are unchanged, and a
+    companion is never owed the line. Tests: `tests/test_ethos_line.py`,
+    `tests/test_skill_units.py`.
 
 19. **Description budget (`description-budget`)** (REQ-666 BR-7, AC-7): every
     harness loads every skill description at session start, and Claude Code
@@ -682,11 +690,88 @@ a general markdown linter and NOT a general shell linter.
     Code reads at the top level, so each skill is validated from a copy staged
     under the system temp directory (removed afterwards) whose frontmatter
     omits `SKILLS_REF_HARNESS_KEYS`; the directory name is kept, so a `name:`
-    mismatch still fails. Without the validator the check prints one `skills-ref:
+    mismatch still fails. The skill's companions are staged beside it at their
+    paths under the skill (REQ-661 BR-7), so the directory is validated once,
+    `references/` included, and never per companion. Without the validator the check prints one `skills-ref:
     SKIP` line naming `pip install skills-ref` and adds no finding, so the lint
     stays offline and stdlib-only (REQ-425 BR-1). Per root, armed like
     `plugin-manifest`. Tests: `tests/test_skills_ref.py`, with a fake validator.
     The run against the real validator is a manual, recorded step.
+
+21. **Skill line budget (`skill-line-budget`)** (REQ-661 BR-2, ADR-8): the
+    Agent Skills specification keeps a `SKILL.md` under 500 lines. Every
+    `SKILL.md` the walk yields is counted as `wc -l` counts (newlines), and one
+    at `SKILL_LINE_BUDGET` (500) or more is one finding at line 1 naming the
+    count and the budget. One threshold for every `SKILL.md`, with no allowlist
+    and no override. It is not routed through `skills-ref`: that validator checks
+    frontmatter rather than body length, and it is optional (item 20 SKIPs
+    without it), so the budget would otherwise be enforced nowhere. A skill over
+    the budget moves whole steps into `<skill>/references/` and leaves a
+    read-and-follow pointer (see "Skill units and companions" below). Tests:
+    `tests/test_skill_units.py` (a 500-line fixture fires, a 499-line one does not).
+
+22. **Companion templating (`companion-templating`)** (REQ-661 BR-6, ADR-8):
+    Claude Code preprocesses `SKILL.md` only, so a companion carries none of what
+    that preprocessing feeds. Each argument placeholder in `ARGUMENT_PLACEHOLDERS`
+    (`<request>`, `<req-ids>`, the tokens REQ-666 ADR-1 fixed, matched exactly,
+    never as a generic angle-bracket pattern) and `$ARGUMENTS`, anywhere in a
+    companion, is a finding on that line: a fence or sentence that consumes the
+    skill argument stays in `SKILL.md`, beside the prose that fills it. So is a
+    bang-backtick macro on a line outside every fence. Companions only. After
+    REQ-666 this is the one check that guards companions for argument tokens
+    (`arg-templating` covers bare `$<digit>` everywhere). Tests:
+    `tests/test_skill_units.py`.
+
+## Skill units and companions (REQ-661)
+
+A skill **unit** is a `SKILL.md` and its companions: `<skill>/references/*.md`
+(the Agent Skills layout, one level deep, no nesting), and for `/proceed` its
+`proceed/phase*.md` files, which stay beside `SKILL.md` (BR-12). The one helper
+is `skill_companions`; `find_skill_units` builds the units from
+`find_skill_files`, so a companion is walked exactly when its `SKILL.md` is,
+under the same pruning (`SKIP_DIR_PARTS`, BUG-254's `.claude/worktrees` pair, the
+root-relative rule and the symlink-escape guard). A root's `proceed/phase*.md`
+files are walked even when it has no `proceed/SKILL.md`.
+
+- **Every per-file check walks the companions** with the rules it applies to
+  `SKILL.md` (BR-7): `sentinel`, `balance`, `canonical-helper`, `posix-fence`,
+  `arg-templating`, `cross-fence-fn`, `cross-fence-var`, `forge-direct-gh`,
+  `read-bin-fallback`, `unguarded-source`, `toolkit-root-line` and
+  `dispatch-has-fallback`, plus `companion-templating`. `ethos-line` reads them in
+  companion mode, `skills-ref` stages them, `no-harness-path` and
+  `builtin-collision` read them as the `*/references/*.md` and
+  `proceed/phase*.md` surfaces, and `description-budget` has nothing to read in
+  them. `skill-line-budget` counts `SKILL.md` only.
+- **The unit is one scope** for `cross-fence-fn`, `cross-fence-var` and
+  `canonical-helper` (BR-8): the fences of every file in the unit are numbered as
+  one sequence, so a function or non-exported variable shared between a
+  `SKILL.md` fence and a companion's is the same finding as a within-file split.
+  A within-file finding keeps its old file, line and message; a cross-file one is
+  reported at the call or read site and names the defining file. A canonical
+  literal anywhere in the unit satisfies `canonical-helper`.
+- **`scanned` counts `SKILL.md` only** (BR-9): a dead skill walk is not maskable
+  by companion files.
+- **Per-root site lists follow the content** (BR-10). `LIFECYCLE_WRITE_SITES`,
+  `RETRIEVAL_READER_SITE`, `LANE_SITES` and `LESSON_RULES_PARITY_SITES` name the
+  file that holds each block today, and a move updates the list in the same
+  change. Once a check is armed (its gate file exists: `spec/SKILL.md` for
+  `retrieval-status-parity`, `wrapup/SKILL.md` and `bugfix/SKILL.md` for
+  `lesson-rules-parity`, the vocabulary file or `proceed/phases-lite.md` for
+  `lane-vocabulary`), a listed site that is missing is a finding naming the path
+  and the constant, and a listed site whose block now lives in another file of
+  the same unit is a finding naming that file (`moved_within_unit`) — never a
+  silent pass. `lane-vocabulary` also scans every companion of a listed
+  `<skill>/SKILL.md`. `lesson-check-order` and `lesson-question-coverage` are
+  keyed on the **unit's** name, so `wrapup/references/x.md` belongs to `wrapup`
+  rather than `references`, and run on the unit's capture file, the first file
+  holding a write point, a check or recheck fence, or the rules block; one of
+  those in a second file of the unit is `capture-step-split` (BR-5).
+  `sync-surface-parity` reads `init/SKILL.md` and `template-drift/SKILL.md` only
+  and is unchanged. Tests: `tests/test_site_lists_follow_content.py`.
+- `partials/*.md` is not a skill companion. It keeps the three checks it had
+  (`unguarded-source`, `toolkit-root-line`, `dispatch-has-fallback`): those files
+  are documentation the Skill loader never templates, and the wider checks report
+  false positives on their examples.
 
 ## Usage
 

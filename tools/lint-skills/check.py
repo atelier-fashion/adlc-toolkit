@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
 (REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609,
-BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654, BUG-254).
+BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654, BUG-254, REQ-661).
 
 Run from the repo root:
 
@@ -190,6 +190,33 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
     pinned here, and the names from ``agents/*.md``. A cross-reference, a
     negated or time-qualified verb, ``agent's`` and a fence are not dispatches. Walks ``SKILL.md`` plus ``proceed/phase*.md``
     and ``partials/*.md``.
+14. ``check_skill_line_budget`` — ``skill-line-budget`` (REQ-661 BR-2): a
+    ``SKILL.md`` of ``SKILL_LINE_BUDGET`` (500) lines or more, counted as
+    ``wc -l`` counts, is one finding naming the count and the budget. One
+    threshold, no allowlist; ``SKILL.md`` only.
+15. ``check_companion_templating`` — ``companion-templating`` (REQ-661 BR-6): a
+    companion carries no ``ARGUMENT_PLACEHOLDERS`` token, no ``$ARGUMENTS`` and
+    no bang-backtick macro line outside a fence, because only ``SKILL.md`` is
+    preprocessed. Companions only.
+
+**Skill units (REQ-661 ADR-6, ADR-7).** The walk is over skill UNITS
+(``find_skill_units``): a ``SKILL.md`` and its companions, ``<skill>/references/*.md``
+and, for ``/proceed``, ``proceed/phase*.md`` (``skill_companions``, the one helper
+every walk and surface uses, BR-7). Checks 1–9, 12 and 13 run on every companion
+with the rules they apply to ``SKILL.md``; ``check_canonical``,
+``check_cross_fence_fn`` and ``check_cross_fence_var`` are resolved across the unit
+(``*_unit``, BR-8), so a function, variable or canonical literal shared between a
+``SKILL.md`` fence and a companion's is judged as one scope; a within-file finding
+is unchanged and a cross-file one sits at the call or read site. ``ethos-line``
+reads companions in companion mode (zero ETHOS lines), ``skills-ref`` stages them,
+and ``no-harness-path``/``builtin-collision`` read them as surfaces. ``scanned``
+still counts ``SKILL.md`` only (BR-9). ``partials/*.md`` is not a companion: it
+keeps checks 9, 12 and 13. Checks 10 and 11 are keyed on the unit's name and run
+on its capture file (``check_lesson_units``; a construct in a second file is
+``capture-step-split``). The per-root site lists follow the content (REQ-661
+BR-10): once a check is armed, a listed site that is missing, or whose block moved
+to another file of its unit (``moved_within_unit``), is a finding naming the
+constant to update, and ``lane-vocabulary`` scans each listed skill's companions.
 
 ``find_skill_files`` root-skip fix (REQ-436 ADR-5, executes REQ-433 ADR-3b's
 deferred follow-up; LESSON-019 #2): the ``SKIP_DIR_PARTS`` membership test is
@@ -234,6 +261,37 @@ SKIP_DIR_PARTS = {".git", ".worktrees", "node_modules"}
 # the tree being linted. `worktrees` alone is too common a name to skip, so the
 # walk skips this run of consecutive components, below the scan root only.
 SKIP_DIR_SEQUENCES = ((".claude", "worktrees"),)
+
+# REQ-661 ADR-6: a skill UNIT is a SKILL.md plus its companions, the files its
+# SKILL.md sends the agent to (or, for /proceed's summary phase files, documents).
+# The Agent Skills layout puts them one level below the skill directory, in
+# `references/`; /proceed keeps its `phase*.md` files beside its SKILL.md (BR-12),
+# because partials/lane-check.md names proceed/phases-lite.md by path. Every walk
+# takes companions from `skill_companions`, so the per-file walk and the per-root
+# surfaces see one set and cannot widen separately (BR-7).
+COMPANION_DIR = "references"
+PHASE_COMPANION_SKILL = "proceed"
+PHASE_COMPANION_GLOB = "phase*.md"
+
+# REQ-661 BR-2 / ADR-8 `skill-line-budget`: the Agent Skills specification keeps a
+# SKILL.md under 500 lines. One threshold for every SKILL.md, no allowlist, and the
+# count is the newline count (`wc -l`). Not routed through `skills-ref`: that
+# validator checks frontmatter, not body length, and is optional (it SKIPs when it
+# is not on PATH), so the budget would otherwise be enforced nowhere.
+SKILL_LINE_BUDGET_CHECK = "skill-line-budget"
+SKILL_LINE_BUDGET = 500
+
+# REQ-661 BR-6 / ADR-8 `companion-templating`. Claude Code preprocesses SKILL.md
+# only: it fills the argument and expands a bang-backtick macro line before the
+# model reads the file, while a companion is read with a file tool and gets
+# neither. REQ-666 ADR-1 fixed the angle-bracket placeholders a fence carries for
+# the argument (/spec Step 1.4, /manifest); a companion carrying one would hand
+# the fence the placeholder unfilled. Matched as these exact tokens, never as a
+# generic angle-bracket pattern. `$ARGUMENTS` is the token REQ-666 retired, and a
+# companion carrying it would receive it literally too.
+COMPANION_TEMPLATING_CHECK = "companion-templating"
+ARGUMENT_PLACEHOLDERS = ("<request>", "<req-ids>")
+ARGUMENTS_TOKEN_RE = re.compile(r"\$\{?ARGUMENTS(?![A-Za-z0-9_])")
 
 # REQ-595 BR-5 exit-status split. POSIX exit statuses are 8-bit, so a
 # "distinct" vacuous status has to live inside 0..255 rather than above the
@@ -670,11 +728,15 @@ LIFECYCLE_WRITE_SITES = (
     "wrapup/SKILL.md",
     "proceed/phases-6-8-ship.md",
     # REQ-652 ADR-4: a lite REQ skips Phase 1 and /architect, the two normal
-    # writers of `approved`, so /proceed Step 0 writes it instead.
-    "proceed/SKILL.md",
+    # writers of `approved`, so /proceed Step 0 writes it instead. REQ-661 moved
+    # Step 0 whole into its companion, block included (BR-10).
+    "proceed/phase-0-setup.md",
 )
-# The single reader whose exclusion list must not swallow any written status.
+# The single reader whose exclusion list must not swallow any written status, and
+# the file that arms the check. They are the same file today; REQ-661 BR-10 keeps
+# them apart so a reader moved into a /spec companion is followed, not dropped.
 RETRIEVAL_READER_SITE = "spec/SKILL.md"
+RETRIEVAL_READER_GATE = "spec/SKILL.md"
 
 # REQ-652 ADR-13: `lane-vocabulary`. The lane, trigger, actor and lane-check
 # values are closed sets defined ONCE, in a `<!-- lane-vocabulary -->` block in
@@ -696,6 +758,11 @@ LANE_SITES = (
     "proceed/phases-1-3-validation.md",
     "proceed/phase-4-implementation.md",
     "proceed/phases-6-8-ship.md",
+    # REQ-661: Step 0 (the lane read), the state schema (the `lane` object) and
+    # the telemetry fences moved out of proceed/SKILL.md whole.
+    "proceed/phase-0-setup.md",
+    "proceed/phases-state.md",
+    "proceed/phases-telemetry.md",
     "wrapup/SKILL.md",
     "status/SKILL.md",
     "sprint/SKILL.md",
@@ -773,6 +840,8 @@ NO_HARNESS_PATH_CHECK = TOOLKIT_PATH_CHECK
 TOOLKIT_PATH_SURFACES = (
     "*/SKILL.md",
     "proceed/phase*.md",
+    # REQ-661 BR-7: every skill's `references/` companions, from `skill_companions`.
+    "*/references/*.md",
     "agents/*.md",
     "partials/*.sh",
     "partials/*.md",
@@ -988,8 +1057,12 @@ BUILTIN_COLLISION_TAIL_RE = (
 # on the skill's directory name, so no other SKILL.md is read by this check.
 LESSON_CHECK_ORDER_SKILLS = ("wrapup", "bugfix")
 # The per-root rules-block comparison reads these two files under the scan root,
-# the reference copy (`/wrapup`, also checked against its `--question`) first.
+# the reference copy (`/wrapup`, also checked against its `--question`) first. The
+# check is armed by LESSON_RULES_PARITY_GATES (REQ-661 BR-10); once armed, a listed
+# site that is missing, or whose unit holds the block in another file, is a
+# finding naming this constant.
 LESSON_RULES_PARITY_SITES = ("wrapup/SKILL.md", "bugfix/SKILL.md")
+LESSON_RULES_PARITY_GATES = ("wrapup/SKILL.md", "bugfix/SKILL.md")
 # Markers are valid only when the line, stripped, IS the marker: a backticked
 # or prose mention of the marker is a decoy, not an anchor (LESSON-404 — the
 # toolkit's own docs mention it in prose). A marker line inside ANY fenced
@@ -1079,6 +1152,140 @@ def _skipped_below_root(parts: tuple[str, ...]) -> bool:
         for seq in SKIP_DIR_SEQUENCES
         for i in range(len(parts) - len(seq) + 1)
     )
+
+
+class SkillUnit(NamedTuple):
+    """A skill directory's ``SKILL.md`` and its companions (REQ-661 ADR-6).
+
+    ``skill_md`` is ``None`` only for the root's ``proceed/`` when it holds phase
+    files but no ``SKILL.md`` (a fixture root stages them alone); its companions
+    are still walked."""
+    name: str
+    skill_md: Path | None
+    companions: tuple[Path, ...]
+
+
+def skill_companions(skill_dir: Path, root: Path) -> list[Path]:
+    """The companions of the skill at ``skill_dir``: ``<skill>/references/*.md``,
+    preceded, for the root's ``proceed/``, by its ``phase*.md`` files. One level
+    only (BR-12 forbids nesting), regular files only, sorted. A directory or file
+    that resolves outside ``root`` is skipped, the defence every walk carries."""
+    root_resolved = root.resolve()
+    try:
+        rel_dir = skill_dir.resolve().relative_to(root_resolved)
+    except (OSError, ValueError):
+        return []
+    candidates: list[Path] = []
+    if rel_dir.as_posix() == PHASE_COMPANION_SKILL:
+        candidates.extend(sorted(skill_dir.glob(PHASE_COMPANION_GLOB)))
+    ref = skill_dir / COMPANION_DIR
+    try:
+        if ref.is_dir():
+            ref.resolve().relative_to(root_resolved)
+            candidates.extend(sorted(ref.glob("*.md")))
+    except (OSError, ValueError):
+        pass
+    out: list[Path] = []
+    for path in candidates:
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(root_resolved)
+        except (OSError, ValueError):
+            continue
+        if resolved.is_file():
+            out.append(path)
+    return out
+
+
+def find_skill_units(root: Path) -> list[SkillUnit]:
+    """One unit per ``SKILL.md`` ``find_skill_files`` yields, so a companion is
+    walked exactly when its ``SKILL.md`` is, under the same pruning (BUG-254's
+    ``.claude/worktrees`` pair included). The root's ``proceed/phase*.md`` files
+    are a unit of their own when the root has no ``proceed/SKILL.md``."""
+    units: list[SkillUnit] = []
+    dirs: set[Path] = set()
+    for skill_path in find_skill_files(root):
+        skill_dir = skill_path.parent
+        units.append(SkillUnit(skill_dir.name, skill_path,
+                               tuple(skill_companions(skill_dir, root))))
+        try:
+            dirs.add(skill_dir.resolve())
+        except OSError:
+            pass
+    proceed = root / PHASE_COMPANION_SKILL
+    try:
+        orphan = proceed.is_dir() and proceed.resolve() not in dirs
+    except OSError:
+        orphan = False
+    if orphan:
+        companions = skill_companions(proceed, root)
+        if companions:
+            units.append(SkillUnit(PHASE_COMPANION_SKILL, None, tuple(companions)))
+    return units
+
+
+def find_companion_files(root: Path) -> list[Path]:
+    """Every companion of every unit, in walk order."""
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for unit in find_skill_units(root):
+        for path in unit.companions:
+            key = path.resolve()
+            if key not in seen:
+                seen.add(key)
+                out.append(path)
+    return out
+
+
+def _site_unit_files(root: Path, rel: str) -> list[tuple[str, Path]]:
+    """The files of the skill unit a per-root site ``rel`` belongs to —
+    ``<skill>/SKILL.md`` when it exists, then its companions — as
+    ``(root-relative label, path)``. ``rel`` may name the ``SKILL.md`` or a
+    companion; a site outside any skill directory yields what exists of it."""
+    parts = Path(rel).parts
+    if len(parts) >= 3 and parts[-2] == COMPANION_DIR:
+        skill_dir = root.joinpath(*parts[:-2])
+    elif len(parts) >= 2:
+        skill_dir = root.joinpath(*parts[:-1])
+    else:
+        return []
+    out: list[tuple[str, Path]] = []
+    skill_md = skill_dir / "SKILL.md"
+    try:
+        # The symlink-escape guard every walk carries: a SKILL.md that resolves
+        # outside the scan root is not part of the unit.
+        skill_md.resolve().relative_to(root.resolve())
+        if skill_md.is_file():
+            out.append((_safe_label(skill_md, root), skill_md))
+    except (OSError, ValueError):
+        pass
+    out.extend((_safe_label(p, root), p) for p in skill_companions(skill_dir, root))
+    return out
+
+
+def moved_within_unit(root: Path, rel: str, holds) -> str | None:
+    """REQ-661 BR-10: when a per-root site list names ``rel`` and the block it
+    expects is not there, the label of the other file of the same skill unit that
+    holds it (``holds(text)``), or ``None``. A site list then reports where the
+    block moved instead of degrading to a silent pass (LESSON-019)."""
+    for label, path in _site_unit_files(root, rel):
+        if label == rel:
+            continue
+        try:
+            text = path.read_bytes().decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        if holds(text):
+            return label
+    return None
+
+
+def _site_moved_finding(rel: str, check_id: str, what: str, moved: str, constant: str) -> Finding:
+    return Finding(
+        rel, 1, check_id,
+        f"{what} is not here but in {moved}, another file of this skill unit — update "
+        f"{constant} in tools/lint-skills/check.py in the same change as the move "
+        "(REQ-661 BR-10)")
 
 
 def find_read_bin_extra_files(root: Path) -> list[Path]:
@@ -1331,27 +1538,44 @@ def load_partials_blob(root: Path) -> str:
 
 
 def check_canonical(text: str, rel: str, partials_blob: str = "") -> list[Finding]:
+    """One file: ``check_canonical_unit`` over a unit of one."""
+    return check_canonical_unit([(rel, text)], partials_blob)
+
+
+def check_canonical_unit(files: list[tuple[str, str]], partials_blob: str = "") -> list[Finding]:
+    """``canonical-helper`` over a skill unit (REQ-661 BR-8, ADR-7).
+
+    ``files`` is the unit's ``(rel, text)`` list, ``SKILL.md`` first. The check
+    fires when ANY file carries the gate anchor, and a literal anywhere in the
+    unit satisfies it, so moving the telemetry fences into a companion moves
+    nothing the guard can see (LESSON-019 #1). Findings go on the first file
+    that carries the anchor. A unit of one behaves exactly as the per-file check
+    always has.
+    """
     # REQ-522: fire when the (sole, de-branded) disable anchor appears.
-    if not any(anchor in text for anchor in DELEGATE_GATE_ANCHORS):
+    anchored = [rel for rel, text in files
+                if any(anchor in text for anchor in DELEGATE_GATE_ANCHORS)]
+    if not anchored:
         return []
     # REQ-436 Phase-5 hardening: the partial may only satisfy a literal for a
-    # SKILL.md that actually sources the telemetry partial. A SKILL.md that
+    # skill that actually sources the telemetry partial. A skill that
     # mentions a disable anchor but wires up no telemetry partial is a genuine
     # misconfiguration and must still be flagged (LESSON-019 #1 — don't let the
     # guard re-rot into vacuity behind the indirection it was taught to follow).
-    sources_partial = TELEMETRY_PARTIAL_MARKER in text
+    sources_partial = any(TELEMETRY_PARTIAL_MARKER in text for _rel, text in files)
     findings: list[Finding] = []
     for spellings in CANONICAL_LITERALS:
         # REQ-436 ADR-4: a logical literal is satisfied if ANY of its acceptable
-        # spellings is present in the SKILL.md text OR — when this SKILL.md
-        # sources the telemetry partial — in that partial.
+        # spellings is present in the unit's text OR — when the unit sources the
+        # telemetry partial — in that partial.
         satisfied = any(
-            sp in text or (sources_partial and sp in partials_blob)
+            any(sp in text for _rel, text in files)
+            or (sources_partial and sp in partials_blob)
             for sp in spellings
         )
         if not satisfied:
             findings.append(
-                Finding(rel, 1, "canonical-helper",
+                Finding(anchored[0], 1, "canonical-helper",
                         f"missing required literal (any of): {spellings!r}")
             )
     return findings
@@ -1449,28 +1673,55 @@ def check_cross_fence_fn(text: str, rel: str) -> list[Finding]:
     within some fence; prose mentions outside fences are ignored. A
     define-and-use within the same fence is legitimate and never flagged
     (shell state is shared *within* a single fenced block).
+
+    One file is a unit of one: see ``check_cross_fence_fn_unit``.
     """
-    fences = list(_iter_fences(text))
+    return check_cross_fence_fn_unit([(rel, text)])
+
+
+def _unit_fences(files: list[tuple[str, str]]):
+    """The shell fences of a unit's files in one sequence:
+    ``(unit_index, rel, file_index, body)``, ``SKILL.md`` first."""
+    out = []
+    g = 0
+    for rel, text in files:
+        for _lang, idx, _start, body in _iter_fences(text):
+            out.append((g, rel, idx, body))
+            g += 1
+    return out
+
+
+def check_cross_fence_fn_unit(files: list[tuple[str, str]]) -> list[Finding]:
+    """``cross-fence-fn`` over a skill unit (REQ-661 BR-8, ADR-7).
+
+    The fences of every file in the unit are one sequence, so a function
+    defined in a ``SKILL.md`` fence and invoked only in a companion's — or the
+    other way round — is the same finding as a within-file split: each fence
+    runs in its own shell, and a companion is read in a separate step besides.
+    A within-file finding keeps the file, line and message it always had (the
+    definition). A cross-file one is reported at the call site, the line a
+    reader must change, and names the definition's file and line.
+    """
+    fences = _unit_fences(files)
 
     # First pass: every function name defined anywhere (with its defining
-    # fence index and def line — first definition wins for reporting).
-    defs: dict[str, tuple[int, int]] = {}  # name -> (fence_index, def_lineno)
-    for _lang, idx, _start, body in fences:
+    # fence and def line — first definition wins for reporting).
+    defs: dict[str, tuple[int, str, int]] = {}  # name -> (unit fence, rel, def_lineno)
+    for g, rel, _idx, body in fences:
         for lineno, line in body:
             dm = FN_DEF_RE.match(line)
             if dm:
                 name = dm.group(1)
                 if name not in defs:
-                    defs[name] = (idx, lineno)
+                    defs[name] = (g, rel, lineno)
 
     if not defs:
         return []
 
     # Second pass: statement-position invocations of any defined name. A line
     # that is itself a definition of that name is not an invocation of it.
-    # invokes[name] = set of (fence_index, lineno)
-    invokes: dict[str, list[tuple[int, int]]] = {name: [] for name in defs}
-    for _lang, idx, _start, body in fences:
+    invokes: dict[str, list[tuple[int, str, int]]] = {name: [] for name in defs}
+    for g, rel, _idx, body in fences:
         for lineno, line in body:
             cm = FN_CALL_RE.match(line)
             if not cm:
@@ -1480,26 +1731,38 @@ def check_cross_fence_fn(text: str, rel: str) -> list[Finding]:
                 continue
             if FN_DEF_RE.match(line):
                 continue  # this line defines the fn; not an invocation
-            invokes[name].append((idx, lineno))
+            invokes[name].append((g, rel, lineno))
 
     findings: list[Finding] = []
-    for name, (def_idx, def_lineno) in defs.items():
+    for name, (def_g, def_rel, def_lineno) in defs.items():
         calls = invokes[name]
         if not calls:
             continue  # defined but never invoked anywhere — out of scope here
-        if any(c_idx == def_idx for c_idx, _ in calls):
+        if any(c_g == def_g for c_g, _rel, _n in calls):
             continue  # invoked in its own defining fence → legitimate
         # Invoked only in fence(s) other than the one it is defined in.
-        inv_idx, inv_lineno = calls[0]
-        findings.append(
-            Finding(
-                rel, def_lineno, "cross-fence-fn",
-                f"'{name}' defined in fenced block at line {def_lineno} but "
-                f"invoked at line {inv_lineno} in a different fenced block — "
-                "SKILL.md fenced blocks do not share shell state; move it to "
-                "a sourced partial",
+        _inv_g, inv_rel, inv_lineno = calls[0]
+        if inv_rel == def_rel:
+            findings.append(
+                Finding(
+                    def_rel, def_lineno, "cross-fence-fn",
+                    f"'{name}' defined in fenced block at line {def_lineno} but "
+                    f"invoked at line {inv_lineno} in a different fenced block — "
+                    "SKILL.md fenced blocks do not share shell state; move it to "
+                    "a sourced partial",
+                )
             )
-        )
+        else:
+            findings.append(
+                Finding(
+                    inv_rel, inv_lineno, "cross-fence-fn",
+                    f"'{name}' invoked here but defined in a fenced block at "
+                    f"{def_rel}:{def_lineno}, another file of the skill unit — "
+                    "fenced blocks do not share shell state and a companion is "
+                    "read in a separate step; move it to a sourced partial "
+                    "(REQ-661 BR-8)",
+                )
+            )
     return findings
 
 
@@ -1539,56 +1802,84 @@ def check_cross_fence_var(text: str, rel: str) -> list[Finding]:
     the id-allocation domain (REQ-518), out of REQ-522's telemetry scope; flagging
     it here would force unrelated edits that collide with REQ-518. The exemption
     is by name and intentionally narrow.
+
+    One file is a unit of one: see ``check_cross_fence_var_unit``.
     """
-    SANCTIONED = {
-        "flag",        # the telemetry flag-path carrier (REQ-522 ADR-3)
-        "BUG_NUM",     # id-allocation carriers — allocate-then-recheck flow,
-        "LESSON_NUM",  # REQ-518 domain, out of REQ-522 telemetry scope.
-        "REQ_NUM",
-    }
-    fences = list(_iter_fences(text))
+    return check_cross_fence_var_unit([(rel, text)])
+
+
+CROSS_FENCE_VAR_SANCTIONED = frozenset({
+    "flag",        # the telemetry flag-path carrier (REQ-522 ADR-3)
+    "BUG_NUM",     # id-allocation carriers — allocate-then-recheck flow,
+    "LESSON_NUM",  # REQ-518 domain, out of REQ-522 telemetry scope.
+    "REQ_NUM",
+})
+
+
+def check_cross_fence_var_unit(files: list[tuple[str, str]]) -> list[Finding]:
+    """``cross-fence-var`` over a skill unit (REQ-661 BR-8, ADR-7).
+
+    The fences of every file in the unit are one sequence; an ``export``
+    anywhere in the unit exempts the name, and a read in a fence that does not
+    assign the name, while another fence of the unit does, is a finding at the
+    read, one per name per file. When the file holding the read also assigns the
+    name in another fence, the finding is the within-file one, with the message
+    it always had; otherwise the message names the companion that assigns it.
+    """
+    fences = _unit_fences(files)
+    where: dict[int, tuple[str, int]] = {g: (rel, idx) for g, rel, idx, _b in fences}
 
     # exported names (exempt everywhere)
     exported: set[str] = set()
-    # name -> set of fence indices where assigned
+    # name -> set of unit fence indices where assigned
     assigned: dict[str, set[int]] = {}
-    # name -> list of (fence_index, lineno) where read
-    read_at: dict[str, list[tuple[int, int]]] = {}
+    # name -> list of (unit fence index, rel, lineno) where read
+    read_at: dict[str, list[tuple[int, str, int]]] = {}
 
-    for _lang, idx, _start, body in fences:
+    for g, rel, _idx, body in fences:
         for lineno, line in body:
             for em in VAR_EXPORT_RE.finditer(line):
                 exported.add(em.group(1))
             for am in VAR_ASSIGN_RE.finditer(line):
-                assigned.setdefault(am.group(1), set()).add(idx)
+                assigned.setdefault(am.group(1), set()).add(g)
             for rm in VAR_READ_RE.finditer(line):
-                name = rm.group(1)
-                read_at.setdefault(name, []).append((idx, lineno))
+                read_at.setdefault(rm.group(1), []).append((g, rel, lineno))
 
     findings: list[Finding] = []
     for name, reads in read_at.items():
-        if name in exported or name in SANCTIONED:
+        if name in exported or name in CROSS_FENCE_VAR_SANCTIONED:
             continue
         assign_fences = assigned.get(name)
         if not assign_fences:
             continue  # read but never assigned in a fence (env/positional) — skip
-        for r_idx, r_lineno in reads:
-            if r_idx in assign_fences:
+        reported: set[str] = set()
+        for r_g, r_rel, r_lineno in reads:
+            if r_g in assign_fences or r_rel in reported:
                 continue  # assigned in the same fence — legitimate
             # read in a fence that does NOT assign it, but it IS assigned in
             # another fence — cross-fence state that will be empty at read time.
-            a_idx = sorted(assign_fences)[0]
-            findings.append(
-                Finding(
-                    rel, r_lineno, "cross-fence-var",
+            same_file = sorted(a for a in assign_fences if where[a][0] == r_rel)
+            if same_file:
+                a_idx = where[same_file[0]][1]
+                message = (
                     f"'{name}' assigned in fenced block #{a_idx} but read at "
-                    f"line {r_lineno} in a different fenced block (#{r_idx}) — "
+                    f"line {r_lineno} in a different fenced block (#{where[r_g][1]}) — "
                     "SKILL.md fenced blocks do not share shell state; persist it "
                     "via the flag-file sidecar (skill-flag.sh mark/read) or "
-                    "re-derive it in the same fence",
+                    "re-derive it in the same fence"
                 )
-            )
-            break  # one finding per name is enough
+            else:
+                a_rel, a_idx = where[sorted(assign_fences)[0]]
+                message = (
+                    f"'{name}' assigned in fenced block #{a_idx} of {a_rel}, another "
+                    f"file of the skill unit, but read at line {r_lineno} here — "
+                    "fenced blocks do not share shell state and a companion is read "
+                    "in a separate step; persist it via the flag-file sidecar "
+                    "(skill-flag.sh mark/read) or re-derive it in the same fence "
+                    "(REQ-661 BR-8)"
+                )
+            findings.append(Finding(r_rel, r_lineno, "cross-fence-var", message))
+            reported.add(r_rel)
     return findings
 
 
@@ -1885,11 +2176,79 @@ def parse_lesson_rules_block(text: str) -> LessonRulesBlock | None:
 
 
 def _lesson_skill(rel: str) -> str | None:
-    """The lesson-capture skill ``rel`` belongs to — its directory name, one of
-    ``LESSON_CHECK_ORDER_SKILLS`` — or ``None``. Every per-file lesson check
-    opens with this gate, so no other SKILL.md is held to the contract."""
-    skill = Path(rel).parent.name
+    """The lesson-capture skill ``rel`` belongs to — its skill directory's name,
+    one of ``LESSON_CHECK_ORDER_SKILLS`` — or ``None``. Every per-file lesson check
+    opens with this gate, so no other skill is held to the contract. A companion
+    under ``<skill>/references/`` belongs to ``<skill>`` (REQ-661 BR-10): keyed on
+    the parent directory alone, ``wrapup/references/x.md`` would belong to
+    ``references`` and both lesson checks would silently stop running."""
+    parent = Path(rel).parent
+    skill = parent.parent.name if parent.name == COMPANION_DIR else parent.name
     return skill if skill in LESSON_CHECK_ORDER_SKILLS else None
+
+
+def _lesson_construct_line(text: str) -> int | None:
+    """The first line of a lesson-capture construct in ``text`` — an own-line
+    write point outside every fence, a shell fence calling ``adlc_lesson_check``
+    or ``adlc_recheck_id lesson`` (its opening line), or an own-line
+    capture-rules block (its open marker) — or ``None`` when there is none."""
+    lines = text.splitlines()
+    fenced = _any_fence_line_numbers(lines)
+    found: list[int] = [
+        n for n, line in enumerate(lines, start=1)
+        if n not in fenced and LESSON_WRITE_POINT_RE.match(line)
+    ]
+    for opening, body in _lesson_shell_fences(lines):
+        codes = [_shell_line_code(line)[1] for _n, line in body]
+        if any(LESSON_CHECK_CALL_RE.search(c) or LESSON_RECHECK_CALL_RE.search(c) for c in codes):
+            found.append(opening)
+    block = parse_lesson_rules_block(text)
+    if block is not None:
+        found.append(block.open_line)
+    return min(found) if found else None
+
+
+def lesson_capture_file(files: list[tuple[str, str]]) -> tuple[str, str] | None:
+    """The unit file that holds the lesson-capture step: the first, in unit
+    order, carrying any construct ``_lesson_construct_line`` finds; else the
+    first file (``SKILL.md``), so the ``missing-*`` findings land where they
+    always have. ``None`` for an empty unit."""
+    for rel, text in files:
+        if _lesson_construct_line(text) is not None:
+            return rel, text
+    return files[0] if files else None
+
+
+def check_lesson_units(unit_name: str, files: list[tuple[str, str]]) -> list[Finding]:
+    """REQ-661 BR-5, BR-10 (ADR-9): ``lesson-check-order`` and
+    ``lesson-question-coverage`` over a skill unit.
+
+    Gated on the unit's name, so a ``/wrapup`` or ``/bugfix`` companion is held
+    to the contract exactly as its ``SKILL.md`` is. Both checks run, with their
+    rules unchanged, on the unit's capture file (``lesson_capture_file``), so the
+    step can live in a companion. A construct in a second file of the unit is
+    ``capture-step-split``: the write point, the two fences and the rules block
+    stay in one file, in order (BR-5).
+    """
+    if unit_name not in LESSON_CHECK_ORDER_SKILLS or not files:
+        return []
+    capture = lesson_capture_file(files)
+    assert capture is not None
+    rel, text = capture
+    findings = check_lesson_check_order(text, rel) + check_lesson_question_coverage(text, rel)
+    for other_rel, other_text in files:
+        if other_rel == rel:
+            continue
+        line = _lesson_construct_line(other_text)
+        if line is not None:
+            findings.append(_lesson_finding(
+                other_rel, line, "capture-step-split",
+                f"a lesson-capture construct outside {rel}, which holds this skill's "
+                "capture step — the write point, the `adlc_lesson_check` fence, the "
+                "`adlc_recheck_id lesson` fence and the capture-rules block stay in one "
+                "file, in that order (REQ-661 BR-5)",
+            ))
+    return findings
 
 
 # Finding ids ride at the front of the message (`<id>: …`), not in `check`.
@@ -2160,9 +2519,13 @@ def check_lesson_rules_parity(root: Path) -> list[Finding]:
     """REQ-646 BR-4 / AC-6: the two capture-rules blocks are byte-equal.
 
     Per-root check (mirrors ``check_sync_surface_parity``): reads the two
-    ``LESSON_RULES_PARITY_SITES`` under ``root`` and degrades to zero findings
-    when either is absent, unreadable, or resolves outside ``root`` (the
-    symlink defence ``find_skill_files`` carries). The files are decoded from
+    ``LESSON_RULES_PARITY_SITES`` under ``root``. It is armed when both
+    ``LESSON_RULES_PARITY_GATES`` exist, and degrades to zero findings otherwise,
+    or when a site is unreadable or resolves outside ``root`` (the symlink
+    defence ``find_skill_files`` carries). Once armed, a listed site that is
+    missing is ``rules-block-site-missing``, and one whose block now lives in
+    another file of its skill unit is ``rules-block-site-moved``, each naming
+    the constant to update (REQ-661 BR-10). The files are decoded from
     bytes, not read in text mode, so a CRLF in one copy is a difference rather
     than being normalised away. A missing, unclosed or empty block is already a
     per-file ``rules-block-missing`` finding, so it is skipped here rather than
@@ -2171,21 +2534,46 @@ def check_lesson_rules_parity(root: Path) -> list[Finding]:
     string, so it is the reference the other copy follows.
     """
     root_resolved = root.resolve()
+    for gate in LESSON_RULES_PARITY_GATES:
+        try:
+            if not (root / gate).is_file():
+                return []  # not the toolkit checkout — skip.
+        except OSError:
+            return []
     texts: list[str] = []
+    missing: list[Finding] = []
     for site in LESSON_RULES_PARITY_SITES:
         path = root / site
         try:
             path.resolve().relative_to(root_resolved)
             if not path.is_file():
-                return []  # not the toolkit checkout — skip.
+                # REQ-661 BR-10: armed, so a listed site that vanished is loud.
+                missing.append(_lesson_finding(
+                    site, 1, "rules-block-site-missing",
+                    "a LESSON_RULES_PARITY_SITES site is missing — if the capture "
+                    "step moved, update LESSON_RULES_PARITY_SITES in "
+                    "tools/lint-skills/check.py in the same change (REQ-661 BR-10)"))
+                texts.append("")
+                continue
             texts.append(path.read_bytes().decode("utf-8", errors="replace"))
         except (OSError, ValueError):
             return []
+    if missing:
+        return missing
     (w_rel, b_rel), (w_text, b_text) = LESSON_RULES_PARITY_SITES, texts
     w_block = parse_lesson_rules_block(w_text)
     b_block = parse_lesson_rules_block(b_text)
     if w_block is None or b_block is None:
-        return []
+        moved = [
+            _site_moved_finding(site, LESSON_CHECK_ORDER,
+                                "rules-block-site-moved: the `<!-- lesson-capture-rules -->` block",
+                                where, "LESSON_RULES_PARITY_SITES")
+            for site, block in ((w_rel, w_block), (b_rel, b_block)) if block is None
+            for where in [moved_within_unit(root, site,
+                                            lambda t: parse_lesson_rules_block(t) is not None)]
+            if where is not None
+        ]
+        return moved
     if w_block.close_line is None or b_block.close_line is None:
         return []
     if not all(any(line.strip() for line in blk.body) for blk in (w_block, b_block)):
@@ -2888,9 +3276,12 @@ def check_retrieval_status_parity(root: Path) -> list[Finding]:
     as a cold start. Nothing detected it because nothing compared the two sides.
 
     Gate: the whole check degrades to zero findings unless ``spec/SKILL.md``
-    exists AND carries a ``retrieval-status: spec-exclude`` block. That keeps it
-    inert outside the toolkit checkout and on pre-BUG-194 copies, while making
-    the post-fix shape enforceable.
+    (``RETRIEVAL_READER_GATE``) exists AND the ``retrieval-status: spec-exclude``
+    block is found. That keeps it inert outside the toolkit checkout and on
+    pre-BUG-194 copies, while making the post-fix shape enforceable. Once armed,
+    a ``RETRIEVAL_READER_SITE`` that is missing, or that lost its block to another
+    file of the ``/spec`` unit, is a finding naming the constant (REQ-661 BR-10);
+    so is a write site whose block moved to another file of its unit.
 
     Rules:
       1. The exclusion block must be non-empty — an empty one means the filter
@@ -2903,15 +3294,29 @@ def check_retrieval_status_parity(root: Path) -> list[Finding]:
       3. No status named by any write site may appear in the reader's exclusion
          set. This is the actual BUG-194 invariant.
     """
+    if not (root / RETRIEVAL_READER_GATE).is_file():
+        return []  # not the toolkit checkout — skip.
     reader_path = root / RETRIEVAL_READER_SITE
     if not reader_path.is_file():
-        return []  # not the toolkit checkout — skip.
+        # REQ-661 BR-10: armed, and the listed reader is gone.
+        return [Finding(
+            RETRIEVAL_READER_SITE, 1, "retrieval-status-parity",
+            "the /spec retrieval reader site is missing — if its `retrieval-status: "
+            "spec-exclude` block moved, update RETRIEVAL_READER_SITE in "
+            "tools/lint-skills/check.py in the same change (REQ-661 BR-10)")]
     try:
         reader_text = reader_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
     excluded = parse_retrieval_status_block(reader_text, "spec-exclude")
     if excluded is None:
+        moved = moved_within_unit(
+            root, RETRIEVAL_READER_SITE,
+            lambda t: parse_retrieval_status_block(t, "spec-exclude") is not None)
+        if moved is not None:
+            return [_site_moved_finding(
+                RETRIEVAL_READER_SITE, "retrieval-status-parity",
+                "the `retrieval-status: spec-exclude` block", moved, "RETRIEVAL_READER_SITE")]
         return []  # pre-BUG-194 checkout — degrade silently, no false red.
 
     findings: list[Finding] = []
@@ -2945,6 +3350,14 @@ def check_retrieval_status_parity(root: Path) -> list[Finding]:
         written = parse_retrieval_status_block(site_text, "lifecycle-write")
         # Rule 2: declaration removed or never added.
         if written is None:
+            moved = moved_within_unit(
+                root, rel, lambda t: parse_retrieval_status_block(t, "lifecycle-write") is not None)
+            if moved is not None:
+                findings.append(_site_moved_finding(
+                    rel, "retrieval-status-parity",
+                    "the `retrieval-status: lifecycle-write` block", moved,
+                    "LIFECYCLE_WRITE_SITES"))
+                continue
             findings.append(
                 Finding(
                     rel, 1, "retrieval-status-parity",
@@ -3014,6 +3427,8 @@ def check_lane_vocabulary(root: Path) -> list[Finding]:
       1. The vocabulary file and its line-start block must exist, be non-empty,
          and define all of ``LANE_VOCAB_SETS``.
       2. Every site in ``LANE_SITES`` must exist (deleting one is a finding).
+         The companions of every listed ``<skill>/SKILL.md`` are scanned too
+         (REQ-661 BR-10), as is any ``proceed/phase*.md``.
       3. Every ``lane:``, ``trigger=``/``trigger:``, ``actor:`` and
          ``lane_check=`` value written at a site — and every prose
          ``trigger `x``` / ``actor `x``` — must be in its set.
@@ -3058,6 +3473,15 @@ def check_lane_vocabulary(root: Path) -> list[Finding]:
     if proceed_dir.is_dir():
         for extra in sorted(proceed_dir.glob("phase*.md")):
             rel = extra.relative_to(root).as_posix()
+            if rel not in sites:
+                sites.append(rel)
+    # REQ-661 BR-10: a listed skill's companions write and read lane values too,
+    # so lane text that moves into `<skill>/references/` stays under the check.
+    for listed in LANE_SITES:
+        if Path(listed).name != "SKILL.md":
+            continue
+        for comp in skill_companions((root / listed).parent, root):
+            rel = _safe_label(comp, root)
             if rel not in sites:
                 sites.append(rel)
     for rel in sites:
@@ -3596,6 +4020,13 @@ def _toolkit_path_surface_files(root: Path, surface: str) -> list[Path]:
         # The loader's rule (``_plugin_root_skill_dirs``): one level, no hidden
         # directory, so nothing under ``.claude/`` or ``tools/`` is reached.
         return [root / d / "SKILL.md" for d in _plugin_root_skill_dirs(root)]
+    if surface == "*/references/*.md":
+        # REQ-661 BR-7: the same companion set the per-file walk reads.
+        return [p for d in _plugin_root_skill_dirs(root)
+                for p in skill_companions(root / d, root) if p.parent.name == COMPANION_DIR]
+    if surface == "proceed/phase*.md":
+        return [p for p in skill_companions(root / PHASE_COMPANION_SKILL, root)
+                if p.parent.name == PHASE_COMPANION_SKILL]
     return sorted(root.glob(surface))
 
 
@@ -3878,10 +4309,15 @@ def load_ethos_line(root: Path) -> tuple[str | None, str]:
     return None, label
 
 
-def check_ethos_line(text: str, rel: str, ethos: str) -> list[Finding]:
+def check_ethos_line(text: str, rel: str, ethos: str, companion: bool = False) -> list[Finding]:
     """One SKILL.md: the ETHOS line exactly once and byte-identical, and no other
     inline bang command in prose. Fenced lines are not read (an example in a
-    fence is not a preamble)."""
+    fence is not a preamble).
+
+    ``companion=True`` (REQ-661 BR-7): a companion carries **zero** ETHOS lines,
+    because the line works only where Claude Code preprocesses, which is
+    ``SKILL.md``. A copy there is a finding, the near and inline-bang rules are
+    unchanged, and a companion is never owed the line."""
     lines = text.splitlines()
     fenced = _any_fence_line_numbers(lines)
     exact: list[int] = []
@@ -3891,7 +4327,13 @@ def check_ethos_line(text: str, rel: str, ethos: str) -> list[Finding]:
         if n in fenced:
             continue
         stripped = line.strip()
-        if stripped == ethos:
+        if stripped == ethos and companion:
+            findings.append(Finding(
+                rel, n, ETHOS_LINE_CHECK,
+                "the ETHOS line belongs to the skill's SKILL.md only — a companion is "
+                "read with a file tool and never preprocessed, so the line would reach "
+                "the model as text (REQ-661 BR-7)"))
+        elif stripped == ethos:
             exact.append(n)
         elif stripped.startswith("!`") and "ETHOS" in stripped:
             near += 1
@@ -3905,7 +4347,7 @@ def check_ethos_line(text: str, rel: str, ethos: str) -> list[Finding]:
                 "an inline bang command other than the ETHOS line — move the read into "
                 "the skill's `# adlc-context` fence (conventions.md 'Context loading "
                 "pattern', REQ-666 BR-2)"))
-    if not exact and not near:
+    if not exact and not near and not companion:
         findings.append(Finding(
             rel, 1, ETHOS_LINE_CHECK,
             "no ETHOS line — every skill carries the canonical line from conventions.md "
@@ -3938,6 +4380,59 @@ def check_ethos_lines(root: Path) -> list[Finding]:
         except OSError:
             continue
         findings.extend(check_ethos_line(text, f"{d}/SKILL.md", ethos))
+        # REQ-661 BR-7: the same walk reads the skill's companions, in companion mode.
+        for comp in skill_companions(root / d, root):
+            try:
+                comp_text = comp.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            findings.extend(check_ethos_line(comp_text, _safe_label(comp, root), ethos,
+                                             companion=True))
+    return findings
+
+
+def check_skill_line_budget(text: str, rel: str) -> list[Finding]:
+    """REQ-661 BR-2: a ``SKILL.md`` of ``SKILL_LINE_BUDGET`` lines or more, counted
+    as ``wc -l`` counts (newlines), is one finding at line 1. Runs on every
+    ``SKILL.md`` the walk yields and on nothing else; there is no allowlist."""
+    count = text.count("\n")
+    if count < SKILL_LINE_BUDGET:
+        return []
+    return [Finding(
+        rel, 1, SKILL_LINE_BUDGET_CHECK,
+        f"{count} lines, at or over the {SKILL_LINE_BUDGET}-line budget the Agent Skills "
+        f"specification sets for a SKILL.md — move whole steps into "
+        f"<skill>/{COMPANION_DIR}/ and leave a read-and-follow pointer (REQ-661 BR-2)")]
+
+
+def check_companion_templating(text: str, rel: str) -> list[Finding]:
+    """REQ-661 BR-6: a companion carries none of the preprocessing only
+    ``SKILL.md`` receives. Each ``ARGUMENT_PLACEHOLDERS`` token, and
+    ``$ARGUMENTS``, anywhere in the file (fence or prose: a sentence that fills
+    the argument belongs beside the fence it fills), is one finding per line;
+    so is a bang-backtick macro on a line outside every fence. Runs on
+    companions only."""
+    lines = text.splitlines()
+    fenced = _any_fence_line_numbers(lines)
+    findings: list[Finding] = []
+    for n, line in enumerate(lines, start=1):
+        for token in ARGUMENT_PLACEHOLDERS:
+            if token in line:
+                findings.append(Finding(
+                    rel, n, COMPANION_TEMPLATING_CHECK,
+                    f"the argument placeholder {token!r} in a companion — nothing fills "
+                    "it here: keep the fence or sentence that consumes the skill "
+                    "argument in SKILL.md (REQ-661 BR-6)"))
+        if ARGUMENTS_TOKEN_RE.search(line):
+            findings.append(Finding(
+                rel, n, COMPANION_TEMPLATING_CHECK,
+                "`$ARGUMENTS` in a companion — a companion is never substituted, and "
+                "no skill writes the token since REQ-666 (REQ-661 BR-6)"))
+        if n not in fenced and INLINE_BANG_RE.search(line):
+            findings.append(Finding(
+                rel, n, COMPANION_TEMPLATING_CHECK,
+                "a bang-backtick macro line in a companion — only SKILL.md is "
+                "preprocessed, so the command would never run (REQ-661 BR-6)"))
     return findings
 
 
@@ -4059,6 +4554,15 @@ def check_skills_ref(root: Path) -> list[Finding]:
             staged = Path(tmp) / d
             staged.mkdir()
             (staged / "SKILL.md").write_text(_skills_ref_copy(text), encoding="utf-8")
+            # REQ-661 BR-7: the validator sees the skill directory once, its
+            # companions included, at the paths they have under the skill.
+            for comp in skill_companions(root / d, root):
+                target = staged / comp.relative_to(root / d)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    shutil.copyfile(comp, target)
+                except OSError:
+                    continue
             try:
                 out = subprocess.run([exe, "validate", str(staged)], capture_output=True,
                                      text=True, timeout=SKILLS_REF_TIMEOUT, check=False)
@@ -4107,39 +4611,68 @@ def run(root: Path) -> tuple[list[Finding], int]:
     agent_names = load_agent_names(root)
     findings: list[Finding] = []
     scanned = 0
-    for skill_path in find_skill_files(root):
-        scanned += 1
-        # Compute the non-leaking label BEFORE the read so the io-error
-        # branch can use it too (BUG-054 — was `str(skill_path)`).
-        rel = _safe_label(skill_path, root)
-        try:
-            text = skill_path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            # `str(exc)` is `[Errno N] <strerror>: '<abs path>'` and leaks the
-            # path; `exc.strerror` is the path-free POSIX reason. strerror is
-            # None only for a hand-constructed OSError (cannot arise from
-            # read_text), so the fallback is a constant — never `exc`.
-            findings.append(
-                Finding(rel, 1, "io-error",
-                        f"could not read: {exc.strerror or 'I/O error'}")
-            )
-            continue
-        findings.extend(check_sentinels(text, sentinels, rel))
-        findings.extend(check_balance(text, rel))
-        findings.extend(check_canonical(text, rel, partials_blob))
-        findings.extend(check_posix_fence(text, rel))
-        findings.extend(check_arg_templating(text, rel))
-        findings.extend(check_cross_fence_fn(text, rel))
-        findings.extend(check_cross_fence_var(text, rel))
-        findings.extend(check_forge_direct_gh(text, rel))
-        findings.extend(check_read_bin_fallback(text, rel))
-        findings.extend(check_unguarded_source(text, rel))
-        findings.extend(check_toolkit_root_line(text, rel))
-        findings.extend(check_dispatch_fallback(
-            text, rel, dispatch_sentence, agent_names, dispatch_source, dispatch_stop))
-        # REQ-646 ADR-5: both gate on `rel`'s directory name (wrapup / bugfix).
-        findings.extend(check_lesson_check_order(text, rel))
-        findings.extend(check_lesson_question_coverage(text, rel))
+    companions_walked: set[Path] = set()
+    # REQ-661 ADR-6: walk skill UNITS. Each unit's SKILL.md and every companion
+    # get the same per-file checks; canonical-helper and the two cross-fence
+    # checks are resolved across the unit (BR-8). `scanned` counts SKILL.md only
+    # (BR-9), so a dead skill walk is not maskable by companion files.
+    for unit in find_skill_units(root):
+        files: list[tuple[str, str, bool]] = []   # (rel, text, is_skill_md)
+        paths = ([unit.skill_md] if unit.skill_md is not None else []) + list(unit.companions)
+        for path in paths:
+            is_skill_md = path is unit.skill_md
+            if is_skill_md:
+                scanned += 1
+            else:
+                companions_walked.add(path.resolve())
+            # Compute the non-leaking label BEFORE the read so the io-error
+            # branch can use it too (BUG-054 — was `str(skill_path)`).
+            rel = _safe_label(path, root)
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                # `str(exc)` is `[Errno N] <strerror>: '<abs path>'` and leaks the
+                # path; `exc.strerror` is the path-free POSIX reason. strerror is
+                # None only for a hand-constructed OSError (cannot arise from
+                # read_text), so the fallback is a constant — never `exc`.
+                findings.append(
+                    Finding(rel, 1, "io-error",
+                            f"could not read: {exc.strerror or 'I/O error'}")
+                )
+                continue
+            files.append((rel, text, is_skill_md))
+        unit_files = [(rel, text) for rel, text, _s in files]
+        by_file: dict[str, dict[str, list[Finding]]] = {rel: {} for rel, _t, _s in files}
+        for key, unit_findings in (
+            ("canonical", check_canonical_unit(unit_files, partials_blob)),
+            ("cross-fence-fn", check_cross_fence_fn_unit(unit_files)),
+            ("cross-fence-var", check_cross_fence_var_unit(unit_files)),
+            # REQ-646 ADR-5 / REQ-661 BR-10: keyed on the unit's name (wrapup /
+            # bugfix), run on the file that holds the capture step.
+            ("lesson", check_lesson_units(unit.name, unit_files)),
+        ):
+            for f in unit_findings:
+                by_file.setdefault(f.file, {}).setdefault(key, []).append(f)
+        for rel, text, is_skill_md in files:
+            unit_scoped = by_file.get(rel, {})
+            findings.extend(check_sentinels(text, sentinels, rel))
+            findings.extend(check_balance(text, rel))
+            findings.extend(unit_scoped.get("canonical", []))
+            findings.extend(check_posix_fence(text, rel))
+            findings.extend(check_arg_templating(text, rel))
+            findings.extend(unit_scoped.get("cross-fence-fn", []))
+            findings.extend(unit_scoped.get("cross-fence-var", []))
+            findings.extend(check_forge_direct_gh(text, rel))
+            findings.extend(check_read_bin_fallback(text, rel))
+            findings.extend(check_unguarded_source(text, rel))
+            findings.extend(check_toolkit_root_line(text, rel))
+            findings.extend(check_dispatch_fallback(
+                text, rel, dispatch_sentence, agent_names, dispatch_source, dispatch_stop))
+            findings.extend(unit_scoped.get("lesson", []))
+            if is_skill_md:
+                findings.extend(check_skill_line_budget(text, rel))
+            else:
+                findings.extend(check_companion_templating(text, rel))
     # REQ-609: `check_read_bin_fallback` also walks `agents/*.md`, and REQ-610
     # adds `check_unguarded_source` to the same walk (`agents/delegate-pre-pass.md`
     # carries both a corpus handover and a partial source line) — see
@@ -4162,8 +4695,17 @@ def run(root: Path) -> tuple[list[Finding], int]:
     # REQ-610 ADR-3: a third separate walk, `find_phase_files`: `proceed/phase*.md`
     # AND `partials/*.md`, the companion docs (REQ-610 review). Same posture as
     # the agents walk: `scanned` is untouched so the vacuous-scan figure keeps
-    # meaning "SKILL.md files walked" (REQ-595 BR-5).
+    # meaning "SKILL.md files walked" (REQ-595 BR-5). Since REQ-661 the phase
+    # files are skill companions, walked with the full per-file set above, so
+    # only the partial docs reach this walk, with the three checks they always
+    # had: they are documentation the Skill loader never templates, and the
+    # wider checks report false positives on their examples (ADR-6).
     for phase_path in find_phase_files(root):
+        try:
+            if phase_path.resolve() in companions_walked:
+                continue
+        except OSError:
+            pass
         phase_rel = _safe_label(phase_path, root)
         try:
             phase_text = phase_path.read_text(encoding="utf-8", errors="replace")

@@ -31,7 +31,7 @@ once, in `partials/lane-check.md`. Use only those values here.
 
 ### Step 0 additions: read the lane
 
-Run these at the end of Step 0 item 8, once `pipeline-state.json` is
+Run these at the end of Step 0 item 8 (`proceed/phase-0-setup.md`), once `pipeline-state.json` is
 initialized (or read back on a resume) and before the draft PR (item 8a). They
 also run on every resume. Items 4–6 are the **lite setup**: they run whenever
 `lane.current` is `lite` and `3` is not yet in `completedPhases`, which covers a
@@ -81,7 +81,7 @@ any part already done.
    update, so the rule "the previous phase is in `completedPhases`" holds
    unchanged at Phase 4. Once `3` is recorded this item never runs again.
 6. **Lite setup: one repo.** A lite REQ is single-repo by definition
-   (a cross-repo REQ is always triaged `full`), but Step 0 item 3 creates a
+   (a cross-repo REQ is always triaged `full`), but Step 0 item 3 (`proceed/phase-0-setup.md`) creates a
    worktree in every configured repo before tasks exist, and Phase 2's
    reconcile step, which normally prunes them, does not run. So for every
    non-primary repo: set `touched: false`, remove its worktree with the absolute
@@ -175,7 +175,7 @@ none can be counted as a ghost-skip.
      a contract change). Go through **Escalation** with trigger `implementer` and
      the reviewer's finding as the detail (BR-9). Never "fix" such a finding by
      dropping what the acceptance criteria asked for.
-4. **Record the findings (REQ-648 BR-4)** before fixing: `proceed/SKILL.md`
+4. **Record the findings (REQ-648 BR-4)** before fixing: `proceed/phases-telemetry.md`
    **Run-outcome telemetry** R3 with `--loops 0` and one entry per finding in
    the review's `findings:` section (its severity, `file`, a short title, and its
    `class:` token), each `fixed: false`. After step 5's fixes land, run R3 again

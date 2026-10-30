@@ -151,7 +151,7 @@ Step 8b close-out, `pr-ready` after the Step 8c note, `blocked` with the halt's
 token, `failed` with `setup-error`, `no-worktree` or `no-pr`. Use engine
 `legacy`. `<state>` is the primary-path `pipeline-state.json`; it outlives your
 worktree. Record `harness` at Step 0, each validation attempt, and the Phase-5
-findings exactly as `/proceed`'s **Run-outcome telemetry** section says: in
+findings exactly as `/proceed`'s **Run-outcome telemetry** section (`proceed/phases-telemetry.md`) says: in
 subagent mode those records are yours to write too. The wrapper always exits
 0, so it cannot change your terminal.
 

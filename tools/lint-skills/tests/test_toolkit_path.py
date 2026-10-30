@@ -111,6 +111,7 @@ def test_each_spelling_fails_in_its_own_fixture(tmp_path, name):
 SURFACE_PLANTS = {
     "*/SKILL.md": ("beta/SKILL.md", "# beta\n\n```sh\ncat ~/.claude/skills/ETHOS.md\n```\n"),
     "proceed/phase*.md": ("proceed/phase-9.md", "Read `$HOME/.claude/skills/templates/x.md`.\n"),
+    "*/references/*.md": ("alpha/references/two.md", "Read `~/.claude/skills/partials/two.md`.\n"),
     "agents/*.md": ("agents/two.md", "# two\n\nRun `~/.claude/agents/two.md` inline.\n"),
     "partials/*.sh": ("partials/two.sh", 'cat "${HOME}/.claude/skills/ETHOS.md"\n'),
     "partials/*.md": ("partials/two.md", "```sh\n. ${HOME:-}/.claude/skills/partials/two.sh\n```\n"),

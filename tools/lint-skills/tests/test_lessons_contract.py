@@ -30,7 +30,8 @@ def _section(text, start, end):
 
 
 def test_proceed_step0_computes_step0_set():
-    step0 = _section(_read("proceed/SKILL.md"), "**Then compute the Step-0 LessonSet (REQ-647 BR-1).**",
+    # REQ-661: Step 0 lives in its companion, whole.
+    step0 = _section(_read("proceed/phase-0-setup.md"), "**Then compute the Step-0 LessonSet (REQ-647 BR-1).**",
                      "8. **Initialize `pipeline-state.json`**")
     assert "adlc_lessons select --set step0" in step0
     assert '--state-out "<state>"' in step0
@@ -80,7 +81,7 @@ def test_step_b_ack_check_is_info_only():
 
 
 def test_lessons_state_key_is_additive():
-    text = _read("proceed/SKILL.md")
+    text = _read("proceed/phases-state.md")  # REQ-661: Pipeline State Tracking, moved whole
     assert "`lessons` is optional and additive (REQ-647)" in text
     assert "nothing reads it for control flow" in text
     assert '"lessons": {' in text  # the schema example carries the key
