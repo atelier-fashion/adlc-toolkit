@@ -40,6 +40,20 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **Copilot CLI and Cursor harness adapters (REQ-656).** `harness/copilot.yml` renders
+  user-level agents, `.github/hooks/adlc.json` and one printed `--allow-tool …
+  --deny-tool …` line; `harness/cursor.yml` renders `.cursor/cli.json` and
+  `.cursor/permissions.json` and reads agents and hooks from Claude Code's paths. Each is
+  written only when `/init --harness` names it, so nothing changes without the flag.
+  Both fail closed on shared bases: `git push:*`, `git branch:*` and `git -C` are off the
+  Copilot line, `Shell(git)` and `Shell(gh)` are off the Cursor files, and those commands
+  prompt. The facts are the vendor docs of 2026-10-30, not a run: the end-to-end check on
+  each harness (BR-13) is owed by an operator with both CLIs installed, so the REQ stays
+  `in-progress`, and no capability a probe would decide is promoted. The new
+  `harness-loss-table` lint holds the README's "What is lost" tables to the adapters.
+  Schema version 2 adds four optional adapter fields; `harness/claude.yml` is unchanged.
+  `adlc harness drift` gains `--opted-in`, `adlc harness render` gains `--write-goldens`,
+  and `render --scope user` writes a copy harness's agents.
 - **Harness adapter framework, shipping the `claude` adapter (REQ-657).** Phase 2a of
   the multi-harness plan. A harness is a data file, `harness/<name>.yml`, loaded by
   one stdlib loader and rendered by one module; nothing branches on a harness name.
@@ -400,6 +414,13 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`harness_render`: a deny on a command base with every routine entry omitted denied the
+  whole command (REQ-656).** The clash check read the surviving allows, so with every
+  `git` allow gone a `Shell(git)` deny looked clear. It now reads the routine candidates.
+  No shipped render changes: `claude` never reached that branch.
+- **`harness_render`: agent bodies had English verbs rewritten as tool names (REQ-656).**
+  "Write tests" became "edit tests" on a harness that maps `Write` to `edit`. A tool name
+  that opens a sentence or a list item is now left alone.
 Found by the REQ-669 Phase 5 review, before this release shipped.
 
 - **`adlc doctor` after a plugin uninstall.** A well-formed install record with no

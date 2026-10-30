@@ -23,6 +23,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import sys
 from collections import OrderedDict
 
@@ -152,6 +153,12 @@ def load_result_file(path):
     return data if isinstance(data, dict) else None
 
 
+def result_for(adapter, toolkit):
+    """The adapter's REQ-664 result file, or ``None``."""
+    return load_result_file(os.path.join(toolkit, ".adlc", "research", "harness-probes",
+                                         adapter["name"] + ".json"))
+
+
 def probe_record_problem(shape, record, result):
     """Why a ``source: probe`` record does not equal REQ-664's result file, or ``None``."""
     variant = _PROBE_VARIANT.get(shape)
@@ -206,7 +213,13 @@ def _never_restore_argv(adapter, spelling):
 # accepted_fidelity lookups
 # --------------------------------------------------------------------------
 def accepted(adapter, entry, command, scope):
-    """The verdict ``accepted_fidelity`` accepts for ``(entry, command)`` at ``scope``."""
+    """The verdict ``accepted_fidelity`` accepts for ``(entry, command)`` at ``scope``.
+
+    A ``printed`` render is the user scope under the committed-scope rules, so its
+    verdicts are declared under ``user``.
+    """
+    if scope == "printed":
+        scope = "user"
     table = adapter.get("accepted_fidelity", {})
     for key in ("%s:%s" % (entry, command), entry):
         if key in table:
@@ -220,11 +233,38 @@ def accepted(adapter, entry, command, scope):
 # --------------------------------------------------------------------------
 # Permissions render (BR-6, BR-8)
 # --------------------------------------------------------------------------
+def gated_scope(adapter):
+    """The scope ``allowlist-fidelity`` judges: the one the allowlist is rendered at."""
+    if adapter["paths"].get("permissions", {}).get("mode") == "printed":
+        return "printed"
+    return "project"
+
+
+def forbidden_first_token(spelling):
+    """Whether a spelling's first token runs its arguments, so an allow on it is a
+    wildcard allow (REQ-656 BR-2)."""
+    if not spelling:
+        return False
+    first = spelling[0]
+    return first in ha.FORBIDDEN_FIRST_TOKENS or \
+        first.startswith(ha.FORBIDDEN_FIRST_TOKEN_PREFIXES)
+
+
 def fence_remedy(adapter):
     return ("fence.partial-source is not committed for %s. To pre-approve the "
             "partial-sourcing fence for yourself only, add a user-level allow for the "
             "opening-token prefix `if [ -f .adlc/partials/` in that harness's user settings; "
             "never a bare first-token entry." % adapter["name"])
+
+
+def printed_fence_remedy(adapter):
+    """The remedy a ``printed`` render gives: a separate, labelled line (REQ-656 BR-6)."""
+    broad = adapter["capabilities"].get("fence_broad_spelling")
+    if not broad:
+        return fence_remedy(adapter)
+    return ("WIDENING, not applied: `%s` would pre-approve the opening of every partial-"
+            "sourcing fence for %s. It is not on the paste-ready line; add it to your own "
+            "line only if you accept that." % (_cmd(broad), adapter["name"]))
 
 
 def render_permissions(adapter, perms, scope, result=None):
@@ -283,6 +323,10 @@ def render_permissions(adapter, perms, scope, result=None):
                     candidates.append(("rule", e, tuple(prefix), spelling, False, widened,
                                        "git-c"))
 
+    # What a deny tested for a clash is every routine candidate, omitted or not: on
+    # command-base the allows sharing `git` are gone by now, and `Shell(git)` must
+    # still read as shared rather than deny all of git (REQ-656 ADR-4).
+    routine_spellings = [c[3] for c in candidates if c[0] == "rule"]
     seen_spellings = set()
     for cand in candidates:
         if cand[0] == "fence":
@@ -310,6 +354,14 @@ def render_permissions(adapter, perms, scope, result=None):
                                     "omitted: it would wrap deny-tier `%s` (shape %s)"
                                     % (_cmd(wrapped[1]), wrapped[0])))
             continue
+        if forbidden_first_token(spelling):
+            findings.append(Finding(name, e["id"], command, "inexpressible", scope,
+                                    "omitted: first token `%s` runs its arguments" % spelling[0]))
+            continue
+        if accepted(adapter, e["id"], command, scope) == "inexpressible":
+            findings.append(Finding(name, e["id"], command, "inexpressible", scope,
+                                    "withheld by accepted_fidelity"))
+            continue
         verdict = ("widened:%s" % _cmd(spelling)) if widened else "exact"
         findings.append(Finding(name, e["id"], command, verdict, scope))
         key = (spelling, exact)
@@ -336,12 +388,12 @@ def render_permissions(adapter, perms, scope, result=None):
                 spelling, widened = dcmd, False
             else:
                 spelling, widened = _spell(dcmd, gran)
-        clash = [a for a in allows
-                 if allow_matches(spelling, exact, gran, a.spelling, renders_exact)]
+        clash = [s for s in routine_spellings
+                 if allow_matches(spelling, exact, gran, s, renders_exact)]
         if clash:
             findings.append(Finding(name, did, command, "deny-unsupported", scope,
                                     "its %s spelling `%s` would also match routine `%s`"
-                                    % (gran, _cmd(spelling), _cmd(clash[0].spelling))))
+                                    % (gran, _cmd(spelling), _cmd(clash[0]))))
             continue
         rules.append(Rule(did, dcmd, "deny", "confirm" if mech == "confirm" else "deny",
                           spelling, exact))
@@ -374,7 +426,7 @@ def render_permissions(adapter, perms, scope, result=None):
             findings.append(Finding(name, "default_mode", "default_mode", "inexpressible", scope,
                                     "no default_mode_map entry for %r" % value))
     return rules, findings, {"default_mode": default_mode, "comment": perms["comment"],
-                             "remedies": remedies}
+                             "remedies": remedies, "binary": adapter["binary"]}
 
 
 def _render_fence(adapter, e, argv, scope, gran):
@@ -400,8 +452,8 @@ def _render_fence(adapter, e, argv, scope, gran):
                 [Finding(name, e["id"], command, verdict, scope)], [])
     why = ("withheld by accepted_fidelity" if expressible else
            "the %s granularity cannot keep the partial path literal" % gran)
-    return [], [Finding(name, e["id"], command, "inexpressible", scope, why)], [
-        fence_remedy(adapter)]
+    remedy = printed_fence_remedy(adapter) if scope == "printed" else fence_remedy(adapter)
+    return [], [Finding(name, e["id"], command, "inexpressible", scope, why)], [remedy]
 
 
 # --------------------------------------------------------------------------
@@ -434,6 +486,10 @@ def evaluate_rules(adapter, perms, rules, scope, result=None):
             continue
         if rule.entry == FENCE_ID and scope == "exec":
             continue
+        if rule.entry != FENCE_ID and forbidden_first_token(rule.spelling):
+            failures.append("%s: rendered allow `%s` starts with `%s`, which runs its arguments "
+                            "(REQ-656 BR-2)" % (adapter["name"], _cmd(rule.spelling),
+                                                rule.spelling[0]))
         for did, dcmd in deny_cmds:
             for shape, form in deny_forms(dcmd):
                 if allow_matches(rule.spelling, rule.exact, gran, form, renders_exact) and \
@@ -445,10 +501,44 @@ def evaluate_rules(adapter, perms, rules, scope, result=None):
     return failures
 
 
-def fidelity(adapter, perms, result=None, scope="project", rules=None):
+def fidelity_summary(adapter, findings):
+    """What the operator acts on, from the findings: what will prompt, what has no hard
+    deny, what was widened, then the adapter's own notes (REQ-656 BR-6, BR-8).
+
+    The fence and ``default_mode`` are left out: the fence has its own remedy, and an
+    adapter with nothing else to say prints nothing here.
+    """
+    def uniq(items):
+        return list(dict.fromkeys(items))
+    name = adapter["name"]
+    lines = []
+    prompts = uniq(f.command for f in findings if f.verdict == "inexpressible" and
+                   f.entry not in (FENCE_ID, "default_mode"))
+    if prompts:
+        lines.append("%s: not pre-approved, these will prompt: %s" % (name, ", ".join(
+            "`%s`" % c for c in prompts)))
+    nodeny = uniq(f.command for f in findings if f.verdict == "deny-unsupported")
+    if nodeny:
+        lines.append("%s: no hard deny, left behind the harness's prompt: %s" % (name, ", ".join(
+            "`%s`" % c for c in nodeny)))
+    widened = uniq(f.verdict.split(":", 1)[1] for f in findings
+                   if f.verdict.startswith("widened:"))
+    if widened:
+        lines.append("%s: widened to the whole command: %s" % (name, ", ".join(
+            "`%s`" % w for w in widened)))
+    lines.extend(adapter.get("fidelity_notes", []))
+    return lines
+
+
+def fidelity(adapter, perms, result=None, scope=None, rules=None):
     """``(findings, failures)`` for one adapter at ``scope`` (default: the gated one)."""
     failures = []
+    scope = scope or gated_scope(adapter)
     for shape, rec in adapter["capabilities"].get("deny_under_allow", {}).items():
+        # An `unverified` record asserts nothing, so there is nothing to check; only a
+        # `pass` must equal the result file.
+        if rec["source"] == "probe" and rec["result"] != "pass":
+            continue
         if rec["source"] == "probe":
             problem = probe_record_problem(shape, rec, result)
             if problem:
@@ -500,6 +590,7 @@ def fidelity_report(adapter_paths, result_files=None, toolkit=None, perms_path=N
             counts[f.verdict.split(":", 1)[0]] = counts.get(f.verdict.split(":", 1)[0], 0) + 1
         lines.append("%s: %s" % (adapter["name"], ", ".join(
             "%s=%d" % (k, counts[k]) for k in sorted(counts))))
+        lines.extend(fidelity_summary(adapter, findings))
     lines.extend(declared_residuals(toolkit))
     return lines, failures
 
@@ -551,10 +642,14 @@ def render_hooks(adapter, hooks):
     """``(hooks_block, findings)``: the harness's hooks object and per-event reports."""
     unit = adapter.get("hook_timeout_unit", "s")
     tail = hook_args(adapter)
+    outputs = adapter.get("hook_output", {})
     groups = OrderedDict()   # (event, matcher) -> [hook entries]
     findings = []
     for hook in hooks:
         command = hook["command"].rstrip("\n") + tail
+        if hook["id"] in outputs:
+            # A harness that takes context only as JSON (ADR-5).
+            command += " --context-key %s" % outputs[hook["id"]].split(":", 1)[1]
         timeout = hook["timeout_s"] * (1000 if unit == "ms" else 1)
         for ev in hook["events"]:
             target = adapter["hook_events"][ev]
@@ -630,6 +725,53 @@ def format_rules_json(rules, extras, hooks_block):
     return dumps_json(doc)
 
 
+def _unique(items):
+    return list(dict.fromkeys(items))
+
+
+def format_copilot_flags(rules, extras, hooks_block):
+    """The one paste-ready line (REQ-656 BR-6, ADR-2).
+
+    A deny is always ``:*``, the only documented prefix form: whether a bare
+    ``shell(git push)`` takes trailing arguments is undocumented, and a deny that
+    misses ``--force origin main`` is the worse failure. A form neither spelling
+    catches still prompts, because the routine prefix is omitted.
+    """
+    flags = []
+    for rule in rules:
+        text = _cmd(rule.spelling)
+        if rule.kind == "allow":
+            spec = "shell(%s)" % text if rule.exact else "shell(%s:*)" % text
+            flags.append("--allow-tool %s" % shlex.quote(spec))
+        else:
+            flags.append("--deny-tool %s" % shlex.quote("shell(%s:*)" % text))
+    return " ".join([extras["binary"]] + _unique(flags)) + "\n"
+
+
+def format_copilot_hooks(rules, extras, hooks_block):
+    """``.github/hooks/adlc.json``: one flat entry per hook under each event."""
+    events = OrderedDict()
+    for event, groups in (hooks_block or {}).items():
+        events[event] = [OrderedDict([("type", "command"), ("bash", hook["command"]),
+                                      ("timeoutSec", hook["timeout"])])
+                         for group in groups for hook in group["hooks"]]
+    return dumps_json(OrderedDict([("version", 1), ("hooks", events)]))
+
+
+def format_cursor_cli(rules, extras, hooks_block):
+    """``.cursor/cli.json``: ``Shell(<base>)`` under ``permissions.allow`` and ``deny``."""
+    perms = OrderedDict()
+    perms["allow"] = _unique("Shell(%s)" % _cmd(r.spelling) for r in rules if r.kind == "allow")
+    perms["deny"] = _unique("Shell(%s)" % _cmd(r.spelling) for r in rules if r.kind == "deny")
+    return dumps_json(OrderedDict([("permissions", perms)]))
+
+
+def format_cursor_terminal(rules, extras, hooks_block):
+    """``.cursor/permissions.json``: the IDE's schema, which has no deny key (ADR-6)."""
+    return dumps_json(OrderedDict([("terminalAllowlist", _unique(
+        _cmd(r.spelling) for r in rules if r.kind == "allow"))]))
+
+
 def dumps_json(doc):
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
@@ -638,7 +780,12 @@ def dumps_json(doc):
 FORMATS = {
     "claude-settings-json": format_claude_settings,
     "rules-json": format_rules_json,
+    "copilot-tool-flags": format_copilot_flags,
+    "copilot-hooks-json": format_copilot_hooks,
+    "cursor-cli-json": format_cursor_cli,
+    "cursor-terminal-allowlist": format_cursor_terminal,
     "claude-agent-md": "agents",
+    "copilot-agent-md": "agents",
     "agents-md": "instructions",
     "claude-md-import": "instructions",
 }
@@ -814,13 +961,16 @@ def plan_surfaces(adapter, scope, project_root, toolkit=None, surfaces=None, res
             continue
         if mode != "rendered" or scope not in spec or surface == "agents":
             continue
-        rel = spec[scope]
-        path = os.path.join(project_root, rel) if scope == "project" else \
-            ha.expand_user_path(rel)
-        slot = by_path.setdefault(path, {"rel": rel, "fmt": fmt, "surfaces": [],
-                                         "write_mode": spec.get("write_mode", "create"),
-                                         "owned": list(spec.get("owned_keys", []))})
-        slot["surfaces"].append(surface)
+        targets = [(spec[scope], fmt)]
+        targets += [(item[scope], item["format"]) for item in spec.get("also", [])
+                    if scope in item]
+        for rel, target_fmt in targets:
+            path = os.path.join(project_root, rel) if scope == "project" else \
+                ha.expand_user_path(rel)
+            slot = by_path.setdefault(path, {"rel": rel, "fmt": target_fmt, "surfaces": [],
+                                             "write_mode": spec.get("write_mode", "create"),
+                                             "owned": list(spec.get("owned_keys", []))})
+            slot["surfaces"].append(surface)
     plans = []
     for path, slot in by_path.items():
         # A file is rendered whole, from every surface that targets it, whenever
@@ -881,6 +1031,64 @@ def exec_entries(adapter, toolkit=None, result=None):
 # --------------------------------------------------------------------------
 # Parity (BR-13) and drift (ADR-11)
 # --------------------------------------------------------------------------
+#: The project files the toolkit commits a render of for itself (REQ-657 BR-13). Any
+#: other adapter has only its golden: a `.cursor/` in a contributor's clone is theirs,
+#: and must not fail the lint.
+IN_TREE_RENDERS = (".claude/settings.json",)
+
+
+def agent_manifest(adapter, toolkit):
+    """Each rendered agent's file name and ``tools:`` line (REQ-656 ADR-8).
+
+    The golden of a copy harness's agents. A full-text golden would make every body
+    edit to ``agents/*.md`` touch ``harness/**``; a ``tools:`` change touches it, and
+    should, because that widens what an agent may do.
+    """
+    import agents_render
+    plans, _notices = agents_render.plan_copies(adapter, toolkit, {"classes": {},
+                                                                   "overrides": {}})
+    doc = OrderedDict()
+    for _name, path, text in plans:
+        frontmatter, _body = split_agent(text)
+        tools = [line.split(":", 1)[1].strip() for line in frontmatter
+                 if line.startswith("tools:")]
+        doc[os.path.basename(path)] = tools[0] if tools else None
+    return dumps_json(doc)
+
+
+def extra_goldens(adapter, printed, toolkit, result=None):
+    """``(relative path, content)`` of the goldens that are not project files."""
+    root = os.path.join("harness", adapter["name"], "rendered")
+    out = []
+    for surface, _fmt in printed:
+        if surface == "permissions":
+            out.append((os.path.join(root, "printed-permissions.txt"),
+                        printed_text(adapter, toolkit, result)[0]))
+    spec = adapter["paths"].get("agents", {})
+    if spec.get("mode") == "rendered" and "user" in spec:
+        out.append((os.path.join(root, "agents.json"), agent_manifest(adapter, toolkit)))
+    return out
+
+
+def write_goldens(toolkit=None, adapter_paths=None):
+    """Write every adapter's goldens from a fresh render; the written paths."""
+    toolkit = toolkit or ha.toolkit_dir()
+    written = []
+    paths = adapter_paths if adapter_paths is not None else ha.shipped_adapter_paths(toolkit)
+    for apath in paths:
+        adapter = ha.load_adapter(apath, toolkit=toolkit)
+        result = result_for(adapter, toolkit)
+        plans, printed = plan_surfaces(adapter, "project", toolkit, toolkit,
+                                       surfaces=("permissions", "hooks"), result=result)
+        items = [(os.path.relpath(p.golden, toolkit), p.content) for p in plans]
+        for rel, content in items + extra_goldens(adapter, printed, toolkit, result):
+            full = os.path.join(toolkit, rel)
+            if read_text(full) != content:
+                write_atomic(full, content)
+                written.append(rel)
+    return written
+
+
 def unified(path_label, expected, actual):
     return "".join(difflib.unified_diff(
         (actual or "").splitlines(True), (expected or "").splitlines(True),
@@ -898,8 +1106,18 @@ def parity(toolkit=None, adapter_paths=None):
     paths = adapter_paths if adapter_paths is not None else ha.shipped_adapter_paths(toolkit)
     for apath in paths:
         adapter = ha.load_adapter(apath, toolkit=toolkit)
-        plans, _printed = plan_surfaces(adapter, "project", toolkit, toolkit,
-                                        surfaces=("permissions", "hooks"))
+        result = result_for(adapter, toolkit)
+        plans, printed = plan_surfaces(adapter, "project", toolkit, toolkit,
+                                       surfaces=("permissions", "hooks"), result=result)
+        for label, content in extra_goldens(adapter, printed, toolkit, result):
+            committed = read_text(os.path.join(toolkit, label))
+            if committed is None:
+                results.append((adapter["name"], "golden", label, "missing-golden", ""))
+            elif committed != content:
+                results.append((adapter["name"], "golden", label, "drifted",
+                                unified(label, content, committed)))
+            else:
+                results.append((adapter["name"], "golden", label, "in-parity", ""))
         for plan in plans:
             label = os.path.relpath(plan.golden, toolkit)
             committed = read_text(plan.golden)
@@ -912,7 +1130,7 @@ def parity(toolkit=None, adapter_paths=None):
             else:
                 results.append((adapter["name"], ",".join(plan.surfaces), label, "in-parity", ""))
             # The toolkit's own committed render of the same file (in-tree).
-            if plan.write_mode != "prepend-import":
+            if plan.write_mode != "prepend-import" and plan.rel in IN_TREE_RENDERS:
                 tree = read_text(plan.path)
                 if tree is not None or os.path.exists(os.path.dirname(plan.path)):
                     if tree is None:
@@ -943,7 +1161,10 @@ def parity(toolkit=None, adapter_paths=None):
 
 def _settings_sets(doc):
     perms = doc.get("permissions", {}) if isinstance(doc, dict) else {}
-    return (set(perms.get("allow", []) or []), set(perms.get("ask", []) or []),
+    # The IDE file spells its allow set `terminalAllowlist` (REQ-656 ADR-6).
+    terminal = doc.get("terminalAllowlist", []) if isinstance(doc, dict) else []
+    return (set(perms.get("allow", []) or []) | set(terminal or []),
+            set(perms.get("ask", []) or []),
             set(perms.get("deny", []) or []), perms.get("defaultMode"))
 
 
@@ -954,6 +1175,10 @@ def _hook_commands(doc):
         return out
     for event, groups in hooks.items():
         for group in groups or []:
+            # Copilot's entries are flat: the command is the entry's `bash` key.
+            if isinstance(group, dict) and "bash" in group:
+                out.add((event, None, group.get("bash")))
+                continue
             for h in (group or {}).get("hooks", []) or []:
                 out.add((event, group.get("matcher"), h.get("command")))
     return out
@@ -1024,6 +1249,17 @@ def drift(adapter, project_root, toolkit=None):
 # --------------------------------------------------------------------------
 # Agent copies (BR-4, ADR-9)
 # --------------------------------------------------------------------------
+def opted_in(adapter, project_root, toolkit=None):
+    """Whether the project carries this adapter's main project-layer file.
+
+    The first file only: `.cursor/permissions.json` is also the IDE's own, so a project
+    with one of its own has not asked for this layer (REQ-656 BR-14).
+    """
+    plans, _printed = plan_surfaces(adapter, "project", project_root, toolkit or ha.toolkit_dir(),
+                                    surfaces=("permissions", "hooks"))
+    return bool(plans) and os.path.exists(plans[0].path)
+
+
 def split_agent(text):
     """``(frontmatter_lines, body)`` of an agent file."""
     lines = text.split("\n")
@@ -1035,11 +1271,24 @@ def split_agent(text):
     return [], text
 
 
+_SENTENCE_OPENING_RE = re.compile(r"^\s*(?:[-*]|\d+\.)?\s*\**$|[.!?]\**\s+\**$")
+
+
+def _opens_sentence(text, pos):
+    """Whether ``pos`` starts a sentence or a list item, where a tool's name is the
+    English verb: "Write tests" is not the Write tool (REQ-656)."""
+    return _SENTENCE_OPENING_RE.search(text[text.rfind("\n", 0, pos) + 1:pos]) is not None
+
+
 def _rewrite_tools(body, tool_map):
+    def rewrite(text, canon, mapped):
+        def replace(match):
+            return match.group(0) if _opens_sentence(text, match.start()) else mapped
+        return re.sub(r"(?<![A-Za-z0-9_-])%s(?![A-Za-z0-9_-])" % re.escape(canon), replace, text)
+
     for canon, mapped in tool_map.items():
-        if mapped in ("unsupported", canon):
-            continue
-        body = re.sub(r"(?<![A-Za-z0-9_-])%s(?![A-Za-z0-9_-])" % re.escape(canon), mapped, body)
+        if mapped not in ("unsupported", canon):
+            body = rewrite(body, canon, mapped)
     return body
 
 

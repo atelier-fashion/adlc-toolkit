@@ -332,7 +332,100 @@ Three things the toolkit depends on have no cross-harness standard: agent defini
 | `agents/*.md` | the agent checklists | stamped in place (`model:`); copy harnesses get rendered copies |
 | `templates/instructions/` | `AGENTS.md`, the instruction file every harness reads | `CLAUDE.md` gains an `@AGENTS.md` import and keeps its own lines |
 
-Only the `claude` adapter ships; Copilot and Cursor, Codex and Gemini CLI follow as data files. What a harness cannot express is reported, never silently widened: `allowlist-fidelity` lists every entry per harness, and an adapter has to accept each gap in writing. On Claude Code, the partial-sourcing fence is not pre-approved in a committed file, and the allowlist applies only in a trusted workspace. The allowlist is a convenience for the routine tier, not a gate: the structural gates are the orchestrator's (`tools/lint-skills/README.md`, "Declared residuals"). `adlc harness render --check` and the `render-parity` lint keep the committed renders equal to what the renderer writes; `/template-drift` reports a project whose rendered settings are behind as `harness-config` drift.
+The `claude`, `copilot` and `cursor` adapters ship; Codex and Gemini CLI follow as data files. What a harness cannot express is reported, never silently widened: `allowlist-fidelity` lists every entry per harness, and an adapter has to accept each gap in writing. On Claude Code, the partial-sourcing fence is not pre-approved in a committed file, and the allowlist applies only in a trusted workspace. The allowlist is a convenience for the routine tier, not a gate: the structural gates are the orchestrator's (`tools/lint-skills/README.md`, "Declared residuals"). `adlc harness render --check` and the `render-parity` lint keep the committed renders equal to what the renderer writes; `/template-drift` reports a project whose rendered settings are behind as `harness-config` drift.
+
+### Copilot CLI
+
+The adapter is `harness/copilot.yml` (REQ-656). Its facts are the vendor docs as read on 2026-10-30: no run has happened yet, and the end-to-end check on this harness is owed (see the REQ-656 spec, Deferred).
+
+```bash
+./install.sh                                # mounts the skills at ~/.agents/skills
+adlc harness install --harness copilot      # renders ~/.copilot/agents/<name>.agent.md
+```
+
+Then run `/init --harness copilot` (`/adlc:init --harness copilot` on the plugin install) in a project. It writes `.github/hooks/adlc.json` (`sessionStart` runs `ethos-inject` and `session-record`, `subagentStart` runs `ethos-inject`) and `AGENTS.md`, and it **prints** one line, because Copilot has no committed allowlist. Paste that line into a shell alias or your profile:
+
+```bash
+alias copilot="copilot --allow-tool 'shell(git status:*)' --allow-tool 'shell(gh pr view:*)' … --deny-tool 'shell(git push --force:*)' --deny-tool 'shell(gh pr merge:*)' …"
+```
+
+The full line and its fidelity report come from `adlc harness render --harness copilot`. That render writes nothing under `~/.copilot`, and the line carries no auto-approve flag. No event marks a compaction, so ETHOS is not re-injected after one.
+
+<!-- harness-loss: copilot -->
+**What is lost on Copilot CLI**
+
+| What | On Copilot CLI |
+|---|---|
+| Committed allowlist | no: session flags on the printed line |
+| Allowlist granularity | subcommand prefix (`token-prefix` in the adapter): `shell(<prefix>:*)` admits every argument after the prefix |
+| Deny-tier rendering | a hard `--deny-tool` on the printed line, one per argv prefix of the deny tier, re-rendered at `exec` scope by REQ-662 |
+| Shared-base fail-closed | `git push:*`, `git branch:*` and the `git -C` prefix are omitted and prompt, so every `git -C …` call prompts, until REQ-664 clears OQ-8 and OQ-9 |
+| Read-only reviewers | `tools:` is rendered and the docs say it is enforced; unverified on a real run |
+| ETHOS in subagents | the `subagentStart` hook plus an ETHOS-first line in every rendered agent; unverified |
+| Subagent nesting depth | 6 |
+| `/sprint` workflow engine | unavailable |
+| Transcript schema | undocumented |
+| Explicit skill invocation | `/name` |
+| Headless deny status | unverified until a REQ-664 result exists for this harness |
+| Fences, not commands | `fence.partial-source` is not on the line, so a partial-sourcing fence prompts; the broad spelling is a separate remedy labelled "WIDENING, not applied" |
+| `git -C` | the bare prefix would cover every git subcommand, so it is omitted (see the shared-base row) |
+
+**Declared residuals.** What no allowlist or prefix deny closes, on either harness. They are declared, not chased:
+
+- Matching is spelling-level.
+- Allows that execute their arguments (`find -exec`, `awk system()`, `sed e`, `npx`, `npm run`/`exec`, `git rebase --exec`, `git fetch --upload-pack`) and `gh api` can reach a deny-tier command in a spelling the deny does not match.
+- Semantic equivalents (`git restore`, `git checkout -f`, `git worktree remove --force`, `gcloud` deploys, `npm publish`) are outside the deny tier.
+- Copilot's matching of chained commands (`;`, `&&`, `$()`) is unverified, and every Copilot allow is untrustworthy against deny-tier commands until REQ-664 shows it.
+- The `env-prefix` and `shell-opener` wrapper shapes are `unverified`, and no REQ-664 result lifts an omission resting on them.
+- The dogfood notes record the prompt count (REQ-656 BR-13).
+- The allowlist is not the gate: REQ-659's structural halt is.
+<!-- /harness-loss: copilot -->
+
+### Cursor
+
+The adapter is `harness/cursor.yml` (REQ-656). Its facts are the vendor docs as read on 2026-10-30: no run has happened yet, and the end-to-end check on this harness is owed (see the REQ-656 spec, Deferred).
+
+Cursor reads `.claude/settings*.json` hooks, `~/.claude/agents` and `~/.claude/skills` itself, so it gets no agent render and no hook render. Prepare a project with both layers, because `/init --harness cursor` alone leaves `.claude/settings.json` without the hooks Cursor would read:
+
+```bash
+./install.sh                                # mounts the skills at ~/.agents/skills
+```
+
+Then run `/init --harness claude,cursor` (`/adlc:init --harness claude,cursor` on the plugin install) in the project, or `/template-drift` on one already initialised. It writes `.cursor/cli.json`, `.cursor/permissions.json` and `AGENTS.md`. `adlc agents render --harness cursor` is a no-op that says so. The hooks reach a Cursor session only while "Include Third-Party Plugins, Skills, and Other Configs" stays on in Cursor Settings (the default), and how Cursor delivers a `SessionStart` hook's output as context is undocumented, so ETHOS by hook is unverified.
+
+<!-- harness-loss: cursor -->
+**What is lost on Cursor**
+
+| What | On Cursor |
+|---|---|
+| Committed allowlist | yes: `.cursor/cli.json` and `.cursor/permissions.json` |
+| Allowlist granularity | command base: an entry names one command and everything under it |
+| Deny-tier rendering | a hard `deny` in `.cursor/cli.json`, so you run a denied one-way move from your own shell (the REQ-655 trade). A shared-base move is approved at Cursor's prompt instead |
+| Shared-base fail-closed | `Shell(git)` and `Shell(gh)` are omitted, so `git` and `gh` prompt, and their deny-tier entries are `deny-unsupported`, until REQ-664 clears OQ-8 and OQ-9 |
+| Read-only reviewers | unverified: whether Cursor honours the `tools:` line of a `~/.claude/agents` file is open (OQ-2) |
+| ETHOS in subagents | no hook path: Cursor's reader of Claude-format hooks does not map `SubagentStart` |
+| Subagent nesting depth | 1 |
+| `/sprint` workflow engine | unavailable |
+| Transcript schema | Claude Code-compatible JSONL |
+| Explicit skill invocation | `/name`, `@name` |
+| Headless deny status | unverified: whether `agent -p` honours `deny` waits on plan §6.3 and REQ-664's `ask-tier-deny` (OQ-6) |
+| Fences, not commands | `fence.partial-source` is omitted, because a first-token `Shell(if)` would allow every line that opens that way, so a partial-sourcing fence prompts |
+| `git -C` | `Shell(git)` would cover it; with that entry omitted, `git -C …` prompts like the rest of git |
+| Deny width | all `rm` and all `terraform` subcommands are denied; run them from your own shell |
+| `Shell(npm)` width | one entry for all of npm, which admits `npm publish` |
+| Double skill discovery | Cursor reads `~/.agents/skills` and `~/.claude/skills`, so every toolkit skill is discovered twice and the clone root's non-skill directories are exposed through the second |
+| IDE permissions file | `.cursor/permissions.json` has no deny key, so the deny tier reaches the `agent` CLI only, and a committed `terminalAllowlist` overrides the matching allowlist in the IDE's settings |
+
+**Declared residuals.** What no allowlist or prefix deny closes, on either harness. They are declared, not chased:
+
+- Matching is spelling-level.
+- Allows that execute their arguments (`find -exec`, `awk system()`, `sed e`, `npx`, `npm run`/`exec`, `git rebase --exec`, `git fetch --upload-pack`) and `gh api` can reach a deny-tier command in a spelling the deny does not match.
+- Semantic equivalents (`git restore`, `git checkout -f`, `git worktree remove --force`, `gcloud` deploys, `npm publish`) are outside the deny tier.
+- Copilot's matching of chained commands (`;`, `&&`, `$()`) is unverified, and every Copilot allow is untrustworthy against deny-tier commands until REQ-664 shows it.
+- The `env-prefix` and `shell-opener` wrapper shapes are `unverified`, and no REQ-664 result lifts an omission resting on them.
+- The dogfood notes record the prompt count (REQ-656 BR-13).
+- The allowlist is not the gate: REQ-659's structural halt is.
+<!-- /harness-loss: cursor -->
 
 ### `ADLC_HOME`
 

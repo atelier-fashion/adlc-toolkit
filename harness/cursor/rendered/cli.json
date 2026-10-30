@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(npm)",
+      "Shell(npx)",
+      "Shell(ls)",
+      "Shell(find)",
+      "Shell(readlink)",
+      "Shell(which)",
+      "Shell(test)",
+      "Shell(date)",
+      "Shell(echo)",
+      "Shell(cat)",
+      "Shell(grep)",
+      "Shell(head)",
+      "Shell(tail)",
+      "Shell(wc)",
+      "Shell(pwd)",
+      "Shell(mkdir)",
+      "Shell(cp)",
+      "Shell(touch)",
+      "Shell(sed)",
+      "Shell(awk)"
+    ],
+    "deny": [
+      "Shell(rm)",
+      "Shell(./deploy.sh)",
+      "Shell(terraform)"
+    ]
+  }
+}

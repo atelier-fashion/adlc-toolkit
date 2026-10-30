@@ -1,0 +1,144 @@
+# harness/cursor.yml — the Cursor adapter (REQ-656). Data, not code: every key is
+# validated by tools/adlc/harness_adapter.py and an unknown key is a loud error. Its
+# goldens live in harness/cursor/rendered/. The facts here are the vendor docs as
+# read on 2026-10-30, not a run: no `agent` binary was available, and BR-13's
+# dogfood is owed. Anything a probe would decide stays unverified.
+name: cursor
+schema_version: 2
+binary: agent
+
+paths:
+  # Cursor reads Claude Code's agents and hooks itself, so neither is rendered (BR-9).
+  agents:
+    mode: via:claude
+  skills:
+    user: $HOME/.agents/skills
+    mode: mounted
+  # .cursor/cli.json is the agent CLI's file. .cursor/permissions.json is the IDE's:
+  # a different schema with no deny key, so it gets its own format (ADR-6).
+  permissions:
+    project: .cursor/cli.json
+    mode: rendered
+    also:
+      - {project: .cursor/permissions.json, format: cursor-terminal-allowlist}
+  hooks:
+    mode: via:claude
+  instructions:
+    project: AGENTS.md
+    mode: rendered
+
+formats:
+  permissions: cursor-cli-json
+  instructions: agents-md
+
+# Present because the loader requires it; nothing is rendered through it.
+tool_map:
+  Read: unsupported
+  Grep: unsupported
+  Glob: unsupported
+  Edit: unsupported
+  Write: unsupported
+  NotebookEdit: unsupported
+  Bash: unsupported
+  Agent: unsupported
+
+tier_map:
+  opus: unverified
+  sonnet: unverified
+  haiku: unverified
+
+# A stated departure from claude's `confirm`: the committed cli.json is the only
+# place a deny can live, and `agent -p` has no confirm form (BR-8, OQ-7). A person in
+# a Cursor session cannot approve a denied one-way move; they run it from their shell.
+deny_tier_render:
+  project: deny
+
+accepted_fidelity:
+  fence.partial-source: inexpressible
+  default_mode: inexpressible
+  # Omitted until deny_under_allow.prefix (and git-c, for git) reads pass (OQ-8, OQ-9).
+  git.read: inexpressible
+  git.config.identity: inexpressible
+  git.write: inexpressible
+  gh.read: inexpressible
+  gh.pr.create: inexpressible
+  gh.api: inexpressible
+  # Shell(gcloud) would pre-approve `gcloud run deploy`: withheld, so gcloud prompts.
+  gcloud.read: inexpressible
+  # Command-base widths, each named in the report (BR-8).
+  test.npm: widened:npm
+  npm.ci: widened:npm
+  "npm.install:npm install": widened:npm
+  shell.pwd: widened:pwd
+  rm.recursive: widened:rm
+  rm.force: widened:rm
+  terraform: widened:terraform
+  # A shared base cannot be denied without blocking the routine tier (BR-8).
+  git.push.force: deny-unsupported
+  git.push.force-main: deny-unsupported
+  git.reset.hard: deny-unsupported
+  git.clean: deny-unsupported
+  git.branch.force-delete: deny-unsupported
+  gh.merge: deny-unsupported
+  gh.pr.close: deny-unsupported
+  gh.release: deny-unsupported
+
+trust:
+  mechanism: flag
+  detail: --trust
+
+# Present for the loader; no render reads them, because hooks are via:claude.
+hook_events:
+  session-start: sessionStart
+  session-compact: unsupported
+  subagent-start: subagentStart
+hook_timeout_unit: s
+hook_payload:
+  session_id: unsupported
+  cwd: unsupported
+  transcript_path: unsupported
+
+doctor_rows:
+  - id: agents-skills-view
+    kind: path-exists
+    target: $HOME/.agents/skills
+    remediation: run ./install.sh from the toolkit clone
+    fact: "skills come from this view and from the clone root below, so every toolkit skill is discovered twice"
+  - id: claude-skills
+    kind: path-exists
+    target: $HOME/.claude/skills
+    remediation: run ./install.sh from the toolkit clone
+    fact: "the clone root, which Cursor also reads, so its non-skill directories are exposed"
+  - id: claude-agents
+    kind: path-exists
+    target: $HOME/.claude/agents
+    remediation: run ./install.sh from the toolkit clone
+    fact: "agents and hooks come from Claude's paths (via:claude); nothing is rendered for Cursor"
+
+fidelity_notes:
+  - "cursor: `git` and `gh` will prompt while deny_under_allow.prefix (and git-c, for git) reads unverified (OQ-8, OQ-9)."
+  - "cursor: `Shell(rm)` and `Shell(terraform)` deny every subcommand; run those from your own shell. `Shell(npm)` admits `npm publish`."
+  - "cursor: .cursor/permissions.json has no deny key, so the deny tier reaches the agent CLI only; the IDE file carries the allow set alone."
+
+# The exec engine's keys are REQ-659's and REQ-662's; none is verified on a real install.
+exec:
+  flags: unverified
+
+capabilities:
+  deny: "yes"
+  # Cursor's reader of Claude-format hooks does not map SubagentStart (ADR-13).
+  subagent_start_hook: "no"
+  compact_rehook: "no"
+  # Cursor's own agent files take `readonly: true`; whether it honours the tools:
+  # line of a Claude agent file is OQ-2, and the README says unverified.
+  agent_tool_restriction: readonly-only
+  readonly_marker: "readonly: true"
+  allowlist_granularity: command-base
+  committable_allowlist: "yes"
+  git_c_spelling: []
+  never_restore: [env-prefix, shell-opener]
+  deny_under_allow:
+    prefix: {mechanism: deny, result: unverified, harness_version: unverified, source: probe}
+    git-c: {mechanism: deny, result: unverified, harness_version: unverified, source: probe}
+    env-prefix: {mechanism: deny, result: unverified, harness_version: unverified, source: probe}
+    shell-opener: {mechanism: deny, result: unverified, harness_version: unverified, source: probe}

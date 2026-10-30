@@ -22,7 +22,7 @@ deliberately does NOT copy.
 - `ethos` — `.adlc/ETHOS.md` vs `$ADLC_TOOLKIT_ROOT/ETHOS.md` (Step 3c, template-posture + missing-principle)
 - `workflow-runtime` — `.adlc/workflows/adlc-sprint.workflow.js` + `README.md` vs `$ADLC_TOOLKIT_ROOT/workflows/` (Step 3d, partials-posture)
 - `workflow-test-landmine` — stale `*.test.js`/`*.spec.js` under `.adlc/` from an older `/init` (Step 3b, always stale; template-drift-only)
-- `harness-config` — the rendered project layer (`.claude/settings.json`) vs a fresh `adlc harness render` (Step 3g, template-posture + missing deny-tier rule)
+- `harness-config` — the rendered project layer (`.claude/settings.json`, and when the project has them `.github/hooks/adlc.json`, `.cursor/cli.json`, `.cursor/permissions.json`) vs a fresh `adlc harness render` (Step 3g, template-posture + missing deny-tier rule)
 <!-- /sync-surfaces -->
 
 **Cross-reference invariant (BR-4):** every surface `/init` copies MUST have a matching check here.
@@ -348,7 +348,7 @@ If every file is `synced`, report `agents` as `clean` (one line). If `.adlc/agen
 
 ### Step 3g: Detect Harness-Config Drift (the rendered allowlist and hooks)
 
-The seventh surface is the harness project layer `/init` Step 8 renders (REQ-657 BR-11): `.claude/settings.json`, from the toolkit's `templates/permissions.yml` and `templates/hooks.yml` through `harness/claude.yml`. It is **re-rendered, not diffed against a copy**: `adlc harness drift` renders the project layer fresh and compares it with the project's file by set, with **template posture**, because a project may legitimately add its own commands:
+The seventh surface is the harness project layer `/init` Step 8 renders (REQ-657 BR-11): `.claude/settings.json`, from the toolkit's `templates/permissions.yml` and `templates/hooks.yml` through `harness/claude.yml`, plus, in a project that opted in with `/init --harness` (`/adlc:init --harness` on the plugin install), `.github/hooks/adlc.json` (Copilot CLI) and `.cursor/cli.json` and `.cursor/permissions.json` (Cursor, REQ-656). `--opted-in` compares those only when one of the harness's files exists, so a project that never asked for them gets no `missing` row. It is **re-rendered, not diffed against a copy**: `adlc harness drift` renders the project layer fresh and compares it with the project's file by set, with **template posture**, because a project may legitimately add its own commands:
 
 - `synced` — every canonical rule and hook is present, and nothing else differs;
 - `customized` — nothing canonical is missing; the project added entries (named);
@@ -359,10 +359,10 @@ The seventh surface is the harness project layer `/init` Step 8 renders (REQ-657
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" harness drift --harness claude
+python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" harness drift --harness claude --opted-in
 ```
 
-The command is read-only and exits 1 when anything is `stale` or `missing`. Its reconciliation is a re-render, never a hand copy: `adlc harness render --harness claude --force` overwrites the file (project additions are lost, so offer it only for a `stale` file and say so), or the user adds the named missing entries by hand.
+The command is read-only and exits 1 when anything is `stale` or `missing`. Its reconciliation is a re-render, never a hand copy: `adlc harness render --harness <name> --force`, naming the harness on the report's row, overwrites the file (project additions are lost, so offer it only for a `stale` file and say so), or the user adds the named missing entries by hand.
 
 ### Step 3e: Classify Each Surface's Drift Across the Pipeline (promotion state)
 

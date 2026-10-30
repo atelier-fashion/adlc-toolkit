@@ -359,6 +359,26 @@ _REQ657_BLOCKED = [
     ("templates/hooks.yml", "templates/hooks.yml"),
     (".claude/settings*.json", ".claude/settings.json"),
 ]
+# REQ-656 BR-12: the three project files the Copilot and Cursor adapters write. Each
+# trips blocked-path through a glob REQ-652 and REQ-666 already carry, so this REQ
+# adds no entry: naming a file here would be a second copy of the same gate.
+REQ656_FILES = (".cursor/cli.json", ".cursor/permissions.json", ".github/hooks/adlc.json")
+
+
+@pytest.mark.parametrize("path", REQ656_FILES)
+def test_req656_files_escalate_a_lite_diff(make_repo, path):
+    sb = make_repo().feature(path)
+    verdict, _counted, pairs = _check(sb.path)
+    assert verdict == "escalate"
+    assert pairs == [("blocked-path", path)]
+
+
+def test_req656_adds_no_blocked_path():
+    assert ".github/**" in lc.DEFAULT_BLOCKED_PATHS and ".cursor/**" in lc.DEFAULT_BLOCKED_PATHS
+    for path in REQ656_FILES:
+        assert path not in lc.DEFAULT_BLOCKED_PATHS
+
+
 REQ657_ADDED = ("harness/**", "templates/permissions.yml", "templates/hooks.yml",
                 ".claude/settings*.json")
 
