@@ -3,8 +3,8 @@
 #
 # Proves that the partial-sourcing lines the repository ACTUALLY CONTAINS survive
 # every shell run.sh drives. The harness hardcodes no spelling: it extracts every
-# distinct sourcing line from the real corpus (*/SKILL.md, agents/*.md,
-# proceed/phase*.md, and the non-comment lines of partials/*.sh — the last is what
+# distinct sourcing line from the real corpus (*/SKILL.md, */references/*.md,
+# agents/*.md, proceed/phase*.md, and the non-comment lines of partials/*.sh — the last is what
 # covers emit-step-telemetry.sh's live self-source) and executes each one verbatim
 # in a sandbox, under the shell run.sh hands it via $ADLC_TEST_SHELL.
 #
@@ -91,11 +91,26 @@ SRC_LINE_RE='^(\. |source |\[ -f |if \[ -f |elif \[ -f |else \. ).*partials/[A-Z
 # silently emptied the corpus — and, in case (e), an empty corpus yields the
 # expected zero hits. Each leg is its own function so the partials leg can be
 # proven to contribute independently of the markdown leg.
+#
+# BUG-255: the skill files are walked as tools/lint-skills/check.py's skill unit
+# (`skill_companions`) — each SKILL.md, its `<skill>/references/*.md`, and
+# proceed/phase*.md. REQ-661 moved fences into companions; a list of SKILL.md
+# alone stopped running them. Companions are listed per skill directory, never by
+# a deep find, so a nested .claude/worktrees/ or .worktrees/ checkout is never
+# entered (BUG-254, LESSON-750). Every corpus walk below goes through this one.
+skill_unit_files() { # skill_unit_files <root> — each SKILL.md and its companions, one per line
+  find "$1" -maxdepth 2 -name SKILL.md -type f 2>/dev/null | while IFS= read -r su_f; do
+    printf '%s\n' "$su_f"
+    find "${su_f%/SKILL.md}/references" -maxdepth 1 -name '*.md' -type f 2>/dev/null
+  done
+  find "$1/proceed" -maxdepth 1 -name 'phase*.md' -type f 2>/dev/null
+}
+markdown_corpus() { # markdown_corpus <root> — every fence-bearing markdown file, sorted
+  { skill_unit_files "$1"
+    find "$1/agents" -maxdepth 1 -name '*.md' -type f 2>/dev/null; } | sort
+}
 extract_markdown_leg() { # extract_markdown_leg <root>
-  { find "$1" -maxdepth 2 -name SKILL.md -type f 2>/dev/null
-    find "$1/agents" -maxdepth 1 -name '*.md' -type f 2>/dev/null
-    find "$1/proceed" -maxdepth 1 -name 'phase*.md' -type f 2>/dev/null; } \
-  | sort | while IFS= read -r f; do cat "$f"; done
+  markdown_corpus "$1" | while IFS= read -r f; do cat "$f"; done
 }
 extract_partials_leg() { # extract_partials_leg <root> — non-comment lines of partials/*.sh
   find "$1/partials" -maxdepth 1 -name '*.sh' -type f 2>/dev/null | sort \
@@ -393,10 +408,10 @@ RETIRED='2>/dev/null || . ~/.claude/skills/partials/'
 RETIRED_NEW='2>/dev/null || . "$ADLC_TOOLKIT_ROOT/partials/'
 CANON_SPELLING='if [ -f .adlc/partials/<name>.sh ]; then . .adlc/partials/<name>.sh; else . "$ADLC_TOOLKIT_ROOT/partials/<name>.sh"; fi'
 surface_files() { # the distribution surface — find, not globs (zsh unmatched-glob abort)
-  { find "$ROOT" -maxdepth 2 -name SKILL.md -type f
+  { skill_unit_files "$ROOT"
     find "$ROOT/agents" "$ROOT/partials" "$ROOT/proceed" "$ROOT/templates" "$ROOT/workflows" \
          "$ROOT/.adlc/context" -maxdepth 1 -type f
-    printf '%s\n' "$ROOT/README.md" "$ROOT/tools/lint-skills/README.md"; } 2>/dev/null
+    printf '%s\n' "$ROOT/README.md" "$ROOT/tools/lint-skills/README.md"; } 2>/dev/null | sort -u
 }
 # Positive control first: an expected value of zero hits is only evidence when
 # the corpus it was counted over is demonstrably non-empty.
@@ -519,9 +534,7 @@ TAB=$(printf '\t')
 extract_fences() { # extract_fences <root> <outdir> — one script per sourcing fence
   mkdir -p "$2"; : > "$2/manifest"; : > "$2/diag"
   fx_n=0
-  { find "$1" -maxdepth 2 -name SKILL.md -type f 2>/dev/null
-    find "$1/agents" -maxdepth 1 -name '*.md' -type f 2>/dev/null
-    find "$1/proceed" -maxdepth 1 -name 'phase*.md' -type f 2>/dev/null; } | sort > "$2/files"
+  markdown_corpus "$1" > "$2/files"
   while IFS= read -r fx_f; do
     fx_n=$(ADLC_SG_REL="${fx_f#"$1"/}" ADLC_SG_OUT="$2" ADLC_SG_SRC_RE="$SRC_LINE_RE" \
       ADLC_SG_ROOT_LINE="$ROOT_LINE_CANON" awk -v n="$fx_n" '
@@ -688,6 +701,19 @@ else
     fail "fence_runner_probes_located: could not find the good and late probe fences in the manifest"
   fi
 
+  # BUG-255: a companion's fence is extracted; the same file inside a nested
+  # .claude/worktrees/ or .worktrees/ checkout is not (BUG-254).
+  CP="$SANDBOX/companionprobe"
+  for cp_d in "$CP/sk" "$CP/.claude/worktrees/x/sk" "$CP/.worktrees/x/sk"; do
+    mkdir -p "$cp_d/references"
+    printf '# sk\n\nNo fence here.\n' > "$cp_d/SKILL.md"
+    printf '# companion\n\n```sh\n%s\nif [ -f .adlc/partials/companion-probe.sh ]; then . .adlc/partials/companion-probe.sh; else . "$ADLC_TOOLKIT_ROOT/partials/companion-probe.sh"; fi\n```\n' \
+      "$ROOT_LINE_CANON" > "$cp_d/references/c.md"
+  done
+  extract_fences "$CP" "$SANDBOX/companionprobe-out"
+  check "fence_extraction_walks_companions: only the top-level skill's references/ fence is extracted" \
+    "sk/references/c.md:3" "$(cut -f2 "$SANDBOX/companionprobe-out/manifest" | tr '\n' ' ' | sed 's/ $//')"
+
   # --- the real corpus: every sourcing fence, not a sample -------------------
   FX="$SANDBOX/fences"
   extract_fences "$ROOT" "$FX"
@@ -696,6 +722,17 @@ else
     fail "fence_extraction_nonvacuous: zero sourcing fences extracted from the corpus"
   else
     pass "fence_extraction_nonvacuous: $FENCE_N sourcing fence(s) extracted from the corpus"
+  fi
+  # BUG-255: REQ-661 moved 9 sourcing fences into spec/references/ (5 in
+  # intake-source-read.md, 4 in retrieval-body-read.md). A walk that stops
+  # reaching companions drops this count. Lower the floor only when a companion
+  # fence is removed on purpose.
+  COMPANION_FENCE_FLOOR=9
+  COMPANION_FENCE_N=$(cut -f2 "$FX/manifest" | grep -c '/references/')
+  if [ "$COMPANION_FENCE_N" -ge "$COMPANION_FENCE_FLOOR" ]; then
+    pass "fence_extraction_reaches_companions: $COMPANION_FENCE_N sourcing fence(s) from references/ companions (floor $COMPANION_FENCE_FLOOR)"
+  else
+    fail "fence_extraction_reaches_companions: only $COMPANION_FENCE_N sourcing fence(s) from references/ companions (floor $COMPANION_FENCE_FLOOR) — the walk no longer reaches them"
   fi
   if [ -s "$FX/diag" ]; then
     fail "fence_extraction_clean: corpus shapes the fence cut cannot run: $(tr '\n' ' ' < "$FX/diag")"
