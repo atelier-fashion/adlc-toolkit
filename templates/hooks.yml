@@ -1,0 +1,33 @@
+# templates/hooks.yml — the canonical hook set (REQ-657 BR-10).
+#
+# Rendered per harness by `adlc harness render` into the file that harness reads
+# (Claude Code: the `hooks` block of .claude/settings.json, which Copilot CLI and
+# Cursor read as-is). Events are canonical and each adapter maps them in
+# `hook_events`; `timeout_s` is converted through the adapter's
+# `hook_timeout_unit`.
+#
+# Each command resolves its partial through the canonical two-level guarded
+# spelling after the ToolkitRoot root line (conventions.md "Bash in skills"); the
+# line before the source exits 0 when the partial is absent at both levels, so a
+# hook never fails a session. tools/lint-skills' unguarded-source walks this file.
+# The ETHOS `!` line in every SKILL.md stays: this hook is additive (plan M6).
+hooks:
+  - id: ethos-inject
+    events: [session-start, session-compact, subagent-start]
+    timeout_s: 10
+    command: |
+      ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+      [ -f .adlc/partials/ethos-inject.sh ] || [ -f "$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh" ] || exit 0
+      if [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . "$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh"; fi
+      adlc_ethos_inject
+  # The command names the partial REQ-660 ships; until it lands, the stub of the
+  # same name writes `.adlc/.session/<id>` with `harness=` and `session_id=` only.
+  # The sidecar's fields, format, mode, pruning and gitignore line are REQ-660's.
+  - id: session-record
+    events: [session-start]
+    timeout_s: 10
+    command: |
+      ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+      [ -f .adlc/partials/session-record.sh ] || [ -f "$ADLC_TOOLKIT_ROOT/partials/session-record.sh" ] || exit 0
+      if [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . "$ADLC_TOOLKIT_ROOT/partials/session-record.sh"; fi
+      adlc_session_record

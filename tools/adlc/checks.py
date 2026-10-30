@@ -1597,6 +1597,29 @@ def _harness_checks():
     return [Check("harness:" + name, _harness_check(name)) for name in harness.NAMES]
 
 
+# --- render-currency:<name> (REQ-657 BR-15) ---------------------------------
+#
+# One framework check per harness detect knows, driven by that harness's adapter:
+# the adapter validates (BR-1), every user-level surface it renders equals a fresh
+# render, and its data-declared doctor_rows hold. `adlc harness doctor` calls the
+# same function (harness_doctor.render_currency), so there is one copy of the code.
+
+def _render_currency_check(name: str):
+    def run(profile: Profile):
+        import harness_doctor
+        status, detail, remediation = harness_doctor.render_currency(name)
+        result = {"PASS": Result.PASS, "FAIL": Result.FAIL}.get(status, Result.SKIP)
+        return result, detail, remediation
+    run.__name__ = "check_render_currency_" + name
+    return run
+
+
+def _render_currency_checks():
+    import harness
+    return [Check("render-currency:" + name, _render_currency_check(name))
+            for name in harness.NAMES]
+
+
 # --- registry (report order) ----------------------------------------------
 
 REGISTRY = [
@@ -1639,4 +1662,4 @@ REGISTRY = [
     Check("template-version", check_template_version),
     # Machine-wide: every consumer's vendored partials against the canonical ones.
     Check("consumer-sync", check_consumer_sync),
-] + _harness_checks()
+] + _harness_checks() + _render_currency_checks()

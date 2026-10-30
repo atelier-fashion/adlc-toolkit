@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "harness": "fake-prefix",
+  "harness_version": "1.2.3",
+  "probes": {
+    "ask-tier-deny": {
+      "status": "pass",
+      "sub_results": {
+        "deny-under-allow": {"status": "pass"},
+        "wrapped-allow": {"status": "pass"}
+      }
+    }
+  }
+}

@@ -32,7 +32,7 @@ Promotion-carried actions must state **which branch the PR is based on**. "Copy 
 is not an action in a multi-branch repo; "branch off `origin/staging`, copy, PR to
 `staging`" is.
 
-With that routing settled, offer a specific action for each reconcilable item, across **all six surfaces**: each **accidental** template drift, each **missing locally** template; each **accidental** or **missing-principle** ETHOS drift; **every** `stale` or `missing` partial (no customization escape hatch — see Step 3); **every** `stale` or `missing` agent checklist (see Step 3f); **every** `stale` or `missing` workflow-runtime file (no customization escape hatch — see Step 3d); and **every** stale workflow test file from Step 3b. Format as a numbered list so the user can approve selectively:
+With that routing settled, offer a specific action for each reconcilable item, across **all seven surfaces**: each **accidental** template drift, each **missing locally** template; each **accidental** or **missing-principle** ETHOS drift; **every** `stale` or `missing` partial (no customization escape hatch — see Step 3); **every** `stale` or `missing` agent checklist (see Step 3f); **every** `stale` or `missing` workflow-runtime file (no customization escape hatch — see Step 3d); **every** stale workflow test file from Step 3b; and each `stale` or `missing` harness-config file from Step 3g, by re-render, naming every missing deny-tier rule. Format as a numbered list so the user can approve selectively:
 
 ```
 ## Proposed Actions

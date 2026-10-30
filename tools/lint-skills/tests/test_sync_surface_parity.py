@@ -216,6 +216,14 @@ def test_init_surfaces_match():
     assert fence_lines, "init/SKILL.md has no shell fences to copy with"
     for bullet in bullets:
         spans = bullet.split("`")[1::2]  # backtick-quoted spans, in order
+        # REQ-657 BR-11: the harness project layer is rendered, never copied; its
+        # bullet names the render, and an init fence must run that render.
+        renders = [s for s in spans if s.startswith("adlc harness render ")]
+        if renders:
+            assert len(renders) == 1 and not [s for s in spans if s.startswith("cp ")], bullet
+            assert any('/tools/adlc/adlc.py" harness render --harness' in line
+                       for line in fence_lines), "no init fence runs `adlc harness render`"
+            continue
         cmds = [s for s in spans if s.startswith("cp ")]
         assert len(cmds) == 1, f"expected one cp command in {bullet!r}"
         cmd = cmds[0]

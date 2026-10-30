@@ -237,6 +237,13 @@ DEFAULT_BLOCKED_PATHS = (
     ".github/agents/**",
     ".github/hooks/**",
     ".claude/**",
+    # REQ-657 BR-14: a lite PR cannot widen an allowlist or soften a hook. The
+    # adapters and their goldens, the permission and hook sources, and the
+    # rendered settings (`.claude/**` already covers the last; named explicitly).
+    "harness/**",
+    "templates/permissions.yml",
+    "templates/hooks.yml",
+    ".claude/settings*.json",
     ".mcp.json",
     "**/CLAUDE.md",
     "**/AGENTS.md",

@@ -229,7 +229,9 @@ def test_context_fences_run_everywhere(tmp_path, shell, where):
 
 def _allow_entries() -> list[str]:
     import json
-    data = json.loads(_read("templates/claude-settings-template.json"))
+    # REQ-657: the settings template is gone; the committed `claude` golden render
+    # of templates/permissions.yml is what /init writes (REQ-666 BR-15 re-pointed).
+    data = json.loads(_read("harness/claude/rendered/settings.json"))
     out = []
     for entry in data["permissions"]["allow"]:
         m = re.match(r"^Bash\((.*?)(?::\*)?\)$", entry)

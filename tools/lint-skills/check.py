@@ -680,13 +680,15 @@ READ_BIN_COMMAND_PREFIX_RE = re.compile(r"(?:^|[;&|(]|\s)command\s+$")
 # symptom `/init` deliberately does NOT copy (so it may appear in template-drift's
 # checked list with no matching `/init` copy entry — see check_sync_surface_parity).
 SYNC_SURFACES = frozenset(
-    {"templates", "partials", "agents", "ethos", "workflow-runtime", "workflow-test-landmine"}
+    {"templates", "partials", "agents", "ethos", "workflow-runtime", "workflow-test-landmine",
+     "harness-config"}
 )
-# The five surfaces `/init` actually copies (every one MUST have a template-drift
-# check; `agents` is REQ-666 BR-8/BR-9). `workflow-test-landmine` is
-# intentionally excluded — it is not copied.
+# The six surfaces `/init` actually writes (every one MUST have a template-drift
+# check; `agents` is REQ-666 BR-8/BR-9; `harness-config`, the rendered project
+# layer, is REQ-657 BR-11). `workflow-test-landmine` is intentionally excluded —
+# it is not copied.
 INIT_COPIED_SURFACES = frozenset(
-    {"templates", "partials", "agents", "ethos", "workflow-runtime"}
+    {"templates", "partials", "agents", "ethos", "workflow-runtime", "harness-config"}
 )
 
 # A surface-list marker block: `<!-- sync-surfaces: <which> -->` ... `<!-- /sync-surfaces -->`.
@@ -4761,7 +4763,166 @@ def run(root: Path) -> tuple[list[Finding], int]:
     # Per-root (REQ-666 BR-7, BR-11): the description budget and the skills-ref validator.
     findings.extend(check_description_budget(root))
     findings.extend(check_skills_ref(root))
+    # Per-root (REQ-657 BR-9, BR-13, BR-16): the harness adapter framework's gates.
+    findings.extend(check_allowlist_fidelity(root))
+    findings.extend(check_render_parity(root))
+    findings.extend(check_hook_sources(root))
+    findings.extend(check_retired_settings_template(root))
     return findings, scanned
+
+
+# ---------------------------------------------------------------------------
+# REQ-657: the harness adapter framework's lint checks
+# ---------------------------------------------------------------------------
+ALLOWLIST_FIDELITY_CHECK = "allowlist-fidelity"
+RENDER_PARITY_CHECK = "render-parity"
+RETIRED_TEMPLATE_CHECK = "retired-settings-template"
+#: REQ-657 BR-6: the deleted template's name. A skill, companion, agent, partial,
+#: or partial doc that still names it is a finding (the REQ-610 BR-6 precedent:
+#: a lint fixture carrying the old path must fail).
+#: Built from parts so this file, which must name it, does not itself match an
+#: AC-5 grep of the distribution surface for the old name.
+RETIRED_SETTINGS_TEMPLATE = "claude-settings-" + "template.json"
+
+
+def _import_harness_engine(root: Path):
+    """``(harness_adapter, harness_render)`` from ``root``'s tools/adlc, or ``None``.
+
+    The same posture as ``check_agent_model_drift``: the engine is imported from
+    the tree under check (the lint and the render share one code path, LESSON-006)
+    and an absent engine degrades to zero findings outside the toolkit.
+    """
+    adlc_dir = root / "tools" / "adlc"
+    if not (adlc_dir / "harness_render.py").is_file():
+        return None
+    if str(adlc_dir) not in sys.path:
+        sys.path.insert(0, str(adlc_dir))
+    try:
+        import harness_adapter  # noqa: E402
+        import harness_render  # noqa: E402
+    except Exception:  # pragma: no cover - defensive import guard
+        return None
+    return harness_adapter, harness_render
+
+
+def check_allowlist_fidelity(root: Path) -> list[Finding]:
+    """REQ-657 BR-9: render templates/permissions.yml at project scope through every
+    shipped adapter and fail on any verdict its ``accepted_fidelity`` does not list.
+
+    The report (one line per ``(harness, entry, command)``, the per-verdict counts,
+    then the declared residuals) goes to stderr; failures are findings. The
+    allowlist is never the gate (Rule B): this closes spellings, not the residuals.
+    """
+    engine = _import_harness_engine(root)
+    if engine is None or not (root / "templates" / "permissions.yml").is_file():
+        return []
+    ha, hr = engine
+    paths = ha.shipped_adapter_paths(str(root))
+    results = {Path(p).stem: str(root / ".adlc" / "research" / "harness-probes"
+                                 / (Path(p).stem + ".json")) for p in paths}
+    try:
+        lines, failures = hr.fidelity_report(paths, results, toolkit=str(root))
+    except Exception as exc:  # an engine crash is itself a finding, never silence
+        return [Finding("templates/permissions.yml", 1, ALLOWLIST_FIDELITY_CHECK,
+                        f"the fidelity engine failed: {type(exc).__name__}: {exc}")]
+    for line in lines:
+        print(f"{ALLOWLIST_FIDELITY_CHECK}: {line}", file=sys.stderr)
+    return [Finding("templates/permissions.yml", 1, ALLOWLIST_FIDELITY_CHECK, msg)
+            for msg in failures]
+
+
+def check_render_parity(root: Path) -> list[Finding]:
+    """REQ-657 BR-13: every golden under harness/<name>/rendered/ and every in-tree
+    render (the agents' ``model:`` lines, the toolkit's .claude/settings.json) equals
+    what ``adlc harness render`` would write. Calls ``harness_render.parity``, the
+    function ``adlc harness render --check`` calls (REQ-516 BR-5, LESSON-006)."""
+    engine = _import_harness_engine(root)
+    if engine is None or not (root / "harness").is_dir():
+        return []
+    _ha, hr = engine
+    try:
+        results = hr.parity(str(root))
+    except Exception as exc:
+        return [Finding("harness", 1, RENDER_PARITY_CHECK,
+                        f"the render failed: {type(exc).__name__}: {exc}")]
+    findings = []
+    for harness, surface, path, status, diff in results:
+        if status == "in-parity":
+            continue
+        head = " | ".join(diff.splitlines()[2:8]) if diff else ""
+        findings.append(Finding(path, 1, RENDER_PARITY_CHECK,
+                                f"{status} ({harness} {surface}) — re-render with "
+                                f"`adlc harness render --harness <name> --force` or "
+                                f"`adlc agents render`, or update the golden"
+                                + (f"; diff: {head}" if head else "")))
+    return findings
+
+
+def _hook_command_findings(rel: str, numbered: list[tuple[int, str]]) -> list[Finding]:
+    findings = []
+    for lineno, line in numbered:
+        if line.lstrip().startswith("#"):
+            continue
+        if CANONICAL_SOURCE_RE.match(line) or not DOT_SOURCE_PARTIAL_RE.search(line):
+            continue
+        findings.append(Finding(
+            rel, lineno, "unguarded-source",
+            "a hook command sources a partial without the canonical guarded spelling; "
+            f"spell it `{GUARDED_SOURCE_SPELLING}` on ONE line, after the root line "
+            "(REQ-657 BR-10, BR-16; REQ-610 BR-3)"))
+    return findings
+
+
+def check_hook_sources(root: Path) -> list[Finding]:
+    """REQ-657 BR-16: ``unguarded-source`` walks templates/hooks.yml and every
+    committed hook render (harness/*/rendered/*.json), one hook command line at a
+    time, so a hook that sources its partial any other way is a finding."""
+    findings: list[Finding] = []
+    hooks_yml = root / "templates" / "hooks.yml"
+    if hooks_yml.is_file():
+        text = hooks_yml.read_text(encoding="utf-8", errors="replace")
+        findings.extend(_hook_command_findings(
+            "templates/hooks.yml", list(enumerate(text.splitlines(), start=1))))
+    harness_dir = root / "harness"
+    if harness_dir.is_dir():
+        for golden in sorted(harness_dir.glob("*/rendered/*.json")):
+            rel = _safe_label(golden, root)
+            try:
+                doc = json.loads(golden.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                findings.append(Finding(rel, 1, "unguarded-source",
+                                        "the committed render is not readable JSON"))
+                continue
+            hooks = doc.get("hooks", {}) if isinstance(doc, dict) else {}
+            for groups in (hooks.values() if isinstance(hooks, dict) else []):
+                for group in groups or []:
+                    for hook in (group or {}).get("hooks", []) or []:
+                        command = hook.get("command", "") if isinstance(hook, dict) else ""
+                        findings.extend(_hook_command_findings(
+                            rel, [(1, ln) for ln in command.split("\n")]))
+    return findings
+
+
+def check_retired_settings_template(root: Path) -> list[Finding]:
+    """REQ-657 BR-6: nothing on the distribution surface names the deleted template."""
+    findings = []
+    paths = list(root.glob("*/SKILL.md")) + list(root.glob("*/references/*.md")) \
+        + list(root.glob("proceed/phase*.md")) + list(root.glob("agents/*.md")) \
+        + list(root.glob("partials/*.sh")) + list(root.glob("partials/*.md"))
+    for path in sorted(set(paths)):
+        rel = _safe_label(path, root)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if RETIRED_SETTINGS_TEMPLATE in line:
+                findings.append(Finding(
+                    rel, lineno, RETIRED_TEMPLATE_CHECK,
+                    f"names the deleted {RETIRED_SETTINGS_TEMPLATE}; the project allowlist "
+                    "is rendered from templates/permissions.yml by `adlc harness render "
+                    "--harness claude` (REQ-657 BR-6)"))
+    return findings
 
 
 def main(argv: list[str] | None = None) -> int:

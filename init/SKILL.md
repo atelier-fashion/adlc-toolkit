@@ -1,7 +1,7 @@
 ---
 name: init
 description: Bootstrap .adlc/ structure in a new repo or subdirectory
-argument-hint: Optional target directory (defaults to current directory)
+argument-hint: Optional target directory, then --harness <name>[,<name>…] (defaults to claude)
 ---
 
 # /init — Bootstrap ADLC Structure
@@ -15,6 +15,8 @@ You are setting up the `.adlc/` directory structure for spec-driven development.
 ## Input
 
 The target is the argument: whatever follows `/init` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), a directory to initialize. With none, the current working directory.
+
+A `--harness <name>[,<name>…]` flag in the argument names the agent harnesses whose project layer Step 8 renders (REQ-657 BR-11). Strip it before reading the directory. Without it the harness list is `claude` alone. A non-Claude harness's project layer is written only when the flag names it, never because `adlc harness detect` found its binary, and only the adapters shipped under the toolkit's `harness/` directory can be named.
 
 ## Instructions
 
@@ -224,9 +226,10 @@ If the user has previously made intentional customizations to their local `.adlc
 
 #### Vendored sync surfaces (drift-detection contract with `/template-drift`)
 
-The five surfaces this step copies are the project's **vendored sync surfaces** — copied once at
-init time, never auto-updated afterward. `/template-drift` is the tool that detects when a toolkit
-update to any of them has not yet landed in this project. The two lists MUST stay in agreement:
+The five surfaces this step copies, plus the harness project layer Step 8 renders
+(`harness-config`), are the project's **vendored sync surfaces** — written once at init time, never
+auto-updated afterward. `/template-drift` is the tool that detects when a toolkit update to any of
+them has not yet landed in this project. The two lists MUST stay in agreement:
 **every surface added here must get a matching check in `/template-drift`** (see its
 `<!-- sync-surfaces: template-drift -->` list). The toolkit's `tools/lint-skills`
 `sync-surface-parity` check fails the build if they diverge.
@@ -237,6 +240,7 @@ update to any of them has not yet landed in this project. The two lists MUST sta
 - `partials` — `cp "$ADLC_TOOLKIT_ROOT/partials"/*.sh .adlc/partials/`
 - `agents` — `cp "$ADLC_TOOLKIT_ROOT/agents"/*.md .adlc/agents/`
 - `workflow-runtime` — `cp "$ADLC_TOOLKIT_ROOT/workflows"/*.workflow.js` + `README.md` → `.adlc/workflows/`
+- `harness-config` — `adlc harness render --harness <name>` → each named harness's project layer (Step 8; `claude`: `.claude/settings.json`)
 <!-- /sync-surfaces -->
 
 (Note: `/template-drift` checks one additional surface — `workflow-test-landmine`, a stale
@@ -271,35 +275,35 @@ fi
 
 Advise the user: "Open `.adlc/context/taxonomy.md` and customize the example values for this codebase. Authors of new REQs, bugs, and lessons will reference this file when choosing tag values (`component`, `domain`, `stack`, `concerns`). The `tags` dimension stays free-form."
 
-### Step 8: Scaffold Claude Code Permissions Allowlist
+### Step 8: Render the Harness Project Layer (allowlist, hooks, instruction files)
 
-Copy the canonical Claude Code settings template to `.claude/settings.json` so `/proceed` (and every other skill in this toolkit) can run end-to-end without prompting for permission on every routine `git`, `gh`, test, and agent-dispatch operation. This is the single biggest mitigation against per-phase gating in long-running pipelines.
+Render each named harness's project layer through its adapter (REQ-657 BR-11), so `/proceed` (and every other skill in this toolkit) can run end-to-end without prompting on every routine `git`, `gh`, test and agent-dispatch operation. The project layer is **rendered, never copied**: `adlc harness render` turns the toolkit's `templates/permissions.yml` (the routine tier and the deny tier) and `templates/hooks.yml` (`ethos-inject`, `session-record`) into the file each harness reads. For `claude` that is `.claude/settings.json`, whose deny tier is Claude Code's **ask** list, so a person still confirms each one-way move (`rm -rf`, `git reset --hard`, `gh pr merge`, `./deploy.sh`, `terraform apply/destroy`, force-push to `main`). The same render writes `AGENTS.md`, the project instruction file every harness reads, and a `CLAUDE.md` that imports it.
 
-**This step is idempotent — skip if the file already exists** (preserve any project-local customizations).
+**Before you run it, when `CLAUDE.md` already exists and someone is in the session**: show the user the `AGENTS.md` the render would write (`$ADLC_TOOLKIT_ROOT/templates/instructions/AGENTS.md`, with the skill list filled in) and the lines that would stay in `CLAUDE.md` if its harness-neutral lines moved to `AGENTS.md`, and wait for their answer. Move lines only on their approval, and by editing `CLAUDE.md` yourself afterwards: the render never deletes or moves a line. In a non-interactive run, render and leave `CLAUDE.md` as the render leaves it.
+
+**This step is idempotent.** An existing `.claude/settings.json` and `AGENTS.md` are kept (pass `--force` to `adlc harness render` to overwrite one), and `CLAUDE.md` gains exactly one `@AGENTS.md` line when it has none, with every other line unchanged. A second run changes nothing. Replace `'<harnesses>'`, quotes included, with the `--harness` value as one single-quoted literal, or with `''` when the argument has none:
 
 ```bash
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-# Verify source exists
-if [ ! -f "$ADLC_TOOLKIT_ROOT/templates/claude-settings-template.json" ]; then
-  echo "ERROR: Settings template not found at $ADLC_TOOLKIT_ROOT/templates/claude-settings-template.json. Ensure the adlc toolkit is installed (plugin route or symlink route, see Step 6)."
+if [ ! -f "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" ]; then
+  echo "ERROR: the adlc CLI was not found at $ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py. Ensure the adlc toolkit is installed (plugin route or symlink route, see Step 6)."
   exit 1
 fi
-
-# Ensure destination directory exists
-mkdir -p .claude
-
-# Idempotent copy: only copy if destination does not already exist
-if [ ! -f .claude/settings.json ]; then
-  cp "$ADLC_TOOLKIT_ROOT/templates/claude-settings-template.json" .claude/settings.json
-  echo "Created .claude/settings.json from canonical template."
-else
-  echo "Preserved existing .claude/settings.json (idempotent — not overwritten)."
-fi
+harnesses='<harnesses>'
+[ -n "$harnesses" ] || harnesses=claude
+printf '%s\n' "$harnesses" | tr ',' '\n' | while IFS= read -r harness; do
+  case "$harness" in
+    ''|*[!a-z]*) echo "Skipping '$harness': not a harness name." ; continue ;;
+  esac
+  python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" harness render --harness "$harness"
+done
 ```
 
-The template pre-approves the routine `git`, `gh`, `npm`, Read/Write/Edit, and agent-dispatch operations the ADLC pipeline fires. Destructive operations (`rm -rf`, `git reset --hard`, `gh pr merge`, `./deploy.sh`, `terraform apply/destroy`, force-push to `main`) remain on the **ask** list so a human still confirms the one-way moves. Customize for project-specific commands (e.g., add `Bash(cd app && ./deploy.sh:*)` for iOS deploys) by editing `.claude/settings.json` directly.
+The render prints one line per file (`written`, `unchanged` or `kept`), and on stderr every allowlist entry the harness cannot express, with the user-level remedy where one exists. When `CLAUDE.md` kept its lines, tell the user the follow-up: harness-neutral lines belong in `AGENTS.md`, and `CLAUDE.md` keeps only the Claude-specific ones below its `@AGENTS.md` line.
 
-Advise the user: "`.claude/settings.json` was scaffolded with a default allowlist. Commit this file — it is team-shared. Use `.claude/settings.local.json` (gitignored by Claude Code) for personal overrides."
+Customize for project-specific commands (e.g., add `Bash(cd app && ./deploy.sh:*)` for iOS deploys) by editing `.claude/settings.json` directly; `/template-drift` reports those additions as `customized`, never as drift to undo.
+
+Advise the user: "`.claude/settings.json` was rendered with the default allowlist and hooks. Commit it and `AGENTS.md` — both are team-shared. Use `.claude/settings.local.json` (gitignored by Claude Code) for personal overrides. Claude Code applies the committed allowlist only once the workspace is trusted."
 
 ### Step 9: Scaffold Cross-Repo Config (Optional)
 
@@ -337,4 +341,4 @@ If the project is single-repo, skip the copy (no config file needed).
 1. Display the created directory structure
 2. Explain the ADLC workflow: `/spec` → `/validate` → `/architect` → `/validate` → implement → `/reflect` → `/review` → `/wrapup` (or use `/proceed` to run the full pipeline automatically)
 3. If cross-repo config was scaffolded, remind the user that `/proceed` will create worktrees in every touched sibling and open one PR per repo
-4. Suggest adding ADLC skill references to the project's `CLAUDE.md` if one exists
+4. Point to `AGENTS.md`, which Step 8 wrote with the workflow, the skill list and the project-context pointers, and to the `@AGENTS.md` line in `CLAUDE.md`

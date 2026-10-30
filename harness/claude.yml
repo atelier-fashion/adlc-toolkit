@@ -1,0 +1,101 @@
+# harness/claude.yml — the Claude Code adapter (REQ-657). Data, not code: every
+# key below is validated by tools/adlc/harness_adapter.py, and an unknown key is
+# a loud error. The goldens it renders live in harness/claude/rendered/.
+name: claude
+schema_version: 1
+binary: claude
+
+paths:
+  # Claude Code's own mounts (REQ-654 BR-6): served by install.sh, nothing rendered.
+  # The agents mount is the canonical agents/ dir, so `adlc agents render --harness
+  # claude` is REQ-516's in-place model: stamp (ADR-9).
+  agents:
+    user: $HOME/.claude/agents
+    mode: mounted
+  skills:
+    user: $HOME/.claude/skills
+    mode: mounted
+  # The allowlist and the hooks travel in the project layer (BR-3): no user path.
+  permissions:
+    project: .claude/settings.json
+    mode: rendered
+  hooks:
+    project: .claude/settings.json
+    mode: rendered
+    # Copilot CLI and Cursor read this render as-is, so it carries no --harness
+    # argument; the partial tells the readers apart from the payload (BR-10).
+    read_by: [copilot, cursor]
+  instructions:
+    project: CLAUDE.md
+    mode: rendered
+
+formats:
+  agents: claude-agent-md
+  permissions: claude-settings-json
+  hooks: claude-settings-json
+  instructions: claude-md-import
+
+tool_map:
+  Read: Read
+  Grep: Grep
+  Glob: Glob
+  Bash: Bash
+  Write: Write
+  Edit: Edit
+  Agent: Agent
+  WebFetch: WebFetch
+  WebSearch: WebSearch
+
+tier_map:
+  opus: opus
+  sonnet: sonnet
+  haiku: haiku
+
+# The deny tier renders as Claude's `ask` list: a human confirms in session (Rule B).
+deny_tier_render:
+  project: confirm
+
+default_mode_map:
+  key: permissions.defaultMode
+  values:
+    acceptEdits: acceptEdits
+
+accepted_fidelity:
+  # A committed opening-token prefix would be a new pre-approval (Rule A): withheld.
+  fence.partial-source: {project: inexpressible, exec: "widened:if [ -f .adlc/partials/"}
+  # `git push:*` matches `git push --force origin feature`; today's template has the
+  # same exposure, grandfathered by Rule A (BR-9).
+  git.push.force: residual:exact-deny
+
+# ASSUME-010 (invalidated by REQ-664's probe): Claude Code 2.1.258 ignores a
+# project's permissions.allow in an untrusted workspace. Declared, not exercised.
+trust:
+  mechanism: user-config-entry
+  detail: "projects[<absolute workspace path>].hasTrustDialogAccepted: true in the home directory's .claude.json"
+
+hook_events:
+  # A SessionStart group with no matcher also fires on compact, so session-start
+  # names the other three sources and compaction gets its own group.
+  session-start: {event: SessionStart, matcher: "startup|resume|clear"}
+  session-compact: {event: SessionStart, matcher: compact}
+  # Present in 2.1.258's hook schema, but it delivers context only as JSON
+  # additionalContext; unverified for a plain-stdout command (spec, Deferred).
+  subagent-start: unsupported
+hook_timeout_unit: s
+hook_payload:
+  session_id: session_id
+  cwd: cwd
+  transcript_path: transcript_path
+
+capabilities:
+  deny: "yes"
+  subagent_start_hook: "no"
+  compact_rehook: "yes"
+  agent_tool_restriction: enforced
+  allowlist_granularity: prefix
+  committable_allowlist: "yes"
+  git_c_spelling: []
+  never_restore: []
+  deny_under_allow:
+    prefix: {mechanism: confirm, result: pass, harness_version: n/a, source: grandfathered}
+  fence_broad_spelling: [if, "[", -f, .adlc/partials/]

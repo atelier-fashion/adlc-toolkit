@@ -106,7 +106,7 @@ On the plugin route each skill is `/adlc:<skill>`.
 - `lesson-template.md` — Lesson-learned knowledge entry
 - `taxonomy-template.md` — Tag/taxonomy reference for retrieval tagging
 
-See [`templates/`](templates/) for the authoritative set (also includes the non-`.md` `config-template.yml` and `claude-settings-template.json`).
+See [`templates/`](templates/) for the authoritative set (also includes the non-`.md` `config-template.yml`, and `permissions.yml` and `hooks.yml`, the semantic allowlist and hook set `adlc harness render` turns into each harness's project settings).
 
 ### Presets
 
@@ -320,6 +320,19 @@ Copilot CLI, Codex, Gemini CLI and Cursor read user-level skills from `~/.agents
   | the ETHOS `!` line | shown as literal text; the model may run its command or skip it, so the ethos can be missing from the skill's context |
   | agent dispatch | runs inline, one checklist at a time, where the harness has no subagents |
   | the plugin route's `adlc:` names | not applicable: those harnesses read the skills view, which has no namespace |
+
+### Harness adapters: one allowlist and one hook set, rendered per harness
+
+Three things the toolkit depends on have no cross-harness standard: agent definitions, command allowlists and hooks. Each now has one semantic source, rendered per harness through a data file, `harness/<name>.yml` (REQ-657). `/init` renders a project's layer with `adlc harness render`, never by copying a static file:
+
+| Source | What it holds | What `claude` renders it into |
+|---|---|---|
+| `templates/permissions.yml` | the **routine** tier (what may be pre-approved) and the **deny** tier (the one-way moves: force-push, `gh pr merge`, `rm -rf`, deploys, `terraform`) | `.claude/settings.json` `allow`, and `ask` for the deny tier, so a person confirms each one-way move |
+| `templates/hooks.yml` | `ethos-inject` (prints `.adlc/ETHOS.md` at session start and after compaction) and `session-record` | the `hooks` block of `.claude/settings.json`, which Copilot CLI and Cursor also read |
+| `agents/*.md` | the agent checklists | stamped in place (`model:`); copy harnesses get rendered copies |
+| `templates/instructions/` | `AGENTS.md`, the instruction file every harness reads | `CLAUDE.md` gains an `@AGENTS.md` import and keeps its own lines |
+
+Only the `claude` adapter ships; Copilot and Cursor, Codex and Gemini CLI follow as data files. What a harness cannot express is reported, never silently widened: `allowlist-fidelity` lists every entry per harness, and an adapter has to accept each gap in writing. On Claude Code, the partial-sourcing fence is not pre-approved in a committed file, and the allowlist applies only in a trusted workspace. The allowlist is a convenience for the routine tier, not a gate: the structural gates are the orchestrator's (`tools/lint-skills/README.md`, "Declared residuals"). `adlc harness render --check` and the `render-parity` lint keep the committed renders equal to what the renderer writes; `/template-drift` reports a project whose rendered settings are behind as `harness-config` drift.
 
 ### `ADLC_HOME`
 

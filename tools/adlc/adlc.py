@@ -93,7 +93,8 @@ SUBCOMMANDS = {
     },
     "harness": {
         "handler": _cmd_harness,
-        "help": "agent harnesses: detect [--json] (read-only); probe <name> (§6 experiments)",
+        "help": "agent harnesses: detect [--json] (read-only); probe <name> (§6 experiments); "
+                "install | render | doctor | drift --harness <name> (REQ-657 adapters)",
     },
 }
 
