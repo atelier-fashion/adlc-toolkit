@@ -8,7 +8,9 @@ sibling adapter's agent or config check is an instance of this check, never new
 code, and nothing here branches on a harness name.
 
 ``adlc doctor --checks render-currency:<name>`` and ``adlc harness doctor`` both
-call :func:`render_currency`, so the two cannot hold separate check code.
+call :func:`render_currency`, so the two cannot hold separate check code. A
+consumer's project layer is not read here: ``consumer-sync`` reports it, machine-wide,
+through ``harness_render.stale_project_layer``.
 
 A row carrying a ``fact`` is not judged: ``checks.py`` reports it under the
 ``harness:<name>`` row, which never fails. ``capabilities.deny_under_allow`` is

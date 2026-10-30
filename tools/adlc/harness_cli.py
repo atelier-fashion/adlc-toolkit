@@ -291,14 +291,8 @@ def _drift_adapters(args, root, toolkit):
     """The adapters to compare. ``--opted-in`` adds each shipped adapter the project
     already has a file of, so a harness nobody asked for is never reported ``missing``
     (REQ-656 BR-14)."""
-    adapters = [ha.resolve_adapter(args.harness or "claude", args.adapter_path, toolkit)]
-    if args.opted_in:
-        named = {a["name"] for a in adapters}
-        for path in ha.shipped_adapter_paths(toolkit):
-            adapter = ha.load_adapter(path, toolkit=toolkit)
-            if adapter["name"] not in named and hr.opted_in(adapter, root, toolkit):
-                adapters.append(adapter)
-    return adapters
+    first = ha.resolve_adapter(args.harness or "claude", args.adapter_path, toolkit)
+    return hr.opted_in_adapters(first, root, toolkit) if args.opted_in else [first]
 
 
 def cmd_drift(args, out=sys.stdout, err=sys.stderr):
@@ -323,7 +317,7 @@ def cmd_drift(args, out=sys.stdout, err=sys.stderr):
         if not rows:
             out.write("harness-config %s: no project-layer file to compare\n"
                       % adapters[0]["name"])
-    return 1 if any(c in ("stale", "missing") for _n, _r, c, _d in rows) else 0
+    return 1 if any(c in hr.DRIFT_FAILING for _n, _r, c, _d in rows) else 0
 
 
 def build_parser():
