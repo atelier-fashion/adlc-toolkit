@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
 (REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609,
-BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654).
+BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654, BUG-254).
 
 Run from the repo root:
 
@@ -199,6 +199,9 @@ to the root's own components. Run from inside a ``.worktrees`` / ``.git`` /
 the linter previously scanned **zero** files and exited 0 — a confident green
 having checked nothing. Now a root that itself sits under such a name is fully
 scanned, while a descendant directory with one of those names is still skipped.
+BUG-254 adds ``SKIP_DIR_SEQUENCES`` under the same rule: a ``.claude/worktrees``
+pair below the root (the desktop app's session checkouts) is skipped, and a root
+inside one is scanned.
 
 Vacuous-*result* guard (REQ-595 BR-5 / AC-7): the fix above corrected the walk,
 but a root that genuinely contains no ``SKILL.md`` still produced zero findings
@@ -226,6 +229,11 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SENTINELS_FILE = SCRIPT_DIR / "sentinels.txt"
 
 SKIP_DIR_PARTS = {".git", ".worktrees", "node_modules"}
+# BUG-254: the Claude desktop app keeps its session worktrees at
+# `.claude/worktrees/<name>/` — whole checkouts of other branches, not part of
+# the tree being linted. `worktrees` alone is too common a name to skip, so the
+# walk skips this run of consecutive components, below the scan root only.
+SKIP_DIR_SEQUENCES = ((".claude", "worktrees"),)
 
 # REQ-595 BR-5 exit-status split. POSIX exit statuses are 8-bit, so a
 # "distinct" vacuous status has to live inside 0..255 rather than above the
@@ -1053,9 +1061,24 @@ def find_skill_files(root: Path) -> Iterable[Path]:
         # `/proceed`-runs-inside-`.worktrees` vacuous-walk false-green).
         # rel.parts excludes the root and includes the trailing "SKILL.md";
         # the directory components to test are everything but that last part.
-        if any(part in SKIP_DIR_PARTS for part in rel.parts[:-1]):
+        if _skipped_below_root(rel.parts[:-1]):
             continue
         yield path
+
+
+def _skipped_below_root(parts: tuple[str, ...]) -> bool:
+    """True when ``parts`` (directory components strictly below the scan root)
+    name a skipped directory: a ``SKIP_DIR_PARTS`` member, or a run of
+    components matching a ``SKIP_DIR_SEQUENCES`` entry (BUG-254). The root's
+    own components are never passed in, so a root that itself sits inside
+    ``.claude/worktrees/<name>`` is still scanned (LESSON-019, REQ-436 ADR-5)."""
+    if any(part in SKIP_DIR_PARTS for part in parts):
+        return True
+    return any(
+        parts[i:i + len(seq)] == seq
+        for seq in SKIP_DIR_SEQUENCES
+        for i in range(len(parts) - len(seq) + 1)
+    )
 
 
 def find_read_bin_extra_files(root: Path) -> list[Path]:
