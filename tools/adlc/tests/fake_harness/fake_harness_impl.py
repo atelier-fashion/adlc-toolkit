@@ -47,7 +47,8 @@ import time
 import uuid
 
 HARNESS_OF = {"claude": "claude", "copilot": "copilot", "codex": "codex",
-              "gemini": "gemini", "agent": "cursor", "cursor-agent": "cursor"}
+              "gemini": "gemini", "agent": "cursor", "cursor-agent": "cursor",
+              "agy": "antigravity"}
 SCENARIO = os.environ.get("FAKE_HARNESS_SCENARIO", "perform")
 FLAGS = {f for f in os.environ.get("FAKE_HARNESS_FLAGS", "").split(",") if f}
 HOME = os.path.expanduser("~")
@@ -59,6 +60,7 @@ TAKES_VALUE = {
     "codex": {"--sandbox", "-C", "-o"},
     "gemini": {"-p", "--output-format"},
     "cursor": {"--output-format", "--workspace"},
+    "antigravity": {"-p", "--output-format", "--settings"},
 }
 BOOLEAN = {
     "claude": {"-p"},
@@ -66,6 +68,7 @@ BOOLEAN = {
     "codex": set(),
     "gemini": set(),
     "cursor": {"-p", "--trust"},
+    "antigravity": set(),
 }
 
 
@@ -122,6 +125,8 @@ def parse(harness, args):
                 opts["deny"].append(value)
             elif a in ("-C", "--workspace"):
                 opts["cwd"] = value
+            elif a == "--settings":
+                opts["settings"] = value
             elif a == "-o":
                 opts["lastmsg"] = value
             continue
@@ -147,7 +152,7 @@ def parse(harness, args):
 
 def trusted(harness, opts, cwd):
     real = os.path.realpath(cwd)
-    if harness == "claude":
+    if harness in ("claude", "antigravity"):
         return True
     if harness in ("copilot", "cursor"):
         return opts["trust"]
@@ -227,6 +232,13 @@ def load(harness, opts, cwd, is_trusted):
         for group in s.get("hooks", {}).get("SessionStart", []):
             c.hooks += [h["command"] for h in group.get("hooks", [])]
         c.skills = sorted(glob.glob(os.path.join(cwd, ".gemini", "skills", "*", "SKILL.md")))
+    elif harness == "antigravity":
+        perms = (read_json(opts.get("settings", "")) or {}).get("permissions", {})
+        c.allow = [x for x in (paren(a, "command") for a in perms.get("allow", [])) if x]
+        c.deny = [x for x in (paren(d, "command") for d in perms.get("deny", [])) if x]
+        for spec in (read_json(os.path.join(cwd, ".agents", "hooks.json")) or {}).values():
+            c.hooks += [h["command"] for h in spec.get("SessionStart", [])]
+        c.skills = sorted(glob.glob(os.path.join(cwd, ".agents", "skills", "*", "SKILL.md")))
     elif harness == "cursor":
         s = read_json(os.path.join(cwd, ".cursor", "cli.json")) or {}
         perms = s.get("permissions", {})
@@ -292,8 +304,8 @@ def asked_commands(prompt, cwd, harness, cfg):
                 ("git push origin %s" % branch, "git push -q origin %s" % branch)]
     if prompt.startswith("/") and harness == "claude":
         return skill_commands(prompt, cfg)
-    if harness == "gemini" and cfg.skills and not prompt.startswith("Run"):
-        return gemini_skill(prompt, cfg)
+    if harness in ("gemini", "antigravity") and cfg.skills and not prompt.startswith("Run"):
+        return gemini_skill(prompt, cfg, harness)
     return [(c, c) for c in re.findall(r"[Rr]un `([^`]+)`", prompt)]
 
 
@@ -323,9 +335,9 @@ def skill_commands(prompt, cfg):
     return []
 
 
-def gemini_skill(prompt, cfg):
+def gemini_skill(prompt, cfg, harness):
     ask = prompt.strip().rstrip(".").lower()
-    if "activate_skill" not in cfg.tools and SCENARIO != "runs-all":
+    if harness == "gemini" and "activate_skill" not in cfg.tools and SCENARIO != "runs-all":
         return []
     for path in cfg.skills:
         front, body = skill_body(path)
@@ -384,11 +396,18 @@ def run_hooks(cfg, payload, recorder_only):
         if isinstance(data, dict):
             ctx = (data.get("additionalContext") or data.get("additional_context")
                    or (data.get("hookSpecificOutput") or {}).get("additionalContext"))
+            for step in data.get("injectSteps", []):
+                ctx = ctx or step.get("systemMessage", {}).get("systemMessage")
             if ctx:
                 contexts.append(ctx)
-        elif out:
+        elif out and not json_output_only():
             contexts.append(out)
     return contexts
+
+
+def json_output_only():
+    """`agy` drops a hook's stdout unless it is JSON."""
+    return HARNESS_OF.get(sys.argv[1]) == "antigravity"
 
 
 def session_path(harness, cwd, sid):
@@ -407,6 +426,9 @@ def session_path(harness, cwd, sid):
         digest = hashlib.sha256(real.encode()).hexdigest()
         return os.path.join(HOME, ".gemini", "tmp", digest, "chats",
                             "session-%s.jsonl" % now.strftime("%Y%m%d%H%M%S%f"))
+    if harness == "antigravity":
+        return os.path.join(HOME, ".gemini", "antigravity-cli", "brain", sid,
+                            ".system_generated", "logs", "transcript_full.jsonl")
     return os.path.join(HOME, ".cursor-fake-sessions", sid + ".jsonl")
 
 
@@ -472,6 +494,13 @@ def emit(harness, opts, message, tool_text, records, sid):
                "session_id": sid,
                "tool_records": [{"type": "tool_result", "content": tool_text}] if tool_text
                else []}
+        if leak:
+            out["debug"] = leak
+        print(json.dumps(out))
+    elif harness == "antigravity":
+        out = {"conversation_id": sid, "status": "SUCCESS", "response": message, "num_turns": 1}
+        if tool_text:
+            out["tool_output"] = tool_text
         if leak:
             out["debug"] = leak
         print(json.dumps(out))
@@ -567,9 +596,16 @@ def main():
     if "stale-writer" in FLAGS:
         stale_write(prompt, cwd)
     records, aborted = [], []
+    autodenied = False
     for match_text, command in asked_commands(prompt, cwd, harness, cfg):
         run_command(match_text, command, cwd, cfg, harness, records, aborted)
         if aborted:
+            break
+        # `agy -p` cannot prompt: a tool it would ask about ends the run, exit 0, with an
+        # empty response and a notice on stderr.
+        if harness == "antigravity" and PERFORMING and records and \
+                records[-1]["decision"] in ("denied", "refused"):
+            autodenied = True
             break
     trust_file = {"codex": os.path.join(HOME, ".codex", "config.toml"),
                   "gemini": os.path.join(HOME, ".gemini", "trustedFolders.json")}.get(harness)
@@ -579,6 +615,10 @@ def main():
          "trust_file": read(trust_file) if trust_file else None,
          "stdin": bool(opts.get("stdin")), "prompt": prompt, "records": records})
     message, tool_text = compose(prompt, contexts)
+    if autodenied:
+        message, tool_text = "", ""
+        sys.stderr.write('jetski: no output produced — a tool required the "command" permission '
+                         "that headless mode cannot prompt for, so it was auto-denied.\n")
     write_session(transcript, harness, cwd, prompt, "" if aborted else message)
     if aborted:
         sys.stderr.write(json.dumps({"error": {"type": "FatalToolExecutionError",

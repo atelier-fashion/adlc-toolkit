@@ -21,8 +21,8 @@ CLAUDE_JSONL = os.path.join(FIXTURES, "claude.jsonl")
 CLAUDE_EXPECTED = os.path.join(FIXTURES, "claude.expected.txt")
 CLAUDE_PROVENANCE = os.path.join(FIXTURES, "claude.provenance.md")
 
-FORMATS = ("claude", "codex", "copilot", "gemini", "cursor")
-UNPROVEN_FORMATS = ("codex", "copilot", "gemini", "cursor")
+FORMATS = ("claude", "codex", "copilot", "gemini", "cursor", "antigravity")
+UNPROVEN_FORMATS = ("codex", "copilot", "gemini", "cursor", "antigravity")
 
 
 def _run(jsonl_path, *extra):

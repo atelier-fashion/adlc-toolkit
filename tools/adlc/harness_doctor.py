@@ -42,6 +42,34 @@ def binary_present(adapter):
     return shutil.which(adapter["binary"]) is not None
 
 
+def nothing_rendered(adapter, toolkit):
+    """At schema 4 and later, whether no user-level file of this adapter exists: a harness
+    installed for other reasons is not a defect here (REQ-658 ADR-10). One file left means
+    a render happened, so a deleted file still FAILs. Earlier adapters never answer yes."""
+    import agents_render
+    if adapter["schema_version"] < 4:
+        return False
+    plans, _printed = hr.plan_surfaces(adapter, "user", toolkit, toolkit,
+                                       surfaces=("permissions", "hooks", ha.SKILLS_SURFACE))
+    paths = [p.path for p in plans]
+    spec = adapter["paths"].get("agents", {})
+    if spec.get("mode") == "rendered" and "user" in spec:
+        copies, _notices = agents_render.plan_copies(adapter, toolkit, {"classes": {},
+                                                                        "overrides": {}})
+        paths += [path for _name, path, _text in copies]
+    return not any(os.path.exists(path) for path in paths)
+
+
+def skip_reason(adapter, toolkit):
+    """Why this adapter's checks SKIP, or ``None``."""
+    if not binary_present(adapter):
+        return "%s not detected on PATH" % adapter["binary"]
+    if nothing_rendered(adapter, toolkit):
+        return "nothing rendered for %s (adlc harness install --harness %s)" % (
+            adapter["name"], adapter["name"])
+    return None
+
+
 def _project_root():
     import subprocess
     try:
@@ -89,7 +117,7 @@ def agents_currency(adapter, toolkit):
 
 def user_surface_currency(adapter, toolkit):
     plans, _printed = hr.plan_surfaces(adapter, "user", toolkit, toolkit,
-                                       surfaces=("permissions", "hooks"))
+                                       surfaces=("permissions", "hooks", ha.SKILLS_SURFACE))
     stale = []
     for plan in plans:
         existing = hr.read_text(plan.path)
@@ -207,8 +235,9 @@ def render_currency(name, adapter_path=None, toolkit=None, project_root=None):
         return "FAIL", "sandbox_can_reach_common_gitdir reads unverified", \
             "record the git-write-worktree result in %s" % (adapter_path or
                                                             "harness/%s.yml" % name)
-    if not binary_present(adapter):
-        return "SKIP", "%s not detected on PATH" % adapter["binary"], ""
+    skip = skip_reason(adapter, toolkit)
+    if skip:
+        return "SKIP", skip, ""
     fails = []
     remedies = []
     passes = []

@@ -304,7 +304,7 @@ confirmation prompt: invoking the command is the consent.
 | `arg-substitution` | 6.10 | claude | a skill with no `$ARGUMENTS` whose fence writes `"$1"` to a sentinel: `hello` passes, empty or a literal `$1` fails |
 
 Not probed, and recorded as such in the result's `coverage`: 6.2 (a documentation
-question), 6.5 (a product-scope survey) and 6.7 (answered by REQ-654's skills-only
+question), 6.5 (answered by `.adlc/research/antigravity-compatibility.md`, REQ-658) and 6.7 (answered by REQ-654's skills-only
 view). 6.1a is recorded as `headless only`; the interactive half is REQ-655's.
 
 `broad-first-token` allows the fence's first word as it is written today. That is
@@ -419,11 +419,23 @@ A harness is data: `harness/<name>.yml`, validated by one loader
 (`harness_adapter.py`) and rendered by one module (`harness_render.py`). Three
 canonical sources go through it: `agents/*.md`, `templates/permissions.yml` (the
 **routine** tier and the **deny** tier, the one-way moves) and `templates/hooks.yml`
-(`ethos-inject`, `session-record`). `harness/claude.yml`, `harness/codex.yml`, `harness/copilot.yml` and
-`harness/cursor.yml` ship. Nothing in `tools/adlc` branches on a harness name; a new
+(`ethos-inject`, `session-record`). `harness/claude.yml`, `harness/codex.yml`, `harness/copilot.yml`,
+`harness/cursor.yml` and `harness/antigravity.yml` ship. Nothing in `tools/adlc` branches on a harness name; a new
 harness is an adapter file, golden renders under `harness/<name>/rendered/`, its
 `accepted_fidelity`, and, only for a new file format, one renderer in
 `harness_render.FORMATS`.
+
+`schema_version` 4 (REQ-658) adds optional fields any adapter can use, each refused under an
+older version: `hook_cwd`, a path of `..` segments a rendered hook changes to first, for a
+harness that runs a hook where its config file sits; `hook_output_envelope`, the JSON around
+`--context-key`'s output, one `%s`, for a harness that wants context nested; a `rendered`
+`skills` surface, one file naming the directory that holds the skills; and
+`capabilities.fence_unmatchable`, for a harness where no rule matches a partial-sourcing
+fence, which renders no rule and prints no remedy. At schema 4 and later, `render-currency`
+and `doctor_rows` SKIP when none of the adapter's user-level files exists, so an installed
+harness nobody rendered for is not a defect. A format can also set `agent_tools_list`, which
+spells `tools:` as a YAML list and writes every mapped tool for an agent with no `tools:`
+line, and `agent_header`, which marks a rendered agent and refuses a target without the mark.
 
 | Command | Does | Writes |
 |---|---|---|

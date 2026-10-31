@@ -115,3 +115,19 @@ def test_bad_adlc_home_refuses_a_launch(tmp_path, bad):
     out = sb.run("codex", ADLC_HOME=bad)
     assert out.returncode == 1 and "ADLC_HOME" in out.stderr
     assert not os.path.exists(sb.log)
+
+
+def test_dry_run_antigravity_edits_no_user_file(tmp_path):
+    """REQ-658 BR-3, ADR-8: the plan lists every launch, names no user file and leaves
+    the disk alone. Without `agy` on PATH it still prints: --dry-run launches nothing."""
+    sb = Sandbox(tmp_path, harnesses=())
+    before = listing(sb.root, skip=("repo/.git",))
+    out = sb.run("antigravity", "--dry-run")
+    assert out.returncode == 0, out.stderr
+    assert "binary agy: absent" in out.stdout
+    assert "launches: 18" in out.stdout
+    assert "skill-activation" in out.stdout and "arg-substitution" not in out.stdout
+    assert "user files it would edit" in out.stdout and "\n  none" in out.stdout
+    assert "recovery marker" not in out.stdout
+    assert listing(sb.root, skip=("repo/.git",)) == before
+

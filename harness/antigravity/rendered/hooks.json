@@ -1,0 +1,16 @@
+{
+  "adlc": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "cd .. || exit 0\nADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/ethos-inject.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\" ] || exit 0\nif [ -f .adlc/partials/ethos-inject.sh ]; then . .adlc/partials/ethos-inject.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/ethos-inject.sh\"; fi\nadlc_ethos_inject --harness antigravity --field session_id=conversationId --field transcript_path=transcriptPath --context-key systemMessage | { IFS= read -r adlc_line && printf '{\"injectSteps\":[{\"systemMessage\":%s}]}\\n' \"$adlc_line\"; :; }",
+        "timeout": 10
+      },
+      {
+        "type": "command",
+        "command": "cd .. || exit 0\nADLC_TOOLKIT_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\n[ -f .adlc/partials/session-record.sh ] || [ -f \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\" ] || exit 0\nif [ -f .adlc/partials/session-record.sh ]; then . .adlc/partials/session-record.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/session-record.sh\"; fi\nadlc_session_record --harness antigravity --field session_id=conversationId --field transcript_path=transcriptPath",
+        "timeout": 10
+      }
+    ]
+  }
+}

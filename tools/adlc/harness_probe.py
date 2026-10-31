@@ -51,7 +51,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 # ---------------------------------------------------------------------------
 
 SCHEMA = 1
-NAMES = ("claude", "copilot", "codex", "gemini", "cursor")
+NAMES = ("claude", "copilot", "codex", "gemini", "cursor", "antigravity")
 
 PASS, FAIL, UNKNOWN, NA = "pass", "fail", "unknown", "n/a"
 STATUSES = (PASS, FAIL, UNKNOWN, NA)
@@ -292,12 +292,19 @@ class Obs:
     message: str = ""
     message_state: str = "ok"
     nonce: str = ""
+    #: The harness said on stderr that it refused a tool (``Profile.refusal_stderr``).
+    denied: bool = False
     effects: Dict[str, bool] = field(default_factory=dict)
     content: Dict[str, Optional[str]] = field(default_factory=dict)
     evidence: Dict = field(default_factory=dict)
 
     def nonce_found(self) -> bool:
         return bool(self.nonce) and self.nonce[::-1] in self.message
+
+    def reached(self) -> bool:
+        """The ask was reached: the model replied, or the harness refused the command
+        and ended the run, which leaves no message to read (REQ-658 ADR-7)."""
+        return self.nonce_found() or self.denied
 
 
 NO_MESSAGE = "precondition-unmet: no delimited final message"
@@ -354,7 +361,7 @@ def decide_exit_exempt(obs: Obs, effect_key: str, effect_is: str) -> Verdict:
         return Verdict(PASS if effect_is == PASS else FAIL)
     if obs.message_state == "undelimited":
         return Verdict(UNKNOWN, NO_MESSAGE)
-    if obs.nonce_found():
+    if obs.reached():
         return Verdict(FAIL if effect_is == PASS else PASS)
     return Verdict(UNKNOWN, ASK_NOT_REACHED)
 
@@ -387,7 +394,7 @@ def decide_variant(obs: Obs) -> Verdict:
         return Verdict(FAIL)
     if obs.message_state == "undelimited":
         return Verdict(UNKNOWN, NO_MESSAGE)
-    if not obs.nonce_found():
+    if not obs.reached():
         return Verdict(UNKNOWN, ASK_NOT_REACHED)
     if not obs.effects.get("witness"):
         return Verdict(UNKNOWN, WITNESS_ABSENT)
@@ -475,6 +482,13 @@ class Profile:
     skill_dir: Optional[str]
     #: Codex only: a directory outside workspace-write's writable roots (ADR-4).
     has_allow_required_path: bool = False
+    #: Stderr, when the harness refuses a tool and ends the run with no reply. A
+    #: refused launch then has no nonce to read (REQ-658 ADR-7).
+    refusal_stderr: Optional[str] = None
+    #: Allowed on every launch where a refusal ends the run: a model that looks around
+    #: first must not lose the launch before it reaches the command under test. None of
+    #: these is a command a probe tests.
+    prep_allow: Tuple[str, ...] = ()
 
 
 #: Claude Code's project-local skills directory, inside the throwaway repository
@@ -510,6 +524,16 @@ PROFILES: Dict[str, Profile] = {
         transcript_root="hook-reported", final_message="json-result",
         hook_file=".cursor/hooks.json", hook_event="sessionStart",
         allow_form="project-file", skill_dir=".cursor/skills"),
+    # REQ-658: read from agy 1.4.12, not from the plan, which predates it. Rules travel
+    # in `--settings`, one session's worth, so no run touches a user file (ADR-8).
+    "antigravity": Profile(
+        name="antigravity", binaries=("agy",), trust="none",
+        transcript_root="~/.gemini/antigravity-cli/brain", final_message="json-response",
+        hook_file=".agents/hooks.json", hook_event="SessionStart",
+        allow_form="launch-flags", skill_dir=".agents/skills",
+        refusal_stderr=r"so it was auto-denied",
+        prep_allow=("ls", "pwd", "cat", "mkdir", "git status", "git log", "git diff", "git show",
+                    "git branch", "git remote", "git rev-parse", "git add")),
 }
 
 #: Directories in the throwaway repo the probe writes config into; every one is
@@ -536,6 +560,8 @@ def render_rule(harness: str, rule: Rule) -> str:
         return "run_shell_command(%s)" % rule.text
     if harness == "cursor":
         return "Shell(%s)" % rule.text
+    if harness == "antigravity":
+        return "command(%s)" % rule.text
     if harness == "codex":
         raise ValueError("codex rules render through render_codex_rules")
     raise ValueError("unknown harness %r" % harness)
@@ -568,6 +594,8 @@ def hook_context_output(harness: str, context: str) -> str:
         payload = {"additionalContext": context}
     elif harness == "cursor":
         payload = {"additional_context": context}
+    elif harness == "antigravity":
+        payload = {"injectSteps": [{"systemMessage": {"systemMessage": context}}]}
     else:
         payload = {"hookSpecificOutput": {"hookEventName": "SessionStart",
                                           "additionalContext": context}}
@@ -581,6 +609,9 @@ def hook_config(harness: str, commands: Sequence[str]) -> Dict:
             {"type": "command", "bash": c, "timeoutSec": 30} for c in commands]}}
     if harness == "cursor":
         return {"version": 1, "hooks": {"sessionStart": [{"command": c} for c in commands]}}
+    if harness == "antigravity":
+        return {"adlc-probe": {"SessionStart": [{"type": "command", "command": c, "timeout": 30}
+                                                for c in commands]}}
     return {"SessionStart": [{"hooks": [{"type": "command", "command": c}
                                         for c in commands]}]}
 
@@ -660,7 +691,7 @@ CATALOGUE: Tuple[Probe, ...] = (
     Probe("git-write-main", "6.1a (headless half), 6.3 (allow half)", ALL, "remote-ref"),
     Probe("git-write-worktree", "6.1b", ALL, "remote-ref"),
     Probe("ask-tier-deny", "6.3", ALL, "sentinel-nonce"),
-    Probe("skill-activation", "6.4", ("gemini",), "sentinel-present"),
+    Probe("skill-activation", "6.4", ("gemini", "antigravity"), "sentinel-present"),
     Probe("shell-timeout", "6.6", ALL, "sentinel-nonce"),
     Probe("trust-then-headless", "6.8 (trust + load)", ALL, "sentinel-present"),
     Probe("session-start-context", "6.8 (injection)", ALL, "nonce-in-stdout"),
@@ -688,8 +719,8 @@ RUN_ORDER: Tuple[str, ...] = (
 
 #: Why a probe is n/a on a harness it does not apply to.
 NA_REASONS = {
-    "skill-activation": "not-applicable: plan §6.4 is a Gemini question (automatic "
-                        "skill activation)",
+    "skill-activation": "not-applicable: plan §6.4 asks about automatic skill activation, "
+                        "which is probed where a harness documents it",
     "arg-substitution": "not-applicable: plan §6.10 is a Claude question ($N "
                         "substitution); no other harness substitutes",
 }
@@ -704,8 +735,8 @@ COVERAGE: Dict[str, Dict] = {
             "documentation question, no experiment decides it"},
     "6.3": {"probes": ["ask-tier-deny", "git-write-main"]},
     "6.4": {"probes": ["skill-activation"]},
-    "6.5": {"status": "not-probed", "reason": "Antigravity CLI survey — a "
-            "product-scope question"},
+    "6.5": {"status": "not-probed", "reason": "Antigravity CLI survey — answered by "
+            ".adlc/research/antigravity-compatibility.md (REQ-658)"},
     "6.6": {"probes": ["shell-timeout"]},
     "6.7": {"status": "not-probed", "reason": "answered structurally by REQ-654's "
             "skills-only view, so no harness ever sees the clone root"},
@@ -1660,7 +1691,7 @@ class Engine:
             body = "Run `touch %s`." % s
             return Spec(repo, prompt="Mark the adlc probe checkpoint.", nonce=nonce,
                         allow=[Rule("touch")], extra_tools=["activate_skill"],
-                        skills=[(os.path.join(PROFILES["gemini"].skill_dir, "adlc-probe",
+                        skills=[(os.path.join(self.profile.skill_dir, "adlc-probe",
                                               "SKILL.md"), _skill_md(
                             "adlc-probe", "Marks the adlc probe checkpoint. Use when "
                             "asked to mark the adlc probe checkpoint.", body))],
@@ -1719,7 +1750,10 @@ class Engine:
         git_form = variant in ("wrapped-allow", "baseline-git-c", "allow-only-git-c")
         command = wrapped if git_form else "touch %s" % target
         if variant in ATD_VARIANTS:
-            prompt = "Run `touch %s`, then run `%s`, %s" % (witness, command, reply)
+            # Two commands, not one chain: a harness that judges a chain part by part
+            # refuses the whole of it, and the witness never runs.
+            prompt = "Run `touch %s` on its own, then run `%s` as a separate command, %s" % (
+                witness, command, reply)
         else:
             prompt = "Run `%s`, %s" % (command, reply)
         spec = Spec(repo, prompt=prompt, nonce=nonce, absent=[target, witness],
@@ -1845,6 +1879,17 @@ class Engine:
                             json.dumps({"permissions": perms}, indent=2) + "\n")
             _write_text(os.path.join(cwd, self.profile.hook_file),
                         json.dumps(hook_config(h, hook_cmds), indent=2) + "\n")
+        elif h == "antigravity":
+            perms = {"allow": [render_rule(h, Rule(text)) for text in self.profile.prep_allow]
+                     + [render_rule(h, r) for r in spec.allow]}
+            if spec.deny:
+                perms["deny"] = [render_rule(h, r) for r in spec.deny]
+            settings_path = os.path.join(self.captures, "%s.settings.json" % lc.lid)
+            _write_text(settings_path, json.dumps({"permissions": perms}, indent=2) + "\n")
+            extra += ["--settings", settings_path]
+            if hook_cmds:
+                _write_text(os.path.join(cwd, self.profile.hook_file),
+                            json.dumps(hook_config(h, hook_cmds), indent=2) + "\n")
         for rel, text in spec.skills + spec.files:
             _write_text(os.path.join(cwd, rel), text)
         if spec.stage:
@@ -1872,6 +1917,10 @@ class Engine:
             tail_ = ["--output-format", "json"]
             argv = [b, "-p", ""] + tail_ if mode == "with-prompt-flag" else \
                 [b] + tail_ if mode == "without-prompt-flag" else [b, "-p", p] + tail_
+        elif h == "antigravity":
+            tail_ = ["--output-format", "json"] + extra
+            argv = [b, "-p", ""] + tail_ if mode == "with-prompt-flag" else \
+                [b] + tail_ if mode == "without-prompt-flag" else [b, "-p", p] + tail_
         else:  # cursor
             tail_ = ["--output-format", "json", "--workspace", spec.cwd, "--trust"]
             argv = [b, "-p"] + tail_ if mode == "with-prompt-flag" else \
@@ -1892,6 +1941,8 @@ class Engine:
         message, state = final_message(self.profile, res)
         obs = Obs(exit_code=res.exit_code, timed_out=res.timed_out, refused=res.refused,
                   message=message, message_state=state, nonce=spec.nonce)
+        refusal = self.profile.refusal_stderr
+        obs.denied = bool(refusal and re.search(refusal, res.stderr))
         notes: List[str] = []
         pid = lc.probe
         if pid == "trust-then-headless":
@@ -1941,6 +1992,8 @@ class Engine:
                 "ask-tier-deny", "shell-timeout", "session-start-context", "stdin-prompt"):
             notes.append("reversed nonce in final message: %s" % (
                 "yes" if obs.nonce_found() else "no" if state == "ok" else state))
+        if obs.denied:
+            notes.append("harness refused a tool on stderr")
         obs.evidence.update(self._launch_evidence(lc, res))
         obs.evidence["observation"] = "; ".join(notes)
         return obs

@@ -312,7 +312,7 @@ Copilot CLI, Codex, Gemini CLI and Cursor read user-level skills from `~/.agents
 
 - An edit to an existing skill reaches every harness at once, as it always has. A skill directory you **add or remove** reaches the four other harnesses at the next `./install.sh` run; `adlc doctor`'s `skills-view` check says when the view is behind.
 - If `~/.agents/skills` is absent, it becomes a link to the view. If it is already a directory of your own, `install.sh` adds one link per toolkit skill inside it and touches nothing else: a skill name you already use there is skipped and reported, never overwritten. `--dry-run` names what it found and what it would do.
-- `adlc harness detect` (`--json` for scripts) prints, for each of the five harnesses, whether its binary is on `PATH`, the version it reports, and whether its skills directory reaches this toolkit. Nothing about discovery on the non-Claude harnesses has been verified yet; the mount is the structural half of that.
+- `adlc harness detect` (`--json` for scripts) prints, for each known harness, whether its binary is on `PATH`, the version it reports, and whether its skills directory reaches this toolkit. Nothing about discovery on the non-Claude harnesses has been verified yet; the mount is the structural half of that.
 - The skill **text** is written for all five (REQ-666): the argument is described in prose rather than as `$ARGUMENTS`, context loads through one fence the model runs first, every agent dispatch says what to do on a harness without subagents (run the checklist inline from the project's `.adlc/agents/`, which `/init` vendors), and no skill names a harness home path. What is lost until the per-harness adapters ship:
 
   | On a non-Claude harness | Effect |
@@ -405,7 +405,7 @@ Three things the toolkit depends on have no cross-harness standard: agent defini
 | `agents/*.md` | the agent checklists | stamped in place (`model:`); copy harnesses get rendered copies |
 | `templates/instructions/` | `AGENTS.md`, the instruction file every harness reads | `CLAUDE.md` gains an `@AGENTS.md` import and keeps its own lines |
 
-The `claude`, `copilot`, `cursor` and `codex` adapters ship; Gemini CLI follows as a data file. What a harness cannot express is reported, never silently widened: `allowlist-fidelity` lists every entry per harness, and an adapter has to accept each gap in writing. On Claude Code, the partial-sourcing fence is not pre-approved in a committed file, and the allowlist applies only in a trusted workspace. The allowlist is a convenience for the routine tier, not a gate: the structural gates are the orchestrator's (`tools/lint-skills/README.md`, "Declared residuals"). `adlc harness render --check` and the `render-parity` lint keep the committed renders equal to what the renderer writes; `/template-drift` reports a project whose rendered settings are behind as `harness-config` drift.
+The `claude`, `copilot`, `cursor`, `codex` and `antigravity` adapters ship; Gemini CLI has none. What a harness cannot express is reported, never silently widened: `allowlist-fidelity` lists every entry per harness, and an adapter has to accept each gap in writing. On Claude Code, the partial-sourcing fence is not pre-approved in a committed file, and the allowlist applies only in a trusted workspace. The allowlist is a convenience for the routine tier, not a gate: the structural gates are the orchestrator's (`tools/lint-skills/README.md`, "Declared residuals"). `adlc harness render --check` and the `render-parity` lint keep the committed renders equal to what the renderer writes; `/template-drift` reports a project whose rendered settings are behind as `harness-config` drift.
 
 ### Copilot CLI
 
@@ -554,6 +554,63 @@ Then run `/init --harness codex` (`/adlc:init --harness codex` on the plugin ins
 - The dogfood notes record the prompt count (REQ-655 BR-14).
 - The allowlist is not the gate: the sandbox is, and REQ-659's structural halt under the exec engine.
 <!-- /harness-loss: codex -->
+
+### Antigravity CLI
+
+The adapter is `harness/antigravity.yml` (REQ-658). Its facts are `agy` 1.4.12 as run on 2026-10-31, row by row in `.adlc/research/antigravity-compatibility.md`, from `adlc harness probe antigravity` and a set of recorded sessions. The render ran end to end against the real binary: ETHOS reached a session and a subagent, and the session sidecar recorded `harness=antigravity`. No lite REQ has been run end to end on `agy` yet, and that dogfood is the operator's to run.
+
+```bash
+./install.sh                                # builds the skills view
+adlc harness install --harness antigravity  # renders ~/.gemini/config/agents/<name>.md and ~/.gemini/config/skills.json
+```
+
+Then run `/init --harness antigravity` (`/adlc:init --harness antigravity` on the plugin install) in a project. It writes `.agents/hooks.json` and `AGENTS.md`, and nothing runs `agy plugin`. `adlc harness render --harness antigravity --surface permissions` prints the rule set. No file in a repository supplies permissions, so that block goes in `~/.gemini/antigravity-cli/settings.json`, or `agy --settings <file>` for one session. Skills are slash commands under their bare names, such as `/proceed`. If you already have a `~/.gemini/config/skills.json`, install keeps it and prints the entry to add.
+
+The toolkit has no Gemini CLI adapter. Gemini CLI is no longer available to individual accounts, Google moved them to Antigravity CLI, and the `gemini` row stays in `adlc harness detect` as it was. `gemini-extension.json` does not exist (REQ-665 BR-14).
+
+**Nine skills are cut when you invoke them.** `agy` loads the first 24,000 bytes of a skill body and replaces the rest with `<truncated N bytes>`. The steps at the end of those skills do not reach the model, and nothing in the text says where the file is. Tell the model to read the whole `SKILL.md` before it starts.
+
+<!-- harness-loss: antigravity -->
+**What is lost on Antigravity CLI**
+
+| What | On Antigravity CLI |
+|---|---|
+| Committed allowlist | no: no file in a repository supplies permissions (four candidate paths tested), so the rule set is printed for your own settings |
+| Allowlist granularity | subcommand prefix (`token-prefix` in the adapter): `command(…)` is a word-by-word prefix, with no exact form, so `git config user.email`, `git config user.name`, `npm ci` and `pwd` take arguments |
+| Deny-tier rendering | a hard `deny` in the printed block. It held headless, the model saw the refusal and carried on, and a person in a session cannot approve it: run a denied one-way move, `gh pr merge` included, from your own shell. It is user-level, so it applies in every project. Interactive is unverified |
+| Shared-base fail-closed | `git push:*`, `git branch:*` and the `git -C` prefix are omitted and never restored, because a word prefix cannot name `--force`, `+refspec` or `-D` at any position, so each one prompts |
+| Read-only reviewers | enforced: an agent's `tools:` list held on a recorded run, and a reviewer without Edit or Write has no tool for them |
+| ETHOS in subagents | the ETHOS read line in every rendered agent, plus `SessionStart`, which fires again for a subagent's conversation and reached it on a recorded run. That needs the project's `.agents/hooks.json`, and an agent copy is user-level, so the read line stays |
+| Subagent nesting depth | undocumented; the pipeline runner stays flat |
+| `/sprint` workflow engine | unavailable |
+| Transcript schema | `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl`, reported by the hook payload; located, not parsed (REQ-660). `/wrapup` drafts from the conversation |
+| Explicit skill invocation | `/name`, or by naming the skill in your prompt; a skill also activates from its description (recorded). No skill name collides with a slash command in `agy`'s reference, as read on 2026-10-31, and a built-in added later would shadow a skill of the same name |
+| Headless deny status | a hard `deny` held in the `lone-deny` and `deny-under-allow` launches, but `ask-tier-deny` itself reads `unknown`: its `allow-only` controls ended early, so the probe's record is unverified. A re-run is owed |
+| Fences, not commands | no rule matches a partial-sourcing fence, in any variant tried, because a compound line is judged part by part. `fence.partial-source` is omitted, so each fence prompts in a session and ends a headless run |
+| `git -C` | omitted (see the shared-base row): every `git -C <path> <sub>` prompts |
+| Skill body cap | a body past 24,000 bytes is cut when invoked. `agy` cuts `analyze`, `architect`, `bugfix`, `init`, `proceed`, `spec`, `sprint`, `template-drift` and `wrapup` |
+| Skill companions | a skill's companion files, such as `proceed/phases-state.md`, sit outside the workspace. They prompt in a session, and a headless run ends at the first one, unless your settings allow `read_file(<toolkit root>)` |
+| ETHOS after compaction | not re-injected: `agy` has no compaction event, and `SessionStart` is documented as once per session. Unverified |
+| Headless exit status | `agy -p` ends at the first tool that would need a prompt, and exits 0 with an empty response and `status: SUCCESS`. Only a hard `deny` leaves the run going. Read stderr or `denied_actions` in the JSON, not the exit code. `3` is a run a hook terminated, `1` an error before the model, `2` a bad flag |
+| Trust | `agy -p` loaded project hooks, skills and agents with no trust record, in a repository and in a linked worktree, so a `.agents/hooks.json` in a repository you open runs. The TUI's trust dialog is unverified |
+| Default mode | the printed block carries no `agentMode`, because it is user-level and would auto-approve edits in every project. Pass `agy --mode accept-edits` for a session that should |
+| Model tiers | `tier:` does not reach `agy`: an agent loads only with `inherit`, `flash` or `pro`, and no run showed what those resolve to, so `model:` is omitted and the session's model runs |
+| Plugin route | none. `agy plugin install` on this repo loads no skill, no agent and no hook, and a native manifest names skills `adlc:..:<name>` and cannot pass `--strict` |
+| `--dangerously-skip-permissions` | auto-approves every tool prompt. `agy`'s docs say deny rules apply in every mode, and no run tested that. Nothing in the toolkit passes it or sets an auto-approve mode, and your own use of it is outside the toolkit |
+| Gemini CLI | no adapter: see above |
+
+`unverified` in this table, and also: whether `agy` reads `~/.agents/skills`. The adapter does not depend on that.
+
+**Declared residuals.** What no allowlist or deny rule closes. They are declared, not chased:
+
+- Matching is spelling-level.
+- Allows that execute their arguments (`find -exec`, `awk system()`, `sed e`, `npx`, `npm run`/`exec`, `git rebase --exec`, `git fetch --upload-pack`) and `gh api` can reach a deny-tier command in a spelling the rule does not match.
+- Semantic equivalents (`git restore`, `git checkout -f`, `git worktree remove --force`, `gcloud` deploys, `npm publish`) are outside the deny tier.
+- `agy` judges a compound line part by part, so `;`, `&&` and `$()` are parsed, and how far that goes is unverified.
+- The `env-prefix` and `shell-opener` wrapper shapes stay `unverified`, and no REQ-664 result lifts an omission resting on them.
+- The dogfood notes record the prompt count (REQ-658 BR-15).
+- The allowlist is not the gate: REQ-659's structural halt is, under the exec engine.
+<!-- /harness-loss: antigravity -->
 
 ### `ADLC_HOME`
 

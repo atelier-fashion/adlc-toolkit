@@ -132,7 +132,7 @@ def test_hang_times_out_without_children(tmp_path):
 def _harness_records(h):
     return {"claude": ".claude/projects", "copilot": ".copilot/session-state",
             "codex": ".codex/sessions", "gemini": ".gemini/tmp",
-            "cursor": ".cursor-fake-sessions"}[h]
+            "cursor": ".cursor-fake-sessions", "antigravity": ".gemini/antigravity-cli"}[h]
 
 
 @pytest.mark.parametrize("h", HARNESSES)
@@ -518,3 +518,51 @@ def test_no_extractor_is_unknown_on_every_nonce_oracle(tmp_path, monkeypatch):
         assert st[pid] == ("unknown", hp.NO_MESSAGE), (pid, st[pid])
     for pid in ("git-write-main", "fence-vs-allowlist", "arg-substitution"):
         assert st[pid] == ("pass", None)
+
+
+# --- REQ-658: a headless refusal, which leaves no message to read ------------------
+
+def test_antigravity_refusal_reads_as_reached(tmp_path):
+    """ADR-7: the fake ends a refused run as `agy` does, exit 0, empty response, a notice
+    on stderr. Without the notice every variant would read ask-not-reached."""
+    sb = Sandbox(tmp_path)
+    result, _ = _run_ok(sb, "antigravity", "--only", "ask-tier-deny")
+    subs = result["probes"]["ask-tier-deny"]["sub_results"]
+    assert (subs["baseline"]["status"], subs["baseline-git-c"]["status"]) == ("fail", "fail")
+    assert subs["allow-only"]["status"] == "pass"
+    assert subs["deny-under-allow"]["status"] == "pass"
+    assert subs["wrapped-allow"]["status"] == "pass"
+    assert result["probes"]["ask-tier-deny"]["status"] == "pass"
+    assert "harness refused a tool" in subs["deny-under-allow"]["evidence"]["observation"]
+
+
+def test_antigravity_silent_refusal_stays_unreached(tmp_path):
+    """Benign path of ADR-7: a model that declines, with no harness notice, proves
+    nothing, and stays ask-not-reached rather than reading as a deny."""
+    sb = Sandbox(tmp_path, scenario="refuse-silent")
+    result, _ = _run_ok(sb, "antigravity", "--only", "ask-tier-deny")
+    assert statuses(result)["ask-tier-deny"] == ("unknown", "ask-not-reached")
+
+
+def test_antigravity_needs_no_user_file(tmp_path):
+    """ADR-8: rules travel in --settings under the run directory, so a full run leaves
+    the home as it found it, and the deny never reaches a file `agy` keeps."""
+    sb = Sandbox(tmp_path)
+    before = listing(sb.home)
+    _run_ok(sb, "antigravity")
+    after = {k: v for k, v in listing(sb.home).items() if not k.startswith(".gemini")}
+    assert after == {k: v for k, v in before.items() if not k.startswith(".gemini")}
+    argvs = [r["argv"] for r in sb.log_records() if "argv" in r]
+    assert all("--settings" in argv for argv in argvs)
+
+
+def test_antigravity_prep_allow_is_not_a_tested_command(tmp_path):
+    """A refused tool ends an `agy -p` run, so a launch allows the look-around a model does
+    first. None of it may touch what a probe tests, or a control would stop being one."""
+    tested = ("touch", "git push", "git commit", "sleep", "printf", "sh")
+    for text in hp.PROFILES["antigravity"].prep_allow:
+        assert not any(text == t or text.startswith(t + " ") for t in tested), text
+    sb = Sandbox(tmp_path)
+    result, _ = _run_ok(sb, "antigravity", "--only", "ask-tier-deny")
+    assert result["probes"]["ask-tier-deny"]["sub_results"]["baseline"]["status"] == "fail"
+
