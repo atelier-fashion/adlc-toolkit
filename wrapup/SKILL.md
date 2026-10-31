@@ -193,7 +193,7 @@ esac
 
 **Delegated drafting** (gate passes — `adlc-read` is on PATH and `ADLC_DISABLE_DELEGATE` is not `1`):
 
-**MANDATORY — no agent discretion.** When the gate passes AND step 1 resolved a transcript, invoking `adlc-read` to draft the lessons is required, not optional. Exactly three non-delegated outcomes are acceptable on the gate-pass path: (a) `adlc-read` was actually invoked and exited non-zero (→ `api-error` fallback), (b) step 1's discovery legitimately produced no transcript — no transcript holds the run's mark, or more than one does — so there was nothing to delegate, or (c) `extract-chat` refused the transcript because no real fixture has proven its format, or failed on it. Cases (b) and (c) never reach the call site, so `invoked` is never marked and the resolver records `fallback`/`gate=fail`; it is therefore NOT rewritten into a `ghost-skip` (that rewrite keys on `gate=pass`). Drafting the lessons-learned yourself from a transcript you *did* resolve, *instead of* calling `adlc-read` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+**MANDATORY — no agent discretion.** When the gate passes AND step 1 resolved a transcript, invoking `adlc-read` to draft the lessons is required, not optional. Exactly four non-delegated outcomes are acceptable on the gate-pass path: (a) `adlc-read` was actually invoked and exited non-zero (→ `api-error` fallback), (b) step 1's discovery legitimately produced no transcript — no transcript holds the run's mark, or more than one does — so there was nothing to delegate, (c) `extract-chat` refused the transcript because no real fixture has proven its format, or failed on it, or (d) the credential redaction failed, so the transcript may still hold a key and must not leave the machine. Cases (b), (c) and (d) never reach the call site, so `invoked` is never marked and the resolver records `fallback`/`gate=fail`; it is therefore NOT rewritten into a `ghost-skip` (that rewrite keys on `gate=pass`). Drafting the lessons-learned yourself from a transcript you *did* resolve, *instead of* calling `adlc-read` — for ANY reason, including "short session", "few lessons", or "faster to just write them" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
 
    **Close-out mode (BUG-249):** skip this step — do not run the discovery blocks (1a and 1b). Mark the flag file's `jsonl` empty (`"$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl ""`, in a fence that re-sources `partials/delegate-tools-path.sh`) so step 2 falls through to **Fallback drafting**, and draft there from the evidence the caller supplied (Close-out mode rule 4).
 
@@ -227,7 +227,7 @@ esac
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl "$JSONL"
    "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" format "$FORMAT"
    ```
-2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when step 1b refused (no transcript, or more than one, holds the mark), `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
+2. Extract the chat to a securely-named temp file (avoid symlink/TOCTOU on a predictable path), redact obvious credential-shaped strings, then delegate the draft — **all in ONE fenced block** so `$JSONL`/`$TMPFILE` and the delegate call share shell state (SKILL.md fenced blocks do not share state across steps — REQ-522 BR-4). **Guard on `[ -n "$JSONL" ]`** — when step 1b refused (no transcript, or more than one, holds the mark), `$JSONL` is empty and delegation is skipped; control falls through to Fallback drafting (BR-9) without re-emitting a stderr line. **A failed redaction never delegates:** when `sed` exits non-zero the fence logs one line and falls through to Fallback drafting with `invoked` unset. Mark `invoked=1` immediately before the `adlc-read` call and the call's `exit` immediately after, so the resolution block detects a real call vs a ghost-skip:
    ```bash
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
    if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
@@ -246,15 +246,19 @@ esac
        :
    else
        TMPFILE=$(mktemp -t adlc-wrapup.XXXXXX) || exit 1
-       trap 'rm -f "$TMPFILE"' EXIT
+       trap 'rm -f "$TMPFILE" "$TMPFILE.bak"' EXIT   # a failed sed can leave its unredacted .bak
        # A format with no proven parser exits non-zero here: Fallback drafting (ADR-5).
        if ! extract-chat "$JSONL" -o "$TMPFILE" --format "$FORMAT"; then
            # Combined single-line log replaces the standard fallback line (BR-4: one line per invocation).
            echo "/wrapup: extract-chat failed — Claude drafting lesson directly" >&2
            # Fall through to Fallback drafting (skip its stderr emit since we already logged).
+       # Best-effort key redaction so a stray pasted key in the transcript doesn't leave the machine.
+       elif ! sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE"; then
+           # The file may still hold a key, so it stays here and `invoked` stays unset.
+           echo "/wrapup: credential redaction failed — Claude drafting lesson directly" >&2
+           # Fall through to Fallback drafting (skip its stderr emit since we already logged).
        else
-           # Best-effort key redaction so a stray pasted key in the transcript doesn't leave the machine.
-           sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE" && rm -f "$TMPFILE.bak"
+           rm -f "$TMPFILE.bak"
            # Delegate the draft. The refusal lives HERE, in the branch that
            # actually delegates — hoisted above the `[ -z "$JSONL" ]` test it
            # turned "no transcript to summarise", an ordinary non-delegating
