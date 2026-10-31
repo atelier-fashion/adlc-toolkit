@@ -470,12 +470,16 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`claude plugin validate .claude-plugin/plugin.json --strict` passes again
+  (BUG-258).** The root `CLAUDE.md` from REQ-657 drew a plugin-root warning, which
+  `--strict` fails, and that broke `RELEASING.md` step 3. The toolkit's copy is now
+  `.claude/CLAUDE.md`, importing `@../AGENTS.md`, and `manifest-parity` refuses a root
+  one. `adlc harness render` still writes `CLAUDE.md` in consumer projects.
 - **`adlc doctor` `consumer-sync` sees a stale project layer and skips archived repos.**
   It passes through `adlc harness drift`'s comparison, so a consumer whose
   `.claude/settings.json` has no `hooks` block now fails, which `render-currency:claude`
   could not see. A repo with something stale is checked with a read-only `gh repo view`,
   and only `gh`'s own `true` skips it by name; no answer leaves it stale.
-
 - **A failed credential redaction no longer reaches the delegate.** `/wrapup` Step 4
   and `/proceed` Phase 5 called `adlc-read` whether or not `sed` succeeded. Each now
   skips the call with one stderr line and leaves `invoked` unset, and the

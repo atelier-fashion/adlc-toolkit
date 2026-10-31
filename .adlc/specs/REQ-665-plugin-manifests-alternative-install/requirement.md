@@ -174,7 +174,7 @@ Owed, because `agent`, `copilot` and `gemini` are not on PATH on the verifier's 
 
 - **BR-13 / AC-6 / AC-8 on Cursor:** a real install, confirming the harness accepts the empty values at all, `"skills": "./"` lists all 17 skills, `"agents": []` and `"hooks": {}` load nothing, the pin holds, the precedence against `~/.agents/skills`, how a plugin skill is named at invocation, and what happens when that name collides with a built-in command (LESSON-728). Whether Cursor's agent `tools:` handling lets a later REQ carry an agents reference (BR-3).
 - **BR-13 / AC-6 / AC-8 on Copilot:** the same, including the empty values, invocation naming and built-in collisions, plus that `.github/plugin/plugin.json` wins over `.claude-plugin/plugin.json`, and whether a direct local-path install pins.
-- **Root `CLAUDE.md`:** REQ-657 (108db1f) added it, and `claude plugin validate .claude-plugin/plugin.json --strict` has failed on it since, on `origin/main` too, which also fails `RELEASING.md` step 3. Moving it is REQ-657's surface, not this REQ's, so it is a follow-up fix.
+- **Root `CLAUDE.md` (resolved, BUG-258):** REQ-657 (108db1f) added it, and `claude plugin validate .claude-plugin/plugin.json --strict` failed on it from then on, on `origin/main` too, which also failed `RELEASING.md` step 3. BUG-258 moved it to `.claude/CLAUDE.md`, so both `--strict` forms pass, and `manifest-parity` now refuses a root one.
 - **Gemini:** a real install would confirm the source reading in Description. A pinned route needs a generated artifact (Out of Scope); REQ-658 decides its rows (BR-14).
 
 ## Retrieved Context

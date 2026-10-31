@@ -1,7 +1,11 @@
-@AGENTS.md
+@../AGENTS.md
 
 ## Claude Code
 
+- This file lives here, not at the repo root, because the repo is also the plugin:
+  a root `CLAUDE.md` fails `claude plugin validate .claude-plugin/plugin.json
+  --strict`. `adlc harness render --harness claude` writes one when none exists, so
+  delete what it writes here; the `manifest-parity` lint refuses it.
 - `.claude/settings.json` is rendered by `adlc harness render --harness claude`
   from the ADLC toolkit's `templates/permissions.yml` and `templates/hooks.yml`.
   Commit it: it is shared by the team. Personal overrides go in
