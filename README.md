@@ -48,7 +48,7 @@ The plugin's design rests on how Claude Code loads plugins. A claim marked **ver
 |---|---|
 | `"skills": "./"` in `plugin.json` exposes all 17 root-level `<skill>/SKILL.md` directories | verified, 2.1.258 |
 | With no `agents` field, the default `agents/` scan exposes all 19 agents | verified, 2.1.258 |
-| `claude plugin validate . --strict` passes. `claude plugin validate .claude-plugin/plugin.json` passes with one warning, about the root `CLAUDE.md`, so its `--strict` form fails | verified, 2.1.258 |
+| `claude plugin validate . --strict` and `claude plugin validate .claude-plugin/plugin.json --strict` both pass. A `CLAUDE.md` at the plugin root fails the second, so the toolkit keeps its own at `.claude/CLAUDE.md`, which Claude Code loads as project instructions from a checkout | verified, 2.1.258 |
 | An install copies the plugin to `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, with no `.git`. Earlier versions stay on disk after `claude plugin update` | verified, 2.1.258, through a git marketplace (the clone-then-cache path a GitHub source takes). The two commands above against this GitHub repo are **unverified** until the first release check |
 | `${CLAUDE_PLUGIN_ROOT}` is substituted in skill text: prose, fenced shell and `!` lines, before a `!` line runs. The `${CLAUDE_PLUGIN_ROOT:-…}` default form is **not** substituted | verified, 2.1.258 |
 | `${CLAUDE_PLUGIN_ROOT}` is substituted in an agent body | **unverified** (needs a model turn) |

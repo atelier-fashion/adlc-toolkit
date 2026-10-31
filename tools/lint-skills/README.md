@@ -397,6 +397,7 @@ a general markdown linter and NOT a general shell linter.
     | a root-level `<dir>/SKILL.md` is not reachable through `skills`: reachable means `skills` is `"./"` or `"."`, or an array holding one of them or `"./<dir>"`. An entry that does not start with `./` reaches nothing, as in the loader. A missing `skills` field is one finding |
     | an `agents` field is present but omits an `agents/*.md`. The field replaces the default `agents/` scan, so the manifest carries none |
     | `marketplace.json` `plugins` does not have exactly one entry, the entry's `name` is not `adlc`, or its `source` is not `"./"` |
+    | a top-level `CLAUDE.md` exists, of any kind (`os.path.lexists`). Claude Code does not load one at a plugin root and warns, which fails `claude plugin validate .claude-plugin/plugin.json --strict`, and `adlc harness render --harness claude` writes one when none exists. The toolkit's own is `.claude/CLAUDE.md` (BUG-258) |
     | a top-level `bin` exists, of any kind: a directory, a file, or a symlink (a dangling one included; the test is `os.path.lexists`). Directory listings reach Claude Code users through the claude.ai sync path, which rejects a plugin with one, so executables go under `scripts/` (ADR-4) |
 
     The skill set uses the loader's rule from the architecture probe: one level

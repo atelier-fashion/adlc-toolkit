@@ -13,6 +13,10 @@ it. Copilot CLI and Cursor (REQ-656) ship beside it, with their own READMEs here
 | instructions | `CLAUDE.md` (project) | `@AGENTS.md` plus the Claude-specific lines; an existing file only gains the import line |
 | agents, skills | `$HOME/.claude/agents`, `$HOME/.claude/skills` | `mounted`: install.sh's symlinks serve the canonical files, so `adlc agents render --harness claude` is the in-place `model:` stamp |
 
+The toolkit itself is the exception to the instructions row. It is a plugin root, where
+a `CLAUDE.md` fails strict validation, so its copy is `.claude/CLAUDE.md` (BUG-258). A
+render run in the toolkit still writes a root one: delete it.
+
 `rendered/settings.json` is the golden render. `adlc harness render --check` and the
 `render-parity` lint hold it, and the toolkit's own `.claude/settings.json`, equal to
 what the renderer writes; REQ-655 BR-13 and REQ-666 BR-15 point at it in place of

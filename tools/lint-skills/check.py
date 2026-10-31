@@ -843,6 +843,11 @@ PLUGIN_RESERVED_NAME_PREFIXES = ("claude", "anthropic", "cc-plugin-")
 # `skills` / `agents` entries the loader accepts are `.` or start with `./`
 # (Claude Code 2.1.258 refuses `alpha`); anything else names nothing.
 PLUGIN_PATH_PREFIX = "./"
+# Claude Code does not load a `CLAUDE.md` at a plugin root, and its presence is the
+# warning that fails `claude plugin validate .claude-plugin/plugin.json --strict`
+# (BUG-258). `adlc harness render --harness claude` writes one, and that validate
+# runs only at release, so this rule is what catches a render in the toolkit sooner.
+PLUGIN_ROOT_INSTRUCTIONS = "CLAUDE.md"
 
 
 class ManifestEntry(NamedTuple):
@@ -4287,6 +4292,15 @@ def scan_plugin_manifest(root: Path) -> tuple[list[Finding], int]:
             "named skills), and Claude Code would scan it beside the `skills` key and "
             "double the catalog — delete skills/ from the clone root; skills stay in "
             "their <name>/ directories (REQ-665 BR-2, ADR-8)",
+        ))
+    if os.path.lexists(root / PLUGIN_ROOT_INSTRUCTIONS):
+        findings.append(_manifest_finding(
+            PLUGIN_ROOT_INSTRUCTIONS, 1,
+            f"a top-level {PLUGIN_ROOT_INSTRUCTIONS} exists, which Claude Code does not "
+            "load at a plugin root and which fails `claude plugin validate "
+            f".claude-plugin/plugin.json --strict` — delete {PLUGIN_ROOT_INSTRUCTIONS}; "
+            "this repo's copy is .claude/CLAUDE.md, importing @../AGENTS.md, and "
+            "`adlc harness render --harness claude` is what writes a root one (BUG-258)",
         ))
     for skill in _plugin_root_skill_dirs(root):
         if not _inside_root(root, skill):

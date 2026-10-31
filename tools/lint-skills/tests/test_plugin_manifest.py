@@ -336,6 +336,25 @@ def test_top_level_bin_rejected(tmp_path):
     assert _scan(root) == []
 
 
+# --- BUG-258: no root CLAUDE.md ------------------------------------------------
+
+@pytest.mark.parametrize("kind", ["file", "dangling-symlink"])
+def test_root_claude_md_rejected(tmp_path, kind):
+    """The file `adlc harness render` writes and `--strict` validate fails on; a
+    copy under `.claude/` is the toolkit's own and draws nothing."""
+    root = _stage(tmp_path, "ok")
+    (root / ".claude").mkdir(exist_ok=True)
+    (root / ".claude" / "CLAUDE.md").write_text("@../AGENTS.md\n", encoding="utf-8")
+    assert _scan(root) == []
+    if kind == "file":
+        (root / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    else:
+        (root / "CLAUDE.md").symlink_to(root / "no-such-file")
+    findings = _scan(root)
+    assert [f.file for f in findings] == ["CLAUDE.md"], findings
+    assert ".claude/CLAUDE.md" in findings[0].message
+
+
 @pytest.mark.parametrize("kind", ["file", "symlink-to-dir", "dangling-symlink"])
 def test_top_level_bin_of_any_kind_rejected(tmp_path, kind):
     """BR-20: the sync path sees a top-level `bin` entry whatever it is, so a
