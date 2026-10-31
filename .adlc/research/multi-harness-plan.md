@@ -349,7 +349,7 @@ engine so P6 ships with all four adapters it can dogfood.
 | P1 | REQ-666 skill text portability; REQ-661 progressive-disclosure splits | REQ-654; the two touch the same three SKILL.md files |
 | P2 | REQ-657 harness adapter framework (+ `claude` adapter); REQ-656 Copilot + Cursor adapters | REQ-654; REQ-656 on REQ-657 |
 | P3 | REQ-655 Codex adapter | REQ-657; §6.1 via REQ-664 |
-| P4 | REQ-658 Gemini adapter | REQ-657; §6.4/§6.5 via REQ-664 and an Antigravity note |
+| P4 | REQ-658 Antigravity CLI adapter (rewritten 2026-10-31; was Gemini) | REQ-657; REQ-655's schema 3; a new `agy` probe profile and a compatibility note |
 | P5 | REQ-660 session sidecar + multi-harness transcripts | REQ-657 (hook render; ownership split recorded in its OQ-8) |
 | P6 | REQ-659 exec engine core (+ `claude` exec adapter); REQ-662 exec adapters for the other four | REQ-657, REQ-655/656/658; §6.1b/6.3/6.6/6.8/6.11/6.12 via REQ-664 |
 | P7 | REQ-665 plugin manifests; REQ-663 opt-in home migration | REQ-654; REQ-663 also on `consumer-sync` being green |
@@ -512,4 +512,5 @@ Toolkit: `partials/id-alloc.sh`, `partials/forge.sh`, `partials/lane-check.sh`,
 | REQ-656, docs recheck of 2026-10-30, Copilot hook context | §1 and §2d say `additionalContext`; the hook set was plain stdout, which the Copilot docs say is not injected. The Copilot render wraps ETHOS in that JSON (`hook_output`) |
 | REQ-656, docs recheck of 2026-10-30, `.cursor/permissions.json` | §1 and §2b list it beside `cli.json` as an allowlist; it is the IDE's file (`terminalAllowlist`, `mcpAllowlist`, `autoRun`), with no deny key, and it ignores unknown keys. It carries the allow set only |
 | REQ-656, docs recheck of 2026-10-30, ETHOS in Cursor subagents | §2d and §4 say hook. Cursor's reader of Claude-format hooks does not map `SubagentStart`, and the `claude` render has none, so no hook path reaches a Cursor subagent; §1's `subagentStart` is native-format only |
+| 2026-10-31, Gemini CLI no longer available to individuals | REQ-658 retargeted at Antigravity CLI (`agy`) alone. `agy` 1.4.12 has its own surfaces, so §1, §2 and §4's Gemini rows do not describe it; the REQ-658 compatibility note replaces them |
 | REQ-656, `subcommand` granularity | §4's "subcommand" is REQ-657's `token-prefix`: `subcommand` caps at two tokens, which would turn `gh pr view` into `gh pr` and every `--deny-tool` into two tokens |
