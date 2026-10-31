@@ -1722,6 +1722,44 @@ def _render_currency_checks():
             for name in harness.NAMES]
 
 
+# --- the adapters' doctor_rows (REQ-655 BR-9) -------------------------------
+#
+# Each row an adapter declares without a `fact` is a check of its own, by the row's
+# id: data, no check code per harness. Dropping the row from the adapter drops the
+# check. An adapter that does not load adds none: render-currency reports it.
+
+def _row_check(name: str, row_id: str):
+    def run(profile: Profile):
+        import harness_adapter
+        import harness_doctor
+        adapter = harness_adapter.resolve_adapter(name)
+        skip = None
+        if not harness_doctor.binary_present(adapter):
+            skip = "%s not detected on PATH" % adapter["binary"]
+        for rid, status, detail, remedy in harness_doctor.row_outcomes(
+                adapter, harness_adapter.toolkit_dir(), skip_reason=skip):
+            if rid == row_id:
+                result = {"PASS": Result.PASS, "FAIL": Result.FAIL}.get(status, Result.SKIP)
+                return result, detail, remedy
+        return Result.SKIP, "%s declares no row %s" % (name, row_id), ""
+    run.__name__ = "check_row_" + row_id.replace("-", "_")
+    return run
+
+
+def _doctor_row_checks():
+    import harness_adapter
+    checks = []
+    for path in harness_adapter.shipped_adapter_paths():
+        try:
+            adapter = harness_adapter.load_adapter(path)
+        except (harness_adapter.AdapterError, OSError):
+            continue
+        for row in adapter.get("doctor_rows", []):
+            if "fact" not in row:
+                checks.append(Check(row["id"], _row_check(adapter["name"], row["id"])))
+    return checks
+
+
 # --- registry (report order) ----------------------------------------------
 
 REGISTRY = [
@@ -1764,4 +1802,4 @@ REGISTRY = [
     Check("template-version", check_template_version),
     # Machine-wide: every consumer's vendored partials against the canonical ones.
     Check("consumer-sync", check_consumer_sync),
-] + _harness_checks() + _render_currency_checks()
+] + _harness_checks() + _render_currency_checks() + _doctor_row_checks()

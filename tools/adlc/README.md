@@ -419,7 +419,7 @@ A harness is data: `harness/<name>.yml`, validated by one loader
 (`harness_adapter.py`) and rendered by one module (`harness_render.py`). Three
 canonical sources go through it: `agents/*.md`, `templates/permissions.yml` (the
 **routine** tier and the **deny** tier, the one-way moves) and `templates/hooks.yml`
-(`ethos-inject`, `session-record`). `harness/claude.yml`, `harness/copilot.yml` and
+(`ethos-inject`, `session-record`). `harness/claude.yml`, `harness/codex.yml`, `harness/copilot.yml` and
 `harness/cursor.yml` ship. Nothing in `tools/adlc` branches on a harness name; a new
 harness is an adapter file, golden renders under `harness/<name>/rendered/`, its
 `accepted_fidelity`, and, only for a new file format, one renderer in
@@ -444,6 +444,23 @@ sequences and mappings, plain / single- / double-quoted scalars, integers, `|` a
 `|-` block scalars, `#` comments. Tabs, anchors, aliases, tags, `>` folding,
 document markers, `?` keys and a key given twice (in any spelling) are loud errors
 naming the line (LESSON-716).
+
+**The Codex CLI adapter (REQ-655).** Its facts are `codex-cli 0.166.0` as run on 2026-10-31.
+
+| Verb | What `--harness codex` does |
+|---|---|
+| `adlc agents render` | writes `$HOME/.codex/agents/<name>.toml`; `developer_instructions` opens with the ETHOS read line, then the restraint sentence when `tools:` omits Edit and Write; `model` omitted while `tier_map` reads `unverified` |
+| `adlc harness render` | writes `.codex/rules/adlc.rules`, `.codex/hooks.json`, `AGENTS.md`, and merges `.codex/config.toml` (TOML `write_mode: merge`, `tools/adlc/toml_merge.py`). A construct it cannot classify, or `danger-full-access` / `approval_policy = "never"` already there, leaves the file and exits non-zero |
+| `adlc harness render --check` | the parity check, plus the rendered agent copies once any exist, so a hand edit fails it naming the file |
+| `adlc harness install` | the agent copies; with the delegation CLIs present, also the routing block in `$HOME/.codex/AGENTS.md` and the three delegation rules in `$HOME/.codex/rules/adlc.rules`. `--only-if-detected` writes nothing without the binary, which is how `tools/delegate/install.sh` calls it. `--writable-root <path>` unions one absolute path into `writable_roots` in the user config, prints the diff, and is the only thing that writes that file |
+| `adlc harness doctor` | also refuses a shipped adapter whose `sandbox_can_reach_common_gitdir` reads `unverified` |
+
+| Doctor row | Kind | Meaning |
+|---|---|---|
+| `codex-rules` | `equals-render` | the user-level rules equal a fresh render; SKIP when delegation is not installed |
+| `codex-routing` | `marker-present` | the routing block is in `$HOME/.codex/AGENTS.md` (the legacy marker counts); SKIP when delegation is not installed |
+
+Each row an adapter declares without a `fact` is a check of its own in `adlc doctor`, by the row's id, and SKIPs without the binary. Schema 3 adds `paths.config`, `capabilities.unmatched_shapes` and `unmatched_default`, `deny_under_allow.<shape>.by_hand`, `doctor_rows[].requires` and a marker row's `legacy_marker`, each refused under an older `schema_version`.
 
 **The Copilot CLI and Cursor adapters (REQ-656).** Their facts are the vendor docs as read
 on 2026-10-30; no run has happened, and the end-to-end check is owed (the spec's

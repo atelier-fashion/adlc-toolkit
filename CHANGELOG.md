@@ -40,6 +40,23 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **Codex CLI adapter (REQ-655).** Phase 3 of the multi-harness plan. `harness/codex.yml`
+  (schema 3) renders user-level TOML agent roles, `.codex/rules/adlc.rules`,
+  `.codex/hooks.json` and a merged `.codex/config.toml`, from `codex-cli 0.166.0` evidence:
+  `adlc harness probe codex` and a by-hand gate through the real TUI. Schema 3 adds the
+  `config` surface, TOML `write_mode: merge` (`tools/adlc/toml_merge.py`, a scanner that
+  fails closed), `capabilities.unmatched_shapes` and `unmatched_default`,
+  `deny_under_allow.<shape>.by_hand` and `doctor_rows[].requires`, and makes
+  `sandbox_can_reach_common_gitdir` required. A rendered `allow` a declared `never_restore`
+  covers now fails `allowlist-fidelity`, and at schema 3 a restoration needs a same-position
+  deny and the by-hand result. `adlc harness install` gains `--only-if-detected` and
+  `--writable-root <path>`; `adlc doctor` reports each adapter row without a `fact` as its
+  own check; `adlc harness render --check --harness <name>` compares rendered agent copies
+  once any exist; `tools/delegate/install.sh` calls `adlc harness install --harness codex
+  --only-if-detected`. Known: Codex skips an unreviewed project hook silently, so a session
+  has no ETHOS until a person runs `/hooks`, per checkout; `PostCompact` cannot add context,
+  so ETHOS is not re-injected after a compaction; the BR-14 dogfood in `atelier-fashion` is
+  owed.
 - **Session sidecar and multi-harness transcript discovery (REQ-660).** Phase 5 of the
   multi-harness plan. The `session-record` hook now writes `.adlc/.session/<id>` (mode
   600, gitignored, pruned at 30 days) with the harness, session id, transcript path,
@@ -428,6 +445,10 @@ is cut per `RELEASING.md`.
 
 ### Changed
 
+- **The framework's restraint sentence (REQ-655).** It now reads "do not create, edit, delete
+  or write files, and do not run commands that do, unless your instructions say to", and
+  fires only when `tools:` omits both Edit and Write. `harness_render.read_text` keeps line
+  endings, and a rewrite keeps a file's mode.
 - **The settings template pre-approves the context reads (REQ-666 BR-15).**
   `templates/claude-settings-template.json` gains `Bash(cat:*)`, `Bash(grep:*)`,
   `Bash(git rev-parse:*)`, `Bash(git for-each-ref:*)`, `Bash(git diff-tree:*)`,
@@ -470,6 +491,10 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`adlc harness probe` scrubs a bare login name and Codex's account ids (REQ-655).** Both
+  needed a by-hand redaction in the first Codex result: `ls -l` prints the login with no
+  path around it, and a Codex session record opens with `creator_user_id` and
+  `creator_account_id`.
 - **`claude plugin validate .claude-plugin/plugin.json --strict` passes again
   (BUG-258).** The root `CLAUDE.md` from REQ-657 drew a plugin-root warning, which
   `--strict` fails, and that broke `RELEASING.md` step 3. The toolkit's copy is now

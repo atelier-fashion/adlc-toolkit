@@ -5363,8 +5363,8 @@ def _import_harness_engine(root: Path):
 
 
 HARNESS_LOSS_CHECK = "harness-loss-table"
-#: Every harness whose README section this check holds. REQ-655 and REQ-658 add theirs.
-LOSS_TABLE_HARNESSES = ("copilot", "cursor")
+#: Every harness whose README section this check holds. REQ-658 adds its own.
+LOSS_TABLE_HARNESSES = ("copilot", "cursor", "codex")
 #: Rows every section carries (REQ-656 BR-11), then each harness's own.
 LOSS_ROWS = ("Committed allowlist", "Allowlist granularity", "Deny-tier rendering",
              "Shared-base fail-closed", "Read-only reviewers", "ETHOS in subagents",
@@ -5372,7 +5372,10 @@ LOSS_ROWS = ("Committed allowlist", "Allowlist granularity", "Deny-tier renderin
              "Explicit skill invocation", "Headless deny status", "Fences, not commands",
              "git -C")
 LOSS_EXTRA_ROWS = {"cursor": ("Deny width", "Shell(npm) width", "Double skill discovery",
-                              "IDE permissions file")}
+                              "IDE permissions file"),
+                   "codex": ("Hook review", "ETHOS after compaction", "Skills catalog budget",
+                             "Unmatched git commands", "Wrapped invocations",
+                             "Allow rules and the sandbox", "--writable-root", "Trust step")}
 #: BR-17's statements, each found case-insensitively in the section's residuals block.
 RESIDUAL_STATEMENTS = ("matching is spelling-level", "find -exec", "awk system()", "sed e",
                        "npx", "npm run", "git rebase --exec", "git fetch --upload-pack",

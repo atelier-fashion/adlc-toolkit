@@ -1,0 +1,21 @@
+{
+  "adversary.toml": "restraint",
+  "api-cost-scanner.toml": "restraint",
+  "architecture-mapper.toml": "restraint",
+  "architecture-reviewer.toml": "restraint",
+  "code-quality-auditor.toml": "restraint",
+  "convention-auditor.toml": "restraint",
+  "correctness-reviewer.toml": "restraint",
+  "db-perf-scanner.toml": "restraint",
+  "delegate-pre-pass.toml": "restraint",
+  "feature-tracer.toml": "restraint",
+  "integration-explorer.toml": "restraint",
+  "latency-scanner.toml": "restraint",
+  "lite-reviewer.toml": "restraint",
+  "pipeline-runner.toml": null,
+  "quality-reviewer.toml": "restraint",
+  "reflector.toml": "restraint",
+  "security-auditor.toml": "restraint",
+  "task-implementer.toml": null,
+  "test-auditor.toml": "restraint"
+}

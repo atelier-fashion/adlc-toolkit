@@ -24,25 +24,35 @@ import json
 import os
 import re
 import shlex
+import shutil
+import stat
 import sys
 from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import harness_adapter as ha  # noqa: E402
+import toml_merge  # noqa: E402
 
 FENCE_ID = "fence.partial-source"
 #: The fixed sample tail BR-9 appends to an exact deny command.
 SAMPLE_TAIL = ("origin", "feature")
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-RESTRAINT_SENTENCE = ("This harness does not enforce per-agent tool lists: use only the "
-                      "tools this agent's task needs, and edit or write no file unless your "
-                      "instructions say to.")
+RESTRAINT_SENTENCE = ("This harness does not enforce this agent's tool list: do not create, "
+                      "edit, delete or write files, and do not run commands that do, unless "
+                      "your instructions say to.")
 ETHOS_LINE = ("Before anything else, read `.adlc/ETHOS.md` (the project's principles) and "
               "follow it; when it is absent, say so and continue.")
 
 DECLARED_RESIDUALS_HEADING = "Declared residuals"
+
+#: The delegation CLIs a harness with a user-level rules file pre-approves (REQ-655).
+DELEGATION_COMMANDS = (("adlc-read",), ("adlc-write",), ("extract-chat",))
+ROUTING_MARKER = "delegate-routing:start"
+#: Recognized as input only: an upgrade must not double-append (REQ-522 ADR-6).
+ROUTING_LEGACY_MARKER = "kimi-delegation:start"
+_PREFIX_RULE_RE = re.compile(r'^prefix_rule\(pattern=(\[.*\]), decision="([a-z]+)"\)$')
 
 
 class RenderError(ValueError):
@@ -209,6 +219,33 @@ def _never_restore_argv(adapter, spelling):
     return False
 
 
+def same_position(spelling, dcmd):
+    """Whether every token ``dcmd`` adds after ``spelling`` is a fixed word.
+
+    A flag or a refspec can sit at any argument position, so no token prefix can name
+    it: `git push origin --force` matches `git push`, not `git push --force` (REQ-655
+    BR-3, read from `codex execpolicy check`).
+    """
+    return not any(tok.startswith(("-", "+")) for tok in tuple(dcmd)[len(tuple(spelling)):])
+
+
+def restores(adapter, shape, scope, result, spelling, dcmd):
+    """Whether a rendered allow may match deny command ``dcmd`` in ``shape`` (ADR-1).
+
+    Schema 3 asks more of a `source: probe` record than `restore_ok`: the probe measures
+    a hard deny, so a `confirm` record needs the by-hand result too, and the deny has to
+    be one a token prefix can tell from the allow at all.
+    """
+    if not restore_ok(adapter, shape, scope, result) or _never_restore_argv(adapter, spelling):
+        return False
+    rec = adapter["capabilities"]["deny_under_allow"][shape]
+    if adapter["schema_version"] < 3 or rec["source"] != "probe":
+        return True
+    if rec["mechanism"] == "confirm" and rec.get("by_hand") != "strictest-wins":
+        return False
+    return same_position(spelling, dcmd)
+
+
 # --------------------------------------------------------------------------
 # accepted_fidelity lookups
 # --------------------------------------------------------------------------
@@ -342,8 +379,7 @@ def render_permissions(adapter, perms, scope, result=None):
         for did, dcmd, _dmatch in deny_cmds:
             for shape, form in deny_forms(dcmd):
                 if allow_matches(spelling, exact, gran, form, renders_exact):
-                    if restore_ok(adapter, shape, scope, result) and \
-                            not _never_restore_argv(adapter, spelling):
+                    if restores(adapter, shape, scope, result, spelling, dcmd):
                         continue
                     wrapped = (shape, form)
                     break
@@ -414,6 +450,12 @@ def render_permissions(adapter, perms, scope, result=None):
                                         "only its own spelling" % (_cmd(hit[0].spelling),
                                                                    _cmd(ext))))
 
+    # ---- shapes a deny-tier rule cannot see: what stops them is not this file (BR-3)
+    if scope in ("project", "printed"):
+        for shape in caps.get("unmatched_shapes", []):
+            findings.append(Finding(name, "shape." + shape, shape, "inexpressible", scope,
+                                    "deny-tier rules match plain argv only"))
+
     # ---- default_mode (evaluated as a routine entry)
     default_mode = None
     if scope in ("project", "printed"):
@@ -426,7 +468,9 @@ def render_permissions(adapter, perms, scope, result=None):
             findings.append(Finding(name, "default_mode", "default_mode", "inexpressible", scope,
                                     "no default_mode_map entry for %r" % value))
     return rules, findings, {"default_mode": default_mode, "comment": perms["comment"],
-                             "remedies": remedies, "binary": adapter["binary"]}
+                             "remedies": remedies, "binary": adapter["binary"],
+                             "findings": findings, "harness": name,
+                             "sha256": perms.get("sha256", "")}
 
 
 def _render_fence(adapter, e, argv, scope, gran):
@@ -452,8 +496,12 @@ def _render_fence(adapter, e, argv, scope, gran):
                 [Finding(name, e["id"], command, verdict, scope)], [])
     why = ("withheld by accepted_fidelity" if expressible else
            "the %s granularity cannot keep the partial path literal" % gran)
+    finding = Finding(name, e["id"], command, "inexpressible", scope, why)
+    # An unmatched fence runs in the sandbox, so there is nothing for a remedy to fix.
+    if adapter["capabilities"].get("unmatched_default") == "sandbox":
+        return [], [finding], []
     remedy = printed_fence_remedy(adapter) if scope == "printed" else fence_remedy(adapter)
-    return [], [Finding(name, e["id"], command, "inexpressible", scope, why)], [remedy]
+    return [], [finding], [remedy]
 
 
 # --------------------------------------------------------------------------
@@ -493,7 +541,7 @@ def evaluate_rules(adapter, perms, rules, scope, result=None):
         for did, dcmd in deny_cmds:
             for shape, form in deny_forms(dcmd):
                 if allow_matches(rule.spelling, rule.exact, gran, form, renders_exact) and \
-                        not restore_ok(adapter, shape, scope, result):
+                        not restores(adapter, shape, scope, result, rule.spelling, dcmd):
                     failures.append("%s: rendered allow `%s` matches deny-tier `%s` (%s) as `%s` "
                                     "in shape %s, and deny_under_allow.%s is not a valid pass"
                                     % (adapter["name"], _cmd(rule.spelling), _cmd(dcmd), did,
@@ -513,9 +561,12 @@ def fidelity_summary(adapter, findings):
     name = adapter["name"]
     lines = []
     prompts = uniq(f.command for f in findings if f.verdict == "inexpressible" and
-                   f.entry not in (FENCE_ID, "default_mode"))
+                   f.entry not in (FENCE_ID, "default_mode") and
+                   not f.entry.startswith("shape."))
     if prompts:
-        lines.append("%s: not pre-approved, these will prompt: %s" % (name, ", ".join(
+        how = ("are unmatched, and what happens is the measured default in the README"
+               if adapter["capabilities"].get("unmatched_default") else "will prompt")
+        lines.append("%s: not pre-approved, these %s: %s" % (name, how, ", ".join(
             "`%s`" % c for c in prompts)))
     nodeny = uniq(f.command for f in findings if f.verdict == "deny-unsupported")
     if nodeny:
@@ -772,6 +823,47 @@ def format_cursor_terminal(rules, extras, hooks_block):
         _cmd(r.spelling) for r in rules if r.kind == "allow"))]))
 
 
+def _rules_header(extras):
+    """The generated-by marker, the source hash and the declared losses (REQ-655 BR-4)."""
+    out = ["# Generated by `adlc harness render --harness %s`. /template-drift reports a"
+           % extras["harness"],
+           "# hand edit as harness-config drift. This file is a convenience for the routine",
+           "# tier, and a matched `allow` runs outside the sandbox: it is not what stops a",
+           "# one-way move."]
+    if extras["sha256"]:
+        out.append("# templates/permissions.yml sha256:%s" % extras["sha256"])
+    losses = []
+    for f in extras.get("findings", []):
+        if f.verdict == "exact":
+            continue
+        # The fence's own spelling stays out: it must not appear anywhere in this file.
+        shown = f.entry if f.entry == FENCE_ID else "%s [%s]" % (f.entry, f.command)
+        losses.append("#   %s %s%s" % (f.verdict, shown, (" - " + f.detail) if f.detail else ""))
+    if losses:
+        out += ["#", "# Declared losses (accepted_fidelity):"] + losses
+    return "\n".join(out) + "\n"
+
+
+def _prefix_rule(spelling, decision):
+    return 'prefix_rule(pattern=%s, decision="%s")\n' % (json.dumps(list(spelling)), decision)
+
+
+def format_starlark_rules(rules, extras, hooks_block):
+    """``prefix_rule`` lines: `allow` for routine, `prompt` for `confirm` (BR-3). `deny` is
+    `forbidden`, which only `deny_tier_render` can ask for: Codex's says `confirm`."""
+    decisions = {"allow": "allow", "confirm": "prompt", "deny": "forbidden"}
+    body = "".join(_prefix_rule(r.spelling, decisions[r.kind]) for r in rules)
+    return _rules_header(extras) + "\n" + body
+
+
+def format_codex_hooks(rules, extras, hooks_block):
+    return dumps_json(OrderedDict([("hooks", hooks_block or OrderedDict())]))
+
+
+def format_codex_config(rules, extras, hooks_block):
+    return toml_merge.render_values(extras["values"])
+
+
 def dumps_json(doc):
     return json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
 
@@ -784,8 +876,12 @@ FORMATS = {
     "copilot-hooks-json": format_copilot_hooks,
     "cursor-cli-json": format_cursor_cli,
     "cursor-terminal-allowlist": format_cursor_terminal,
+    "starlark-prefix-rule": format_starlark_rules,
+    "codex-hooks-json": format_codex_hooks,
+    "codex-config-toml": format_codex_config,
     "claude-agent-md": "agents",
     "copilot-agent-md": "agents",
+    "toml-role": "agents",
     "agents-md": "instructions",
     "claude-md-import": "instructions",
 }
@@ -835,28 +931,37 @@ def prepend_import(existing):
 class FilePlan(object):
     """One file a render writes: its path, its full render, and how it lands."""
     __slots__ = ("harness", "surfaces", "scope", "path", "rel", "content", "write_mode",
-                 "owned_keys", "golden")
+                 "owned_keys", "golden", "config", "notes")
 
     def __init__(self, harness, surfaces, scope, path, rel, content, write_mode="create",
-                 owned_keys=None, golden=None):
+                 owned_keys=None, golden=None, config=None):
         self.harness = harness
         self.surfaces = surfaces
         self.scope = scope
         self.path = path
         self.rel = rel
         self.content = content
-        self.write_mode = write_mode    # create | merge | prepend-import
+        self.write_mode = write_mode    # create | merge | prepend-import | append-block
         self.owned_keys = owned_keys or []
         self.golden = golden
+        self.config = config            # a TOML merge's surface spec
+        self.notes = []                 # what a merge reported, for the caller to print
 
     def target_text(self, existing, force=False):
         """What the file should hold given what it holds now (``None`` = absent)."""
         if existing is None:
             return self.content
+        if self.write_mode == "merge" and self.config is not None:
+            merged = merge_toml(existing, self.config, self.rel)
+            self.notes = ["conflict: %s: %s, left as it is" % (self.rel, c)
+                          for c in merged.conflicts]
+            return merged.text
         if self.write_mode == "merge":
             return merge_json(existing, self.content, self.owned_keys)
         if self.write_mode == "prepend-import":
             return prepend_import(existing)
+        if self.write_mode == "append-block":
+            return append_block(existing, self.content)
         return self.content if force else existing
 
 
@@ -892,17 +997,115 @@ def merge_json(existing_text, rendered_text, owned_keys):
     return dumps_json(out)
 
 
+POSTURE_LINE = ("the sandbox posture is not set, so the deny-tier `prompt` rules do not provide "
+                "Rule B")
+
+
+def merge_toml(existing, spec, rel):
+    """The TOML merge of BR-5; a refusal is a :class:`RenderError` and writes nothing."""
+    table = (spec.get("user_owned") or {}).get("table")
+    try:
+        return toml_merge.merge_owned(existing, spec["values"], spec.get("refuse"),
+                                      spec.get("refuse_keys", ()), table)
+    except toml_merge.PostureRefused as exc:
+        raise RenderError("%s holds %s: left as it is; %s" % (rel, exc, POSTURE_LINE))
+    except toml_merge.TomlConstructError as exc:
+        raise RenderError("%s cannot be merged: %s; nothing written; %s"
+                          % (rel, exc, POSTURE_LINE))
+
+
+def append_block(existing, block):
+    """``existing`` with the routing ``block`` once, whichever marker it already has."""
+    if ROUTING_MARKER in existing or ROUTING_LEGACY_MARKER in existing:
+        return existing
+    return existing + ("" if existing.endswith("\n") or not existing else "\n") + "\n" + block
+
+
+def writable_roots_needed(result):
+    """BR-10: the repo must be named only when the worktree root alone did not work."""
+    try:
+        subs = result["probes"]["git-write-worktree"]["sub_results"]
+    except (KeyError, TypeError):
+        return False
+    return subs.get("root-is-worktree", {}).get("status") != "pass" and \
+        subs.get("writable-roots-repo", {}).get("status") == "pass"
+
+
+def writable_root_stanza(adapter, common_dir):
+    """The user-config stanza `/init` prints, and never writes (BR-5)."""
+    owned = adapter["paths"]["config"]["user_owned"]
+    return "[%s]\n%s = [%s]\n" % (owned["table"], owned["key"], json.dumps(common_dir))
+
+
+def add_writable_root(adapter, root, dry_run=False, out=None):
+    """Union ``root`` into the user config's owned array; never removes (BR-5)."""
+    out = out or sys.stdout
+    spec = adapter["paths"].get("config") or {}
+    owned = spec.get("user_owned")
+    if not owned or "user" not in spec:
+        raise RenderError("%s declares no user-owned config key" % adapter["name"])
+    if not os.path.isabs(root):
+        raise RenderError("--writable-root must be an absolute path, got %r" % root)
+    # realpath: a dotfiles manager's link stays a link, and its target takes the write.
+    path = os.path.realpath(ha.expand_user_path(spec["user"]))
+    existing = read_text(path) or ""
+    try:
+        target = toml_merge.union_list(existing, owned["table"], owned["key"], root)
+    except toml_merge.TomlConstructError as exc:
+        raise RenderError("%s cannot be merged: %s; nothing written" % (spec["user"], exc))
+    if target == existing:
+        out.write("%s already holds %s\n" % (spec["user"], root))
+        return 0
+    out.write(unified(spec["user"], target, existing))
+    out.write("This widens every %s session's writable area to include %s, its .git too.\n"
+              % (adapter["name"], root))
+    if dry_run:
+        return 0
+    write_atomic(path, target)
+    return 1
+
+
+def delegation_installed():
+    """Whether the delegation CLIs are here: the PATH walk, then ``~/bin`` (ADR-6), the
+    order ``partials/delegate-gate.sh`` resolves them in."""
+    if shutil.which("adlc-read"):
+        return True
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    return os.access(os.path.join(home, "bin", "adlc-read"), os.X_OK)
+
+
+def routing_text(toolkit):
+    """The hash-validated routing block, read once (REQ-522 BR-2, the TOCTOU posture)."""
+    import hashlib
+    root = os.path.join(toolkit, "tools", "delegate")
+    try:
+        with open(os.path.join(root, "claude-md-routing.txt"), encoding="utf-8") as fh:
+            text = fh.read().rstrip("\n") + "\n"
+        with open(os.path.join(root, "claude-md-routing.txt.sha256"), encoding="utf-8") as fh:
+            pinned = fh.read().split()[0]
+    except (OSError, IndexError) as exc:
+        raise RenderError("the routing block cannot be read: %s" % exc)
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != pinned:
+        raise RenderError("claude-md-routing.txt does not match its pinned hash: not written")
+    return text
+
+
 def write_atomic(path, text):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = "%s.tmp.%d" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(text)
+    # A user config can be 0600: replacing it must not widen who reads it.
+    if os.path.exists(path):
+        os.chmod(tmp, stat.S_IMODE(os.stat(path).st_mode))
     os.replace(tmp, path)
 
 
 def read_text(path):
+    # newline="": the bytes as they are. Universal newlines would hide a CRLF file from
+    # the TOML scanner, and every merge would then rewrite its line endings.
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8", newline="") as fh:
             return fh.read()
     except FileNotFoundError:
         return None
@@ -916,10 +1119,13 @@ def apply_plans(plans, dry_run=False, force=False, out=None):
         existing = read_text(plan.path)
         target = plan.target_text(existing, force=force)
         surfaces = ",".join(plan.surfaces)
+        for note in plan.notes:
+            out.write("  %s\n" % note)
         if existing is not None and target == existing:
             unchanged += 1
-            out.write("  unchanged  %s %s %s %s\n" % (plan.harness, surfaces, plan.scope,
-                                                      plan.rel))
+            word = "already present" if plan.write_mode == "append-block" else "unchanged"
+            out.write("  %s  %s %s %s %s\n" % (word, plan.harness, surfaces, plan.scope,
+                                               plan.rel))
             continue
         if existing is not None and plan.write_mode == "create" and not force:
             unchanged += 1
@@ -961,6 +1167,9 @@ def plan_surfaces(adapter, scope, project_root, toolkit=None, surfaces=None, res
             continue
         if mode != "rendered" or scope not in spec or surface == "agents":
             continue
+        # The user config is written by one explicit flag and nothing else (BR-5).
+        if surface == "config" and scope == "user":
+            continue
         targets = [(spec[scope], fmt)]
         targets += [(item[scope], item["format"]) for item in spec.get("also", [])
                     if scope in item]
@@ -969,7 +1178,8 @@ def plan_surfaces(adapter, scope, project_root, toolkit=None, surfaces=None, res
                 ha.expand_user_path(rel)
             slot = by_path.setdefault(path, {"rel": rel, "fmt": target_fmt, "surfaces": [],
                                              "write_mode": spec.get("write_mode", "create"),
-                                             "owned": list(spec.get("owned_keys", []))})
+                                             "owned": list(spec.get("owned_keys", [])),
+                                             "spec": spec})
             slot["surfaces"].append(surface)
     plans = []
     for path, slot in by_path.items():
@@ -982,6 +1192,20 @@ def plan_surfaces(adapter, scope, project_root, toolkit=None, surfaces=None, res
         golden = os.path.join(toolkit, "harness", adapter["name"], "rendered",
                               os.path.basename(slot["rel"])) if scope == "project" else None
         if fmt in ("claude-agent-md",):
+            continue
+        # Two user-level files exist only for delegation, so they wait for it (ADR-6).
+        delegating = scope == "user" and (fmt == "agents-md" or
+                                          ha.FORMATS.get(fmt, {}).get("user_delegation"))
+        if delegating and not delegation_installed():
+            continue
+        if fmt == "agents-md" and scope == "user":
+            plans.append(FilePlan(adapter["name"], ["instructions"], scope, path, slot["rel"],
+                                  routing_text(toolkit), "append-block"))
+            continue
+        if ha.FORMATS.get(fmt, {}).get("toml"):
+            plans.append(FilePlan(adapter["name"], ["config"], scope, path, slot["rel"],
+                                  FORMATS[fmt]([], {"values": slot["spec"]["values"]}, None),
+                                  slot["write_mode"], slot["owned"], golden, slot["spec"]))
             continue
         if fmt in ("agents-md", "claude-md-import"):
             if fmt == "claude-md-import":
@@ -1002,6 +1226,12 @@ def plan_surfaces(adapter, scope, project_root, toolkit=None, surfaces=None, res
             if perms is None:
                 perms = ha.load_permissions(ha.permissions_path(toolkit))
             rules, _f, extras = render_permissions(adapter, perms, scope, result)
+            if delegating:
+                # Not the routine tier, which never reaches user scope (BR-3).
+                rules = [Rule("delegation", argv, "routine", "allow", argv, False)
+                         for argv in DELEGATION_COMMANDS]
+                # No template hash: this file does not move when the template does.
+                extras = dict(extras, findings=[], sha256="")
         if "hooks" in slot["surfaces"]:
             if hooks is None:
                 hooks = ha.load_hooks(ha.hooks_path(toolkit))
@@ -1031,6 +1261,8 @@ def exec_entries(adapter, toolkit=None, result=None):
 # --------------------------------------------------------------------------
 # Parity (BR-13) and drift (ADR-11)
 # --------------------------------------------------------------------------
+#: The surfaces of a project layer, whose renders are golden and whose files can drift.
+PROJECT_LAYER = ("permissions", "hooks", "config")
 #: The project files the toolkit commits a render of for itself (REQ-657 BR-13). Any
 #: other adapter has only its golden: a `.cursor/` in a contributor's clone is theirs,
 #: and must not fail the lint.
@@ -1049,6 +1281,10 @@ def agent_manifest(adapter, toolkit):
                                                                    "overrides": {}})
     doc = OrderedDict()
     for _name, path, text in plans:
+        if path.endswith(".toml"):
+            # No tools: line exists to pin, so pin what stands in for one.
+            doc[os.path.basename(path)] = "restraint" if RESTRAINT_SENTENCE in text else None
+            continue
         frontmatter, _body = split_agent(text)
         tools = [line.split(":", 1)[1].strip() for line in frontmatter
                  if line.startswith("tools:")]
@@ -1079,7 +1315,7 @@ def write_goldens(toolkit=None, adapter_paths=None):
         adapter = ha.load_adapter(apath, toolkit=toolkit)
         result = result_for(adapter, toolkit)
         plans, printed = plan_surfaces(adapter, "project", toolkit, toolkit,
-                                       surfaces=("permissions", "hooks"), result=result)
+                                       surfaces=PROJECT_LAYER, result=result)
         items = [(os.path.relpath(p.golden, toolkit), p.content) for p in plans]
         for rel, content in items + extra_goldens(adapter, printed, toolkit, result):
             full = os.path.join(toolkit, rel)
@@ -1108,7 +1344,7 @@ def parity(toolkit=None, adapter_paths=None):
         adapter = ha.load_adapter(apath, toolkit=toolkit)
         result = result_for(adapter, toolkit)
         plans, printed = plan_surfaces(adapter, "project", toolkit, toolkit,
-                                       surfaces=("permissions", "hooks"), result=result)
+                                       surfaces=PROJECT_LAYER, result=result)
         for label, content in extra_goldens(adapter, printed, toolkit, result):
             committed = read_text(os.path.join(toolkit, label))
             if committed is None:
@@ -1159,6 +1395,36 @@ def parity(toolkit=None, adapter_paths=None):
     return results
 
 
+def _rules_sets(text):
+    """The ``_settings_sets`` shape of a rules file; ``prompt`` is its deny tier."""
+    allow, ask, deny = set(), set(), set()
+    for line in text.splitlines():
+        match = _PREFIX_RULE_RE.match(line.strip())
+        if match:
+            {"allow": allow, "prompt": ask, "forbidden": deny}.get(
+                match.group(2), set()).add(match.group(1))
+    return allow, ask, deny, None
+
+
+def _config_drift(plan, existing):
+    """``(classification, details)`` of a TOML config against its owned values."""
+    spec = plan.config
+    table = (spec.get("user_owned") or {}).get("table")
+    try:
+        found = toml_merge.scan(existing, tuple(spec["values"]), table,
+                                spec.get("refuse_keys", ()))
+    except toml_merge.TomlConstructError as exc:
+        return "stale", ["cannot classify it: %s" % exc]
+    details = []
+    for key, want in spec["values"].items():
+        have = toml_merge.plain_string(found.top.get(key, ""))
+        if have != want:
+            details.append("%s is %s, the render says %r" % (key, found.top.get(key), want))
+    if details:
+        return "stale", details
+    return ("synced", []) if existing == plan.content else ("customized", [])
+
+
 def _settings_sets(doc):
     perms = doc.get("permissions", {}) if isinstance(doc, dict) else {}
     # The IDE file spells its allow set `terminalAllowlist` (REQ-656 ADR-6).
@@ -1196,7 +1462,7 @@ def drift(adapter, project_root, toolkit=None):
     """
     toolkit = toolkit or ha.toolkit_dir()
     plans, _printed = plan_surfaces(adapter, "project", project_root, toolkit,
-                                    surfaces=("permissions", "hooks"))
+                                    surfaces=PROJECT_LAYER)
     out = []
     for plan in plans:
         existing = read_text(plan.path)
@@ -1204,14 +1470,24 @@ def drift(adapter, project_root, toolkit=None):
             out.append((plan.rel, "missing", ["absent — render it with `adlc harness render "
                                               "--harness %s`" % adapter["name"]]))
             continue
-        try:
-            have = json.loads(existing)
-        except ValueError:
-            out.append((plan.rel, "stale", ["not valid JSON"]))
+        if plan.config is not None:
+            cls, details = _config_drift(plan, existing)
+            out.append((plan.rel, cls, details))
             continue
-        want = json.loads(plan.content)
-        h_allow, h_ask, h_deny, h_mode = _settings_sets(have)
-        w_allow, w_ask, w_deny, w_mode = _settings_sets(want)
+        if adapter["formats"].get("permissions") == "starlark-prefix-rule" and \
+                "permissions" in plan.surfaces:
+            have, want = {}, {}
+            h_allow, h_ask, h_deny, h_mode = _rules_sets(existing)
+            w_allow, w_ask, w_deny, w_mode = _rules_sets(plan.content)
+        else:
+            try:
+                have = json.loads(existing)
+            except ValueError:
+                out.append((plan.rel, "stale", ["not valid JSON"]))
+                continue
+            want = json.loads(plan.content)
+            h_allow, h_ask, h_deny, h_mode = _settings_sets(have)
+            w_allow, w_ask, w_deny, w_mode = _settings_sets(want)
         details = []
         missing = False
         for rule in sorted(w_ask - h_ask):
@@ -1353,15 +1629,50 @@ def render_agent_copy(adapter, name, text, model, notices):
             if "Edit" not in canon and "Write" not in canon:
                 out_fm.append(caps["readonly_marker"])
         else:
-            restraint = True
-    if model:
+            restraint = "Edit" not in canon and "Write" not in canon
+    if model and not ha.FORMATS[adapter["formats"]["agents"]].get("agent_toml"):
         out_fm.insert(min(2, len(out_fm)), "model: %s" % model)
     body = _rewrite_tools(body, tool_map)
-    body = re.sub(r"^<!-- model: is rendered by .*-->\n", "", body.lstrip("\n"))
+    body = re.sub(r"^<!-- model: is rendered by .*-->\n", "", body.lstrip("\n")).lstrip("\n")
     prefix = []
     if caps["subagent_start_hook"] != "yes":
         prefix.append(ETHOS_LINE)
     if restraint:
         prefix.append(RESTRAINT_SENTENCE)
     head = ("\n\n".join(prefix) + "\n\n") if prefix else ""
+    if ha.FORMATS[adapter["formats"]["agents"]].get("agent_toml"):
+        return _toml_role(out_fm, model, head + body)
     return "---\n" + "\n".join(out_fm) + "\n---\n\n" + head + body
+
+
+def _toml_basic(value):
+    """``value`` as a one-line TOML basic string: JSON's escapes are a subset of TOML's."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _toml_multiline(value):
+    """``value`` as a TOML multi-line basic string."""
+    out = value.replace("\\", "\\\\").replace('"""', '""\\"')
+    out = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", lambda m: "\\u%04x" % ord(m.group(0)), out)
+    return '"""\n' + out.rstrip("\n") + '\n"""'
+
+
+def _frontmatter_value(lines, key):
+    for line in lines:
+        name, _sep, value = line.partition(":")
+        if name.strip() == key:
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            return value
+    return ""
+
+
+def _toml_role(frontmatter, model, instructions):
+    """A Codex agent role: `name`, `description`, `model`, `developer_instructions`."""
+    lines = ["name = %s" % _toml_basic(_frontmatter_value(frontmatter, "name")),
+             "description = %s" % _toml_basic(_frontmatter_value(frontmatter, "description"))]
+    if model:
+        lines.append("model = %s" % _toml_basic(model))
+    lines.append("developer_instructions = %s" % _toml_multiline(instructions))
+    return "\n".join(lines) + "\n"

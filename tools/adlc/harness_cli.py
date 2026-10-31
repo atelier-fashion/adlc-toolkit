@@ -12,7 +12,9 @@ the other (LESSON-397).
   ``--write-goldens`` rewrites the goldens; ``--scope exec`` prints the structured
   exec entries and writes nothing; ``--scope user`` writes a copy harness's agents.
 * ``install``  writes a harness's user-level surfaces only (BR-3); ``--all``
-  iterates the harnesses ``adlc harness detect`` reports present.
+  iterates the harnesses ``adlc harness detect`` reports present,
+  ``--only-if-detected`` writes nothing without the binary, and ``--writable-root``
+  unions one path into a user config's owned array (REQ-655).
 * ``doctor``   runs ``harness:<name>`` and ``render-currency:<name>`` (BR-15).
 * ``drift``    classifies the project's rendered files with template posture for
   ``/template-drift`` (ADR-11); read-only. ``--opted-in`` adds each shipped adapter
@@ -81,6 +83,45 @@ def _agent_copies(adapter, toolkit, args, out, err):
     return 0 if args.dry_run else changed
 
 
+def _copy_currency(args, toolkit, out):
+    """A harness's rendered agent copies against a fresh render, once any were written:
+    `render-currency`'s comparison, so a hand edit fails `--check` too (REQ-655 BR-2)."""
+    import agents_render
+    adapter = ha.resolve_adapter(args.harness, args.adapter_path, toolkit)
+    spec = adapter["paths"].get("agents", {})
+    if spec.get("mode") != "rendered" or "user" not in spec or \
+            not os.path.isdir(ha.expand_user_path(spec["user"])):
+        return 0
+    try:
+        drift = agents_render.check_copy_drift(adapter, toolkit)
+    except agents_render.ConfigError as exc:
+        out.write("invalid tier config: %s\n" % exc)
+        return 1
+    for name, why in drift:
+        out.write("%-14s %-8s %-22s %s\n" % ("drifted", adapter["name"], "agents",
+                                              "%s/%s (%s)" % (spec["user"], name, why)))
+    return len(drift)
+
+
+def _writable_root_remedy(adapter, result, root, out):
+    """BR-10: print the stanza `/init` must not write, when the gate says it is needed."""
+    if "user_owned" not in adapter["paths"].get("config", {}) or \
+            not hr.writable_roots_needed(result):
+        return
+    try:
+        common = subprocess.run(["git", "-C", root, "rev-parse", "--git-common-dir"],
+                                capture_output=True, text=True, timeout=10,
+                                stdin=subprocess.DEVNULL).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        common = ""
+    if not common:
+        return
+    path = os.path.abspath(os.path.join(root, common))
+    out.write("remedy: a linked worktree cannot commit here until your user config holds this "
+              "(`adlc harness install --harness %s --writable-root %s` writes it):\n%s"
+              % (adapter["name"], path, hr.writable_root_stanza(adapter, path)))
+
+
 def cmd_render(args, out=sys.stdout, err=sys.stderr):
     toolkit = ha.toolkit_dir()
     if args.check or args.write_goldens:
@@ -108,6 +149,8 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
                 out.write(diff if diff.endswith("\n") else diff + "\n")
             if status != "in-parity":
                 bad += 1
+        if args.harness or args.adapter_path:
+            bad += _copy_currency(args, toolkit, out)
         out.write("parity: %d checked, %d not in parity\n" % (len(results), bad))
         return 1 if bad else 0
     if not args.harness:
@@ -179,6 +222,8 @@ def cmd_render(args, out=sys.stdout, err=sys.stderr):
             fmt = adapter["formats"].get("permissions", "rules-json")
             out.write(hr.FORMATS[fmt](rules, extras, None))
             _report_findings(adapter, findings, [], err, summary=False)
+    if args.scope == "project":
+        _writable_root_remedy(adapter, result, root, out)
     if args.dry_run:
         out.write("dry-run: nothing written\n")
     elif written == 0:
@@ -203,10 +248,12 @@ def _install_one(adapter, toolkit, dry_run, out):
         notes.append("agents: %s (served by the mount, REQ-654; nothing to render)"
                      % spec["mode"])
     plans, _printed = hr.plan_surfaces(adapter, "user", toolkit, toolkit,
-                                       surfaces=("permissions", "hooks"))
+                                       surfaces=("permissions", "hooks", "instructions"))
     if plans:
         w, _u = hr.apply_plans(plans, dry_run=dry_run, force=False, out=out)
         written += w
+    elif adapter["paths"].get("permissions", {}).get("user"):
+        notes.append("delegation is not installed, so no user-level rules or routing block")
     else:
         notes.append("permissions and hooks: no user-level path (they travel in the project "
                      "layer)")
@@ -214,9 +261,13 @@ def _install_one(adapter, toolkit, dry_run, out):
 
 
 def cmd_install(args, out=sys.stdout, err=sys.stderr):
+    import harness_doctor
     toolkit = ha.toolkit_dir()
     if args.all and args.adapter_path:
         err.write("adlc harness install: --all does not take --adapter-path\n")
+        return 2
+    if args.all and args.writable_root:
+        err.write("adlc harness install: --writable-root names one harness\n")
         return 2
     names = []
     if args.all:
@@ -238,7 +289,18 @@ def cmd_install(args, out=sys.stdout, err=sys.stderr):
             err.write("adlc harness install: %s\n" % exc)
             rc = 2
             continue
-        written, notes = _install_one(adapter, toolkit, args.dry_run, out)
+        if args.only_if_detected and not harness_doctor.binary_present(adapter):
+            out.write("%s not detected on PATH: nothing written for it\n" % name)
+            continue
+        import agents_render
+        try:
+            written, notes = _install_one(adapter, toolkit, args.dry_run, out)
+            if args.writable_root:
+                written += hr.add_writable_root(adapter, args.writable_root, args.dry_run, out)
+        except (hr.RenderError, agents_render.ConfigError, ValueError) as exc:
+            err.write("adlc harness install: %s\n" % exc)
+            rc = 2
+            continue
         if written == 0:
             out.write("%s: nothing to write — %s\n" % (adapter["name"], "; ".join(notes)))
         else:
@@ -275,15 +337,16 @@ def cmd_doctor(args, out=sys.stdout, err=sys.stderr):
             fails += 1
             for line in remedy.splitlines():
                 out.write("    -> fix: %s\n" % line)
-        if status != "SKIP":
-            try:
-                adapter = ha.resolve_adapter(name, args.adapter_path, toolkit)
-            except ha.AdapterError:
-                continue
-            for row_id, rstatus, rdetail, rremedy in harness_doctor.row_outcomes(adapter, toolkit):
-                out.write("    [%s] row %s — %s\n" % (rstatus, row_id, rdetail))
-                if rremedy:
-                    out.write("        -> fix: %s\n" % rremedy)
+        try:
+            adapter = ha.resolve_adapter(name, args.adapter_path, toolkit)
+        except ha.AdapterError:
+            continue
+        absent = None if status != "SKIP" else detail
+        for row_id, rstatus, rdetail, rremedy in harness_doctor.row_outcomes(
+                adapter, toolkit, skip_reason=absent):
+            out.write("    [%s] row %s — %s\n" % (rstatus, row_id, rdetail))
+            if rremedy:
+                out.write("        -> fix: %s\n" % rremedy)
     return 1 if fails else 0
 
 
@@ -326,7 +389,8 @@ def build_parser():
     r = sub.add_parser("render", help="render surfaces through an adapter (--check: parity)")
     r.add_argument("--harness")
     r.add_argument("--adapter-path", help="load a test-only adapter from this file")
-    r.add_argument("--surface", choices=("agents", "permissions", "hooks", "instructions"))
+    r.add_argument("--surface", choices=("agents", "permissions", "hooks", "instructions",
+                                         "config"))
     r.add_argument("--scope", choices=("project", "user", "exec"), default="project")
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--force", action="store_true", help="overwrite a create-mode file")
@@ -338,6 +402,10 @@ def build_parser():
     i.add_argument("--all", action="store_true")
     i.add_argument("--adapter-path")
     i.add_argument("--dry-run", action="store_true")
+    i.add_argument("--only-if-detected", action="store_true",
+                   help="write nothing when `adlc harness detect` does not find the binary")
+    i.add_argument("--writable-root", metavar="PATH",
+                   help="add this absolute path to the user config's owned array")
     d = sub.add_parser("doctor", help="harness:<name> and render-currency:<name>")
     d.add_argument("--harness")
     d.add_argument("--adapter-path")
