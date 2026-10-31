@@ -4,7 +4,7 @@ title: "Exec adapters for Copilot CLI, Codex, Gemini CLI and Cursor, accepted on
 status: draft
 deployable: false
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-31
 component: "adlc/harness"
 domain: "adlc"
 stack: ["sh", "python", "yaml", "markdown"]
@@ -195,6 +195,7 @@ residuals (BR-19); REQ-659's structural halt is the gate.
 - REQ-659 (exec engine core): the `exec` sub-block's engine keys (`exec_schema_version`, `forbidden_flags`, `exit_codes`, `env_passthrough`, working-copy strategy), the working-copy preparation, the prompt builder, `awaiting_approval` and `/sprint approve`, the forge-mock merge path, `exec.exitCode`/`exec.exitClass` and the abort path, plus the structural gates this REQ relies on instead of the allowlist (local trial merge at the recorded oid, `--match-head-commit`, local rename-aware diffs, frozen deploy plan, git/ssh/gh config isolation, ledger hardening, protection default true), `ExecRun.plan`, `--ack-gate-change` and BR-23c's "changes the gate" list.
 - REQ-657 (adapter framework): the `harness/<name>.yml` loader and closed schema, the opaque `exec` sub-block, the top-level `trust` field and enum, `deny_tier_render`, `accepted_fidelity`, the allowlist renderer with `exec` scope, the hooks renderer whose session-start context the §6.8 probes check, the `deny_under_allow` map (`{shape: {mechanism, result, harness_version, source}}`) and the loader hook point for the exec sub-schema validator.
 - REQ-656 (Copilot, Cursor), REQ-655 (Codex, including BR-10's `sandbox_can_reach_common_gitdir` record), REQ-658 (Gemini, including its `.gemini/settings.json` render): the adapter files this REQ's exec blocks are added to.
+- REQ-655's `sandbox_can_reach_common_gitdir: true` for Codex holds because an allowed `git commit` runs outside the sandbox, and a sandboxed command is blocked at `.git/worktrees/wt/index.lock`, so `exec.working_copy.strategy` must not read it as sandbox reach (REQ-655 spec, Assumptions, "Probe readings").
 - REQ-654 (installed-binary version lookup), compared against `exec.harness_version` at every launch, resume and close-out (BR-11).
 - REQ-664 (capability probes): `adlc harness probe <name>`, the probe ids, the `pass`/`fail`/`unknown`/`n/a` verdicts, the result file `.adlc/research/harness-probes/<harness>.json` this REQ cites, its redaction pass, its recovery marker, and the fake harness BR-12 extends.
 

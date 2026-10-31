@@ -1,7 +1,7 @@
 ---
 id: REQ-655
 title: "Codex CLI harness adapter: `harness/codex.yml` and the Codex render targets"
-status: approved
+status: in-progress
 deployable: false
 created: 2026-10-27
 updated: 2026-10-31
@@ -231,7 +231,7 @@ _Permissions: not applicable — single-user machine tooling; the only "permissi
 - REQ-659 (sprint exec engine): declares `sandbox_can_reach_common_gitdir: true` for Claude, the value this REQ's one-line change to `harness/claude.yml` carries.
 - REQ-666 (P1 skill-text portability: `$ARGUMENTS` prose, description trims, `no-harness-path` lint) — the catalog-budget loss in BR-11 is only accurate after its description trims, and the BR-14 dogfood needs it landed.
 - REQ-664 (`adlc harness probe codex`): its `git-write-main` and `git-write-worktree` results (sub-variants `root-is-worktree`, `writable-roots-repo`) in `.adlc/research/harness-probes/codex.json` are the headless evidence for BR-10, as are its `ask-tier-deny` sub-variants `deny-under-allow` and `wrapped-allow` as comparison for the recorded precedence cases (information only, they restore nothing under BR-3); this REQ runs by hand only the interactive half of §6.1a, which REQ-664 leaves `not-probed`, the unmatched baseline and the two `prompt`-decision cases, because the probe measures `forbidden`.
-- REQ-662 (exec-engine adapters): needs a persisted hook review or `--dangerously-bypass-hook-trust` before any project hook runs headless, on top of a project entry in the user config (recorded 2026-10-31); fills the adapter's opaque `exec` block, owns the `forbidden` render of the deny tier (`exec.deny_render: file`, keyed on `capabilities.deny: yes`, in a file name distinct from `adlc.rules`, which `adlc harness install` owns) and chooses `exec.working_copy.strategy` from this REQ's recorded gate result and `sandbox_can_reach_common_gitdir`; nothing here executes Codex headlessly.
+- REQ-662 (exec-engine adapters): reads `sandbox_can_reach_common_gitdir: true` as recorded, not as sandbox reach: it holds because an allowed `git commit` runs outside the sandbox, and a sandboxed command is blocked at `.git/worktrees/wt/index.lock` (Assumptions, "Probe readings"). It needs a persisted hook review or `--dangerously-bypass-hook-trust` before any project hook runs headless, on top of a project entry in the user config (recorded 2026-10-31); fills the adapter's opaque `exec` block, owns the `forbidden` render of the deny tier (`exec.deny_render: file`, keyed on `capabilities.deny: yes`, in a file name distinct from `adlc.rules`, which `adlc harness install` owns) and chooses `exec.working_copy.strategy` from this REQ's recorded gate result and `sandbox_can_reach_common_gitdir`; nothing here executes Codex headlessly.
 - A real Codex CLI install for the interactive half of the BR-10 gate and the BR-14 dogfood. Codex is probed by `adlc harness detect`, never required by any toolkit code path.
 - No new Python packages: the renderer, doctor and loader are stdlib only. TOML is read only as far as the config merge needs: a quote- and bracket-depth-aware scanner classifies top-level keys and tables and fails closed on any construct it cannot classify unambiguously (the list in BR-5); the same schema bump extends `write_mode: merge` to TOML. `tomllib` (3.11+) is not required.
 
@@ -262,6 +262,18 @@ _Permissions: not applicable — single-user machine tooling; the only "permissi
 - [ ] REQ-666-gated — With all toolkit skills mounted, does Codex drop any skill under its catalog budget once REQ-666's description trims have landed? Measured what can be seen without a live mount: none dropped, none shortened (Assumptions, "Catalog measurement"). Left open for a real `~/.agents/skills` mount, and the BR-11 row says which it is.
 - [x] ~~§6.6 — What is Codex's shell command timeout, and can a skill request a longer one? `adlc-read` needs ≥ 120 s; if shorter, the delegate gate must pass an explicit timeout or skip on Codex.~~ Resolved 2026-10-31 by `shell-timeout` `pass`: `sleep 125 && touch` ran to completion in 124.9 s under `codex exec`, so the delegate gate needs no Codex branch.
 - [x] ~~Which exact key, if any, the gate proves necessary in `.codex/config.toml` beyond `sandbox_mode` and `approval_policy` (e.g. `writable_roots`)?~~ Resolved by BR-10 (2026-10-27, at validation; revised in the Rule B round): `writable_roots` becomes an owned BR-5 key, at user scope only, written only by the explicit `adlc harness install --harness codex --writable-root <path>` flag and never by `/init` (which prints the stanza), iff `root-is-worktree` is not `pass` and `writable-roots-repo` is `pass`; no other key is owned, and nothing else is written on the gate's say-so.
+
+## Deferred
+
+PR #238 merged as `b589039` on 2026-10-31 with AC-14's dogfood owed, on the operator's approval, so this REQ stays `in-progress` until the items below close (the same treatment as REQ-656).
+
+- **AC-14 and BR-14, the dogfood gate: unmet.** `/spec` → `/proceed` (lite) → `/wrapup` on one lite REQ in the `atelier-fashion` test bed, on Codex, was out of bounds for the implementing run. The documentation half of BR-14 shipped. Owed: that run, recorded with the session's tool-call evidence of the ETHOS injection and the git-write prompt outcome.
+- **Live skill discovery.** `~/.agents/skills` is not mounted on the implementing machine, so no skill was discovered live. The catalog measurement in Assumptions is `codex debug prompt-input` in a throwaway `HOME`. The REQ-666-gated Open Question stays open until a real mount.
+- **Unverified: the user and project rules together.** Whether `~/.codex/rules/adlc.rules` loads alongside the project's `.codex/rules/adlc.rules` in a live session. The Assumption above stands until a run shows it (ASSUME-017).
+- **Unverified: automatic compaction.** Whether automatic compaction fires `SessionStart`. Only a manual compaction was measured, and it did not.
+- **AC-8's full installer run.** The installer's Codex block ran under bash, zsh, `/bin/sh` and dash (`partials/tests/codex-install.test.sh`). A whole `tools/delegate/install.sh` run, with its venv and pip step, has not been made in a sandbox.
+- **REQ-664 follow-ups, recorded and not fixed.** `ask-tier-deny` read `unknown` because the model refused the `allow-only` control's command without calling it, so the probe says nothing about `forbidden` on Codex. `trust-then-headless` cannot tell an unreviewed hook from an unread hook file.
+- **A flaky test.** `tools/adlc/tests/test_harness_probe_e2e.py::test_fresh_state_per_launch`: its `l\d\d` regex over the Gemini policy text can match a random temp path. It failed once in a full run and passed three of three alone. REQ-655 did not touch it.
 
 ## Out of Scope
 
