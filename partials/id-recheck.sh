@@ -29,6 +29,8 @@
 #     req call site — specs merge before implementation); pre-merge callers omit it.
 #
 # Contract — adlc_recheck_id <kind> <ID> [own-artifact-name]:   (kind = req|bug|lesson|assume; ID = REQ-518 etc.)
+#   Scope follows adlc_remote_high: req, bug and lesson walk every repo under the repos
+#   root (the machine-global namespace); assume stays on the current repo (BR-12).
 #   return 0 -> <ID> is NOT present on any reachable remote (safe to proceed), OR the
 #               remote was unreachable (degraded: cannot find a collision; warns, BR-3).
 #   return 1 -> COLLISION: <ID> is already on the remote. A halt message naming the exact
@@ -149,6 +151,8 @@ adlc_recheck_id() {
 
   # Exact-id presence probe across participating repos. We re-walk the same repo set
   # adlc_remote_high uses, looking for the EXACT id as a pushed branch or merged dir/file.
+  # That set is kind-dependent: `assume` is per-repo (BR-12, BUG-259), so its probe stays
+  # on the current repo's origin and a sibling's same-numbered ASSUME is another namespace.
   # BUG-210: resolve from the MAIN worktree, not the current one — inside a linked
   # worktree the parent-of-toplevel default is the worktree container, which narrows the
   # namespace this recheck is supposed to cover. adlc_main_worktree lives in id-alloc.sh;
@@ -161,17 +165,26 @@ adlc_recheck_id() {
   [ -n "$adlc_rc_root" ] || adlc_rc_root="."
 
   # Branch token per kind: REQ rides feat/REQ-NNN, BUG rides fix/bug-NNN (lowercase
-  # `bug` in the branch name, NOT the BUG prefix). Lesson has no branch of its own.
+  # `bug` in the branch name, NOT the BUG prefix). Lesson and assume have no branch of
+  # their own, and each kind sets the global: it outlives a call in the same shell.
   case "$adlc_rc_kind" in
-    req)    adlc_rc_branch_grep='feat/REQ-[0-9][0-9]*' ;;
-    bug)    adlc_rc_branch_grep='fix/bug-[0-9][0-9]*' ;;
-    lesson) adlc_rc_branch_grep='' ;;
+    req)           adlc_rc_branch_grep='feat/REQ-[0-9][0-9]*' ;;
+    bug)           adlc_rc_branch_grep='fix/bug-[0-9][0-9]*' ;;
+    lesson|assume) adlc_rc_branch_grep='' ;;
   esac
 
   adlc_rc_hit=""
   # zsh NOMATCH guard — same rationale as adlc_remote_high (BUG-116).
   if [ -n "${ZSH_VERSION:-}" ]; then setopt localoptions nullglob 2>/dev/null; fi
-  for adlc_rc_repo in "$adlc_rc_root"/*; do
+  # Positional parameters, as adlc_remote_high builds its set (`for x in $var` does not
+  # word-split under zsh, BUG-116). The function's own arguments were copied above.
+  if [ "$adlc_rc_kind" = assume ]; then
+    adlc_rc_top=$(adlc_main_worktree)
+    if [ -n "$adlc_rc_top" ]; then set -- "$adlc_rc_top"; else set --; fi
+  else
+    set -- "$adlc_rc_root"/*
+  fi
+  for adlc_rc_repo in "$@"; do
     [ -d "$adlc_rc_repo/.git" ] || [ -f "$adlc_rc_repo/.git" ] || continue
     git -C "$adlc_rc_repo" remote get-url origin >/dev/null 2>&1 || continue
 
@@ -273,9 +286,16 @@ adlc_recheck_id() {
       echo "COLLISION: $adlc_rc_id already exists on the remote ($adlc_rc_hit)."
       echo "Refusing to push a duplicate id (BR-4). Renumber before continuing:"
       echo
-      echo "    adlc renumber $adlc_rc_id $adlc_rc_newid"
-      echo
-      echo "(then re-run; the renumber helper re-checks the new id against the remote.)"
+      if [ "$adlc_rc_kind" = assume ]; then
+        # `adlc renumber` takes REQ, BUG and LESSON ids only (BUG-259).
+        echo "    rename it to $adlc_rc_newid by hand, in the filename and the frontmatter"
+        echo
+        echo "(adlc renumber does not take ASSUME ids; re-run this recheck afterwards.)"
+      else
+        echo "    adlc renumber $adlc_rc_id $adlc_rc_newid"
+        echo
+        echo "(then re-run; the renumber helper re-checks the new id against the remote.)"
+      fi
     } >&2
     return 1
   fi
