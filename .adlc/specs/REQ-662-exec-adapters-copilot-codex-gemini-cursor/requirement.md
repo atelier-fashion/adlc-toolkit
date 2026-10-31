@@ -30,7 +30,17 @@ ships it with Claude Code only.
 
 This REQ makes that engine run on the four non-Claude harnesses by filling in
 the **exec block** of each adapter file the REQ-656 (Copilot, Cursor), REQ-655
-(Codex) and REQ-658 (Gemini) adapter REQs create under `harness/<name>.yml`.
+(Codex) and REQ-658 (Antigravity CLI, which replaced Gemini) adapter REQs create under
+`harness/<name>.yml`. REQ-658 retargeted, so this spec's Gemini entries must be re-derived for
+`harness/antigravity.yml` from `.adlc/research/harness-probes/antigravity.json` and
+`.adlc/research/antigravity-compatibility.md`. What that block must read from them: the prompt
+goes on stdin with no `-p`, because `agy -p ""` exits 1 (`stdin-prompt`); the final message is
+the `response` key of `--output-format json`; rules travel in `agy --settings <file>`, never a
+file in the working copy, because none is read; `0` is not success on its own, because a run
+ended by an auto-denied tool exits 0 with an empty response, so the exec parser must read
+`denied_actions` and stderr, and it must allow everything a run needs up front, since the first
+refusal ends it; and a partial-sourcing fence matches no rule, so the exec allowlist has to be
+settled before this engine can run a skill on `agy`.
 Per harness the block declares seven things the engine cannot guess: the
 launch command template with the prompt delivered on stdin; how the
 routine-tier allow entries and the deny-tier entries (the one-way moves)

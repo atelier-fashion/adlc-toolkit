@@ -1733,11 +1733,9 @@ def _row_check(name: str, row_id: str):
         import harness_adapter
         import harness_doctor
         adapter = harness_adapter.resolve_adapter(name)
-        skip = None
-        if not harness_doctor.binary_present(adapter):
-            skip = "%s not detected on PATH" % adapter["binary"]
+        toolkit = harness_adapter.toolkit_dir()
         for rid, status, detail, remedy in harness_doctor.row_outcomes(
-                adapter, harness_adapter.toolkit_dir(), skip_reason=skip):
+                adapter, toolkit, skip_reason=harness_doctor.skip_reason(adapter, toolkit)):
             if rid == row_id:
                 result = {"PASS": Result.PASS, "FAIL": Result.FAIL}.get(status, Result.SKIP)
                 return result, detail, remedy

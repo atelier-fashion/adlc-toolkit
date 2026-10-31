@@ -15,12 +15,13 @@ The canonical sources rendered through an adapter are loaded here too:
 Pure standard library (LESSON-395): the doctor loads adapters before any venv
 exists, so the YAML is read by ``harness_yaml``, never PyYAML.
 
-Adapter discovery (ADR-2): ``harness/<name>.yml`` exists only for the five names
+Adapter discovery (ADR-2): ``harness/<name>.yml`` exists only for the names
 ``adlc harness detect`` knows. Any other adapter loads only from an explicit
 ``--adapter-path <file>``, which ``install --all`` and ``/init`` never take.
 """
 
 import hashlib
+import json
 import os
 import re
 import sys
@@ -37,9 +38,15 @@ import harness_yaml  # noqa: E402
 #: ``capabilities.unmatched_shapes`` and ``unmatched_default``, the ``by_hand`` half
 #: of a ``deny_under_allow`` record, ``doctor_rows[].requires`` and a marker row's
 #: ``legacy_marker``, and makes ``sandbox_can_reach_common_gitdir`` required.
-KNOWN_SCHEMA_VERSIONS = (1, 2, 3)
+#: Version 4 (REQ-658) adds ``hook_cwd``, ``hook_output_envelope``, a rendered ``skills``
+#: surface and ``capabilities.fence_unmatchable``, and doctor SKIPs an adapter with nothing
+#: rendered. Each field is optional and refused under an older version, so no earlier
+#: adapter changes.
+KNOWN_SCHEMA_VERSIONS = (1, 2, 3, 4)
 
 SURFACES = ("agents", "permissions", "hooks", "instructions", "skills", "config")
+#: The surface by name, for code that treats it specially. A schema key, never a directory.
+SKILLS_SURFACE = "skills"
 SCOPES = ("project", "user")
 RENDER_SCOPES = ("project", "user", "exec", "printed")
 MODES = ("rendered", "printed", "mounted", "unsupported")
@@ -101,6 +108,14 @@ FORMATS = {
                           "renders_exact": False},
     "toml-role": {"json": False, "surfaces": ("agents",), "renders_exact": False,
                   "agent_suffix": ".toml", "agent_toml": True},
+    # Named for their shape (REQ-658 ADR-5). A map of named hooks with flat handler
+    # lists; `action(target)` rules, printed; agent files whose `tools:` is a YAML list,
+    # in a directory the user also writes to; a file that lists directories of skills.
+    "named-hooks-json": {"json": True, "surfaces": ("hooks",), "renders_exact": False},
+    "action-rules-json": {"json": True, "surfaces": ("permissions",), "renders_exact": False},
+    "yaml-tools-agent-md": {"json": False, "surfaces": ("agents",), "renders_exact": False,
+                            "agent_tools_list": True, "agent_header": True},
+    "skills-entries-json": {"json": True, "surfaces": ("skills",), "renders_exact": False},
 }
 
 _TOP_KEYS = {
@@ -108,6 +123,7 @@ _TOP_KEYS = {
     "accepted_fidelity", "deny_tier_render", "default_mode_map", "exec", "trust",
     "sandbox_can_reach_common_gitdir", "hook_events", "hook_timeout_unit",
     "hook_payload", "doctor_rows", "capabilities", "hook_output", "fidelity_notes",
+    "hook_cwd", "hook_output_envelope",
 }
 _REQUIRED_TOP = ("name", "schema_version", "binary", "paths", "formats", "tool_map",
                  "tier_map", "deny_tier_render", "trust", "hook_events", "hook_payload",
@@ -118,7 +134,8 @@ _CONFIG_KEYS = ("values", "refuse", "refuse_keys", "user_owned")
 _CAP_KEYS = {"deny", "subagent_start_hook", "compact_rehook", "agent_tool_restriction",
              "allowlist_granularity", "committable_allowlist", "git_c_spelling",
              "never_restore", "deny_under_allow", "fence_broad_spelling",
-             "readonly_marker", "unmatched_shapes", "unmatched_default"}
+             "readonly_marker", "unmatched_shapes", "unmatched_default",
+             "fence_unmatchable"}
 _CAP_REQUIRED = ("deny", "subagent_start_hook", "compact_rehook", "agent_tool_restriction",
                  "allowlist_granularity", "committable_allowlist")
 _DUA_KEYS = ("mechanism", "result", "harness_version", "source")
@@ -126,6 +143,7 @@ _LITERAL_HOME_RE = re.compile(r"(^/(Users|home|root|var|private)/)|(^~)")
 _ID_RE = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
 _TOKEN_BAD_RE = re.compile(r"[\s;|&`]|\$\(")
 _HOOK_OUTPUT_RE = re.compile(r"^json:[A-Za-z_][A-Za-z0-9_]*$")
+_HOOK_CWD_RE = re.compile(r"^\.\.(/\.\.)*$")
 HOOK_IDS = ("ethos-inject", "session-record")
 
 
@@ -290,6 +308,29 @@ def _need_schema_3(src, field, version):
     _need_schema(src, field, version, 3)
 
 
+def _need_schema_4(src, field, version):
+    _need_schema(src, field, version, 4)
+
+
+def _hook_output_envelope(src, data):
+    """Each envelope wraps a hook's ``--context-key`` JSON: valid JSON around one ``%s``,
+    with no quote the rendered shell line could not hold."""
+    outputs = data.get("hook_output", {})
+    for hook, envelope in _need_map(src, "hook_output_envelope",
+                                    data["hook_output_envelope"]).items():
+        field = "hook_output_envelope." + hook
+        _enum(src, field, hook, HOOK_IDS)
+        _need_str(src, field, envelope)
+        if hook not in outputs:
+            raise AdapterError(src, field, "wraps hook_output, which has no %s entry" % hook)
+        if envelope.count("%") != 1 or "%s" not in envelope or "'" in envelope:
+            raise AdapterError(src, field, "must hold one %s, no other %, and no single quote")
+        try:
+            json.loads(envelope % "{}")
+        except ValueError as exc:
+            raise AdapterError(src, field, "is not JSON around %%s: %s" % exc)
+
+
 def _config_surface(src, field, spec):
     """The ``config`` surface's owned values: what a merge adds and what it refuses."""
     values = _need_map(src, field + ".values", spec.get("values"))
@@ -439,6 +480,8 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
             if surface not in formats:
                 raise AdapterError(src, "formats." + surface, "a %s surface names its format"
                                    % mode)
+        if mode == "rendered" and surface == SKILLS_SURFACE:
+            _need_schema_4(src, field + ".mode", data["schema_version"])
         if wmode == "merge":
             fmt = formats.get(surface)
             if fmt not in FORMATS or not (FORMATS[fmt]["json"] or FORMATS[fmt].get("toml")):
@@ -553,6 +596,15 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
             if not isinstance(how, str) or not _HOOK_OUTPUT_RE.match(how):
                 raise AdapterError(src, "hook_output." + hook, "%r is not json:<key>" % (how,))
 
+    if "hook_cwd" in data:
+        _need_schema_4(src, "hook_cwd", data["schema_version"])
+        if not isinstance(data["hook_cwd"], str) or not _HOOK_CWD_RE.match(data["hook_cwd"]):
+            raise AdapterError(src, "hook_cwd", "%r is not a path of .. segments"
+                               % (data["hook_cwd"],))
+    if "hook_output_envelope" in data:
+        _need_schema_4(src, "hook_output_envelope", data["schema_version"])
+        _hook_output_envelope(src, data)
+
     if "fidelity_notes" in data:
         _need_schema_2(src, "fidelity_notes", data["schema_version"])
         for k, note in enumerate(_need_list(src, "fidelity_notes", data["fidelity_notes"])):
@@ -643,14 +695,18 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
         _need_schema_3(src, "capabilities.unmatched_default", data["schema_version"])
         _enum(src, "capabilities.unmatched_default", caps["unmatched_default"],
               UNMATCHED_DEFAULTS)
+    if "fence_unmatchable" in caps:
+        _need_schema_4(src, "capabilities.fence_unmatchable", data["schema_version"])
+        _enum(src, "capabilities.fence_unmatchable", caps["fence_unmatchable"], YES_NO)
     if "fence_broad_spelling" in caps:
         fbs = _token_list(src, "capabilities.fence_broad_spelling", caps["fence_broad_spelling"])
         if len(fbs) == 1 and fbs[0] in FIRST_TOKEN_WILDCARDS:
             raise AdapterError(src, "capabilities.fence_broad_spelling", "a bare %r is a "
                                "first-token wildcard over every shell line (BR-8)" % fbs[0])
-    elif caps["allowlist_granularity"] != "command-base":
+    elif caps["allowlist_granularity"] != "command-base" and \
+            caps.get("fence_unmatchable") != "yes":
         raise AdapterError(src, "capabilities.fence_broad_spelling", "required unless the "
-                           "granularity is command-base")
+                           "granularity is command-base or no rule can match the fence")
     data["_path"] = os.path.abspath(path)
     return data
 

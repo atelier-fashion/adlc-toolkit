@@ -1,0 +1,147 @@
+# harness/antigravity.yml — the Antigravity CLI adapter (REQ-658). Data, not code: every key
+# is validated by tools/adlc/harness_adapter.py and an unknown key is a loud error. Its
+# goldens live in harness/antigravity/rendered/. Facts are from agy 1.4.12 as run on
+# 2026-10-31: .adlc/research/antigravity-compatibility.md is the row-by-row evidence, and
+# .adlc/research/harness-probes/antigravity.json is the probe result.
+name: antigravity
+schema_version: 4
+binary: agy
+
+paths:
+  # User-level copies; a project render never writes these. A file without the marker is
+  # the user's and is refused (ADR-6).
+  agents:
+    user: $HOME/.gemini/config/agents
+    mode: rendered
+  # One file that names the skills view. `agy` documents no read of ~/.agents/skills, and
+  # a plugin loads these skills as adlc:..:<name> (ADR-1, ADR-2).
+  skills:
+    user: $HOME/.gemini/config/skills.json
+    mode: rendered
+  # No file in a repository supplies permissions (the note's project-config row), so the
+  # rule set is printed, for the user's settings.json or `agy --settings` (ADR-3).
+  permissions:
+    mode: printed
+  hooks:
+    project: .agents/hooks.json
+    mode: rendered
+  instructions:
+    project: AGENTS.md
+    mode: rendered
+
+formats:
+  agents: yaml-tools-agent-md
+  skills: skills-entries-json
+  permissions: action-rules-json
+  hooks: named-hooks-json
+  instructions: agents-md
+
+# From recorded runs. A subagent can hang on a misspelled name, so none is guessed. The
+# default toolset has no grep or glob tool; an agent that lists these two gets them.
+tool_map:
+  Read: read_file
+  Grep: grep_search
+  Glob: find_by_name
+  Bash: run_command
+  Edit: edit_file
+  Write: write_file
+  Agent: invoke_subagent
+
+# An agent loads only with inherit, flash or pro, and no run showed what those resolve to,
+# so model is omitted and the session's model runs.
+tier_map:
+  opus: unverified
+  sonnet: unverified
+  haiku: unverified
+
+# A hard deny at user scope, held headless. Interactive is owed.
+deny_tier_render:
+  user: deny
+
+accepted_fidelity:
+  # The rule set is user-level, so agentMode would auto-approve edits in every project.
+  # The canonical default_mode is a project's: `agy --mode accept-edits` is its scope here.
+  default_mode: {user: inexpressible}
+  # fence-vs-allowlist failed in every variant: a compound line is judged part by part, so
+  # no rule matches a fence, and rendering one would be inert (LESSON-757).
+  fence.partial-source: {user: inexpressible}
+  # Omitted and never restored: a token prefix cannot name --force, +refspec or -D at any
+  # other position, and the deny tier is a hard deny that would not prompt.
+  "git.read:git branch": {user: inexpressible}
+  "git.write:git push": {user: inexpressible}
+  # One entry per git.* routine entry the bare `git -C` prefix would have doubled.
+  "git.read:git -C": {user: inexpressible}
+  "git.config.identity:git -C": {user: inexpressible}
+  "git.write:git -C": {user: inexpressible}
+  # `command(...)` is a word prefix, with no exact form, so an exact entry takes arguments.
+  "git.config.identity:git config user.email": {user: "widened:git config user.email"}
+  "git.config.identity:git config user.name": {user: "widened:git config user.name"}
+  "npm.ci:npm ci": {user: "widened:npm ci"}
+  "shell.pwd:pwd": {user: "widened:pwd"}
+
+trust:
+  mechanism: none
+  detail: agy -p loaded project hooks, skills and agents with no trust record, in a repository and a linked worktree. The TUI's dialog and settings key trustedWorkspaces are unverified
+
+# `true` is REQ-655 BR-10's rule read from git-write-worktree `pass`, in the default mode
+# with enableTerminalSandbox off. It says what the row measured: an allowed `git commit` in a
+# linked worktree reached the common git dir and the push reached the bare remote.
+sandbox_can_reach_common_gitdir: true
+
+hook_events:
+  session-start: SessionStart
+  # SessionStart also fires for a subagent's conversation (the note's H4), but only where
+  # the project has this hook file, so the ETHOS read line stays in every agent (ADR-9).
+  subagent-start: unsupported
+  session-compact: unsupported
+hook_timeout_unit: s
+# From a captured payload. workspacePaths is a list, so cwd falls to the hook's own, which
+# hook_cwd has made the project root.
+hook_payload:
+  session_id: conversationId
+  cwd: unsupported
+  transcript_path: transcriptPath
+
+# A hook runs in the directory holding hooks.json, and plain stdout fails to unmarshal and
+# is dropped, so both of these are required for ETHOS to reach the model (ADR-4).
+hook_cwd: ".."
+hook_output:
+  ethos-inject: json:systemMessage
+hook_output_envelope:
+  ethos-inject: '{"injectSteps":[{"systemMessage":%s}]}'
+
+fidelity_notes:
+  - "antigravity: no file in a repository supplies permissions. Add the rule set to ~/.gemini/antigravity-cli/settings.json yourself, or pass it to one session with agy --settings <file>."
+  - "antigravity: agy -p ends a run at the first tool that would need a prompt, with exit 0 and an empty response. Read stderr or denied_actions, not the exit code."
+  - "antigravity: a skill's companion files sit outside the workspace. Allow them with read_file(<toolkit root>), or a headless run ends at the first one."
+  - "antigravity: a partial-sourcing fence matches no rule, so each one prompts in a session and ends a headless run."
+  - "antigravity: the printed rule set carries no agentMode, which would auto-approve edits in every project. Pass agy --mode accept-edits for a session that should."
+
+doctor_rows:
+  - id: antigravity-skills
+    kind: equals-render
+    target: skills
+    remediation: adlc harness install --harness antigravity
+
+exec:
+  flags: unverified
+
+capabilities:
+  deny: "yes"
+  subagent_start_hook: "no"
+  compact_rehook: "no"
+  agent_tool_restriction: enforced
+  allowlist_granularity: token-prefix
+  committable_allowlist: "no"
+  git_c_spelling: [[git, -C]]
+  # A token prefix is position-sensitive, as on Codex: no record restores these three.
+  never_restore: [[git, push], [git, branch], [git, -C], git-c, env-prefix, shell-opener]
+  # Read from the probe, never hand-set: ask-tier-deny reads unknown, so every shape stays
+  # unverified, and the omissions above hold whatever they read.
+  deny_under_allow:
+    prefix: {mechanism: deny, result: unverified, harness_version: "1.4.12", source: probe}
+    git-c: {mechanism: deny, result: unverified, harness_version: "1.4.12", source: probe}
+    env-prefix: {mechanism: deny, result: unverified, harness_version: "1.4.12", source: probe}
+    shell-opener: {mechanism: deny, result: unverified, harness_version: "1.4.12", source: probe}
+  # fence-vs-allowlist failed in all three variants, the broad ones included.
+  fence_unmatchable: "yes"

@@ -18,7 +18,7 @@ FAKE_DIR = os.path.join(TESTS, "fake_harness")
 WRAPPER = os.path.join(FAKE_DIR, "fake-harness")
 IMPL = os.path.join(FAKE_DIR, "fake_harness_impl.py")
 BINARY = {"claude": "claude", "copilot": "copilot", "codex": "codex", "gemini": "gemini",
-          "cursor": "agent"}
+          "cursor": "agent", "antigravity": "agy"}
 HARNESSES = tuple(BINARY)
 SYSTEM_PATH = "/usr/bin:/bin"
 

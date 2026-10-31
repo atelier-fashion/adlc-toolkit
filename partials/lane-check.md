@@ -162,7 +162,7 @@ The defaults are in `tools/adlc/lane_check.py`. The blocks below mirror them;
   `**/gradlew`, `**/gradlew.bat`, `**/settings.gradle*`,
   `**/gradle.properties`, `.mvn/**`, `**/mvnw`, `.cargo/**`, `**/build.rs`
 - more agent and editor config: `**/CLAUDE.local.md`, `**/GEMINI.md`,
-  `.cursor/**`, `.cursorrules`, `.codex/**`, `.gemini/**`,
+  `.cursor/**`, `.cursorrules`, `.codex/**`, `.gemini/**`, `.agents/**`,
   `.vscode/tasks.json`, `.devcontainer/**`
 - the project's ADLC context, which names the gates every later run executes:
   `.adlc/context/**`

@@ -182,3 +182,47 @@ def test_codex_unmatched_row_follows_the_gate_record():
         assert "may run" in row
     else:
         assert 'none reads "may run"' in row
+
+
+@pytest.mark.parametrize("old, new, words", [
+    # REQ-658 AC-11: one loss sentence or one declared fact removed.
+    ("`agy` cuts `analyze`, `architect`,", "`agy` cuts `architect`,", "`analyze`"),
+    ("| Committed allowlist | no: no file", "| Committed allowlist | yes: no file", "committable"),
+    ("a hard `deny` in the printed block", "a prompt", "`deny`"),
+    ("so `git config user.email`, `git config user.name`, `npm ci` and `pwd` take arguments",
+     "so `npm ci` and `pwd` take arguments", "git config user.email"),
+    ("ETHOS after compaction | not re-injected:", "ETHOS after compaction | re-injected:",
+     "not re-injected"),
+    ("| ETHOS in subagents | the ETHOS read line in every rendered agent, plus `SessionStart`, "
+     "which fires again for a subagent's conversation and reached it on a recorded run. That "
+     "needs the project's `.agents/hooks.json`, and an agent copy is user-level, so the read "
+     "line stays |", "| ETHOS in subagents | `SessionStart` reaches them |", "read line"),
+    ("`git push:*`, `git branch:*` and the `git -C` prefix are omitted",
+     "`git branch:*` and the `git -C` prefix are omitted", "git push:*"),
+])
+def test_antigravity_section(tmp_path, old, new, words):
+    assert not check.check_harness_loss_tables(REPO_ROOT)
+    messages = lint(tmp_path, in_section("antigravity", old, new))
+    assert any(words in m for m in messages), messages
+
+
+def test_antigravity_section_claims_no_cut_the_cap_does_not_make(tmp_path):
+    """The agreement runs both ways: a skill under the cap, named as cut, is a claimed loss
+    the tree does not have."""
+    messages = lint(tmp_path, in_section("antigravity", "`agy` cuts `analyze`,",
+                                         "`agy` cuts `reflect`, `analyze`,"))
+    assert any("`reflect`" in m and "does not cut" in m for m in messages), messages
+
+
+def test_antigravity_section_states_every_br11_item():
+    start, end = section("antigravity")
+    text = README[README.rindex("### Antigravity CLI", 0, start):end]
+    for words in ("how skills", "24,000", "read_file(", "exits 0", "`deny`",
+                  "--dangerously-skip-permissions", "outside the toolkit", "unverified",
+                  "no Gemini CLI adapter", "`gemini-extension.json` does not exist",
+                  "ETHOS in subagents", "What is lost"):
+        if words == "how skills":
+            assert "Explicit skill invocation" in text
+            continue
+        assert words in text, words
+

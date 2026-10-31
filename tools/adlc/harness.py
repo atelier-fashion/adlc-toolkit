@@ -6,7 +6,7 @@ Read-only and pure standard library (LESSON-395): `/init --harness` and the exec
 engine will call it to choose defaults before the machine is set up, so it may
 depend on nothing it reports on.
 
-For each of the five harnesses the multi-harness plan surveyed it reports:
+For each harness the toolkit knows it reports:
 
 * **binary** — the first of the harness's executable names found on ``PATH``,
   ``present`` or ``absent``. Cursor's CLI installs as ``agent``, with a possible
@@ -22,8 +22,11 @@ For each of the five harnesses the multi-harness plan surveyed it reports:
   no repository), ``unreadable`` when it does not parse. ``probe_file`` is its
   path, or ``None``. Claude Code reads its own skills mount, which install.sh keeps
   whatever ``ADLC_HOME`` says (REQ-654 BR-6), or loads the adlc plugin; the
-  doctor's symlink-install test decides which. The other four read
-  ``$HOME/.agents/skills`` (architecture ADR-7).
+  doctor's symlink-install test decides which. Most of the others read
+  ``$HOME/.agents/skills`` (architecture ADR-7). A harness that reads no such
+  directory names its skills in a user-level config file, which its adapter locates:
+  that is the ``skills-config`` mount, ``mounted`` when an entry there reaches this
+  toolkit (REQ-658 ADR-2).
 
 Absence of every harness is a result, so the command exits 0 whenever it ran.
 
@@ -47,18 +50,20 @@ from typing import List, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 #: (name, executable names tried in order, where its user-level skills live).
-#: ``claude`` is the only harness with its own mount; the rest share one.
+#: ``claude`` is the only harness with its own mount, and ``skills-config`` reads the
+#: adapter's skills file; the rest share ``~/.agents/skills``.
 HARNESSES: Tuple[Tuple[str, Tuple[str, ...], str], ...] = (
     ("claude", ("claude",), "claude"),
     ("copilot", ("copilot",), "agents"),
     ("codex", ("codex",), "agents"),
     ("gemini", ("gemini",), "agents"),
     ("cursor", ("agent", "cursor-agent"), "agents"),
+    ("antigravity", ("agy",), "skills-config"),
 )
 NAMES = tuple(h[0] for h in HARNESSES)
 
 #: Seconds a ``--version`` probe may take before it is ``unknown``. Kept short:
-#: doctor runs five of these, and a binary that blocks (a login prompt, a
+#: doctor runs one per harness, and a binary that blocks (a login prompt, a
 #: network check) must cost the report seconds, not a hang.
 PROBE_TIMEOUT_SECONDS = 3.0
 
@@ -141,30 +146,64 @@ def _claude_mounted() -> bool:
         return False
 
 
+def _toolkit_roots(root: Optional[str]) -> set:
+    """The tree this runs from, and the clone Claude Code's mount points at:
+    install.sh builds the view from the latter, so a run from a worktree of that
+    clone must still see the view as reaching the toolkit."""
+    try:
+        import checks
+        sym = checks._symlink_install()
+    except Exception:  # a probe must never stop the report
+        sym = None
+    return {os.path.realpath(r) for r in (root, sym[1] if sym else None) if r}
+
+
+def _reaches_toolkit(directory: str, roots: set) -> bool:
+    """At least one ``<directory>/<name>/SKILL.md`` resolves into a toolkit root."""
+    if not roots or not os.path.isdir(directory):
+        return False
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return False
+    for name in names:
+        entry = os.path.join(directory, name, "SKILL.md")
+        if not os.path.isfile(entry):
+            continue
+        real = os.path.realpath(entry)
+        if any(real == os.path.join(r, name, "SKILL.md") for r in roots):
+            return True
+    return False
+
+
 def _agents_mounted(root: Optional[str]) -> bool:
     """At least one toolkit skill resolves into this toolkit through ``~/.agents/skills``."""
     try:
         import checks
         mount = checks._agents_mount()
-        sym = checks._symlink_install()
     except Exception:  # a probe must never stop the report
         return False
-    # The tree this runs from, and the clone Claude Code's mount points at:
-    # install.sh builds the view from the latter, so a run from a worktree of
-    # that clone must still see the view as reaching the toolkit.
-    roots = {os.path.realpath(r) for r in (root, sym[1] if sym else None) if r}
-    if not roots or not os.path.isdir(mount):
-        return False
+    return _reaches_toolkit(mount, _toolkit_roots(root))
+
+
+def _skills_config_mounted(name: str, root: Optional[str]) -> bool:
+    """An ``entries`` path in the file the adapter's ``skills`` surface names reaches
+    this toolkit (REQ-658 ADR-2). The path comes from the adapter, so this module holds
+    no harness's layout; no adapter, no file, or a file that does not parse reads
+    ``False``, because a probe must never stop the report."""
     try:
-        names = os.listdir(mount)
-    except OSError:
+        import harness_adapter
+        adapter = harness_adapter.resolve_adapter(name)
+        surface = adapter["paths"][harness_adapter.SKILLS_SURFACE]
+        path = harness_adapter.expand_user_path(surface["user"])
+        with open(path, encoding="utf-8") as fh:
+            entries = json.load(fh).get("entries", [])
+    except Exception:  # a probe must never stop the report
         return False
-    for name in names:
-        entry = os.path.join(mount, name, "SKILL.md")
-        if not os.path.isfile(entry):
-            continue
-        real = os.path.realpath(entry)
-        if any(real == os.path.join(r, name, "SKILL.md") for r in roots):
+    roots = _toolkit_roots(root)
+    for entry in entries if isinstance(entries, list) else []:
+        target = entry.get("path") if isinstance(entry, dict) else None
+        if isinstance(target, str) and _reaches_toolkit(os.path.expanduser(target), roots):
             return True
     return False
 
@@ -179,6 +218,8 @@ def probe(name: str, root: Optional[str] = None) -> HarnessProbe:
             if path:
                 if mount_kind == "claude":
                     mounted = _claude_mounted()
+                elif mount_kind == "skills-config":
+                    mounted = _skills_config_mounted(hname, root)
                 else:
                     mounted = _agents_mounted(root)
                 return HarnessProbe(name, binary, "present", path, _version(path),
@@ -301,7 +342,7 @@ def main(argv=None) -> int:
                        ("doctor", "harness:<name> and render-currency:<name> (REQ-657)"),
                        ("drift", "template-posture drift of the project layer (read-only)")):
         sub.add_parser(verb, add_help=False, help=text)
-    detect = sub.add_parser("detect", help="report the five known harnesses (read-only)")
+    detect = sub.add_parser("detect", help="report the known harnesses (read-only)")
     detect.add_argument("--json", action="store_true",
                         help="one JSON object per harness, as an array")
     args = parser.parse_args(argv)

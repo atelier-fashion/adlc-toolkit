@@ -850,7 +850,8 @@ def test_goldens_round_trip(tmp_path):
     agents.write_text(agents.read_text().replace("tools: Read, Grep, Glob", "tools: Read, Write"))
     assert "harness/copilot/rendered/agents.json" in [
         r[2] for r in hr.parity(str(tk)) if r[3] != "in-parity"]
-    assert sorted(hr.write_goldens(str(tk))) == ["harness/codex/rendered/agents.json",
+    assert sorted(hr.write_goldens(str(tk))) == ["harness/antigravity/rendered/agents.json",
+                                                 "harness/codex/rendered/agents.json",
                                                  "harness/copilot/rendered/agents.json",
                                                  "harness/copilot/rendered/printed-permissions.txt"]
     assert all(r[3] == "in-parity" for r in hr.parity(str(tk)))

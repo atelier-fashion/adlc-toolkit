@@ -247,8 +247,13 @@ def _install_one(adapter, toolkit, dry_run, out):
     elif spec:
         notes.append("agents: %s (served by the mount, REQ-654; nothing to render)"
                      % spec["mode"])
-    plans, _printed = hr.plan_surfaces(adapter, "user", toolkit, toolkit,
-                                       surfaces=("permissions", "hooks", "instructions"))
+    plans, printed = hr.plan_surfaces(adapter, "user", toolkit, toolkit,
+                                      surfaces=("permissions", "hooks", "instructions",
+                                                ha.SKILLS_SURFACE))
+    if any(surface == "permissions" for surface, _fmt in printed):
+        notes.append("permissions: printed, never written here; `adlc harness render "
+                     "--harness %s --surface permissions` prints the rule set to apply "
+                     "yourself" % adapter["name"])
     if plans:
         w, _u = hr.apply_plans(plans, dry_run=dry_run, force=False, out=out)
         written += w
@@ -390,7 +395,7 @@ def build_parser():
     r.add_argument("--harness")
     r.add_argument("--adapter-path", help="load a test-only adapter from this file")
     r.add_argument("--surface", choices=("agents", "permissions", "hooks", "instructions",
-                                         "config"))
+                                         "config", ha.SKILLS_SURFACE))
     r.add_argument("--scope", choices=("project", "user", "exec"), default="project")
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--force", action="store_true", help="overwrite a create-mode file")

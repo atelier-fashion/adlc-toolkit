@@ -298,6 +298,7 @@ DEFAULT_BLOCKED_PATHS = (
     ".cursorrules",
     ".codex/**",
     ".gemini/**",
+    ".agents/**",
     ".vscode/tasks.json",
     ".devcontainer/**",
     # the project's ADLC context names the gates every later run executes

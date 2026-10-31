@@ -1,0 +1,657 @@
+{
+  "schema": 1,
+  "harness": "antigravity",
+  "harness_version": "1.4.12",
+  "probe_tool_version": "5.4.0+9bf9cbd",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "shell": "/bin/zsh"
+  },
+  "ran_at": "2026-10-31T18:10:10Z",
+  "date": "2026-10-31",
+  "plan_ref": ".adlc/research/multi-harness-plan.md revision 2 \u00a76",
+  "launches": {
+    "planned": 1,
+    "actual": 1
+  },
+  "probes": {
+    "git-write-main": {
+      "status": "fail",
+      "plan_item": "6.1a (headless half), 6.3 (allow half)",
+      "oracle": "remote-ref",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "evidence": {
+        "launch": "l02",
+        "command": [
+          "agy",
+          "-p",
+          "<prompt>",
+          "--output-format",
+          "json",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l02.settings.json"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "exit_code": 0,
+        "wall_s": 5.3,
+        "stdout_bytes": 316,
+        "stderr_bytes": 303,
+        "stdout_tail": "{\"conversation_id\":\"3ee7d88a-cfba-47e4-9724-b560b78556db\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":3.544864,\"num_turns\":1,\"usage\":{\"input_tokens\":6828,\"output_tokens\":278,\"thinking_tokens\":242,\"cache_read_tokens\":0,\"total_tokens\":7106},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+        "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+        "observation": "ref main: 7fad61f \u2192 7fad61f; harness refused a tool on stderr"
+      }
+    },
+    "git-write-worktree": {
+      "status": "pass",
+      "plan_item": "6.1b",
+      "oracle": "remote-ref",
+      "ran_at": "2026-10-31T18:10:10Z",
+      "evidence": {
+        "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/repo/.git/worktrees/wt",
+        "launch": "l01",
+        "command": [
+          "agy",
+          "-p",
+          "<prompt>",
+          "--output-format",
+          "json",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/captures/l01.settings.json"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/wt",
+        "exit_code": 0,
+        "wall_s": 11.3,
+        "stdout_bytes": 571,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"conversation_id\":\"f540df2f-852e-41a6-b9fc-880f244f070e\",\"status\":\"SUCCESS\",\"response\":\"The staged file has been committed and pushed to `origin/probe-wt`.\\n\\n- **Commit**: `probe` (`50ad6c1`)\\n- **File**: [probe-l01-aw9tb7e2.txt](file:///private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/wt/probe-l01-aw9tb7e2.txt)\\n- **Branch**: `probe-wt` pushed to `origin/probe-wt`\\n\",\"duration_seconds\":9.752169,\"num_turns\":1,\"usage\":{\"input_tokens\":29427,\"output_tokens\":449,\"thinking_tokens\":184,\"cache_read_tokens\":0,\"total_tokens\":29876}}\n",
+        "stderr_tail": "",
+        "observation": "ref probe-wt: 53ad95e \u2192 50ad6c1 (contains the nonce file)"
+      }
+    },
+    "ask-tier-deny": {
+      "status": "unknown",
+      "reason": "precondition-unmet: allow-only control did not run the command",
+      "plan_item": "6.3",
+      "oracle": "sentinel-nonce",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "sub_results": {
+        "baseline": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l07",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l07.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 4.8,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"e6c7b1dc-9d6c-42e7-9c97-2338e62aa032\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":3.550275,\"num_turns\":1,\"usage\":{\"input_tokens\":6902,\"output_tokens\":338,\"thinking_tokens\":179,\"cache_read_tokens\":0,\"total_tokens\":7240},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel target: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+          }
+        },
+        "allow-only": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l08",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l08.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 6.9,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"942fec12-128b-4edd-9c5d-220464ddef37\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":5.682961,\"num_turns\":1,\"usage\":{\"input_tokens\":6897,\"output_tokens\":807,\"thinking_tokens\":651,\"cache_read_tokens\":0,\"total_tokens\":7704},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel target: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+          }
+        },
+        "baseline-git-c": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l09",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l09.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 9.4,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"b8340de5-6ce9-4065-9e75-b29b0cbe3bf9\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":8.133678,\"num_turns\":1,\"usage\":{\"input_tokens\":6908,\"output_tokens\":809,\"thinking_tokens\":771,\"cache_read_tokens\":0,\"total_tokens\":7717},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "ref refs/heads/probe-deny-l09: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+          }
+        },
+        "allow-only-git-c": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l10",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l10.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 13.0,
+            "stdout_bytes": 328,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"60858345-9843-4231-ae92-78251323f63b\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":11.808451999999999,\"num_turns\":1,\"usage\":{\"input_tokens\":22519,\"output_tokens\":865,\"thinking_tokens\":591,\"cache_read_tokens\":0,\"total_tokens\":23384},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "ref refs/heads/probe-deny-l10: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+          }
+        },
+        "lone-deny": {
+          "status": "n/a",
+          "reason": "not-applicable: headless ask is already a deny, an absent sentinel proves nothing",
+          "evidence": {
+            "launch": "l04",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l04.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 61.4,
+            "stdout_bytes": 836,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"7bb36830-3c85-4e75-9d62-e3d0b3c019bf\",\"status\":\"SUCCESS\",\"response\":\"I encountered an error executing the second command:\\n\\n`touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo/.probe/target-l04`\\n**Error:** `Permission denied for unsandboxed(touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo/.probe/target-l04). Matches user-configured deny rule.`\\n\\nPer safety guidelines, I cannot bypass or defeat permission checks. Because the operation is denied and no sanctioned alternative exists, I am blocked and stopping here.\\n\\nReversed nonce: `o3dh15gr`\\n\",\"duration_seconds\":60.157426,\"num_turns\":1,\"usage\":{\"input_tokens\":22252,\"output_tokens\":7840,\"thinking_tokens\":7448,\"cache_read_tokens\":0,\"total_tokens\":30092}}\n",
+            "stderr_tail": "",
+            "observation": "sentinel target: absent; witness: present; reversed nonce in final message: yes"
+          }
+        },
+        "deny-under-allow": {
+          "status": "unknown",
+          "reason": "precondition-unmet: allow-only control did not run the command",
+          "evidence": {
+            "launch": "l05",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l05.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 25.4,
+            "stdout_bytes": 321,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"fc88da4c-8e9b-4c09-9f39-c7f2e862be7c\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":23.966364,\"num_turns\":1,\"usage\":{\"input_tokens\":22221,\"output_tokens\":2809,\"thinking_tokens\":2572,\"cache_read_tokens\":0,\"total_tokens\":25030},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel target: absent; witness: present; reversed nonce in final message: no; harness refused a tool on stderr"
+          }
+        },
+        "wrapped-allow": {
+          "status": "unknown",
+          "reason": "precondition-unmet: allow-only-git-c control did not run the command",
+          "evidence": {
+            "launch": "l06",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l06.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 8.1,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":6.877066,\"num_turns\":1,\"usage\":{\"input_tokens\":6989,\"output_tokens\":716,\"thinking_tokens\":625,\"cache_read_tokens\":0,\"total_tokens\":7705},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "ref refs/heads/probe-deny-l06: absent; witness: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+          }
+        }
+      }
+    },
+    "skill-activation": {
+      "status": "pass",
+      "plan_item": "6.4",
+      "oracle": "sentinel-present",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "evidence": {
+        "launch": "l11",
+        "command": [
+          "agy",
+          "-p",
+          "<prompt>",
+          "--output-format",
+          "json",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l11.settings.json"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "exit_code": 0,
+        "wall_s": 9.6,
+        "stdout_bytes": 317,
+        "stderr_bytes": 303,
+        "stdout_tail": "{\"conversation_id\":\"e44034f2-7add-4ebf-b891-b1ac0b54137d\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":8.41932,\"num_turns\":1,\"usage\":{\"input_tokens\":22101,\"output_tokens\":658,\"thinking_tokens\":379,\"cache_read_tokens\":0,\"total_tokens\":22759},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+        "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+        "observation": "sentinel: present; harness refused a tool on stderr"
+      }
+    },
+    "shell-timeout": {
+      "status": "fail",
+      "plan_item": "6.6",
+      "oracle": "sentinel-nonce",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "evidence": {
+        "launch": "l12",
+        "command": [
+          "agy",
+          "-p",
+          "<prompt>",
+          "--output-format",
+          "json",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l12.settings.json"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "exit_code": 0,
+        "wall_s": 10.0,
+        "stdout_bytes": 327,
+        "stderr_bytes": 303,
+        "stdout_tail": "{\"conversation_id\":\"56c3c78d-d8cb-4497-a390-fccd7324c761\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":8.731864999999999,\"num_turns\":1,\"usage\":{\"input_tokens\":6907,\"output_tokens\":1141,\"thinking_tokens\":1051,\"cache_read_tokens\":0,\"total_tokens\":8048},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+        "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+        "observation": "sentinel: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+      }
+    },
+    "trust-then-headless": {
+      "status": "pass",
+      "plan_item": "6.8 (trust + load)",
+      "oracle": "sentinel-present",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "sub_results": {
+        "hooks-loaded": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l01",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l01.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 11.2,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"76005fbb-c8df-4a0d-bbd0-5bee053a7a5e\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":9.527905,\"num_turns\":1,\"usage\":{\"input_tokens\":6877,\"output_tokens\":915,\"thinking_tokens\":878,\"cache_read_tokens\":0,\"total_tokens\":7792},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel A (hook): present; sentinel B (allow): absent; harness refused a tool on stderr"
+          }
+        },
+        "allowlist-loaded": {
+          "status": "n/a",
+          "reason": "not-applicable: no project-local allow form",
+          "evidence": {
+            "launch": "l01",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l01.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 11.2,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"76005fbb-c8df-4a0d-bbd0-5bee053a7a5e\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":9.527905,\"num_turns\":1,\"usage\":{\"input_tokens\":6877,\"output_tokens\":915,\"thinking_tokens\":878,\"cache_read_tokens\":0,\"total_tokens\":7792},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel A (hook): present; sentinel B (allow): absent; harness refused a tool on stderr"
+          }
+        }
+      }
+    },
+    "session-start-context": {
+      "status": "pass",
+      "plan_item": "6.8 (injection)",
+      "oracle": "nonce-in-stdout",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "evidence": {
+        "launch": "l13",
+        "command": [
+          "agy",
+          "-p",
+          "<prompt>",
+          "--output-format",
+          "json",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l13.settings.json"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "exit_code": 0,
+        "wall_s": 4.7,
+        "stdout_bytes": 258,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"conversation_id\":\"1e1ae218-f59a-4398-8757-fcc3b252c4f6\",\"status\":\"SUCCESS\",\"response\":\"3uexu0sk\\n\",\"duration_seconds\":3.353493,\"num_turns\":1,\"usage\":{\"input_tokens\":6901,\"output_tokens\":302,\"thinking_tokens\":297,\"cache_read_tokens\":0,\"total_tokens\":7203}}\n",
+        "stderr_tail": "",
+        "observation": "reversed nonce in final message: yes"
+      }
+    },
+    "stdin-prompt": {
+      "status": "pass",
+      "plan_item": "6.12",
+      "oracle": "nonce-in-stdout",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "evidence": {
+        "returned_reversed_nonce": [
+          "without-prompt-flag"
+        ],
+        "observation": "variants that made stdin the task (returned the reversed nonce): without-prompt-flag"
+      },
+      "sub_results": {
+        "with-prompt-flag": {
+          "status": "unknown",
+          "reason": "binary-exit-1",
+          "evidence": {
+            "launch": "l14",
+            "command": [
+              "agy",
+              "-p",
+              "",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l14.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 1,
+            "wall_s": 0.3,
+            "stdout_bytes": 300,
+            "stderr_bytes": 66,
+            "stdout_tail": "{\"conversation_id\":\"\",\"status\":\"ERROR\",\"response\":\"\",\"error\":\"Error: empty prompt. Usage: agy --print \\\"your prompt here\\\"\",\"duration_seconds\":0.000038875,\"num_turns\":0,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"thinking_tokens\":0,\"cache_read_tokens\":0,\"total_tokens\":0},\"finished_reason\":\"error\"}\n",
+            "stderr_tail": "error: Error: empty prompt. Usage: agy --print \"your prompt here\"\n",
+            "observation": "reversed nonce in final message: no"
+          }
+        },
+        "without-prompt-flag": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l15",
+            "command": [
+              "agy",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l15.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 5.2,
+            "stdout_bytes": 270,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"103438f8-3107-4b33-a750-b7b9eb4ab350\",\"status\":\"SUCCESS\",\"response\":\"xujj1goa\\n\",\"duration_seconds\":3.7258649999999998,\"num_turns\":1,\"usage\":{\"input_tokens\":15542,\"output_tokens\":210,\"thinking_tokens\":205,\"cache_read_tokens\":0,\"total_tokens\":15752}}\n",
+            "stderr_tail": "",
+            "observation": "reversed nonce in final message: yes"
+          }
+        }
+      }
+    },
+    "fence-vs-allowlist": {
+      "status": "fail",
+      "plan_item": "6.11",
+      "oracle": "sentinel-present",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "sub_results": {
+        "routine-only": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l16",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l16.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 8.2,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"745ec928-90be-4e53-8f4c-15ec31339160\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":7.008423,\"num_turns\":1,\"usage\":{\"input_tokens\":7015,\"output_tokens\":965,\"thinking_tokens\":742,\"cache_read_tokens\":0,\"total_tokens\":7980},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel: absent; harness refused a tool on stderr"
+          }
+        },
+        "broad-sh": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l17",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l17.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 6.6,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"00433507-c0f0-463e-8b70-3bcf04238ed7\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":5.368854,\"num_turns\":1,\"usage\":{\"input_tokens\":7017,\"output_tokens\":597,\"thinking_tokens\":374,\"cache_read_tokens\":0,\"total_tokens\":7614},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel: absent; harness refused a tool on stderr"
+          }
+        },
+        "broad-first-token": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l18",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l18.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "exit_code": 0,
+            "wall_s": 8.1,
+            "stdout_bytes": 316,
+            "stderr_bytes": 303,
+            "stdout_tail": "{\"conversation_id\":\"a6d2c245-04b2-4f2a-b9d0-104db1613c18\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":6.856054,\"num_turns\":1,\"usage\":{\"input_tokens\":7018,\"output_tokens\":672,\"thinking_tokens\":443,\"cache_read_tokens\":0,\"total_tokens\":7690},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
+            "observation": "sentinel: absent; harness refused a tool on stderr"
+          }
+        }
+      }
+    },
+    "transcript-locate": {
+      "status": "pass",
+      "plan_item": "6.9",
+      "oracle": "file-located",
+      "ran_at": "2026-10-31T18:06:21Z",
+      "evidence": {
+        "location": "~/.gemini/antigravity-cli/brain/103438f8-3107-4b33-a750-b7b9eb4ab350/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+        "discovery_rule": "mtime",
+        "records_copied": 2,
+        "fixture": ".adlc/research/harness-probes/fixtures/antigravity.jsonl",
+        "session_files": [
+          "~/.gemini/antigravity-cli/brain/103438f8-3107-4b33-a750-b7b9eb4ab350/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/103438f8-3107-4b33-a750-b7b9eb4ab350/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/transcript.jsonl"
+        ],
+        "launches_exited_zero": "17 of 18",
+        "observation": "located 46 session file(s) newer than the first launch; 17 of 18 launches exited 0",
+        "files_scanned": 120
+      }
+    },
+    "arg-substitution": {
+      "status": "n/a",
+      "reason": "not-applicable: plan \u00a76.10 is a Claude question ($N substitution); no other harness substitutes",
+      "plan_item": "6.10",
+      "oracle": "sentinel-content",
+      "ran_at": "2026-10-31T18:10:10Z"
+    }
+  },
+  "coverage": {
+    "6.1a": {
+      "probes": [
+        "git-write-main"
+      ],
+      "note": "headless only"
+    },
+    "6.1b": {
+      "probes": [
+        "git-write-worktree"
+      ]
+    },
+    "6.2": {
+      "status": "not-probed",
+      "reason": "Copilot committed allowlist \u2014 a documentation question, no experiment decides it"
+    },
+    "6.3": {
+      "probes": [
+        "ask-tier-deny",
+        "git-write-main"
+      ]
+    },
+    "6.4": {
+      "probes": [
+        "skill-activation"
+      ]
+    },
+    "6.5": {
+      "status": "not-probed",
+      "reason": "Antigravity CLI survey \u2014 answered by .adlc/research/antigravity-compatibility.md (REQ-658)"
+    },
+    "6.6": {
+      "probes": [
+        "shell-timeout"
+      ]
+    },
+    "6.7": {
+      "status": "not-probed",
+      "reason": "answered structurally by REQ-654's skills-only view, so no harness ever sees the clone root"
+    },
+    "6.8": {
+      "probes": [
+        "trust-then-headless",
+        "session-start-context"
+      ]
+    },
+    "6.9": {
+      "probes": [
+        "transcript-locate"
+      ]
+    },
+    "6.10": {
+      "probes": [
+        "arg-substitution"
+      ]
+    },
+    "6.11": {
+      "probes": [
+        "fence-vs-allowlist"
+      ]
+    },
+    "6.12": {
+      "probes": [
+        "stdin-prompt"
+      ]
+    }
+  },
+  "cleanup": {
+    "repo_removed": true,
+    "user_files_restored": true,
+    "leftovers": []
+  }
+}

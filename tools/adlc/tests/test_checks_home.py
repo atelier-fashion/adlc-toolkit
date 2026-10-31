@@ -65,7 +65,7 @@ def test_registry_lists_new_checks():
         assert cid in ids
     assert [i for i in ids if i.startswith("harness:")] == [
         "harness:claude", "harness:copilot", "harness:codex", "harness:gemini",
-        "harness:cursor"]
+        "harness:cursor", "harness:antigravity"]
     assert "claude-code" not in ids
 
 
