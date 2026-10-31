@@ -290,6 +290,9 @@ def _stage_harness(tmp_path: Path, read_bin: str = "", jsonl: str | None = None)
         "ADLC_STUB_MARKER": str(marker),
         "ADLC_FN_MARKER": str(fn_marker),
         "ADLC_FAKE_JSONL": str(transcript) if jsonl is None else jsonl,
+        # `proceed`'s fence redacts `$TMPFILE` from its step 2 and delegates only
+        # if that worked, so without a real file it never reaches the invocation.
+        "TMPFILE": str(cwd / "corpus.txt"),
     }
     return cwd, env, marker, fn_marker
 

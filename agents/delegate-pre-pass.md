@@ -223,7 +223,10 @@ if [ "$sed_exit" -ne 0 ]; then
   # (invoked:false, exit:-1, changedFiles kept).
   gate_word=fail; mode=fallback; reason=redaction-failed; duration_ms=-
   "$DELEGATE_TOOLS"/emit-telemetry.sh delegate-pre-pass Phase-5-prepass "$REQ" "$gate_word" "$mode" "$reason" "$duration_ms"
-  # ... then return the degraded CANDIDATES object and STOP.
+  echo "delegate-pre-pass: credential redaction failed — not invoking the delegate; returning the degraded object" >&2
+  # The whole protocol is ONE shell, so only `exit` keeps step 4 from sending the
+  # diff. Exit 0 (the Hard contract), then return the degraded CANDIDATES object and STOP.
+  exit 0
 fi
 ```
 

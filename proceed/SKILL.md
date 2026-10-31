@@ -232,26 +232,29 @@ esac
 
 **Delegated pre-pass (per touched repo)** — iterate over the touched repos already enumerated by the prerequisite step. The per-repo diff and changed-files list MUST be derived from THAT repo's worktree (NOT a shared / monorepo list): use `git -C <repos[<id>].worktree> diff main...HEAD` for the diff and `git -C <repos[<id>].worktree> diff main...HEAD --name-only` for the changed-files list. The validation in step 6 below references the per-repo changed-files list, not a global one.
 
-**MANDATORY — no agent discretion.** When the gate passes, invoking `adlc-read` for the pre-pass is required for every touched repo, not optional. The *only* acceptable non-delegated outcome on the gate-pass path is per-repo: `adlc-read` was actually invoked for that repo and exited non-zero (→ the per-repo delegation-failure fall-through, recorded as `api-error`). Producing the candidate-findings yourself by reading the repo diff directly *instead of* invoking `adlc-read` — for ANY reason, including "small diff", "few changed files", or "faster to just review it" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
+**MANDATORY — no agent discretion.** When the gate passes, invoking `adlc-read` for the pre-pass is required for every touched repo, not optional. Exactly two non-delegated outcomes are acceptable on the gate-pass path, both per-repo: (a) `adlc-read` was actually invoked for that repo and exited non-zero (→ the per-repo delegation-failure fall-through, recorded as `api-error`), or (b) the credential redaction failed for that repo, so its diff may still hold a key and must not leave the machine (→ the same fall-through, with no `invoked` mark). Producing the candidate-findings yourself by reading the repo diff directly *instead of* invoking `adlc-read` — for ANY reason, including "small diff", "few changed files", or "faster to just review it" — is a compliance violation, NOT a fallback. `emit-telemetry.sh` mechanically rewrites any gate-pass `fallback` record whose reason is not `api-error` into a `ghost-skip`, so a hand-written reason cannot disguise a skipped call — the skip surfaces in `check-delegation.sh` counts regardless of how the emit is labeled.
 
 1. Emit ONE stderr line announcing intent BEFORE invoking the delegate (consistent with `/spec` and `/analyze`):
    ```
    /proceed Phase 5: delegating verify pre-pass to the delegate (repo=<id>, <N> changed files)
    ```
-2. Capture the repo's diff to a temp file using `mktemp -t adlc-verify.XXXXXX` (BSD-sed-compatible, no predictable name). Install an `EXIT` trap to remove the temp file on every exit path so the diff (which may contain sensitive code) does not persist. **Do NOT** hardcode a predictable path like `/tmp/adlc-verify-<reqid>.txt` — that pattern is a symlink/TOCTOU foothold (LESSON-008).
-3. Redact credential-shaped strings from the diff in place via the 5-pattern BSD-sed chain established in REQ-415 (covers `sk-…`, `AKIA…`, `ghp_…`, `Bearer …`, and `[A-Z_]+_(API_KEY|TOKEN)…` env-var assignments — the broader `[A-Z_]+_(API_KEY|TOKEN)` arm subsumes `MOONSHOT_API_KEY` so no separate pattern is needed):
-   ```bash
-   sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE" && rm -f "$TMPFILE.bak"
-   ```
-4. Invoke the delegate over the redacted diff. Mark `invoked=1` to the flag sidecar immediately before the call (REQ-424 telemetry), and mark the call's `exit` immediately after it returns — these marks are how the resolution block detects a real call vs a ghost-skip:
+2. Capture the repo's diff to a temp file using `mktemp -t adlc-verify.XXXXXX` (BSD-sed-compatible, no predictable name). Install an `EXIT` trap to remove the temp file and its `$TMPFILE.bak` sidecar on every exit path so the diff (which may contain sensitive code) does not persist. **Do NOT** hardcode a predictable path like `/tmp/adlc-verify-<reqid>.txt` — that pattern is a symlink/TOCTOU foothold (LESSON-008).
+3. Redact credential-shaped strings from the diff in place via the 5-pattern BSD-sed chain established in REQ-415 (covers `sk-…`, `AKIA…`, `ghp_…`, `Bearer …`, and `[A-Z_]+_(API_KEY|TOKEN)…` env-var assignments — the broader `[A-Z_]+_(API_KEY|TOKEN)` arm subsumes `MOONSHOT_API_KEY` so no separate pattern is needed). The chain lives in step 4's fence, not one of its own, and steps 2–4 run in **one shell invocation**: fenced blocks do not share shell state (REQ-522 BR-4), so only a test in the same shell can keep a failed `sed` from reaching the delegate.
+4. Invoke the delegate over the redacted diff, **only if the redaction succeeded**. A failed `sed` logs one line and takes this repo to the fallback dispatch with `invoked` unset. Mark `invoked=1` to the flag sidecar immediately before the call (REQ-424 telemetry), and mark the call's `exit` immediately after it returns — these marks are how the resolution block detects a real call vs a ghost-skip:
    ```bash
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
    if [ -f .adlc/partials/delegate-gate.sh ]; then . .adlc/partials/delegate-gate.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-gate.sh"; fi
    if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
    case "$ADLC_READ_BIN" in /*) ;; *) echo "/proceed: ADLC_READ_BIN is not an absolute path ('$ADLC_READ_BIN') — refusing to hand over the corpus (re-run install.sh --with-delegation (symlink install; the plugin ships no delegation CLIs), and /init (/adlc:init on the plugin install) to refresh the vendored gate)" >&2; exit 1 ;; esac
-   "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
-   command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
-   "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
+   if ! sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$TMPFILE"; then
+       # The file may still hold a key, so it stays here and `invoked` stays unset.
+       echo "/proceed Phase 5: credential redaction failed for repo=<id> — reviewers running without candidates" >&2
+   else
+       rm -f "$TMPFILE.bak"
+       "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" invoked 1
+       command "$ADLC_READ_BIN" --no-warn --paths "$TMPFILE" --question "From this diff, produce candidate-findings across: correctness (logic bugs, race conditions, edge cases), quality (naming, duplication, dead code), architecture (layer violations, contract drift), test-coverage (missing tests for changed surfaces), security (input validation, secrets, auth). For each dimension, list 0-5 candidates as: '<file path>:<line range> | <one-line description>'. Reply 'NONE' for dimensions with no candidates. 1000 words max total."
+       "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" exit $?
+   fi
    ```
    (The gate partial is re-sourced here because fenced blocks do not share shell state — it exports `ADLC_READ_BIN`, the resolved binary (PATH, or `$HOME/bin/adlc-read` in GUI-launched sessions whose PATH lacks `~/bin`).)
    **If `adlc-read` exits non-zero**, emit one combined stderr line and fall through to the fallback dispatch for this repo (BR-4: one line per invocation — this REPLACES the intent line for this repo; the success/announce line in step 1 is the only emit when delegation succeeds):
@@ -284,7 +287,7 @@ esac
   /proceed Phase 5: adlc-read unavailable — reviewers running without candidate pre-pass
   ```
   (substitute `… disabled via ADLC_DISABLE_DELEGATE …` when the opt-out is the cause).
-- On a per-repo delegation failure already logged in step 6 above, do NOT re-emit the unavailable line — the failure line has already been written. Just dispatch reviewers for that repo without the advisory block.
+- On a per-repo delegation or redaction failure already logged in step 4 above, do NOT re-emit the unavailable line — the failure line has already been written. Just dispatch reviewers for that repo without the advisory block.
 - Behavior of the 6-agent dispatch is otherwise unchanged.
 
 **Resolve telemetry mode and emit** (REQ-424). After the delegated OR fallback path completes for this Phase 5 pre-pass, before continuing to the 6-agent dispatch. Emit telemetry ONLY by sourcing and calling the shared resolver in the SAME fenced block — it derives `mode`/`reason`/`gate_result`/`duration_ms` from the flag-file sidecar the steps above `mark`ed, so no shell variable crosses a fence boundary (REQ-522 BR-4). Never hand-construct a telemetry line:
