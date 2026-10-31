@@ -47,11 +47,14 @@ Do these in order. `X.Y.Z` is the new version throughout.
    node space/build.mjs
    ```
 
-3. **Bump the plugin manifest.** Set `version` in
-   [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) to the same `X.Y.Z`.
+3. **Bump the plugin manifests.** Set `version` to the same `X.Y.Z`, by hand, in all
+   three: [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json),
+   [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json) and
+   [`.github/plugin/plugin.json`](.github/plugin/plugin.json).
    `.claude-plugin/marketplace.json` carries no version and stays as it is. The
-   `plugin-manifest` lint check fails when `plugin.json`'s `version` differs from
-   `VERSION`. Then validate both manifests and cross-check them:
+   `manifest-parity` lint check fails with `version-mismatch` when any manifest's
+   `version` differs from `VERSION`. Then validate both Claude Code manifests and
+   cross-check them:
 
    ```bash
    tools/lint-skills/check.sh
@@ -60,6 +63,9 @@ Do these in order. `X.Y.Z` is the new version throughout.
    claude plugin validate .claude-plugin/plugin.json --strict
    claude plugin tag --dry-run .               # checks plugin.json and the marketplace entry agree
    ```
+
+   Until the root `CLAUDE.md` is resolved, the second `validate` line fails on that
+   one warning (REQ-665 `## Deferred`). Any other warning there is a real failure.
 
    `claude plugin tag` would create an `adlc--vX.Y.Z` tag. Run it with `--dry-run`
    only. The toolkit's release tag is the `vX.Y.Z` tag in step 6.
@@ -109,7 +115,7 @@ Do these in order. `X.Y.Z` is the new version throughout.
      reviewer. This repo is well over that: `git ls-files | wc -l` printed more than 700
      when this file was written. The hold slows the review; it does not reject the submission.
    - **No top-level `bin/`.** The claude.ai sync path rejects one, so the CLI lives in
-     `scripts/`, and the `plugin-manifest` lint check fails on a top-level `bin/`.
+     `scripts/`, and the `manifest-parity` lint check fails on a top-level `bin/`.
      Whether a directory install goes through that sync path at all is open (REQ-669
      OQ-4). After the first directory install, record in REQ-669's `verification.md`
      whether `adlc` reached the session's PATH (BR-20).

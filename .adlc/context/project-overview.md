@@ -18,6 +18,8 @@ Two routes (REQ-669). One skill text serves both, and a machine should use one o
 - **Plugin route (users).** This repo is both a Claude Code marketplace (`adlc-toolkit`) and the plugin (`adlc`). `claude plugin marketplace add atelier-fashion/adlc-toolkit`, then `claude plugin install adlc@adlc-toolkit`, copies a release into `~/.claude/plugins/cache/adlc-toolkit/adlc/<version>/`. The plugin's `version` is pinned to `VERSION`, so the install layer is versioned on this route. Users move only when a release is tagged and they run `claude plugin update` (`RELEASING.md` is the release sequence). Skills are `/adlc:<skill>` and agents `adlc:<name>`. A SessionStart hook records the plugin root in `~/.claude/adlc/plugin-root`, scaffolds a delegation-off `~/.claude/adlc/config.yml` when none exists, and puts `scripts/adlc` on the session's PATH.
 - **Symlink route (contributors and the maintainer).** One canonical git clone on disk, linked at `~/.claude/skills/` and `~/.claude/agents/` by `install.sh`. Edits to the clone are visible immediately, with no separate installed copy and no sync step. This matters because a skill change committed here takes effect for every project on such a machine the instant it lands, while plugin users get it at the next release.
 
+Two pinned alternatives exist for other harnesses (REQ-665). `.cursor-plugin/plugin.json` and `.github/plugin/plugin.json` let Cursor and Copilot CLI list the skills at a chosen tag. They are catalog mounts, not routes: each needs a Claude Code route behind it, because a skill resolves ToolkitRoot, the engines and the `adlc` CLI through one. Gemini CLI has none, and stays on the `~/.agents/skills` mount. No Cursor, Copilot or Gemini install has been exercised (REQ-665 `## Deferred`).
+
 Every toolkit-owned file a skill, partial, agent, workflow or tool reads resolves through **ToolkitRoot** (`$ADLC_TOOLKIT_ROOT`): the clone on the symlink route, the cache copy on the plugin route (see architecture.md "Install routes"). Machine state, meaning the id counters, their locks, the machine config and the telemetry log, stays where it is and is shared by both routes: under `ADLC_HOME`, which defaults to `~/.claude` so that nothing moves (REQ-654). On the symlink route `install.sh` also mounts a skills-only view of the clone at `~/.agents/skills`, which Copilot CLI, Codex, Gemini CLI and Cursor read. Both routes active on one machine is a doubled install, which `adlc doctor` reports.
 
 ## Primary surface areas
@@ -30,6 +32,7 @@ Every toolkit-owned file a skill, partial, agent, workflow or tool reads resolve
 | Ethos | `ETHOS.md` | The ETHOS principles injected into every skill — the non-negotiable constitution |
 | Docs | `README.md`, `RELEASING.md` | Install instructions for both routes (plugin first), the skill catalog, and the maintainer's release and directory-submission sequence |
 | Plugin | `.claude-plugin/`, `hooks/`, `scripts/` | The plugin and marketplace manifests, the SessionStart hook, and the `scripts/adlc` CLI shim (REQ-669) |
+| Alternative manifests | `.cursor-plugin/`, `.github/plugin/` | The pinned catalog mounts for Cursor and Copilot CLI, kept in step by `manifest-parity` (REQ-665) |
 
 ## Relationship to consumer projects
 

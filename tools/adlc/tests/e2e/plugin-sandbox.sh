@@ -280,12 +280,18 @@ def cmd_bump(version):
 
 
 def cmd_set_version(root, version):
-    path = os.path.join(root, ".claude-plugin", "plugin.json")
-    with open(path, encoding="utf-8") as fh:
-        data = json.load(fh, object_pairs_hook=collections.OrderedDict)
-    data["version"] = version
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(data, indent=2) + "\n")
+    # RELEASING.md steps 2 and 3: every manifest in the lint's MANIFEST_REGISTRY moves
+    # with VERSION (REQ-665 BR-5). `--ref` can name a tag from before a manifest
+    # existed, so one that is absent has nothing to move; the Claude one always exists.
+    for parts in ((".claude-plugin",), (".cursor-plugin",), (".github", "plugin")):
+        path = os.path.join(root, *parts, "plugin.json")
+        if parts != (".claude-plugin",) and not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh, object_pairs_hook=collections.OrderedDict)
+        data["version"] = version
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=2) + "\n")
     with open(os.path.join(root, "VERSION"), "w", encoding="utf-8") as fh:
         fh.write(version + "\n")
 
@@ -1209,9 +1215,15 @@ case_test_release_update() {
   v0=$(e2e_py version "$rsrc")
   tv=${OPT_TEST_VERSION:-$(e2e_py bump "$v0")}
   v0_path=$(e2e_py record "$rh" "$E2E_PLUGIN_ID" | cut -f2)
-  # The release bump, made in the sandbox copy only: VERSION and plugin.json together,
+  # The release bump, made in the sandbox copy only: VERSION and every manifest together,
   # the way RELEASING.md steps 2 and 3 make it.
-  e2e_py set-version "$rsrc" "$tv"
+  if ! e2e_py set-version "$rsrc" "$tv"; then
+    e2e_check "$c" plugin_update FAIL "the release bump to $tv failed in the sandbox copy"
+    for chk in template_drift_baseline_fence template_drift_skill_run; do
+      e2e_check "$c" "$chk" SKIPPED 'the release bump failed'
+    done
+    return
+  fi
   (cd "$E2E_WORK" && e2e_run_in "$rh" claude plugin marketplace update "$E2E_MARKETPLACE" \
     && e2e_run_in "$rh" claude plugin update "$E2E_PLUGIN_ID" \
     && e2e_run_in "$rh" claude plugin list --json > "$E2E_LOGS/$c-list-after.json") < /dev/null > "$E2E_LOGS/$c-update.log" 2>&1

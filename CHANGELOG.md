@@ -80,6 +80,35 @@ is cut per `RELEASING.md`.
   `adlc harness drift` gains `--opted-in`, `adlc harness render` gains `--write-goldens`,
   and `render --scope user` writes a copy harness's agents.
 
+- **Plugin manifests for Cursor and Copilot CLI, an alternative install (REQ-665).**
+  Phase P7a of the multi-harness plan. `.cursor-plugin/plugin.json` and
+  `.github/plugin/plugin.json` let each harness list the toolkit at a chosen tag, as
+  an alternative to following the clone through `~/.agents/skills`.
+  - **Manifests.** Both point at the existing skill directories with `"skills": "./"`
+    and switch off the Claude-format defaults with `"agents": []` and `"hooks": {}`.
+    No skill moves, and `.claude-plugin/`, `hooks/` and `install.sh` do not change.
+  - **Nothing from REQ-656 is bundled.** Copilot's agent and hook renders and Cursor's
+    `.claude/settings.json` hooks stay separate steps, so `"agents": []` and `"hooks": {}`
+    hold on both manifests.
+  - **Catalog mounts, not routes.** Neither is self-sufficient: a skill resolves
+    ToolkitRoot, the engines and the `adlc` CLI through a Claude Code install route,
+    so a machine that runs the skills keeps one. On Copilot the `~/.agents/skills`
+    mount wins, so the pin has no effect while the mount exists.
+  - **No Gemini manifest ships.** By its docs and source, Gemini CLI loads extension
+    skills only from a root `skills/`, which would double Claude Code's catalog, and its
+    install does not preserve a committed relative symlink. None of that ran on a real
+    install; only Node's rewrite of the symlink was reproduced. It stays on the
+    `~/.agents/skills` mount. REQ-658 is told, and decides what its Gemini rows become.
+  - **Cursor and Copilot are unverified.** No binary for either was available, so
+    nothing was exercised on a real install; the README marks every claim and
+    REQ-665's `## Deferred` lists what is owed.
+  - **Lint.** `manifest-parity` absorbs `plugin-manifest`, keeping every rule and its
+    arming, and holds every manifest in `MANIFEST_REGISTRY` to the skill set, the agent
+    set, `VERSION` and the name `adlc`. Its new `execution-key` rule refuses any key that
+    runs, installs or prompts, any inline definition, and those surfaces at their default
+    locations. A release now bumps all three manifests
+    (`RELEASING.md` step 3).
+
 - **Harness adapter framework, shipping the `claude` adapter (REQ-657).** Phase 2a of
   the multi-harness plan. A harness is a data file, `harness/<name>.yml`, loaded by
   one stdlib loader and rendered by one module; nothing branches on a harness name.

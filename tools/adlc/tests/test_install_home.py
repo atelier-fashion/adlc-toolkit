@@ -51,6 +51,8 @@ def make_clone(path):
                 _copy(sub + "/" + name, path)
     for name in os.listdir(os.path.join(TOOLKIT, ".claude-plugin")):
         _copy(".claude-plugin/" + name, path)
+    _copy(".cursor-plugin/plugin.json", path)
+    _copy(".github/plugin/plugin.json", path)
     for skill in SKILLS:
         os.makedirs(os.path.join(path, skill))
         with open(os.path.join(path, skill, "SKILL.md"), "w") as fh:
@@ -233,7 +235,7 @@ def test_view_tracks_added_and_removed_skill(box):
         assert os.path.islink(entry)
         assert os.path.realpath(entry) == os.path.realpath(os.path.join(clone, name))
     # Directories without a SKILL.md are not skills, and never shown.
-    for hidden in ("tools", "partials", "agents", ".claude-plugin"):
+    for hidden in ("tools", "partials", "agents", ".claude-plugin", ".cursor-plugin", ".github"):
         assert not os.path.lexists(os.path.join(mount, hidden))
 
     os.makedirs(os.path.join(clone, "zzz-test"))
