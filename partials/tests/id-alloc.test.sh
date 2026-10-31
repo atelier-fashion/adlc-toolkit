@@ -567,6 +567,40 @@ else
 fi
 cleanup
 
+# --- ASSUME recheck stays per-repo (BR-12): a sibling's ASSUME is not a collision ------
+# adlc_remote_high scopes assume to the current repo, and the exact-id probe has to
+# match it. A sibling's reservation of the same number is another namespace; a
+# reservation in this repo's own origin is still a real collision.
+new_sandbox
+two_machines
+mkdir -p "$RA/.adlc"
+git init -q --bare "$SBX/sibr.git"
+SIB="$ROOTA/sibling"; git clone -q "$SBX/sibr.git" "$SIB" 2>/dev/null
+( cd "$SIB" && git config user.email s@s && git config user.name s \
+    && git commit -q --allow-empty -m i && git push -q origin HEAD:main 2>/dev/null )
+SET=$(git -C "$SIB" hash-object -t tree /dev/null)
+SOBJ=$(printf 'sib\n' | git -C "$SIB" commit-tree "$SET")
+git -C "$SIB" push origin "${SOBJ}:refs/adlc/ids/assume/18" >/dev/null 2>&1
+RC=0; MSG=$( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id assume ASSUME-018 2>&1 ) || RC=$?
+check "ASSUME recheck: a sibling's ASSUME-018 is not a collision (BR-12)" "0" "$RC"
+case "$MSG" in *COLLISION*) fail "ASSUME recheck named a sibling collision (got: $MSG)";; *) pass "ASSUME recheck prints no collision for a sibling";; esac
+ROBJ=$(printf 'own\n' | git -C "$RB" commit-tree "$(git -C "$RB" hash-object -t tree /dev/null)")
+git -C "$RB" push origin "${ROBJ}:refs/adlc/ids/assume/19" >/dev/null 2>&1
+RC=0; MSG=$( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id assume ASSUME-019 2>&1 ) || RC=$?
+check "ASSUME recheck: this repo's own origin is still a collision" "1" "$RC"
+case "$MSG" in *"adlc renumber ASSUME"*) fail "ASSUME recheck printed a renumber command that refuses ASSUME ids (got: $MSG)";; *"by hand"*) pass "ASSUME recheck names the by-hand rename";; *) fail "ASSUME recheck remedy (got: $MSG)";; esac
+# A bug recheck earlier in the same shell must not leave its branch pattern behind:
+# fix/bug-19-x is no assume footprint, so ASSUME-020 stays free after it.
+RSHA=$(git -C "$RB" rev-parse HEAD)
+git -C "$RB" push origin "${RSHA}:refs/heads/fix/bug-20-x" >/dev/null 2>&1
+RC=0; ( HOME="$HA"; export HOME; ADLC_REPOS_ROOT="$ROOTA"; export ADLC_REPOS_ROOT
+  cd "$RA"; . "$PARTIALS/id-recheck.sh"; adlc_recheck_id bug BUG-999 >/dev/null 2>&1
+  adlc_recheck_id assume ASSUME-020 ) >/dev/null 2>&1 || RC=$?
+check "ASSUME recheck: an earlier bug recheck's branch pattern does not carry over" "0" "$RC"
+cleanup
+
 # --- ASSUME historical high-water: merged ASSUME-040 + stale counter=5 => >= 41 (BR-12)
 new_sandbox
 git init -q --bare "$SBX/ah.git"

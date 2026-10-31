@@ -93,7 +93,8 @@ behavior. Examples:
   Defines `adlc_recheck_id <kind> <ID>` returning 0 (no collision on any
   reachable remote, OR degraded-unreachable — never invents a collision from
   absence of data), 1 (collision — prints the exact `adlc renumber` halt to
-  stderr), or 2 (usage error). It is a separate partial from `id-alloc.sh` so
+  stderr, or a by-hand rename for `assume`, which `adlc renumber` does not take),
+  or 2 (usage error). `assume` is checked on the current repo only (BR-12). It is a separate partial from `id-alloc.sh` so
   recheck call sites don't load the full allocation machinery, but it sources
   `id-alloc.sh` for the kind mappers + `adlc_remote_high` (one derivation
   surface). Never blocks on the network. Contract in the header comment.

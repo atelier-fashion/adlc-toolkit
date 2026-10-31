@@ -503,6 +503,11 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`adlc_recheck_id assume` stays in the current repo (BUG-259).** It walked every repo
+  under the repos root, so a sibling's same-numbered ASSUME read as a collision, although
+  ASSUME ids are per-repo. It now matches `adlc_remote_high`'s scope, a `bug` or `req`
+  recheck earlier in the shell no longer leaves its branch pattern behind, and an assume
+  collision names a by-hand rename, because `adlc renumber` does not take ASSUME ids.
 - **`adlc harness probe` scrubs a bare login name and Codex's account ids (REQ-655).** Both
   needed a by-hand redaction in the first Codex result: `ls -l` prints the login with no
   path around it, and a Codex session record opens with `creator_user_id` and
