@@ -64,8 +64,10 @@ Do these in order. `X.Y.Z` is the new version throughout.
    claude plugin tag --dry-run .               # checks plugin.json and the marketplace entry agree
    ```
 
-   Until the root `CLAUDE.md` is resolved, the second `validate` line fails on that
-   one warning (REQ-665 `## Deferred`). Any other warning there is a real failure.
+   Both `validate` lines must exit 0, and any warning fails them. A `CLAUDE.md` at the
+   repo root fails the second one: the toolkit's own is `.claude/CLAUDE.md`, the
+   `manifest-parity` lint refuses a root one, and `adlc harness render --harness claude`
+   writes one when run here, so delete what it writes (BUG-258).
 
    `claude plugin tag` would create an `adlc--vX.Y.Z` tag. Run it with `--dry-run`
    only. The toolkit's release tag is the `vX.Y.Z` tag in step 6.
