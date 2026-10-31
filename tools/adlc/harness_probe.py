@@ -153,6 +153,12 @@ def redact(text: str) -> str:
 #: a ``session_context`` record (found by the first live run, REQ-664 AC-13).
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 REDACTED_EMAIL = "[REDACTED-EMAIL]"
+#: The account ids a Codex session record opens with, in JSON that may itself sit
+#: inside a JSON string (found by the REQ-655 run).
+ACCOUNT_ID_RE = re.compile(r'(creator_(?:user|account)_id\\*"\s*:\s*\\*")[^"\\]+')
+#: What a home directory's last component is when it names no one.
+GENERIC_HOME_NAMES = ("home", "root", "user", "users", "tmp")
+REDACTED_LOGIN = "<user>"
 
 
 def home_rewrite(text: str, home: Optional[str]) -> str:
@@ -163,13 +169,19 @@ def home_rewrite(text: str, home: Optional[str]) -> str:
                            key=len, reverse=True):
         if spelling and spelling != "/":
             text = text.replace(spelling, "~")
+    # `ls -l` prints the login with no path around it (found by the REQ-655 run).
+    login = os.path.basename(home.rstrip("/"))
+    if len(login) >= 3 and login.lower() not in GENERIC_HOME_NAMES:
+        text = re.sub(r"(?<![A-Za-z0-9_.-])%s(?![A-Za-z0-9_.-])" % re.escape(login),
+                      REDACTED_LOGIN, text)
     return text
 
 
 def scrub(text: str, home: Optional[str]) -> str:
     """Redact credentials and email addresses, then rewrite ``$HOME``: what every
     captured string goes through before it is written."""
-    return home_rewrite(EMAIL_RE.sub(REDACTED_EMAIL, redact(text)), home)
+    text = ACCOUNT_ID_RE.sub(r"\1" + REDACTED, EMAIL_RE.sub(REDACTED_EMAIL, redact(text)))
+    return home_rewrite(text, home)
 
 
 def scrub_obj(value, home: Optional[str]):

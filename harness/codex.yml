@@ -1,0 +1,176 @@
+# harness/codex.yml — the Codex CLI adapter (REQ-655). Data, not code: every key is
+# validated by tools/adlc/harness_adapter.py and an unknown key is a loud error. Its
+# goldens live in harness/codex/rendered/. Facts are from codex-cli 0.166.0 as run on
+# 2026-10-31: the REQ-664 result in .adlc/research/harness-probes/codex.json and the
+# gate and hook records in the REQ-655 spec's Assumptions.
+name: codex
+schema_version: 3
+binary: codex
+
+paths:
+  # Rendered copies, user-level only; a project render never writes these, and
+  # .codex/agents/ is never written (the opt-in is deferred by REQ-657).
+  agents:
+    user: $HOME/.codex/agents
+    mode: rendered
+  # REQ-654's mount, served by install.sh: nothing rendered here.
+  skills:
+    user: $HOME/.agents/skills
+    mode: mounted
+  # adlc.rules is this file's name at both scopes; the exec render takes another (REQ-662).
+  permissions:
+    project: .codex/rules/adlc.rules
+    user: $HOME/.codex/rules/adlc.rules
+    mode: rendered
+  hooks:
+    project: .codex/hooks.json
+    mode: rendered
+  # The user file takes only the delegation routing block, and only with delegation.
+  instructions:
+    project: AGENTS.md
+    user: $HOME/.codex/AGENTS.md
+    mode: rendered
+  # Merged, never overwritten (BR-5). user_owned is written by one explicit flag:
+  # `adlc harness install --harness codex --writable-root <path>`.
+  config:
+    project: .codex/config.toml
+    user: $HOME/.codex/config.toml
+    mode: rendered
+    write_mode: merge
+    owned_keys: [sandbox_mode, approval_policy]
+    values:
+      sandbox_mode: workspace-write
+      approval_policy: on-request
+    # A posture a person chose to weaken is theirs to change: the render says so and
+    # exits non-zero, because the deny-tier `prompt` rules then provide nothing.
+    refuse:
+      sandbox_mode: [danger-full-access]
+      approval_policy: [never]
+    # A profile can override both owned keys from outside this file.
+    refuse_keys: [profile]
+    user_owned: {table: sandbox_workspace_write, key: writable_roots}
+
+formats:
+  agents: toml-role
+  permissions: starlark-prefix-rule
+  hooks: codex-hooks-json
+  instructions: agents-md
+  config: codex-config-toml
+
+# No per-agent tool list exists: agent_tool_restriction: none makes the restraint
+# sentence the rendered form.
+tool_map:
+  Read: unsupported
+  Grep: unsupported
+  Glob: unsupported
+  Bash: unsupported
+  Edit: unsupported
+  Write: unsupported
+  Agent: unsupported
+
+# Model ids follow the plan a login has, so model is omitted and Codex's default runs.
+tier_map:
+  opus: unverified
+  sonnet: unverified
+  haiku: unverified
+
+# `prompt` in the committed render; `forbidden` is the exec engine's (REQ-662). No `user`
+# entry: a deny-tier rule at user scope would apply in every project.
+deny_tier_render:
+  project: confirm
+
+accepted_fidelity:
+  # An unmatched fence runs in the sandbox (REQ-664 routine-only pass), and a rule would
+  # need the whole script as one token, which differs per partial: omitted, not widened.
+  fence.partial-source: {project: inexpressible, exec: "widened:if [ -f .adlc/partials/"}
+  default_mode: {project: inexpressible}
+  # Omitted unconditionally and never restored (BR-3): a token prefix is position-
+  # sensitive, so it cannot name --force, +refspec or -D at any other position.
+  "git.read:git branch": {project: inexpressible}
+  "git.write:git push": {project: inexpressible}
+  # One entry per git.* routine entry the bare `git -C` prefix would have doubled.
+  "git.read:git -C": {project: inexpressible}
+  "git.config.identity:git -C": {project: inexpressible}
+  "git.write:git -C": {project: inexpressible}
+  # prefix_rule has no exact form, so an exact routine entry takes trailing arguments.
+  "git.config.identity:git config user.email": {project: "widened:git config user.email"}
+  "git.config.identity:git config user.name": {project: "widened:git config user.name"}
+  "npm.ci:npm ci": {project: "widened:npm ci"}
+  "shell.pwd:pwd": {project: "widened:pwd"}
+  # Deny-tier rules match plain argv. Inside shell control flow, a substitution, an
+  # env-assignment prefix or `bash -lc '<script>'` the command is unmatched, and what
+  # stops it is the sandbox, only while network_access is off.
+  shape.env-prefix: {project: inexpressible}
+  shape.shell-opener: {project: inexpressible}
+
+trust:
+  mechanism: user-config-entry
+  detail: projects.<path>.trust_level = "trusted" in the user config, and each hook reviewed (hooks.state."<key>".trusted_hash, set by /hooks in the TUI)
+
+# `true` is BR-10's rule read from git-write-worktree `pass`. It means an allowed `git
+# commit` reached the common git dir, because a matched allow runs outside the sandbox.
+# A sandboxed command was blocked at .git/worktrees/wt/index.lock (spec, Assumptions).
+sandbox_can_reach_common_gitdir: true
+
+hook_events:
+  session-start: SessionStart
+  subagent-start: SubagentStart
+  # PostCompact exists and cannot add context (its output schema has no
+  # additionalContext), and a manual compaction fires no SessionStart (REQ-655 ADR-2).
+  session-compact: unsupported
+hook_timeout_unit: s
+# From a captured payload (REQ-655 spec, Assumptions).
+hook_payload:
+  session_id: session_id
+  cwd: cwd
+  transcript_path: transcript_path
+
+# hook_output is absent on purpose: plain stdout reached a session and a subagent on
+# recorded runs, and Codex refuses the framework's top-level json:<key> form (ADR-3).
+
+doctor_rows:
+  - id: codex-rules
+    kind: equals-render
+    target: permissions
+    requires: delegation
+    remediation: adlc harness render --harness codex --scope user --surface permissions --force
+  - id: codex-routing
+    kind: marker-present
+    target:
+      path: $HOME/.codex/AGENTS.md
+      marker: delegate-routing:start
+      legacy_marker: kimi-delegation:start
+    requires: delegation
+    remediation: adlc harness install --harness codex
+
+fidelity_notes:
+  - "codex: trust the project first (the user config's projects table), or .codex/ is ignored."
+  - "codex: then review the hooks with /hooks in the TUI. An unreviewed hook does not run, `codex exec` skips it silently, and a new checkout path or a changed hook needs the review again."
+
+exec:
+  flags: unverified
+
+capabilities:
+  deny: "yes"
+  # A reviewed hook reaches a subagent; an unreviewed one does not, and a linked
+  # worktree starts unreviewed, so the ETHOS read line stays (ADR-4).
+  subagent_start_hook: "no"
+  compact_rehook: "no"
+  agent_tool_restriction: none
+  allowlist_granularity: token-prefix
+  committable_allowlist: "yes"
+  git_c_spelling: [[git, -C]]
+  # A token prefix is position-sensitive: no record restores these three (BR-3).
+  never_restore: [[git, push], [git, branch], [git, -C], git-c, env-prefix, shell-opener]
+  unmatched_shapes: [env-prefix, shell-opener]
+  unmatched_default: sandbox
+  deny_under_allow:
+    # by_hand is BR-10's cases (3) and (2). The probe rows read unknown, so these stay
+    # unverified, and never_restore holds whatever they read.
+    prefix: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe, by_hand: strictest-wins}
+    git-c: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe, by_hand: strictest-wins}
+    env-prefix: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe}
+    shell-opener: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe}
+  # Declared because the loader requires it: an unmatched fence runs in the sandbox, and
+  # the broad variants REQ-664 passed are bare openers that are never rendered.
+  fence_broad_spelling: [if, "[", -f, .adlc/partials/]
