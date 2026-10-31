@@ -345,6 +345,15 @@ else
     echo '  "Bash(adlc-read:*)", "Bash(adlc-write:*)", "Bash(extract-chat:*)"'
 fi
 
+# --- the same routing for Codex CLI (REQ-655 BR-8) -----------------------
+# `adlc harness install` owns the routing block and the user-level rules, and reads
+# their paths from the adapter, so this installer names none. --only-if-detected
+# writes nothing, and says so, on a machine without the binary.
+if ! PYTHONDONTWRITEBYTECODE=1 "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/adlc/adlc.py" \
+        harness install --harness codex --only-if-detected; then
+    echo "WARNING: adlc harness install --harness codex failed; the Claude Code install above is unaffected."
+fi
+
 # --- next steps ---------------------------------------------------------
 echo ""
 if [ -n "${RC:-}" ]; then

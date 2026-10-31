@@ -405,7 +405,7 @@ Three things the toolkit depends on have no cross-harness standard: agent defini
 | `agents/*.md` | the agent checklists | stamped in place (`model:`); copy harnesses get rendered copies |
 | `templates/instructions/` | `AGENTS.md`, the instruction file every harness reads | `CLAUDE.md` gains an `@AGENTS.md` import and keeps its own lines |
 
-The `claude`, `copilot` and `cursor` adapters ship; Codex and Gemini CLI follow as data files. What a harness cannot express is reported, never silently widened: `allowlist-fidelity` lists every entry per harness, and an adapter has to accept each gap in writing. On Claude Code, the partial-sourcing fence is not pre-approved in a committed file, and the allowlist applies only in a trusted workspace. The allowlist is a convenience for the routine tier, not a gate: the structural gates are the orchestrator's (`tools/lint-skills/README.md`, "Declared residuals"). `adlc harness render --check` and the `render-parity` lint keep the committed renders equal to what the renderer writes; `/template-drift` reports a project whose rendered settings are behind as `harness-config` drift.
+The `claude`, `copilot`, `cursor` and `codex` adapters ship; Gemini CLI follows as a data file. What a harness cannot express is reported, never silently widened: `allowlist-fidelity` lists every entry per harness, and an adapter has to accept each gap in writing. On Claude Code, the partial-sourcing fence is not pre-approved in a committed file, and the allowlist applies only in a trusted workspace. The allowlist is a convenience for the routine tier, not a gate: the structural gates are the orchestrator's (`tools/lint-skills/README.md`, "Declared residuals"). `adlc harness render --check` and the `render-parity` lint keep the committed renders equal to what the renderer writes; `/template-drift` reports a project whose rendered settings are behind as `harness-config` drift.
 
 ### Copilot CLI
 
@@ -499,6 +499,61 @@ Then run `/init --harness claude,cursor` (`/adlc:init --harness claude,cursor` o
 - The dogfood notes record the prompt count (REQ-656 BR-13).
 - The allowlist is not the gate: REQ-659's structural halt is.
 <!-- /harness-loss: cursor -->
+
+### Codex CLI
+
+The adapter is `harness/codex.yml` (REQ-655). Its facts are `codex-cli 0.166.0` as run on 2026-10-31: `adlc harness probe codex`, and a by-hand gate through the real TUI, recorded in the REQ-655 spec. No lite REQ has been run end to end on Codex yet, and that dogfood is owed.
+
+```bash
+./install.sh                              # mounts the skills at ~/.agents/skills
+adlc harness install --harness codex      # renders ~/.codex/agents/<name>.toml
+```
+
+Then run `/init --harness codex` (`/adlc:init --harness codex` on the plugin install) in a project. It writes `.codex/rules/adlc.rules`, `.codex/hooks.json`, `.codex/config.toml` (`sandbox_mode = "workspace-write"` and `approval_policy = "on-request"`, merged into a file you already have) and `AGENTS.md`. Commit them. Two steps are yours, and neither is optional:
+
+1. **Trust the project.** Codex ignores `.codex/` until your user config holds `[projects."<absolute path>"]` with `trust_level = "trusted"`. A `-c` override does not load a project layer.
+2. **Review the hooks.** Trust loads `.codex/hooks.json`, but each hook stays `untrusted` until you approve it with `/hooks` in the TUI, or at the "Hooks need review" prompt at startup. The approval is stored per hook, by absolute path and content hash, so a fresh clone, a linked worktree or a changed hook needs it again. `codex exec` has no review step: it skips an unreviewed hook and says nothing. Nothing here writes that approval for you.
+
+**The gate, recorded on 2026-10-31.** `git add` and `git commit` in a main checkout ran with no prompt in the TUI under the rendered rules, and `git commit` ran headless under a probe's `allow` rule in a main checkout and in a linked worktree. A commit runs because a matched `allow` runs outside the sandbox; the sandbox itself cannot write `.git` (`git branch -D x`, unmatched, failed at `refs/heads/x.lock`). When an `allow` and a `prompt` rule both match, the stricter wins: `git -C <path> push --force` and `git push --force` each stopped at `requires approval by policy` with `allow` rules for their shorter prefixes loaded, in the TUI and in `codex execpolicy check`. So `/proceed` commits on Codex without asking, and does not push on its own: `git push` is unmatched and needs a person.
+
+<!-- harness-loss: codex -->
+**What is lost on Codex CLI**
+
+| What | On Codex CLI |
+|---|---|
+| Committed allowlist | yes: `.codex/rules/adlc.rules`, once the project is trusted |
+| Allowlist granularity | subcommand prefix (`token-prefix` in the adapter): a `prefix_rule` admits every argument after its tokens, and an exact entry widens (`git config user.email`, `npm ci`, `pwd`) |
+| Deny-tier rendering | the `deny` tier renders as `prompt` in the committed file, so a one-way move is a human confirmation for plain invocations; `forbidden` is the exec engine's (REQ-662) |
+| Shared-base fail-closed | `git push:*`, `git branch:*` and the `git -C` prefix are omitted unconditionally and no result restores them, because a token prefix cannot name `--force`, `+refspec` or `-D` at any position. Omitted does not mean a prompt here: see the unmatched row |
+| Read-only reviewers | honour-system: Codex has no per-agent tool list, so seventeen rendered agents carry a restraint sentence and nothing enforces it |
+| ETHOS in subagents | the ETHOS read line in every rendered agent, plus `SubagentStart`, which reaches a subagent once reviewed (recorded) |
+| Subagent nesting depth | undocumented; the pipeline runner stays flat |
+| `/sprint` workflow engine | unavailable |
+| Transcript schema | undocumented; `~/.codex/sessions/**/rollout-*.jsonl` is located, not parsed (REQ-660) |
+| Explicit skill invocation | `$name`; the catalog lists each skill as `adlc:<name>` |
+| Headless deny status | `ask-tier-deny` read `unknown` at `codex-cli 0.166.0`: the model refused the control command without calling it, so the probe says nothing about `forbidden`. Unverified |
+| Fences, not commands | `fence.partial-source` is omitted, and an unmatched partial-sourcing fence runs in the sandbox with no rule (`fence-vs-allowlist` `routine-only` passed) |
+| `git -C` | no rule of any decision; every `git -C <path> <sub>` is unmatched (see the shared-base and unmatched rows) |
+| Hook review | no ETHOS reaches a session until a person reviews the hooks, per checkout, and again when a hook changes (see above). Codex has no load-time `!` line, so an unreviewed session has no ETHOS unless a rendered agent's read line supplies it |
+| ETHOS after compaction | not re-injected: `PostCompact` has no context channel, and a manual compaction fires no `SessionStart` (recorded); automatic compaction is unmeasured |
+| Skills catalog budget | 2 % of context or 8 000 chars, past which Codex shortens descriptions and drops skills with a warning. All 17 skills listed, none shortened, 6,107 characters: read from `codex debug prompt-input` in a sandbox home, not from a live mount. Run that command to see what your session lists |
+| Unmatched git commands | measured with no rule loaded under `on-request` + `workspace-write`: `git push --force`, `git push --force-with-lease`, `git push origin +HEAD:refs/heads/x`, `git push origin --force`, `git branch -D x` and `git -C <path> push --force` each read `sandbox-failed`, which this table counts as prompts: the command fails in the sandbox, and it reaches a person only if the model asks to retry outside it. No spelling was recorded `ran`, so none reads "may run". That holds only where the sandbox reaches: `/tmp` and `$TMPDIR` are writable, so a remote there is not stopped |
+| Wrapped invocations | deny-tier `prompt` rules match plain argv only. Inside shell control flow, a substitution, an env-assignment prefix or `bash -lc '<script>'` a deny-tier command is unmatched, and what stops it is the sandbox, only while `network_access` is off |
+| Allow rules and the sandbox | a matched routine `allow` runs outside the sandbox (recorded), and the lint checks prefix and wrapper relations only: `gh api`, `npx`, `npm run`, `find -delete`, `sed -i` and `cp` residuals are the same exposure as Claude Code's |
+| `--writable-root` | `adlc harness install --harness codex --writable-root <path>` widens every Codex session's writable area to include that repo's `.git`. The gate does not need it: `root-is-worktree` passed, and `writable-roots-repo` read `fail` |
+| Trust step | without the `projects.<path>.trust_level` entry, `.codex/` is ignored |
+
+**Declared residuals.** What no allowlist or prompt rule closes. They are declared, not chased:
+
+- Matching is spelling-level.
+- Allows that execute their arguments (`find -exec`, `awk system()`, `sed e`, `npx`, `npm run`/`exec`, `git rebase --exec`, `git fetch --upload-pack`) and `gh api` can reach a deny-tier command in a spelling the rule does not match.
+- Semantic equivalents (`git restore`, `git checkout -f`, `git worktree remove --force`, `gcloud` deploys, `npm publish`) are outside the deny tier.
+- Codex parses a chain of plain commands (`;`, `&&`) into its parts; a `$()` substitution or shell control flow is not matched.
+- The `env-prefix` and `shell-opener` wrapper shapes stay `unverified`, and no REQ-664 result lifts an omission resting on them.
+- A hook review pins the command in `.codex/hooks.json`, not the `.adlc/partials/` file it sources, so a change to a vendored partial runs under an approval already given.
+- The dogfood notes record the prompt count (REQ-655 BR-14).
+- The allowlist is not the gate: the sandbox is, and REQ-659's structural halt under the exec engine.
+<!-- /harness-loss: codex -->
 
 ### `ADLC_HOME`
 

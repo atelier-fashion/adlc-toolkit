@@ -101,12 +101,21 @@ def user_surface_currency(adapter, toolkit):
     return True, "user-level surfaces current (%d)" % len(plans), ""
 
 
-def row_outcomes(adapter, toolkit, project_root=None):
-    """``[(row_id, status, detail, remediation)]`` for the adapter's ``doctor_rows``."""
+def row_outcomes(adapter, toolkit, project_root=None, skip_reason=None):
+    """``[(row_id, status, detail, remediation)]`` for the adapter's ``doctor_rows``.
+
+    ``skip_reason`` SKIPs every row with that detail, as an absent binary does.
+    """
     project_root = project_root or _project_root()
     out = []
     for row in adapter.get("doctor_rows", []):
         if "fact" in row:
+            continue
+        if skip_reason:
+            out.append((row["id"], "SKIP", skip_reason, ""))
+            continue
+        if row.get("requires") == "delegation" and not hr.delegation_installed():
+            out.append((row["id"], "SKIP", "delegation is not installed", ""))
             continue
         kind = row["kind"]
         ok = False
@@ -118,7 +127,8 @@ def row_outcomes(adapter, toolkit, project_root=None):
         elif kind == "marker-present":
             path = _expand_target(row["target"]["path"], project_root)
             text = hr.read_text(path)
-            ok = text is not None and row["target"]["marker"] in text
+            markers = [row["target"]["marker"], row["target"].get("legacy_marker")]
+            ok = text is not None and any(m and m in text for m in markers)
             detail = "%s %s the marker" % (row["target"]["path"],
                                            "carries" if ok else "lacks")
         else:  # equals-render
@@ -191,6 +201,12 @@ def render_currency(name, adapter_path=None, toolkit=None, project_root=None):
     except ha.AdapterError as exc:
         return "FAIL", "adapter invalid — %s" % exc, \
             "fix the field named above in %s" % (adapter_path or "harness/%s.yml" % name)
+    # A shipped adapter must have read its gate (BR-10). Before the binary check, so a
+    # machine without the harness cannot hide it.
+    if adapter.get("sandbox_can_reach_common_gitdir") == "unverified":
+        return "FAIL", "sandbox_can_reach_common_gitdir reads unverified", \
+            "record the git-write-worktree result in %s" % (adapter_path or
+                                                            "harness/%s.yml" % name)
     if not binary_present(adapter):
         return "SKIP", "%s not detected on PATH" % adapter["binary"], ""
     fails = []

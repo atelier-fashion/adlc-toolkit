@@ -72,6 +72,7 @@ accepted_fidelity:
 trust:
   mechanism: user-config-entry
   detail: "projects[<absolute workspace path>].hasTrustDialogAccepted: true in the home directory's .claude.json"
+sandbox_can_reach_common_gitdir: true
 
 hook_events:
   # A SessionStart group with no matcher also fires on compact, so session-start

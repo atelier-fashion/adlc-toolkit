@@ -813,13 +813,19 @@ a general markdown linter and NOT a general shell linter.
   `printed-permissions.txt`; a copy harness's is `agents.json`, each agent's file name
   and `tools:` line, so a body edit to `agents/*.md` does not touch `harness/**`.
   `adlc harness render --write-goldens` rewrites them.
+- **`allowlist-fidelity` and `never_restore`** (REQ-655): a rendered `allow` a list entry
+  of `capabilities.never_restore` covers fails whatever the records say, and at schema 3
+  a restoration also needs the by-hand `strictest-wins` result for a `confirm` mechanism
+  and a deny whose added tokens are fixed words, not flags or refspecs.
 - **`harness-loss-table`** (REQ-656) holds each `<!-- harness-loss: <name> -->` block in
   the root `README.md` to its adapter. It derives the expected facts from the adapter
   and a fresh render (committed allowlist, granularity, deny mechanism, the omitted
   bases and prefixes, the widths) and fails on a missing row, a contradicted fact, a
   missing declared-residuals statement, a claim that the allowlist is the gate, or a
   claim that Copilot's chained-command matching is verified. `LOSS_TABLE_HARNESSES`
-  names the harnesses it holds.
+  names the harnesses it holds. Codex's section also carries its own rows, and
+  `tools/lint-skills/tests/test_harness_loss_table.py` holds its unmatched-commands row
+  to the gate record in the REQ-655 spec.
 - **`unguarded-source`** also walks `templates/hooks.yml` and every committed hook
   render, one hook-command line at a time.
   It also fails a hook command holding the braced `${CLAUDE_PLUGIN_ROOT}`, because

@@ -131,3 +131,54 @@ def test_claiming_chained_matching_is_verified_fails(tmp_path):
 
 def test_a_root_with_no_adapters_is_not_judged(tmp_path):
     assert check.check_harness_loss_tables(tmp_path) == []
+
+
+# --------------------------------------------------------------------------- REQ-655
+GATE_SPEC = REPO_ROOT / ".adlc" / "specs" / "REQ-655-codex-harness-adapter" / "requirement.md"
+GATE_SPELLINGS = ("git push --force", "git push --force-with-lease",
+                  "git push origin +HEAD:refs/heads/x", "git push origin --force",
+                  "git branch -D x", "git -C <path> push --force")
+
+
+def codex_rows():
+    return check._loss_rows(check._loss_blocks(README)["codex"][1])
+
+
+def test_codex_section_holds():
+    rows = codex_rows()
+    for label in check.LOSS_ROWS + check.LOSS_EXTRA_ROWS["codex"]:
+        assert label in rows
+    start, end = section("codex")
+    body = README[start:end]
+    assert "honour-system" in body and "8 000" in body
+    # BR-11: said once by the adapter's own vocabulary, and held by the check.
+    assert not [f for f in check.check_harness_loss_tables(REPO_ROOT) if "codex" in f.message]
+
+
+@pytest.mark.parametrize("old, new, words", [
+    ("| Committed allowlist | yes:", "| Committed allowlist | no:", "committable"),
+    ("| Hook review |", "| Hooks |", "Hook review"),
+    ("the `deny` tier renders as `prompt`", "the tier renders as a question", "`deny`"),
+    ("`git push:*`, `git branch:*`", "`git status:*`", "git push:*"),
+])
+def test_a_codex_lie_is_caught(tmp_path, old, new, words):
+    assert any(words in m for m in lint(tmp_path, in_section("codex", old, new)))
+
+
+def test_codex_unmatched_row_follows_the_gate_record():
+    import re
+    record = GATE_SPEC.read_text(encoding="utf-8")
+    row = codex_rows()["Unmatched git commands"]
+    seen = {}
+    for spelling in GATE_SPELLINGS:
+        assert "`%s`" % spelling in row
+        found = re.search(re.escape("`%s`" % spelling) + r" `(prompted|ran|sandbox-failed)`",
+                          record)
+        assert found, spelling
+        seen[spelling] = found.group(1)
+    if any(v in ("prompted", "sandbox-failed") for v in seen.values()):
+        assert "prompts" in row
+    if "ran" in seen.values():
+        assert "may run" in row
+    else:
+        assert 'none reads "may run"' in row

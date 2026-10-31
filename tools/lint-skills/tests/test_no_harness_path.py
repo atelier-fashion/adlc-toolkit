@@ -108,3 +108,8 @@ def test_adlc_home_keeps_toolkit_lines_in_files_no_harness_path_sets_aside():
         assert _check.toolkit_path_findings(line, rel) == [], rel
     assert _check.adlc_home_findings(line, "partials/x.sh") == []
     assert [f.check for f in _check.toolkit_path_findings(line, "partials/x.sh")] == ["no-harness-path"]
+
+
+def test_a_codex_home_in_a_partial_is_a_finding():
+    """REQ-655 AC-1: the lint half; `.codex/` and `~/.agents` are held by that REQ's test."""
+    assert _all_findings('x="$HOME/.codex/rules"', FAMILIES["partial"])

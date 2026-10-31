@@ -1,0 +1,678 @@
+{
+  "schema": 1,
+  "harness": "codex",
+  "harness_version": "codex-cli 0.166.0",
+  "probe_tool_version": "5.4.0+91d5de6",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "shell": "/bin/zsh"
+  },
+  "ran_at": "2026-10-31T15:48:19Z",
+  "date": "2026-10-31",
+  "plan_ref": ".adlc/research/multi-harness-plan.md revision 2 \u00a76",
+  "launches": {
+    "planned": 18,
+    "actual": 18
+  },
+  "probes": {
+    "git-write-main": {
+      "status": "pass",
+      "plan_item": "6.1a (headless half), 6.3 (allow half)",
+      "oracle": "remote-ref",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "evidence": {
+        "launch": "l02",
+        "command": [
+          "codex",
+          "exec",
+          "--sandbox",
+          "workspace-write",
+          "-C",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+          "-o",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l02.lastmsg",
+          "<prompt>"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+        "exit_code": 0,
+        "wall_s": 10.8,
+        "stdout_bytes": 120,
+        "stderr_bytes": 1632,
+        "stdout_tail": "Committed the staged file as `d1e2a11` (`probe`) and pushed `main` to `origin`. Untracked `.codex/` was left unchanged.\n",
+        "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a1-eaa5-7652-a669-31ccf892af11\n--------\nuser\nCommit the staged file with message `probe` and push to origin.\ncodex\nI\u2019ll inspect the staged change and repository state, then commit it as `probe` and push the current branch to `origin`.\nexec\n/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\n## main...origin/main\nA  probe-l02-lvnrw6t6.txt\n?? .codex/\n probe-l02-lvnrw6t6.txt | 1 +\n 1 file changed, 1 insertion(+)\nprobe-l02-lvnrw6t6.txt\n\ncodex\nThere\u2019s one staged file; `.codex/` is untracked and will stay out of the commit. I\u2019m committing the staged file and pushing `main` to `origin`.\nexec\n/bin/zsh -lc 'git commit -m probe && git push origin main' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\n[main d1e2a11] probe\n 1 file changed, 1 insertion(+)\n create mode 100644 probe-l02-lvnrw6t6.txt\nTo ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/remote.git\n   b5f2217..d1e2a11  main -> main\n\ncodex\nCommitted the staged file as `d1e2a11` (`probe`) and pushed `main` to `origin`. Untracked `.codex/` was left unchanged.\ntokens used\n9,098\n",
+        "observation": "ref main: b5f2217 \u2192 d1e2a11 (contains the nonce file)"
+      }
+    },
+    "git-write-worktree": {
+      "status": "pass",
+      "plan_item": "6.1b",
+      "oracle": "remote-ref",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "sub_results": {
+        "root-is-worktree": {
+          "status": "pass",
+          "evidence": {
+            "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo/.git/worktrees/wt",
+            "launch": "l03",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l03.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt",
+            "exit_code": 0,
+            "wall_s": 6.9,
+            "stdout_bytes": 84,
+            "stderr_bytes": 1449,
+            "stdout_tail": "Committed the staged file as `5542c2e` (`probe`) and pushed `probe-wt` to `origin`.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a2-156e-7670-81a7-47c02b835a3f\n--------\nuser\nCommit the staged file with message `probe` and push branch `probe-wt` to origin.\ncodex\nI\u2019ll check the staged changes and current branch, then commit with `probe` and push `probe-wt` to `origin`.\nexec\n/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git branch --show-current' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt\n succeeded in 0ms:\n## probe-wt...origin/probe-wt\nA  probe-l03-sq2w5tnu.txt\n?? .codex/\n probe-l03-sq2w5tnu.txt | 1 +\n 1 file changed, 1 insertion(+)\nprobe-wt\n\nexec\n/bin/zsh -lc 'git commit -m probe && git push origin probe-wt' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt\n succeeded in 0ms:\n[probe-wt 5542c2e] probe\n 1 file changed, 1 insertion(+)\n create mode 100644 probe-l03-sq2w5tnu.txt\nTo ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/remote.git\n   b5f2217..5542c2e  probe-wt -> probe-wt\n\ncodex\nCommitted the staged file as `5542c2e` (`probe`) and pushed `probe-wt` to `origin`.\ntokens used\n16,241\n",
+            "observation": "ref probe-wt: b5f2217 \u2192 5542c2e (contains the nonce file)"
+          }
+        },
+        "writable-roots-repo": {
+          "status": "fail",
+          "evidence": {
+            "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo/.git/worktrees/wt",
+            "launch": "l04",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l04.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt",
+            "exit_code": 0,
+            "wall_s": 11.9,
+            "stdout_bytes": 245,
+            "stderr_bytes": 2275,
+            "stdout_tail": "I couldn\u2019t commit or push: Git was blocked from creating `.git/worktrees/wt/index.lock` in the shared repository metadata, which is outside the writable area. The staged file remains staged, and the untracked `.codex/` directory is untouched.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR, /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a2-3120-7b02-8b95-5c4f0a53f290\n--------\nuser\nCommit the staged file with message `probe` and push branch `probe-wt` to origin.\ncodex\nI\u2019ll verify the staged changes and current branch, then commit as `probe` and push `probe-wt` to `origin`.\nexec\n/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git branch --show-current && git remote -v' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt\n succeeded in 0ms:\n## probe-wt...origin/probe-wt [behind 1]\nA  probe-l04-hryw89kl.txt\n?? .codex/\n probe-l04-hryw89kl.txt | 1 +\n 1 file changed, 1 insertion(+)\nprobe-wt\norigin\t~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/remote.git (fetch)\norigin\t~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/remote.git (push)\n\nexec\n/bin/zsh -lc 'git diff --cached -- probe-l04-hryw89kl.txt && git log --oneline --decorate --graph -4 --all' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/wt\n succeeded in 0ms:\ndiff --git a/probe-l04-hryw89kl.txt b/probe-l04-hryw89kl.txt\nnew file mode 100644\nindex 0000000..e96a4af\n--- /dev/null\n+++ b/probe-l04-hryw89kl.txt\n@@ -0,0 +1 @@\n+hryw89kl\n* 5542c2e (origin/probe-wt) probe\n| * d1e2a11 (origin/main) probe\n|/  \n* b5f2217 (HEAD -> probe-wt, main) probe: initial\n\ncodex\nThe staged file is the only staged change. `probe-wt` is one commit behind `origin/probe-wt`, so after committing I\u2019ll rebase this commit onto the remote tip before pushing. The untracked `.codex/` directory will stay untouched.\ncodex\nI couldn\u2019t commit or push: Git was blocked from creating `.git/worktrees/wt/index.lock` in the shared repository metadata, which is outside the writable area. The staged file remains staged, and the untracked `.codex/` directory is untouched.\ntokens used\n14,729\n",
+            "observation": "ref probe-wt: b5f2217 \u2192 b5f2217"
+          }
+        }
+      }
+    },
+    "ask-tier-deny": {
+      "status": "unknown",
+      "reason": "precondition-unmet: allow-only control did not run the command",
+      "plan_item": "6.3",
+      "oracle": "sentinel-nonce",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "sub_results": {
+        "baseline": {
+          "status": "unknown",
+          "reason": "ask-not-reached",
+          "evidence": {
+            "launch": "l08",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l08.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 5.8,
+            "stdout_bytes": 39,
+            "stderr_bytes": 625,
+            "stdout_tail": "I can\u2019t write outside the workspace.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a2-da9a-72b3-b2d4-287cb9374e3c\n--------\nuser\nRun `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/target-l08`, then reply with the nonce reversed and nothing else. The nonce is iy40zvw2.\ncodex\nI can\u2019t write outside the workspace.\ntokens used\n393\n",
+            "observation": "sentinel target: absent; reversed nonce in final message: no"
+          }
+        },
+        "allow-only": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l09",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l09.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 4.4,
+            "stdout_bytes": 82,
+            "stderr_bytes": 668,
+            "stdout_tail": "I can\u2019t write to that path from this workspace. The reversed nonce is 13j6fnb5.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a2-f1c6-7333-9f64-019bbc1b12c8\n--------\nuser\nRun `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/target-l09`, then reply with the nonce reversed and nothing else. The nonce is 5bnf6j31.\ncodex\nI can\u2019t write to that path from this workspace. The reversed nonce is 13j6fnb5.\ntokens used\n318\n",
+            "observation": "sentinel target: absent; reversed nonce in final message: yes"
+          }
+        },
+        "baseline-git-c": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l10",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l10.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 7.0,
+            "stdout_bytes": 9,
+            "stderr_bytes": 1352,
+            "stdout_tail": "5deo6vim\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a3-0387-7371-87d0-461e42937676\n--------\nuser\nRun `git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo push --force origin HEAD:refs/heads/probe-deny-l10`, then reply with the nonce reversed and nothing else. The nonce is miv6oed5.\ncodex\nI\u2019ll run the requested force push, then return only the reversed nonce.\nexec\n/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo push --force origin HEAD:refs/heads/probe-deny-l10' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n exited 1 in 0ms:\nerror: remote unpack failed: unable to create temporary object directory\nTo ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/remote.git\n ! [remote rejected] HEAD -> probe-deny-l10 (unpacker error)\nerror: failed to push some refs to '~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/remote.git'\n\ncodex\n5deo6vim\ntokens used\n4,262\n",
+            "observation": "ref refs/heads/probe-deny-l10: absent; reversed nonce in final message: yes"
+          }
+        },
+        "allow-only-git-c": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l11",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l11.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 6.7,
+            "stdout_bytes": 9,
+            "stderr_bytes": 1105,
+            "stdout_tail": "zrr24ta0\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a3-1f65-7342-9918-7d40ca66243a\n--------\nuser\nRun `git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo push --force origin HEAD:refs/heads/probe-deny-l11`, then reply with the nonce reversed and nothing else. The nonce is 0at42rrz.\ncodex\nI\u2019ll run the specified push command now.\nexec\n/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo push --force origin HEAD:refs/heads/probe-deny-l11' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\nTo ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/remote.git\n * [new branch]      HEAD -> probe-deny-l11\n\ncodex\nzrr24ta0\ntokens used\n4,073\n",
+            "observation": "ref refs/heads/probe-deny-l11: present; reversed nonce in final message: yes"
+          }
+        },
+        "lone-deny": {
+          "status": "n/a",
+          "reason": "not-applicable: headless ask is already a deny, an absent sentinel proves nothing",
+          "evidence": {
+            "launch": "l05",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l05.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 4.4,
+            "stdout_bytes": 111,
+            "stderr_bytes": 813,
+            "stdout_tail": "I can\u2019t write to that path because it\u2019s outside the permitted workspace. The reversed nonce is `w4rn950q`.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a2-6009-73d3-bb8d-78ee46bbd10a\n--------\nuser\nRun `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/witness-l05`, then run `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/target-l05`, then reply with the nonce reversed and nothing else. The nonce is q059nr4w.\ncodex\nI can\u2019t write to that path because it\u2019s outside the permitted workspace. The reversed nonce is `w4rn950q`.\ntokens used\n3,638\n",
+            "observation": "sentinel target: absent; witness: absent; reversed nonce in final message: yes"
+          }
+        },
+        "deny-under-allow": {
+          "status": "unknown",
+          "reason": "precondition-unmet: allow-only control did not run the command",
+          "evidence": {
+            "launch": "l06",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l06.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 21.4,
+            "stdout_bytes": 95,
+            "stderr_bytes": 1779,
+            "stdout_tail": "I couldn\u2019t create either file: `~/...` is outside the writable workspace.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a2-7185-7a80-bd20-a6d1c22786fc\n--------\nuser\nRun `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/witness-l06`, then run `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/target-l06`, then reply with the nonce reversed and nothing else. The nonce is v5moal4d.\ncodex\nI can\u2019t write to those `/Users/...` paths from this workspace. I\u2019ll check whether the requested files already exist and report the result without modifying anything.\nexec\n/bin/zsh -lc 'ls -ld ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/witness-l06 ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/target-l06 2>&1' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n exited 1 in 0ms:\nls: ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/target-l06: No such file or directory\nls: ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/witness-l06: No such file or directory\ndrwxr-xr-x@ 2 <user>  staff  64 Oct 31 08:44 ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent\n\ncodex\nI couldn\u2019t create either file: `~/...` is outside the writable workspace.\ntokens used\n8,762\n",
+            "observation": "sentinel target: absent; witness: absent; reversed nonce in final message: no"
+          }
+        },
+        "wrapped-allow": {
+          "status": "unknown",
+          "reason": "precondition-unmet: config witness absent",
+          "evidence": {
+            "launch": "l07",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l07.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 5.3,
+            "stdout_bytes": 9,
+            "stderr_bytes": 756,
+            "stdout_tail": "wy7paa7h\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a2-c568-7c73-8809-dd036e69d8c7\n--------\nuser\nRun `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/witness-l07`, then run `git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo push --force origin HEAD:refs/heads/probe-deny-l07`, then reply with the nonce reversed and nothing else. The nonce is h7aap7yw.\ncodex\nwy7paa7h\ntokens used\n8,247\n",
+            "observation": "ref refs/heads/probe-deny-l07: absent; witness: absent; reversed nonce in final message: yes"
+          }
+        }
+      }
+    },
+    "skill-activation": {
+      "status": "n/a",
+      "reason": "not-applicable: plan \u00a76.4 is a Gemini question (automatic skill activation)",
+      "plan_item": "6.4",
+      "oracle": "sentinel-present",
+      "ran_at": "2026-10-31T15:48:19Z"
+    },
+    "shell-timeout": {
+      "status": "pass",
+      "plan_item": "6.6",
+      "oracle": "sentinel-nonce",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "evidence": {
+        "launch": "l12",
+        "command": [
+          "codex",
+          "exec",
+          "--sandbox",
+          "workspace-write",
+          "-C",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+          "-o",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l12.lastmsg",
+          "<prompt>"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+        "exit_code": 0,
+        "wall_s": 130.0,
+        "stdout_bytes": 9,
+        "stderr_bytes": 959,
+        "stdout_tail": "csehgzxn\n",
+        "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a3-3a25-7621-b839-d10eb66c3bcf\n--------\nuser\nRun `sleep 125 && touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo/.probe/slept-l12`, then reply with the nonce reversed and nothing else. The nonce is xnzghesc.\ncodex\nI\u2019ll run the requested command and then return only the reversed nonce.\nexec\n/bin/zsh -lc 'sleep 125 && touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo/.probe/slept-l12' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 124871ms:\ncodex\ncsehgzxn\ntokens used\n9,725\n",
+        "observation": "sentinel: present; reversed nonce in final message: no"
+      }
+    },
+    "trust-then-headless": {
+      "status": "fail",
+      "plan_item": "6.8 (trust + load)",
+      "oracle": "sentinel-present",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "sub_results": {
+        "hooks-loaded": {
+          "status": "fail",
+          "evidence": {
+            "launch": "l01",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l01.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 10.1,
+            "stdout_bytes": 30,
+            "stderr_bytes": 829,
+            "stdout_tail": "Ran the command successfully.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a1-c2a6-7a22-bac2-192871e9f8f8\n--------\nuser\nRun `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/allow-l01`.\ncodex\nI\u2019ll run the exact `touch` command you provided.\nexec\n/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/allow-l01' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\ncodex\nRan the command successfully.\ntokens used\n15,752\n",
+            "observation": "sentinel A (hook): absent; sentinel B (allow): present"
+          }
+        },
+        "allowlist-loaded": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l01",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l01.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 10.1,
+            "stdout_bytes": 30,
+            "stderr_bytes": 829,
+            "stdout_tail": "Ran the command successfully.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a1-c2a6-7a22-bac2-192871e9f8f8\n--------\nuser\nRun `touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/allow-l01`.\ncodex\nI\u2019ll run the exact `touch` command you provided.\nexec\n/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261031T154356Z/sent/allow-l01' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\ncodex\nRan the command successfully.\ntokens used\n15,752\n",
+            "observation": "sentinel A (hook): absent; sentinel B (allow): present"
+          }
+        }
+      }
+    },
+    "session-start-context": {
+      "status": "fail",
+      "plan_item": "6.8 (injection)",
+      "oracle": "nonce-in-stdout",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "evidence": {
+        "launch": "l13",
+        "command": [
+          "codex",
+          "exec",
+          "--sandbox",
+          "workspace-write",
+          "-C",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+          "-o",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l13.lastmsg",
+          "<prompt>"
+        ],
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+        "exit_code": 0,
+        "wall_s": 4.1,
+        "stdout_bytes": 9,
+        "stderr_bytes": 502,
+        "stdout_tail": "5kd1fz4y\n",
+        "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a5-367b-7d41-b161-091717912450\n--------\nuser\nReply with the eight-character code in your session context, reversed, and nothing else.\ncodex\n5kd1fz4y\ntokens used\n1,335\n",
+        "observation": "reversed nonce in final message: no"
+      }
+    },
+    "stdin-prompt": {
+      "status": "pass",
+      "plan_item": "6.12",
+      "oracle": "nonce-in-stdout",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "evidence": {
+        "returned_reversed_nonce": [
+          "with-prompt-flag",
+          "without-prompt-flag"
+        ],
+        "observation": "variants that made stdin the task (returned the reversed nonce): with-prompt-flag, without-prompt-flag"
+      },
+      "sub_results": {
+        "with-prompt-flag": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l14",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l14.lastmsg",
+              "-"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 3.7,
+            "stdout_bytes": 9,
+            "stderr_bytes": 31788,
+            "stdout_tail": "oqni2tan\n",
+            "stderr_tail": "e; nothing to do here.\nLine 368: background context for the adlc stdin probe; nothing to do here.\nLine 369: background context for the adlc stdin probe; nothing to do here.\nLine 370: background context for the adlc stdin probe; nothing to do here.\nLine 371: background context for the adlc stdin probe; nothing to do here.\nLine 372: background context for the adlc stdin probe; nothing to do here.\nLine 373: background context for the adlc stdin probe; nothing to do here.\nLine 374: background context for the adlc stdin probe; nothing to do here.\nLine 375: background context for the adlc stdin probe; nothing to do here.\nLine 376: background context for the adlc stdin probe; nothing to do here.\nLine 377: background context for the adlc stdin probe; nothing to do here.\nLine 378: background context for the adlc stdin probe; nothing to do here.\nLine 379: background context for the adlc stdin probe; nothing to do here.\nLine 380: background context for the adlc stdin probe; nothing to do here.\nLine 381: background context for the adlc stdin probe; nothing to do here.\nLine 382: background context for the adlc stdin probe; nothing to do here.\nLine 383: background context for the adlc stdin probe; nothing to do here.\nLine 384: background context for the adlc stdin probe; nothing to do here.\nLine 385: background context for the adlc stdin probe; nothing to do here.\nLine 386: background context for the adlc stdin probe; nothing to do here.\nLine 387: background context for the adlc stdin probe; nothing to do here.\nLine 388: background context for the adlc stdin probe; nothing to do here.\nLine 389: background context for the adlc stdin probe; nothing to do here.\nLine 390: background context for the adlc stdin probe; nothing to do here.\nLine 391: background context for the adlc stdin probe; nothing to do here.\nLine 392: background context for the adlc stdin probe; nothing to do here.\nLine 393: background context for the adlc stdin probe; nothing to do here.\nLine 394: background context for the adlc stdin probe; nothing to do here.\nLine 395: background context for the adlc stdin probe; nothing to do here.\nLine 396: background context for the adlc stdin probe; nothing to do here.\nLine 397: background context for the adlc stdin probe; nothing to do here.\nLine 398: background context for the adlc stdin probe; nothing to do here.\nLine 399: background context for the adlc stdin probe; nothing to do here.\nLine 400: background context for the adlc stdin probe; nothing to do here.\nLine 401: background context for the adlc stdin probe; nothing to do here.\nLine 402: background context for the adlc stdin probe; nothing to do here.\nLine 403: background context for the adlc stdin probe; nothing to do here.\nLine 404: background context for the adlc stdin probe; nothing to do here.\nLine 405: background context for the adlc stdin probe; nothing to do here.\nLine 406: background context for the adlc stdin probe; nothing to do here.\nLine 407: background context for the adlc stdin probe; nothing to do here.\nLine 408: background context for the adlc stdin probe; nothing to do here.\nLine 409: background context for the adlc stdin probe; nothing to do here.\nLine 410: background context for the adlc stdin probe; nothing to do here.\nLine 411: background context for the adlc stdin probe; nothing to do here.\nLine 412: background context for the adlc stdin probe; nothing to do here.\nLine 413: background context for the adlc stdin probe; nothing to do here.\nLine 414: background context for the adlc stdin probe; nothing to do here.\nLine 415: background context for the adlc stdin probe; nothing to do here.\nLine 416: background context for the adlc stdin probe; nothing to do here.\nLine 417: background context for the adlc stdin probe; nothing to do here.\nLine 418: background context for the adlc stdin probe; nothing to do here.\nLine 419: background context for the adlc stdin probe; nothing to do here.\nLine 420: background context for the adlc stdin probe; nothing to do here.\nReply with the code from line 250, reversed, and nothing else.\n\ncodex\noqni2tan\ntokens used\n11,014\n",
+            "observation": "reversed nonce in final message: yes"
+          }
+        },
+        "without-prompt-flag": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l15",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l15.lastmsg"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 4.2,
+            "stdout_bytes": 9,
+            "stderr_bytes": 31816,
+            "stdout_tail": "dkh279sd\n",
+            "stderr_tail": "be; nothing to do here.\nLine 368: background context for the adlc stdin probe; nothing to do here.\nLine 369: background context for the adlc stdin probe; nothing to do here.\nLine 370: background context for the adlc stdin probe; nothing to do here.\nLine 371: background context for the adlc stdin probe; nothing to do here.\nLine 372: background context for the adlc stdin probe; nothing to do here.\nLine 373: background context for the adlc stdin probe; nothing to do here.\nLine 374: background context for the adlc stdin probe; nothing to do here.\nLine 375: background context for the adlc stdin probe; nothing to do here.\nLine 376: background context for the adlc stdin probe; nothing to do here.\nLine 377: background context for the adlc stdin probe; nothing to do here.\nLine 378: background context for the adlc stdin probe; nothing to do here.\nLine 379: background context for the adlc stdin probe; nothing to do here.\nLine 380: background context for the adlc stdin probe; nothing to do here.\nLine 381: background context for the adlc stdin probe; nothing to do here.\nLine 382: background context for the adlc stdin probe; nothing to do here.\nLine 383: background context for the adlc stdin probe; nothing to do here.\nLine 384: background context for the adlc stdin probe; nothing to do here.\nLine 385: background context for the adlc stdin probe; nothing to do here.\nLine 386: background context for the adlc stdin probe; nothing to do here.\nLine 387: background context for the adlc stdin probe; nothing to do here.\nLine 388: background context for the adlc stdin probe; nothing to do here.\nLine 389: background context for the adlc stdin probe; nothing to do here.\nLine 390: background context for the adlc stdin probe; nothing to do here.\nLine 391: background context for the adlc stdin probe; nothing to do here.\nLine 392: background context for the adlc stdin probe; nothing to do here.\nLine 393: background context for the adlc stdin probe; nothing to do here.\nLine 394: background context for the adlc stdin probe; nothing to do here.\nLine 395: background context for the adlc stdin probe; nothing to do here.\nLine 396: background context for the adlc stdin probe; nothing to do here.\nLine 397: background context for the adlc stdin probe; nothing to do here.\nLine 398: background context for the adlc stdin probe; nothing to do here.\nLine 399: background context for the adlc stdin probe; nothing to do here.\nLine 400: background context for the adlc stdin probe; nothing to do here.\nLine 401: background context for the adlc stdin probe; nothing to do here.\nLine 402: background context for the adlc stdin probe; nothing to do here.\nLine 403: background context for the adlc stdin probe; nothing to do here.\nLine 404: background context for the adlc stdin probe; nothing to do here.\nLine 405: background context for the adlc stdin probe; nothing to do here.\nLine 406: background context for the adlc stdin probe; nothing to do here.\nLine 407: background context for the adlc stdin probe; nothing to do here.\nLine 408: background context for the adlc stdin probe; nothing to do here.\nLine 409: background context for the adlc stdin probe; nothing to do here.\nLine 410: background context for the adlc stdin probe; nothing to do here.\nLine 411: background context for the adlc stdin probe; nothing to do here.\nLine 412: background context for the adlc stdin probe; nothing to do here.\nLine 413: background context for the adlc stdin probe; nothing to do here.\nLine 414: background context for the adlc stdin probe; nothing to do here.\nLine 415: background context for the adlc stdin probe; nothing to do here.\nLine 416: background context for the adlc stdin probe; nothing to do here.\nLine 417: background context for the adlc stdin probe; nothing to do here.\nLine 418: background context for the adlc stdin probe; nothing to do here.\nLine 419: background context for the adlc stdin probe; nothing to do here.\nLine 420: background context for the adlc stdin probe; nothing to do here.\nReply with the code from line 250, reversed, and nothing else.\n\ncodex\ndkh279sd\ntokens used\n8,838\n",
+            "observation": "reversed nonce in final message: yes"
+          }
+        }
+      }
+    },
+    "fence-vs-allowlist": {
+      "status": "pass",
+      "plan_item": "6.11",
+      "oracle": "sentinel-present",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "sub_results": {
+        "routine-only": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l16",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l16.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 5.8,
+            "stdout_bytes": 51,
+            "stderr_bytes": 1598,
+            "stdout_tail": "The block ran as written and exited with status 0.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a5-66e0-7540-9edf-7f8c6460b2df\n--------\nuser\nRun this fenced block exactly as written:\n\n```sh\nADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/probe.sh\"; fi\nadlc_probe_function; result=$?\n```\nexec\n/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/probe.sh\"; fi\nadlc_probe_function; result=$?' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\ncodex\nThe block ran as written and exited with status 0.\ntokens used\n8,715\n",
+            "observation": "sentinel: present"
+          }
+        },
+        "broad-sh": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l17",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l17.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 6.2,
+            "stdout_bytes": 82,
+            "stderr_bytes": 1743,
+            "stdout_tail": "The block ran exactly as written. It produced no output and exited with status 0.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a5-7e17-7563-abcb-855491429ed1\n--------\nuser\nRun this fenced block exactly as written:\n\n```sh\nADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/probe.sh\"; fi\nadlc_probe_function; result=$?\n```\ncodex\nI\u2019ll run the block exactly as provided from the repository directory and report its output and exit status.\nexec\n/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/probe.sh\"; fi\nadlc_probe_function; result=$?' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\ncodex\nThe block ran exactly as written. It produced no output and exited with status 0.\ntokens used\n991\n",
+            "observation": "sentinel: present"
+          }
+        },
+        "broad-first-token": {
+          "status": "pass",
+          "evidence": {
+            "launch": "l18",
+            "command": [
+              "codex",
+              "exec",
+              "--sandbox",
+              "workspace-write",
+              "-C",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+              "-o",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/captures/l18.lastmsg",
+              "<prompt>"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo",
+            "exit_code": 0,
+            "wall_s": 11.9,
+            "stdout_bytes": 100,
+            "stderr_bytes": 1752,
+            "stdout_tail": "Ran the block exactly as written in the repository. It produced no output and exited with status 0.\n",
+            "stderr_tail": "Reading additional input from stdin...\nOpenAI Codex v0.166.0\n--------\nworkdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\nmodel: gpt-6-luna\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: none\nreasoning summaries: none\nsession id: 01a192a5-96d5-7791-90d7-37edb09979a4\n--------\nuser\nRun this fenced block exactly as written:\n\n```sh\nADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/probe.sh\"; fi\nadlc_probe_function; result=$?\n```\ncodex\nI\u2019ll run the block verbatim from the repository directory and report its exit status and output.\nexec\n/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\"${CLAUDE_PLUGIN_ROOT}\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || [ ! -d \"$HOME/.claude/skills/partials\" ] || ADLC_TOOLKIT_ROOT=\"$HOME/.claude/skills\"; [ -n \"$ADLC_TOOLKIT_ROOT\" ] || ADLC_TOOLKIT_ROOT=$(cat \"$HOME/.claude/adlc/plugin-root\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\"\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/probe.sh\"; fi\nadlc_probe_function; result=$?' in /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-y4zf1dk5/repo\n succeeded in 0ms:\ncodex\nRan the block exactly as written in the repository. It produced no output and exited with status 0.\ntokens used\n8,730\n",
+            "observation": "sentinel: present"
+          }
+        }
+      }
+    },
+    "transcript-locate": {
+      "status": "pass",
+      "plan_item": "6.9",
+      "oracle": "file-located",
+      "ran_at": "2026-10-31T15:48:19Z",
+      "evidence": {
+        "location": "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-48-08-01a192a5-96d5-7791-90d7-37edb09979a4.jsonl",
+        "discovery_rule": "cwd-field",
+        "records_copied": 8,
+        "fixture": ".adlc/research/harness-probes/fixtures/codex.jsonl",
+        "session_files": [
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-48-08-01a192a5-96d5-7791-90d7-37edb09979a4.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-48-01-01a192a5-7e17-7563-abcb-855491429ed1.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-47-55-01a192a5-66e0-7540-9edf-7f8c6460b2df.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-47-51-01a192a5-55f7-7270-b578-f8dc0860830b.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-47-47-01a192a5-4712-7090-849c-467f8607b587.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-47-44-01a192a5-367b-7d41-b161-091717912450.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-45-33-01a192a3-3a25-7621-b839-d10eb66c3bcf.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-45-26-01a192a3-1f65-7342-9918-7d40ca66243a.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-45-19-01a192a3-0387-7371-87d0-461e42937676.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-45-14-01a192a2-f1c6-7333-9f64-019bbc1b12c8.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-45-08-01a192a2-da9a-72b3-b2d4-287cb9374e3c.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-45-03-01a192a2-c568-7c73-8809-dd036e69d8c7.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-44-41-01a192a2-7185-7a80-bd20-a6d1c22786fc.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-44-37-01a192a2-6009-73d3-bb8d-78ee46bbd10a.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-44-25-01a192a2-3120-7b02-8b95-5c4f0a53f290.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-44-18-01a192a2-156e-7670-81a7-47c02b835a3f.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-44-07-01a192a1-eaa5-7652-a669-31ccf892af11.jsonl",
+          "~/.codex/sessions/2026/10/31/rollout-2026-10-31T08-43-57-01a192a1-c2a6-7a22-bac2-192871e9f8f8.jsonl"
+        ],
+        "launches_exited_zero": "18 of 18",
+        "observation": "located 18 session file(s) newer than the first launch; 18 of 18 launches exited 0",
+        "files_scanned": 18
+      }
+    },
+    "arg-substitution": {
+      "status": "n/a",
+      "reason": "not-applicable: plan \u00a76.10 is a Claude question ($N substitution); no other harness substitutes",
+      "plan_item": "6.10",
+      "oracle": "sentinel-content",
+      "ran_at": "2026-10-31T15:48:19Z"
+    }
+  },
+  "coverage": {
+    "6.1a": {
+      "probes": [
+        "git-write-main"
+      ],
+      "note": "headless only"
+    },
+    "6.1b": {
+      "probes": [
+        "git-write-worktree"
+      ]
+    },
+    "6.2": {
+      "status": "not-probed",
+      "reason": "Copilot committed allowlist \u2014 a documentation question, no experiment decides it"
+    },
+    "6.3": {
+      "probes": [
+        "ask-tier-deny",
+        "git-write-main"
+      ]
+    },
+    "6.4": {
+      "probes": [
+        "skill-activation"
+      ]
+    },
+    "6.5": {
+      "status": "not-probed",
+      "reason": "Antigravity CLI survey \u2014 a product-scope question"
+    },
+    "6.6": {
+      "probes": [
+        "shell-timeout"
+      ]
+    },
+    "6.7": {
+      "status": "not-probed",
+      "reason": "answered structurally by REQ-654's skills-only view, so no harness ever sees the clone root"
+    },
+    "6.8": {
+      "probes": [
+        "trust-then-headless",
+        "session-start-context"
+      ]
+    },
+    "6.9": {
+      "probes": [
+        "transcript-locate"
+      ]
+    },
+    "6.10": {
+      "probes": [
+        "arg-substitution"
+      ]
+    },
+    "6.11": {
+      "probes": [
+        "fence-vs-allowlist"
+      ]
+    },
+    "6.12": {
+      "probes": [
+        "stdin-prompt"
+      ]
+    }
+  },
+  "cleanup": {
+    "repo_removed": true,
+    "user_files_restored": true,
+    "leftovers": []
+  }
+}

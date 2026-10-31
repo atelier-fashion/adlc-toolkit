@@ -230,6 +230,21 @@ def test_redaction_and_home():
     assert hp.scrub("adlc-probe@localhost", home) == "adlc-probe@localhost"
 
 
+def test_scrub_takes_the_login_name_and_account_ids():
+    home = "/Users/somelogin"
+    listing = "drwxr-xr-x@ 2 somelogin  staff  64 Oct 31 08:44 /Users/somelogin/x"
+    out = hp.scrub(listing, home)
+    assert "somelogin" not in out and hp.REDACTED_LOGIN in out and out.endswith("~/x")
+    # Part of a longer word names no one, and a generic last component is not a login.
+    assert hp.scrub("somelogin-tools", home) == "somelogin-tools"
+    assert hp.scrub("the home directory", "/tmp/x/home") == "the home directory"
+    record = '{\\"creator_user_id\\":\\"user-abc\\",\\"creator_account_id\\":\\"9c1b\\"}'
+    scrubbed = hp.scrub(record, home)
+    assert "user-abc" not in scrubbed and "9c1b" not in scrubbed
+    assert hp.scrub('{"creator_user_id": "user-abc"}', home) == \
+        '{"creator_user_id": "%s"}' % hp.REDACTED
+
+
 def test_tail_cap():
     assert hp.tail("x" * 10, 4) == "xxxx"
     assert len(hp.tail("é" * 5000).encode()) <= hp.EVIDENCE_CAP
