@@ -686,6 +686,13 @@ def check_agents_skills_mount(profile: Profile):
 # clean-and-current is compared through origin/<default>, and with no
 # trustworthy baseline the verdict is withheld, never guessed (LESSON-581).
 # Read-only: no fetch, and nothing is written to any repo, .git included.
+#
+# The same walk reports a stale project layer (a settings file with no hooks
+# block, say) through `adlc harness drift`'s comparison, which render-currency,
+# looking only at agents and user-level surfaces, cannot see. A repo with
+# something stale is then asked about on GitHub: one GitHub calls archived cannot
+# take the fix, so it is skipped by name. Only `gh`'s own true does that. No
+# answer leaves the repo stale, and a repo with nothing stale costs no request.
 
 def _git_out(root: str, *args):
     """``git -C root args`` stdout stripped, or ``None`` on a non-zero exit."""
@@ -764,11 +771,12 @@ def _disk_partials(root: str):
 class _Baseline:
     """What the canonical partials are compared from, named (BUG-204)."""
 
-    def __init__(self, label, source, partials, unverified=""):
+    def __init__(self, label, source, partials, unverified="", ref=None):
         self.label = label            # e.g. "main, clean, 0 behind origin/main ..."
         self.source = source          # "the working tree" | "origin/main" | "adlc plugin 5.4.0"
         self.partials = partials      # {name: bytes}
         self.unverified = unverified  # non-empty: why no verdict can be trusted
+        self.ref = ref                # the origin ref of a checkout, whichever copy is read
 
 
 def _consumer_baseline(profile: Profile) -> _Baseline:
@@ -799,7 +807,7 @@ def _consumer_baseline(profile: Profile) -> _Baseline:
                                     "never fetched: git -C %s fetch origin)" % (ref, _q(root)))
     same = _git_out(root, "diff", "--quiet", "HEAD", ref, "--", "partials") is not None
     if branch == default and not dirty and behind == "0" and same:
-        return _Baseline(label, "the working tree", _disk_partials(root))
+        return _Baseline(label, "the working tree", _disk_partials(root), ref=ref)
     listing = _git_out(root, "ls-tree", "--name-only", ref, "partials/") or ""
     partials = {}
     for path in listing.splitlines():
@@ -815,7 +823,7 @@ def _consumer_baseline(profile: Profile) -> _Baseline:
             partials[name] = shown.stdout
     if not partials:
         return _Baseline(label, ref, {}, unverified="%s carries no partials/*.sh" % ref)
-    return _Baseline(label, ref, partials)
+    return _Baseline(label, ref, partials, ref=ref)
 
 
 def _stale_files(consumer: str, canonical: dict):
@@ -835,6 +843,72 @@ def _stale_files(consumer: str, canonical: dict):
     return out
 
 
+#: What a project-layer render reads from the toolkit.
+_RENDER_INPUTS = ("harness", "templates/permissions.yml", "templates/hooks.yml")
+
+
+def _project_layers(consumers: list, profile: Profile, base: _Baseline):
+    """``({consumer: [finding]}, [why not compared])``, ``adlc harness drift``'s verdict.
+
+    A render reads the toolkit's disk copy, so in a checkout it counts only while
+    those inputs match the ref, even when ``partials/`` is clean and current: an
+    unmerged template must not call every consumer stale (BUG-204).
+    """
+    if base.ref and _git_out(profile.repo_root, "diff", "--quiet", base.ref, "--",
+                             *_RENDER_INPUTS) is None:
+        return {}, ["the toolkit's %s differ from %s" % (", ".join(_RENDER_INPUTS), base.ref)]
+    import harness_render
+    layers, unverified = {}, []
+    for consumer in consumers:
+        try:
+            rows = harness_render.stale_project_layer(consumer, profile.repo_root)
+        except (OSError, ValueError, AttributeError, TypeError) as exc:
+            unverified.append("%s (%s)" % (consumer, exc))
+            continue
+        layers[consumer] = ["%s %s %s: %s" % (name, rel, cls, ", ".join(details))
+                            for name, rel, cls, details in rows]
+    return layers, unverified
+
+
+#: A github.com origin in the spellings git hands back. The slug is passed to `gh`
+#: and printed, and the rest of the URL is neither: it can carry a token.
+_GITHUB_ORIGIN_RE = re.compile(
+    r"(?:https://(?:[^@/]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)"
+    r"([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*?)(?:\.git)?/?")
+
+
+def _archive_state(consumer: str):
+    """``(archived, why)``: ``True`` or ``False`` on ``gh``'s word, else ``None``."""
+    origin = _git_out(consumer, "remote", "get-url", "origin")
+    if not origin:
+        return None, "no origin remote"
+    match = _GITHUB_ORIGIN_RE.fullmatch(origin)
+    if not match:
+        return None, "origin is not on github.com"
+    slug = match.group(1)
+    gh = shutil.which("gh")
+    if not gh:
+        return None, "gh is not on PATH"
+    try:
+        out = subprocess.run([gh, "repo", "view", slug, "--json", "isArchived",
+                              "--jq", ".isArchived"], capture_output=True,
+                             stdin=subprocess.DEVNULL, timeout=_PROBE_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        return None, "gh repo view %s did not answer" % slug
+    answer = out.stdout.decode("utf-8", "replace").strip()
+    if out.returncode == 0 and answer == "true":
+        return True, "%s is archived on GitHub and cannot take a PR" % slug
+    if out.returncode == 0 and answer == "false":
+        return False, ""
+    return None, "gh repo view %s gave no answer (exit %d)" % (slug, out.returncode)
+
+
+def _stale_reason(files: list, layer: list):
+    reasons = ["%d file%s: %s" % (len(files), "" if len(files) == 1 else "s", ", ".join(files))
+               ] if files else []
+    return "; ".join(reasons + ["project layer %s" % finding for finding in layer])
+
+
 def check_consumer_sync(profile: Profile):
     root, how = _repos_root(profile)
     if root is None:
@@ -851,20 +925,37 @@ def check_consumer_sync(profile: Profile):
                 f"{len(consumers)} consumer(s) under {root}, {len(differ)} differ from "
                 f"{base.source}{': ' + ', '.join(differ) if differ else ''}. No verdict "
                 "is asserted until the baseline can be trusted", "")
-    stale = [(c, _stale_files(c, base.partials)) for c in consumers]
-    stale = [(c, files) for c, files in stale if files]
-    if not stale:
-        return (Result.PASS,
-                f"{len(consumers)} consumer(s) under {root} in sync with {base.source} "
-                f"(baseline {base.label})", "")
-    skill = "/adlc:template-drift" if profile.route == ROUTE_PLUGIN else "/template-drift"
-    detail = "; ".join("%s is stale (%d file%s: %s)" % (c, len(f), "" if len(f) == 1 else "s",
-                                                        ", ".join(f)) for c, f in stale)
-    return (Result.FAIL,
-            f"{detail}. Compared against {base.source} (baseline {base.label}); a stale "
-            "vendored partial is read before the canonical copy, so its fixes never run "
-            "there (LESSON-441)",
-            "\n".join("cd %s && claude -p %s" % (_q(c), _q(skill)) for c, _f in stale))
+    layers, unverified = _project_layers(consumers, profile, base)
+    stale, skipped = [], []
+    for consumer in consumers:
+        reason = _stale_reason(_stale_files(consumer, base.partials), layers.get(consumer, []))
+        if not reason:
+            continue
+        archived, why = _archive_state(consumer)
+        if archived:
+            skipped.append("skipped %s (%s)" % (consumer, why))
+            continue
+        note = " [archive state unknown: %s]" % why if archived is None else ""
+        stale.append((consumer, "%s is stale (%s)%s" % (consumer, reason, note)))
+    tail = "".join(". " + line for line in skipped)
+    if unverified:
+        tail += ". Project layer not compared: %s" % "; ".join(unverified)
+    if stale:
+        skill = "/adlc:template-drift" if profile.route == ROUTE_PLUGIN else "/template-drift"
+        detail = "; ".join(line for _c, line in stale)
+        return (Result.FAIL,
+                f"{detail}. Compared against {base.source} (baseline {base.label}); a stale "
+                "vendored partial is read before the canonical copy, so its fixes never run "
+                f"there (LESSON-441){tail}",
+                "\n".join("cd %s && claude -p %s" % (_q(c), _q(skill)) for c, _line in stale))
+    checked = len(consumers) - len(skipped)
+    if unverified or not checked:
+        return (Result.SKIP,
+                f"{checked} consumer(s) under {root} show nothing stale against {base.source} "
+                f"(baseline {base.label}), and no verdict is asserted{tail}", "")
+    return (Result.PASS,
+            f"{checked} consumer(s) under {root} in sync with {base.source} "
+            f"(baseline {base.label}){tail}", "")
 
 
 # --- toolkit clone health --------------------------------------------------

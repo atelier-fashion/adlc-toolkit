@@ -1184,6 +1184,10 @@ def _hook_commands(doc):
     return out
 
 
+#: The classifications `adlc harness drift` exits 1 on.
+DRIFT_FAILING = ("stale", "missing")
+
+
 def drift(adapter, project_root, toolkit=None):
     """Template-posture drift of the project's rendered files (ADR-11, BR-11).
 
@@ -1258,6 +1262,30 @@ def opted_in(adapter, project_root, toolkit=None):
     plans, _printed = plan_surfaces(adapter, "project", project_root, toolkit or ha.toolkit_dir(),
                                     surfaces=("permissions", "hooks"))
     return bool(plans) and os.path.exists(plans[0].path)
+
+
+def opted_in_adapters(first, project_root, toolkit=None):
+    """``first`` plus each shipped adapter the project already has a file of, so a
+    harness nobody asked for is never reported ``missing`` (REQ-656 BR-14)."""
+    toolkit = toolkit or ha.toolkit_dir()
+    adapters = [first]
+    for path in ha.shipped_adapter_paths(toolkit):
+        adapter = ha.load_adapter(path, toolkit=toolkit)
+        if adapter["name"] != first["name"] and opted_in(adapter, project_root, toolkit):
+            adapters.append(adapter)
+    return adapters
+
+
+def stale_project_layer(project_root, toolkit=None, harness="claude"):
+    """``[(harness, rel, classification, details)]`` for each row ``adlc harness drift
+    --harness <harness> --opted-in`` exits 1 on: the same comparison, for a project
+    other than the current one (``consumer-sync``)."""
+    toolkit = toolkit or ha.toolkit_dir()
+    first = ha.resolve_adapter(harness, None, toolkit)
+    return [(a["name"], rel, cls, details)
+            for a in opted_in_adapters(first, project_root, toolkit)
+            for rel, cls, details in drift(a, project_root, toolkit)
+            if cls in DRIFT_FAILING]
 
 
 def split_agent(text):
