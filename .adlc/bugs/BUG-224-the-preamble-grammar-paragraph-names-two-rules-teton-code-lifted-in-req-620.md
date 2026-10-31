@@ -1,10 +1,10 @@
 ---
 id: BUG-224
 title: "The preamble-grammar paragraph names two rules Teton Code lifted in REQ-620"
-status: open
+status: resolved
 severity: low
 created: 2026-09-09
-updated: 2026-09-09
+updated: 2026-10-31
 component: "adlc/context"
 domain: "skills"
 stack: ["markdown"]
@@ -87,3 +87,37 @@ The paragraph states both rules unconditionally, which is false on a current hos
 ## Files to Change
 
 - `.adlc/context/conventions.md` — the BUG-220 paragraph, two rules version-scoped
+
+## Root Cause
+
+Prior lessons consulted:
+- LESSON-657 — A static shell classifier rejects on characters before it reads the verb, and a reader with no file scans the root (score 10)
+- LESSON-655 — A statically classified preamble is judged on every branch it could take, not the one that runs (score 9)
+- LESSON-663 — To keep a model's shell inside a classifier's grammar, allowlist what it may run — forbidding commands one at a time never converges (score 4)
+- LESSON-662 — Some shell cannot be respelled past a provenance classifier — the skill text has to route around it (score 4)
+- LESSON-764 — A parallel REQ landing turns \"in flight\" and \"not shipped yet\" into false statements, and a clean rebase will not tell you (score 3)
+
+The paragraph stated two rules without saying they were specific to a host version: that
+`2>/dev/null` pins, and that a `| head` after a producer pins. Teton Code's REQ-620 made both
+false on newer hosts, and this report asked to version-scope them.
+
+Validated on 2026-10-31: the paragraph no longer exists. REQ-666 removed it in `7d3bf2c`
+(TASK-179, retiring the Teton-only surface), after Teton Code was shelved on 2026-10-27.
+`git log -S'stays inside the same grammar' -- .adlc/context/conventions.md` shows only that
+commit and the one that added it, and no skill, partial, agent, template or lint text on
+`main` names Teton Code. The only `BUG-220` mention left, in the `conventions.md` table of
+placeholder spellings, says a `!` line allows neither backticks nor parentheses, which is
+not one of the two rules at issue.
+
+## Resolution
+
+No code change. The ask is moot: its target text is gone, and the host it scoped against is
+shelved, so restoring the paragraph to version-scope it would reverse REQ-666 BR-5.
+
+## Files Changed
+
+- This report only.
+
+## Deployment
+
+None: documentation only, and the toolkit has no deploy targets.
