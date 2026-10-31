@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
 (REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609,
-BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654, BUG-254, REQ-661).
+BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654, BUG-254, REQ-661, REQ-665).
 
 Run from the repo root:
 
@@ -19,10 +19,15 @@ order:
   render.
 * ``check_sync_surface_parity`` (REQ-525 AC4) — ``/init``'s vendored-surface
   copy list vs ``/template-drift``'s checked-surface list must agree.
-* ``check_plugin_manifest`` (REQ-669 BR-12/BR-20) — the plugin and marketplace
-  manifests agree with ``VERSION``, the skill directories, ``agents/`` and each
-  other, the name avoids ``PLUGIN_RESERVED_NAME_PREFIXES``, and there is no
-  top-level ``bin`` of any kind.
+* ``check_plugin_manifest`` — ``manifest-parity`` (REQ-665 BR-7, ADR-1; it
+  absorbed REQ-669's ``plugin-manifest``) — every harness in
+  ``MANIFEST_REGISTRY`` has its manifest, which parses strictly, carries only
+  its vendor's documented keys and no machine path, and agrees with ``VERSION``,
+  the skill directories and the set's name; agents and hooks hold each harness's
+  shape; no manifest names a server or an inline definition; Claude Code's
+  marketplace entry carries the set's name, the name avoids
+  ``PLUGIN_RESERVED_NAME_PREFIXES``, and there is no top-level ``bin`` or
+  ``skills`` of any kind.
 * ``check_toolkit_path`` — ``no-harness-path`` (REQ-666 BR-13, ADR-5; it
   absorbed REQ-669's ``toolkit-path``) — no literal harness home path on the
   plugin-reachable surface (``TOOLKIT_PATH_SURFACES``): any of the five
@@ -821,7 +826,10 @@ PLUGIN_MANIFEST_DIR = ".claude-plugin"
 PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
 MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json"
 PLUGIN_VERSION_FILE = "VERSION"
-PLUGIN_MANIFEST_CHECK = "plugin-manifest"
+# REQ-665 ADR-1: `manifest-parity` absorbs that check, keeping every rule and the
+# arming. The REQ-669 identifiers stay, so `is_plugin_root`'s other callers do not
+# move; only the check id changes.
+PLUGIN_MANIFEST_CHECK = "manifest-parity"
 # Claude Code's own plugin-name rule: `claude plugin validate --strict` fails a
 # name that is not kebab-case, because the claude.ai marketplace sync requires it.
 PLUGIN_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -835,6 +843,105 @@ PLUGIN_RESERVED_NAME_PREFIXES = ("claude", "anthropic", "cc-plugin-")
 # `skills` / `agents` entries the loader accepts are `.` or start with `./`
 # (Claude Code 2.1.258 refuses `alpha`); anything else names nothing.
 PLUGIN_PATH_PREFIX = "./"
+
+
+class ManifestEntry(NamedTuple):
+    """One harness's plugin manifest, and what ``manifest-parity`` holds it to."""
+    harness: str
+    path: str
+    companions: tuple[str, ...]  # files its install route requires beside it
+    keys: frozenset[str]         # the top-level keys its vendor documents
+    agents: str                  # "canonical" | "empty"
+    hooks: str                   # "default" | "empty"
+    name_rules: bool             # its marketplace rules on `name` apply (REQ-669)
+
+
+# REQ-665 ADR-2: the harnesses that ship a manifest, defined here and nowhere else
+# (BR-1). Adding one starts with an entry plus its file; the bump in `RELEASING.md`
+# and `plugin-sandbox.sh`, and the README subsection, follow. `keys` are each vendor's
+# documented top-level keys, read 2026-10-30 from code.claude.com/docs/en/plugins-reference,
+# cursor.com/docs/reference/plugins and the Copilot CLI plugin reference on
+# docs.github.com. `agents`: "canonical" is REQ-669's rule (absent, or it lists every
+# `agents/*.md`); "empty" requires `"agents": []`, because that harness scans `agents/`
+# by default and cannot read the format (BR-3). `hooks`: "default" leaves
+# `hooks/hooks.json` to the default scan; "empty" requires `"hooks": {}`, for the same
+# reason (BR-4).
+MANIFEST_REGISTRY = (
+    ManifestEntry(
+        "claude", PLUGIN_MANIFEST, (MARKETPLACE_MANIFEST,),
+        frozenset(
+            "$schema name displayName version description author homepage repository "
+            "license keywords metadata icon documentationUrl supportUrl "
+            "privacyPolicyUrl termsOfServiceUrl defaultEnabled dependencies settings "
+            "userConfig types channels skills commands agents hooks mcpServers "
+            "lspServers outputStyles workflows experimental".split()),
+        "canonical", "default", True,
+    ),
+    ManifestEntry(
+        "cursor", ".cursor-plugin/plugin.json", (),
+        frozenset(
+            "name description version author homepage repository license keywords "
+            "logo rules agents skills commands hooks mcpServers variables".split()),
+        "empty", "empty", False,
+    ),
+    ManifestEntry(
+        "copilot", ".github/plugin/plugin.json", (),
+        frozenset(
+            "name description version author homepage repository license keywords "
+            "tags category agents skills commands hooks extensions mcpServers "
+            "lspServers".split()),
+        "empty", "empty", False,
+    ),
+)
+# BR-1's name for the set, held as a literal: `session-start.sh` and `adlc doctor`
+# recognise a copy by it, so a set renamed in step is still wrong (LESSON-019).
+MANIFEST_SET_NAME = "adlc"
+# The top-level keys whose string values, or arrays of them, are paths in the
+# checkout (`path-missing`). `skills` is not here: its entries go to the skill rules,
+# which also read a value that is not an array.
+MANIFEST_PATH_KEYS = (
+    "agents", "hooks", "commands", "outputStyles", "workflows", "logo", "icon", "rules",
+    "types",
+)
+# The two path keys that name an image, which a vendor lets a URL stand in for.
+MANIFEST_URL_KEYS = ("logo", "icon")
+# `execution-key` (BR-4): keys that start a process, install a plugin or prompt for a
+# value, and the path keys a harness also reads as inline definitions. The toolkit uses
+# none of those, and `path-missing` has no path to read in one, so the rule is what
+# covers them (LESSON-749).
+MANIFEST_EXEC_KEYS = (
+    "mcpServers", "lspServers", "extensions", "experimental", "settings", "dependencies",
+    "userConfig", "channels", "variables",
+)
+MANIFEST_INLINE_KEYS = (
+    "commands", "outputStyles", "workflows", "logo", "icon", "rules", "types",
+)
+# The same surfaces by their default location, which a harness reads with no key at all.
+MANIFEST_DEFAULT_EXEC_FILES = (
+    ".mcp.json", ".lsp.json", "settings.json", "monitors/monitors.json", "mcp.json",
+    "lsp.json", "hooks.json", ".github/mcp.json", ".github/lsp.json",
+)
+# What `marketplace.json` may hold: anything else in its one entry overrides or adds to
+# the plugin, and `allowCrossMarketplaceDependenciesOn` lifts the block on `dependencies`.
+MANIFEST_MARKET_KEYS = frozenset("$schema name description owner metadata plugins".split())
+MANIFEST_MARKET_ENTRY_KEYS = frozenset(
+    "name source description version author homepage repository license keywords "
+    "category tags".split())
+# `machine-path`: a value that only means something on one machine. The lookbehind
+# leaves `./home/x`, `a/home/x` and a URL's own path alone. An `https` URL with a host
+# and no userinfo is set aside first, so what follows it is still read; any other URL
+# form, `file:` above all, does not pass.
+MANIFEST_MACHINE_PATH_RE = re.compile(
+    r"^\s*(?:/|\\\\|[A-Za-z]:[\\/]|~(?:[\w.-]+[/\\]|[/\\]|$))"
+    r"|\$\{?(?:env:)?(?:HOME|USERPROFILE)\b|%(?:HOME|USERPROFILE)%"
+    r"|(?<![\w.])/(?:users|home)\b",
+    re.IGNORECASE)
+MANIFEST_URL_RE = re.compile(
+    r"\s*https://[A-Za-z0-9][A-Za-z0-9.-]*(?::\d+)?(?:[/?#]\S*)?(?=\s|$)", re.IGNORECASE)
+MANIFEST_SCHEME_RE = re.compile(
+    r"^\s*(?:[A-Za-z][A-Za-z0-9+.-]*://|(?:file|ssh|git|mailto|data|javascript):"
+    r"|[^\s/@]+@[^\s/:]+:)",
+    re.IGNORECASE)
 
 # REQ-669 ADR-9 / BR-13 `toolkit-path`: no literal toolkit read path on the
 # plugin-reachable surface. Under the plugin route there is no `~/.claude/skills`
@@ -3584,52 +3691,80 @@ def _manifest_finding(rel: str, line: int, message: str) -> Finding:
     return Finding(rel, line, PLUGIN_MANIFEST_CHECK, message)
 
 
+def _inside_root(root: Path, rel: str) -> bool:
+    """Whether ``rel`` resolves, symlinks included, to ``root`` or below it."""
+    try:
+        base = os.path.realpath(root)
+        target = os.path.realpath(os.path.join(base, rel))
+    except ValueError:  # a NUL in the path, which newer Pythons refuse here
+        return False
+    return target == base or target.startswith(base + os.sep)
+
+
 def _load_json_manifest(root: Path, rel: str) -> tuple[dict | None, str, list[Finding], bool]:
-    """Read and strictly parse one manifest.
+    """Read and strictly parse one manifest or companion (rule ``unparseable``).
 
     Returns ``(obj, text, findings, found)``. ``obj`` is ``None`` whenever the file
     is missing, unreadable, not UTF-8, not JSON, repeats a key, uses a non-JSON
-    constant, or is not a top-level object — each of those is one finding, and the
-    rules that read the manifest are skipped rather than run on a guess. ``found``
-    is True when the file exists, so an unreadable manifest still counts as
-    scanned (the same posture as an unreadable SKILL.md in ``run``).
+    constant, or is not a top-level object. Each of those but the first is one
+    finding, and the rules that read the manifest are skipped rather than run on a
+    guess. A missing file has no finding here: the caller names it under its own
+    rule (``set-incomplete`` for a manifest, ``path-missing`` for a companion).
+    ``found`` is True when the file exists, so an unreadable manifest still counts
+    as scanned (the same posture as an unreadable SKILL.md in ``run``).
     """
     path = root / rel
     if not path.is_file():
+        return None, "", [], False
+    if not _inside_root(root, rel):
         return None, "", [_manifest_finding(
             rel, 1,
-            f"{rel} is missing — this root is a plugin root, so the manifest must "
-            "exist (REQ-669 BR-12, ADR-3)",
-        )], False
+            f"unparseable: {rel} resolves outside this checkout, so what the lint reads "
+            f"is not what an install gets — replace the symlink on the path to {rel} with "
+            "the file (REQ-665 BR-7)")], True
     try:
         raw = path.read_bytes()
     except OSError as exc:
         return None, "", [_manifest_finding(
-            rel, 1, f"could not read: {exc.strerror or 'I/O error'}")], True
+            rel, 1,
+            f"unparseable: could not read: {exc.strerror or 'I/O error'} — make {rel} "
+            "readable (REQ-665 BR-7)")], True
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        return None, "", [_manifest_finding(rel, 1, "not valid UTF-8")], True
+        return None, "", [_manifest_finding(
+            rel, 1, f"unparseable: not valid UTF-8 — save {rel} as UTF-8 (REQ-665 BR-7)")], True
     try:
         obj = json.loads(text, object_pairs_hook=_reject_duplicate_keys,
                          parse_constant=_reject_constant)
+        json.dumps(obj)  # the rules print values, so a depth they cannot print stops here
     except _DuplicateJsonKey as exc:
+        shown = json.dumps(exc.key)
         return None, text, [_manifest_finding(
             rel, _json_key_line(text, exc.key, last=True),
-            f"repeated JSON key {json.dumps(exc.key)} — a JSON reader keeps one of "
-            "the two values and the plugin loader may keep the other, so the "
-            "manifest is not checked until the key appears once (LESSON-716)",
+            f"unparseable: repeated JSON key {shown}: a JSON reader keeps one of the two "
+            "values and the plugin loader may keep the other, so the manifest is not "
+            f"checked until the key appears once — delete one {shown} line in {rel} "
+            "(REQ-665 BR-7, LESSON-716)",
         )], True
     except _NonStandardJsonConstant as exc:
         return None, text, [_manifest_finding(
-            rel, 1, f"{exc.name} is not a JSON value — the plugin loader's parser "
-            "rejects it (LESSON-716)")], True
+            rel, 1, f"unparseable: {exc.name} is not a JSON value and the plugin loader's "
+            f"parser rejects it — replace {exc.name} with a JSON value in {rel} "
+            "(REQ-665 BR-7, LESSON-716)")], True
+    except RecursionError:
+        return None, text, [_manifest_finding(
+            rel, 1, f"unparseable: nested too deeply to parse — flatten {rel} "
+            "(REQ-665 BR-7)")], True
     except json.JSONDecodeError as exc:
         return None, text, [_manifest_finding(
-            rel, exc.lineno, f"not valid JSON: {exc.msg}")], True
+            rel, exc.lineno, f"unparseable: not valid JSON: {exc.msg} — correct line "
+            f"{exc.lineno} of {rel}, which `python3 -m json.tool {rel}` then accepts "
+            "(REQ-665 BR-7)")], True
     if not isinstance(obj, dict):
         return None, text, [_manifest_finding(
-            rel, 1, "the top level must be a JSON object")], True
+            rel, 1, "unparseable: the top level must be a JSON object — wrap the content "
+            f"in one object in {rel} (REQ-665 BR-7)")], True
     return obj, text, [], True
 
 
@@ -3664,37 +3799,90 @@ def _normalized_plugin_path(entry: str) -> str | None:
     return posixpath.normpath(entry)
 
 
-def _check_plugin_fields(root: Path, plugin: dict, text: str) -> list[Finding]:
-    rel = PLUGIN_MANIFEST
-    findings: list[Finding] = []
-
-    # version == VERSION (BR-12, AC-7).
+def _manifest_version(root: Path) -> str | None:
+    """The trimmed content of ``VERSION``, or ``None`` when there is none to read."""
     version_path = root / PLUGIN_VERSION_FILE
     try:
-        expected = version_path.read_text(encoding="utf-8").strip() if version_path.is_file() else None
+        text = version_path.read_text(encoding="utf-8") if version_path.is_file() else ""
     except (OSError, UnicodeDecodeError):
-        expected = None
-    actual = plugin.get("version")
-    if expected is None:
-        findings.append(_manifest_finding(
-            PLUGIN_VERSION_FILE, 1,
-            "VERSION is missing or unreadable — plugin.json's `version` has nothing "
-            "to be pinned to (REQ-669 BR-12, ADR-3)",
-        ))
-    elif actual != expected:
-        shown = "absent" if actual is None else json.dumps(actual)
-        findings.append(_manifest_finding(
-            rel, _json_key_line(text, "version"),
-            f"`version` is {shown} but VERSION holds {json.dumps(expected)} — they "
-            "must be equal, so a release moves both (REQ-669 BR-12, ADR-3)",
-        ))
+        return None
+    return text.strip() or None
 
-    # name: kebab-case and not a reserved prefix.
-    name = plugin.get("name")
+
+def _is_machine_path(value: str) -> bool:
+    url = MANIFEST_URL_RE.match(value)
+    rest = value[url.end():] if url else value
+    return bool(MANIFEST_SCHEME_RE.match(rest) or MANIFEST_MACHINE_PATH_RE.search(rest))
+
+
+def _json_strings(value: object) -> list[tuple[str, str, str]]:
+    """Every string value under ``value`` as ``(json_path, key, string)``; keys are not values."""
+    found: list[tuple[str, str, str]] = []
+    stack: list[tuple[str, str, object]] = [("", "", value)]
+    while stack:
+        where, key, item = stack.pop()
+        if isinstance(item, str):
+            found.append((where, key, item))
+        elif isinstance(item, dict):
+            stack.extend(reversed(
+                [(f"{where}.{k}" if where else k, k, v) for k, v in item.items()]))
+        elif isinstance(item, list):
+            stack.extend(reversed([(f"{where}[{i}]", key, v) for i, v in enumerate(item)]))
+    return found
+
+
+def _json_value_line(text: str, key: str, value: str) -> int:
+    """The line of a string value when it appears once, else of its key."""
+    shown = json.dumps(value, ensure_ascii=False)
+    if text.count(shown) == 1:
+        return text.count("\n", 0, text.index(shown)) + 1
+    return _json_key_line(text, key)
+
+
+def _path_items(value: object) -> list:
+    """A value that may be one item or an array of them, as a list."""
+    return value if isinstance(value, list) else [value]
+
+
+def _check_machine_paths(rel: str, obj: dict, text: str) -> list[Finding]:
+    """``machine-path`` (BR-1): the committed file is the file every installer reads."""
+    findings: list[Finding] = []
+    for where, key, value in _json_strings(obj):
+        if _is_machine_path(value):
+            shown = json.dumps(value)
+            top = re.split(r"[.\[]", where, maxsplit=1)[0]
+            if top == "skills":
+                remedy = f"remove {shown} from `skills`"
+            elif top in MANIFEST_PATH_KEYS and top not in MANIFEST_URL_KEYS:
+                remedy = f"use a `./` path for `{where}`"
+            else:
+                remedy = f"use a `./` path or an `https://` URL for `{where}`"
+            findings.append(_manifest_finding(
+                rel, _json_value_line(text, key, value),
+                f"machine-path: `{where}` is {shown}, which means something on one machine "
+                f"only — {remedy} in {rel} (REQ-665 BR-1)",
+            ))
+    return findings
+
+
+def _check_manifest_name(entry: ManifestEntry, manifest: dict, text: str) -> list[Finding]:
+    """``name-mismatch`` on every manifest, then the entry's marketplace name rules."""
+    rel = entry.path
+    name = manifest.get("name")
     name_line = _json_key_line(text, "name")
-    if not isinstance(name, str) or not name:
-        findings.append(_manifest_finding(rel, name_line, "`name` must be a non-empty string"))
-    elif not PLUGIN_NAME_RE.match(name):
+    findings: list[Finding] = []
+    if name != MANIFEST_SET_NAME:
+        shown = "absent" if name is None else json.dumps(name)
+        want = json.dumps(MANIFEST_SET_NAME)
+        findings.append(_manifest_finding(
+            rel, name_line,
+            f"name-mismatch: `name` is {shown} but the set's name is {want} — set "
+            f"`\"name\": {want}` in {rel} (REQ-665 BR-1)",
+        ))
+    if not entry.name_rules or not isinstance(name, str) or not name:
+        return findings
+    # Kebab-case and not a reserved prefix.
+    if not PLUGIN_NAME_RE.match(name):
         findings.append(_manifest_finding(
             rel, name_line,
             f"plugin name {json.dumps(name)} is not kebab-case (lowercase letters, "
@@ -3707,60 +3895,247 @@ def _check_plugin_fields(root: Path, plugin: dict, text: str) -> list[Finding]:
             f"({', '.join(PLUGIN_RESERVED_NAME_PREFIXES)}) — Claude Code reserves "
             "those for Anthropic's own marketplaces and plugins",
         ))
-
-    # Every root-level skill directory is reachable through `skills`.
-    skill_dirs = _plugin_root_skill_dirs(root)
-    skills_line = _json_key_line(text, "skills")
-    if "skills" not in plugin:
-        if skill_dirs:
-            findings.append(_manifest_finding(
-                rel, 1,
-                f"no `skills` field, so the loader scans only `skills/` and none of the "
-                f"{len(skill_dirs)} root-level skill directories is exposed — set "
-                '`"skills": "./"` (REQ-669 BR-12, ADR-3)',
-            ))
-    else:
-        entries = _plugin_path_entries(plugin["skills"])
-        if entries is None:
-            findings.append(_manifest_finding(
-                rel, skills_line, "`skills` must be a path string or an array of path strings"))
-        else:
-            named = {n for n in (_normalized_plugin_path(e) for e in entries) if n is not None}
-            if "." not in named:
-                for skill in skill_dirs:
-                    if skill not in named:
-                        findings.append(_manifest_finding(
-                            rel, skills_line,
-                            f"skill directory `{skill}/` holds a SKILL.md but is not "
-                            f"reachable through `skills` {json.dumps(plugin['skills'])} — "
-                            f'use "./" or list "./{skill}" (REQ-669 BR-12)',
-                        ))
-
-    # No `agents` field, or one that lists every agents/*.md (BR-12). The field
-    # replaces the default `agents/` scan, so a partial list hides agents.
-    if "agents" in plugin:
-        agents_line = _json_key_line(text, "agents")
-        entries = _plugin_path_entries(plugin["agents"])
-        if entries is None:
-            findings.append(_manifest_finding(
-                rel, agents_line, "`agents` must be a path string or an array of path strings"))
-        else:
-            listed = {n for n in (_normalized_plugin_path(e) for e in entries) if n is not None}
-            agents_dir = root / "agents"
-            agent_files = sorted(agents_dir.glob("*.md")) if agents_dir.is_dir() else []
-            for agent in agent_files:
-                agent_rel = f"agents/{agent.name}"
-                if agent_rel not in listed:
-                    findings.append(_manifest_finding(
-                        rel, agents_line,
-                        f"`agents` is present but omits `{agent_rel}` — the field "
-                        "replaces the default `agents/` scan, so that agent would not "
-                        "load; drop the field or list every agent (REQ-669 BR-12, ADR-3)",
-                    ))
     return findings
 
 
-def _check_marketplace_fields(market: dict, text: str, plugin_name: str | None) -> list[Finding]:
+def _check_manifest_skills(root: Path, rel: str, manifest: dict, text: str) -> list[Finding]:
+    """``skill-missing``, ``skill-extra`` and ``dangling-entry``: what ``skills``
+    resolves to is exactly the root-level skill directories (BR-2, BR-7(e))."""
+    skill_dirs = _plugin_root_skill_dirs(root)
+    if "skills" not in manifest:
+        if not skill_dirs:
+            return []
+        return [_manifest_finding(
+            rel, 1,
+            f"skill-missing: no `skills` field, so the loader scans only `skills/` and "
+            f"none of the {len(skill_dirs)} root-level skill directories is exposed — set "
+            f'`"skills": "./"` in {rel} (REQ-665 BR-2)',
+        )]
+    skills_line = _json_key_line(text, "skills")
+    entries = _plugin_path_entries(manifest["skills"])
+    if entries is None:
+        return [_manifest_finding(
+            rel, skills_line,
+            "skill-missing: `skills` must be a path string or an array of path strings "
+            f'— set `"skills": "./"` in {rel} (REQ-665 BR-2)',
+        )]
+    findings: list[Finding] = []
+    named = {n for n in (_normalized_plugin_path(e) for e in entries) if n is not None}
+    if "." not in named:
+        for skill in skill_dirs:
+            if skill not in named:
+                findings.append(_manifest_finding(
+                    rel, skills_line,
+                    f"skill-missing: skill directory `{skill}/` holds a SKILL.md but is "
+                    f"not reachable through `skills` {json.dumps(manifest['skills'])} — "
+                    f'add "./{skill}" to `skills` in {rel}, or set `"skills": "./"` '
+                    "(REQ-665 BR-2)",
+                ))
+    # Read the string form too: `path-missing` hands `skills` to these two rules, so
+    # an entry they skipped would be read by neither (LESSON-749). A machine path is
+    # `machine-path`'s, and that walk reads every string value. An entry with no `./`
+    # is refused here first, so the rule above that dropped it cannot hand it on.
+    for skills_entry in entries:
+        if _is_machine_path(skills_entry):
+            continue
+        where = _normalized_plugin_path(skills_entry)
+        shown = json.dumps(skills_entry)
+        if where is None:
+            findings.append(_manifest_finding(
+                rel, skills_line,
+                f"dangling-entry: `skills` entry {shown} does not start with `./`, so the "
+                f"loader refuses it and it names nothing — remove {shown} from `skills` in "
+                f"{rel} (REQ-665 BR-2)",
+            ))
+        elif where == "." or where in skill_dirs:
+            continue
+        elif os.path.isdir(root / where):
+            findings.append(_manifest_finding(
+                rel, skills_line,
+                f"skill-extra: `skills` entry {shown} is not a root-level directory "
+                f"holding a SKILL.md — remove {shown} from `skills` in {rel} (REQ-665 BR-2)",
+            ))
+        else:
+            findings.append(_manifest_finding(
+                rel, skills_line,
+                f"dangling-entry: `skills` entry {shown} names no directory — remove "
+                f"{shown} from `skills` in {rel} (REQ-665 BR-2)",
+            ))
+    return findings
+
+
+def _check_manifest_agents(root: Path, entry: ManifestEntry, manifest: dict,
+                           text: str) -> list[Finding]:
+    """``agents-ref-invalid``: the BR-3 shape for this harness."""
+    rel = entry.path
+    agents_line = _json_key_line(text, "agents")
+    if entry.agents == "empty":
+        if manifest.get("agents") == []:
+            return []
+        shown = "absent" if "agents" not in manifest else json.dumps(manifest["agents"])
+        return [_manifest_finding(
+            rel, agents_line,
+            f"agents-ref-invalid: `agents` is {shown}, but {entry.harness} scans `agents/` "
+            f'by default and cannot read that format — set `"agents": []` in {rel} '
+            "(REQ-665 BR-3)",
+        )]
+    # No `agents` field, or one that lists every agents/*.md. The field replaces the
+    # default `agents/` scan, so a partial list hides agents.
+    if "agents" not in manifest:
+        return []
+    entries = _plugin_path_entries(manifest["agents"])
+    if entries is None:
+        return [_manifest_finding(
+            rel, agents_line,
+            "agents-ref-invalid: `agents` must be a path string or an array of path "
+            f"strings — delete the `agents` key from {rel} (REQ-665 BR-3)",
+        )]
+    findings: list[Finding] = []
+    listed = {n for n in (_normalized_plugin_path(e) for e in entries) if n is not None}
+    agents_dir = root / "agents"
+    agent_files = sorted(agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+    for agent in agent_files:
+        agent_rel = f"agents/{agent.name}"
+        if agent_rel not in listed:
+            findings.append(_manifest_finding(
+                rel, agents_line,
+                f"agents-ref-invalid: `agents` is present but omits `{agent_rel}`, and "
+                "the field replaces the default `agents/` scan, so that agent would not "
+                f'load — delete the `agents` key, or add "./{agent_rel}" to it, in {rel} '
+                "(REQ-665 BR-3)",
+            ))
+    return findings
+
+
+def _check_execution_keys(entry: ManifestEntry, manifest: dict, text: str) -> list[Finding]:
+    """``execution-key`` (BR-4): a manifest names no server, and defines nothing inline.
+
+    A key this rule reads here cannot also reach ``path-missing``, which reads paths
+    only. ``agents`` is the shape rule's in both forms, and so is ``hooks`` where the
+    entry says "empty"; a "default" entry's inline ``hooks`` would run, so it is read.
+    """
+    rel = entry.path
+    findings: list[Finding] = []
+    for key in MANIFEST_EXEC_KEYS:
+        if key in manifest and key in entry.keys:
+            findings.append(_manifest_finding(
+                rel, _json_key_line(text, key),
+                f"execution-key: `{key}` can run or install something, or prompt for a "
+                f"value, and the toolkit uses none of that — delete the `{key}` key from "
+                f"{rel} (REQ-665 BR-4)",
+            ))
+    inline_keys = MANIFEST_INLINE_KEYS + (("hooks",) if entry.hooks == "default" else ())
+    for key in inline_keys:
+        if key in entry.keys and any(
+                isinstance(item, (dict, list)) and item for item in _path_items(manifest.get(key))):
+            findings.append(_manifest_finding(
+                rel, _json_key_line(text, key),
+                f"execution-key: `{key}` holds an inline definition, which no path rule can "
+                f"read — delete the `{key}` key from {rel}, or point it at a `./` path "
+                "(REQ-665 BR-4)",
+            ))
+    return findings
+
+
+def _check_manifest_paths(root: Path, entry: ManifestEntry, manifest: dict,
+                          text: str) -> list[Finding]:
+    """``path-missing``: a path a manifest names exists inside the checkout.
+
+    An inline value is ``execution-key``'s, and an empty one names nothing. Only a key
+    in ``MANIFEST_URL_KEYS`` takes a URL. A machine path is ``machine-path``'s, so it
+    is reported once (LESSON-749: that walk reads every string value, so nothing handed
+    over here goes unread). A key the entry does not document is ``unknown-key``'s, and
+    ``agents`` and ``hooks`` on an "empty" entry are the shape rules', whose remedy is
+    the one that holds.
+    """
+    rel = entry.path
+    findings: list[Finding] = []
+    for key in MANIFEST_PATH_KEYS:
+        if key not in entry.keys or (key in ("agents", "hooks") and getattr(entry, key) == "empty"):
+            continue
+        for item in _path_items(manifest.get(key)):
+            if item is None or isinstance(item, (dict, list)):
+                continue
+            shown = json.dumps(item)
+            if not isinstance(item, str):
+                if key != "agents":  # the canonical shape rule reads this one
+                    findings.append(_manifest_finding(
+                        rel, _json_key_line(text, key),
+                        f"path-missing: `{key}` holds {shown}, which is not a path — remove "
+                        f"{shown} from `{key}` in {rel} (REQ-665 BR-7)",
+                    ))
+                continue
+            if _is_machine_path(item) or (key in MANIFEST_URL_KEYS
+                                          and MANIFEST_URL_RE.fullmatch(item)):
+                continue
+            where = _normalized_plugin_path(item)
+            if where is None or ".." in item.split("/") or not _inside_root(root, item):
+                findings.append(_manifest_finding(
+                    rel, _json_key_line(text, key),
+                    f"path-missing: `{key}` names {shown}, which is not a `./` path inside "
+                    f"this checkout, so it would not resolve on an install — use a `./` "
+                    f"path, or remove {shown} from `{key}` in {rel} (REQ-665 BR-7)",
+                ))
+            elif not os.path.exists(root / where):
+                findings.append(_manifest_finding(
+                    rel, _json_key_line(text, key),
+                    f"path-missing: `{key}` names {shown}, which does not exist — add "
+                    f"that path, or remove {shown} from `{key}` in {rel} (REQ-665 BR-7)",
+                ))
+    return findings
+
+
+def _check_plugin_fields(root: Path, entry: ManifestEntry, manifest: dict, text: str,
+                         version: str | None) -> list[Finding]:
+    """Every per-manifest rule, for one registry entry (REQ-665 ADR-2)."""
+    rel = entry.path
+    findings: list[Finding] = []
+
+    # unknown-key: only the keys this harness documents (BR-1, AC-12).
+    for key in manifest:
+        if key not in entry.keys:
+            shown = json.dumps(key)
+            findings.append(_manifest_finding(
+                rel, _json_key_line(text, key),
+                f"unknown-key: {shown} is not a key {entry.harness} documents for its "
+                f"manifest — remove {shown} from {rel} (REQ-665 BR-1)",
+            ))
+
+    findings.extend(_check_machine_paths(rel, manifest, text))
+    findings.extend(_check_manifest_name(entry, manifest, text))
+
+    # version == VERSION, per manifest (BR-5, AC-3). A missing VERSION is one finding
+    # in the caller, not one here per manifest (ADR-9).
+    actual = manifest.get("version")
+    if version is not None and actual != version:
+        shown = "absent" if actual is None else json.dumps(actual)
+        expected = json.dumps(version)
+        findings.append(_manifest_finding(
+            rel, _json_key_line(text, "version"),
+            f"version-mismatch: `version` is {shown} but VERSION holds {expected} — set "
+            f'`"version": {expected}` in {rel} (REQ-665 BR-5)',
+        ))
+
+    findings.extend(_check_manifest_skills(root, rel, manifest, text))
+    findings.extend(_check_manifest_agents(root, entry, manifest, text))
+
+    # hooks-ref-invalid: the BR-4 shape. "default" has no rule: `hooks/hooks.json` is
+    # read by default, and `path-missing` reads a path string here.
+    if entry.hooks == "empty" and manifest.get("hooks") != {}:
+        shown = "absent" if "hooks" not in manifest else json.dumps(manifest["hooks"])
+        findings.append(_manifest_finding(
+            rel, _json_key_line(text, "hooks"),
+            f"hooks-ref-invalid: `hooks` is {shown}, but {entry.harness} must not load the "
+            f'Claude-format `hooks/hooks.json`, its default — set `"hooks": {{}}` in {rel} '
+            "(REQ-665 BR-4)",
+        ))
+
+    findings.extend(_check_execution_keys(entry, manifest, text))
+    findings.extend(_check_manifest_paths(root, entry, manifest, text))
+    return findings
+
+
+def _check_marketplace_fields(market: dict, text: str) -> list[Finding]:
     rel = MARKETPLACE_MANIFEST
     plugins = market.get("plugins")
     plugins_line = _json_key_line(text, "plugins")
@@ -3776,16 +4151,27 @@ def _check_marketplace_fields(market: dict, text: str, plugin_name: str | None) 
     if not isinstance(entry, dict):
         return [_manifest_finding(rel, plugins_line, "the `plugins` entry must be an object")]
     findings: list[Finding] = []
+    for keys, allowed, where in ((market, MANIFEST_MARKET_KEYS, "the top level"),
+                                 (entry, MANIFEST_MARKET_ENTRY_KEYS, "the `plugins` entry")):
+        for key in keys:
+            if key not in allowed:
+                shown = json.dumps(key)
+                findings.append(_manifest_finding(
+                    rel, _json_key_line(text, key),
+                    f"unknown-key: {shown} in {where} is not a key this marketplace uses, and "
+                    f"one there can change what the plugin runs — remove {shown} from {rel} "
+                    "(REQ-665 BR-4)",
+                ))
     entry_name = entry.get("name")
     if not isinstance(entry_name, str):
         findings.append(_manifest_finding(
             rel, plugins_line, "the `plugins` entry has no string `name`"))
-    elif plugin_name is not None and entry_name != plugin_name:
+    elif entry_name != MANIFEST_SET_NAME:
         findings.append(_manifest_finding(
             rel, _json_key_line(text, "name", last=True),
-            f"the marketplace entry is named {json.dumps(entry_name)} but plugin.json "
-            f"names the plugin {json.dumps(plugin_name)} — `plugin install` takes the "
-            "entry's name, so they must be equal (REQ-669 BR-1)",
+            f"the marketplace entry is named {json.dumps(entry_name)} but the plugin is "
+            f"named {json.dumps(MANIFEST_SET_NAME)} — `plugin install` takes the entry's "
+            "name, so they must be equal (REQ-669 BR-1)",
         ))
     source = entry.get("source")
     if not (isinstance(source, str) and _normalized_plugin_path(source) == "."):
@@ -3798,44 +4184,89 @@ def _check_marketplace_fields(market: dict, text: str, plugin_name: str | None) 
 
 
 def scan_plugin_manifest(root: Path) -> tuple[list[Finding], int]:
-    """REQ-669 BR-12 / BR-20: return ``(findings, manifests_scanned)``.
+    """REQ-665 BR-7, absorbing REQ-669 BR-12 / BR-20: return ``(findings, files_read)``.
 
     Inert (``([], 0)``) unless the root carries ``.claude-plugin/`` or is a
     versioned skills root (``VERSION`` plus a root-level ``<dir>/SKILL.md``). Once
-    armed, both manifests are read, so an armed run that scanned no manifest has
-    produced two "missing" findings — never a silent pass (LESSON-019). The count
-    lets a test prove the scan did real work on every fixture.
+    armed, every manifest in ``MANIFEST_REGISTRY`` and every companion is read, so
+    an armed run that read none of them has produced one finding per file, never a
+    silent pass (LESSON-019). The count is the manifests and companions found (ADR-9),
+    which lets a test prove the scan did real work on every fixture.
 
-    Rules, each reported once per violation:
-      1. each manifest exists and parses as strict JSON — repeated keys and the
-         non-JSON constants are rejected (LESSON-716);
-      2. plugin.json ``version`` is the trimmed content of ``VERSION`` (BR-12);
-      3. the plugin ``name`` is kebab-case and avoids the reserved prefixes;
-      4. every root-level ``<dir>/SKILL.md`` is reachable through ``skills``;
-      5. an ``agents`` field, when present, lists every ``agents/*.md``;
-      6. marketplace.json has exactly one ``plugins`` entry, whose ``name`` is the
-         plugin's name and whose ``source`` is ``./`` (BR-1);
-      7. there is no top-level ``bin`` of any kind: directory, file or symlink
-         (BR-20).
+    The rule name leads the message and ``Finding.check`` stays one id (ADR-3). Rules,
+    each reported once per violation:
+      * ``set-incomplete`` — every manifest exists (BR-1);
+      * ``unparseable`` — each parses as strict JSON: repeated keys and the non-JSON
+        constants are rejected (LESSON-716);
+      * ``unknown-key`` — only the keys its vendor documents (BR-1);
+      * ``machine-path`` — no string value is tied to one machine (BR-1);
+      * ``name-mismatch`` — ``name`` is ``adlc`` in every manifest (BR-1);
+      * ``version-mismatch`` — ``version`` is the trimmed content of ``VERSION``, per
+        manifest; a missing ``VERSION`` is one finding, on ``VERSION`` (BR-5);
+      * ``skill-missing`` — every root-level ``<dir>/SKILL.md`` is reachable through
+        ``skills`` (BR-2);
+      * ``skill-extra`` — a ``skills`` entry names a directory that is not a skill, or
+        a root ``skills`` entry of any kind exists (BR-2, ADR-8);
+      * ``dangling-entry`` — a ``skills`` entry names no directory (BR-2);
+      * ``agents-ref-invalid`` — "canonical": an ``agents`` field, when present, lists
+        every ``agents/*.md``; "empty": present and ``[]`` (BR-3);
+      * ``hooks-ref-invalid`` — "empty": present and ``{}`` (BR-4);
+      * ``path-missing`` — every companion, and every path a manifest names, exists
+        inside the checkout (BR-7);
+      * ``execution-key`` — no key that runs, installs or prompts, no inline definition,
+        and none of those at its default location (BR-4).
+
+    REQ-669's Claude-only rules keep their wording: the plugin ``name`` is kebab-case
+    and avoids the reserved prefixes; marketplace.json has exactly one ``plugins``
+    entry, whose ``name`` is ``adlc`` and whose ``source`` is ``./`` (BR-1);
+    and there is no top-level ``bin`` of any kind: directory, file or symlink (BR-20).
     """
     if not is_plugin_root(root):
         return [], 0
     findings: list[Finding] = []
     scanned = 0
-    plugin, plugin_text, loaded, found = _load_json_manifest(root, PLUGIN_MANIFEST)
-    findings.extend(loaded)
-    scanned += int(found)
-    market, market_text, loaded, found = _load_json_manifest(root, MARKETPLACE_MANIFEST)
-    findings.extend(loaded)
-    scanned += int(found)
+    parsed: list[tuple[ManifestEntry, dict, str]] = []
+    for entry in MANIFEST_REGISTRY:
+        manifest, text, loaded, found = _load_json_manifest(root, entry.path)
+        findings.extend(loaded)
+        scanned += int(found)
+        if not found:
+            findings.append(_manifest_finding(
+                entry.path, 1,
+                f"set-incomplete: {entry.path} is missing, and this root is a plugin root, "
+                f"so {entry.harness}'s manifest must exist — run `git checkout HEAD -- "
+                f"{entry.path}`, or if it was never committed create {entry.path} "
+                "(REQ-665 BR-1)",
+            ))
+        elif manifest is not None:
+            parsed.append((entry, manifest, text))
 
-    plugin_name: str | None = None
-    if plugin is not None:
-        findings.extend(_check_plugin_fields(root, plugin, plugin_text))
-        if isinstance(plugin.get("name"), str):
-            plugin_name = plugin["name"]
-    if market is not None:
-        findings.extend(_check_marketplace_fields(market, market_text, plugin_name))
+    version = _manifest_version(root)
+    if version is None:
+        findings.append(_manifest_finding(
+            PLUGIN_VERSION_FILE, 1,
+            "version-mismatch: VERSION is missing, empty or unreadable, so no manifest's "
+            f"`version` has anything to be pinned to — write the release number to "
+            f"{PLUGIN_VERSION_FILE} (REQ-665 BR-5)",
+        ))
+    for entry, manifest, text in parsed:
+        findings.extend(_check_plugin_fields(root, entry, manifest, text, version))
+
+    for rel in (c for entry in MANIFEST_REGISTRY for c in entry.companions):
+        companion, text, loaded, found = _load_json_manifest(root, rel)
+        findings.extend(loaded)
+        scanned += int(found)
+        if not found:
+            findings.append(_manifest_finding(
+                rel, 1,
+                f"path-missing: companion file {rel} is missing, and its install route "
+                f"needs it — run `git checkout HEAD -- {rel}`, or if it was never "
+                f"committed create {rel} (REQ-665 BR-7)",
+            ))
+        if companion is not None:
+            findings.extend(_check_machine_paths(rel, companion, text))
+            if rel == MARKETPLACE_MANIFEST:
+                findings.extend(_check_marketplace_fields(companion, text))
 
     # `lexists`, not `is_dir`: a `bin` file, or a symlink (dangling included),
     # is still a top-level `bin` entry the sync path sees.
@@ -3847,11 +4278,36 @@ def scan_plugin_manifest(root: Path) -> tuple[list[Finding], int]:
             "through the claude.ai sync path, which rejects a plugin with a top-level "
             "bin/; put executables under scripts/ (REQ-669 BR-20, ADR-3, ADR-4)",
         ))
+    # `lexists` again: Claude Code scans a root `skills/` in addition to its `skills`
+    # key, so one would double the catalog with no failure anywhere else (ADR-8).
+    if os.path.lexists(root / "skills"):
+        findings.append(_manifest_finding(
+            "skills/", 1,
+            "skill-extra: a top-level skills entry exists (a directory, file or symlink "
+            "named skills), and Claude Code would scan it beside the `skills` key and "
+            "double the catalog — delete skills/ from the clone root; skills stay in "
+            "their <name>/ directories (REQ-665 BR-2, ADR-8)",
+        ))
+    for skill in _plugin_root_skill_dirs(root):
+        if not _inside_root(root, skill):
+            findings.append(_manifest_finding(
+                f"{skill}/", 1,
+                f"skill-extra: {skill}/ resolves outside this checkout, so an install does "
+                f"not get it — replace the symlink at {skill}/ with the directory "
+                "(REQ-665 BR-2)",
+            ))
+    for rel in MANIFEST_DEFAULT_EXEC_FILES:
+        if os.path.lexists(root / rel):
+            findings.append(_manifest_finding(
+                rel, 1,
+                f"execution-key: a harness reads {rel} by default, with no manifest key, and "
+                f"the toolkit ships nothing of that kind — delete {rel} (REQ-665 BR-4)",
+            ))
     return findings, scanned
 
 
 def check_plugin_manifest(root: Path) -> list[Finding]:
-    """Per-root ``plugin-manifest`` findings (see ``scan_plugin_manifest``)."""
+    """Per-root ``manifest-parity`` findings (see ``scan_plugin_manifest``)."""
     return scan_plugin_manifest(root)[0]
 
 
@@ -3859,7 +4315,7 @@ def is_plugin_root(root: Path) -> bool:
     """Whether ``root`` is a plugin root: it carries ``.claude-plugin/``, or it is
     a versioned skills root (``VERSION`` plus a root-level ``<dir>/SKILL.md``).
 
-    Arms both ``plugin-manifest`` and ``toolkit-path``, so the two checks cannot
+    Arms both ``manifest-parity`` and ``no-harness-path``, so the two checks cannot
     disagree about which roots ship as the plugin.
     """
     return (root / PLUGIN_MANIFEST_DIR).is_dir() or (
@@ -4384,7 +4840,7 @@ def check_ethos_line(text: str, rel: str, ethos: str, companion: bool = False) -
 
 
 def check_ethos_lines(root: Path) -> list[Finding]:
-    """REQ-666 BR-2 per root: armed like `plugin-manifest` (``is_plugin_root``), so a
+    """REQ-666 BR-2 per root: armed like `manifest-parity` (``is_plugin_root``), so a
     fixture root or a consumer repo is never read. Walks the loader's
     ``*/SKILL.md`` set. A conventions copy without the line is one finding on it."""
     if not is_plugin_root(root):
@@ -4562,7 +5018,7 @@ def skill_description(text: str) -> tuple[str, int] | None:
 
 
 def check_description_budget(root: Path) -> list[Finding]:
-    """Per root, armed like `plugin-manifest`: a description over
+    """Per root, armed like `manifest-parity`: a description over
     ``DESCRIPTION_BUDGET`` code points is a finding; the per-skill total is
     printed to stderr whenever the check runs."""
     if not is_plugin_root(root):
@@ -4620,7 +5076,7 @@ def _skills_ref_copy(text: str) -> str:
 
 
 def check_skills_ref(root: Path) -> list[Finding]:
-    """Per root, armed like `plugin-manifest`."""
+    """Per root, armed like `manifest-parity`."""
     if not is_plugin_root(root):
         return []
     exe = shutil.which(SKILLS_REF_BIN)

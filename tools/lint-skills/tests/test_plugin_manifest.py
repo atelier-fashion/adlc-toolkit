@@ -1,4 +1,7 @@
-"""Test the plugin-manifest check (REQ-669 BR-1, BR-12, BR-20, ADR-3).
+"""Test the REQ-669 rules of `manifest-parity` (REQ-669 BR-1, BR-12, BR-20, ADR-3).
+
+REQ-665 ADR-1: `manifest-parity` absorbed REQ-669's check, and this file keeps its
+name. `tests/test_manifest_parity.py` covers REQ-665's rules across the registry.
 
 `scan_plugin_manifest` reads `.claude-plugin/plugin.json` and
 `.claude-plugin/marketplace.json` at the scan root and holds them to the repo:
@@ -11,8 +14,10 @@ there is no top-level `bin/`.
 Fixture trees live under `fixtures/plugin-manifest/<name>/`. Their skill files
 are stored as `SKILL.fixture.md` and renamed to `SKILL.md` when a tree is staged
 into `tmp_path`, so the real-repo lint walk (which counts every `SKILL.md`) and
-the plugin loader never see fixture skills. Every scan asserts that it read at
-least one manifest, so a fixture path that went wrong fails instead of passing
+the plugin loader never see fixture skills. Only `ok` holds the Cursor and Copilot
+manifests: `_stage` overlays them onto every other tree, carrying that tree's
+`VERSION`, so each fixture still breaks one rule. Every scan asserts that it read
+at least one manifest, so a fixture path that went wrong fails instead of passing
 vacuously (LESSON-019).
 """
 from __future__ import annotations
@@ -29,11 +34,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LINT_DIR = REPO_ROOT / "tools" / "lint-skills"
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "plugin-manifest"
 SKILL_STAND_IN = "SKILL.fixture.md"
+# The manifests a fixture other than `ok` takes from `ok` when `_stage` copies it.
+OVERLAID_MANIFESTS = (".cursor-plugin/plugin.json", ".github/plugin/plugin.json")
 
 sys.path.insert(0, str(LINT_DIR))
 import check  # noqa: E402
 
-# fixture -> number of plugin-manifest findings it must produce.
+# fixture -> number of manifest-parity findings it must produce.
 FIXTURE_EXPECTED = {
     "ok": 0,
     "version-mismatch": 1,
@@ -46,21 +53,29 @@ FIXTURE_EXPECTED = {
 
 
 def _stage(tmp_path: Path, name: str) -> Path:
-    """Copy fixture tree ``name`` into ``tmp_path`` with its skill stand-ins renamed."""
+    """Copy fixture tree ``name`` into ``tmp_path`` with its skill stand-ins renamed
+    and the manifests it lacks overlaid from ``ok``, at its own ``VERSION``."""
     src = FIXTURES / name
     assert src.is_dir(), f"fixture tree missing: {src}"
     dest = tmp_path / name
     shutil.copytree(src, dest)
     for stand_in in dest.rglob(SKILL_STAND_IN):
         stand_in.rename(stand_in.with_name("SKILL.md"))
+    version = (dest / "VERSION").read_text(encoding="utf-8").strip()
+    for rel in OVERLAID_MANIFESTS:
+        if not (dest / rel).exists():
+            manifest = _read(FIXTURES / "ok", rel)
+            manifest["version"] = version
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            _write(dest, rel, manifest)
     return dest
 
 
 def _scan(root: Path) -> list:
-    """plugin-manifest findings for ``root``; fails if no manifest was read."""
+    """manifest-parity findings for ``root``; fails if no manifest was read."""
     findings, scanned = check.scan_plugin_manifest(root)
     assert scanned > 0, f"vacuous scan: no manifest read under {root} (LESSON-019)"
-    assert all(f.check == "plugin-manifest" for f in findings)
+    assert all(f.check == "manifest-parity" for f in findings)
     return findings
 
 
@@ -72,6 +87,24 @@ def _write(root: Path, rel: str, obj: dict) -> None:
     (root / rel).write_text(json.dumps(obj, indent=2) + "\n", encoding="utf-8")
 
 
+def _name_every_manifest(root: Path, name: str) -> None:
+    """Set ``name`` on every manifest and the marketplace entry, for the rules that
+    read a name's shape; ``_name_rules`` sets aside the literal ``adlc`` comparison."""
+    for entry in check.MANIFEST_REGISTRY:
+        manifest = _read(root, entry.path)
+        manifest["name"] = name
+        _write(root, entry.path, manifest)
+    market = _read(root, check.MARKETPLACE_MANIFEST)
+    market["plugins"][0]["name"] = name
+    _write(root, check.MARKETPLACE_MANIFEST, market)
+
+
+def _name_rules(root: Path) -> list:
+    """Findings other than the set's literal name, which any rename also breaks."""
+    return [f for f in _scan(root) if not f.message.startswith("name-mismatch")
+            and "the marketplace entry is named" not in f.message]
+
+
 # --- every fixture ----------------------------------------------------------
 
 def test_fixture_set_matches_the_tree_on_disk():
@@ -80,10 +113,10 @@ def test_fixture_set_matches_the_tree_on_disk():
 
 
 @pytest.mark.parametrize("name", sorted(FIXTURE_EXPECTED))
-def test_every_fixture_scans_both_manifests(tmp_path, name):
+def test_every_fixture_scans_every_manifest(tmp_path, name):
     root = _stage(tmp_path, name)
     findings, scanned = check.scan_plugin_manifest(root)
-    assert scanned == 2
+    assert scanned == 4
     assert len(findings) == FIXTURE_EXPECTED[name], [f.format() for f in findings]
 
 
@@ -91,11 +124,11 @@ def test_every_fixture_scans_both_manifests(tmp_path, name):
 
 def test_repo_root_and_ok_fixture_are_clean(tmp_path):
     repo_findings, repo_scanned = check.scan_plugin_manifest(REPO_ROOT)
-    assert repo_scanned == 2
+    assert repo_scanned == 4
     assert repo_findings == [], [f.format() for f in repo_findings]
     ok = _stage(tmp_path, "ok")
     ok_findings, ok_scanned = check.scan_plugin_manifest(ok)
-    assert ok_scanned == 2
+    assert ok_scanned == 4
     assert ok_findings == []
     # The ok fixture is a real plugin root: two skills, two agents, no agents field.
     assert check._plugin_root_skill_dirs(ok) == ["alpha", "beta"]
@@ -111,7 +144,7 @@ def test_check_is_wired_into_run_and_main(tmp_path):
         "---\nname: alpha\n---\n# alpha\n\n" + ethos + "\n", encoding="utf-8")
     findings, scanned = check.run(root)
     assert scanned == 1
-    assert [f.check for f in findings] == ["plugin-manifest"]
+    assert [f.check for f in findings] == ["manifest-parity"]
     assert check.main(["--root", str(root)]) == 1
 
 
@@ -121,7 +154,7 @@ def test_inert_outside_a_plugin_root(tmp_path):
     (tmp_path / "alpha" / "SKILL.md").write_text("# alpha\n", encoding="utf-8")
     assert check.scan_plugin_manifest(tmp_path) == ([], 0)
     findings, _ = check.run(tmp_path)
-    assert not [f for f in findings if f.check == "plugin-manifest"]
+    assert not [f for f in findings if f.check == "manifest-parity"]
 
 
 @pytest.mark.parametrize("skills", [
@@ -156,7 +189,10 @@ def test_version_mismatch_fails(tmp_path):
     assert '"version"' in lines[f.line - 1]
     # The comparison is against the TRIMMED content: a trailing newline or space
     # in VERSION is not a mismatch.
-    (root / "VERSION").write_text("1.2.4 \n\n", encoding="utf-8")
+    (root / "VERSION").write_text("1.2.3 \n\n", encoding="utf-8")
+    plugin = _read(root, check.PLUGIN_MANIFEST)
+    plugin["version"] = "1.2.3"
+    _write(root, check.PLUGIN_MANIFEST, plugin)
     assert _scan(root) == []
 
 
@@ -193,8 +229,8 @@ def test_skills_entry_without_dot_slash_reaches_nothing(tmp_path):
     plugin = _read(root, check.PLUGIN_MANIFEST)
     plugin["skills"] = ["alpha", "./beta"]
     _write(root, check.PLUGIN_MANIFEST, plugin)
-    findings = _scan(root)
-    assert len(findings) == 1 and "`alpha/`" in findings[0].message
+    missing, refused = _scan(root)
+    assert "`alpha/`" in missing.message and "does not start with `./`" in refused.message
 
 
 def test_no_skills_field_is_one_finding(tmp_path):
@@ -264,11 +300,12 @@ def test_unparseable_manifest_is_one_finding(tmp_path, bad_text, needle):
 
 def test_missing_manifests_are_findings_once_armed(tmp_path):
     # VERSION plus a root-level skill arms the check, so deleting the manifest
-    # directory is two findings, not a silent skip (LESSON-019).
+    # directory is two findings, not a silent skip (LESSON-019). The Cursor and
+    # Copilot manifests are still read.
     root = _stage(tmp_path, "ok")
     shutil.rmtree(root / ".claude-plugin")
     findings, scanned = check.scan_plugin_manifest(root)
-    assert scanned == 0
+    assert scanned == 2
     assert sorted(f.file for f in findings) == [check.MARKETPLACE_MANIFEST, check.PLUGIN_MANIFEST]
     assert all("missing" in f.message for f in findings)
 
@@ -277,7 +314,7 @@ def test_one_missing_manifest_is_one_finding(tmp_path):
     root = _stage(tmp_path, "ok")
     (root / check.MARKETPLACE_MANIFEST).unlink()
     findings, scanned = check.scan_plugin_manifest(root)
-    assert scanned == 1
+    assert scanned == 3
     assert [f.file for f in findings] == [check.MARKETPLACE_MANIFEST]
 
 
@@ -367,14 +404,9 @@ def test_marketplace_entry_source_must_be_this_repo(tmp_path, source):
 @pytest.mark.parametrize("name", ["claude-adlc", "anthropic-tools", "claudeadlc", "cc-plugin-adlc"])
 def test_reserved_prefix_plugin_name_fails(tmp_path, name):
     root = _stage(tmp_path, "ok")
-    plugin = _read(root, check.PLUGIN_MANIFEST)
-    market = _read(root, check.MARKETPLACE_MANIFEST)
-    plugin["name"] = name
-    market["plugins"][0]["name"] = name  # keep the entry in step: one rule broken
-    _write(root, check.PLUGIN_MANIFEST, plugin)
-    _write(root, check.MARKETPLACE_MANIFEST, market)
-    findings = _scan(root)
-    assert len(findings) == 1 and "reserved prefix" in findings[0].message
+    _name_every_manifest(root, name)
+    finding, = _name_rules(root)
+    assert "reserved prefix" in finding.message
 
 
 def test_reserved_prefixes_match_the_requirement():
@@ -387,26 +419,16 @@ def test_reserved_prefixes_match_the_requirement():
 @pytest.mark.parametrize("name", ["cc-tools", "ccplugin-adlc", "adlc-cc-plugin-x", "cc-plugins"])
 def test_near_reserved_plugin_name_is_clean(tmp_path, name):
     root = _stage(tmp_path, "ok")
-    plugin = _read(root, check.PLUGIN_MANIFEST)
-    market = _read(root, check.MARKETPLACE_MANIFEST)
-    plugin["name"] = name
-    market["plugins"][0]["name"] = name
-    _write(root, check.PLUGIN_MANIFEST, plugin)
-    _write(root, check.MARKETPLACE_MANIFEST, market)
-    assert _scan(root) == []
+    _name_every_manifest(root, name)
+    assert _name_rules(root) == []
 
 
 @pytest.mark.parametrize("name", ["Adlc", "adlc_toolkit", "adlc:x", "adlc--x"])
 def test_non_kebab_plugin_name_fails(tmp_path, name):
     root = _stage(tmp_path, "ok")
-    plugin = _read(root, check.PLUGIN_MANIFEST)
-    market = _read(root, check.MARKETPLACE_MANIFEST)
-    plugin["name"] = name
-    market["plugins"][0]["name"] = name
-    _write(root, check.PLUGIN_MANIFEST, plugin)
-    _write(root, check.MARKETPLACE_MANIFEST, market)
-    findings = _scan(root)
-    assert len(findings) == 1 and "kebab-case" in findings[0].message
+    _name_every_manifest(root, name)
+    finding, = _name_rules(root)
+    assert "kebab-case" in finding.message
 
 
 # --- BR-1: the README's install commands name the manifests -------------------

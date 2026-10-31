@@ -1,0 +1,13 @@
+{
+  "name": "adlc",
+  "version": "1.2.3",
+  "description": "Fixture plugin for the manifest-parity lint tests.",
+  "author": {
+    "name": "Atelier Fashion"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/atelier-fashion/adlc-toolkit",
+  "skills": "./",
+  "agents": [],
+  "hooks": {}
+}

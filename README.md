@@ -48,7 +48,7 @@ The plugin's design rests on how Claude Code loads plugins. A claim marked **ver
 |---|---|
 | `"skills": "./"` in `plugin.json` exposes all 17 root-level `<skill>/SKILL.md` directories | verified, 2.1.258 |
 | With no `agents` field, the default `agents/` scan exposes all 19 agents | verified, 2.1.258 |
-| Both manifests pass `claude plugin validate --strict` | verified, 2.1.258 |
+| `claude plugin validate . --strict` passes. `claude plugin validate .claude-plugin/plugin.json` passes with one warning, about the root `CLAUDE.md`, so its `--strict` form fails | verified, 2.1.258 |
 | An install copies the plugin to `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, with no `.git`. Earlier versions stay on disk after `claude plugin update` | verified, 2.1.258, through a git marketplace (the clone-then-cache path a GitHub source takes). The two commands above against this GitHub repo are **unverified** until the first release check |
 | `${CLAUDE_PLUGIN_ROOT}` is substituted in skill text: prose, fenced shell and `!` lines, before a `!` line runs. The `${CLAUDE_PLUGIN_ROOT:-…}` default form is **not** substituted | verified, 2.1.258 |
 | `${CLAUDE_PLUGIN_ROOT}` is substituted in an agent body | **unverified** (needs a model turn) |
@@ -319,7 +319,80 @@ Copilot CLI, Codex, Gemini CLI and Cursor read user-level skills from `~/.agents
   |---|---|
   | the ETHOS `!` line | shown as literal text; the model may run its command or skip it, so the ethos can be missing from the skill's context |
   | agent dispatch | runs inline, one checklist at a time, where the harness has no subagents |
-  | the plugin route's `adlc:` names | not applicable: those harnesses read the skills view, which has no namespace |
+  | the plugin route's `adlc:` names | not applicable on this mount: the skills view has no namespace. The plugin installs below are a separate route, and their naming is unverified |
+
+### Install as a plugin on other harnesses (alternative)
+
+This is an alternative for harnesses other than Claude Code. On Claude Code, use the [plugin route](#install) or the symlink install above.
+
+The `~/.agents/skills` mount follows the clone, so a harness lists every commit at once. Cursor and Copilot CLI can instead list the toolkit at a tag you choose, through their own manifests, [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json) and [`.github/plugin/plugin.json`](.github/plugin/plugin.json). Both point at the same skill directories, so nothing moves. Use a tag cut after these manifests landed: `v5.4.0` and older have none.
+
+Each one is a **catalog mount**, not a third install route. It pins what the harness lists, and a skill's shell still needs a Claude Code install route on the same machine. So the pin covers the skill text only: the partials, engines and `adlc` CLI a skill runs are whatever that route has installed, at its version. A tag can also be moved, so note `git -C adlc-toolkit rev-parse HEAD` if you need the exact commit. Neither vendor documents `CLAUDE_PLUGIN_ROOT` for a skill's shell, so a skill finds ToolkitRoot through `~/.claude/skills` or `~/.claude/adlc/plugin-root`.
+
+Every claim below about Cursor, Copilot CLI and Gemini CLI is **unverified**. None of their binaries was available, so nothing here has run on a real install, and `.adlc/research/harness-probes/` holds no `cursor.json`, `copilot.json` or `gemini.json` probe result. Each subsection names the vendor docs its claims come from, read on 2026-10-30. The full record is [`.adlc/specs/REQ-665-plugin-manifests-alternative-install/verification.md`](.adlc/specs/REQ-665-plugin-manifests-alternative-install/verification.md).
+
+#### Cursor (pinned plugin)
+
+**Unverified.** Source: [Cursor plugins](https://cursor.com/docs/plugins) and the [plugin reference](https://cursor.com/docs/reference/plugins). No probe result: `cursor.json` does not exist.
+
+- **Install.** Clone at a tag, copy the clone into Cursor's local plugin directory, then run **Developer: Reload Window**. Copy it, do not symlink it: Cursor skips a symlink that resolves outside that directory. On Enterprise accounts the admin setting **Allow Local Plugin Imports** has to be on, and it is off by default.
+
+  ```bash
+  git clone --branch <tag> https://github.com/atelier-fashion/adlc-toolkit
+  mkdir -p ~/.cursor/plugins/local
+  cp -R adlc-toolkit ~/.cursor/plugins/local/adlc
+  ```
+
+- **What loads.** The skills, through `"skills": "./"`. How a plugin's skill is named when you invoke it, and what happens when that name is also a built-in command, is **unverified**.
+- **What does not load.** Agents: `"agents": []` switches off the default `agents/` scan, because the toolkit's agents are in Claude Code's format. On the symlink install Cursor reads them through `~/.claude/agents` instead (see [Cursor](#cursor)). Hooks: `"hooks": {}` keeps Claude Code's `hooks/hooks.json` out, and Cursor has no hook render of its own: it reads a project's `.claude/settings.json`. Neither agents nor hooks are bundled in the plugin manifest. MCP: the toolkit ships no server. The runtime: this install pins what Cursor lists but does not replace a Claude Code install route on a machine that runs the skills, because a skill resolves ToolkitRoot, the installed engines and the `adlc` CLI through it.
+- **Coexistence.** With the `~/.agents/skills` mount on the same machine, each skill may be listed twice. Which copy answers is undocumented and **unverified**.
+- **Update.** Check out the new tag and copy again, then reload the window:
+
+  ```bash
+  git -C adlc-toolkit fetch --tags
+  git -C adlc-toolkit checkout <new-tag>
+  rm -rf ~/.cursor/plugins/local/adlc
+  cp -R adlc-toolkit ~/.cursor/plugins/local/adlc
+  ```
+
+- **Trade-off.** A pinned copy is reproducible and changes only when you update it, and can therefore be behind the clone; the live clone shows every commit instantly and cannot be pinned.
+
+#### Copilot CLI (pinned plugin)
+
+**Unverified.** Source: the [Copilot CLI plugin reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference). No probe result: `copilot.json` does not exist.
+
+- **Install.** Clone at a tag, then install the clone by path. Copilot's lookup order reaches `.github/plugin/plugin.json` before `.claude-plugin/plugin.json`. Whether this install copies the clone or reads it in place is undocumented, so keep the clone at the tag.
+
+  ```bash
+  git clone --branch <tag> https://github.com/atelier-fashion/adlc-toolkit
+  copilot plugin install ./adlc-toolkit
+  ```
+
+- **What loads.** The skills, through `"skills": "./"`. How a plugin's skill is named when you invoke it, and what happens when that name is also a built-in command, is **unverified**.
+- **What does not load.** Agents: `"agents": []` switches off the default `agents/` scan, because the toolkit's agents are in Claude Code's format. Copilot gets its agents from `adlc harness install --harness copilot`, which is separate from this plugin (see [Copilot CLI](#copilot-cli)). Hooks: `"hooks": {}` keeps Claude Code's `hooks/hooks.json` out, and Copilot's hook render is `.github/hooks/adlc.json`, which `/init --harness copilot` writes into a project. Neither is bundled in the plugin manifest. MCP: the toolkit ships no server. The runtime: this install pins what Copilot lists but does not replace a Claude Code install route on a machine that runs the skills, because a skill resolves ToolkitRoot, the installed engines and the `adlc` CLI through it.
+- **Coexistence.** Copilot resolves skills first-found-wins, with `~/.agents/skills` ahead of plugin skills, so the mount **wins**: a same-named plugin skill is silently ignored, and the pin has no effect while the mount exists. `install.sh` creates that mount; the Claude Code plugin route does not.
+- **Update.** Check out the new tag and install again. The vendor doc does not describe updating a direct local-path install:
+
+  ```bash
+  git -C adlc-toolkit fetch --tags
+  git -C adlc-toolkit checkout <new-tag>
+  copilot plugin install ./adlc-toolkit
+  ```
+
+- **Trade-off.** A pinned copy is reproducible and changes only when you update it, and can therefore be behind the clone; the live clone shows every commit instantly and cannot be pinned.
+
+#### Gemini CLI
+
+No manifest ships for Gemini CLI: there is no `gemini-extension.json`. Gemini CLI uses the `~/.agents/skills` mount above.
+
+**Unverified.** Source: the [extension reference](https://geminicli.com/docs/extensions/reference) and `packages/cli/src/config/extension-manager.ts` on `main`. No probe result: `gemini.json` does not exist. Why no manifest ships:
+
+- Gemini CLI loads an extension's skills only from `<extension>/skills`, and its manifest has no skills key, so a manifest at the clone root would need a root `skills/` directory.
+- A root `skills/` would double the Claude Code plugin's catalog, because Claude Code scans it in addition to the manifest's `skills` key.
+- A root `skills/` of symlinks would not survive an install. Install copies with `fs.promises.cp`, which rewrites a relative symlink to an absolute path into the source. The copy then dangles once a git install's temporary clone is gone, and after a local-path install it still reads the clone, which is no pin. The rewrite is **verified** on Node 26.7.0; the install itself is not.
+- `agents/` and `hooks/hooks.json` are read from fixed locations, with no opt-out short of disabling the extension, so a clone-root extension would feed Gemini CLI Claude-format agents and Claude Code's hook.
+
+A pinned install would need an artifact with real copies under `skills/`, such as a generated release branch, and none is published. geminicli.com also says Gemini CLI was replaced by Antigravity CLI for unpaid and Google One users on 2026-06-18.
 
 ### Harness adapters: one allowlist and one hook set, rendered per harness
 
