@@ -342,10 +342,50 @@ a general markdown linter and NOT a general shell linter.
     REQ gets `status: approved` from it (BR-18); since REQ-661 that site is
     `proceed/phase-0-setup.md`, where Step 0 now lives.
 
-12. **Plugin manifest (`plugin-manifest`)** (REQ-669 BR-1, BR-12, BR-20,
-    ADR-3): this repo is both the Claude Code marketplace and the plugin, and
-    the check keeps `.claude-plugin/plugin.json` and
-    `.claude-plugin/marketplace.json` in step with the tree. Each of these is
+12. **Manifest parity (`manifest-parity`)** (REQ-665 BR-1, BR-2, BR-3, BR-4,
+    BR-5, BR-7, ADR-1 to ADR-9; REQ-669 BR-1, BR-12, BR-20, ADR-3;
+    it absorbed REQ-669's `plugin-manifest` and kept every rule and its arming):
+    every plugin manifest stays in step with the tree, with the other manifests
+    and with `VERSION`. This repo is both the Claude Code marketplace and the
+    plugin, and Cursor and Copilot CLI read manifests of their own. The set is
+    `MANIFEST_REGISTRY`, defined once in `check.py`. Each entry also lists the
+    top-level keys its vendor documents. Adding a harness starts with one entry
+    and one file; the bump in `RELEASING.md` and `plugin-sandbox.sh`, and the
+    README subsection, follow:
+
+    | Harness | Manifest | Companion | `agents` | `hooks` |
+    |---|---|---|---|---|
+    | `claude` | `.claude-plugin/plugin.json` | `.claude-plugin/marketplace.json` | `canonical`: absent, or lists every `agents/*.md` | `default`: no shape rule, `hooks/hooks.json` is read by default, and `execution-key` refuses an inline definition |
+    | `cursor` | `.cursor-plugin/plugin.json` | none | `empty`: present and `[]` | `empty`: present and `{}` |
+    | `copilot` | `.github/plugin/plugin.json` | none | `empty`: present and `[]` | `empty`: present and `{}` |
+
+    Each rule leads its finding's message, so a line reads
+    `<file>:<line>: manifest-parity: version-mismatch: …`, and the clause after
+    the em dash is the exact edit, naming the file (ADR-3, LESSON-572):
+
+    | Rule | Fires when |
+    |---|---|
+    | `set-incomplete` | an armed root is missing a manifest in the registry. With every manifest gone it fires once per manifest, never a silent pass (LESSON-019) |
+    | `unparseable` | a manifest or companion cannot be read, resolves outside the checkout through a symlink, is not UTF-8, is not strict JSON (a repeated key, `NaN` or `Infinity` included), is nested too deeply to parse, or is not a top-level object |
+    | `name-mismatch` | a manifest's `name` is not the literal `MANIFEST_SET_NAME`, `adlc`, so a set renamed in step still fails: `session-start.sh` and `adlc doctor` recognise a copy by that name |
+    | `version-mismatch` | a manifest's `version` is not the trimmed content of `VERSION`, once per manifest. A missing or empty `VERSION` is one finding |
+    | `skill-missing` | a root-level `<dir>/SKILL.md` is not reachable through `skills`, or `skills` is absent or is not a path string or an array of them |
+    | `skill-extra` | a `skills` entry is a directory outside the skill set, a skill directory resolves outside the checkout, or a top-level `skills` exists of any kind: Claude Code scans it beside the key, so it would double the catalog (BR-2, ADR-8) |
+    | `dangling-entry` | a `skills` entry names no directory, or does not start with `./`, even beside a twin that does |
+    | `agents-ref-invalid` | `agents` breaks the harness's shape above (BR-3) |
+    | `hooks-ref-invalid` | `hooks` breaks the harness's shape above (BR-4) |
+    | `path-missing` | a value under `MANIFEST_PATH_KEYS` is not a `./` path with no `..` segment that exists inside the checkout, symlinks resolved, or a companion file does not exist. Only `logo` and `icon` may hold an `https` URL. An inline value is left to `execution-key`, a machine path to `machine-path`, and `agents` and `hooks` on an `empty` entry to their shape rules |
+    | `unknown-key` | a top-level key the registry does not list for that harness, or a key `marketplace.json` does not list, at its top level or in its entry |
+    | `machine-path` | a string value at any depth starts with `/` or `~/`, is `~`, names `$HOME` or `%USERPROFILE%` in any spelling, is a Windows path, holds a home path such as `/Users/` in any case, or is a URL form other than `https` with a host and no userinfo. What follows an `https` URL in the same value is still read |
+    | `execution-key` | a manifest carries a key under `MANIFEST_EXEC_KEYS`, in any form, a path key holds an inline definition, or a file under `MANIFEST_DEFAULT_EXEC_FILES` exists. No path rule can read those, and a harness acts on them at install or at session start (BR-4, LESSON-749) |
+
+    Two gaps are declared, not chased: a percent-encoded home path in a free string,
+    and a symlink inside the checkout whose target is an absolute path that also
+    resolves inside it, which would dangle on another machine.
+
+    REQ-669's rows all still hold, under this one check id. The reserved-name,
+    marketplace and `bin` rows keep their wording and carry no rule tag; the
+    others are reported under the rule above that covers them. Each of these is
     one finding:
 
     | Fires when |
@@ -356,7 +396,7 @@ a general markdown linter and NOT a general shell linter.
     | the plugin `name` is not kebab-case, or starts with a reserved prefix in `PLUGIN_RESERVED_NAME_PREFIXES`: `claude`, `anthropic` or `cc-plugin-` (case-insensitive). The three cover every prefix requirement.md's PluginManifest entity forbids (`claude-`, `anthropic-`, `anthropics-`, `cc-plugin-`). `cc-tools` and `ccplugin-x` are clean |
     | a root-level `<dir>/SKILL.md` is not reachable through `skills`: reachable means `skills` is `"./"` or `"."`, or an array holding one of them or `"./<dir>"`. An entry that does not start with `./` reaches nothing, as in the loader. A missing `skills` field is one finding |
     | an `agents` field is present but omits an `agents/*.md`. The field replaces the default `agents/` scan, so the manifest carries none |
-    | `marketplace.json` `plugins` does not have exactly one entry, the entry's `name` differs from the plugin name, or its `source` is not `"./"` |
+    | `marketplace.json` `plugins` does not have exactly one entry, the entry's `name` is not `adlc`, or its `source` is not `"./"` |
     | a top-level `bin` exists, of any kind: a directory, a file, or a symlink (a dangling one included; the test is `os.path.lexists`). Directory listings reach Claude Code users through the claude.ai sync path, which rejects a plugin with one, so executables go under `scripts/` (ADR-4) |
 
     The skill set uses the loader's rule from the architecture probe: one level
@@ -364,12 +404,15 @@ a general markdown linter and NOT a general shell linter.
     `SKILL.md` under `tools/` is not a skill. The check is per-root. It is
     inert unless the root has `.claude-plugin/` or is a versioned skills root
     (`VERSION` plus a root-level `<dir>/SKILL.md`). Either one arms it, so
-    deleting `.claude-plugin/` turns into two missing-manifest findings, not a
-    silent pass (LESSON-019). `scan_plugin_manifest` also returns the number
-    of manifests it read, and every test asserts it is non-zero. Fixture trees
-    are in `tests/fixtures/plugin-manifest/`. Their skills are stored as
-    `SKILL.fixture.md` and renamed when a test stages them, so neither this
-    lint's `SKILL.md` walk nor the plugin loader ever sees a fixture skill.
+    deleting every manifest turns into findings, not a silent pass (LESSON-019).
+    `scan_plugin_manifest` also returns the number of manifests and companions
+    it read, 4 on a complete root, and every test asserts it is non-zero.
+    The acceptance tests are `tests/test_manifest_parity.py`, one firing test per
+    rule, and REQ-669's cases stay in `tests/test_plugin_manifest.py`. Fixture
+    trees are in `tests/fixtures/plugin-manifest/`, a name ADR-1 kept. Their
+    skills are stored as `SKILL.fixture.md` and renamed when a test stages them,
+    so neither this lint's `SKILL.md` walk nor the plugin loader ever sees a
+    fixture skill.
 
     BR-1's install commands are checked by a test rather than a lint rule,
     because they live in the README:
@@ -378,7 +421,12 @@ a general markdown linter and NOT a general shell linter.
     README.md, every `claude plugin install <plugin>@<marketplace>` line there to
     type plugin.json's and marketplace.json's `name`s, and the added repo to be
     plugin.json's `repository`. `test_readme_install_check_fires_on_drift` edits
-    each side in turn and expects a problem.
+    each side in turn and expects a problem. REQ-665's README section is pinned
+    the same way, in `tests/test_manifest_parity.py`:
+    `test_readme_alternative_section_parts` requires one subsection per registry
+    entry but `claude`, each with its install, what loads, what does not, coexistence,
+    update and trade-off, and `test_docs_name_the_new_check` reads the documents
+    for the name this check replaced.
 
 13. **Toolkit root line (`toolkit-root-line`)** (REQ-669 ADR-1, BR-3, BR-4):
     every shell fence that reads `$ADLC_TOOLKIT_ROOT` carries the canonical
@@ -557,7 +605,7 @@ a general markdown linter and NOT a general shell linter.
     `test_checks_py_guard_fires_on_a_partial_path_fallback` plants each
     fallback shape in `_partial_path` and expects it reported.
 
-    The check is per-root and armed like `plugin-manifest` (`is_plugin_root`):
+    The check is per-root and armed like `manifest-parity` (`is_plugin_root`):
     only a plugin root has a plugin-reachable surface, so a consumer repo is
     never read. Like every walk here it keeps to the scan root and tests only
     the path components below it, so a root inside `.worktrees/` is scanned in
@@ -667,7 +715,7 @@ a general markdown linter and NOT a general shell linter.
     `*/SKILL.md`. A missing line, a line that starts like it but differs, and a
     second copy are each a finding, and so is any other inline bang command in a
     skill's prose: context reads belong in the `# adlc-context` fence. Per root,
-    armed like `plugin-manifest` (`is_plugin_root`). The same walk reads each
+    armed like `manifest-parity` (`is_plugin_root`). The same walk reads each
     skill's companions in companion mode (REQ-661 BR-7): a companion carries
     **zero** ETHOS lines, because only `SKILL.md` is preprocessed, so a copy
     there is a finding; the near-line and inline-bang rules are unchanged, and a
@@ -681,7 +729,7 @@ a general markdown linter and NOT a general shell linter.
     `DESCRIPTION_BUDGET` (512) Unicode code points, counted with `len(str)`,
     never bytes. The check prints `description-budget: <N> skill
     description(s), <total> code points in all` to stderr whenever it runs.
-    Per root, armed like `plugin-manifest`. Tests:
+    Per root, armed like `manifest-parity`. Tests:
     `tests/test_description_budget.py`.
 
 20. **Skills reference validator (`skills-ref`)** (REQ-666 BR-11, AC-10): when
@@ -696,7 +744,7 @@ a general markdown linter and NOT a general shell linter.
     `references/` included, and never per companion. Without the validator the check prints one `skills-ref:
     SKIP` line naming `pip install skills-ref` and adds no finding, so the lint
     stays offline and stdlib-only (REQ-425 BR-1). Per root, armed like
-    `plugin-manifest`. Tests: `tests/test_skills_ref.py`, with a fake validator.
+    `manifest-parity`. Tests: `tests/test_skills_ref.py`, with a fake validator.
     The run against the real validator is a manual, recorded step.
 
 21. **Skill line budget (`skill-line-budget`)** (REQ-661 BR-2, ADR-8): the

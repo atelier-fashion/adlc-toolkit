@@ -1,0 +1,13 @@
+{
+  "name": "adlc",
+  "version": "5.4.0",
+  "description": "Agentic Development Lifecycle skills and agents: spec, architect, implement, review and ship a requirement, with the knowledge base that carries lessons between features.",
+  "author": {
+    "name": "Atelier Fashion"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/atelier-fashion/adlc-toolkit",
+  "skills": "./",
+  "agents": [],
+  "hooks": {}
+}
