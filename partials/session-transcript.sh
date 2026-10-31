@@ -165,7 +165,7 @@ _adlc_tf_sidecars() {
     [ -n "$_adlc_tfs_f" ] || continue
     _adlc_tfs_h=$(command sed -n 's/^harness=//p' "$_adlc_tfs_f" 2>/dev/null | command head -n 1)
     case "$_adlc_tfs_h" in
-      claude|copilot|codex|gemini|cursor) ;;
+      claude|copilot|codex|gemini|cursor|antigravity) ;;
       *) continue ;;
     esac
     _adlc_tfs_p=$(command sed -n 's/^transcript_path=//p' "$_adlc_tfs_f" 2>/dev/null | command head -n 1)

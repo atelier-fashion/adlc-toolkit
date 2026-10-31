@@ -117,7 +117,7 @@ def _iter_turns(fh):
 # (REQ-660 ADR-5). An entry lands only with a transcript captured from a real
 # session (BR-11), so `cursor` is not an alias of `claude` until one proves the
 # shapes identical.
-FORMATS = ("claude", "codex", "copilot", "gemini", "cursor")
+FORMATS = ("claude", "codex", "copilot", "gemini", "cursor", "antigravity")
 _PARSERS = {"claude": _iter_turns}
 
 

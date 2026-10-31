@@ -1,0 +1,21 @@
+{
+  "adversary.md": "[read_file, grep_search, find_by_name, run_command]",
+  "api-cost-scanner.md": "[read_file, grep_search, find_by_name, run_command]",
+  "architecture-mapper.md": "[read_file, grep_search, find_by_name]",
+  "architecture-reviewer.md": "[read_file, grep_search, find_by_name, run_command]",
+  "code-quality-auditor.md": "[read_file, grep_search, find_by_name, run_command]",
+  "convention-auditor.md": "[read_file, grep_search, find_by_name, run_command]",
+  "correctness-reviewer.md": "[read_file, grep_search, find_by_name, run_command]",
+  "db-perf-scanner.md": "[read_file, grep_search, find_by_name, run_command]",
+  "delegate-pre-pass.md": "[run_command]",
+  "feature-tracer.md": "[read_file, grep_search, find_by_name]",
+  "integration-explorer.md": "[read_file, grep_search, find_by_name]",
+  "latency-scanner.md": "[read_file, grep_search, find_by_name, run_command]",
+  "lite-reviewer.md": "[read_file, grep_search, find_by_name, run_command]",
+  "pipeline-runner.md": "[read_file, grep_search, find_by_name, run_command, edit_file, write_file, invoke_subagent]",
+  "quality-reviewer.md": "[read_file, grep_search, find_by_name, run_command]",
+  "reflector.md": "[read_file, grep_search, find_by_name, run_command]",
+  "security-auditor.md": "[read_file, grep_search, find_by_name, run_command]",
+  "task-implementer.md": "[read_file, grep_search, find_by_name, run_command, edit_file, write_file, invoke_subagent]",
+  "test-auditor.md": "[read_file, grep_search, find_by_name, run_command]"
+}

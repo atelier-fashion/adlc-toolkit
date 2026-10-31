@@ -16,6 +16,8 @@ import pytest
 ADLC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "adlc.py")
 TOOLKIT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.realpath(__file__)))))
+sys.path.insert(0, os.path.dirname(ADLC))
+import harness  # noqa: E402
 #: Directories a fake binary may need (`/bin/sh`, `sleep`, `echo`).
 SYSTEM_PATH = "/usr/bin:/bin"
 
@@ -49,14 +51,14 @@ def _mounted_home(tmp_path):
 
 
 def test_only_claude_on_path(tmp_path):
-    """Five rows; claude present with its version and mounted; the other four
+    """One row per harness; claude present with its version and mounted; the others
     absent with mount n/a; exit 0."""
     bindir = str(tmp_path / "bin")
     _fake(bindir, "claude", "echo '2.1.258 (Claude Code)'")
     out = _run(tmp_path, bindir, "detect", home=_mounted_home(tmp_path))
     assert out.returncode == 0, out.stderr
     rows = [line.split() for line in out.stdout.splitlines()[1:]]
-    assert [r[0] for r in rows] == ["claude", "copilot", "codex", "gemini", "cursor"]
+    assert [r[0] for r in rows] == list(harness.NAMES)
     assert rows[0][2] == "present" and "2.1.258" in out.stdout.splitlines()[1]
     assert rows[0][-2] == "mounted"
     for row in rows[1:]:
@@ -73,7 +75,7 @@ def test_json_round_trips(tmp_path):
                           capture_output=True, text=True)
     assert tool.returncode == 0, tool.stderr
     data = json.loads(out.stdout)
-    assert [d["name"] for d in data] == ["claude", "copilot", "codex", "gemini", "cursor"]
+    assert [d["name"] for d in data] == list(harness.NAMES)
     for d in data:
         assert set(d) == {"name", "binary", "state", "path", "version", "mount",
                           "last_probe", "probe_file"}
@@ -204,3 +206,64 @@ def test_last_probe_column(tmp_path):
     out = _run_in(outside, tmp_path, "detect", "--json")
     assert out.returncode == 0, out.stderr
     assert {d["last_probe"] for d in json.loads(out.stdout)} == {"never"}
+
+
+def test_antigravity_present_and_absent(tmp_path):
+    """REQ-658 AC-2: `agy` on the PATH is `present`, with its version; absent, the row
+    still prints, with mount n/a."""
+    bindir = str(tmp_path / "bin")
+    os.makedirs(bindir)
+    out = _run(tmp_path, bindir, "detect", "--json")
+    row = next(d for d in json.loads(out.stdout) if d["name"] == "antigravity")
+    assert (row["state"], row["binary"], row["mount"]) == ("absent", "agy", "n/a")
+    _fake(bindir, "agy", "echo 1.4.12")
+    out = _run(tmp_path, bindir, "detect", "--json")
+    row = next(d for d in json.loads(out.stdout) if d["name"] == "antigravity")
+    assert (row["state"], row["version"]) == ("present", "1.4.12")
+    assert row["mount"] == "not-mounted"          # nothing rendered yet
+
+
+def test_gemini_row_unchanged(tmp_path):
+    """REQ-658 BR-12: `gemini` keeps its row, on the shared mount, with a binary of its
+    own, and never counts as Antigravity."""
+    bindir = str(tmp_path / "bin")
+    _fake(bindir, "gemini", "echo 0.66.0")
+    out = _run(tmp_path, bindir, "detect", "--json")
+    rows = {d["name"]: d for d in json.loads(out.stdout)}
+    assert rows["gemini"]["state"] == "present" and rows["gemini"]["version"] == "0.66.0"
+    assert rows["gemini"]["mount"] == "not-mounted"
+    assert rows["antigravity"]["state"] == "absent"
+    assert ("gemini", ("gemini",), "agents") in harness.HARNESSES
+
+
+def _skills_config(home, path):
+    config = os.path.join(home, ".gemini", "config")
+    os.makedirs(config, exist_ok=True)
+    with open(os.path.join(config, "skills.json"), "w") as fh:
+        json.dump({"entries": [{"path": path}]}, fh)
+
+
+def _antigravity_mount(tmp_path, bindir, home):
+    out = _run(tmp_path, bindir, "detect", "--json", home=home)
+    return next(d for d in json.loads(out.stdout) if d["name"] == "antigravity")["mount"]
+
+
+def test_skills_config_mount(tmp_path):
+    """REQ-658 ADR-2: `mounted` only when an entry in the adapter's skills file reaches
+    this toolkit. Elsewhere, an unparsable file, or a home with neither reads
+    `not-mounted`, and never stops the report."""
+    bindir = str(tmp_path / "bin")
+    _fake(bindir, "agy", "echo 1.4.12")
+    home = str(tmp_path / "home")
+    os.makedirs(home)
+    assert _antigravity_mount(tmp_path, bindir, home) == "not-mounted"
+    elsewhere = tmp_path / "other" / "some-skill"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "SKILL.md").write_text("---\nname: x\n---\n")
+    _skills_config(home, str(tmp_path / "other"))
+    assert _antigravity_mount(tmp_path, bindir, home) == "not-mounted"
+    _skills_config(home, TOOLKIT)
+    assert _antigravity_mount(tmp_path, bindir, home) == "mounted"
+    with open(os.path.join(home, ".gemini", "config", "skills.json"), "w") as fh:
+        fh.write("{not json")
+    assert _antigravity_mount(tmp_path, bindir, home) == "not-mounted"

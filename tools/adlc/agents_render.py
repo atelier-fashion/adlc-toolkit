@@ -494,11 +494,34 @@ def plan_copies(adapter, root, config):
     return out, notices
 
 
+def _refuse_foreign_copies(adapter, plans):
+    """Where the user keeps agents too, a target without the marker is theirs: refuse
+    before the first write, so a render never stops half done (REQ-658 ADR-6)."""
+    import harness_adapter
+    import harness_render
+    if not harness_adapter.FORMATS.get(adapter["formats"].get("agents"), {}).get("agent_header"):
+        return
+    foreign = []
+    for _name, path, _text in plans:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                if harness_render.AGENT_MARKER not in fh.read():
+                    foreign.append(path)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):  # unreadable, or not text: not this toolkit's file
+            foreign.append(path)
+    if foreign:
+        raise ConfigError("refusing to overwrite %s: not rendered by this toolkit. Move it "
+                          "away, then render again; nothing was written" % ", ".join(foreign))
+
+
 def render_copies(adapter, root, config, write=True):
     """Write the copies atomically; ``[(agent, path, changed)]``. Idempotent."""
     plans, notices = plan_copies(adapter, root, config)
     for notice in notices:
         sys.stderr.write(notice + "\n")
+    _refuse_foreign_copies(adapter, plans)
     report = []
     for name, path, text in plans:
         try:

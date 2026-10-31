@@ -40,6 +40,18 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **Antigravity CLI adapter (REQ-658).** Phase 4 of the multi-harness plan, retargeted from
+  Gemini CLI, which is no longer available to individuals. `agy` joins `adlc harness detect`
+  and `adlc harness probe`, and `harness/antigravity.yml` (schema 4) renders user-level
+  agents, a user-level `skills.json` and `.agents/hooks.json`, and prints the permission rule
+  set, from `agy` 1.4.12 evidence in `.adlc/research/antigravity-compatibility.md`. No file in
+  a repository supplies permissions, and no plugin route delivers a surface. Schema 4 adds
+  `hook_cwd`, `hook_output_envelope`, a rendered `skills` surface and
+  `capabilities.fence_unmatchable`, and doctor SKIPs a schema 4 adapter with nothing rendered.
+  `.agents/**` joins the lane check's blocked paths. `adlc harness render` now says `kept`,
+  not `unchanged`, for a create-mode file that differs from its render. The README states
+  the losses, among them that `agy` cuts nine skills at 24,000 bytes and that `agy -p` exits 0
+  when it auto-denies a tool. The `atelier-fashion` dogfood is owed.
 - **Codex CLI adapter (REQ-655).** Phase 3 of the multi-harness plan. `harness/codex.yml`
   (schema 3) renders user-level TOML agent roles, `.codex/rules/adlc.rules`,
   `.codex/hooks.json` and a merged `.codex/config.toml`, from `codex-cli 0.166.0` evidence:

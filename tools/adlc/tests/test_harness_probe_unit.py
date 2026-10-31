@@ -43,7 +43,7 @@ def test_catalogue_and_coverage():
 
 
 def test_applicability():
-    assert hp.BY_ID["skill-activation"].harnesses == ("gemini",)
+    assert hp.BY_ID["skill-activation"].harnesses == ("gemini", "antigravity")
     assert hp.BY_ID["arg-substitution"].harnesses == ("claude",)
     for pid in ("git-write-main", "ask-tier-deny", "fence-vs-allowlist", "transcript-locate"):
         assert hp.BY_ID[pid].harnesses == hp.NAMES

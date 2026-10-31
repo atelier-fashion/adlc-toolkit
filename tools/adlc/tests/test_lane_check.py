@@ -315,7 +315,7 @@ _BLOCKED_EXAMPLES = [
     "settings.gradle.kts", "android/gradle.properties", ".mvn/wrapper/x.properties",
     "mvnw", ".cargo/config.toml", "crates/x/build.rs",
     "CLAUDE.local.md", "apps/web/GEMINI.md", ".cursor/rules/x.mdc", ".cursorrules",
-    ".codex/config.toml", ".gemini/settings.json", ".vscode/tasks.json",
+    ".codex/config.toml", ".gemini/settings.json", ".agents/hooks.json", ".vscode/tasks.json",
     ".devcontainer/devcontainer.json", ".adlc/context/conventions.md",
     "tools/adlc/lane_check.py", "tools/delegate/_machine_config.py",
     "partials/lane-check.sh", "partials/forge.sh", "proceed/phases-lite.md",
@@ -336,6 +336,7 @@ _REQ666_BLOCKED = [
     (".github/hooks/**", ".github/hooks/adlc.json"),
     (".codex/**", ".codex/config.toml"),
     (".gemini/**", ".gemini/settings.json"),
+    (".agents/**", ".agents/hooks.json"),
     (".cursor/**", ".cursor/rules/x.mdc"),
     (".github/**", ".github/workflows/ci.yml"),
     (".adlc/partials/**", ".adlc/partials/forge.sh"),
@@ -1336,3 +1337,15 @@ def test_symlinked_adlc_dir_at_the_base_is_an_error(make_repo):
     sb.commit(msg="symlinked .adlc at base")
     sb.feature("src/a.py")
     _assert_error(sb.path, ".adlc is not a directory")
+
+
+def test_agents_dir_is_blocked():
+    """REQ-658 BR-12: `agy` reads `.agents/`, hooks included, so a lite PR cannot soften
+    it. A directory that merely has the name elsewhere in the tree stays free."""
+    assert lc.DEFAULT_BLOCKED_PATHS.count(".agents/**") == 1
+    for path in (".agents/hooks.json", ".agents/skills.json", ".agents/skills/x/SKILL.md",
+                 ".agents/agents/x.md"):
+        _counted, failures = lc.evaluate([path], lc.effective_config())
+        assert ("blocked-path", path) in failures, path
+    _counted, failures = lc.evaluate(["docs/.agents/notes.md"], lc.effective_config())
+    assert failures == []

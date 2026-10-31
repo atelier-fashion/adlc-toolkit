@@ -5,7 +5,7 @@
 # adlc_session_record [--harness <name>] [--field <item>=<payload key>]...
 #   Reads the harness's session-start payload (JSON) on stdin and writes the session
 #   sidecar .adlc/.session/<id>, mode 600, as key=value lines in this order:
-#     harness=          claude, copilot, codex, gemini, cursor or unknown
+#     harness=          claude, copilot, codex, gemini, cursor, antigravity or unknown
 #     session_id=       the harness's id when it is safe, else gen-<16 hex>
 #     transcript_path=  an absolute path under $HOME, else empty
 #     cwd=              the payload's working tree, else the current directory
@@ -39,7 +39,7 @@ import json, os, re, select, stat, sys, time
 
 TABLE = {"claude": {"session_id": "session_id", "cwd": "cwd", "transcript_path": "transcript_path", "marker": "/.claude/projects/"}}
 
-HARNESSES = ("claude", "copilot", "codex", "gemini", "cursor", "unknown")
+HARNESSES = ("claude", "copilot", "codex", "gemini", "cursor", "antigravity", "unknown")
 ITEMS = ("session_id", "cwd", "transcript_path")
 SESSION_DIR = ".adlc/.session"
 RETENTION_S = 30 * 86400

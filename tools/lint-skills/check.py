@@ -5363,8 +5363,8 @@ def _import_harness_engine(root: Path):
 
 
 HARNESS_LOSS_CHECK = "harness-loss-table"
-#: Every harness whose README section this check holds. REQ-658 adds its own.
-LOSS_TABLE_HARNESSES = ("copilot", "cursor", "codex")
+#: Every harness whose README section this check holds.
+LOSS_TABLE_HARNESSES = ("copilot", "cursor", "codex", "antigravity")
 #: Rows every section carries (REQ-656 BR-11), then each harness's own.
 LOSS_ROWS = ("Committed allowlist", "Allowlist granularity", "Deny-tier rendering",
              "Shared-base fail-closed", "Read-only reviewers", "ETHOS in subagents",
@@ -5375,7 +5375,14 @@ LOSS_EXTRA_ROWS = {"cursor": ("Deny width", "Shell(npm) width", "Double skill di
                               "IDE permissions file"),
                    "codex": ("Hook review", "ETHOS after compaction", "Skills catalog budget",
                              "Unmatched git commands", "Wrapped invocations",
-                             "Allow rules and the sandbox", "--writable-root", "Trust step")}
+                             "Allow rules and the sandbox", "--writable-root", "Trust step"),
+                   "antigravity": ("Skill body cap", "Skill companions", "ETHOS after compaction",
+                                   "Headless exit status", "Trust", "Default mode", "Model tiers",
+                                   "Plugin route",
+                                   "--dangerously-skip-permissions", "Gemini CLI")}
+#: Bytes of a skill body the harness loads when a skill is invoked (REQ-658). `agy`
+#: replaces the rest with `<truncated N bytes>`, so the README names each skill it cuts.
+SKILL_BODY_CAP = 24000
 #: BR-17's statements, each found case-insensitively in the section's residuals block.
 RESIDUAL_STATEMENTS = ("matching is spelling-level", "find -exec", "awk system()", "sed e",
                        "npx", "npm run", "git rebase --exec", "git fetch --upload-pack",
@@ -5414,6 +5421,49 @@ def _loss_rows(block: list[str]) -> dict[str, str]:
     return rows
 
 
+def _skills_over_cap(root: Path) -> list[str]:
+    """The skills whose body, frontmatter excluded, is past ``SKILL_BODY_CAP`` bytes."""
+    over = []
+    for path in sorted(root.glob("*/SKILL.md")):
+        parts = path.read_text(encoding="utf-8", errors="replace").split("---", 2)
+        body = parts[2] if len(parts) == 3 else parts[0]
+        if len(body.lstrip("\n").encode("utf-8")) > SKILL_BODY_CAP:
+            over.append(path.parent.name)
+    return over
+
+
+def _antigravity_fact_problems(adapter, findings, rows, root: Path) -> list[str]:
+    """REQ-658 BR-11: what this table owes that is computed, not copied. Every skill the
+    cap cuts, every widened entry and every `unsupported` hook event has its sentence."""
+    problems = []
+    cap = rows.get("Skill body cap", "")
+    for skill in _skills_over_cap(root):
+        if f"`{skill}`" not in cap:
+            problems.append(f"row `Skill body cap` must name `{skill}`: its body is past "
+                            f"{SKILL_BODY_CAP} bytes")
+    for name in re.findall(r"`([a-z-]+)`", cap):
+        if (root / name / "SKILL.md").is_file() and name not in _skills_over_cap(root):
+            problems.append(f"row `Skill body cap` names `{name}`, which the cap does not cut")
+    width = rows.get("Allowlist granularity", "")
+    for f in findings:
+        if f.verdict.startswith("widened:") and f.verdict.split(":", 1)[1] not in width:
+            problems.append(f"row `Allowlist granularity` must name "
+                            f"`{f.verdict.split(':', 1)[1]}`: the render widens it")
+    events = adapter["hook_events"]
+    if events.get("session-compact") == "unsupported" and \
+            "not re-injected" not in rows.get("ETHOS after compaction", "").lower():
+        problems.append("row `ETHOS after compaction` must say `not re-injected`: "
+                        "hook_events.session-compact is unsupported")
+    if adapter["capabilities"]["subagent_start_hook"] == "no" and \
+            "read line" not in rows.get("ETHOS in subagents", "").lower():
+        problems.append("row `ETHOS in subagents` must name the read line: "
+                        "subagent_start_hook is no")
+    if adapter["paths"].get("permissions", {}).get("mode") == "printed" and \
+            not rows.get("Committed allowlist", "").lower().startswith("no"):
+        problems.append("row `Committed allowlist` must start `no`: the rule set is printed")
+    return problems
+
+
 def _loss_fact_problems(adapter, hr, perms, result, rows: dict[str, str]) -> list[str]:
     """What the table says that the adapter and a fresh render do not (BR-11)."""
     caps = adapter["capabilities"]
@@ -5439,10 +5489,10 @@ def _loss_fact_problems(adapter, hr, perms, result, rows: dict[str, str]) -> lis
     need("Allowlist granularity", words, f"the adapter declares {gran}")
     if gran == "command-base":
         refuse("Allowlist granularity", "subcommand", "a command base has no subcommand")
-    if scope == "printed":
+    if adapter["formats"].get("permissions") == "copilot-tool-flags":
         need("Deny-tier rendering", "--deny-tool", "the printed line carries the deny tier")
     else:
-        need("Deny-tier rendering", "`deny`", "the project render carries the deny tier")
+        need("Deny-tier rendering", "`deny`", "the render carries the deny tier")
     refuse("Deny-tier rendering", "no deny", "the deny tier is rendered")
     omitted = [f.command for f in findings
                if f.verdict == "inexpressible" and "would wrap deny-tier" in f.detail]
@@ -5503,7 +5553,12 @@ def check_harness_loss_tables(root: Path, readme: Path | None = None) -> list[Fi
         adapter = ha.load_adapter(str(root / "harness" / (name + ".yml")), toolkit=str(root))
         result = hr.load_result_file(str(root / ".adlc" / "research" / "harness-probes"
                                          / (name + ".json")))
-        for problem in _loss_fact_problems(adapter, hr, perms, result, rows):
+        problems = _loss_fact_problems(adapter, hr, perms, result, rows)
+        if name == "antigravity":
+            scope = hr.gated_scope(adapter)
+            problems += _antigravity_fact_problems(
+                adapter, hr.render_permissions(adapter, perms, scope, result)[1], rows, root)
+        for problem in problems:
             findings.append(Finding(rel, lineno, HARNESS_LOSS_CHECK, f"{name}: {problem}"))
         text = "\n".join(block)
         if "Declared residuals" not in text:
