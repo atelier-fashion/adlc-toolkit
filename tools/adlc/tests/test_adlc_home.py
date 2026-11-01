@@ -58,6 +58,27 @@ VECTOR = [
     ("config-empty-is-unset", "/opt/adlc", ""),
 ]
 
+#: REQ-663 BR-8. (label, pointer bytes, ADLC_HOME or None). ``{home}`` is a real directory
+#: inside the sandbox, ``{other}`` another. Every row is driven through all three sites.
+POINTER_VECTOR = [
+    ("pointer", "{home}\n", None),
+    ("pointer-no-newline", "{home}", None),
+    ("pointer-trailing-slash", "{home}/\n", None),
+    ("pointer-second-line-ignored", "{home}\nignored\n", None),
+    ("pointer-env-agrees", "{home}\n", "{home}"),
+    ("pointer-env-agrees-after-trim", "{home}\n", "{home}/"),
+    ("pointer-env-conflict", "{home}\n", "{other}"),
+    ("pointer-empty", "", None),
+    ("pointer-relative", "rel/home\n", None),
+    ("pointer-missing-dir", "{home}/gone\n", None),
+    ("pointer-missing-dir-env-agrees", "{home}/gone\n", "{home}/gone"),
+]
+
+#: The rows that resolve, and what to. Everything else is an error at all three sites.
+POINTER_RESOLVES = {"pointer", "pointer-no-newline", "pointer-trailing-slash",
+                    "pointer-second-line-ignored", "pointer-env-agrees",
+                    "pointer-env-agrees-after-trim"}
+
 
 def _env(home_dir, value, config):
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": home_dir}
@@ -125,6 +146,88 @@ def test_parity_vector_expectations(tmp_path, monkeypatch):
     assert got["config-wins"] == ("/opt/adlc", "/etc/adlc.yml")
     assert got["config-with-invalid-home"] == (None, "/etc/adlc.yml")
     assert got["config-empty-is-unset"] == ("/opt/adlc", "/opt/adlc/adlc/config.yml")
+
+
+@pytest.mark.parametrize("label,pointer,value", POINTER_VECTOR,
+                         ids=[v[0] for v in POINTER_VECTOR])
+def test_pointer_vector(tmp_path, monkeypatch, label, pointer, value):
+    home_dir = tmp_path / "home dir"
+    (home_dir / ".claude").mkdir(parents=True)
+    target = tmp_path / "moved home"
+    target.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    fill = {"home": str(target), "other": str(other)}
+    (home_dir / ".claude" / ".adlc-home").write_text(pointer.format(**fill))
+    env = _env(str(home_dir), value.format(**fill) if value else None, None)
+    sh = _shell(env)
+    py = _python(monkeypatch, env, adlc_home.adlc_home, adlc_home.machine_config_path,
+                 adlc_home.AdlcHomeError)
+    mirror = _python(monkeypatch, env, MIRROR.adlc_home, MIRROR.default_config_path,
+                     MIRROR.AdlcHomeError)
+    assert sh == py == mirror, (label, sh, py, mirror)
+    if label in POINTER_RESOLVES:
+        assert sh == (str(target), str(target / "adlc" / "config.yml")), label
+    else:
+        assert sh == (None, None), label
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory"])
+def test_pointer_of_the_wrong_kind_is_refused_everywhere(tmp_path, monkeypatch, kind):
+    """A pointer that is not a regular file refuses at all three sites (LESSON-014)."""
+    home_dir = tmp_path / "h"
+    (home_dir / ".claude").mkdir(parents=True)
+    target = tmp_path / "moved"
+    target.mkdir()
+    real = tmp_path / "real-pointer"
+    real.write_text(str(target) + "\n")
+    path = home_dir / ".claude" / ".adlc-home"
+    if kind == "symlink":
+        path.symlink_to(real)
+    else:
+        path.mkdir()
+    env = _env(str(home_dir), None, None)
+    sh = _shell(env)
+    py = _python(monkeypatch, env, adlc_home.adlc_home, adlc_home.machine_config_path,
+                 adlc_home.AdlcHomeError)
+    mirror = _python(monkeypatch, env, MIRROR.adlc_home, MIRROR.default_config_path,
+                     MIRROR.AdlcHomeError)
+    assert sh == py == mirror == (None, None)
+
+
+def test_no_pointer_is_rule_a(tmp_path, monkeypatch):
+    """With neither a pointer nor the variable, the answer is the literal default."""
+    home_dir = tmp_path / "h"
+    (home_dir / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home_dir))
+    assert adlc_home.adlc_home() == str(home_dir / ".claude")
+    assert adlc_home.adlc_home_source() == "default"
+
+
+def test_pointer_error_tells_a_pointer_from_a_bad_variable(tmp_path, monkeypatch):
+    home_dir = tmp_path / "h"
+    (home_dir / ".claude").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setenv("ADLC_HOME", "rel")
+    assert adlc_home.validate() and not adlc_home.pointer_error()
+    monkeypatch.delenv("ADLC_HOME")
+    (home_dir / ".claude" / ".adlc-home").write_text(str(tmp_path / "gone") + "\n")
+    assert adlc_home.pointer_error() and "does not exist" in adlc_home.pointer_error()
+
+
+def test_source_says_pointer(tmp_path, monkeypatch):
+    home_dir = tmp_path / "h"
+    (home_dir / ".claude").mkdir(parents=True)
+    target = tmp_path / "moved"
+    target.mkdir()
+    (home_dir / ".claude" / ".adlc-home").write_text(str(target) + "\n")
+    monkeypatch.setenv("HOME", str(home_dir))
+    assert adlc_home.adlc_home_source() == "pointer"
+    script = '. "%s"; adlc_home_source' % PARTIAL
+    out = subprocess.run(["/bin/sh", "-c", script], env={"HOME": str(home_dir),
+                                                         "PATH": "/usr/bin:/bin"},
+                         capture_output=True, text=True)
+    assert out.stdout.strip() == "pointer"
 
 
 @pytest.mark.parametrize("bad", ["", "rel/home"])

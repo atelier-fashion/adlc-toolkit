@@ -148,6 +148,18 @@ adlc_ss_replace() {
   return 1
 }
 
+# adlc_ss_trim <path> — <path> without trailing slashes; a bare `/` stays `/`.
+adlc_ss_trim() {
+  adlc_ss_t=$1
+  while :; do
+    case $adlc_ss_t in
+      ?*/) adlc_ss_t=${adlc_ss_t%/} ;;
+      *) break ;;
+    esac
+  done
+  printf '%s\n' "$adlc_ss_t"
+}
+
 adlc_ss_main() {
   # Each input is read once, here.
   adlc_ss_root=${CLAUDE_PLUGIN_ROOT-}
@@ -171,25 +183,44 @@ adlc_ss_main() {
   # (REQ-654 BR-3); it never moves with ADLC_HOME.
   adlc_ss_dir="$adlc_ss_home/.claude/adlc"  # adlc-home: alias
   # The config's directory is <ADLC_HOME>/adlc (REQ-654 BR-1): partials/adlc-home.sh's
-  # rule, inlined. Unset is the pointer's directory, so by default 1 and 2 share it.
+  # rule, inlined. Unset is the pointer's directory, so by default 1 and 2 share it,
+  # unless the machine was migrated (REQ-663 BR-8): then ~/.claude/.adlc-home names the
+  # home. A home pointer that cannot be used, or that disagrees with a set ADLC_HOME,
+  # writes no config: adlc names that problem, and a scaffold here would hide it.
   adlc_ss_cdir=$adlc_ss_dir
+  adlc_ss_hp="$adlc_ss_home/.claude/.adlc-home"  # adlc-home: default
+  adlc_ss_hpv=
+  adlc_ss_hpbad=
+  if [ -e "$adlc_ss_hp" ] || [ -L "$adlc_ss_hp" ]; then
+    if [ -f "$adlc_ss_hp" ] && [ ! -L "$adlc_ss_hp" ]; then
+      IFS= read -r adlc_ss_hpv < "$adlc_ss_hp" || :
+    fi
+    adlc_ss_hpv=$(adlc_ss_trim "$adlc_ss_hpv")
+    case $adlc_ss_hpv in
+      /*) [ -d "$adlc_ss_hpv" ] || adlc_ss_hpbad=1 ;;
+      *) adlc_ss_hpbad=1 ;;
+    esac
+  fi
   if [ -n "$adlc_ss_ahset" ]; then
     case $adlc_ss_ahv in
       /*)
-        adlc_ss_ah=$adlc_ss_ahv
-        while :; do
-          case $adlc_ss_ah in
-            ?*/) adlc_ss_ah=${adlc_ss_ah%/} ;;
-            *) break ;;
-          esac
-        done
+        adlc_ss_ah=$(adlc_ss_trim "$adlc_ss_ahv")
         adlc_ss_cdir="${adlc_ss_ah%/}/adlc"
+        if [ -n "$adlc_ss_hpv" ] && [ "$adlc_ss_hpv" != "$adlc_ss_ah" ]; then
+          adlc_ss_hpbad=1
+        fi
         ;;
       *)
         adlc_ss_cdir=
         adlc_ss_note "ADLC_HOME is set but is not an absolute path; config not written"
         ;;
     esac
+  elif [ -n "$adlc_ss_hpv" ]; then
+    adlc_ss_cdir="${adlc_ss_hpv%/}/adlc"
+  fi
+  if [ -n "$adlc_ss_hpbad" ]; then
+    adlc_ss_cdir=
+    adlc_ss_note "the ADLC home pointer cannot be used; config not written (adlc doctor says why)"
   fi
 
   if mkdir -p "$adlc_ss_dir"; then

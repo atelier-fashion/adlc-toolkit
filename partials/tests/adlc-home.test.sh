@@ -16,6 +16,10 @@
 #   set_u_home_unset        — `set -u` with HOME and ADLC_HOME unset: the partial
 #                             loads, adlc_home returns 1 naming HOME, and the
 #                             script runs on (it never aborts the caller)
+#   pointer_cases           — REQ-663 BR-8: the pointer decides when ADLC_HOME is
+#                             unset; an equal variable resolves; a different one is an
+#                             error naming both; an empty, relative, dangling or
+#                             symlinked pointer is an error, never the default
 #
 # Native zsh sets HOME from the password database when it is unset, so the
 # set_u case runs zsh as `zsh --emulate sh`, the mode in which HOME can be unset.
@@ -104,7 +108,51 @@ check "set_u_home_unset: the call fails, the script runs on" "rc=1|after" "$(tr 
 if grep -q 'HOME' "$ERR"; then pass "set_u_home_unset: stderr names HOME"; else fail "set_u_home_unset: stderr: $(cat "$ERR")"; fi
 
 # ---------------------------------------------------------------------------
-FLOOR=24
+# REQ-663 BR-8: the pointer. Written under the sandbox HOME and removed at the end of
+# the block, so every case above ran with none.
+POINTER="$H/.claude/.adlc-home"
+MOVED="$SANDBOX/moved home"
+ELSE="$SANDBOX/elsewhere"
+mkdir -p "$H/.claude" "$MOVED" "$ELSE"
+printf '%s\n' "$MOVED" > "$POINTER"
+
+run_case 'adlc_home; adlc_home_source'
+check "pointer_cases: the pointer decides, source pointer" "$MOVED|pointer" "$(tr '\n' '|' < "$OUT" | sed 's/|$//')"
+run_case 'adlc_machine_config'
+check "pointer_cases: the config follows it" "$MOVED/adlc/config.yml" "$(cat "$OUT")"
+run_case 'adlc_home; adlc_home_source' ADLC_HOME="$MOVED/"
+check "pointer_cases: an equal ADLC_HOME resolves" "$MOVED|env" "$(tr '\n' '|' < "$OUT" | sed 's/|$//')"
+
+run_case 'adlc_home' ADLC_HOME="$ELSE"
+check "pointer_cases: a different ADLC_HOME is rc 1" 1 "$RC"
+check "pointer_cases: it prints nothing" "" "$(cat "$OUT")"
+if grep -q 'ADLC_HOME' "$ERR" && grep -q 'pointer' "$ERR"; then pass "pointer_cases: the conflict names both"
+else fail "pointer_cases: the conflict names both: $(cat "$ERR")"; fi
+
+printf '%s' "$MOVED" > "$POINTER"
+run_case 'adlc_home'
+check "pointer_cases: no trailing newline still reads" "$MOVED" "$(cat "$OUT")"
+
+for pc in empty relative dangling symlink; do
+  rm -f "$POINTER"
+  case "$pc" in
+    empty)    : > "$POINTER" ;;
+    relative) printf 'rel/home\n' > "$POINTER" ;;
+    dangling) printf '%s\n' "$SANDBOX/gone" > "$POINTER" ;;
+    symlink)  printf '%s\n' "$MOVED" > "$SANDBOX/real-pointer"; ln -s "$SANDBOX/real-pointer" "$POINTER" ;;
+  esac
+  run_case 'adlc_home'
+  check "pointer_cases: $pc pointer is rc 1" 1 "$RC"
+  check "pointer_cases: $pc pointer never prints the default" "" "$(cat "$OUT")"
+  if grep -q '\.adlc-home' "$ERR"; then pass "pointer_cases: $pc names the pointer"
+  else fail "pointer_cases: $pc names the pointer: $(cat "$ERR")"; fi
+done
+rm -f "$POINTER"
+run_case 'adlc_home; adlc_home_source'
+check "pointer_cases: with the pointer gone the default is back" "$H/.claude|default" "$(tr '\n' '|' < "$OUT" | sed 's/|$//')"
+
+# ---------------------------------------------------------------------------
+FLOOR=43
 if [ "$CHECKS" -lt "$FLOOR" ]; then
   echo "FAIL: only $CHECKS checks ran (floor $FLOOR) — a case was skipped"
   FAILS=$((FAILS + 1))

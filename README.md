@@ -686,7 +686,28 @@ The toolkit's machine state (the id counters and their locks, the reservations l
 ADLC_HOME="$HOME/.adlc" ./install.sh     # set it in your shell profile too, so every session sees it
 ```
 
-`install.sh` then creates `skills`, `agents`, `adlc/config.yml` and the skills view under that directory, and still links `~/.claude/skills` and `~/.claude/agents` to the clone, because Claude Code reads those and every skill's shell falls back through `~/.claude/skills`. A set `ADLC_HOME` that is empty or relative is an error that names it; nothing falls back to `~/.claude` silently. `ADLC_CONFIG`, when set, still names the config file outright. No migration tool ships: moving existing counters or the venv is a follow-up, not this release.
+`install.sh` then creates `skills`, `agents`, `adlc/config.yml` and the skills view under that directory, and still links `~/.claude/skills` and `~/.claude/agents` to the clone, because Claude Code reads those and every skill's shell falls back through `~/.claude/skills`. A set `ADLC_HOME` that is empty or relative is an error that names it; nothing falls back to `~/.claude` silently. `ADLC_CONFIG`, when set, still names the config file outright. That override is for a machine starting fresh there; to move an existing install, use `--migrate-home` below.
+
+### Moving an existing home: `--migrate-home`
+
+`install.sh --migrate-home <dir>` moves the toolkit's machine state out of `~/.claude` and `--back` reverses it. It is opt-in, and a plain `./install.sh` never migrates. Read the plan first:
+
+```bash
+./install.sh --migrate-home "$HOME/adlc-home" --dry-run    # every check and action; changes nothing
+./install.sh --migrate-home "$HOME/adlc-home"              # do it
+./install.sh --migrate-home "$HOME/adlc-home"              # run again: zero actions, or a repair
+./install.sh --migrate-home --back                     # reverse it
+./install.sh --migrate-home "$HOME/adlc-home" --prune-backup   # drop the backup
+```
+
+- **What moves**: the machine config, the three id counters, the reservations ledger, the delegate venv (rebuilt at the new home, which needs network access to the package index), the skills view and the launchd helper. `<dir>/skills` and `<dir>/agents` are created as links to the clone. The `~/bin` wrappers, the launchd plist, a harness `skills.json` that names the view, and `~/.agents/skills` are re-stamped to the new home.
+- **What never moves**: `~/.claude/skills`, `~/.claude/agents`, `~/.claude/CLAUDE.md`, `~/.claude/settings.json`, `~/.claude/adlc/plugin-root`, the logs under `~/Library/Logs`, and anything under `~/.claude` the toolkit did not create.
+- **What stays behind at the old paths**: a symlink at each counter and at the config, so anything reading the old path still sees the one value, and a file at each old lock path, so an out-of-date `id-alloc.sh` fails loud within its own five-second budget instead of allocating under a second lock. The ledger gets neither: every shipped reader refuses a symlinked ledger.
+- **How a session finds the home**: `export ADLC_HOME="<dir>"` in the REQ-519 block of your login shell's rc file, and a pointer file, `~/.claude/.adlc-home`, for a session that never sourced it (a GUI-launched Claude Code, launchd, a `/bin/sh` fence). A set `ADLC_HOME` that disagrees with the pointer is refused everywhere, and a pointer naming a directory that does not exist is an error, never a fall-through to `~/.claude`.
+- **When it refuses**: while a consumer repo's vendored partials are behind (run the `/template-drift` line it prints in that repo), when consumer currency cannot be proven, when an allocation lock is held, when `<dir>` holds anything that is not a toolkit home, when `ADLC_HOME` or the pointer names another home, while an earlier migration's backup is in the way, while a `harness probe` left a recovery marker, or when the venv cannot be rebuilt. Each refusal prints its evidence and a fix, and nothing on disk changes.
+- **The backup**: `~/.claude/.adlc-home-backup-<time>/` holds a copy of every moved file and every stamped file. `--back` removes it, `--prune-backup` removes it, and nothing else does. A failed flip is undone from it before the command exits. `--back` works after a prune: it reads the live files.
+
+`adlc doctor`'s `home-layout` check verifies the result end to end. After `--back`, open a new shell: one opened before it still exports the old `ADLC_HOME`.
 
 Other install options:
 

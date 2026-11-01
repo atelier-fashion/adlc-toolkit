@@ -42,7 +42,7 @@ if [ "${1-}" = "--inner" ]; then
   # under that shell.
   run_all "$2" "$HERE/id-alloc.test.sh" "$HERE/forge.test.sh" "$HERE/attribution.test.sh" "$HERE/intake.test.sh" "$HERE/delegate-gate.test.sh" "$HERE/source-guard.test.sh" "$HERE/toolkit-root.test.sh" "$HERE/conflict-bound.test.sh" "$HERE/lesson-check.test.sh" "$HERE/lane-check.test.sh" "$HERE/plugin-route.test.sh" "$HERE/session-start.test.sh" "$HERE/set-u-home.test.sh" "$HERE/sprint-fence.test.sh" "$HERE/lessons.test.sh" "$HERE/session-transcript.test.sh" "$HERE/adlc-home.test.sh" "$HERE/run-outcome.test.sh" "$HERE/hooks.test.sh" "$HERE/redact-fence.test.sh" "$HERE/codex-install.test.sh"
   # On its own line: two REQs adding to the list above collide on one line (LESSON-738).
-  run_all "$2" "$HERE/exec-engine.test.sh"
+  run_all "$2" "$HERE/exec-engine.test.sh" "$HERE/migrate-home.test.sh"
   exit $RC
 fi
 

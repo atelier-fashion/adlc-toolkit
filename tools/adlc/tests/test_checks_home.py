@@ -351,6 +351,29 @@ def test_consumer_sync_names_partials_and_project_layer_together(tmp_path, repos
     assert fix.count("\n") == 0                  # one repo, one line
 
 
+def test_consumer_sync_report_separates_partials_from_layers(tmp_path, repos):
+    """REQ-663 ADR-6: the migration gate needs the two kinds apart, and the doctor row
+    needs them together. One walk serves both."""
+    toolkit = _toolkit(tmp_path)
+    fresh = _consumer(repos, "fresh")
+    partial = _consumer(repos, "partial", forge="forge v1\n")
+    layer = _consumer(repos, "layer")
+    (layer / ".claude" / "settings.json").write_text(_no_hooks_settings())
+    report = checks.consumer_sync_report(_profile(toolkit))
+    by_repo = {c: (files, bool(found)) for c, files, found, _note in report.stale}
+    assert by_repo[str(partial)] == (["forge.sh"], False)
+    assert by_repo[str(layer)] == ([], True)
+    assert str(fresh) not in by_repo
+    assert not report.base.unverified
+    assert sorted(report.consumers) == sorted(str(c) for c in (fresh, partial, layer))
+
+
+def test_consumer_sync_report_with_no_consumer_needs_no_baseline(tmp_path, repos):
+    toolkit = _toolkit(tmp_path, remote=False)
+    report = checks.consumer_sync_report(_profile(toolkit))
+    assert report.consumers == [] and report.base is None and report.stale == []
+
+
 def test_consumer_sync_flags_a_missing_settings_file(tmp_path, repos):
     """`adlc harness drift --harness claude` exits 1 on `missing`, so this does too."""
     toolkit = _toolkit(tmp_path)

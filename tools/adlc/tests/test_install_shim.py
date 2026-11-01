@@ -315,3 +315,27 @@ def test_shim_rewrite_keeps_no_backup(tmp_path, repo_root):
     _shim2, _home2, _marker2, gen2 = _sandbox(tmp_path, repo_root, with_venv=False)
     assert "done: wrote" in gen2.stdout
     assert not (shim.parent / "adlc.bak").exists()
+
+
+def test_shim_reads_the_pointer(tmp_path, repo_root):
+    """REQ-663 BR-8: a GUI session has no ADLC_HOME, and the pointer is how it finds the venv."""
+    shim, home, marker, _out = _sandbox(tmp_path, repo_root, with_venv=False)
+    moved = tmp_path / "moved home"
+    _write_exec(moved / "delegate-venv" / "bin" / "python3",
+                '#!/bin/sh\nprintf \'%%s\\n\' "$*" > "%s"\nexec /usr/bin/env python3 "$@"\n'
+                % marker)
+    (moved / "delegate-venv" / "lib" / "python3.9" / "site-packages" / "yaml").mkdir(parents=True)
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".claude" / ".adlc-home").write_text(str(moved) + "\n")
+    out = _run_shim(shim, home)
+    assert out.returncode == 0
+    assert marker.exists()
+
+
+def test_shim_with_an_unusable_pointer_runs_path_python3(tmp_path, repo_root):
+    shim, home, marker, _out = _sandbox(tmp_path, repo_root, with_venv=False)
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".claude" / ".adlc-home").write_text("relative\n")
+    out = _run_shim(shim, home)
+    assert out.returncode == 0 and "ADLC_MAIN" in out.stdout
+    assert not marker.exists()

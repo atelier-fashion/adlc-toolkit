@@ -195,13 +195,58 @@ class AdlcHomeError(ValueError):
     """``ADLC_HOME`` is set but cannot be used. The message names the variable."""
 
 
+class AdlcPointerError(AdlcHomeError):
+    """The pointer cannot be used, or disagrees with ``ADLC_HOME`` (REQ-663 BR-8)."""
+
+
+#: The pointer's name under the default home (REQ-663 ADR-2).
+POINTER_NAME = ".adlc-home"
+
+
+def default_home():
+    """``~/.claude``: the only name the default has, and where the pointer lives."""
+    return os.path.join(os.path.expanduser("~"), ".claude")  # adlc-home: default
+
+
+def pointer_home():
+    """The home the pointer names, ``None`` with no pointer, or :class:`AdlcPointerError`."""
+    path = os.path.join(default_home(), POINTER_NAME)
+    if not os.path.lexists(path):
+        return None
+    if os.path.islink(path) or not os.path.isfile(path):
+        raise AdlcPointerError(
+            "the ADLC home pointer %s is not a regular file — run: install.sh --migrate-home "
+            "<dir> to repair it, or remove it if this machine was never migrated "
+            "(REQ-663 BR-8)" % path)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            line = fh.readline()
+    except OSError as exc:
+        raise AdlcPointerError("the ADLC home pointer %s cannot be read (%s) (REQ-663 BR-8)"
+                               % (path, exc.strerror or "I/O error"))
+    line = line[:-1] if line.endswith("\n") else line
+    value = (line.rstrip("/") or "/") if line else ""
+    if not value.startswith("/"):
+        raise AdlcPointerError(
+            "the ADLC home pointer %s does not hold an absolute path, got %r — run: "
+            "install.sh --migrate-home <dir> to repair it (REQ-663 BR-8)" % (path, value))
+    if not os.path.isdir(value):
+        raise AdlcPointerError(
+            "the ADLC home pointer %s names %r, which does not exist — mount it, or run: "
+            "install.sh --migrate-home %r to restore it from the backup (REQ-663 BR-8)"
+            % (path, value, value))
+    return value
+
+
 def adlc_home():
     """The toolkit's machine-state home (REQ-654 BR-1, BR-2), or :class:`AdlcHomeError`.
 
-    THE RULE: ``ADLC_HOME`` unset is ``~/.claude``, spelled as this module always
-    spelled it; set and absolute is used with trailing slashes removed; set and
-    empty or not absolute
-    is an error naming the variable, never a fall-through to the default.
+    THE RULE: ``ADLC_HOME`` set and absolute is used with trailing slashes removed;
+    set and empty or not absolute is an error naming the variable, never a
+    fall-through to the default. Unset, the pointer decides, and with no pointer it
+    is ``~/.claude``, spelled as this module always spelled it. A set value that
+    differs from the pointer, and a pointer that cannot be used, are errors naming
+    the pointer (REQ-663 BR-8).
 
     Written out at THREE sites, because a partial cannot import Python and these
     delegation tools import nothing from ``tools/adlc``: the other two are
@@ -210,7 +255,8 @@ def adlc_home():
     input vector.
     """
     if "ADLC_HOME" not in os.environ:
-        return os.path.join(os.path.expanduser("~"), ".claude")  # adlc-home: default
+        pointed = pointer_home()
+        return pointed if pointed is not None else default_home()
     value = os.environ["ADLC_HOME"]
     if value == "":
         raise AdlcHomeError(
@@ -220,7 +266,13 @@ def adlc_home():
         raise AdlcHomeError(
             "ADLC_HOME must be an absolute path, got %r — unset it to use "
             "~/.claude, or set an absolute path (REQ-654 BR-2)" % value)  # adlc-home: default
-    return value.rstrip("/") or "/"
+    value = value.rstrip("/") or "/"
+    pointed = pointer_home()
+    if pointed is not None and pointed != value:
+        raise AdlcPointerError(
+            "ADLC_HOME is %r but the ADLC home pointer names %r — unset ADLC_HOME, or run "
+            "install.sh --migrate-home --back first (REQ-663 BR-8)" % (value, pointed))
+    return value
 
 
 def default_config_path():

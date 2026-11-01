@@ -54,6 +54,18 @@ is cut per `RELEASING.md`.
   calls meet (`--allowedTools` in an untrusted workspace, deny over allow, a fence against the
   allow set, a resume that continues a conversation) is unverified. The workflow and legacy
   engines are unchanged.
+- **`install.sh --migrate-home` and `--back` (REQ-663).** P7b of the multi-harness plan: the
+  opt-in move of the toolkit's machine state out of `~/.claude`, and its exact reverse. A
+  plain install never migrates. Stage then flip, inside both homes' allocation locks, with
+  a backup and an undo at every step. The counters and the config leave compatibility
+  symlinks and the locks leave tombstones, because a counter is data and a `mkdir` lock is an
+  operation on a path, so an out-of-date allocator fails loud in its own budget instead of
+  splitting the lock. The home now resolves as `$ADLC_HOME`, else the pointer
+  `~/.claude/.adlc-home`, else `~/.claude`; with no pointer nothing changes. `adlc doctor`
+  gains `home-layout`. **Owed:** AC-2, the real launchd run, needs a real login session, and
+  every consumer needs `/template-drift` first, because `partials/adlc-home.sh` changed and
+  the migration refuses until they have.
+
 - **Antigravity CLI adapter (REQ-658).** Phase 4 of the multi-harness plan, retargeted from
   Gemini CLI, which is no longer available to individuals. `agy` joins `adlc harness detect`
   and `adlc harness probe`, and `harness/antigravity.yml` (schema 4) renders user-level

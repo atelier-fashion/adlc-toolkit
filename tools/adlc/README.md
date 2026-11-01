@@ -52,6 +52,15 @@ every path is the one it always was. `ADLC_CONFIG` still names the config file
 outright. A set `ADLC_HOME` that is empty or not absolute stops `adlc doctor`
 before any check, with exit 2 and a message naming the variable.
 
+The rule is `$ADLC_HOME`, else the pointer `~/.claude/.adlc-home`, else `~/.claude`
+(REQ-663 BR-8). `install.sh --migrate-home` writes the pointer, so a session that
+never sourced the rc file resolves a migrated home. A set `ADLC_HOME` that differs
+from the pointer, and a pointer that is not a regular file, holds no absolute path,
+or names a directory that does not exist, are errors at every resolver, never a
+fall-through. Doctor reports those two states through `home-layout` alone, with exit 1,
+because every other check reads the home that did not resolve. Its `profile:` line
+names the home and what decided it.
+
 The rule is written out three times — `adlc_home.py`,
 [`partials/adlc-home.sh`](../../partials/adlc-home.sh) and
 `tools/delegate/_machine_config.py::adlc_home` — because a partial cannot import
@@ -100,6 +109,7 @@ tables below show placeholders such as `<root>` unquoted.
 | `counters` | each `<ADLC_HOME>/.global-next-{req,bug,lesson}` is numeric, no stale lock | `printf <n> > …` / `rmdir …lock.d` | a counter that doesn't exist yet (first run) |
 | `launchctl` | (macOS) delegate setenv LaunchAgent loaded *when delegation is on* | `launchctl bootstrap gui/$(id -u) <plist>` | Linux (macOS-only); delegation off |
 | `template-version` | project `.adlc/` scaffold present | run `/template-drift` to compare | run outside a consumer project |
+| `home-layout` | **REQ-663 BR-12.** On a migrated machine, that the pointer, the rc line and any `ADLC_HOME` agree; every moved file is under the home; each old counter and config path is a symlink to it and no regular file remains; each old lock path is a tombstone, not a directory; the shim, wrappers, plist and any harness `skills` surface carry the home; the venv passes the interpreter probe; the view, `~/.agents/skills`, `<home>/skills` and `<home>/agents` resolve; `~/.claude/skills` still resolves to the clone; and nothing the migration retires is left behind. [`home_layout.py`](home_layout.py) is the one statement of this, and `migrate_home.py` reads the same findings as its plan | `<clone>/install.sh --migrate-home <home>`, a repair, or `--back`; `unset ADLC_HOME` when only the environment disagrees | no pointer and nothing a migration leaves at the old paths, which includes a REQ-654 `ADLC_HOME` override |
 | `consumer-sync` | every consumer repo under `$ADLC_REPOS_ROOT` (default: the parent of the current repo's main worktree, as id-alloc reads it) whose `.adlc/partials/` matches the canonical partials by content (REQ-654 BR-8), and whose project layer `adlc harness drift --harness claude --opted-in` finds neither `stale` nor `missing`. The baseline is named first (branch, `partials/` dirty or not, distance behind `origin/<default>` as of the last fetch); a checkout that is not clean-and-current is compared through `origin/<default>`, the plugin route against `adlc plugin <version>`. It never fetches and writes to no repo. A repo with something stale is looked up read-only with `gh repo view`: one GitHub reports archived is skipped by name and needs no fix; any other outcome (no `gh`, no network, not on github.com) leaves it stale and says the archive state is unknown | one line per stale repo: `cd '<repo>' && claude -p /template-drift` (`/adlc:template-drift` on the plugin route), which re-renders the project layer only with your approval because `--force` drops project additions | no consumer under the root; **unverified-baseline** (no `origin/<default>` ref, or no readable plugin version) is a SKIP that names the repos that differ and asserts nothing; a project layer that could not be compared (the toolkit's `harness/` or render templates differ from the baseline ref, or a file cannot be read as settings) is a SKIP that names why when nothing else is stale; so is every consumer being archived |
 | `harness:claude`, `harness:copilot`, `harness:codex`, `harness:gemini`, `harness:cursor` | (report-only) the binary is on PATH; reports its version and whether its skills directory reaches this toolkit. Replaces the former `claude-code` check (REQ-654) | never fails the verdict | the binary is not on PATH |
 
