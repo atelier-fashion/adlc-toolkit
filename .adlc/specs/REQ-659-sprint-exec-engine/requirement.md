@@ -4,7 +4,7 @@ title: "/sprint exec engine — a shell orchestrator that runs one headless harn
 status: in-progress
 deployable: false
 created: 2026-10-27
-updated: 2026-10-31
+updated: 2026-11-01
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["sh", "python", "markdown", "claude-skills", "json"]
@@ -273,13 +273,16 @@ Phase 1 re-measured this spec against `main` at `5025e40` (LESSON-751) and again
 
 ## Deferred
 
-The engine is built, and all 38 ACs run against a test harness, the stateful mock forge and real throwaway git under four shells. `claude auth status` read `loggedIn: false` on the implementing machine, so no run reached a model. This REQ stays `in-progress`, as REQ-655, REQ-656 and REQ-658 did, until the first item closes. `.adlc/research/harness-probes/claude-exec-manual.md` holds what the logged-out binary did prove, and `tools/adlc/tests/e2e/claude-exec-manual.sh` reruns it.
+PR #245 merged as `562ebff` on 2026-11-01, on the operator's approval, with the live checks below owed, so this REQ stays `in-progress` until they close (the same treatment as REQ-655, REQ-656 and REQ-658). The engine is built, and all 38 ACs run against a test harness, the stateful mock forge and real throwaway git under four shells. `claude auth status` read `loggedIn: false` on the implementing machine, so no run reached a model.
 
-- **AC-1, AC-3, AC-4, AC-8, AC-15: a logged-in run is owed.** Each names what `claude -p` itself does: a real session reaching the gate and leading with `Terminal state: awaiting_approval`, a real question and a real reply, and a `--resume` that continues a conversation and drafts a lesson. Each passes on the test harness. The real binary accepted the whole argv and stopped at `Not logged in`. Use a throwaway repo with a throwaway bare remote, and no bypass flag.
-- **The Assumptions on enforcement: unverified.** That `--allowedTools` holds in an untrusted workspace, that a deny beats a matching allow, and that a tool outside the allow tier is denied rather than prompted for. Until then BR-8's tiers are text the binary accepted, not behaviour anyone observed. The structural gates do not rest on them.
-- **`fence-vs-allowlist`: unknown.** Every fence opens with the ToolkitRoot line and holds several statements, and neither `Bash(ADLC_TOOLKIT_ROOT=:*)` nor the `if [ -f` spelling has been run against a model. If neither matches, the first fence ends the run `denied`, which is loud. The fix is `sprint.exec.allow_extra` or the adapter's `allow_extra`, and it may need a broader shell entry than AC-26's reading allows.
-- **The routine tier's reach.** `python3`, `sh` and a project's test runner are not routine, so a real project will meet `denied` halts until its `sprint.exec.allow_extra` names them. Expected, and what BR-21's halt is for, but unmeasured.
-- **This repo's `main` is `unprotected`** (`adlc_forge_branch_protection`, read-only, 2026-10-31), so a real `--exec` here needs `--allow-unprotected`, or branch protection first.
+**How to run them.** `tools/adlc/tests/e2e/claude-exec-manual.sh` is the way: it holds the throwaway repo, bare origin and `HOME` these checks need, under `env -i`, with no bypass flag. Today it reruns the logged-out rows in `.adlc/research/harness-probes/claude-exec-manual.md`, and each item below becomes a row there, with a login in that `HOME`.
+
+- **AC-1, AC-3, AC-4, AC-8, AC-15: owed a logged-in `claude` run.** Each names what `claude -p` itself does: a real session reaching the gate and leading with `Terminal state: awaiting_approval`, a real question and a real reply, and a `--resume` that continues a conversation and drafts a lesson. Each passes on the test harness. The real binary accepted the whole argv and stopped at `Not logged in`.
+- **Unverified: `--allowedTools` in an untrusted workspace (ASSUME-020).** Claude's notice names only the project's `permissions.allow`, which is not proof the command-line tier holds.
+- **Unverified: deny over a matching allow (ASSUME-021).** Until then BR-8's tiers are text the binary accepted, not behaviour anyone observed, and that a tool outside the allow tier is denied rather than prompted for rests on the same run. The structural gates do not rest on either.
+- **Unverified: whether a multi-statement fence matches an allow entry (ASSUME-022).** Every fence opens with the ToolkitRoot line and holds several statements, and neither `Bash(ADLC_TOOLKIT_ROOT=:*)` nor the `if [ -f` spelling has met a model. If neither matches, the first fence ends the run `denied`, which is loud. The fix may need a broader shell entry than AC-26's reading allows.
+- **Unverified: a `--resume` that continues a conversation from another working copy (ASSUME-023).** The session file is found from a sibling worktree. Nothing has continued from it.
+- **First-run needs.** `--allow-unprotected`, or branch protection first: this repo's `main` reads `unprotected` (`adlc_forge_branch_protection`, read-only, 2026-10-31). `sprint.exec.allow_extra` for `python3`, `sh` and test runners, which are not routine, so a real project meets `denied` halts until it names them.
 - **Azure DevOps.** The fields, list and flag allowlist are in, and `--exec` stays refused until a merge can be pinned there.
 
 ## Out of Scope
