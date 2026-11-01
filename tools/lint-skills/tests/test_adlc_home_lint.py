@@ -113,3 +113,18 @@ def test_registered_in_run():
     findings, _scanned = check.run(REPO_ROOT)
     assert [f for f in findings if f.check == "adlc-home"] == []
     assert "check_adlc_home(root)" in (REPO_ROOT / "tools" / "lint-skills" / "check.py").read_text()
+
+
+def test_fires_on_migration_code():
+    """REQ-663 BR-13, BR-15: migration code reaches the default through the helper, so a
+    literal added to it is a finding, and the shipped files carry none."""
+    for rel in ("tools/adlc/migrate_home.py", "tools/adlc/home_layout.py"):
+        path = REPO_ROOT / rel
+        text = path.read_text(encoding="utf-8")
+        assert check.adlc_home_findings(text, rel) == [], rel
+        assert ".claude" not in text.replace(".claude-plugin", ""), rel
+        planted = text + 'BAD = os.path.join(os.path.expanduser("~"), ".claude")\n'
+        found = check.adlc_home_findings(planted, rel)
+        assert [f.line for f in found] == [len(planted.splitlines())], rel
+        planted = text + 'BAD = "$HOME/.claude/.global-next-req"\n'
+        assert len(check.adlc_home_findings(planted, rel)) == 1, rel

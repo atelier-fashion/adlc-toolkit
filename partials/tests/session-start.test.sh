@@ -674,6 +674,57 @@ for ahbad in '' 'rel/home'; do
 done
 
 # ===========================================================================
+# 15. case_home_pointer (REQ-663 BR-8)
+# ===========================================================================
+# A migrated machine: ~/.claude/.adlc-home names the home, so the config scaffold
+# lands there and a session that never sourced the rc file agrees with one that did.
+# A pointer that cannot be used, or that disagrees with ADLC_HOME, writes no config:
+# adlc names the problem, and a scaffold would hide it. Benign half: an agreeing
+# variable and pointer scaffold as usual.
+new_home hptr
+HP_DIR="$SANDBOX/migrated home"
+mkdir -p "$CASE_HOME/.claude" "$HP_DIR"
+printf '%s\n' "$HP_DIR" > "$CASE_HOME/.claude/.adlc-home"
+run_hook hptr "$CACHE"
+hook_contract hptr 0
+check "case_home_pointer: the config lands under the pointer's home" "1" \
+  "$(command grep -c -x -F '  enabled: false' "$HP_DIR/adlc/config.yml" 2>/dev/null)"
+check "case_home_pointer: no config under ~/.claude" "./plugin-root " "$(listing "$CASE_HOME/.claude/adlc")"
+
+new_home hpagree
+HP_DIR2="$SANDBOX/migrated home two"
+mkdir -p "$CASE_HOME/.claude" "$HP_DIR2"
+printf '%s\n' "$HP_DIR2" > "$CASE_HOME/.claude/.adlc-home"
+ADLC_HOME="$HP_DIR2/"; export ADLC_HOME
+run_hook hpagree "$CACHE"
+unset ADLC_HOME
+hook_contract hpagree 0
+check "case_home_pointer: an agreeing ADLC_HOME scaffolds there" "1" \
+  "$(command grep -c -x -F '  enabled: false' "$HP_DIR2/adlc/config.yml" 2>/dev/null)"
+
+new_home hpgone
+mkdir -p "$CASE_HOME/.claude"
+printf '%s\n' "$SANDBOX/never made" > "$CASE_HOME/.claude/.adlc-home"
+run_hook hpgone "$CACHE"
+hook_contract hpgone 1
+check "case_home_pointer: a dangling pointer creates no directory" "no" \
+  "$([ -e "$SANDBOX/never made" ] && echo yes || echo no)"
+check "case_home_pointer: a dangling pointer is reported" "1" "$(command grep -c 'pointer' "$SANDBOX/out/hpgone.err")"
+check "case_home_pointer: a dangling pointer writes no config" "./plugin-root " "$(listing "$CASE_HOME/.claude/adlc")"
+
+new_home hpconf
+HP_DIR3="$SANDBOX/migrated home three"
+mkdir -p "$CASE_HOME/.claude" "$HP_DIR3"
+printf '%s\n' "$HP_DIR3" > "$CASE_HOME/.claude/.adlc-home"
+ADLC_HOME="$SANDBOX/elsewhere home"; export ADLC_HOME
+run_hook hpconf "$CACHE"
+unset ADLC_HOME
+hook_contract hpconf 1
+check "case_home_pointer: a conflict writes nothing under ADLC_HOME" "no" \
+  "$([ -e "$SANDBOX/elsewhere home" ] && echo yes || echo no)"
+check "case_home_pointer: nor under the pointer's home" "" "$(listing "$HP_DIR3")"
+
+# ===========================================================================
 # Case-count floor: a harness that ran nothing must not read as a pass.
 echo "session-start.test.sh: $CASES cases executed"
 if [ "$CASES" -lt 100 ]; then

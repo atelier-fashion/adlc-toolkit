@@ -490,6 +490,14 @@ def verdict_exit_code(outcomes: List[CheckOutcome]) -> int:
     return 1 if any(o.result is Result.FAIL for o in outcomes) else 0
 
 
+def _home_label() -> str:
+    """Which home this report is about, and what decided it (REQ-663 AC-3)."""
+    try:
+        return "%s (%s)" % (adlc_home.adlc_home(), adlc_home.adlc_home_source())
+    except adlc_home.AdlcHomeError:
+        return "(unresolved)"
+
+
 def format_report(outcomes: List[CheckOutcome], profile: Profile) -> str:
     lines: List[str] = []
     for o in outcomes:
@@ -503,7 +511,8 @@ def format_report(outcomes: List[CheckOutcome], profile: Profile) -> str:
     lines.append("")
     shell = profile.login_shell or "(undetermined)"
     route = profile.route + (" (route detection failed)" if profile.route_error else "")
-    lines.append(f"profile: os={profile.os} login_shell={shell} route={route}")
+    lines.append(f"profile: os={profile.os} login_shell={shell} route={route} "
+                 f"home={_home_label()}")
     verdict = "OK" if n_fail == 0 else "FAILED"
     lines.append(
         f"verdict: {verdict} ({n_pass} pass, {n_fail} fail, {n_skip} skip)"
@@ -545,8 +554,12 @@ def main(argv=None) -> int:
     # REQ-654 BR-2: an ADLC_HOME that is set but empty or relative is an error
     # naming the variable, before any check reads a path. Falling through to
     # ~/.claude would report on a machine the operator did not point us at.
+    # REQ-663 BR-12: a pointer that cannot be used, or that disagrees with ADLC_HOME,
+    # is a state of the machine rather than a bad invocation, so `home-layout` reports
+    # it. No other check can run: each of them reads the home that did not resolve.
     home_error = adlc_home.validate()
-    if home_error:
+    pointer_error = adlc_home.pointer_error()
+    if home_error and not pointer_error:
         sys.stderr.write("adlc doctor: %s\n" % home_error)
         return 2
 
@@ -554,7 +567,10 @@ def main(argv=None) -> int:
     registry = _build_registry()
 
     only = None
-    if args.checks:
+    if pointer_error:
+        sys.stderr.write("adlc doctor: %s\n" % pointer_error)
+        only = ["home-layout"]
+    elif args.checks:
         try:
             only = _parse_only(args.checks, registry)
         except ValueError as exc:

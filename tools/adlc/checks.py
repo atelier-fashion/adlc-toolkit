@@ -44,6 +44,7 @@ import sys
 import time
 
 import adlc_home
+import home_layout
 import toolkit_root
 from doctor import (PLUGIN_MARKETPLACE, PLUGIN_NAME, ROUTE_PLUGIN, Check, PluginInstall,
                     Profile, Result, detect_plugin_install, plugin_manifest,
@@ -57,7 +58,7 @@ _q = shlex.quote
 # increment, which holds the lock for milliseconds.
 _STALE_LOCK_SECONDS = 15 * 60
 
-_COUNTERS = (".global-next-req", ".global-next-bug", ".global-next-lesson")
+_COUNTERS = home_layout.COUNTERS
 
 #: Every subprocess doctor uses to read the config is bounded. An interpreter
 #: on a stalled network mount, or one whose site customization blocks, would
@@ -909,45 +910,90 @@ def _stale_reason(files: list, layer: list):
     return "; ".join(reasons + ["project layer %s" % finding for finding in layer])
 
 
-def check_consumer_sync(profile: Profile):
+class ConsumerSync:
+    """What the walk found, before anyone words it (REQ-654 ADR-8, REQ-663 ADR-6).
+
+    Separate from the verdict because the two readers want different things: the
+    doctor row reports everything, and the migration gate refuses only on a stale
+    vendored partial, which is the hazard it exists for.
+    """
+
+    def __init__(self, root, how):
+        self.root = root              # None: there is nowhere to walk
+        self.how = how                # how the root was chosen, or why there is none
+        self.consumers = []
+        self.base = None              # None until a consumer needs one
+        self.differ = []              # with an unverified baseline only
+        self.stale = []               # [(consumer, files, layer, note)]
+        self.skipped = []             # ["skipped <consumer> (<why>)"]
+        self.unverified = []          # project layers that could not be compared
+
+
+def consumer_sync_report(profile: Profile) -> ConsumerSync:
+    """Walk the consumers. A read-only gather: no verdict, no text a reader must parse."""
     root, how = _repos_root(profile)
+    report = ConsumerSync(root, how)
+    if root is None:
+        return report
+    report.consumers = _consumers(root, profile.repo_root)
+    if not report.consumers:
+        return report
+    report.base = _consumer_baseline(profile)
+    if report.base.unverified:
+        report.differ = [c for c in report.consumers
+                         if _stale_files(c, report.base.partials)]
+        return report
+    layers, report.unverified = _project_layers(report.consumers, profile, report.base)
+    for consumer in report.consumers:
+        files = _stale_files(consumer, report.base.partials)
+        layer = layers.get(consumer, [])
+        if not _stale_reason(files, layer):
+            continue
+        archived, why = _archive_state(consumer)
+        if archived:
+            report.skipped.append("skipped %s (%s)" % (consumer, why))
+            continue
+        note = " [archive state unknown: %s]" % why if archived is None else ""
+        report.stale.append((consumer, files, layer, note))
+    return report
+
+
+def consumer_sync_fix(profile: Profile, consumer: str) -> str:
+    """The verbatim per-repo fix, on either route."""
+    skill = "/adlc:template-drift" if profile.route == ROUTE_PLUGIN else "/template-drift"
+    return "cd %s && claude -p %s" % (_q(consumer), _q(skill))
+
+
+def check_consumer_sync(profile: Profile):
+    report = consumer_sync_report(profile)
+    root, how = report.root, report.how
     if root is None:
         return Result.SKIP, f"no repos root ({how})", ""
-    consumers = _consumers(root, profile.repo_root)
+    consumers = report.consumers
     if not consumers:
         return (Result.SKIP,
                 f"no consumer under {root} ({how}) has a vendored .adlc/partials/", "")
-    base = _consumer_baseline(profile)
+    base = report.base
     if base.unverified:
-        differ = [c for c in consumers if _stale_files(c, base.partials)]
+        differ = report.differ
         return (Result.SKIP,
                 f"unverified-baseline: {base.unverified}. Baseline {base.label}; "
                 f"{len(consumers)} consumer(s) under {root}, {len(differ)} differ from "
                 f"{base.source}{': ' + ', '.join(differ) if differ else ''}. No verdict "
                 "is asserted until the baseline can be trusted", "")
-    layers, unverified = _project_layers(consumers, profile, base)
-    stale, skipped = [], []
-    for consumer in consumers:
-        reason = _stale_reason(_stale_files(consumer, base.partials), layers.get(consumer, []))
-        if not reason:
-            continue
-        archived, why = _archive_state(consumer)
-        if archived:
-            skipped.append("skipped %s (%s)" % (consumer, why))
-            continue
-        note = " [archive state unknown: %s]" % why if archived is None else ""
-        stale.append((consumer, "%s is stale (%s)%s" % (consumer, reason, note)))
+    skipped, unverified = report.skipped, report.unverified
+    stale = [(consumer, "%s is stale (%s)%s" % (consumer, _stale_reason(files, layer), note))
+             for consumer, files, layer, note in report.stale]
     tail = "".join(". " + line for line in skipped)
     if unverified:
         tail += ". Project layer not compared: %s" % "; ".join(unverified)
     if stale:
-        skill = "/adlc:template-drift" if profile.route == ROUTE_PLUGIN else "/template-drift"
         detail = "; ".join(line for _c, line in stale)
         return (Result.FAIL,
                 f"{detail}. Compared against {base.source} (baseline {base.label}); a stale "
                 "vendored partial is read before the canonical copy, so its fixes never run "
                 f"there (LESSON-441){tail}",
-                "\n".join("cd %s && claude -p %s" % (_q(c), _q(skill)) for c, _line in stale))
+                "\n".join(consumer_sync_fix(profile, c) for c, _line in stale))
     checked = len(consumers) - len(skipped)
     if unverified or not checked:
         return (Result.SKIP,
@@ -1621,6 +1667,40 @@ def check_counters(profile: Profile):
     return Result.PASS, "global counters present, numeric, no stale locks", ""
 
 
+# --- home-layout (REQ-663 BR-12, ADR-5) -------------------------------------
+
+def check_home_layout(profile: Profile):
+    """The migrated layout, end to end. SKIP on a machine that never migrated.
+
+    ``home_layout.inspect`` is what the migration reads as its plan, so a FAIL here
+    and the repair it names cannot disagree. The one finding a repair cannot clear is
+    a variable in this environment, so that one gets its own fix.
+    """
+    if not home_layout.is_migrated():
+        return (Result.SKIP,
+                "not migrated: no home pointer and nothing a migration leaves at the old "
+                "paths", "")
+    home, how = home_layout.persisted_home()
+    # The clone Claude Code's mount points at, so a doctor run from a worktree or a
+    # second copy does not report the mounts as wrong.
+    facts = home_layout.machine_facts(home, _view_source(profile),
+                                      home_layout.rc_file_for(profile.login_shell))
+    findings = home_layout.inspect(facts, os.environ.get(adlc_home.ENV))
+    if not findings:
+        return (Result.PASS,
+                f"{home} holds the machine state; the pointer, rc line, compatibility "
+                "symlinks, lock tombstones, stamped files, venv, view and mounts agree", "")
+    detail = "; ".join("%s: %s" % (f.item, f.detail) for f in findings)
+    install = _q(os.path.join(profile.repo_root, "install.sh"))
+    fixes = []
+    if any(f.step == "env" for f in findings):
+        fixes.append("unset ADLC_HOME   # this environment disagrees with the machine")
+    if any(f.step != "env" for f in findings):
+        fixes.append("%s --migrate-home %s   # repairs it in place" % (install, _q(home)))
+        fixes.append("%s --migrate-home --back   # or leaves the migration" % install)
+    return Result.FAIL, f"home is {home} ({how}): {detail}", "\n".join(fixes)
+
+
 # --- launchctl (macOS-only, opt-in) ----------------------------------------
 
 def check_launchctl(profile: Profile):
@@ -1800,4 +1880,6 @@ REGISTRY = [
     Check("template-version", check_template_version),
     # Machine-wide: every consumer's vendored partials against the canonical ones.
     Check("consumer-sync", check_consumer_sync),
+    # The migrated layout; SKIPs on a machine that never migrated (REQ-663 BR-12).
+    Check("home-layout", check_home_layout),
 ] + _harness_checks() + _render_currency_checks() + _doctor_row_checks()

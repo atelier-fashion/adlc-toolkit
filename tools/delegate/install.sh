@@ -1,7 +1,39 @@
 #!/bin/sh
 # Idempotent installer for the provider-agnostic delegation CLIs.
 # POSIX sh only — no bashisms, no GNU-specific flags.
+#
+# Two narrower modes, for `install.sh --migrate-home` (REQ-663), each against a home it
+# is told rather than the one the rule resolves, because a migration names both:
+#   tools/delegate/install.sh --venv-only <home>        the venv-creation and pip steps
+#                                                       only (BR-4): no rc file, no
+#                                                       CLAUDE.md, no settings.json, no
+#                                                       launchctl, no log directory
+#   tools/delegate/install.sh --render <home> <outdir>  write the wrappers and the plist
+#                                                       this script would install for
+#                                                       <home> into <outdir>; touch
+#                                                       nothing else
 set -eu
+
+MODE=full
+MODE_HOME=""
+MODE_OUT=""
+case "${1:-}" in
+    --venv-only)
+        MODE=venv
+        MODE_HOME="${2:-}"
+        ;;
+    --render)
+        MODE=render
+        MODE_HOME="${2:-}"
+        MODE_OUT="${3:-}"
+        ;;
+esac
+if [ "$MODE" != full ]; then
+    case "$MODE_HOME" in
+        /*) ;;
+        *) echo "ERROR: $1 needs an absolute home" >&2; exit 2 ;;
+    esac
+fi
 
 # Resolve REPO_ROOT to the CANONICAL repo, not any worktree (e.g. Claude Code's
 # per-session `.claude/worktrees/<id>` or ADLC pipeline `.worktrees/REQ-xxx`).
@@ -37,7 +69,11 @@ if [ ! -f "$ADLC_HOME_PARTIAL" ]; then
     exit 1
 fi
 . "$ADLC_HOME_PARTIAL"
-ADLC_HOME_DIR=$(adlc_home) || exit 1
+if [ "$MODE" = full ]; then
+    ADLC_HOME_DIR=$(adlc_home) || exit 1
+else
+    ADLC_HOME_DIR=$MODE_HOME
+fi
 VENV_DIR="$ADLC_HOME_DIR/delegate-venv"
 # Legacy venv name (REQ-522 rename) — removed on upgrade so it does not linger.
 LEGACY_VENV_DIR="$ADLC_HOME_DIR/kimi-venv"
@@ -62,6 +98,32 @@ esac
 # Provider-neutral CLIs (REQ-515 BR-1; REQ-522 BR-3 removed the legacy
 # ask-kimi / kimi-write shims — use adlc-read / adlc-write).
 CLIS="adlc-read adlc-write extract-chat"
+AGENT_LABEL="com.adlc-toolkit.delegate-setenv"
+PLIST_SRC="$REPO_ROOT/tools/delegate/$AGENT_LABEL.plist.in"
+
+# render_wrapper <name> <file> — one wrapper's text. Path-stamped to $REPO_ROOT and
+# $VENV_DIR, so moving either means regenerating it.
+render_wrapper() {
+    cat > "$2" <<EOF
+#!/bin/sh
+exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/delegate/$1" "\$@"
+EOF
+}
+
+# render_plist <file> — __ADLC_HOME__ is ADLC_HOME_DIR, where the helper is; a plist
+# needs an absolute path, not a variable.
+render_plist() {
+    sed -e "s|__ADLC_HOME__|$ADLC_HOME_DIR|g" -e "s|__HOME__|$HOME|g" "$PLIST_SRC" > "$1"
+}
+
+if [ "$MODE" = render ]; then
+    [ -d "$MODE_OUT" ] || { echo "ERROR: --render needs an existing output directory" >&2; exit 2; }
+    for name in $CLIS; do
+        render_wrapper "$name" "$MODE_OUT/$name"
+    done
+    render_plist "$MODE_OUT/$AGENT_LABEL.plist"
+    exit 0
+fi
 # Legacy shim names removed on upgrade so stale wrappers do not shadow PATH.
 LEGACY_SHIMS="ask-kimi kimi-write"
 
@@ -119,6 +181,9 @@ if [ ! -d "$VENV_DIR" ]; then
 fi
 echo "Installing pinned dependencies from requirements.txt into venv"
 "$VENV_DIR/bin/pip" install -r "$REPO_ROOT/tools/delegate/requirements.txt"
+if [ "$MODE" = venv ]; then
+    exit 0
+fi
 
 # Remove the legacy Kimi-named venv on upgrade (REQ-522) so it does not linger.
 if [ -d "$LEGACY_VENV_DIR" ] && [ "$LEGACY_VENV_DIR" != "$VENV_DIR" ]; then
@@ -132,10 +197,7 @@ fi
 mkdir -p "$BIN_DIR"
 for name in $CLIS; do
     wrapper="$BIN_DIR/$name"
-    cat > "$wrapper" <<EOF
-#!/bin/sh
-exec "$VENV_DIR/bin/python3" "$REPO_ROOT/tools/delegate/$name" "\$@"
-EOF
+    render_wrapper "$name" "$wrapper"
     chmod +x "$wrapper"
     echo "Wrote wrapper $wrapper (-> $REPO_ROOT/tools/delegate/$name)"
 done
@@ -196,11 +258,9 @@ fi
 # GUI-launched Claude Code to see the key). A compromised user-space process
 # already has access to ~/.zshrc anyway.
 if command -v launchctl >/dev/null 2>&1; then
-    AGENT_LABEL="com.adlc-toolkit.delegate-setenv"
     AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
     AGENT_HELPER="$ADLC_HOME_DIR/delegate-launchctl-setenv.sh"
     HELPER_SRC="$REPO_ROOT/tools/delegate/delegate-launchctl-setenv.sh.in"
-    PLIST_SRC="$REPO_ROOT/tools/delegate/com.adlc-toolkit.delegate-setenv.plist.in"
 
     # REQ-522 BR-8 migration: a prior install left a Kimi-labeled LaunchAgent.
     # Unload and remove it BEFORE loading the renamed agent so the two do not
@@ -235,9 +295,8 @@ if command -v launchctl >/dev/null 2>&1; then
     cp "$HELPER_SRC" "$AGENT_HELPER"
     chmod +x "$AGENT_HELPER"
 
-    # Write plist with the helper's directory substituted (plist needs an absolute
-    # path, not a variable). __ADLC_HOME__ is ADLC_HOME_DIR, where the helper is.
-    sed -e "s|__ADLC_HOME__|$ADLC_HOME_DIR|g" -e "s|__HOME__|$HOME|g" "$PLIST_SRC" > "$AGENT_PLIST"
+    # Write plist with the helper's directory substituted.
+    render_plist "$AGENT_PLIST"
 
     # Validate the plist BEFORE attempting to load — catches a malformed
     # template / failed substitution at install time rather than at next login.
