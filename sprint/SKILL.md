@@ -1,7 +1,7 @@
 ---
 name: sprint
 description: Parallel pipeline orchestrator — launch multiple /proceed sessions concurrently across REQs, monitor progress, and report status. Use when the user says "sprint", "run these REQs in parallel", "proceed with all approved REQs", "launch a sprint", or wants to advance multiple requirements simultaneously.
-argument-hint: REQ IDs to sprint (e.g., "REQ-091 REQ-092 REQ-093") or "all"; add --workflow to run on the Dynamic Workflows engine
+argument-hint: REQ IDs to sprint (e.g., "REQ-091 REQ-092 REQ-093") or "all"; add --workflow to run on the Dynamic Workflows engine, or --exec for the headless exec engine
 ---
 
 # /sprint — Parallel Pipeline Orchestrator
@@ -30,7 +30,7 @@ find .adlc/specs -name pipeline-state.json 2>/dev/null || echo 'No specs directo
 
 ## Input
 
-The target REQs are the argument: whatever follows `/sprint` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), REQ ids and optionally `--workflow`. With none, Step 1 picks every eligible REQ.
+The target REQs are the argument: whatever follows `/sprint` in the invocation (on Claude Code it can also arrive as an `ARGUMENTS:` line appended to this text), REQ ids and optionally `--workflow`, or `--exec` with its flags. `approve`, `reject`, `answer`, `abort`, `reissue` or `status` as the first word is the exec engine's operator verb. With none, Step 1 picks every eligible REQ.
 
 ## Prerequisites
 
@@ -43,16 +43,17 @@ Before proceeding, verify:
 
 ### Step 0: Select the Sprint Engine
 
-`/sprint` has two engines behind one command (ADR-1):
+`/sprint` has three engines behind one command (ADR-1):
 
 - **`workflow`** — the deterministic `adlc-sprint` Dynamic Workflows script, which restores each REQ's internal fan-out (explore trio, Phase-5 review panel) *while* keeping cross-REQ concurrency.
 - **`legacy`** — the background `pipeline-runner` engine documented in Steps 1–6 below. Always available; the hard fallback.
+- **`exec`** — a program, not a model (REQ-659). It launches one headless harness per REQ, stops each at the merge gate, and performs every one-way move itself after an operator approves. Selected only by an explicit `--exec`: never the default, and never a fallback for the other two.
 
 **Decide which engine to run:**
 
 1. **Detect Dynamic Workflows availability**: the engine is *available* only if the `Workflow` tool is invocable in this session. Dynamic Workflows is research-preview and plan-gated, so it can be absent (headless/cron runs, non-qualifying plans). If you cannot invoke the `Workflow` tool, treat it as unavailable.
-2. **Read the `--workflow` flag** from the argument. Strip the flag token from the argument list before any REQ-ID parsing downstream, so it is never mistaken for a REQ id.
-3. **Select the engine**: choose `workflow` only when *available* **AND** (`--workflow` was passed **OR** the workflow engine has graduated to the default). Otherwise choose `legacy` — with no behavior change from today's `/sprint`.
+2. **Read the `--workflow` and `--exec` flags** from the argument, with `--exec`'s own `--harness <name>`, `--allow-unprotected` and `--shared-credentials`. Strip the flag tokens from the argument list before any REQ-ID parsing downstream, so none is mistaken for a REQ id.
+3. **Select the engine**: choose `exec` when `--exec` was passed, or when the first word is one of its operator verbs. Otherwise choose `workflow` only when *available* **AND** (`--workflow` was passed **OR** the workflow engine has graduated to the default). Otherwise choose `legacy` — with no behavior change from today's `/sprint`.
 
 If the user passed `--workflow` but the `Workflow` tool is unavailable, say so explicitly and fall back to `legacy` rather than failing.
 
@@ -115,6 +116,8 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
 5. **Orchestrator `blocker-cleared` auto-resume (REQ-485 BR-8 — primary engine per OQ-1 default).** A REQ held by a Phase-8 trial-merge conflict against an ahead REQ is **not** resumed by a user reply — it is resumed by the **orchestrator** once it merges that blocker *within the run*. This is a distinct resume channel from `args.answers` (a user answer): the script threads an orchestrator-generated `blocker-cleared` signal for the held REQ. The held workflow REQ does NOT self-resume — it already returned `{state:'blocked'}` and the post-merge unblock pass (in `adlc-sprint.workflow.js`) drives its resume by relaunching the SAME script via `resumeFromRunId` carrying the cleared signal in `args` (e.g. `args.blockerCleared[<held-REQ-id>] = <blocker-id>`, parallel to `args.answers`). Like `args.answers`, the signal is injected **surgically** — only into the held REQ's Phase-8 / halt-prone path — so every untouched and already-`merged` REQ replays byte-identical from the journal cache (no recreated worktree, no double-merge). The unblock pass rebases the held REQ's own worktree first; a clean rebase resumes it (it re-runs the now-passing trial-merge gate and merges, clearing its `blockers` entry — BR-11), a conflicting rebase aborts non-mutatingly and re-halts `{state:'blocked'}` with the materialized conflict files (BR-4), retry-bounded (BR-10). Held REQs on one blocker resume in REQ-483's deterministic order, one at a time (BR-6). See the "Self-healing serialization" section below for the cross-engine behavior contract.
 
 6. **Summarise the sprint (REQ-648 BR-7).** When no REQ is left waiting on a reply, produce the summary from the final `{results}`: the Completed and Blocked tables and the Close-out table of Step 6's template, and its **Recurrence** section, built by the fence there over this run's REQ list. The engine already emitted one run-outcome line per REQ after its close-out pass, so the script has its input.
+
+**If the engine is `exec`:** Read `sprint/references/exec-engine.md` and follow it before you continue. It holds the launch, the dashboard, the rule for `approve`, and the operator verbs. Nothing in this file replaces it.
 
 **Else (the engine is `legacy`)** — run Steps 1–6 below exactly as written. This is the existing background-`pipeline-runner` orchestration, unchanged.
 
@@ -423,7 +426,7 @@ If any check fails, mark the REQ ineligible with a specific issue in the pre-fli
 - It does not replace `/proceed` — it orchestrates multiple `/proceed` sessions
 - It does not originate REQs from different primary repos in a single sprint — every REQ in one `/sprint` invocation is assumed to originate from the repo the command was run in. Cross-repo REQs whose primary is a sibling must be sprinted from that sibling instead.
 - It does not require the workflow engine. Dynamic Workflows is a research-preview, plan-gated capability that can be absent (headless/cron runs, non-qualifying plans), so the workflow engine is never assumed present: `/sprint` runs the workflow engine only when the `Workflow` tool is invocable **and** the run opts in (`--workflow`, or once it graduates to default), and otherwise runs the legacy background-runner engine — the always-available, behavior-unchanged fallback. A `--workflow` request with the tool unavailable does not fail the sprint; it falls back to legacy with an explicit notice.
-- It does not make the two engines diverge in outcome. The workflow engine only changes *how* the pipeline is dispatched (restored per-REQ fan-out); it does not add, skip, or reorder pipeline phases relative to the legacy engine, and it does not gate the legacy engine behind the workflow engine.
+- It does not make the engines diverge in outcome. The workflow engine only changes *how* the pipeline is dispatched (restored per-REQ fan-out); it does not add, skip, or reorder pipeline phases relative to the legacy engine, and it does not gate the legacy engine behind the workflow engine.
 - It does not auto-resume a REQ blocked by a **cross-session** merge (REQ-485 BR-9). Self-healing serialization triggers only on a blocker this `/sprint` run merged itself — a known local event. There is no cross-session watch/poll; a blocker merged by a different session stays manual until a human resumes it.
 - It does not auto-resume a **solo `/proceed`** (not under `/sprint`) that hit a trial-merge block (REQ-485 BR-1). The human is present in that path, so the held REQ keeps today's manual rebase-and-resume behavior; only an orchestrated `/sprint` batch self-heals.
 - It does not auto-resolve a rebase conflict (REQ-485 BR-4). A conflicting auto-rebase is `--abort`ed and re-halted for human resolution; the machinery only detects and restores, never resolves, forces, or merges-anyway.

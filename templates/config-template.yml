@@ -184,6 +184,30 @@ merge_order:
 #   integration: dev
 
 # ---------------------------------------------------------------------------
+# sprint: The `/sprint --exec` engine. Optional.
+# ---------------------------------------------------------------------------
+# Read once at launch and frozen for the run, so an edit changes nothing for a
+# live one. `child_gh_token` is the NAME of a variable holding a token without
+# `contents: write`, never a token. Without it a launch needs
+# `--shared-credentials`. `require_branch_protection` defaults to true, and an
+# operator who accepts the risk for one run passes `--allow-unprotected`.
+# `deploy` is the one deploy the engine will run, after approval, and only from
+# the copy of this file on the integration branch. `allow_extra` adds routine
+# entries, as argv lists; one that wraps a deny-tier command is refused.
+#
+# sprint:
+#   exec:
+#     child_gh_token: ADLC_CHILD_GH_TOKEN
+#     stall_minutes: 20
+#     require_branch_protection: true
+#     auto_rebase_max_attempts: 1
+#     allow_extra:
+#       - [pytest]
+#     deploy:
+#       target: production
+#       command: "./deploy.sh production"
+
+# ---------------------------------------------------------------------------
 # gcp: GCP-specific deploy config. Only relevant if `stack.backends` includes
 # `cloud-run` or your CI/CD targets GCP.
 # ---------------------------------------------------------------------------

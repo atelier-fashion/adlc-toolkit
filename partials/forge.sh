@@ -303,6 +303,23 @@ _adlc_forge_mock() {
   adlc_mk_op=$1
   adlc_mk_prov="${ADLC_FORGE_MOCK_PROVIDER:-github}"
   adlc_mk_scn="${ADLC_FORGE_MOCK_SCENARIO:-ok}"
+  # REQ-659 BR-26: the flag allowlist guards the mock path too, so a refused flag
+  # is refused the same way with no `az` on the machine.
+  if [ "$adlc_mk_prov" = "azure-devops" ]; then
+    case "$adlc_mk_op" in
+      pr_create|pr_ready|pr_edit)
+        shift
+        _adlc_forge_ado_check "$@" || return 1
+        set -- "$adlc_mk_op" "$@" ;;
+    esac
+  fi
+  # The stateful mock (REQ-659 ADR-8): a store sends every call to the helper; with
+  # no store, only what REQ-659 added does, so the fixed strings below stay as they
+  # were for every older call site.
+  if _adlc_forge_mock_new "$@"; then
+    _adlc_forge_mock_py "$@"
+    return $?
+  fi
   # ADO pr_comment is always feature-unsupported in v1, regardless of scenario.
   if [ "$adlc_mk_op" = "pr_comment" ] && [ "$adlc_mk_prov" = "azure-devops" ]; then
     _adlc_forge_err "feature-unsupported" "ADO pr_comment is not supported in v1 (no az repos comment subcommand; REST thread API deferred)"
@@ -330,6 +347,104 @@ _adlc_forge_mock() {
     *) _adlc_forge_err "network" "mock backend: unknown op '$adlc_mk_op'"; return 1 ;;
   esac
   return 0
+}
+
+# True when this mock call needs tools/adlc/forge_mock.py.
+_adlc_forge_mock_new() {
+  [ -n "${ADLC_FORGE_MOCK_STORE:-}" ] && return 0
+  adlc_mkn_op=$1
+  shift
+  case "$adlc_mkn_op" in
+    branch_protection|commit_prs) return 0 ;;
+    pr_view|pr_list|pr_merge)
+      for adlc_mkn_a in "$@"; do
+        case "$adlc_mkn_a" in
+          --head|--match-head-commit|*headRefOid*|*headRefName*|*baseRefName*|*isCrossRepository*|*mergeCommit*|files|files,*|*,files|*,files,*)
+            return 0 ;;
+        esac
+      done ;;
+  esac
+  return 1
+}
+
+# The interpreter rule, and `command` so a function named python3 cannot intercept
+# the call (REQ-609 D5). -E, as lane-check.sh does for the engine it runs.
+_adlc_forge_mock_py() {
+  adlc_mkp_py=$(_adlc_forge_python)
+  command "$adlc_mkp_py" -E "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/adlc/forge_mock.py" "$@"
+}
+
+# The Azure DevOps flag allowlist (REQ-659 BR-26 f). What reaches `az` is
+# --title --description --draft --source-branch --target-branch. The five flags that
+# would complete, abandon or bypass a PR are refused by name before `az` runs, and so
+# is anything else unrecognized: the old `--*) :` drop is how a pin went missing
+# silently. gh-shaped --body, --body-file, --base, --head and -R are the call sites'
+# spelling, and _adlc_forge_ado_run translates them.
+_adlc_forge_ado_check() {
+  while [ "$#" -gt 0 ]; do
+    adlc_fac_a=$1
+    shift
+    case "$adlc_fac_a" in
+      --title|--description|--source-branch|--target-branch|--body|--body-file|--base|--head|-R)
+        [ "$#" -gt 0 ] && shift ;;
+      --draft)
+        case "${1:-}" in true|false) shift ;; esac ;;
+      --status|--auto-complete|--squash|--delete-source-branch|--bypass-policy)
+        _adlc_forge_err "feature-unsupported" "forge: $adlc_fac_a is refused on the azure-devops backend: it would change a PR's merge state outside adlc_forge_pr_merge"
+        return 1 ;;
+      -*)
+        _adlc_forge_err "feature-unsupported" "forge: $adlc_fac_a is not on the azure-devops flag allowlist"
+        return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# _adlc_forge_ado_run <create|update> <caller args...>: translate the gh-shaped
+# flags, rebuilding "$@" in place (POSIX, word-split-free under zsh), then run az.
+_adlc_forge_ado_run() {
+  adlc_far_sub=$1
+  shift
+  _adlc_forge_ado_check "$@" || return 1
+  adlc_far_n=$#
+  adlc_far_id=""
+  while [ "$adlc_far_n" -gt 0 ]; do
+    adlc_far_a=$1
+    shift
+    adlc_far_n=$((adlc_far_n - 1))
+    case "$adlc_far_a" in
+      --title|--description|--source-branch|--target-branch)
+        set -- "$@" "$adlc_far_a" "$1"; shift; adlc_far_n=$((adlc_far_n - 1)) ;;
+      --body)
+        set -- "$@" --description "$1"; shift; adlc_far_n=$((adlc_far_n - 1)) ;;
+      --body-file)
+        adlc_far_body=$(cat -- "$1"); shift; adlc_far_n=$((adlc_far_n - 1))
+        set -- "$@" --description "$adlc_far_body" ;;
+      --base)
+        set -- "$@" --target-branch "$1"; shift; adlc_far_n=$((adlc_far_n - 1)) ;;
+      --head)
+        set -- "$@" --source-branch "$1"; shift; adlc_far_n=$((adlc_far_n - 1)) ;;
+      -R)
+        shift; adlc_far_n=$((adlc_far_n - 1)) ;;   # az reads the repo from its defaults
+      --draft)
+        case "${1:-}" in
+          true|false)
+            if [ "$adlc_far_n" -gt 0 ]; then
+              set -- "$@" --draft "$1"; shift; adlc_far_n=$((adlc_far_n - 1))
+            else
+              set -- "$@" --draft
+            fi ;;
+          *) set -- "$@" --draft ;;
+        esac ;;
+      *)
+        adlc_far_id=$adlc_far_a ;;
+    esac
+  done
+  if [ "$adlc_far_sub" = "update" ]; then
+    _adlc_forge_run -- az repos pr update --id "$adlc_far_id" "$@"
+  else
+    _adlc_forge_run -- az repos pr create "$@"
+  fi
 }
 
 # --- backend runner: run a command, capture stderr, classify on failure ------
@@ -364,7 +479,7 @@ _adlc_forge_run() {
 
 # adlc_forge_pr_create --base B --head H --title T --body BODY [--draft]
 adlc_forge_pr_create() {
-  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_create; return $?; }
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_create "$@"; return $?; }
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)
@@ -375,34 +490,33 @@ adlc_forge_pr_create() {
       # The runner already streamed the raw URL; re-emit as a normalized field too.
       printf 'url=%s\nstate=OPEN\n' "$adlc_fc_out"; return 0 ;;
     azure-devops)
-      _adlc_forge_run -- az repos pr create "$@"; return $? ;;
+      _adlc_forge_ado_run create "$@"; return $? ;;
     *) _adlc_forge_err "feature-unsupported" "no backend for provider '$ADLC_FORGE_PROVIDER'"; return 1 ;;
   esac
 }
 
 # adlc_forge_pr_ready <number|url>
 adlc_forge_pr_ready() {
-  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_ready; return $?; }
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_ready "$@"; return $?; }
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)       _adlc_forge_run -- gh pr ready "$@"; adlc_fr_rc=$?; [ "$adlc_fr_rc" -eq 0 ] && printf 'state=OPEN\n'; return "$adlc_fr_rc" ;;
-    azure-devops) _adlc_forge_run -- az repos pr update --id "$@" --draft false; adlc_fr_rc=$?; [ "$adlc_fr_rc" -eq 0 ] && printf 'state=OPEN\n'; return "$adlc_fr_rc" ;;
+    azure-devops) _adlc_forge_ado_run update "$@" --draft false; adlc_fr_rc=$?; [ "$adlc_fr_rc" -eq 0 ] && printf 'state=OPEN\n'; return "$adlc_fr_rc" ;;
     *) _adlc_forge_err "feature-unsupported" "no backend for provider '$ADLC_FORGE_PROVIDER'"; return 1 ;;
   esac
 }
 
 # adlc_forge_pr_edit <number|url> [--title T] [--body BODY] [--body-file F]
 adlc_forge_pr_edit() {
-  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_edit; return $?; }
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_edit "$@"; return $?; }
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)       _adlc_forge_run -- gh pr edit "$@"; return $? ;;
     azure-devops)
-      # gh's --title/--body map to az repos pr update --title/--description; caller
-      # passes gh-shaped flags, the ADO call-site adapter translates. For v1 the
-      # migrated call sites pass gh-shaped flags only through the github branch;
-      # ADO edit goes through az with the id positional.
-      _adlc_forge_run -- az repos pr update --id "$@"; return $? ;;
+      # gh's --title/--body/--body-file map to az repos pr update
+      # --title/--description; _adlc_forge_ado_run translates them, and refuses
+      # anything off the allowlist before az runs (REQ-659 BR-26 f).
+      _adlc_forge_ado_run update "$@"; return $? ;;
     *) _adlc_forge_err "feature-unsupported" "no backend for provider '$ADLC_FORGE_PROVIDER'"; return 1 ;;
   esac
 }
@@ -418,7 +532,7 @@ adlc_forge_pr_edit() {
 #     need the raw body string (e.g. footprint reads) stay byte-identical (BR-3).
 #     ADO has no raw-gh shape; it always normalizes via `az repos pr show`.
 adlc_forge_pr_view() {
-  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_view; return $?; }
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_view "$@"; return $?; }
   adlc_fv_ref=""
   adlc_fv_fields=""
   adlc_fv_raw_mode=0
@@ -461,19 +575,38 @@ adlc_forge_pr_view() {
 }
 
 # adlc_forge_pr_list --state open --branch-pattern PAT
+#                    | --head <branch> --state all --json number,url,headRefOid,baseRefName,isCrossRepository
+# The --head form (REQ-659 BR-26 b) returns a JSON array on both backends.
 adlc_forge_pr_list() {
-  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_list; return $?; }
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_list "$@"; return $?; }
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)       _adlc_forge_run -- gh pr list "$@"; return $? ;;
-    azure-devops) _adlc_forge_run -- az repos pr list "$@"; return $? ;;
+    azure-devops)
+      adlc_fl_head=""
+      adlc_fl_prev=""
+      for adlc_fl_a in "$@"; do
+        [ "$adlc_fl_prev" = "--head" ] && adlc_fl_head=$adlc_fl_a
+        adlc_fl_prev=$adlc_fl_a
+      done
+      if [ -n "$adlc_fl_head" ]; then
+        adlc_fl_raw=$(_adlc_forge_run -- az repos pr list --source-branch "$adlc_fl_head" --status all); adlc_fl_rc=$?
+        [ "$adlc_fl_rc" -ne 0 ] && { printf '%s\n' "$adlc_fl_raw"; return "$adlc_fl_rc"; }
+        printf '%s\n' "$adlc_fl_raw" | _adlc_forge_ado_list_norm
+        return $?
+      fi
+      _adlc_forge_run -- az repos pr list "$@"; return $? ;;
     *) _adlc_forge_err "feature-unsupported" "no backend for provider '$ADLC_FORGE_PROVIDER'"; return 1 ;;
   esac
 }
 
-# adlc_forge_pr_merge <number|url> [--squash] [--delete-branch]
+# adlc_forge_pr_merge <number|url> [--squash] [--delete-branch] [--match-head-commit <oid>]
+#
+# --match-head-commit pins the merge to the head a caller verified (REQ-659 BR-11): a
+# head that moved makes the forge refuse. GitHub forwards it. The Azure DevOps backend
+# cannot pin, so it answers feature-unsupported: a pinned merge is never unpinned.
 adlc_forge_pr_merge() {
-  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_merge; return $?; }
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_merge "$@"; return $?; }
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)
@@ -511,11 +644,13 @@ adlc_forge_pr_merge() {
       adlc_fm_out=$(_adlc_forge_run -- gh pr merge "$@"); adlc_fm_rc=$?
       # PR ref = first non-flag positional (same extraction the ADO arm does).
       adlc_fm_ref=""
+      adlc_fm_prev=""
       for adlc_fm_a in "$@"; do
         case "$adlc_fm_a" in
           --*) : ;;
-          *) [ -z "$adlc_fm_ref" ] && adlc_fm_ref="$adlc_fm_a" ;;
+          *) [ "$adlc_fm_prev" != "--match-head-commit" ] && [ -z "$adlc_fm_ref" ] && adlc_fm_ref="$adlc_fm_a" ;;
         esac
+        adlc_fm_prev=$adlc_fm_a
       done
       if [ "$adlc_fm_rc" -ne 0 ]; then
         if [ -z "$adlc_fm_ref" ] || ! gh pr view "$adlc_fm_ref" --json state 2>/dev/null \
@@ -604,6 +739,9 @@ adlc_forge_pr_merge() {
         case "$adlc_fm_a" in
           --squash)        adlc_fm_squash="--squash true" ;;
           --delete-branch) adlc_fm_delsrc="--delete-source-branch true" ;;
+          --match-head-commit)
+            _adlc_forge_err "feature-unsupported" "adlc_forge_pr_merge (azure-devops): --match-head-commit cannot be honoured; refusing rather than merge unpinned (REQ-659 BR-26 e)"
+            return 1 ;;
           --merge|--rebase|--admin|--auto) : ;;  # gh-only; drop (never forward to az)
           --*) : ;;                               # any other gh-only flag; drop
           *) [ -z "$adlc_fm_ref" ] && adlc_fm_ref="$adlc_fm_a" ;;  # first positional = ref
@@ -626,9 +764,75 @@ adlc_forge_pr_merge() {
   esac
 }
 
+# adlc_forge_branch_protection <branch> — exactly one of protected, unprotected,
+# unknown on stdout, always rc 0 (REQ-659 BR-8, BR-26 c). `protected` is defined in
+# tools/adlc/forge_protection.py; a failed lookup is never `protected`. Runs as whatever
+# identity GH_TOKEN names, which is how a caller asks about the child's token. The `gh
+# api` placeholders resolve from the working directory, hence the subshell.
+adlc_forge_branch_protection() {
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock branch_protection "$@"; return $?; }
+  adlc_fb_branch=${1:-}
+  if [ -z "$adlc_fb_branch" ] || ! adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null 2>&1; then
+    printf 'unknown\n'
+    return 0
+  fi
+  case "$ADLC_FORGE_PROVIDER" in
+    github) : ;;
+    *) printf 'unknown\n'; return 0 ;;
+  esac
+  adlc_fb_dir=$(mktemp -d 2>/dev/null || mktemp -d -t forge)
+  (
+    cd "${ADLC_FORGE_REPO:-.}" 2>/dev/null || exit 1
+    gh api "repos/{owner}/{repo}/rules/branches/$adlc_fb_branch" >"$adlc_fb_dir/rules.json" 2>/dev/null \
+      || : >"$adlc_fb_dir/rules.failed"
+    adlc_fb_ids=$(_adlc_forge_ruleset_ids "$adlc_fb_dir/rules.json")
+    # A pipe, not `for x in $list`: zsh does not split an unquoted variable (LESSON-329).
+    printf '%s\n' "$adlc_fb_ids" | while IFS= read -r adlc_fb_id; do
+      [ -n "$adlc_fb_id" ] || continue
+      gh api "repos/{owner}/{repo}/rulesets/$adlc_fb_id" >"$adlc_fb_dir/ruleset-$adlc_fb_id.json" 2>/dev/null \
+        || rm -f "$adlc_fb_dir/ruleset-$adlc_fb_id.json"
+    done
+    adlc_fb_err=$(gh api "repos/{owner}/{repo}/branches/$adlc_fb_branch/protection" 2>&1 >"$adlc_fb_dir/classic.json")
+    if [ "$?" -ne 0 ]; then
+      rm -f "$adlc_fb_dir/classic.json"
+      case "$adlc_fb_err" in
+        *"Branch not protected"*) : ;;
+        *) : >"$adlc_fb_dir/classic.failed" ;;
+      esac
+    fi
+    gh api "repos/{owner}/{repo}" >"$adlc_fb_dir/repo.json" 2>/dev/null || rm -f "$adlc_fb_dir/repo.json"
+    gh api user --jq .login >"$adlc_fb_dir/login" 2>/dev/null || rm -f "$adlc_fb_dir/login"
+  )
+  adlc_fb_py=$(_adlc_forge_python)
+  adlc_fb_out=$(command "$adlc_fb_py" -E "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/adlc/forge_protection.py" "$adlc_fb_dir" 2>/dev/null) || adlc_fb_out=unknown
+  rm -rf "$adlc_fb_dir"
+  case "$adlc_fb_out" in
+    protected|unprotected) printf '%s\n' "$adlc_fb_out" ;;
+    *) printf 'unknown\n' ;;
+  esac
+  return 0
+}
+
+# adlc_forge_commit_prs <sha> — the numbers of the merged PRs associated with a commit,
+# one per line, nothing when there are none (REQ-659 BR-26 d). A failed lookup is an
+# error block and a non-zero return, never an empty answer.
+adlc_forge_commit_prs() {
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock commit_prs "$@"; return $?; }
+  adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
+  case "$ADLC_FORGE_PROVIDER" in
+    github)
+      (
+        cd "${ADLC_FORGE_REPO:-.}" 2>/dev/null || exit 1
+        _adlc_forge_run -- gh api "repos/{owner}/{repo}/commits/$1/pulls" --jq '.[] | select(.merged_at != null) | .number'
+      )
+      return $? ;;
+    *) _adlc_forge_err "feature-unsupported" "adlc_forge_commit_prs has no backend for provider '$ADLC_FORGE_PROVIDER'"; return 1 ;;
+  esac
+}
+
 # adlc_forge_pr_comment <number|url> --body BODY
 adlc_forge_pr_comment() {
-  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_comment; return $?; }
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_comment "$@"; return $?; }
   adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
   case "$ADLC_FORGE_PROVIDER" in
     github)       _adlc_forge_run -- gh pr comment "$@"; adlc_fcm_rc=$?; [ "$adlc_fcm_rc" -eq 0 ] && printf 'ok=1\n'; return "$adlc_fcm_rc" ;;
@@ -648,10 +852,31 @@ except Exception:
     sys.exit(0)
 if isinstance(d, dict):
     for k, v in d.items():
-        if isinstance(v, (dict, list)):
+        if k == "mergeCommit":
+            v = v.get("oid", "") if isinstance(v, dict) else ""
+        elif k == "files" and isinstance(v, list):
+            v = [f.get("path", "") if isinstance(f, dict) else f for f in v]
+        if isinstance(v, bool):
+            v = "true" if v else "false"
+        elif isinstance(v, (dict, list)):
             v = json.dumps(v, separators=(",", ":"))
         print(f"{k}={v}")
 '
+}
+
+# The ids of the rulesets an effective-rules response names, one per line.
+_adlc_forge_ruleset_ids() {
+  python3 -c '
+import sys, json
+try:
+    with open(sys.argv[1]) as fh:
+        rules = json.load(fh)
+except Exception:
+    sys.exit(0)
+if isinstance(rules, list):
+    for i in sorted({r.get("ruleset_id") for r in rules if isinstance(r, dict)} - {None}):
+        print(i)
+' "$1"
 }
 
 # ADO: normalize `status` -> state {OPEN,MERGED,CLOSED}; surface url/number/title.
@@ -679,5 +904,38 @@ if status == "completed" and ct:
 desc = d.get("description")
 if desc is not None:
     print(f"body={desc}")
+def ref(name):
+    value = d.get(name) or ""
+    return value[len("refs/heads/"):] if value.startswith("refs/heads/") else value
+print(f"headRefName={ref('sourceRefName')}")
+print(f"baseRefName={ref('targetRefName')}")
+print("headRefOid=" + ((d.get("lastMergeSourceCommit") or {}).get("commitId") or ""))
+print("mergeCommit=" + ((d.get("lastMergeCommit") or {}).get("commitId") or ""))
+print("isCrossRepository=" + ("true" if d.get("forkSource") else "false"))
+print("files=[]")
+'
+}
+
+# ADO: `az repos pr list` to the GitHub shape of the --head form (REQ-659 BR-26 b).
+_adlc_forge_ado_list_norm() {
+  python3 -c '
+import sys, json
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    print("[]")
+    sys.exit(0)
+out = []
+def ref(value):
+    value = value or ""
+    return value[len("refs/heads/"):] if value.startswith("refs/heads/") else value
+for d in rows if isinstance(rows, list) else []:
+    status = (d.get("status") or "").lower()
+    out.append({"number": d.get("pullRequestId"), "url": d.get("url") or "",
+                "headRefOid": (d.get("lastMergeSourceCommit") or {}).get("commitId") or "",
+                "baseRefName": ref(d.get("targetRefName")),
+                "isCrossRepository": bool(d.get("forkSource")),
+                "state": {"active": "OPEN", "completed": "MERGED", "abandoned": "CLOSED"}.get(status, status.upper())})
+print(json.dumps(out))
 '
 }

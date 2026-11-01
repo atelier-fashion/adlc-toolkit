@@ -74,6 +74,94 @@ trust:
   detail: "projects[<absolute workspace path>].hasTrustDialogAccepted: true in the home directory's .claude.json"
 sandbox_can_reach_common_gitdir: true
 
+# The exec engine (REQ-659): how `adlc sprint-exec` launches this harness headless.
+# Validated by harness_adapter.py; an unknown key is a loud error. Facts here come
+# from .adlc/research/harness-probes/claude-exec-manual.md (claude 2.1.258, logged
+# out); the allow and deny tiers are unverified against a model until a logged-in run.
+exec:
+  exec_schema_version: 1
+  working_copy: worktree
+  # What the engine does per run. Not `trust` above, which is what the harness reads:
+  # both tiers go on the command line, and on a linked worktree Claude keys trust by
+  # the main repo root, so a per-working-copy entry would be inert (ADR-5).
+  trust_grant: none
+  # Printed on stderr when a project allowlist was dropped; surfaced, never parsed.
+  trust_notice: "permissions.allow"
+  launch: [-p, --output-format, json]
+  resume_flag: --resume
+  allow_flag: --allowedTools
+  deny_flag: --disallowedTools
+  add_dir_flag: --add-dir
+  shell_rule: "Bash(%s:*)"
+  shell_rule_exact: "Bash(%s)"
+  # The non-shell tools a pipeline uses. Rules for the shell come from the exec-scope
+  # render of templates/permissions.yml.
+  allow_tools: [Read, Write, Edit, Glob, Grep, Agent, Skill, TodoWrite]
+  # The shared-base rule drops `git push`, `git branch` and `git worktree` at exec
+  # scope. These spellings wrap no deny (ADR-6). `{branch}` is the REQ's own branch.
+  allow_extra:
+    - [git, push, -u, origin, "{branch}"]
+    - [git, push, origin, "{branch}"]
+    - [git, branch, --show-current]
+    - [git, branch, --list]
+    - [git, worktree, list]
+    - [ADLC_TOOLKIT_ROOT=]
+  allow_extra_exact:
+    - [git, push]
+  # Denied here and not in templates/permissions.yml: an interactive session has no
+  # use for them, and a person there can still approve a one-way move.
+  engine_deny:
+    - [az, repos, pr]
+    - [git, push, --force-with-lease]
+    - [git, push, origin, "+*"]
+    - [git, -C, "*", push, --force]
+    - [git, -C, "*", push, -f]
+    - [git, worktree, remove]
+    - [git, worktree, prune]
+    - [rm, -r]
+    - [rm, -fr]
+    - [adlc, sprint-exec, approve]
+    - [adlc, sprint-exec, reject]
+    - [adlc, sprint-exec, answer]
+    - [adlc, sprint-exec, abort]
+    - [adlc, sprint-exec, reissue]
+    - [adlc, sprint-exec, resume]
+    - [adlc, sprint-exec, run]
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+  # A logged-out run exits 1. An unmapped non-zero code is `error`.
+  exit_codes: {"0": ok, "1": error}
+  # No exit code means "denied"; the JSON result lists the denials.
+  denied_result_key: permission_denials
+  result_keys: {session_id: session_id, is_error: is_error, num_turns: num_turns, text: result, cost: total_cost_usd}
+  env_passthrough: [HOME, PATH, ADLC_HOME, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK, SSH_AUTH_SOCK, GIT_SSH_COMMAND, XDG_CONFIG_HOME, TMPDIR, LANG, TERM]
+  # USER reaches the macOS keychain item a stored login lives in.
+  auth_env: [ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, USER]
+  # BR-25: the resumed close-out reads no working-copy settings, hooks or MCP servers.
+  config_isolation: [--setting-sources, user, --settings, "{settings}", --strict-mcp-config]
+  config_isolation_help: [--setting-sources, --settings, --strict-mcp-config]
+  settings_keys: {allow: [permissions, allow], deny: [permissions, deny]}
+  # OQ-4: a sandboxed session has not been shown to reach the common git dir.
+  sandbox_refuse:
+    files: [$HOME/.claude/settings.json, .claude/settings.json, .claude/settings.local.json]
+    key: [sandbox, enabled]
+  # Defense in depth, not a gate. What stops a one-way move is the approval ledger,
+  # the pinned orchestrator merge, the detached-worktree trial merge and rebase, the
+  # local diff gates, the child credentials, branch protection and the exit checks.
+  residuals:
+    - a command wrapped in sh -c, env, xargs, python -c, npx, npm run or find -exec
+    - a call routed through gh api, which reaches merge and ref-update endpoints
+    - a flag in a position a prefix rule does not match, such as gh -R <repo> pr merge
+    - a semantic equivalent of a denied move under another spelling
+    - the Azure DevOps flag routes, narrowed for the forge wrappers only
+    - a merge bot on the forge that acts on a label or a comment
+    - a fence that sources a partial, which no per-command rule sees
+
 hook_events:
   # A SessionStart group with no matcher also fires on compact, so session-start
   # names the other three sources and compaction gets its own group.
