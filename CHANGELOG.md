@@ -40,6 +40,20 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **The `/sprint` exec engine (REQ-659).** Phase 6a of the multi-harness plan: a third engine,
+  selected only by `--exec`, whose orchestrator is a program. `adlc sprint-exec` launches one
+  `claude -p` per REQ with the prompt on stdin, stops each at the merge gate, and performs
+  every one-way move itself after an operator's `approve`, which takes a one-time token whose
+  digest only the supervisor's memory holds. `partials/forge.sh` gains
+  `adlc_forge_branch_protection`, `adlc_forge_commit_prs`, `--match-head-commit`, `pr_list
+  --head`, richer `pr_view` fields, an Azure DevOps flag allowlist, and a stateful mock
+  (`tools/adlc/forge_mock.py`). `harness/claude.yml` gains the `exec` block, and
+  `tools/adlc/README.md` the adapter contract REQ-662 fills in. `tools/delegate/run_outcome.py`
+  gains engine `exec`. Tested with a fake harness and the mock forge under four shells. A
+  logged-in `claude -p` run is owed: this machine's CLI was logged out, so what a model's tool
+  calls meet (`--allowedTools` in an untrusted workspace, deny over allow, a fence against the
+  allow set, a resume that continues a conversation) is unverified. The workflow and legacy
+  engines are unchanged.
 - **Antigravity CLI adapter (REQ-658).** Phase 4 of the multi-harness plan, retargeted from
   Gemini CLI, which is no longer available to individuals. `agy` joins `adlc harness detect`
   and `adlc harness probe`, and `harness/antigravity.yml` (schema 4) renders user-level

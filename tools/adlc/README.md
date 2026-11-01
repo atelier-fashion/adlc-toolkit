@@ -38,6 +38,7 @@ adlc --version
 | `renumber` | Rename an artifact id repo-wide, collision-safe, dry-run by default (REQ-518). |
 | `harness detect` | Read-only: which agent harnesses are installed, and whether each one's skills directory reaches this toolkit (REQ-654, below). |
 | `harness probe` | The plan's §6 experiments against one installed harness, with one committed JSON result per harness (REQ-664, below). |
+| `sprint-exec run \| resume \| status \| approve \| reject \| answer \| abort \| reissue` | The `/sprint` exec engine, a program that runs one headless harness per REQ and performs every one-way move itself (REQ-659, below). |
 | `harness render \| install \| doctor \| drift` | The adapter framework: render any surface through `harness/<name>.yml`, write a harness's user-level surfaces, `render-currency:<name>`, and the project layer's template-posture drift (REQ-657, below). |
 
 Each is one entry in the data-driven `SUBCOMMANDS` table (REQ-519 BR-11).
@@ -522,6 +523,42 @@ through the default column, so a `claude` column, present or absent, changes not
 - This is the same exposure Claude's template has today (Rule A grandfathers it); no adapter makes it worse, and none claims to close it.
 - The allowlist is never the gate (Rule B). The orchestrator's structural gates (REQ-659) are.
 <!-- /declared-residuals -->
+
+## The exec adapter contract (REQ-659)
+
+A harness joins `/sprint --exec` by adding an `exec` block to its adapter. `harness_adapter.py`
+validates it when `exec_schema_version` is present, and `exec_adapter.py` is the only reader.
+Nothing branches on a harness name. `harness/claude.yml` is the reference block.
+
+| Key | Meaning |
+|---|---|
+| `working_copy` | `worktree`, allowed only when the top-level `sandbox_can_reach_common_gitdir` is exactly `true`; `clone`; or `orchestrator-git`. A scalar, or `{strategy: ...}` once REQ-662's migration lands. Only `worktree` runs today: the other two are pre-flight refusals until an adapter ships one |
+| `trust_grant` | What the **engine** does per run: `none`, `flag`, `user-config-entry`, `trusted-folders-file`. Not the top-level `trust`, which is what the harness reads. Today only `none` runs; the rest refuse at pre-flight |
+| `launch`, `resume_flag`, `add_dir_flag` | the argv after the binary, on a prompt delivered on stdin |
+| `allow_flag`, `deny_flag`, `shell_rule`, `shell_rule_exact` | how the two tiers reach the argv. `deny_flag` renders only when `capabilities.deny` is `yes` |
+| `allow_tools` | the non-shell tools |
+| `allow_extra`, `allow_extra_exact` | routine spellings the exec-scope render cannot give. Each is vetted like an operator's `sprint.exec.allow_extra`: no token that runs its arguments, and nothing that wraps a deny |
+| `engine_deny` | denies that belong to this engine, never in `templates/permissions.yml` |
+| `forbidden_flags` | carries the engine-wide vocabulary and the harness's own equivalents |
+| `exit_codes`, `denied_result_key` | raw code to `ok`, `denied`, `timeout`, `error`, an unmapped non-zero code being `error`; then a non-empty value at `denied_result_key`, with no terminal claim, is `denied` |
+| `result_keys` | where the JSON result holds the session id, error flag, turn count, final text and cost |
+| `env_passthrough`, `auth_env` | the only variables a child inherits |
+| `config_isolation`, `config_isolation_help`, `settings_keys` | how the resumed close-out ignores working-copy config, and the flag names looked for in `<binary> --help` |
+| `sandbox_refuse` | a setting that refuses at pre-flight |
+| `residuals` | what the two tiers do not stop, stated, not enumerated away |
+
+**Trust, for an adapter whose grant is real.** Grant before launch, per working copy, the
+close-out copy included. Revoke on every exit path: merge, reject, abort, crash. Remove exactly
+what the run added, and never leave an entry for a path that is gone. A `user-config-entry` or
+`trusted-folders-file` grant edits a file the harness may rewrite while it runs, so re-read
+before writing, replace atomically, and verify after.
+
+**Three things REQ-662 must carry.** Codex's `sandbox_can_reach_common_gitdir: true` holds because
+an allowed `git commit` runs outside the sandbox, while a sandboxed command stops at `index.lock`
+(REQ-655). A Codex hook's review key contains the absolute path, so every working copy starts
+unreviewed and `codex exec` skips the hook silently. `agy -p` ends at the first tool it would need
+to prompt for, with exit 0 and an empty response, and a failed run exits 3 (REQ-658), which is why
+`ok` with no terminal claim is `failed` for every harness.
 
 ## `adlc agents render` (REQ-516)
 

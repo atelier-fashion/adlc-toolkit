@@ -428,12 +428,9 @@ def test_scope_vectors(tmp_path, sandbox):
     deny = [r for r in exec_rules if r.kind == "deny"]
     assert any(r.argv == ("git", "push", "--force") and not r.exact for r in deny)
     # exec.engine_deny joins; deny_render none needs a `fail` ask-tier-deny verdict.
-    eng = load(variant(tmp_path, "claude", [(
-        "hook_timeout_unit: s", "hook_timeout_unit: s\nexec:\n  engine_deny: [[adlc, sprint, approve]]")]))
-    er, _ef, _x = hr.render_permissions(eng, perms(), "exec")
-    assert any(r.entry == "exec.engine_deny" and r.kind == "deny" for r in er)
+    assert any(r.entry == "exec.engine_deny" and r.kind == "deny" for r in exec_rules)
     none = load(variant(tmp_path, "claude", [(
-        "hook_timeout_unit: s", "hook_timeout_unit: s\nexec:\n  deny_render: none")]))
+        "  exec_schema_version: 1", "  exec_schema_version: 1\n  deny_render: none")]))
     with pytest.raises(hr.RenderError):
         hr.render_permissions(none, perms(), "exec", {"probes": {"ask-tier-deny": {"status": "pass"}}})
     hr.render_permissions(none, perms(), "exec", {"probes": {"ask-tier-deny": {"status": "fail"}}})

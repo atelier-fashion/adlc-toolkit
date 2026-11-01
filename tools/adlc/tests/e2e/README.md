@@ -187,3 +187,12 @@ in `<sandbox>/logs/` and `<sandbox>/<home>/.claude/projects/`.
   the count whenever `adlc-read` was not installed. It now puts a stub `adlc-read` on
   `PATH`, so the disabled path is reached on every machine, and its subshell reports
   what it failed.
+
+## `claude-exec-manual.sh` — the exec engine's logged-out table
+
+Reruns `.adlc/research/harness-probes/claude-exec-manual.md` against the installed `claude`
+(REQ-659). It runs under `env -i` in a temp directory with a throwaway `HOME`, so it reads no
+credential, spends nothing, and needs no login: a logged-out `claude -p` still reads settings,
+fires hooks, starts MCP servers and writes a transcript (LESSON-759). It prints one line per row
+and exits non-zero on a surprise. It is not part of the default test run, because it needs the
+binary. It says nothing about a tool call: those rows are owed to a logged-in run.

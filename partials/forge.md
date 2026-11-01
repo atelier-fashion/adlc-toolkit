@@ -184,3 +184,34 @@ primary backend. When `az` is unavailable, each ADO op maps to a single ADO REST
 call authenticated by `Authorization: Basic base64(:$PAT)`. The per-op REST
 mapping is documented inline at the top of `forge.sh` so a future REQ can
 implement it behind the same adapter functions without changing any call site.
+
+## The exec engine's additions (REQ-659 BR-26)
+
+`/sprint --exec` binds an approval to the exact PR an operator saw, so it needs more of
+the forge than a merge. Each op below honours `ADLC_FORGE_MOCK`.
+
+| Op | Contract |
+|---|---|
+| `adlc_forge_pr_view <ref> --fields ...` | also takes `number`, `url`, `headRefName`, `headRefOid`, `baseRefName`, `isCrossRepository`, `files`, `mergeCommit`. `files` is a JSON list of paths, `mergeCommit` an oid, a boolean `true` or `false`. Azure DevOps prints the same keys, its id numeric, with `files=[]` because `az repos pr show` has no file list |
+| `adlc_forge_pr_list --head <branch> --state all --json number,url,headRefOid,baseRefName,isCrossRepository` | a JSON array for that head ref, `state` included on Azure DevOps |
+| `adlc_forge_branch_protection <branch>` | exactly one of `protected`, `unprotected`, `unknown` on stdout, rc 0. `protected` means the effective rules require a pull request, give the current identity no bypass, forbid force-push and forbid deletion (`tools/adlc/forge_protection.py`). A lookup that failed is `unknown`. Set `GH_TOKEN` to ask about another identity |
+| `adlc_forge_commit_prs <sha>` | one merged PR number per line, nothing when none. A failed lookup is an error block and a non-zero return, never an empty answer |
+| `adlc_forge_pr_merge <ref> --match-head-commit <oid>` | forwarded on GitHub, so a moved head makes the forge refuse. Azure DevOps cannot pin, and answers `feature-unsupported`: a pinned merge is never unpinned |
+
+**The Azure DevOps flag allowlist.** `adlc_forge_pr_edit`, `adlc_forge_pr_ready` and
+`adlc_forge_pr_create` let only `--title --description --draft --source-branch
+--target-branch` reach `az`, after translating the call sites' gh-shaped `--body`,
+`--body-file`, `--base`, `--head` and `-R`. `--status --auto-complete --squash
+--delete-source-branch --bypass-policy`, and any other flag, are refused with
+`feature-unsupported` before `az` runs. Those five would complete or bypass a PR
+outside `adlc_forge_pr_merge`. The check runs on the mock path too.
+
+**The stateful mock (`tools/adlc/forge_mock.py`).** `ADLC_FORGE_MOCK_STORE=<dir>` sends
+every mock call to it: PRs as JSON, a `calls.log` of the argv each op received, and a
+`pr_merge` that squashes into the bare remote named in `config.json`, so a local diff
+gate sees what a forge would leave. `ADLC_FORGE_MOCK_SCENARIO`, or a `scenario` file in
+the store read at each call, selects `head-advances`, `pr-replaced`, `pr-other-repo`,
+`cross-repo`, `second-open-pr`, `base-other`, `head-other`, `merged` or a `protection-*`
+value. `forge_mock.py make-head` builds a PR-head commit with plumbing, for fixtures
+that need a rename, a symlink, a gitlink or a mode. Without a store, a call that uses
+none of the above gets the fixed strings it always got.

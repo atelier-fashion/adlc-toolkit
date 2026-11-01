@@ -68,6 +68,13 @@ def _cmd_harness(argv):
     return harness.main(argv)
 
 
+def _cmd_sprint_exec(argv):
+    """Lazy-import the exec engine and delegate to its main() (REQ-659)."""
+    import sprint_exec  # noqa: E402  (lazy so --version works even if it breaks)
+
+    return sprint_exec.main(argv)
+
+
 def _cmd_renumber(argv):
     """Lazy-import the renumber subcommand and delegate to its main() (REQ-518)."""
     import renumber  # noqa: E402  (lazy so --version works even if renumber breaks)
@@ -90,6 +97,11 @@ SUBCOMMANDS = {
     "renumber": {
         "handler": _cmd_renumber,
         "help": "rename an artifact id repo-wide, collision-safe (dry-run by default)",
+    },
+    "sprint-exec": {
+        "handler": _cmd_sprint_exec,
+        "help": "the /sprint exec engine: run | resume | status | approve | reject | answer "
+                "| abort | reissue",
     },
     "harness": {
         "handler": _cmd_harness,

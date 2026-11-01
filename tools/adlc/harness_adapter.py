@@ -77,6 +77,24 @@ FORBIDDEN_FIRST_TOKENS = FIRST_TOKEN_WILDCARDS + ("env", "xargs", "eval", "exec"
 #: ...and the same for any token starting with one of these (``python3``).
 FORBIDDEN_FIRST_TOKEN_PREFIXES = ("python",)
 
+#: The ExecAdapter block (REQ-659 BR-3).
+EXEC_SCHEMA_VERSION = 1
+EXEC_WORKING_COPIES = ("worktree", "clone", "orchestrator-git")
+EXIT_CLASSES = ("ok", "denied", "timeout", "error")
+#: The engine-wide vocabulary every adapter carries (BR-8); REQ-662 adds each
+#: harness's equivalents to its own list.
+ENGINE_FORBIDDEN_FLAGS = ("--dangerously-skip-permissions",
+                          "--allow-dangerously-skip-permissions",
+                          "--permission-mode bypassPermissions", "--yolo", "--force",
+                          "--allow-all")
+_EXEC_REQUIRED = ("working_copy", "trust_grant", "launch", "allow_flag", "shell_rule",
+                  "forbidden_flags", "exit_codes", "result_keys", "env_passthrough")
+_EXEC_KEYS = set(_EXEC_REQUIRED) | {
+    "exec_schema_version", "trust_notice", "resume_flag", "deny_flag", "add_dir_flag",
+    "shell_rule_exact", "allow_tools", "allow_extra", "allow_extra_exact", "engine_deny",
+    "deny_render", "denied_result_key", "auth_env", "config_isolation",
+    "config_isolation_help", "settings_keys", "sandbox_refuse", "residuals"}
+
 #: Every format an adapter may name, with what the loader needs to know of it.
 #: ``harness_render.FORMATS`` implements each one; a test holds the two equal.
 FORMATS = {
@@ -331,6 +349,54 @@ def _hook_output_envelope(src, data):
             raise AdapterError(src, field, "is not JSON around %%s: %s" % exc)
 
 
+def _exec_block(src, block):
+    """The ExecAdapter block (REQ-659 BR-3): closed keys, each with its shape.
+
+    A block without ``exec_schema_version`` stays the opaque map REQ-657 allowed.
+    """
+    if block["exec_schema_version"] != EXEC_SCHEMA_VERSION:
+        raise AdapterError(src, "exec.exec_schema_version", "%r is not a version this loader "
+                           "knows (%d)" % (block["exec_schema_version"], EXEC_SCHEMA_VERSION))
+    _unknown(src, "exec.", block, _EXEC_KEYS)
+    for key in _EXEC_REQUIRED:
+        if key not in block:
+            raise AdapterError(src, "exec." + key, "is required when exec_schema_version is set")
+    wc = block["working_copy"]
+    if isinstance(wc, dict):
+        _unknown(src, "exec.working_copy.", wc, {"strategy"})
+        wc = wc.get("strategy")
+    _enum(src, "exec.working_copy", wc, EXEC_WORKING_COPIES)
+    _enum(src, "exec.trust_grant", block["trust_grant"], TRUST_MECHANISMS)
+    for key in ("resume_flag", "allow_flag", "deny_flag", "add_dir_flag", "shell_rule",
+                "shell_rule_exact", "trust_notice", "denied_result_key"):
+        if key in block:
+            _need_str(src, "exec." + key, block[key])
+    for key in ("launch", "allow_tools", "forbidden_flags", "env_passthrough", "auth_env",
+                "config_isolation", "config_isolation_help", "residuals"):
+        if key in block:
+            for i, item in enumerate(_need_list(src, "exec." + key, block[key])):
+                _need_str(src, "exec.%s[%d]" % (key, i), item)
+    for key in ("allow_extra", "allow_extra_exact", "engine_deny"):
+        for i, item in enumerate(_need_list(src, "exec." + key, block.get(key, []))):
+            _token_list(src, "exec.%s[%d]" % (key, i), item)
+    for code, klass in _need_map(src, "exec.exit_codes", block["exit_codes"]).items():
+        if not str(code).lstrip("-").isdigit():
+            raise AdapterError(src, "exec.exit_codes", "%r is not an exit code" % (code,))
+        _enum(src, "exec.exit_codes." + str(code), klass, EXIT_CLASSES)
+    _unknown(src, "exec.result_keys.", _need_map(src, "exec.result_keys", block["result_keys"]),
+             {"session_id", "is_error", "num_turns", "text", "cost"})
+    if "settings_keys" in block:
+        _unknown(src, "exec.settings_keys.", _need_map(src, "exec.settings_keys",
+                                                       block["settings_keys"]), {"allow", "deny"})
+    if "sandbox_refuse" in block:
+        _unknown(src, "exec.sandbox_refuse.", _need_map(src, "exec.sandbox_refuse",
+                                                        block["sandbox_refuse"]), {"files", "key"})
+    missing = [f for f in ENGINE_FORBIDDEN_FLAGS if f not in block["forbidden_flags"]]
+    if missing:
+        raise AdapterError(src, "exec.forbidden_flags", "must carry the engine-wide vocabulary; "
+                           "missing %s" % ", ".join(missing))
+
+
 def _config_surface(src, field, spec):
     """The ``config`` surface's owned values: what a merge adds and what it refuses."""
     values = _need_map(src, field + ".values", spec.get("values"))
@@ -549,9 +615,12 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
         for k, v in _need_map(src, "default_mode_map.values", dmm.get("values")).items():
             _need_str(src, "default_mode_map.values." + k, v)
 
-    if "exec" in data and not isinstance(data["exec"], dict):
-        raise AdapterError(src, "exec", "must be a mapping or absent (its keys are REQ-659's "
-                           "and REQ-662's)")
+    if "exec" in data:
+        if not isinstance(data["exec"], dict):
+            raise AdapterError(src, "exec", "must be a mapping or absent (its keys are "
+                               "REQ-659's and REQ-662's)")
+        if "exec_schema_version" in data["exec"]:
+            _exec_block(src, data["exec"])
 
     trust = _need_map(src, "trust", data["trust"])
     _unknown(src, "trust.", trust, {"mechanism", "detail"})

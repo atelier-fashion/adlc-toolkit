@@ -766,6 +766,100 @@ esac
 PATH=$OLDPATH2; export PATH
 unset ADLC_FORGE_PROVIDER_OVERRIDE AZ_RECORD
 
+# ===========================================================================
+# REQ-659 BR-26: pinned merge, protection, commit PRs, ADO allowlist, new fields
+# ===========================================================================
+ADLC_TOOLKIT_ROOT=$ROOT; export ADLC_TOOLKIT_ROOT
+ADLC_FORGE_MOCK=1; export ADLC_FORGE_MOCK
+unset ADLC_FORGE_PROVIDER_OVERRIDE ADLC_FORGE_MOCK_STORE
+for prov in github azure-devops; do
+  ADLC_FORGE_MOCK_PROVIDER=$prov; ADLC_FORGE_MOCK_SCENARIO=ok; export ADLC_FORGE_MOCK_PROVIDER ADLC_FORGE_MOCK_SCENARIO
+  out=$(adlc_forge_pr_view 101 --fields number,url,headRefOid,isCrossRepository,files,mergeCommit 2>&1)
+  contains "$prov view number" "number=101" "$out"
+  contains "$prov view oid" "headRefOid=0000000000" "$out"
+  contains "$prov view cross" "isCrossRepository=false" "$out"
+  contains "$prov view files" 'files=["README.md"]' "$out"
+  contains "$prov view mergeCommit" "mergeCommit=1111111111" "$out"
+  out=$(adlc_forge_pr_list --head feat/REQ-520-forge-adapter --state all --json number,url,headRefOid,baseRefName,isCrossRepository 2>&1)
+  contains "$prov list by head" '"number": 101' "$out"
+  check "$prov protection default" "protected" "$(adlc_forge_branch_protection main)"
+  check "$prov commit_prs empty" "" "$(adlc_forge_commit_prs abc123)"
+done
+ADLC_FORGE_MOCK_PROVIDER=github; export ADLC_FORGE_MOCK_PROVIDER
+for v in no-pr bypass force-push deletion; do
+  ADLC_FORGE_MOCK_SCENARIO=protection-$v; export ADLC_FORGE_MOCK_SCENARIO
+  check "protection without $v" "unprotected" "$(adlc_forge_branch_protection main)"
+done
+ADLC_FORGE_MOCK_SCENARIO=protection-lookup-fail; export ADLC_FORGE_MOCK_SCENARIO
+check "protection lookup failure" "unknown" "$(adlc_forge_branch_protection main)"
+ADLC_FORGE_MOCK_SCENARIO=ok; export ADLC_FORGE_MOCK_SCENARIO
+out=$(adlc_forge_pr_merge 101 --squash --match-head-commit abc 2>&1); rc=$?
+check "github pinned merge rc" "0" "$rc"
+contains "github pinned merge" "state=MERGED" "$out"
+ADLC_FORGE_MOCK_PROVIDER=azure-devops; export ADLC_FORGE_MOCK_PROVIDER
+out=$(adlc_forge_pr_merge 101 --squash --match-head-commit abc 2>&1); rc=$?
+contains "ado pinned merge is refused" "error_class=feature-unsupported" "$out"
+check "ado pinned merge rc" "1" "$rc"
+for op in pr_edit pr_ready pr_create; do
+  for f in --status --auto-complete --squash --delete-source-branch --bypass-policy; do
+    out=$(adlc_forge_"$op" 101 "$f" true 2>&1); rc=$?
+    contains "ado $op refuses $f" "error_class=feature-unsupported" "$out"
+    check "ado $op $f rc" "1" "$rc"
+  done
+  out=$(adlc_forge_"$op" 101 --title T --description D --draft --source-branch a --target-branch b 2>&1); rc=$?
+  check "ado $op passes the five flags" "0" "$rc"
+done
+unset ADLC_FORGE_MOCK ADLC_FORGE_MOCK_PROVIDER ADLC_FORGE_MOCK_SCENARIO
+
+# The real ADO merge arm refuses the pin before az runs; the real edit arm strips
+# nothing silently and translates the gh-shaped flags.
+AZDIR="$SBX/azpin"; mkdir -p "$AZDIR"; AZREC2="$SBX/azpin.rec"
+cat > "$AZDIR/az" <<AZSH
+#!/bin/sh
+printf '%s\n' "\$*" >> "$AZREC2"
+echo '{}'
+AZSH
+chmod +x "$AZDIR/az"
+OLDPATH3=$PATH; PATH="$AZDIR:$PATH"; export PATH
+ADLC_FORGE_PROVIDER_OVERRIDE=azure-devops; export ADLC_FORGE_PROVIDER_OVERRIDE
+out=$(adlc_forge_pr_merge 101 --squash --match-head-commit abc 2>&1); rc=$?
+contains "real ado pinned merge refused" "error_class=feature-unsupported" "$out"
+check "real ado pin never reached az" "no" "$( [ -f "$AZREC2" ] && echo yes || echo no )"
+out=$(adlc_forge_pr_edit 101 --status completed 2>&1); rc=$?
+contains "real ado edit refuses --status" "error_class=feature-unsupported" "$out"
+check "real ado --status never reached az" "no" "$( [ -f "$AZREC2" ] && echo yes || echo no )"
+adlc_forge_pr_edit 101 --title 'T x' --body 'B y' >/dev/null 2>&1
+contains "real ado edit translates --body" "repos pr update --id 101 --title T x --description B y" "$(cat "$AZREC2")"
+adlc_forge_pr_ready 101 >/dev/null 2>&1
+contains "real ado ready" "repos pr update --id 101 --draft false" "$(cat "$AZREC2")"
+adlc_forge_pr_create -R o/r --draft --base main --head feat/x --title T --body B >/dev/null 2>&1
+contains "real ado create translates" "repos pr create --draft --target-branch main --source-branch feat/x --title T --description B" "$(cat "$AZREC2")"
+PATH=$OLDPATH3; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE
+
+# Real-backend protection: a recording gh on PATH, the merge pin forwarded verbatim.
+GHDIR="$SBX/ghprot"; mkdir -p "$GHDIR"; GHREC="$SBX/ghprot.rec"
+cat > "$GHDIR/gh" <<GHSH
+#!/bin/sh
+printf '%s\n' "\$*" >> "$GHREC"
+case "\$*" in
+  *rules/branches/*) echo '[{"type":"pull_request","ruleset_id":7},{"type":"non_fast_forward","ruleset_id":7},{"type":"deletion","ruleset_id":7}]' ;;
+  *rulesets/7*) echo '{"current_user_can_bypass":"never"}' ;;
+  *branches/*/protection*) echo 'Branch not protected (HTTP 404)' >&2; exit 1 ;;
+  "api user"*) echo operator ;;
+  "api repos/{owner}/{repo}"*) echo '{"permissions":{"admin":false}}' ;;
+  *) echo ok ;;
+esac
+GHSH
+chmod +x "$GHDIR/gh"
+OLDPATH4=$PATH; PATH="$GHDIR:$PATH"; export PATH
+ADLC_FORGE_PROVIDER_OVERRIDE=github; export ADLC_FORGE_PROVIDER_OVERRIDE
+check "real github protection" "protected" "$(adlc_forge_branch_protection main)"
+adlc_forge_pr_merge 7 --squash --match-head-commit abc >/dev/null 2>&1
+contains "real github pin is forwarded" "pr merge 7 --squash --match-head-commit abc" "$(cat "$GHREC")"
+PATH=$OLDPATH4; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE ADLC_TOOLKIT_ROOT
+
 rm -rf "$SBX"
 
 echo ""

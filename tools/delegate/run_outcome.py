@@ -53,7 +53,7 @@ import tempfile
 # --- vocabularies ------------------------------------------------------------
 
 TERMINALS = ("merged", "pr-ready", "blocked", "failed")
-ENGINES = ("solo", "legacy", "workflow")
+ENGINES = ("solo", "legacy", "workflow", "exec")
 BLOCKED_REASONS = (
     "validation-exhausted", "reflector-questions", "merge-conflict",
     "merge-unverified", "close-out-failed", "setup-error", "no-worktree",
