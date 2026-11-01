@@ -4,7 +4,7 @@ title: "Opt-in, reversible toolkit home migration: `install.sh --migrate-home <d
 status: in-progress
 deployable: false
 created: 2026-10-27
-updated: 2026-10-31
+updated: 2026-11-01
 component: "adlc/install"
 domain: "adlc"
 stack: ["sh", "python", "markdown"]
@@ -188,7 +188,18 @@ Nothing else moved: `.adlc/.next-assume` is per repo, not machine state; REQ-660
 
 ## Owed
 
-- **AC-2, unmet.** It needs a real login session: `launchctl` loads agents only there, so it cannot run on a sandbox `HOME`, and this REQ's pipeline was not to run a real migration. What stands in its place: a sandbox run with a stub `launchctl` proves the plist is stamped, linted, and that `bootout` precedes `bootstrap`; nothing has shown a real agent reloading. Whether to run a real migration is the operator's call. It needs every consumer re-synced first, because `partials/adlc-home.sh` changed; the real `consumer-sync` FAILs on five repos today, and the migration would refuse.
+PR #244 merged as `733514d` on 2026-11-01, on the operator's approval, with AC-2 owed, so this REQ stays `in-progress` until the items below close (the same treatment as REQ-655, REQ-656, REQ-658 and REQ-659). Merging migrated nothing: no real migration, rollback or `launchctl` call has run on any machine. Every other AC was met in a sandbox.
+
+- **AC-2, unmet: the launchd reload needs a real login session (ASSUME-024).** `launchctl` loads agents only there, so it cannot run on a sandbox `HOME`, and this REQ's pipeline was not to run a real migration. What stands in its place: a sandbox run with a stub `launchctl` proves the plist is stamped and linted and that `bootout` precedes `bootstrap`. Nothing has shown a real agent reloading, or `adlc-read --version` reporting the same provider through a rebuilt venv (ASSUME-025: the tests rebuild from a one-file local wheel, never the real `requirements.txt`).
+- **Untested: `<dir>` on a removable or TCC-protected volume (ASSUME-026).** A pointer to an unmounted home fails loud, by design. Whether launchd can read the helper from such a path at login has not been tried, and BR-2 refuses neither location.
+- **Residual risk: an allocator in flight across `--back` (ASSUME-027).** `id-alloc.sh` resolves its paths, spends seconds on the network, then locks, so one that resolved `<dir>` before `--back` can recreate an orphan `<dir>` and write a counter there. The remote reservation is what prevents a duplicate id, and no test has exercised that race.
+- **Assumed: `$ADLC_REPOS_ROOT` holds every allocator on the machine (ASSUME-028).** The consumer gate sees nothing outside it. The tombstone still stops such a repo, loudly.
+
+**Before any real run:**
+
+- **Re-sync every consumer.** `partials/adlc-home.sh` changed, so every vendored copy is stale until `/template-drift` runs in that repo, and a copy that predates the pointer resolves the old home and fails on the tombstone. `consumer-sync` FAILed on five repos on the reference machine at merge, and the migration refuses until it stops.
+- **Decide about the ledger's junk.** The reference machine's `.adlc-own-reservations` holds 522 fake `req 700` lines from BUG-256's old test leak. They are inert, because the recheck matches a whole line against a real sha, but BR-1's byte-identical move carries them into the new home. Clear them first if a clean ledger matters.
+- **Have a person review `tools/adlc/migrate_home.py`.** The Phase 5 review found 11 issues in code that had passed its own suite, two of which would have destroyed data (LESSON-785). All are fixed with regression tests, but that review was the author's own, inline. This code runs once, on real state, so read it before running it: start at `sync_moved`, `remove_path` and the two flip step lists.
 
 ## Retrieved Context
 
