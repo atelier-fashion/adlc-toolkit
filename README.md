@@ -82,7 +82,7 @@ The plugin's design rests on how Claude Code loads plugins. A claim marked **ver
 | `/architect` | Design architecture and break requirements into tasks |
 | `/validate` | Validate any ADLC phase output before advancing |
 | `/proceed` | End-to-end pipeline: validate → architect → implement → reflect → review → PR → wrapup. Opens a draft PR early and trial-merge-gates the merge to enforce ordering (REQ-483). On a **lite** REQ it skips validation, architecture and tasks, reviews with one `lite-reviewer` pass, and runs a mechanical lane check of the diff that escalates to the full lane when the change crosses a line; `--full` escalates by hand (REQ-652) |
-| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback. The workflow engine runs lite-lane REQs on the full lane and logs that it did |
+| `/sprint` | Parallel pipeline orchestrator — launch multiple `/proceed` sessions across REQs. Has an exec engine (`--exec`, a program that runs one headless harness per REQ and merges only after an operator approves), a workflow engine (`--workflow`, the deterministic `adlc-sprint` Dynamic Workflows script that restores per-REQ fan-out while keeping cross-REQ concurrency) with the legacy background-runner engine as an always-available fallback. The workflow engine runs lite-lane REQs on the full lane and logs that it did |
 | `/reflect` | Post-implementation self-review before formal review |
 | `/review` | Multi-agent code review (correctness, quality, architecture, tests, security) |
 | `/adversary` | Adversarial review of any artifact (spec, plan, diff/PR, README, or prose claim) — assumes it is wrong and tries to prove it, then reports only findings that survive self-refutation. Read-only; hunts omissions, not just bugs in what was written |
@@ -393,6 +393,72 @@ No manifest ships for Gemini CLI: there is no `gemini-extension.json`. Gemini CL
 - `agents/` and `hooks/hooks.json` are read from fixed locations, with no opt-out short of disabling the extension, so a clone-root extension would feed Gemini CLI Claude-format agents and Claude Code's hook.
 
 A pinned install would need an artifact with real copies under `skills/`, such as a generated release branch, and none is published. geminicli.com also says Gemini CLI was replaced by Antigravity CLI for unpaid and Google One users on 2026-06-18.
+
+### The `/sprint` exec engine
+
+`/sprint --exec REQ-a REQ-b` runs each REQ in a headless harness and keeps every one-way move
+out of the model's hands. The orchestrator is a program, `adlc sprint-exec`, so a plain shell
+can do all of it:
+
+```sh
+adlc sprint-exec run REQ-a REQ-b      # foreground: pre-flight, launch, supervise; its stdout is the dashboard
+adlc sprint-exec status               # the dashboard, without tokens
+adlc sprint-exec approve REQ-a --token <token>
+adlc sprint-exec reject REQ-b "not this sprint"
+adlc sprint-exec answer REQ-c "use the second option"
+adlc sprint-exec abort REQ-d
+adlc sprint-exec resume               # a new supervisor, with fresh tokens
+```
+
+The model runs Phases 0 to 7 and stops at the merge gate. On approval the orchestrator verifies
+the PR is the one the dashboard showed, trial-merges in a detached worktree of its own, merges
+pinned to the recorded head, runs the declared deploy, resumes the harness session once for
+lesson drafting, gates and merges the chore PR, and cleans up. Only the `claude` adapter ships;
+the Copilot, Codex, Antigravity and Cursor adapters are REQ-662 and are refused until then. A
+GitHub repo only: `--exec` on Azure DevOps is refused until a merge can be pinned there.
+
+Keys, all under `sprint.exec` in `.adlc/config.yml` and read once at launch:
+`child_gh_token` (the **name** of a variable holding a token without `contents: write`),
+`stall_minutes` (20), `require_branch_protection` (true), `auto_rebase_max_attempts` (1),
+`deploy` (`{target, command}`), `harness_flags`, and `allow_extra` (argv lists of further routine
+entries, each refused if it wraps a deny). Without a scoped token, launch needs
+`--shared-credentials`. Against an unprotected branch it needs `--allow-unprotected`.
+
+**What this does not stop.** The allow and deny lists are defense in depth, not the gate. The
+gates are the approval ledger, the pinned merge, the detached-worktree trial merge and rebase,
+the local diff gates, the child credentials, branch protection and the exit checks. These
+residuals stand, and `harness/claude.yml` declares them too:
+
+- **Fences.** A fence that sources a partial is matched by no per-command rule, so the routine
+  tier carries a broad entry, and a deny rule can be bypassed by such a fence.
+- **Wrappers and runners.** A command wrapped in `sh -c`, `env`, `xargs`, `python -c`, `npx`,
+  `npm run` or `find -exec` is not seen by a prefix rule.
+- **`gh api`** reaches merge and ref-update endpoints without a `gh pr merge` prefix.
+- **Flag positions and equivalents.** `gh -R <repo> pr merge` does not match, and a semantic
+  equivalent of a denied move under another spelling is not denied.
+- **Azure DevOps flag routes**, narrowed for the `partials/forge.sh` wrappers only.
+- **Direct pushes.** Nothing local fully stops `git push origin HEAD:<integration branch>`.
+  Branch protection does, which is why pre-flight refuses without it, and the first-parent exit
+  check reports one that got through.
+- **Credentials.** `SSH_AUTH_SOCK` and `GIT_SSH_COMMAND` give a child a push credential whatever
+  its forge token is. The controls are branch protection and the exit checks.
+- **Merge bots.** A bot on the forge that merges on a label or a comment is reachable by anything
+  that can write one.
+- **Same-user processes.** A process that escapes the sweep and reads the operator's terminal, or
+  the session transcript when `/sprint` carries the dashboard, can read a token. Approval is held
+  by a supervisor-side token, not by file permissions: anything on disk in a run directory is
+  writable by the same user, so the digest is in memory only. Once the supervisor has exited,
+  an escapee can start its own with `resume`, which prints fresh tokens to whoever runs it.
+  `decidedBy`, `channel` and `callerPid` are recorded on every decision, as evidence.
+- **Skills stay discoverable.** A `claude -p` session can still find `/wrapup` and `/sprint` through
+  ordinary skill loading, even though the delivered prompts name neither's merge steps.
+- **A harness without `capabilities.deny`** gets no deny flags at all.
+
+**Verified, and not.** `.adlc/research/harness-probes/claude-exec-manual.md` records what a
+logged-out `claude` 2.1.258 shows. Owed to a logged-in run: that `--allowedTools` holds in an
+untrusted workspace, that a deny beats a matching allow, whether a multi-statement fence matches
+any entry, and a `--resume` that continues a real conversation. A miss shows as a `denied` halt,
+not silently.
 
 ### Harness adapters: one allowlist and one hook set, rendered per harness
 

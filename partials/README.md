@@ -46,6 +46,8 @@ behavior. Examples:
   single home of `gh`/`az` PR commands; skills never call `gh pr` ops directly
   (lint-enforced). Companion `forge.md` documents the op contract, the normalized
   result/error vocabulary, and the ADO REST-via-PAT fallback.
+  REQ-659 adds `adlc_forge_branch_protection`, `adlc_forge_commit_prs`, a pinned merge and an
+  Azure DevOps flag allowlist for the `/sprint` exec engine (`forge.md`).
 - `emit-step-telemetry.sh` — defines `_adlc_emit_step_telemetry` (the
   `/analyze` per-step telemetry resolve-and-emit). Companion
   `emit-step-telemetry.md` documents the caller-env contract and the

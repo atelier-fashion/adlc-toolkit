@@ -179,8 +179,8 @@ def test_no_harness_name_in_code():
 
 def test_other_adapters_are_not_edited():
     out = subprocess.run(["git", "-C", TOOLKIT, "diff", "--name-only", "origin/main", "--",
-                          "harness/claude.yml", "harness/copilot.yml", "harness/cursor.yml",
-                          "harness/codex.yml"], capture_output=True, text=True)
+                          "harness/copilot.yml", "harness/cursor.yml", "harness/codex.yml"],
+                         capture_output=True, text=True)
     if out.returncode:
         pytest.skip("no origin/main here")
     assert out.stdout == ""
@@ -277,11 +277,13 @@ def test_no_fence_rule_is_rendered_and_no_remedy_promises_one():
 
 
 def test_a_dangerous_flag_appears_only_where_it_is_refused():
-    """AC-6: no code or adapter names it. The tests name it to ban it from every launch."""
+    """AC-6: no code or adapter names it but REQ-659's refusal table, in the loader. The
+    tests name it to ban it from every launch."""
     grep = subprocess.run(["grep", "-rn", "dangerously-skip-permissions",
                            os.path.join(TOOLKIT, "tools", "adlc"), ADAPTER],
                           capture_output=True, text=True)
-    assert [ln for ln in grep.stdout.splitlines() if "/tests/" not in ln] == []
+    assert [ln for ln in grep.stdout.splitlines()
+            if "/tests/" not in ln and "/harness_adapter.py:" not in ln] == []
 
 
 def test_rm_fixture_is_omitted(tmp_path):
