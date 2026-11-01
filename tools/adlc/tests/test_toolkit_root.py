@@ -353,7 +353,8 @@ def test_no_skills_dir_reads_outside_the_doctor_symlink_checks():
 
     TASK-129's lint lists those checks as the one exception. Every other
     module, and the doctor's own ``_partial_path``, resolves toolkit files
-    through toolkit_root.
+    through toolkit_root. ``home_layout.MOUNT_NAMES`` names the link a migrated
+    home keeps (REQ-663 BR-1): it is compared as a link and never read through.
     """
     adlc_dir = os.path.dirname(_SRC)
     hits = []
@@ -363,7 +364,8 @@ def test_no_skills_dir_reads_outside_the_doctor_symlink_checks():
         for func, value in _code_strings(os.path.join(adlc_dir, name)):
             if (value == "skills" or ".claude/skills" in value) \
                     and not _probe_data(name, value) \
-                    and not (func is None and _adapter_surface_name(name, value)):
+                    and not (func is None and _adapter_surface_name(name, value)) \
+                    and not (func is None and name == "home_layout.py" and value == "skills"):
                 hits.append((name, func))
     assert ("checks.py", "check_skills_symlink") in hits, "non-vacuity"
     assert [h for h in hits if h[0] != "checks.py"] == []

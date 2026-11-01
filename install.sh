@@ -13,11 +13,17 @@
 #   ./install.sh --repair        # same as default; re-derives paths after a clone move
 #   ./install.sh --dry-run       # print the action plan, change nothing
 #   ./install.sh --with-delegation   # also run the (opt-in) delegation install
+#   ./install.sh --migrate-home <dir>            # move the toolkit's machine state to <dir>
+#   ./install.sh --migrate-home <dir> --dry-run  # print the plan, change nothing
+#   ./install.sh --migrate-home --back           # reverse it
+#   ./install.sh --migrate-home [<dir>] --prune-backup   # drop the migration's backup
 #
 # Machine state lives under ADLC_HOME, default ~/.claude (REQ-654): the config, the
 # delegate venv and the skills view. Claude Code's mount (~/.claude/skills and
 # ~/.claude/agents) is installed whatever ADLC_HOME says; a skills-only view of the
-# clone is mounted at ~/.agents/skills for the other harnesses.
+# clone is mounted at ~/.agents/skills for the other harnesses. --migrate-home moves
+# that state and keeps a backup until --back or --prune-backup (REQ-663); run it on a
+# real machine only after reading the plan --dry-run prints.
 #
 # Ends with an embedded `adlc doctor` report.
 
@@ -26,13 +32,40 @@ set -euo pipefail
 # --- arg parse -------------------------------------------------------------
 MODE="install"          # install | dry-run   (repair is just install; both repair)
 WITH_DELEGATION=0
-for arg in "$@"; do
+MIGRATE=0               # REQ-663: --migrate-home was given
+MIGRATE_DIR_SET=0       # ...with a value, which may be empty (and is refused for it)
+MIGRATE_DIR=""
+MIGRATE_BACK=0
+MIGRATE_PRUNE=0
+INTERNAL=""             # --migrate-internal <view|mount|shim> <arg>: the engine's callback
+INTERNAL_ARG=""
+while [ $# -gt 0 ]; do
+    arg="$1"
     case "$arg" in
         --dry-run)         MODE="dry-run" ;;
         --repair)          MODE="install" ;;   # repair == idempotent reinstall
         --with-delegation) WITH_DELEGATION=1 ;;
+        --migrate-home)
+            MIGRATE=1
+            # The value is optional (--migrate-home --back); a flag is never a value.
+            if [ $# -gt 1 ]; then
+                case "$2" in
+                    --*) : ;;
+                    *) MIGRATE_DIR_SET=1; MIGRATE_DIR="$2"; shift ;;
+                esac
+            fi
+            ;;
+        --back)            MIGRATE_BACK=1 ;;
+        --prune-backup)    MIGRATE_PRUNE=1 ;;
+        --migrate-internal)
+            if [ $# -lt 3 ]; then
+                echo "install.sh: --migrate-internal takes a step and an argument" >&2
+                exit 2
+            fi
+            INTERNAL="$2"; INTERNAL_ARG="$3"; shift 2
+            ;;
         -h|--help)
-            sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -40,7 +73,16 @@ for arg in "$@"; do
             exit 2
             ;;
     esac
+    shift
 done
+if [ "$MIGRATE" -eq 0 ] && { [ "$MIGRATE_BACK" -eq 1 ] || [ "$MIGRATE_PRUNE" -eq 1 ]; }; then
+    echo "install.sh: --back and --prune-backup go with --migrate-home (try --help)" >&2
+    exit 2
+fi
+if [ "$MIGRATE" -eq 1 ] && [ "$WITH_DELEGATION" -eq 1 ]; then
+    echo "install.sh: --migrate-home does not take --with-delegation; run them one at a time" >&2
+    exit 2
+fi
 
 DRY=0
 [ "$MODE" = "dry-run" ] && DRY=1
@@ -85,9 +127,15 @@ if [ ! -f "$SCRIPT_DIR/partials/adlc-home.sh" ]; then
     exit 1
 fi
 . "$SCRIPT_DIR/partials/adlc-home.sh"
+# --migrate-home is the remediation for a home that cannot resolve (a pointer naming
+# a directory that is gone, REQ-663 BR-12), so its engine reads the machine itself and
+# only the plain install stops here. The internal steps are told their home.
 if ! ADLC_HOME_DIR="$(adlc_home)"; then
-    echo "install.sh: nothing changed — fix ADLC_HOME and re-run." >&2
-    exit 1
+    if [ "$MIGRATE" -eq 0 ] && [ -z "$INTERNAL" ]; then
+        echo "install.sh: nothing changed — fix ADLC_HOME and re-run." >&2
+        exit 1
+    fi
+    ADLC_HOME_DIR=""
 fi
 
 # Claude Code's own directory: its skills and agents mounts, installed on every
@@ -169,17 +217,20 @@ ensure_symlink() {
 # would break `adlc doctor` on exactly the machine that most needs it
 # (LESSON-395). $HOME and ADLC_HOME are expanded by the shim at RUN time, not
 # stamped here (REQ-654 ADR-3).
-ensure_adlc_shim() {
-    shim="$BIN_DIR/adlc"
-    want="#!/usr/bin/env bash
+adlc_shim_text() {
+    printf '%s\n' "#!/usr/bin/env bash
 # The ONE interpreter rule (REQ-609 BR-8, ADR-2) — see install.sh,
 # tools/adlc/checks.py::_delegate_interpreter, partials/forge.sh::_adlc_forge_python.
-# The venv lives under ADLC_HOME, default ~/.claude, resolved here at run time by
-# partials/adlc-home.sh's rule (REQ-654 ADR-3). An unusable ADLC_HOME means no
-# venv: python3 from PATH, and adlc itself then names the problem.
+# The venv lives under ADLC_HOME, else the home ~/.claude/.adlc-home names, else
+# ~/.claude, resolved here at run time by partials/adlc-home.sh's rule (REQ-654 ADR-3,
+# REQ-663 BR-8). An unusable home means no venv: python3 from PATH, and adlc itself
+# then names the problem.
 _h=\"\$HOME/.claude\"  # adlc-home: default
 if [ -n \"\${ADLC_HOME+x}\" ]; then
   case \"\$ADLC_HOME\" in /*) _h=\"\${ADLC_HOME%/}\" ;; *) _h=\"\" ;; esac
+elif [ -f \"\$_h/.adlc-home\" ]; then
+  IFS= read -r _p < \"\$_h/.adlc-home\" || :
+  case \"\$_p\" in /*) _h=\"\${_p%/}\" ;; *) _h=\"\" ;; esac
 fi
 _v=\"\$_h/delegate-venv/bin/python3\"
 _y=\"\"
@@ -192,6 +243,11 @@ if [ -n \"\$_h\" ] && [ -f \"\$_v\" ] && [ -x \"\$_v\" ] && [ -n \"\$_y\" ]; the
   exec \"\$_v\" \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\"
 fi
 exec python3 \"$REPO_ROOT/tools/adlc/adlc.py\" \"\$@\""
+}
+
+ensure_adlc_shim() {
+    shim="$BIN_DIR/adlc"
+    want="$(adlc_shim_text)"
     # Whole-text comparison: the idempotency key is the shim's CONTENT, so a
     # machine carrying the old single-line shim is re-stamped rather than
     # reported "already current" (BR-1, LESSON-017).
@@ -242,15 +298,20 @@ report_venv_pyyaml() {
 # --- PATH wiring (marker-guarded, idempotent BR-1) -------------------------
 PATH_MARKER="# >>> adlc-toolkit (REQ-519) >>>"
 PATH_MARKER_END="# <<< adlc-toolkit (REQ-519) <<<"
-ensure_path() {
-    # Pick the rc file by the REAL login shell, not $SHELL (BR-6).
-    login_shell="$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}')"
-    [ -z "$login_shell" ] && login_shell="$(getent passwd "$USER" 2>/dev/null | awk -F: '{print $7}')"
+# login_rc_file — the rc file of the REAL login shell, not $SHELL (BR-6). One spelling:
+# the migration writes the BR-8 line into the same file ensure_path marks.
+login_rc_file() {
+    login_shell="$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}' || true)"
+    [ -z "$login_shell" ] && login_shell="$(getent passwd "$USER" 2>/dev/null | awk -F: '{print $7}' || true)"
     case "$login_shell" in
-        *zsh)  rc="$HOME/.zshrc" ;;
-        *bash) rc="$HOME/.bash_profile" ;;
-        *)     rc="$HOME/.profile" ;;
+        *zsh)  printf '%s\n' "$HOME/.zshrc" ;;
+        *bash) printf '%s\n' "$HOME/.bash_profile" ;;
+        *)     printf '%s\n' "$HOME/.profile" ;;
     esac
+}
+
+ensure_path() {
+    rc="$(login_rc_file)"
     if [ -f "$rc" ] && grep -F "$PATH_MARKER" "$rc" >/dev/null 2>&1; then
         note "  ok: PATH marker already in $rc"
         return 0
@@ -436,21 +497,23 @@ ensure_agents_mount() {
             note "  ok: $eam_m -> $SKILLS_VIEW"
             return 0
         fi
+        # A link to an earlier home's view is ours, dangling or not. It is tested before
+        # the directory arm: per-skill mode through it would write into the old view,
+        # which is what a migration finds while that view still exists (REQ-663 BR-4).
+        case "$eam_t" in
+            */adlc/skills-view)
+                note "  found: $eam_m is a symlink to an earlier skills view ($eam_t)"
+                link_entry "$SKILLS_VIEW" "$eam_m" "repointed"
+                return 0
+                ;;
+        esac
         if [ -d "$eam_m" ]; then
             note "  found: $eam_m is a symlink to a directory ($eam_t)"
             mount_per_skill "$eam_m"
             return 0
         fi
-        case "$eam_t" in
-            */adlc/skills-view)
-                note "  found: $eam_m is a dangling symlink to an earlier skills view ($eam_t)"
-                link_entry "$SKILLS_VIEW" "$eam_m" "repointed"
-                ;;
-            *)
-                note "  found: $eam_m is a dangling symlink to $eam_t, which install.sh did not make"
-                note "  WARN: left alone; move it aside and re-run to mount the skills view there"
-                ;;
-        esac
+        note "  found: $eam_m is a dangling symlink to $eam_t, which install.sh did not make"
+        note "  WARN: left alone; move it aside and re-run to mount the skills view there"
         return 0
     fi
     if [ -d "$eam_m" ]; then
@@ -474,6 +537,50 @@ ensure_agents_mount() {
 }
 
 # --- run -------------------------------------------------------------------
+# --- the migration (REQ-663) ------------------------------------------------
+# --migrate-home hands over to the engine, which owns the transaction. Only what the
+# shell alone knows goes with it. PYTHONDONTWRITEBYTECODE: the engine runs on a stdlib
+# python3, and bytecode in the clone is not what a migration should leave behind.
+if [ "$MIGRATE" -eq 1 ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "install.sh: --migrate-home needs python3 on PATH; nothing changed." >&2
+        exit 1
+    fi
+    set -- --repo-root "$REPO_ROOT" --installer "$SCRIPT_DIR/install.sh" \
+        --delegate-installer "$SCRIPT_DIR/tools/delegate/install.sh" \
+        --rc-file "$(login_rc_file)"
+    if [ "$MIGRATE_DIR_SET" -eq 1 ]; then set -- "$@" "--dir=$MIGRATE_DIR"; fi
+    if [ "$MIGRATE_BACK" -eq 1 ]; then set -- "$@" --back; fi
+    if [ "$MIGRATE_PRUNE" -eq 1 ]; then set -- "$@" --prune-backup; fi
+    if [ "$DRY" -eq 1 ]; then set -- "$@" --dry-run; fi
+    PYTHONDONTWRITEBYTECODE=1 exec python3 "$SCRIPT_DIR/tools/adlc/migrate_home.py" "$@"
+fi
+
+# The engine's callbacks: one step of what a plain run does, against the home it names,
+# so no text or rule here gets a second spelling in Python. `view` and `mount` take a
+# home; `shim` takes the file to write the shim's text to and touches nothing else.
+if [ -n "$INTERNAL" ]; then
+    SKILL_NAMES="$(toolkit_skill_names)"
+    case "$INTERNAL" in
+        view)
+            SKILLS_VIEW="$INTERNAL_ARG/adlc/skills-view"
+            ensure_skills_view
+            ;;
+        mount)
+            SKILLS_VIEW="$INTERNAL_ARG/adlc/skills-view"
+            ensure_agents_mount
+            ;;
+        shim)
+            adlc_shim_text > "$INTERNAL_ARG"
+            ;;
+        *)
+            echo "install.sh: unknown --migrate-internal step '$INTERNAL'" >&2
+            exit 2
+            ;;
+    esac
+    exit 0
+fi
+
 # Preflight first: nothing below it mutates until every input is known good
 # (LESSON-017). The skill list is read once and every later step uses it.
 SKILL_NAMES="$(toolkit_skill_names)"

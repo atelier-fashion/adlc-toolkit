@@ -322,3 +322,128 @@ def test_repair_after_clone_move(box):
                             hits.append(p)
     assert hits == []
     assert done_lines(run_install(moved, home)) == []
+
+
+# --- REQ-663: the seams the migration engine calls ---------------------------
+
+def _stubbed_env(home, stub, extra=None):
+    """A stub launchctl first on PATH: the real one acts on the live agent by label."""
+    env = {"HOME": home, "PATH": "%s:%s" % (stub, SYSTEM_PATH),
+           "USER": os.environ.get("USER", "u"), "PIP_NO_INDEX": "1",
+           "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+    env.update(extra or {})
+    assert shutil.which("launchctl", path=env["PATH"]) == os.path.join(stub, "launchctl")
+    return env
+
+
+@pytest.fixture
+def seam(tmp_path):
+    clone = make_clone(str(tmp_path / "clone dir"))
+    home = make_home(str(tmp_path / "home"))
+    stub = str(tmp_path / "stub")
+    os.makedirs(stub)
+    with open(os.path.join(stub, "launchctl"), "w") as fh:
+        fh.write("#!/bin/sh\nexit 0\n")
+    os.chmod(os.path.join(stub, "launchctl"), 0o755)
+    # An empty requirements file: pip succeeds with nothing to fetch.
+    with open(os.path.join(clone, "tools", "delegate", "requirements.txt"), "w") as fh:
+        fh.write("")
+    return clone, home, stub, tmp_path
+
+
+def _delegate(clone, env, *args):
+    return subprocess.run(["sh", os.path.join(clone, "tools", "delegate", "install.sh")]
+                          + list(args), env=env, cwd=env["HOME"], capture_output=True,
+                          text=True, timeout=300)
+
+
+def test_venv_only_touches_nothing_else(seam):
+    clone, home, stub, tmp = seam
+    target = str(tmp / "stage")
+    before = {p: open(os.path.join(home, p)).read() for p in (".zshrc", ".bash_profile",
+                                                              ".profile")}
+    out = _delegate(clone, _stubbed_env(home, stub), "--venv-only", target)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert os.access(os.path.join(target, "delegate-venv", "bin", "python3"), os.X_OK)
+    assert {p: open(os.path.join(home, p)).read() for p in before} == before
+    assert not os.path.exists(os.path.join(home, "bin"))
+    assert not os.path.exists(os.path.join(home, ".claude"))
+    # Not Library itself: Xcode's python3 keeps its bytecode cache under it.
+    assert not os.path.exists(os.path.join(home, "Library", "LaunchAgents"))
+    assert not os.path.exists(os.path.join(home, "Library", "Logs"))
+
+
+def test_render_matches_full_install(seam):
+    clone, home, stub, tmp = seam
+    env = _stubbed_env(home, stub)
+    assert _delegate(clone, env).returncode == 0
+    outdir = str(tmp / "rendered")
+    os.makedirs(outdir)
+    out = _delegate(clone, env, "--render", os.path.join(home, ".claude"), outdir)
+    assert out.returncode == 0, out.stdout + out.stderr
+    for name in ("adlc-read", "adlc-write", "extract-chat"):
+        with open(os.path.join(outdir, name)) as got, \
+                open(os.path.join(home, "bin", name)) as want:
+            assert got.read() == want.read(), name
+    plist = "com.adlc-toolkit.delegate-setenv.plist"
+    with open(os.path.join(outdir, plist)) as got, \
+            open(os.path.join(home, "Library", "LaunchAgents", plist)) as want:
+        assert got.read() == want.read()
+
+
+def test_render_names_the_home_it_is_told(seam):
+    clone, home, stub, tmp = seam
+    outdir = str(tmp / "rendered")
+    os.makedirs(outdir)
+    moved = str(tmp / "moved home")
+    assert _delegate(clone, _stubbed_env(home, stub), "--render", moved, outdir).returncode == 0
+    with open(os.path.join(outdir, "adlc-read")) as fh:
+        assert moved + "/delegate-venv/bin/python3" in fh.read()
+    assert not os.path.exists(moved)
+
+
+def test_narrow_modes_refuse_a_relative_home(seam):
+    clone, home, stub, _tmp = seam
+    out = _delegate(clone, _stubbed_env(home, stub), "--venv-only", "rel")
+    assert out.returncode == 2
+
+
+def test_mount_repoints_a_live_earlier_view(box):
+    """A link to an earlier home's view is ours, even while that view still exists."""
+    clone, home, tmp = box
+    assert run_install(clone, home).returncode == 0
+    mount = os.path.join(home, ".agents", "skills")
+    earlier = str(tmp / "earlier" / "adlc" / "skills-view")
+    os.makedirs(earlier)
+    os.unlink(mount)
+    os.symlink(earlier, mount)
+    out = run_install(clone, home)
+    assert out.returncode == 0
+    assert os.readlink(mount) == os.path.join(home, ".claude", "adlc", "skills-view")
+    assert os.listdir(earlier) == []
+
+
+def test_a_users_directory_link_stays_per_skill(box):
+    """The benign half: a link to a directory that is not a view stays the user's."""
+    clone, home, tmp = box
+    assert run_install(clone, home).returncode == 0
+    mount = os.path.join(home, ".agents", "skills")
+    mine = str(tmp / "my-skills")
+    os.makedirs(mine)
+    os.unlink(mount)
+    os.symlink(mine, mount)
+    assert run_install(clone, home).returncode == 0
+    assert os.readlink(mount) == mine
+    assert "spec" in os.listdir(mine)
+
+
+def test_plain_install_stops_on_a_conflict_with_nothing_changed(box):
+    clone, home, tmp = box
+    assert run_install(clone, home).returncode == 0
+    target = str(tmp / "moved")
+    os.makedirs(target)
+    with open(os.path.join(home, ".claude", ".adlc-home"), "w") as fh:
+        fh.write(target + "\n")
+    out = run_install(clone, home, adlc_home="/elsewhere")
+    assert out.returncode == 1
+    assert "pointer" in out.stderr and "nothing changed" in out.stderr
