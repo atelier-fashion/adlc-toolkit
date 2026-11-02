@@ -375,6 +375,8 @@ def _exec_block(src, block):
                 "config_isolation", "config_isolation_help", "residuals"):
         if key in block:
             for i, item in enumerate(_need_list(src, "exec." + key, block[key])):
+                if key == "config_isolation" and item == "":
+                    continue   # an empty value is an argument: `--setting-sources ""` (BUG-260)
                 _need_str(src, "exec.%s[%d]" % (key, i), item)
     for key in ("allow_extra", "allow_extra_exact", "engine_deny"):
         for i, item in enumerate(_need_list(src, "exec." + key, block.get(key, []))):

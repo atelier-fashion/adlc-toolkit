@@ -62,7 +62,7 @@ def test_happy_path(box):
     assert trial_cwd and all(run.path in " ".join(r["argv"]) for r in trial_cwd)
     argv = json.load(open(str(box.home / "closeout-argv-REQ-901.json")))
     assert argv[argv.index("--resume") + 1] == "session-REQ-901"
-    assert "--strict-mcp-config" in argv and argv[argv.index("--setting-sources") + 1] == "user"
+    assert "--strict-mcp-config" in argv and argv[argv.index("--setting-sources") + 1] == ""
     settings = argv[argv.index("--settings") + 1]
     assert settings == run.file("settings.json")
     assert "hooks" not in json.load(open(settings))
@@ -593,9 +593,11 @@ def test_no_session_means_no_close_out(tmp_path):
 
 def test_config_isolation(tmp_path):
     box = eh.Sandbox(tmp_path)
-    box.write_scenario(help="--setting-sources <s>\n--settings <f>\n")
     orch = box.go(shared=True)
     run = orch.runs[REQ]
+    # The flags vanish after launch (a harness upgraded mid-run): preflight passed, and the
+    # close-out still checks for itself.
+    box.write_scenario(help="--setting-sources <s>\n--settings <f>\n")
     box.approve(orch)
     state = run.read_primary_state()
     assert state["closeOut"] == {"status": "failed", "at": state["closeOut"]["at"],

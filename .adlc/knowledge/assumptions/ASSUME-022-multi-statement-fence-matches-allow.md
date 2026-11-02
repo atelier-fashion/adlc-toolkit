@@ -1,10 +1,10 @@
 ---
 id: ASSUME-022
 title: "A multi-statement skill fence matches an allow entry under `claude -p`"
-status: unresolved
+status: invalidated
 req: REQ-659
 created: 2026-11-01
-resolved:
+resolved: 2026-11-02
 ---
 
 ## Assumption
@@ -23,4 +23,4 @@ REQ-659 allows.
 
 ## Resolution
 
-Open. Owed to a logged-in run, in REQ-659's `## Deferred`.
+False. Row `fence`: a multi-statement partial-sourcing fence was denied. Neither `Bash(ADLC_TOOLKIT_ROOT=:*)` nor `Bash(if [ -f .adlc/partials/:*)` admits it, so every skill fence halts `denied` under `--exec` until the engine allows them or runs them another way.

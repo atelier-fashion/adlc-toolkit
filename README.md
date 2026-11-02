@@ -421,7 +421,7 @@ Keys, all under `sprint.exec` in `.adlc/config.yml` and read once at launch:
 `child_gh_token` (the **name** of a variable holding a token without `contents: write`),
 `stall_minutes` (20), `require_branch_protection` (true), `auto_rebase_max_attempts` (1),
 `deploy` (`{target, command}`), `harness_flags`, and `allow_extra` (argv lists of further routine
-entries, each refused if it wraps a deny). Without a scoped token, launch needs
+entries, each refused if it wraps a deny or shares a command base with one, such as `git push`). Without a scoped token, launch needs
 `--shared-credentials`. Against an unprotected branch it needs `--allow-unprotected`.
 
 **What this does not stop.** The allow and deny lists are defense in depth, not the gate. The

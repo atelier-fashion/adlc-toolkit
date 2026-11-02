@@ -42,6 +42,14 @@ def test_two_reqs(two):
         argv = json.loads(open(str(two.home / ("argv-%s.json" % req))).readline())
         assert "--allowedTools" in argv and "--disallowedTools" in argv
         assert "--dangerously-skip-permissions" not in argv
+        # BUG-260: the first launch reads no settings file but the engine's own, so a
+        # user or project `Bash(git push:*)` cannot widen the tiers.
+        assert argv[argv.index("--setting-sources") + 1] == ""
+        assert "--strict-mcp-config" in argv
+        doc = json.load(open(argv[argv.index("--settings") + 1]))
+        assert doc["permissions"]["allow"] == argv[argv.index("--allowedTools") + 1:
+                                                   argv.index("--disallowedTools")]
+        assert "Bash(git push --force:*)" in doc["permissions"]["deny"]
         assert "Bash(adlc sprint-exec approve:*)" in argv
         state = run.read_primary_state()
         assert state["status"] == "awaiting_approval" and state["approval"]["action"] == "merge"
@@ -57,6 +65,15 @@ def test_two_reqs(two):
     assert os.path.isdir(orch.runs["REQ-901"].wc)
     text = two.out.getvalue()
     assert "Awaiting approval" in text and "/sprint reject REQ-902" in text
+
+
+def test_launch_refused_without_config_isolation(box):
+    """BUG-260: a harness that cannot read only the engine's settings would let the
+    operator's or the project's allowlist widen the tiers, so nothing launches."""
+    box.write_scenario(help="--setting-sources <s>\n--settings <f>\n")
+    with pytest.raises(se.Refused, match="config-isolation flags"):
+        box.start()
+    assert not (box.home / "argv-REQ-901.json").exists()
 
 
 def test_halt_record(box):
