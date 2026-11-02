@@ -1,10 +1,10 @@
 ---
 id: ASSUME-020
 title: "`claude -p --allowedTools` holds in a workspace Claude has not trusted"
-status: unresolved
+status: validated
 req: REQ-659
 created: 2026-11-01
-resolved:
+resolved: 2026-11-02
 ---
 
 ## Assumption
@@ -23,4 +23,4 @@ is false, the first tool call in a run in an untrusted repo is denied and the ru
 
 ## Resolution
 
-Open. Owed to a logged-in run, in REQ-659's `## Deferred`.
+Holds. On 2026-11-02 (`claude` 2.1.258, logged in) `tools/adlc/tests/e2e/claude-exec-live.sh` row `allow-engine-only` ran `git config user.name`, an allow only the engine's tier carries, in a never-trusted folder.

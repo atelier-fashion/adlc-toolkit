@@ -1,10 +1,10 @@
 ---
 id: ASSUME-021
 title: "`--disallowedTools` beats a matching `--allowedTools`, and a tool in neither tier is denied under `claude -p`"
-status: unresolved
+status: validated
 req: REQ-659
 created: 2026-11-01
-resolved:
+resolved: 2026-11-02
 ---
 
 ## Assumption
@@ -23,4 +23,4 @@ either way: the structural gates are the ledger, the pinned merge and the exit c
 
 ## Resolution
 
-Open. Owed to a logged-in run, in REQ-659's `## Deferred`.
+Holds. Row `deny-over-allow`: an added deny matching the same command as an allow won, and the origin did not move. Row `outside-tier`: `chmod`, in neither tier, was denied under `-p`, not prompted for. BUG-260 found the tiers themselves leaking: a prefix allow admitted `<branch> main` and `<branch> --force`, and the operator's settings file widened them; both are fixed.

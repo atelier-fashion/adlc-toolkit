@@ -1,10 +1,10 @@
 ---
 id: ASSUME-023
 title: "`claude -p --resume` continues a conversation from another working copy"
-status: unresolved
+status: validated
 req: REQ-659
 created: 2026-11-01
-resolved:
+resolved: 2026-11-02
 ---
 
 ## Assumption
@@ -22,4 +22,4 @@ are thinner.
 
 ## Resolution
 
-Open. Owed to a logged-in run, in REQ-659's `## Deferred`.
+Holds. Row `resume-sibling`: a session started in one worktree was resumed from a sibling worktree and recalled a word given in the first session.

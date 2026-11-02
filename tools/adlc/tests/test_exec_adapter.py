@@ -69,7 +69,13 @@ def test_deny_superset(adapter):
     assert "Bash(git push:*)" not in allow and "Bash(git branch:*)" not in allow
     assert "Bash(git worktree:*)" not in allow
     assert "Bash(git push)" in allow
-    assert "Bash(git push -u origin %s:*)" % BRANCH in allow
+    # BUG-260: the REQ's branch push is exact. A prefix rule admitted `<branch> main` and
+    # `<branch> --force` after it, and a live `claude -p` pushed main through it.
+    assert "Bash(git push -u origin %s)" % BRANCH in allow
+    assert "Bash(git push origin %s)" % BRANCH in allow
+    for rule in allow:
+        if rule.startswith(("Bash(git push", "Bash(git branch", "Bash(git worktree")):
+            assert not rule.endswith(":*)"), rule
     assert "Read" in allow and "Edit" in allow
 
 
@@ -83,6 +89,20 @@ def test_extra_that_wraps_a_deny_is_refused(adapter):
         adapter.tiers(BRANCH, [["sh"]])
     with pytest.raises(ea.ExecRefused, match="will not spell"):
         adapter.tiers(BRANCH, [["ls)", "Bash(rm"]])
+
+
+def test_prefix_extra_sharing_a_deny_base_is_refused(adapter):
+    """BUG-260: under prefix matching anything can follow an allow, so an extra that shares a
+    command base with a deny admits that deny's flags after it."""
+    for extra, base in ((["git", "push", "-u", "origin", "feat/x"], "git push"),
+                        (["git", "branch", "--list"], "git branch"),
+                        (["git", "worktree", "list"], "git worktree"),
+                        (["rm", "build.log"], "rm"),
+                        (["gh", "pr", "view"], "gh pr")):
+        with pytest.raises(ea.ExecRefused, match="shares the command base"):
+            adapter.tiers(BRANCH, [extra])
+    allow, _deny = adapter.tiers(BRANCH, [["pytest"], ["make", "test"], ["git", "log"]])
+    assert "Bash(git log:*)" in allow
 
 
 def test_forbidden_flags(adapter):
@@ -151,7 +171,7 @@ def test_isolation_detection(adapter):
     assert adapter.isolation_available(help_text)
     assert not adapter.isolation_available(help_text.replace("--strict-mcp-config", "--other"))
     flags = adapter.isolation_flags("/run/settings.json")
-    assert flags == ["--setting-sources", "user", "--settings", "/run/settings.json",
+    assert flags == ["--setting-sources", "", "--settings", "/run/settings.json",
                      "--strict-mcp-config"]
     doc = adapter.settings_document(["Read"], ["Bash(rm -f:*)"])
     assert doc == {"permissions": {"allow": ["Read"], "deny": ["Bash(rm -f:*)"]}}

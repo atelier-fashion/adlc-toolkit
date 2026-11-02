@@ -355,6 +355,16 @@ class Orchestrator(object):
         batch.binary = shutil.which(adapter.binary, path=self.environ.get("PATH", ""))
         if not batch.binary:
             raise Refused("%s is not on PATH" % adapter.binary)
+        # Every launch reads only the engine's settings file. Without the flags that do
+        # that, the operator's and the project's own allowlists would widen the tiers.
+        help_out = subprocess.run([batch.binary, "--help"], stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, universal_newlines=True,
+                                  env=self.environ).stdout
+        if not adapter.isolation_available(help_out):
+            raise Refused("%s --help does not list the config-isolation flags %s, so a launch "
+                          "would read settings files the engine does not control (BUG-260)"
+                          % (adapter.binary, " ".join(adapter.block.get(
+                              "config_isolation_help", []))))
         text = self.read_config_text()
         try:
             batch.config = eg.exec_config(text)
@@ -522,8 +532,12 @@ class Orchestrator(object):
     def _argv(self, run, resume=None, extra=(), add_dir=None):
         adapter = self.adapter(run)
         allow, deny = adapter.tiers(run.doc["branch"], run.doc["config"]["allow_extra"])
+        # Isolated like the close-out (BR-25): the tiers are the whole policy (BUG-260).
+        settings = run.file("settings.json")
+        el.atomic_json(settings, adapter.settings_document(allow, deny))
         return adapter.launch_argv(run.doc["binary"], allow, deny, resume=resume,
-                                   extra=list(run.doc["flags"]) + list(extra), add_dir=add_dir)
+                                   extra=list(run.doc["flags"]) + adapter.isolation_flags(settings)
+                                   + list(extra), add_dir=add_dir)
 
     def _child_env(self, run):
         adapter = self.adapter(run)

@@ -54,3 +54,31 @@ a throwaway repo with the mock forge. The binary took the whole 115-element argv
 included, with nothing on stderr, and exited 1. The engine read `Not logged in` from the JSON
 result, kept the session id, classed the exit `error`, and ended the run `failed` with that line
 in `notes`. So the launch path is proven as far as the first API call, and no further.
+
+## Logged-in rows (2026-11-02)
+
+`tools/adlc/tests/e2e/claude-exec-live.sh`, `claude` 2.1.258 logged in through claude.ai (Max), the
+operator's real `HOME`, a throwaway repo with a local bare origin. Every launch uses the engine's own
+argv from `exec_adapter.launch_argv`. The operator's `~/.claude/settings.json` allows 60 commands,
+including `Bash(git push:*)` and `Bash(git add:*)`, and `claude -p` reads it, so the effective policy is
+that list plus the engine's tiers.
+
+| Row | Result | What it shows |
+|---|---|---|
+| `allow-untrusted` | pass | `git add` ran in a never-trusted folder (also allowed by the user's settings) |
+| `allow-engine-only` | pass | `git config user.name`, allowed only by the engine's tier, ran: `--allowedTools` holds untrusted (ASSUME-020) |
+| `outside-tier` | pass | `chmod` was denied under `-p`, not prompted: one denial, file unchanged (ASSUME-021b) |
+| `deny-over-allow` | pass | an added deny matching the same command as an allow won: the remote did not move (ASSUME-021a) |
+| `force-own-branch` | **ran**, then pass after BUG-260 | `git push -u origin <branch> --force` force-pushed the REQ's branch: the deny `git push --force:*` does not catch a flag after the refspec |
+| `extra-refspec-main` | **ran**, then pass after BUG-260 | `git push -u origin <branch> main` pushed `main`: the allow `git push -u origin <branch>:*` admits a second refspec, so the model could update the integration branch without `/sprint approve` |
+| `fence` | **fail** | the multi-statement partial-sourcing fence was denied: neither `Bash(ADLC_TOOLKIT_ROOT=:*)` nor `Bash(if [ -f .adlc/partials/:*)` admits it (ASSUME-022 false) |
+| `resume-sibling` | pass | `--resume` from a sibling worktree recalled a word given in the first session (ASSUME-023) |
+
+Those two rows were a gap with two causes (BUG-260). The `{branch}` push entries in
+`harness/claude.yml` were prefix rules, so anything could follow them. And `claude -p` read the
+operator's `~/.claude/settings.json` and the project's committed `.claude/settings.json`, both of
+which allow `Bash(git push:*)`, so removing the engine's prefix alone did not stop the push: the
+first rerun after that change still pushed `main`. With the entries exact and every launch
+passing `--setting-sources "" --settings <runDir>/settings.json --strict-mcp-config`, the rerun
+on 2026-11-02 denied both pushes and left the origin unchanged. Every other row read the same.
+`fence` still fails: that is ASSUME-022, open as a design question for the engine.

@@ -98,16 +98,19 @@ exec:
   # render of templates/permissions.yml.
   allow_tools: [Read, Write, Edit, Glob, Grep, Agent, Skill, TodoWrite]
   # The shared-base rule drops `git push`, `git branch` and `git worktree` at exec
-  # scope. These spellings wrap no deny (ADR-6). `{branch}` is the REQ's own branch.
+  # scope, so the pipeline's own calls are listed here. Each shares a command base with
+  # a deny, so each is exact: as a prefix rule, `git push -u origin <branch>` admitted
+  # `<branch> main` and `<branch> --force` after it (BUG-260). `{branch}` is the REQ's
+  # own branch.
   allow_extra:
+    - [ADLC_TOOLKIT_ROOT=]
+  allow_extra_exact:
+    - [git, push]
     - [git, push, -u, origin, "{branch}"]
     - [git, push, origin, "{branch}"]
     - [git, branch, --show-current]
     - [git, branch, --list]
     - [git, worktree, list]
-    - [ADLC_TOOLKIT_ROOT=]
-  allow_extra_exact:
-    - [git, push]
   # Denied here and not in templates/permissions.yml: an interactive session has no
   # use for them, and a person there can still approve a one-way move.
   engine_deny:
@@ -143,7 +146,10 @@ exec:
   # USER reaches the macOS keychain item a stored login lives in.
   auth_env: [ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, USER]
   # BR-25: the resumed close-out reads no working-copy settings, hooks or MCP servers.
-  config_isolation: [--setting-sources, user, --settings, "{settings}", --strict-mcp-config]
+  # Every launch, not only the close-out: no user, project or local settings file is read,
+  # because the operator's and the project's own allowlists hold prefix rules such as
+  # `Bash(git push:*)` that re-admit what the tiers withhold (BUG-260).
+  config_isolation: [--setting-sources, "", --settings, "{settings}", --strict-mcp-config]
   config_isolation_help: [--setting-sources, --settings, --strict-mcp-config]
   settings_keys: {allow: [permissions, allow], deny: [permissions, deny]}
   # OQ-4: a sandboxed session has not been shown to reach the common git dir.

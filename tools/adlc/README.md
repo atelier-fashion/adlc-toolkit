@@ -547,7 +547,7 @@ Nothing branches on a harness name. `harness/claude.yml` is the reference block.
 | `launch`, `resume_flag`, `add_dir_flag` | the argv after the binary, on a prompt delivered on stdin |
 | `allow_flag`, `deny_flag`, `shell_rule`, `shell_rule_exact` | how the two tiers reach the argv. `deny_flag` renders only when `capabilities.deny` is `yes` |
 | `allow_tools` | the non-shell tools |
-| `allow_extra`, `allow_extra_exact` | routine spellings the exec-scope render cannot give. Each is vetted like an operator's `sprint.exec.allow_extra`: no token that runs its arguments, and nothing that wraps a deny |
+| `allow_extra`, `allow_extra_exact` | routine spellings the exec-scope render cannot give, `{branch}` substituted in both. Each is vetted like an operator's `sprint.exec.allow_extra`: no token that runs its arguments, nothing that wraps a deny, and no prefix entry that shares a command base with a deny (`git push`, `git branch`, `rm`): those go in `allow_extra_exact` (BUG-260) |
 | `engine_deny` | denies that belong to this engine, never in `templates/permissions.yml` |
 | `forbidden_flags` | carries the engine-wide vocabulary and the harness's own equivalents |
 | `exit_codes`, `denied_result_key` | raw code to `ok`, `denied`, `timeout`, `error`, an unmapped non-zero code being `error`; then a non-empty value at `denied_result_key`, with no terminal claim, is `denied` |

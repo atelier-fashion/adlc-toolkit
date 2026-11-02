@@ -24,6 +24,20 @@ _CLAIM_RE = re.compile(r"^Terminal state: ([a-z_-]+)\s*$")
 _EXTRA_RE = re.compile(r"^[A-Za-z0-9_./=+:@%,*-]+$")
 
 
+#: Programs whose first argument names a subcommand: their command base is two tokens.
+_SUBCOMMAND_PROGRAMS = ("git", "gh", "az", "adlc", "terraform", "gcloud", "npm", "docker",
+                        "kubectl")
+
+
+def _command_base(spelling):
+    """The tokens a deny shares with any command of the same kind: `git push` for
+    `git push --force`, `git -C` for `git -C * push -f`, `rm` for `rm -rf` (BUG-260)."""
+    spelling = tuple(spelling)
+    if len(spelling) > 1 and spelling[0] in _SUBCOMMAND_PROGRAMS:
+        return spelling[:2]
+    return spelling[:1]
+
+
 class ExecRefused(ValueError):
     """A pre-flight refusal: nothing is launched."""
 
@@ -112,6 +126,15 @@ class ExecAdapter(object):
                 if hr.allow_matches(argv, exact, gran, form, exact):
                     raise ExecRefused("allow entry %r would wrap deny-tier `%s`"
                                       % (" ".join(argv), " ".join(form)))
+            # A prefix rule admits any tokens after it, so one that shares a command base
+            # with a deny admits that deny's flags at a later position: `git push -u origin
+            # <branch>:*` let `<branch> --force` and `<branch> main` through (BUG-260).
+            base = _command_base(entry["spelling"])
+            if not exact and tuple(argv[:len(base)]) == base:
+                raise ExecRefused("allow entry %r shares the command base `%s` with deny-tier "
+                                  "`%s`; list it as an exact entry instead"
+                                  % (" ".join(argv), " ".join(base),
+                                     " ".join(entry["spelling"])))
 
     def tiers(self, branch, config_extra=()):
         """``(allow, deny)``: the argv elements of both tiers (BR-8, ADR-6)."""
@@ -128,8 +151,9 @@ class ExecAdapter(object):
             self.vet_extra(spelled, entries)
             allow.append(self.spell(spelled))
         for argv in self.block.get("allow_extra_exact", []):
-            self.vet_extra(list(argv), entries, exact=True)
-            allow.append(self.spell(argv, exact=True))
+            spelled = [t.replace("{branch}", branch) for t in argv]
+            self.vet_extra(spelled, entries, exact=True)
+            allow.append(self.spell(spelled, exact=True))
         for argv in config_extra:
             self.vet_extra(list(argv), entries)
             allow.append(self.spell(argv))

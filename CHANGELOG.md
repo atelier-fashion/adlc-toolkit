@@ -529,6 +529,13 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`/sprint --exec` no longer lets a model push `main` or force-push (BUG-260).** The claude
+  adapter allowed `git push -u origin <branch>` as a prefix rule, so anything could follow it.
+  A live `claude -p` run pushed `main` with `git push -u origin <branch> main` and force-pushed
+  with `<branch> --force`. The pipeline's push, branch and worktree calls are now exact entries,
+  and the vet refuses a prefix extra that shares a command base with a deny, including an
+  operator's `sprint.exec.allow_extra`. `tools/adlc/tests/e2e/claude-exec-live.sh` holds the
+  logged-in rows, and both cases are assertions there.
 - **`adlc_recheck_id assume` stays in the current repo (BUG-259).** It walked every repo
   under the repos root, so a sibling's same-numbered ASSUME read as a collision, although
   ASSUME ids are per-repo. It now matches `adlc_remote_high`'s scope, a `bug` or `req`
