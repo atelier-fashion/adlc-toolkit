@@ -6,6 +6,7 @@ parent: REQ-691
 created: 2026-11-04
 updated: 2026-11-04
 dependencies: [TASK-241]
+repo: adlc-toolkit
 ---
 
 ## Description
