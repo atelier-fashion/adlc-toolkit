@@ -1,7 +1,7 @@
 ---
 id: REQ-691
 title: "/bugfix writes a failing-first regression test for every bug, with a project opt-out"
-status: approved
+status: complete
 deployable: false
 created: 2026-11-04
 updated: 2026-11-04
