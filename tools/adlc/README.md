@@ -40,6 +40,7 @@ adlc --version
 | `harness probe` | The plan's §6 experiments against one installed harness, with one committed JSON result per harness (REQ-664, below). |
 | `sprint-exec run \| resume \| status \| approve \| reject \| answer \| abort \| reissue` | The `/sprint` exec engine, a program that runs one headless harness per REQ and performs every one-way move itself (REQ-659, below). |
 | `harness render \| install \| doctor \| drift` | The adapter framework: render any surface through `harness/<name>.yml`, write a harness's user-level surfaces, `render-currency:<name>`, and the project layer's template-posture drift (REQ-657, below). |
+| `regression-check mode \| check` | Read-only: the project's `bugfix.regression_test` setting, and whether every resolved bug still has its regression test or a waiver (REQ-691, `regression_check.py` below). |
 
 Each is one entry in the data-driven `SUBCOMMANDS` table (REQ-519 BR-11).
 
@@ -850,6 +851,134 @@ carrying on without lessons. Contract: `partials/lessons.md`.
 **Tests.** `tools/adlc/tests/test_lessons.py`. The corpus cases (the LESSON-604
 reproduction, the 40-line cap over every lesson) read this repo's own
 `.adlc/knowledge/lessons`.
+
+## `regression_check.py` (REQ-691)
+
+The regression-test check: it reads a project's `bugfix.regression_test`
+setting and sorts its bug reports into passed, waived, legacy and failed
+(REQ-691 architecture ADR-691-A to ADR-691-D). People and CI run it as
+`adlc regression-check`; skill fences reach it through
+`partials/regression-check.sh`, which runs the installed toolkit's copy. It
+reads `.adlc/` under `--root`, which defaults to the current directory, and
+writes nothing. Standard library only, plus the sibling `harness_yaml.py`.
+
+```bash
+adlc regression-check mode  [--root DIR] [--base REF]
+adlc regression-check check [--root DIR] [--base REF] [--require-recorded] [BUG-nnn ...]
+```
+
+| Verb | First line | rc |
+|---|---|---|
+| `mode` | `regression-test: required` or `off`, then a line saying whether the key was set, absent, or there is no config | 0; 2 with `regression-test: error` |
+| `check` | `regression-check: pass` / `fail`, then `passed=N waived=N legacy=N failed=N`, then one `BUG-nnn: <reason>` line per failed bug | 0 pass, 1 fail |
+| `check`, off project | `regression-check: off`, then a line saying regression tests are off; no bug report is opened | 0 |
+| either, error | `regression-check: error` (or `regression-test: error`), then the reason; no counts line, because none was made | 2 |
+
+**The setting.** Read from `.adlc/config.yml` in the working tree, or, with
+`--base REF`, from the copy committed at `REF` and never from the disk. A gate
+that reads the tree under check lets the fix branch switch its own gate off or
+re-point a sibling, so `/bugfix`'s Gate passes
+`--base refs/remotes/origin/<integration-branch>` (the rule `lane_check.py`
+follows). The setting and `repos:` both come from `REF`, read with
+`git ls-tree` and `git cat-file` at the root's repo-relative prefix, so a
+project in a subdirectory reads its own config. The bug reports and test files
+still come from the working tree and the index. `REF` must be a full ref,
+`refs/remotes/<remote>/<branch>` or `refs/heads/<branch>`, in
+`A-Z a-z 0-9 . _ / -`, with no `..`, no empty or dot-led component and no
+`.lock`. A short name is a usage error because git resolves `origin/main` to a
+tag of that name before the remote-tracking branch, so a tag could choose the
+config the gate reads; `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` and a bare sha are
+usage errors too. `REF` is resolved with `git show-ref --verify`, which takes
+it exactly as written: a missing `refs/remotes/origin/main` is rc 2, never
+`refs/tags/refs/remotes/origin/main`, where plain `rev-parse` would fall
+through. A config that is a symlink, a directory or a submodule at `REF` is rc
+2. No config at `REF` is `off`, and the line says `does not exist at REF`.
+
+A missing config is `off`. So is one that names neither `regression_test` nor
+`bugfix` outside whole-line comments, and it is not parsed (the `lane_check.py`
+byte prefilter: a backslash or a NUL on a non-comment line also forces a
+parse). Otherwise the file is parsed with `harness_yaml.loads`, so no PyYAML is
+needed. If the YAML subset refuses the file, it stops the caller only when the
+file may still define the setting. That means `regression_test` written as a
+key anywhere, `bugfix` as a top-level or flow key, or a double-quoted key
+holding a backslash (an escape could spell either). Otherwise the parse
+failure came from something else, such as a backslash in a value, a `>` block
+or an anchor, and the setting is `off`. A parsed `bugfix` must be a mapping
+whose only key is `regression_test`, set to `required` or `off`. Anything
+else is rc 2, naming the key, the value and the two allowed values. That
+includes a typo such as `regresion_test`, and a `bugfix:` whose every child is
+commented out. To turn the check off, delete the block or set `off`. A config
+that is not UTF-8, or whose path resolves outside the root through a symlink,
+is rc 2. An unreadable setting is never read as `off`.
+
+**The bugs.** Without ids, every `.adlc/bugs/BUG-*.md` whose status is
+`resolved` or `closed`; with ids, exactly those reports, whatever their status,
+and an id with no report fails. Frontmatter is read by the engine's own strict
+one-line reader, not `lessons.py`'s lenient one. A key given twice, a block
+list, an unclosed quote or flow list, a misspelt key and a wrong type each fail
+the report. `regression_tests` is a flow list of paths. `regression_waiver` is
+a quoted string, because readers type a plain `false`, `0` or `reason: x`
+differently, and some cut it at ` #`. An unquoted waiver fails as the wrong
+type. An empty list, an empty string (`""`) and an empty value all count as
+absent, so a report copied from the bug template and never filled reads as
+legacy. An indented line that names a read key is a misspelling only when no
+block is open above it. Under `deploy:` or inside a `notes: |` block, a line
+such as `  status: live` is not the report's status. A bug report that is a
+symlink fails without being read. A `.adlc` or `.adlc/bugs` that resolves
+outside the root is rc 2. When two reports carry one id, an unnamed run fails
+each one in scope with the same reason a named run gives.
+
+| Result | When |
+|---|---|
+| passed | `regression_tests` lists at least one path, and every path passes the rules below |
+| waived | `regression_waiver` is non-blank and `regression_tests` is empty |
+| legacy | neither is present. Reported, never failed, unless `--require-recorded` (which `/bugfix` Phase 6 passes) |
+| failed | anything else: both set, a whitespace-only waiver with no tests, a bad path, a malformed field |
+
+**The path rules.** A path is relative to its repository: no leading `/`, no
+`..` segment. It must exist, not be a symlink, resolve inside the repository,
+be a regular file, be tracked (`git ls-files --error-unmatch` with literal
+pathspecs), and its working-tree bytes must cite the bug id as `BUG-<n>` with
+no digit after it, so `BUG-26` never matches `BUG-261`. With
+`--require-recorded` it must also be committed in its repository's `HEAD`
+(`git cat-file` at `HEAD:./<path>`, relative to the project's or the sibling's
+directory), as a regular file (a committed symlink fails with `is not committed
+as a regular file (HEAD)`), and that committed copy must cite the id too. A test that is only
+staged fails with `is not committed (not in HEAD)`, and one whose citation is
+only in the working tree with `does not cite BUG-nnn in its committed copy
+(HEAD)`: what merges is the commits, and `/bugfix`'s clean-tree guard covers
+only the primary checkout, not a sibling's. A cross-repo entry is
+`<repo-id>:<path>`, resolved through `repos.<repo-id>.path` in the same config.
+An absolute path is used as written. A relative path resolves from the
+project's directory in its repository's main worktree, the way `/proceed`
+resolves it from the primary checkout. The main worktree is the parent of
+`git rev-parse --git-common-dir`, the rule `partials/id-alloc.sh` uses for
+BUG-210, plus the root's repo-relative prefix. So `../api` finds the same
+sibling from `/bugfix`'s fix worktree under `.worktrees/` as from the primary.
+A root that is its repository's main checkout, or is in no git work tree,
+resolves from itself. The primary's own id (`primary: true`) and no prefix both
+mean this repo. An undeclared id or a sibling that isn't cloned fails, naming
+it.
+
+Under `--require-recorded` the bug report itself must also be committed as it
+stands: its bytes on disk must equal a regular file at `HEAD`, or it fails with
+`the bug report is not committed (not in HEAD); commit it` or `the bug report
+differs from its committed copy (HEAD); commit it`. The report is read from the
+working tree, and `git status`, which `/bugfix`'s clean-tree guard trusts, says
+nothing about a file marked `skip-worktree` or `assume-unchanged`, so a waiver
+written only on disk would otherwise be judged though the PR merges the commits.
+
+The verdict on each bug depends only on the working tree, git's index and,
+under `--require-recorded`, each repository's own `HEAD`. The engine never
+fetches and never diffs. The only other ref it reads is the one a caller names
+with `--base`, and only for the config, so two branches with the same bugs and
+tests get the same answer. Output names bug ids, the paths a report
+lists and reasons. It never names a file's contents, a symlink's target or the
+root's absolute path.
+
+**Tests.** `tools/adlc/tests/test_regression_check.py`. Every case builds its
+repository, `.adlc/bugs/` and config under `tmp_path`, because a fixture bug
+report in this tree would become a real BUG record.
 
 ## Running the tests
 

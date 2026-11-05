@@ -88,7 +88,7 @@ The plugin's design rests on how Claude Code loads plugins. A claim marked **ver
 | `/adversary` | Adversarial review of any artifact (spec, plan, diff/PR, README, or prose claim) — assumes it is wrong and tries to prove it, then reports only findings that survive self-refutation. Read-only; hunts omissions, not just bugs in what was written |
 | `/canary` | Canary deployment with smoke tests — deploy zero-traffic revision and promote on success |
 | `/wrapup` | Close out a feature — commit, merge, deploy, update artifacts |
-| `/bugfix` | Streamlined bug fix workflow |
+| `/bugfix` | Streamlined bug fix workflow. With `bugfix.regression_test: required` in `.adlc/config.yml` it writes a regression test that cites the bug id and watches it fail before writing the fix, records the test (or a waiver) in the bug report, and runs `adlc regression-check` on the bug before merging. An absent key means `off` (REQ-691) |
 | `/status` | Show current state of all ADLC work, including each REQ's lane and any escalations |
 | `/manifest` | Remote-derived view of all in-flight ADLC work — open PRs + pushed `feat/REQ-*` branches, with advisory component/domain + file-footprint overlap and a deterministic merge order (REQ-483) |
 | `/analyze` | Codebase health audit |
@@ -259,6 +259,7 @@ The toolkit's workflow is stack-agnostic. Skills that need to do stack-specific 
 | iOS device deploys (`/bugfix`, `/wrapup`) | `stack.frontends` includes `ios` | `ios.deploy_targets`, `ios.deploy_command` |
 | Convention checking (`/review`, `/reflect`) | `.adlc/context/conventions.md` | declare your project's naming, logging, and API conventions |
 | Lite-lane limits (`/proceed`, `/spec`) | `lanes.lite` | `max_files`; globs added to the default `blocked_paths` and `count_exclude`; and a `deploy_units` glob → unit map, for the lane check (`partials/lane-check.md`) |
+| Regression tests (`/bugfix`, `adlc regression-check`) | `bugfix.regression_test` | `required` or `off`; an absent key means `off`, so a project that never sets it keeps today's `/bugfix`. With `required`, every fix gets a test that fails without it and passes with it, or a recorded waiver, and `adlc regression-check check` (which a CI job can run) confirms that every resolved bug still has its test (`partials/regression-check.md`) |
 
 `branches.integration` is optional. When it is declared, `/proceed` step 4 takes it as the integration branch outright; when it is absent, the skills detect the branch model as before — a declared `gcp.staging_project`, a `verify-head-ref` workflow, or staging-first wording in `CLAUDE.md` means `staging`, otherwise `main`. Set it whenever that detection would pick the wrong branch, e.g. a `dev` → `staging` → `main` promotion pipeline, where feature work integrates into `dev` although a staging project is declared. Repos without the key behave exactly as before.
 

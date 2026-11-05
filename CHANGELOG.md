@@ -40,6 +40,63 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **`/bugfix` writes a failing-first regression test, when the project asks for one
+  (REQ-691).** A new `.adlc/config.yml` setting, `bugfix.regression_test`, takes `required`
+  or `off`. An absent key, an absent `bugfix` block and no config file all mean `off`, so
+  upgrading the toolkit changes nothing for a project that never sets it. Any other value
+  stops `/bugfix` and the check with an error naming the key, the value and the two allowed
+  values, and a config that names the key but does not parse is an error too, never `off`.
+  `templates/config-template.yml` sets `required`, so a config `/init` starts from the
+  template opts in; a single-repo project opts in by adding the key. With `required`,
+  `/bugfix` writes a test that cites the bug id before it writes any of the fix, runs it
+  against the unfixed tree and keeps the first failing assertion line, then writes the fix
+  and runs the test again to see it pass. A test that passes without the fix does not
+  reproduce the bug: it is rewritten, never recorded. A bug no test can reach gets a
+  one-line `regression_waiver` instead. The bug report records the tests in
+  `regression_tests` (a flow list; `<repo-id>:<path>` for a test in a sibling repo) or the
+  waiver, never both, and a `## Regression Test` section with the command and both runs;
+  the PR body and the closing summary carry the same. The protocol is
+  `bugfix/references/regression-test.md` (Mode, Write and contrast, Record, PR body,
+  Gate), reached by one-line pointers from the Prerequisites and Phases 3 to 6, because
+  `bugfix/SKILL.md` is already past Antigravity's body cap. Phase 6 gains a Step 0 that
+  runs the check on this bug with `--require-recorded`, in the fix worktree, before
+  anything merges: a fail or an error stops `/bugfix` with nothing merged and the bug
+  unresolved. The gate runs only the installed toolkit's code, sourcing nothing under
+  `.adlc/partials`, and reads its policy only from the integration branch: it checks
+  that the PR targets that branch, fetches it without tags, and reads the setting at
+  `refs/remotes/origin/<integration-branch>`, so neither the fix branch's config nor a
+  tag named `origin/main` can turn it off. A project that is `off` there, or has no
+  config there, gets no guard and no new stop, and the forge is not asked; a `required`
+  one needs the PR to merge the fix branch into that branch, a clean, pushed fix checkout,
+  the PR's head at that commit, and the bug report and every listed test committed. A
+  pass prints the head it certified, and the merge is pinned to it with
+  `--match-head-commit`; the gate's own git calls run no hooks. In `off` mode `/bugfix` writes neither field, its other test work is
+  unchanged, and the summary says regression tests are off, naming the key when it is
+  not set. `templates/bug-template.md` documents both fields as optional and additive and
+  adds the section. A cross-repo bug can fail the gate when its sibling is not reachable
+  from the fix worktree (Known limitations, below).
+- **`adlc regression-check` (REQ-691).** The check, for operators and CI. `adlc
+  regression-check mode` prints the setting, and `adlc regression-check check
+  [--require-recorded] [BUG-nnn ...]` sorts every resolved or closed bug, or exactly the
+  ids given, into passed, waived, legacy and failed. A bug passes when each test it lists
+  exists, is tracked by git and cites its id (`BUG-26` never matches `BUG-261`). It exits 0
+  on a pass or `off`, 1 on a fail and 2 on an error; a pass or fail run prints `passed=N
+  waived=N legacy=N failed=N`, then one line per failed bug naming it, the path and the
+  reason. An `off` project exits 0 without opening a bug report. A bug with neither field,
+  which is every bug resolved before this release, reads as legacy: counted, never failed,
+  unless `--require-recorded` is passed, which also requires each listed test to be
+  committed, citing the id, in its repo's `HEAD`, and the bug report to equal its
+  committed copy, so a `skip-worktree` entry cannot hide a waiver written only on disk. The verdict reads only the working tree
+  and git's index (and that `HEAD`), never a remote ref, so every branch with the same bugs
+  and tests gets the same answer; `--base` takes a full ref (`refs/remotes/...` or
+  `refs/heads/...`, never a short name a tag could shadow) and reads only the setting and
+  `repos:` there. The engine, `tools/adlc/regression_check.py`, is standard library only and reads
+  the setting with `harness_yaml`, the toolkit's stdlib YAML subset, so a plugin install
+  with no PyYAML gets the same answer as any other. Skill fences reach it through the new
+  partial `partials/regression-check.sh`, which always runs the installed toolkit's
+  engine with the installed `forge.sh`'s interpreter and refuses an engine inside the tree
+  under check, except in the symlink install's own clone. No project's CI runs the check
+  yet, the toolkit's included.
 - **The `/sprint` exec engine (REQ-659).** Phase 6a of the multi-harness plan: a third engine,
   selected only by `--exec`, whose orchestrator is a program. `adlc sprint-exec` launches one
   `claude -p` per REQ with the prompt on stdin, stops each at the merge gate, and performs
@@ -752,6 +809,15 @@ plugin install), or re-sync per file and byte for byte rather than trusting a su
   `ADLC_HOME` only after the consumers on that machine are re-synced. `adlc doctor`'s
   `consumer-sync` lists the repos to visit, one `cd '<repo>' && claude -p
   /template-drift` line each.
+- **REQ-691 follow-up: the bug template changed, and `regression-check.sh` is new.**
+  `/template-drift` reports `bug-template.md` `stale` and `regression-check.sh`
+  `missing`. A project without the new partial is not broken: `/bugfix`'s guarded source
+  line falls back to the installed toolkit's copy, and `/init` vendors it on the next
+  re-sync. A stale bug template lacks only the two fields and the `## Regression Test`
+  section, and `/bugfix` writes them as its protocol spells them, whatever the vendored
+  template holds. `templates/config-template.yml` gained the `bugfix` block, but `/init`
+  copies it only when `.adlc/config.yml` is absent, so an existing config has no key and
+  stays `off`.
 
 ### Reconciliation with unmerged REQs (REQ-669 BR-18)
 
@@ -794,6 +860,16 @@ reconciles:
 - The config scaffold's comment says "scaffolded by install.sh" and suggests
   `./install.sh --with-delegation` on both routes, because its bytes are pinned to
   `install.sh`'s. The plugin ships no delegation CLIs, and the README says so.
+- **A cross-repo bug's sibling test must be committed where `repos:` points (REQ-691).**
+  The gate resolves a `<repo-id>:<path>` entry through `repos.<repo-id>.path` as the
+  integration branch's config gives it, a relative one from the primary's main checkout
+  even when the gate runs in a fix worktree, and only what is committed in that clone's
+  `HEAD` counts. So the sibling's fix branch must be checked out in that clone, committed
+  and pushed; a sibling fix made in a sibling worktree is not seen. The gate then stops
+  with `not cloned at`, `does not exist` or `not in HEAD`. That is the safe direction, a
+  stop before the merge and never a pass; `/bugfix` reports it to the user, never loops
+  on the gate and never merges. Since `repos:` is read at the integration branch, a path
+  changed on the fix branch cannot redirect it.
 
 ## [5.4.0] — 2026-10-27
 

@@ -184,6 +184,45 @@ merge_order:
 #   integration: dev
 
 # ---------------------------------------------------------------------------
+# bugfix: Failing-first regression tests for bug fixes.
+# ---------------------------------------------------------------------------
+# `regression_test` decides whether `/bugfix` pins every fix with a test.
+# With `required`, `/bugfix` writes a test that reproduces the bug and cites
+# its id (BUG-nnn), watches it fail without the fix and pass with it, and
+# records the test's path in the bug report's `regression_tests` field and
+# the run in its `## Regression Test` section. The regression check then
+# confirms that every resolved bug still has its test: a listed file that is
+# missing, untracked or no longer cites the id fails it. Run it from the
+# project root as `adlc regression-check check`; a CI job can run the same
+# command (exit 0 pass, 1 fail, 2 error).
+#
+# Values:
+#   required  every fix gets a regression test that fails without the fix
+#             and passes with it, or a recorded waiver
+#   off       `/bugfix` writes no regression test and asks for no waiver,
+#             and the check exits 0 without reading any bug report
+#
+# An absent key, an absent `bugfix` section or no config file at all means
+# `off`, so upgrading the toolkit changes nothing for a project that never
+# set it. A config copied from an older template has no key and stays `off`.
+# Any other value stops `/bugfix` and the check with an error naming the key;
+# a setting that cannot be read is never taken as `off`. This template sets
+# `required`, so a config started from it opts in.
+#
+# Choose `off` when the project has no test suite (a docs, design asset or
+# infrastructure repo), or has one but does not want a regression test per
+# bug.
+#
+# Under `required`, a bug that no test can reproduce is waived on its own:
+# `/bugfix` writes a one-line reason to that bug's `regression_waiver` field
+# and leaves `regression_tests` empty. The waiver and its reason show in the
+# PR body and in the `/bugfix` summary, and the check counts the bug as
+# waived, not failed.
+
+bugfix:
+  regression_test: required
+
+# ---------------------------------------------------------------------------
 # sprint: The `/sprint --exec` engine. Optional.
 # ---------------------------------------------------------------------------
 # Read once at launch and frozen for the run, so an edit changes nothing for a
