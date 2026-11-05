@@ -19,7 +19,7 @@ Run this block first, with your shell tool, and read its output before you conti
 ```sh
 # adlc-context
 echo '--- Project config'
-test -s .adlc/config.yml && echo 'present — read .adlc/config.yml before Step 1' || echo 'none — single-repo legacy mode'
+test -s .adlc/config.yml && echo 'present — read .adlc/config.yml before Phase 1' || echo 'none — single-repo legacy mode'
 echo '--- Bug template'
 cat .adlc/templates/bug-template.md 2>/dev/null || echo 'No bug template found — run /init (/adlc:init on the plugin install) to vendor .adlc/templates'
 echo '--- Conventions'
@@ -35,6 +35,8 @@ The bug report is the argument: whatever follows `/bugfix` in the invocation (on
 ## Prerequisites
 
 Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tell the user: "The `.adlc/` structure hasn't been initialized. Run `/init` (`/adlc:init` on the plugin install) first."
+
+Read `bugfix/references/regression-test.md` and follow it before you continue. It holds the regression-test protocol (REQ-691): its `Mode` section reads `bugfix.regression_test` now, before Phase 1, and Phases 3 to 6 each send you back to one of its other sections. `off` skips them all; a setting it cannot read stops `/bugfix` here. Nothing in this file replaces it.
 
 ## Instructions
 
@@ -136,7 +138,7 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
 
 ### Phase 3: Fix
 1. **Determine target repo**: if the bug's frontmatter has `repo:` and it names a sibling (not this repo), cd into that sibling's path from `.adlc/config.yml` and do all fix work there. For `touched_repos: [...]`, cd into each in turn — one commit per repo, on a shared branch name. Otherwise fix in the current repo.
-2. Proceed directly with the validated fix approach — do not pause for user confirmation
+2. Proceed directly with the validated fix approach — do not pause for user confirmation. Read the `Write and contrast` section of `bugfix/references/regression-test.md` and follow it before you continue. It writes and runs the regression test before items 3 to 5 write the fix; skip it when the mode is `off`.
 3. Implement the fix following project conventions
 4. Ensure the fix addresses the root cause, not just symptoms
 5. Update related test files if the fix changes behavior
@@ -150,11 +152,13 @@ Before proceeding, verify that `.adlc/bugs/` exists. If it doesn't, stop and tel
    - Fill in "Resolution" section with what was changed and why
    - Fill in "Files Changed" section with specific file paths
    - Update the `updated` date
+   - Read the `Record` section of `bugfix/references/regression-test.md` and follow it before you continue. It writes `regression_tests` or `regression_waiver` and the `## Regression Test` section; skip it when the mode is `off`.
 4. Present an interim summary:
    - Root cause
    - What was fixed
    - Files changed
    - Test results
+   - Regression test: the tests and their contrast, the waiver, or off for this project
    - Then continue to Phase 5
 
 ### Phase 5: Ship — Create Pull Request(s)
@@ -164,6 +168,7 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
 1. Push the fix branch: `git -C <worktree> push -u origin fix/bug-xxx-slug`
 2. Create the PR with `adlc_forge_pr_create` (source `partials/forge.sh` with the guarded spelling from conventions.md "Bash in skills" in the same fence; run from inside the worktree, or pass `-R <owner/repo>`). All PR ops route through the forge adapter, never direct `gh` (REQ-520 BR-1). In cross-repo mode, create the **primary** repo's PR **last** so its body can link every sibling.
    - **Title**: `fix(BUG-xxx): short description` — when cross-repo, scope to the repo (e.g., `fix(api): null deref in user serializer [BUG-042]`).
+   - Read the `PR body` section of `bugfix/references/regression-test.md` and follow it before you continue. It fills the body's `## Regression Test` block, in every mode.
    - **Body**:
      ```
      ## Summary
@@ -184,6 +189,10 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
      [Omit in single-repo mode. Otherwise list each sibling PR URL — back-fill
       sibling bodies via `adlc_forge_pr_edit` once every URL is known.]
 
+     ## Regression Test
+     [The tests and their contrast, the waiver and its reason, or
+      "Regression tests: off for this project." — per the PR body section]
+
      ## Test Plan
      - [ ] Unit/integration tests pass locally
      - [ ] CI green on this PR
@@ -197,6 +206,8 @@ For each touched repo (just the current repo in single-repo mode; each entry in 
 ### Phase 6: Wrapup — Merge, Deploy, Knowledge Capture
 
 This is the equivalent of `/proceed`'s Phase 8 / `/wrapup` steps, condensed for bugs.
+
+**Step 0 — Regression gate** (before anything merges). Read the `Gate` section of `bugfix/references/regression-test.md` and follow it before you continue. It runs the regression check on this bug in the fix worktree; anything but a pass, or `off`, stops `/bugfix` here, with nothing merged and the bug unresolved (BR-13).
 
 **Step 1 — Merge each PR.**
 1. Verify the PR is mergeable: `adlc_forge_pr_view <prUrl> --json mergeable,mergeStateStatus` should report `MERGEABLE` (on GitHub; ADO normalizes via `pr_view`). If the integration branch has advanced, rebase the fix branch onto `origin/<integration-branch>` — the PR's base, resolved by `/proceed` step 4's rule (`branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`), never a hardcoded `main` (LESSON-036) — force-push with lease, and wait for CI to re-pass.
@@ -235,7 +246,7 @@ If staging deployed but production has NOT yet been promoted, wait — the pipel
 If `stack.frontends` doesn't include `ios`, skip this section entirely.
 
 **Step 3 — Update the bug report.**
-- Set status to `resolved`
+- Set status to `resolved` (Step 0's gate passed, or reported `off`)
 - Update the `updated` date
 - Confirm Resolution and Files Changed sections are filled in (from Phase 4)
 - Add a Deployment section noting the staging + production revisions
@@ -260,6 +271,7 @@ Ask of this bug:
 - An assumption from a prior REQ that turned out false?
 
 A reproduce-then-fix sequence is a contrast (rule 2); name it in `evidence`.
+With regression tests on, the pre-fix-fail / post-fix-pass run recorded in the bug report's `## Regression Test` section is that contrast: cite it as the lesson's `evidence` (the test path, the command and the first failing assertion line).
 
 If yes, write a lesson to `.adlc/knowledge/lessons/LESSON-xxx-slug.md` using the **global** atomic counter `${ADLC_HOME:-$HOME/.claude}/.global-next-lesson` (shared across all repos for unique IDs, mirroring the REQ/BUG counters — see LESSON-004). The counter is now a **cache, not the authority** — the remote is the source of truth (REQ-518): allocation derives the remote high-water, takes `max(remote, local) + 1`, and fast-forwards the local counter, all inside the shared `mkdir`-lock (`${ADLC_HOME:-$HOME/.claude}/.global-next-lesson.lock.d`, shared with `/wrapup` so concurrent `/bugfix` and `/wrapup` runs mutually exclude). Allocate via the shared `partials/id-alloc.sh` helper (BR-5 — the lock block + its LESSON-014 symlink pre-check live in the partial). Source it and call `adlc_alloc_id` **in the same fenced block** (the cross-fence-fn rule — see conventions.md "Bash in skills"):
 ```bash
@@ -318,6 +330,11 @@ If nothing transferable survived, the summary's `### Lessons captured` carries e
 
 ### Fix
 - 1-2 lines
+
+### Regression test
+- `path/to/test` — fails without the fix (first failing assertion), passes with it
+  (or: Waived: <reason>; or: off for this project, and, when the key is not set,
+  "set bugfix.regression_test: required in .adlc/config.yml to turn them on")
 
 ### Deployment
 - Staging: <service> revision <hash> @ 100% traffic

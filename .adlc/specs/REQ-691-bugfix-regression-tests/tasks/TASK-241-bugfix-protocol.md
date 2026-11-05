@@ -1,7 +1,7 @@
 ---
 id: TASK-241
 title: "/bugfix runs the regression protocol from a companion"
-status: draft
+status: complete
 parent: REQ-691
 created: 2026-11-04
 updated: 2026-11-04
@@ -21,10 +21,10 @@ Wire the regression protocol into `/bugfix`: read the mode before Phase 1, write
 
 ## Acceptance Criteria
 
-- [ ] The contract test asserts: the Prerequisites pointer comes before `### Phase 1`; the Write and contrast section records the failing run before it says to write the fix; the Gate pointer comes before Phase 6's merge step; the companion names `regression_tests`, `regression_waiver`, `--require-recorded` and both modes; and the BR-16 sentence is outside the capture-rules block.
-- [ ] `tools/lint-skills/check.sh` passes, including `lesson-check-order`, the rules-parity check against `wrapup/SKILL.md`, `toolkit-root-line`, `unguarded-source`, `cross-fence-fn`, `cross-fence-var`, `companion-templating` and `skill-line-budget`.
-- [ ] `partials/tests/lesson-check.test.sh` (the Step 6 slice and `NO_ENTRY: <reason>`) and `tools/lint-skills/tests/test_lessons_contract.py` (the Phase 2 slice) still pass.
-- [ ] `bugfix/SKILL.md` grows by no more than 25 lines.
+- [x] The contract test asserts: the Prerequisites pointer comes before `### Phase 1`; the Write and contrast section records the failing run before it says to write the fix; the Gate pointer comes before Phase 6's merge step; the companion names `regression_tests`, `regression_waiver`, `--require-recorded` and both modes; and the BR-16 sentence is outside the capture-rules block.
+- [x] `tools/lint-skills/check.sh` passes, including `lesson-check-order`, the rules-parity check against `wrapup/SKILL.md`, `toolkit-root-line`, `unguarded-source`, `cross-fence-fn`, `cross-fence-var`, `companion-templating` and `skill-line-budget`.
+- [x] `partials/tests/lesson-check.test.sh` (the Step 6 slice and `NO_ENTRY: <reason>`) and `tools/lint-skills/tests/test_lessons_contract.py` (the Phase 2 slice) still pass.
+- [x] `bugfix/SKILL.md` grows by no more than 25 lines.
 
 ## Verification
 
