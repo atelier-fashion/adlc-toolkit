@@ -846,14 +846,14 @@ reconciles:
 - The config scaffold's comment says "scaffolded by install.sh" and suggests
   `./install.sh --with-delegation` on both routes, because its bytes are pinned to
   `install.sh`'s. The plugin ships no delegation CLIs, and the README says so.
-- **A cross-repo bug can fail `/bugfix`'s regression gate (REQ-691).** The Phase 6 gate
-  runs in the fix worktree, and the check resolves a `<repo-id>:<path>` entry through
-  `repos.<repo-id>.path` relative to the directory it runs from: the fix worktree, not
-  the primary checkout. A relative sibling path written for the primary checkout, such
-  as `../api`, then usually names nothing from the worktree, and the gate fails the bug
-  with `repo 'api' is not cloned at ../api`. That is the safe direction, a stop before
-  the merge and never a pass, but such a bug cannot get through the gate until this is
-  fixed. An operator or CI run from the primary checkout resolves the same entry.
+- **A cross-repo bug's sibling test must be checked out where `repos:` points (REQ-691).**
+  The check resolves a `<repo-id>:<path>` entry through `repos.<repo-id>.path`, a
+  relative one from the primary's main checkout even when the gate runs in a fix
+  worktree. It reads the sibling's clone there, so a sibling fix made in a sibling
+  worktree is not seen until that branch is checked out at the path, and the gate stops
+  with `not cloned at` or `does not exist`. That is the safe direction, a stop before the
+  merge and never a pass; `/bugfix` reports it rather than looping, and an absolute
+  `repos.<id>.path` naming the sibling's fix worktree is the workaround.
 
 ## [5.4.0] — 2026-10-27
 

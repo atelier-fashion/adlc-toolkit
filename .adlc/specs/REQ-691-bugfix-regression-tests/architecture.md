@@ -98,3 +98,14 @@ Two verbs, one output contract.
 ## Proposed addition to `.adlc/context/architecture.md`
 
 A cross-cutting bullet, **Regression tests (REQ-691)**, summarising the engine, the two verbs, the stdlib-subset config read and why, the `--require-recorded` gate in the fix worktree, and the `off` default for an absent key. Also, the bug-template row in "Template anatomy" gains the two optional fields. TASK-242 writes both.
+
+## Amendments from the verify pass (Phase 5)
+
+The review panel found that the gate as first designed could be loosened by the branch it judges (LESSON-718). These amend the ADRs above; the rules in the spec are unchanged.
+
+- **ADR-691-C, amended.** The *setting* and `repos:` are policy, so the Gate reads them from the integration branch (`check --base origin/<integration-branch>`, read with `ls-tree`/`cat-file` as `lane_check.read_base_config` does). Bug reports and test files stay worktree-and-index reads (BR-12); what makes that the tree that merges is ADR-691-F's guards.
+- **ADR-691-F, amended.** Before sourcing anything, the Gate fence requires the checkout root, a clean tree, `HEAD` equal to `origin/<fix-branch>` after a fetch, and no change under `.adlc/partials` or `.adlc/tools` (any letter case) against the integration branch, the lane check's guards in `proceed/phases-lite.md`. A pass certifies the head it checked; a rebase in Step 1 means running it again.
+- **ADR-691-D, amended.** A relative `repos.<id>.path` resolves from the primary's main checkout (the git common dir's parent), so it means the same thing from a linked fix worktree.
+- **Wrapper.** The install-clone exemption is for `mode` only; containment is also compared case-folded; a project with no config file gets `off` from the wrapper without Python.
+- **ADR-691-A, amended.** A config the subset loader refuses is an error only when it could define the setting (a key-shaped `regression_test` or `bugfix`); any `bugfix:` block is always parsed and validated.
+- **ADR-691-B, amended.** A waiver must be quoted; a plain value is the wrong type. Indented lines under an open parent block are not misspellings.

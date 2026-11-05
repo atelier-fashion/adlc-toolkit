@@ -117,8 +117,8 @@ SUBCOMMANDS = {
     },
     "regression-check": {
         "handler": _cmd_regression_check,
-        "help": "bug regression tests: mode | check [--require-recorded] [BUG-nnn ...] "
-                "(REQ-691)",
+        "help": "bug regression tests: mode | check [--require-recorded] [--base REF] "
+                "[BUG-nnn ...] (REQ-691)",
     },
 }
 

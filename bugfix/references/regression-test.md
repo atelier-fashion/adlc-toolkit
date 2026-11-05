@@ -156,7 +156,7 @@ echo "regression_gate_rc=$rgt_rc"
 
 The check reads the mode itself, at the integration branch, so this fence is the Gate's mode read. `--require-recorded` turns a bug that recorded neither tests nor a waiver from legacy into failed (BR-13):
 
-- `regression-check: pass` (rc 0): continue to Step 1, the merge.
+- `regression-check: pass` (rc 0): continue to Step 1, the merge. A pass certifies the head it checked: if Step 1 rebases and force-pushes the fix branch, run this fence again on the new head before merging.
 - `regression-check: off` (rc 0): regression tests are off for this project, so there is nothing to gate. Continue to Step 1. The second line says where `off` came from, for the Step 6 summary.
 - `regression-check: fail` (rc 1): stop before merging. Merge no PR and do not set the bug `resolved` (AC-12). Show the engine's `BUG-nnn:` lines as printed, then fix what they name: the record (Record) or the test (Write and contrast). Commit and push the fix branch, wait for CI to pass again, and run this fence again, unless the lines are the cross-repo limitation below.
 - `regression-check: error`, or `regression_gate_rc=2` from a refusal or a guard: stop exactly as for `fail`. The check could not decide, so nothing is merged and the bug stays unresolved. Show its reason line. A guard's line names what to do: run from the checkout's root, commit, push, or take the vendored change out of the fix branch.
