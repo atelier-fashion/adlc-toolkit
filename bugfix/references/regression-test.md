@@ -115,12 +115,21 @@ In cross-repo mode, each repo's PR lists the tests that live in that repo, and a
 
 ## Gate
 
-Phase 6 sends you here at Step 0, before Step 1 merges anything (ADR-691-F). Run the fence from the root of the checkout that holds the fix branch: the fix worktree when you made one, else the primary repo. It then judges exactly the tree that will land, with the bug report's record and the tests committed, while nothing is merged yet. In cross-repo mode, run it once, in the primary repo's checkout, which holds the bug report; a sibling's test is found through its `<repo-id>:` prefix.
+Phase 6 sends you here at Step 0, before Step 1 merges anything (ADR-691-F). The Gate runs only the installed toolkit's code, and reads its policy only from the integration branch, as a full remote ref. The fix branch supplies data, the bug report and its tests, never code and never policy (LESSON-718: a branch must not loosen its own gate).
 
-Replace each placeholder and its quotes with one single-quoted literal, every `'` in a value written `'\''`: `<bug-id>` with this bug's id, for example `'BUG-123'`; `<fix-branch>` with the fix branch, `fix/bug-xxx-slug`; and `<integration-branch>` with the PR's base, resolved by Step 1's rule (`branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`). The fence refuses an id other than `BUG-` and three to six digits, and a branch name with a character outside letters, digits, `.`, `_`, `/` and `-`, a leading `-`, `.` or `/`, a `..`, `//` or `/.`, or a trailing `/`, `.` or `.lock`, before it runs anything else.
+Run the fence from the project directory of the checkout that holds the fix branch: the directory holding `.adlc/` (the repo's root, or the subdirectory the project lives in), in the fix worktree when you made one, else in the primary repo. It then judges exactly the tree that will land, with the bug report's record and the tests committed, while nothing is merged yet. In cross-repo mode, run it once, in the primary repo's checkout, which holds the bug report; a sibling's test is found through its `<repo-id>:` prefix.
+
+Replace each placeholder and its quotes with one single-quoted literal, every `'` in a value written `'\''`:
+
+- `<bug-id>`: this bug's id, for example `'BUG-123'`.
+- `<fix-branch>`: the fix branch, `fix/bug-xxx-slug`.
+- `<integration-branch>`: the integration branch `/bugfix` resolved in the primary checkout before the fix branch existed, by Step 1's rule (`branches.integration` from `.adlc/config.yml` when declared, else `staging` in two-branch repos, else `main`): the branch the fix was cut from and its PR targets. Never read it again from the fix checkout's `.adlc/config.yml`, which the fix branch can edit: a `branches.integration` naming the fix branch itself would have the Gate read its policy from the branch it judges.
+- `<pr-number>`: the number of the PR that merges the fix branch, digits only (the primary repo's PR in cross-repo mode).
+
+The fence refuses an id other than `BUG-` and three to six digits; a branch name with a character outside letters, digits, `.`, `_`, `/` and `-`, a leading `-`, `.` or `/`, a `..`, `//` or `/.`, or a trailing `/`, `.` or `.lock`; a PR number that is not all digits; and an integration branch equal to the fix branch, before it runs anything else.
 
 ```sh
-rgt_bug='<bug-id>'; rgt_fix='<fix-branch>'; rgt_ib='<integration-branch>'
+rgt_bug='<bug-id>'; rgt_fix='<fix-branch>'; rgt_ib='<integration-branch>'; rgt_pr='<pr-number>'
 rgt_rc=0
 case "$rgt_bug" in
   BUG-[0-9][0-9][0-9] | BUG-[0-9][0-9][0-9][0-9] | BUG-[0-9][0-9][0-9][0-9][0-9] | BUG-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
@@ -132,33 +141,67 @@ for rgt_ref in "$rgt_fix" "$rgt_ib"; do
       printf 'regression gate: %s is not a branch name\n' "'$rgt_ref'"; rgt_rc=2 ;;
   esac
 done
+case "$rgt_pr" in
+  '' | *[!0-9]*) printf 'regression gate: %s is not a PR number\n' "'$rgt_pr'"; rgt_rc=2 ;;
+esac
+if [ "$rgt_rc" = 0 ] && [ "$rgt_ib" = "$rgt_fix" ]; then
+  printf 'regression gate: the integration branch is the fix branch, %s; take it from the primary checkout\n' "$rgt_ib"; rgt_rc=2
+fi
+ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+rgt_home="$ADLC_TOOLKIT_ROOT/partials/adlc-home.sh"; rgt_forge="$ADLC_TOOLKIT_ROOT/partials/forge.sh"; rgt_part="$ADLC_TOOLKIT_ROOT/partials/regression-check.sh"
+rgt_base="refs/remotes/origin/$rgt_ib"; rgt_head="refs/remotes/origin/$rgt_fix"
 if [ "$rgt_rc" != 0 ]; then
   :
-elif [ -n "$(git rev-parse --show-prefix 2>&1)" ]; then
-  printf 'regression gate: run this fence from the root of the fix checkout\n'; rgt_rc=2
-elif [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
-  printf 'regression gate: the fix checkout has uncommitted changes; commit the record and the tests, and push\n'; rgt_rc=2
-elif ! git fetch -q origin "$rgt_ib" "$rgt_fix"; then
-  printf 'regression gate: fetch of origin/%s or origin/%s failed\n' "$rgt_ib" "$rgt_fix"; rgt_rc=2
-elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$rgt_fix")" ]; then
-  printf 'regression gate: HEAD is not origin/%s; push the fix branch first, the PR merges the remote head\n' "$rgt_fix"; rgt_rc=2
-elif ! git diff --quiet "origin/$rgt_ib...HEAD" -- ':(icase).adlc/partials' ':(icase).adlc/tools'; then
-  printf 'regression gate: the branch changes the vendored .adlc/partials or .adlc/tools this gate would load\n'; rgt_rc=2
+elif [ ! -f "$rgt_home" ] || [ ! -f "$rgt_forge" ] || [ ! -f "$rgt_part" ]; then
+  printf 'regression gate: the installed toolkit lacks partials/adlc-home.sh, forge.sh or regression-check.sh\n'; rgt_rc=2
 else
-  ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-  if [ -f .adlc/partials/regression-check.sh ]; then . .adlc/partials/regression-check.sh; else . "$ADLC_TOOLKIT_ROOT/partials/regression-check.sh"; fi
-  adlc_regression_check check --require-recorded --base "origin/$rgt_ib" "$rgt_bug"; rgt_rc=$?
+  . "$rgt_home"
+  . "$rgt_forge"
+  . "$rgt_part"
+  rgt_prov=$(command "$(_adlc_forge_python)" -E "$ADLC_TOOLKIT_ROOT/tools/adlc/forge_config.py" resolve-provider .)
+  rgt_at="$rgt_base:$(git rev-parse --show-prefix)"
+  if [ -z "$rgt_prov" ]; then
+    printf 'regression gate: the installed forge_config.py could not resolve the forge provider\n'; rgt_rc=2
+  elif [ "$(ADLC_FORGE_PROVIDER_OVERRIDE="$rgt_prov" adlc_forge_pr_view "$rgt_pr" --fields baseRefName | sed -n 's/^baseRefName=//p')" != "$rgt_ib" ]; then
+    printf 'regression gate: PR %s does not target %s, or the forge could not say; a PR retargeted at another branch is refused\n' "$rgt_pr" "$rgt_ib"; rgt_rc=2
+  elif ! git fetch -q --no-tags origin "+refs/heads/$rgt_ib:$rgt_base" "+refs/heads/$rgt_fix:$rgt_head"; then
+    printf 'regression gate: fetch of %s or %s from origin failed\n' "$rgt_ib" "$rgt_fix"; rgt_rc=2
+  elif git cat-file -e "$rgt_at.adlc/config.yml" 2>/dev/null || { git cat-file -e "$rgt_at.adlc" 2>/dev/null && ! git cat-file -e "$rgt_at.adlc/" 2>/dev/null; }; then
+    rgt_mode=$(adlc_regression_check mode --base "$rgt_base"); rgt_rc=$?
+    printf '%s\n' "$rgt_mode"
+    case "$rgt_rc:$rgt_mode" in
+      '0:regression-test: off'*) ;;
+      '0:regression-test: required'*)
+        if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+          printf 'regression gate: the fix checkout has uncommitted changes; commit the record and the tests, and push\n'; rgt_rc=2
+        elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "$rgt_head")" ]; then
+          printf 'regression gate: HEAD is not %s; push the fix branch first, the PR merges the remote head\n' "$rgt_head"; rgt_rc=2
+        else
+          adlc_regression_check check --require-recorded --base "$rgt_base" "$rgt_bug"; rgt_rc=$?
+        fi
+        ;;
+      *) rgt_rc=2 ;;
+    esac
+  else
+    printf 'regression-test: off\n.adlc/config.yml does not exist at %s, which means off; set bugfix.regression_test: required in it to turn regression tests on\n' "$rgt_base"
+  fi
 fi
 echo "regression_gate_rc=$rgt_rc"
 ```
 
-**Why the guards come first** (LESSON-718: a branch must not loosen its own gate). The partial is sourced from the current directory, so whatever the fix branch carries under `.adlc/partials` would run as the gate, and the check reads the setting that decides whether there is a gate at all. So, before anything is sourced, the fence checks that it runs at the root of the fix checkout; that the tree is clean, so the record and the tests it judges are committed (an untracked file counts); that after a fetch `HEAD` is `origin/<fix-branch>`, because Step 1 merges the remote head and a check of anything else certifies the wrong commit; and that the branch changes nothing under `.adlc/partials` or `.adlc/tools` against `origin/<integration-branch>`, in any letter case, since a macOS filesystem sources `.ADLC/partials/…` for `.adlc/partials/…`. The engine itself always runs from the installed toolkit. Then `--base "origin/<integration-branch>"` makes it read `bugfix.regression_test` and `repos:` from the integration branch's `.adlc/config.yml`, not the fix branch's, so a fix cannot switch its own gate `off` by editing its config. The lane check's fence in `proceed/phases-lite.md` guards the same way.
+**Why it is built this way.**
 
-The check reads the mode itself, at the integration branch, so this fence is the Gate's mode read. `--require-recorded` turns a bug that recorded neither tests nor a waiver from legacy into failed (BR-13):
+- **No code from the tree.** The partials are sourced from `$ADLC_TOOLKIT_ROOT`, the installed toolkit, each through a variable behind a `[ -f ]` test, and nothing under `.adlc/partials` is sourced at all. `adlc-home.sh` comes first, so `forge.sh` never looks for one in the current directory, and the forge provider is resolved by the installed `forge_config.py` and handed to the adapter, so no `forge_config.py` in the tree runs either. The wrapper then runs the installed engine. An earlier version sourced the vendored partial and guarded it with a diff of `.adlc/partials` and `.adlc/tools` against the integration branch. A symlinked `.adlc`, a file git ignores and a `skip-worktree` entry each put code past that guard, because a diff sees only what git tracks, as git records it. Code that never comes from the tree needs no such guard, so there is none.
+- **Policy from the base the PR merges into.** The PR's base, as the forge reports it, must be `<integration-branch>`, so a PR retargeted at another branch is refused. The fetch names both refspecs in full and takes no tags, and every later read uses the full ref `refs/remotes/origin/<branch>`: git resolves a short `origin/main` to a tag of that name before the remote-tracking branch, so a tag pushed to the repo could choose the config the Gate reads. The engine refuses a `--base` that is not a full ref, and resolves it exactly.
+- **The mode first, before any guard.** `bugfix.regression_test` is read at `refs/remotes/origin/<integration-branch>`, at the project's own path in the repo. With no `.adlc/config.yml` there, the fence prints the engine's own `off` lines itself, with `git cat-file` and no Python; a `.adlc` there that is not a directory goes to the engine, which refuses it. Otherwise the engine reads the setting, `mode --base`.
+- **`off` has no guards** (BR-1). A project that has not turned regression tests on gets no new stop: an untracked file, an unpushed commit or a vendored partial in the fix checkout changes nothing, and the fence goes on to the merge.
+- **`required` has two guards, then the check.** The tree must be clean (an untracked file counts), so the record and the tests it judges are committed, and `HEAD` must equal `refs/remotes/origin/<fix-branch>` after the fetch, because Step 1 merges the remote head and a check of anything else certifies the wrong commit. Then `check --require-recorded --base` reads the setting and `repos:` at the integration branch, so a fix cannot switch its own gate `off` by editing its config, and requires every listed test to be committed in its repo's `HEAD`.
 
+The fence's first line, or its first two, are the mode, and in `required` mode the check's lines follow. `--require-recorded` turns a bug that recorded neither tests nor a waiver from legacy into failed (BR-13):
+
+- `regression-test: off` (rc 0): regression tests are off for this project, so there is nothing to gate. Continue to Step 1. The second line says where `off` came from, for the Step 6 summary.
 - `regression-check: pass` (rc 0): continue to Step 1, the merge. A pass certifies the head it checked: if Step 1 rebases and force-pushes the fix branch, run this fence again on the new head before merging.
-- `regression-check: off` (rc 0): regression tests are off for this project, so there is nothing to gate. Continue to Step 1. The second line says where `off` came from, for the Step 6 summary.
 - `regression-check: fail` (rc 1): stop before merging. Merge no PR and do not set the bug `resolved` (AC-12). Show the engine's `BUG-nnn:` lines as printed, then fix what they name: the record (Record) or the test (Write and contrast). Commit and push the fix branch, wait for CI to pass again, and run this fence again, unless the lines are the cross-repo limitation below.
-- `regression-check: error`, or `regression_gate_rc=2` from a refusal or a guard: stop exactly as for `fail`. The check could not decide, so nothing is merged and the bug stays unresolved. Show its reason line. A guard's line names what to do: run from the checkout's root, commit, push, or take the vendored change out of the fix branch.
+- `regression-test: error`, `regression-check: error`, or `regression_gate_rc=2` from a refusal or a guard: stop exactly as for `fail`. The check could not decide, so nothing is merged and the bug stays unresolved. Show its reason line. A guard's line names what to do: correct a placeholder, retarget or re-check the PR, commit, or push.
 
-**Known limitation, cross-repo.** The check finds a sibling's test in the sibling's clone at its `repos.<id>.path`, and that clone has the fix branch only if it is checked out there. When a cross-repo bug's `BUG-nnn:` line says a sibling is `not cloned at` its path, or that a sibling's test `does not exist`, the sibling's fix branch is not checked out at `repos.<id>.path`. Stop and report it to the user as this known limitation: do not loop on the fence, and merge nothing. Where the sibling's fix worktree lives elsewhere, an absolute `repos.<id>.path` naming it is the workaround.
+**Known limitation, cross-repo.** A sibling's test is read from the sibling's clone at its committed `repos.<id>.path`, the path the integration branch's config gives, and only what is committed there counts. So the sibling's fix branch must be checked out in that clone, committed and pushed. When a cross-repo bug's `BUG-nnn:` line says a sibling is `not cloned at` its path, that a sibling's test `does not exist`, or that it is `not in HEAD`, stop and report it to the user as this known limitation: never loop on the fence, and never merge.

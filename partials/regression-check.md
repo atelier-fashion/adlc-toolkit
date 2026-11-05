@@ -30,13 +30,16 @@ adlc_regression_check check [--root DIR] [--base REF] [--require-recorded] [BUG-
 
 The arguments reach the engine unchanged. `--root` is the project root, the
 directory holding `.adlc/`. It defaults to the current directory, so a fence
-runs from the project root, or from the fix worktree for the Phase 6 gate
+runs from the project directory, in the fix worktree for the Phase 6 gate
 (ADR-691-F). `--base REF` makes the engine read `bugfix.regression_test` and
 `repos:` from `.adlc/config.yml` as committed at `REF`, not from the tree under
 check, so a branch cannot loosen its own gate by editing its config
-(LESSON-718); the Gate passes `--base origin/<integration-branch>`. No config
-at `REF` is `off`, and a `REF` git cannot resolve is the engine's error, rc 2.
-The wrapper passes it through like any other argument. Each fence that branches on the mode
+(LESSON-718); the Gate passes `--base refs/remotes/origin/<integration-branch>`.
+`REF` must be a full ref under `refs/remotes/` or `refs/heads/`: a short name,
+which a tag of the same name shadows, `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` and a
+bare sha are the engine's usage error, rc 2. No config at `REF` is `off`, and a
+`REF` that names no commit is the engine's error, rc 2. The wrapper passes it
+through like any other argument. Each fence that branches on the mode
 calls `mode` itself; no fence reads a value another fence set (ADR-691-H).
 
 ## Return contract
@@ -56,19 +59,22 @@ stdout is the engine's, line for line. The first line is always the verdict:
 `mode` never exits 1. A project with no resolved bugs passes with every count 0
 (BR-10): an empty history is a legitimate state, not a vacuous pass.
 
-**No config needs no engine.** When the tree under check has no
+**No config needs no engine, without `--base`.** When the tree under check has no
 `.adlc/config.yml` and no `--base` was passed, the wrapper prints the engine's
 own no-config lines itself, rc 0, without running the engine or resolving an
 interpreter: `regression-test: off` then `.adlc/config.yml does not exist, which
 means off; set bugfix.regression_test: required in it to turn regression tests
 on` for `mode`, and `regression-check: off` then that reason after `regression
-tests are off for this project: ` for `check`. So a project that never named the
-setting never needs Python. It does this only where the engine would read the
-same thing: the root resolves, every argument is `--root`, or for `check`
-`--require-recorded` or a `BUG-` id of ASCII digits, nothing is at
-`.adlc/config.yml` (not even a symlink, which the engine reads as an error), and
-`.adlc` is absent or a searchable directory that is not a symlink. Anything else,
-`--base` included, goes to the engine, and a missing engine is then an error.
+tests are off for this project: ` for `check`. So such a run needs no Python. A
+run with `--base` always goes to the engine and needs Python; the `/bugfix` Gate
+answers a base with no config itself, with `git cat-file`, before it calls the
+wrapper. The wrapper answers only where the engine would read the same thing:
+the root resolves and has no `..` segment (see "The tree under check"), every
+argument is `--root`, or for `check` `--require-recorded` or a `BUG-` id of
+ASCII digits, nothing is at `.adlc/config.yml` (not even a symlink, which the
+engine reads as an error), and `.adlc` is absent or a searchable directory that
+is not a symlink. Anything else goes to the engine, and a missing engine is then
+an error.
 The harness compares these lines with a real engine run, so they cannot drift.
 The refusals below that come before it (usage, a relative root, an engine inside
 the tree) still refuse.
@@ -133,6 +139,15 @@ any `--`, an empty value meaning the current directory, and the current
 directory when there is no `--root`. Reading it any other way would let a second
 `--root` move the engine's root past the test.
 
+A root with a `..` segment is read as the engine reads it. `cd -P` resolves `..`
+physically, after following the symlink before it, and the engine
+(`os.path.abspath`) lexically, by dropping the segment before it, so
+`proj/link/..` would be the link target's parent to `cd -P` and `proj` to the
+engine. The wrapper therefore makes such a root absolute against the physical
+current directory, normalizes it segment by segment as `os.path.normpath` does,
+and only then resolves it with `cd -P` for the test below. It never gets the
+no-config answer: it always goes to the engine.
+
 The wrapper refuses when the engine's directory resolves inside that tree:
 `ADLC_TOOLKIT_ROOT` naming the tree itself, a copy vendored in it, or either
 reached through a symlink (both sides are resolved with `cd -P` first). A fix
@@ -172,13 +187,15 @@ comes from the installed toolkit too. The toolkit's own tests point `HOME`, or
 
 The partial resolves Python with `forge.sh`'s `_adlc_forge_python`, as
 `lane-check.sh` and `lessons.sh` do, so every engine runs under one interpreter
-(the REQ-652 ADR-3 coupling). A vendored `.adlc/partials/forge.sh` is sourced
-first, as the guarded spelling says; when it is older than the resolver and loads
-without defining `_adlc_forge_python`, the partial also sources the installed
-toolkit's `forge.sh`, read as
-`"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"` (a partial
-carries no root line), so a stale vendored copy does not stop the check. It
-needs no PyYAML: the engine is standard library
+(the REQ-652 ADR-3 coupling). It sources `forge.sh` from the installed toolkit
+only, `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"` (a partial
+carries no root line), behind a `[ -f ]` test, and never
+`.adlc/partials/forge.sh` from the current directory: the resolver picks the
+interpreter that runs the engine, so a copy in the tree under check would pick
+what judges that tree (LESSON-718). A stale vendored copy without the resolver
+is then never the one loaded either. When the caller already defined
+`_adlc_forge_python` (the Gate sources the installed `forge.sh` itself), the
+partial keeps it. It needs no PyYAML: the engine is standard library
 only (ADR-691-A), so the answer is the same on a plugin install with no delegate
 venv. The call is `command "$py" -E <engine> "$@"`: `command` so a shell function
 named `python3` cannot intercept it (REQ-609 D5), and `-E` so a `PYTHONPATH`
@@ -197,5 +214,8 @@ verdict lines, never on the exit status alone (LESSON-754). Stub toolkit roots
 stand in for an engine that prints nothing, exits outside the contract, prints a
 verdict its code or verb does not mean, or writes to stderr. The letter-case
 case runs only on a case-insensitive filesystem and prints a `SKIP:` line
-elsewhere. The engine's own rules are
-tested by `tools/adlc/tests/test_regression_check.py`.
+elsewhere. Further cases prove a `forge.sh` in the current directory is never
+sourced, and that a `..` root goes to the engine and is judged lexically. The
+engine's own rules are tested by `tools/adlc/tests/test_regression_check.py`,
+and the Gate fence, run whole under the four shells against lab repos, by
+`tools/lint-skills/tests/test_bugfix_regression_contract.py`.

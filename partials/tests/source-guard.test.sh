@@ -85,6 +85,13 @@ ERR="$SANDBOX/err"
 # `else` is as live as one after `then`); the name class admits `_` and
 # uppercase so an unconventionally named partial cannot slip past.
 SRC_LINE_RE='^(\. |source |\[ -f |if \[ -f |elif \[ -f |else \. ).*partials/[A-Za-z0-9_-]+\.sh'
+# REQ-691: the installed-only shape. A gate that must never load the tree under
+# check names each installed partial in a variable, on a line of nothing but such
+# assignments, tests it with `[ -f "$<var>" ]`, and sources it as `. "$<var>"`
+# (bugfix/references/regression-test.md, the Gate). The fence cut (section 7)
+# keeps the assignment line and every `. "$<var>"` of a variable assigned there,
+# and runs them on each route like any other sourcing line.
+VAR_PATH_RE='^[a-z_]+="\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh"(; [a-z_]+="\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh")*$'
 
 # File lists come from `find`, never from globs: zsh aborts the WHOLE command
 # on one unmatched glob (LESSON-335 #3), so a single missing family would have
@@ -141,7 +148,10 @@ extract() { # extract <root> — distinct sourcing lines, leading whitespace str
 # line, so its operand is the default-expansion spelling
 # `"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/<name>.sh"`, byte-exact,
 # as one double-quoted token. No other default text is allowlisted.
-TOKEN_RE='^(if|then|elif|else|fi|\.|source|sh|\[|-f|\]|\];|;|\|\||&&|2>/dev/null|\.adlc/partials/[A-Za-z0-9_-]+\.sh;?|"\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh";?|"\$\{ADLC_TOOLKIT_ROOT:-\$HOME/\.claude/skills\}/partials/[A-Za-z0-9_-]+\.sh";?)$'
+# REQ-691: the installed-only shape's two tokens, `<var>="$ADLC_TOOLKIT_ROOT/
+# partials/<name>.sh";` and `"$<var>"`. The cut carries a `"$<var>"` only for a
+# variable its fence assigned that way (extract_fences).
+TOKEN_RE='^(if|then|elif|else|fi|\.|source|sh|\[|-f|\]|\];|;|\|\||&&|2>/dev/null|\.adlc/partials/[A-Za-z0-9_-]+\.sh;?|"\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh";?|"\$\{ADLC_TOOLKIT_ROOT:-\$HOME/\.claude/skills\}/partials/[A-Za-z0-9_-]+\.sh";?|[a-z_]+="\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh";?|"\$[a-z_]+")$'
 conforms() { # conforms <line> — 0 iff every token is allowlisted
   if printf '%s\n' "$1" | tr '\t' ' ' | tr -s ' ' '\n' | grep -vqE "$TOKEN_RE"; then
     return 1
@@ -522,7 +532,10 @@ fi
 #      UNEXTRACTED — a fence line carrying the ToolkitRoot operand that the
 #                    extraction regex does not see (a `{ if …; }` group, a
 #                    source after `&&`, a guard split by a continuation `\`
-#                    whose second half is not itself a sourcing line).
+#                    whose second half is not itself a sourcing line, a path
+#                    assignment with anything else on its line).
+#    The installed-only shape (VAR_PATH_RE, REQ-691) is extracted: its
+#    assignment line, then each `. "$<var>"` of a variable that line assigned.
 #    A guard split across a continuation whose halves ARE both extracted is
 #    refused by conforms() (`\` is not a token), and a sourcing line placed
 #    above its fence's root line runs with an empty root and fails loudly.
@@ -537,12 +550,14 @@ extract_fences() { # extract_fences <root> <outdir> — one script per sourcing 
   markdown_corpus "$1" > "$2/files"
   while IFS= read -r fx_f; do
     fx_n=$(ADLC_SG_REL="${fx_f#"$1"/}" ADLC_SG_OUT="$2" ADLC_SG_SRC_RE="$SRC_LINE_RE" \
-      ADLC_SG_ROOT_LINE="$ROOT_LINE_CANON" awk -v n="$fx_n" '
+      ADLC_SG_VAR_RE="$VAR_PATH_RE" ADLC_SG_ROOT_LINE="$ROOT_LINE_CANON" awk -v n="$fx_n" '
       BEGIN { rel = ENVIRON["ADLC_SG_REL"]; out = ENVIRON["ADLC_SG_OUT"]
               src = ENVIRON["ADLC_SG_SRC_RE"]; rl = ENVIRON["ADLC_SG_ROOT_LINE"]
+              vre = ENVIRON["ADLC_SG_VAR_RE"]
               man = out "/manifest"; diag = out "/diag"; infence = 0 }
       !infence { if ($0 ~ /^[ \t]*```(sh|bash|shell)([^A-Za-z0-9_]|$)/) {
-                   infence = 1; open_line = FNR; nl = 0; has_src = 0 }
+                   infence = 1; open_line = FNR; nl = 0; has_src = 0
+                   for (k in pvar) delete pvar[k] }
                  next }
       /^[ \t]*```[ \t]*$/ {
         if (has_src) {
@@ -558,6 +573,13 @@ extract_fences() { # extract_fences <root> <outdir> — one script per sourcing 
         if (index(line, "ADLC_TOOLKIT_ROOT=") > 0) {
           printf "BADROOT %s:%d\n", rel, FNR >> diag; close(diag); next }
         if (line ~ src) { buf[++nl] = line; has_src = 1; next }
+        if (line ~ vre) {
+          buf[++nl] = line; has_src = 1
+          np = split(line, parts, "; ")
+          for (i = 1; i <= np; i++) pvar[substr(parts[i], 1, index(parts[i], "=") - 1)] = 1
+          next }
+        if (line ~ /^\. "\$[a-z_]+"$/ && (substr(line, 5, length(line) - 5) in pvar)) {
+          buf[++nl] = line; next }
         if (index(line, "$ADLC_TOOLKIT_ROOT/partials/") > 0) {
           printf "UNEXTRACTED %s:%d\n", rel, FNR >> diag; close(diag) } }
       END { print n }' "$fx_f")
@@ -674,18 +696,36 @@ else
     printf 'An unbraced root-line variant.\n\n```sh\n'
     printf '%s\n' "$ROOT_LINE_CANON" | sed 's/\${CLAUDE_PLUGIN_ROOT}/$CLAUDE_PLUGIN_ROOT/'
     printf '```\n\nA source above its root line.\n\n```sh\n'
-    printf 'if [ -f .adlc/partials/late-probe.sh ]; then . .adlc/partials/late-probe.sh; else . "$ADLC_TOOLKIT_ROOT/partials/late-probe.sh"; fi\n%s\n```\n' "$ROOT_LINE_CANON"
+    printf 'if [ -f .adlc/partials/late-probe.sh ]; then . .adlc/partials/late-probe.sh; else . "$ADLC_TOOLKIT_ROOT/partials/late-probe.sh"; fi\n%s\n```\n\n' "$ROOT_LINE_CANON"
+    printf 'The installed-only shape (REQ-691).\n\n```sh\n%s\n' "$ROOT_LINE_CANON"
+    printf 'pv_a="$ADLC_TOOLKIT_ROOT/partials/var-probe.sh"; pv_b="$ADLC_TOOLKIT_ROOT/partials/var-probe-two.sh"\n'
+    printf 'if [ -f "$pv_a" ] && [ -f "$pv_b" ]; then\n  . "$pv_a"\n  . "$pv_b"\nfi\n```\n\n'
+    printf 'A path assignment with a source after it on the line.\n\n```sh\n%s\n' "$ROOT_LINE_CANON"
+    printf 'pv_c="$ADLC_TOOLKIT_ROOT/partials/var-bad.sh" && . "$pv_c"\n```\n'
   } > "$FP/probe/SKILL.md"
   extract_fences "$FP" "$SANDBOX/fenceprobe-out"
   probe_diag=$(sed 's/:[0-9]*$//' "$SANDBOX/fenceprobe-out/diag" | sort | tr '\n' ' ' | sed 's/ $//')
-  check "fence_extraction_reports_planted_shapes: grouped source and root-line variant are reported" \
-    "BADROOT probe/SKILL.md UNEXTRACTED probe/SKILL.md" "$probe_diag"
+  check "fence_extraction_reports_planted_shapes: grouped source, root-line variant and an assignment with a source after it are reported" \
+    "BADROOT probe/SKILL.md UNEXTRACTED probe/SKILL.md UNEXTRACTED probe/SKILL.md" "$probe_diag"
   probe_fences=$(grep -c . "$SANDBOX/fenceprobe-out/manifest")
-  check "fence_extraction_counts_sourcing_fences: the good and the late fence are extracted" "2" "$probe_fences"
+  check "fence_extraction_counts_sourcing_fences: the good, the late and the installed-only fence are extracted" "3" "$probe_fences"
   all_names "$SANDBOX/fenceprobe-out" > "$SANDBOX/fenceprobe-out/names"
   mk_route_sandboxes "$SANDBOX/fenceprobe-out/names"
   good_id=$(grep -F 'probe/SKILL.md:5' "$SANDBOX/fenceprobe-out/manifest" | cut -f1)
   late_id=$(sed -n '2p' "$SANDBOX/fenceprobe-out/manifest" | cut -f1)
+  var_id=$(sed -n '3p' "$SANDBOX/fenceprobe-out/manifest" | cut -f1)
+  if [ -n "$var_id" ]; then
+    check "fence_extraction_cuts_installed_only_shape: the assignment line and both sources, nothing else" \
+      "$ROOT_LINE_CANON
+pv_a=\"\$ADLC_TOOLKIT_ROOT/partials/var-probe.sh\"; pv_b=\"\$ADLC_TOOLKIT_ROOT/partials/var-probe-two.sh\"
+. \"\$pv_a\"
+. \"\$pv_b\"" "$(cat "$SANDBOX/fenceprobe-out/$var_id.sh")"
+    run_fence "$SANDBOX/fenceprobe-out/$var_id.sh" "$SL_HOME" "$SL_WORK"
+    check "fence_runner_passes_installed_only_probe: the installed-only probe fence runs clean on the symlink route" \
+      "$FENCE_OK" "$(fence_state "$SANDBOX/fenceprobe-out/$var_id.sh" CANON "$SL_HOME/.claude/skills")"
+  else
+    fail "fence_runner_probes_located: could not find the installed-only probe fence in the manifest"
+  fi
   if [ -n "$good_id" ] && [ -n "$late_id" ]; then
     run_fence "$SANDBOX/fenceprobe-out/$good_id.sh" "$SL_HOME" "$SL_WORK"
     check "fence_runner_passes_good_probe: the good probe fence runs clean on the symlink route" \

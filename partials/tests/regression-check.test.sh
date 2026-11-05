@@ -40,9 +40,15 @@
 #                           root: `mode` runs (required or off, whatever the checkout says,
 #                           LESSON-745); `check` there, and the same tree without the symlink
 #                           install, stay refused
-#   stale_vendored_forge (benign) — a vendored .adlc/partials/forge.sh that loads without
-#                           `_adlc_forge_python`: the installed forge.sh is sourced as well and
-#                           the engine runs
+#   forge_from_cwd_never_sourced (LESSON-718) — a .adlc/partials/forge.sh in the current
+#                           directory (a planted resolver, or a stale copy without one) is never
+#                           sourced: the installed forge.sh is, and the installed engine runs
+#   dotdot_root_goes_to_engine — a --root with a `..` segment never gets the no-config answer
+#                           (with no engine installed it is an error, not off), and the
+#                           inside-tree test sees it lexically, as the engine does: a root
+#                           `proj/link/..` whose link leads out of proj is still proj, so an
+#                           engine vendored in proj is refused (benign: a `..` root with a
+#                           config reaches the real engine)
 #   root_inside_toolkit (benign) — the root sits under the toolkit root, as the toolkit's
 #                           own worktrees do; the engine is not inside it and runs
 #   set_u_home_unset      — sourced by a `set -u` shell with HOME and ADLC_TOOLKIT_ROOT
@@ -194,10 +200,10 @@ check "no_config_needs_no_engine: a config and no engine: rc" 2 "$rc"
 check "no_config_needs_no_engine: a config and no engine: output" "regression-test: error
 regression_check.py not found in the installed toolkit" "$out"
 R="$SANDBOX/noconfig"
-out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_regression_check check --require-recorded --base origin/main --root "$R" BUG-123 2>/dev/null); rc=$?
+out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_regression_check check --require-recorded --base refs/remotes/origin/main --root "$R" BUG-123 2>/dev/null); rc=$?
 check "no_config_needs_no_engine: --base goes to the engine: rc" 2 "$rc"
 check "no_config_needs_no_engine: --base goes to the engine: verdict" "regression-check: error" "$(nth "$out" 1)"
-out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_regression_check check --base=origin/main --root "$R" 2>/dev/null); rc=$?
+out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_regression_check check --base=refs/remotes/origin/main --root "$R" 2>/dev/null); rc=$?
 check "no_config_needs_no_engine: --base=REF goes to the engine: rc" 2 "$rc"
 for a in --bogus BUG-12a -- BUG-123; do
   out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_regression_check mode --root "$R" "$a" 2>/dev/null); rc=$?
@@ -492,20 +498,65 @@ the engine is inside the tree under check" "$out"
 out=$(ADLC_TOOLKIT_ROOT="$R2"; export ADLC_TOOLKIT_ROOT; cd "$TOOLKIT" && adlc_regression_check check --root "$R2" 2>/dev/null); rc=$?
 check "install_checkout_is_exempt: a planted engine in another tree: rc" 2 "$rc"
 
-# --- stale_vendored_forge (benign path) --------------------------------------
-# A project vendored forge.sh before `_adlc_forge_python` existed. The partial
-# sources it (the project's copy wins), finds no resolver, and sources the
-# installed toolkit's forge.sh as well. The stale copy leaves a marker, so the
-# case also proves it was the one loaded first (positive control, LESSON-762).
-R="$SANDBOX/staleforge"; mkproj "$R" required
-mkdir -p "$R/.adlc/partials"
-printf '%s\n' "# a forge.sh from before the interpreter resolver" ": > '$SANDBOX/staleforge-loaded'" > "$R/.adlc/partials/forge.sh"
-( unset -f _adlc_forge_python 2>/dev/null || unfunction _adlc_forge_python 2>/dev/null
-  cd "$R" && . "$PARTIALS/regression-check.sh" && adlc_regression_check mode ) > "$SANDBOX/staleforge.out" 2>/dev/null; rc=$?
-out=$(cat "$SANDBOX/staleforge.out")
-check "stale_vendored_forge: the vendored copy was loaded" "yes" "$([ -e "$SANDBOX/staleforge-loaded" ] && echo yes || echo no)"
-check "stale_vendored_forge: rc" 0 "$rc"
-check "stale_vendored_forge: the engine ran" "regression-test: required
+# --- forge_from_cwd_never_sourced (LESSON-718) ----------------------------------
+# The resolver picks the interpreter that runs the engine, so it comes from the
+# installed toolkit only. A forge.sh in the current directory is never sourced:
+# here one that defines a resolver naming a planted "python", and one from before
+# the resolver existed. Each leaves a marker when sourced; neither may appear, and
+# the installed engine answers. The current directory is the project, as in a fence.
+R="$SANDBOX/cwdforge"; mkproj "$R" required
+mkdir -p "$R/.adlc/partials" "$SANDBOX/planted"
+printf '%s\n' '#!/bin/sh' 'echo "regression-test: off"; echo "PLANTED-PYTHON-RAN"' > "$SANDBOX/planted/python3"
+chmod +x "$SANDBOX/planted/python3"
+for variant in resolver stale; do
+  rm -f "$SANDBOX/cwdforge-loaded"
+  if [ "$variant" = resolver ]; then
+    printf '%s\n' ": > '$SANDBOX/cwdforge-loaded'" "_adlc_forge_python() { printf '%s\\n' '$SANDBOX/planted/python3'; }" > "$R/.adlc/partials/forge.sh"
+  else
+    printf '%s\n' "# a forge.sh from before the interpreter resolver" ": > '$SANDBOX/cwdforge-loaded'" > "$R/.adlc/partials/forge.sh"
+  fi
+  ( unset -f _adlc_forge_python 2>/dev/null || unfunction _adlc_forge_python 2>/dev/null
+    cd "$R" && . "$PARTIALS/regression-check.sh" && adlc_regression_check mode ) > "$SANDBOX/cwdforge.out" 2>/dev/null; rc=$?
+  out=$(cat "$SANDBOX/cwdforge.out")
+  check "forge_from_cwd_never_sourced: $variant: the copy in the current directory was not sourced" "no" "$([ -e "$SANDBOX/cwdforge-loaded" ] && echo yes || echo no)"
+  check "forge_from_cwd_never_sourced: $variant: no planted interpreter ran" "0" "$(countf "$out" PLANTED-PYTHON-RAN)"
+  check "forge_from_cwd_never_sourced: $variant: rc" 0 "$rc"
+  check "forge_from_cwd_never_sourced: $variant: the installed engine ran" "regression-test: required
+bugfix.regression_test is required in .adlc/config.yml" "$out"
+done
+
+# --- dotdot_root_goes_to_engine ---------------------------------------------------
+# `cd -P` resolves `..` physically and the engine lexically, so a `..` root is
+# never answered by the wrapper and is checked for containment the engine's way.
+R="$SANDBOX/noconfig"; mkdir -p "$R/sub"
+for root in "$R/sub/.." "$R/./sub/../"; do
+  out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_regression_check mode --root "$root" 2>/dev/null); rc=$?
+  check "dotdot_root_goes_to_engine: no config, '..' root, no engine: rc" 2 "$rc"
+  check "dotdot_root_goes_to_engine: no config, '..' root, no engine: output" "regression-test: error
+regression_check.py not found in the installed toolkit" "$out"
+done
+out=$(cd "$R/sub" && ADLC_TOOLKIT_ROOT="$SANDBOX/emptyroot"; export ADLC_TOOLKIT_ROOT; adlc_regression_check check --root .. 2>/dev/null); rc=$?
+check "dotdot_root_goes_to_engine: a relative '..' root, no engine: rc" 2 "$rc"
+check "dotdot_root_goes_to_engine: a relative '..' root, no engine: verdict" "regression-check: error" "$(nth "$out" 1)"
+# A root `proj/link/..` whose link leads out of proj: physically the link target's
+# parent, to the engine proj itself, which holds a vendored engine stubbed to pass.
+P="$SANDBOX/dotdotproj"; mkproj "$P" required
+mkdir -p "$SANDBOX/dotdotout/inner" "$P/vt/tools/adlc"
+ln -s "$SANDBOX/dotdotout/inner" "$P/link"
+printf '%s\n' 'print("regression-check: pass")' 'print("passed=0 waived=0 legacy=0 failed=0")' > "$P/vt/tools/adlc/regression_check.py"
+for root in "$P/link/.." "$P/link/../"; do
+  out=$(ADLC_TOOLKIT_ROOT="$P/vt"; export ADLC_TOOLKIT_ROOT; adlc_regression_check check --root "$root" 2>/dev/null); rc=$?
+  check "dotdot_root_goes_to_engine: '$root' reaching an engine inside proj: rc" 2 "$rc"
+  check "dotdot_root_goes_to_engine: '$root' reaching an engine inside proj: refused" "regression-check: error
+the engine is inside the tree under check" "$out"
+done
+out=$(cd "$P/link" && ADLC_TOOLKIT_ROOT="$P/vt"; export ADLC_TOOLKIT_ROOT; adlc_regression_check check --root "$P/link/.." 2>/dev/null); rc=$?
+check "dotdot_root_goes_to_engine: from inside the link target: refused" "regression-check: error
+the engine is inside the tree under check" "$out"
+# Benign: a `..` root with a config reaches the installed engine, which reads it.
+out=$(adlc_regression_check mode --root "$P/link/.."); rc=$?
+check "dotdot_root_goes_to_engine: a '..' root with a config: rc" 0 "$rc"
+check "dotdot_root_goes_to_engine: a '..' root with a config: the engine read it" "regression-test: required
 bugfix.regression_test is required in .adlc/config.yml" "$out"
 
 # --- root_inside_toolkit (benign path) --------------------------------------

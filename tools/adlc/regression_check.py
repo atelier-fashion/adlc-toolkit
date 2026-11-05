@@ -52,11 +52,15 @@ The setting (ADR-691-A)
 committed at ``REF`` (``git ls-tree`` and ``git cat-file`` at the root's
 repo-relative prefix), never the disk: a gate that reads the tree under check
 lets the branch switch its own gate off or re-point a sibling, so the
-``/bugfix`` Gate passes the integration branch (``lane_check.py``'s rule).
-``REF`` is branch-name characters only (``[A-Za-z0-9._/-]``, no ``..``, no
-leading ``-``); anything else is a usage error, and a ref that names no commit
-is an error. Bug reports and test files are still read from the working tree
-and the index (BR-12).
+``/bugfix`` Gate passes the integration branch's remote-tracking ref
+(``lane_check.py``'s rule). ``REF`` is a full ref, ``refs/remotes/...`` or
+``refs/heads/...``, in branch-name characters (``[A-Za-z0-9._/-]``, no ``..``,
+no empty or dot-led component, no ``.lock``); a short name (which a tag of the
+same name shadows), ``HEAD``, ``FETCH_HEAD``, ``ORIG_HEAD`` or a bare sha is a
+usage error. It is resolved with ``git show-ref --verify``, which takes the ref
+exactly as written, and a ref that names no commit is an error. Bug reports and
+test files are still read from the working tree and the index (BR-12, amended:
+only the policy comes from the ref).
 
 A missing file is ``off`` (BR-1). A file whose bytes carry neither
 ``regression_test`` nor ``bugfix`` outside whole-line comments is ``off``
@@ -110,7 +114,8 @@ path and every path passes the path rules; **waived** when
 string ``""`` and an empty value all count as absent (the bug template ships
 them empty); **failed** otherwise, including both fields set (BR-7) and a
 whitespace-only waiver with no tests (BR-6). ``--require-recorded`` turns
-legacy into failed, for ``/bugfix`` Phase 6 (BR-13).
+legacy into failed, for ``/bugfix`` Phase 6 (BR-13), and requires every listed
+test to be committed (The path rules).
 
 The path rules (ADR-691-C, ADR-691-D)
 -------------------------------------
@@ -131,10 +136,15 @@ symlink, resolves inside its repository, is a regular file, is tracked
 (``git ls-files --error-unmatch`` with literal pathspecs, its output equal to
 the path), and its working-tree bytes cite the bug id: ``BUG-<n>`` with no
 letter or digit before it and no digit after it, so BUG-26 never matches
-BUG-261. The verdict on a bug reads only the working tree and git's index. This
-module never fetches and never diffs, and the only ref it reads is the one a
-caller names with ``--base``, for the config alone (BR-12, LESSON-782). Git
-runs from a fixed argv, never through a shell.
+BUG-261. With ``--require-recorded`` the path must also be committed in its
+repository's ``HEAD``, and that committed copy must cite the id
+(``git cat-file`` at ``HEAD:./<path>``), so a test that is only staged, or
+whose citation is only in the working tree, fails as not committed. The verdict
+on a bug reads only the working tree, git's index and, under
+``--require-recorded``, each repository's own ``HEAD``. This module never
+fetches and never diffs, and the only other ref it reads is the one a caller
+names with ``--base``, for the config alone (BR-12, LESSON-782). Git runs from
+a fixed argv, never through a shell.
 """
 
 import argparse
@@ -189,10 +199,14 @@ SOURCE_SET = "set"
 USAGE = ("regression_check.py mode [--root DIR] [--base REF] | "
          "check [--root DIR] [--base REF] [--require-recorded] [BUG-nnn ...]")
 
-#: A ``--base`` ref: branch-name characters only, so it can never carry a
-#: revision suffix (``^``, ``~``, ``@{``), a path (``REF:path``), a range
-#: (``..``) or an option (a leading ``-``).
-_REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+#: A ``--base`` ref: a full ref under ``refs/remotes/`` or ``refs/heads/``, in
+#: branch-name characters only, so it can never carry a revision suffix (``^``,
+#: ``~``, ``@{``), a path (``REF:path``), a range (``..``) or an option (a
+#: leading ``-``). A short name is refused: git resolves ``origin/main`` to a tag
+#: of that name before the remote-tracking branch, so a tag could pick the
+#: config the gate reads. ``HEAD``, ``FETCH_HEAD``, ``ORIG_HEAD`` and a bare sha
+#: are refused for the same reason: none of them names the integration branch.
+_REF_RE = re.compile(r"^refs/(?:remotes|heads)/[A-Za-z0-9._/-]+$")
 _OID_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _REGULAR_BLOB_MODES = (b"100644", b"100755")
 _SYMLINK_MODE = b"120000"
@@ -453,11 +467,20 @@ def read_disk_config(root):
 
 
 def check_ref(ref):
-    """``ref`` when it is a usable ``--base``; a usage error otherwise."""
-    if not _REF_RE.match(ref) or ".." in ref or ref.startswith("-"):
+    """``ref`` when it is a usable ``--base``; a usage error otherwise.
+
+    Usable is a full ref, ``refs/remotes/<remote>/<branch>`` or
+    ``refs/heads/<branch>``, whose every component is non-empty, does not start
+    with ``.`` and does not end in ``.lock``, with no ``..`` and no trailing
+    ``.`` (``git check-ref-format``'s rules, within the strict charset).
+    """
+    parts = ref.split("/")
+    if (not _REF_RE.match(ref) or ".." in ref or ref.endswith(".")
+            or any(not part or part.startswith(".") or part.endswith(".lock")
+                   for part in parts)):
         raise RegressionCheckError(
-            "usage: %s ('%s' is not a usable --base ref: name a branch or a "
-            "remote-tracking branch)" % (USAGE, ref))
+            "usage: %s ('%s' is not a usable --base ref: name a full ref, "
+            "refs/remotes/<remote>/<branch> or refs/heads/<branch>)" % (USAGE, ref))
     return ref
 
 
@@ -472,6 +495,31 @@ def _git_stdout(repo_dir, args, what):
     if proc.returncode != 0:
         raise RegressionCheckError("%s failed (git exit %d)" % (what, proc.returncode))
     return proc.stdout
+
+
+def resolve_ref(root, ref):
+    """The commit ``ref`` names, exactly that ref and nothing git's lookup rules
+    would put in its place; an error when it names none.
+
+    ``git show-ref --verify`` takes the full ref as it is written: a missing
+    ``refs/remotes/origin/main`` is not then found as ``refs/tags/refs/remotes/
+    origin/main``, which plain ``rev-parse`` falls through to. Its object is
+    peeled to a commit by its full object id, which git never reads as a ref.
+    """
+    proc = _git(root, ["show-ref", "--verify", "--", ref])
+    if proc is None:
+        raise RegressionCheckError("resolving --base %s: git could not be run" % ref)
+    fields = proc.stdout.decode("ascii", "replace").split()
+    if (proc.returncode != 0 or len(fields) != 2 or fields[1] != ref
+            or not _OID_RE.match(fields[0])):
+        raise RegressionCheckError("--base %s does not resolve to a commit" % ref)
+    proc = _git(root, ["rev-parse", "--verify", "--quiet", fields[0] + "^{commit}"])
+    if proc is None:
+        raise RegressionCheckError("resolving --base %s: git could not be run" % ref)
+    oid = proc.stdout.decode("ascii", "replace").strip()
+    if proc.returncode != 0 or not _OID_RE.match(oid):
+        raise RegressionCheckError("--base %s does not resolve to a commit" % ref)
+    return oid
 
 
 def read_base_config(root, ref):
@@ -492,12 +540,7 @@ def read_base_config(root, ref):
                                    "inside a git work tree")
     prefix = os.fsdecode(proc.stdout)
     prefix = prefix[:-1] if prefix.endswith("\n") else prefix
-    proc = _git(root, ["rev-parse", "--verify", "--quiet", ref + "^{commit}"])
-    if proc is None:
-        raise RegressionCheckError("resolving --base %s: git could not be run" % ref)
-    oid = proc.stdout.decode("ascii", "replace").strip()
-    if proc.returncode != 0 or not _OID_RE.match(oid):
-        raise RegressionCheckError("--base %s does not resolve to a commit" % ref)
+    oid = resolve_ref(root, ref)
     path = prefix + CONFIG_RELPATH
     out = _git_stdout(root, ["ls-tree", "-l", "-z", "--full-tree", oid, "--", path],
                       "listing %s" % where)
@@ -1043,6 +1086,39 @@ def tracked_reason(repo_dir, rel):
     return None
 
 
+#: The one ref the engine names itself: each repository's own ``HEAD``, read
+#: only under ``--require-recorded`` (:func:`committed_reason`). It is local
+#: state, like the index, never a remote branch (BR-12).
+_COMMITTED_REV = "HEAD"
+
+
+def committed_reason(repo_dir, rel, bug_id):
+    """``None`` when ``rel`` is committed in ``repo_dir``'s ``HEAD`` and that
+    copy cites ``bug_id``, else why not.
+
+    ``/bugfix``'s Gate passes ``--require-recorded``: what merges is the
+    commits, so a test that is only staged, or whose citation is only in the
+    working tree, is not a recorded regression test. That matters most for a
+    sibling repository, whose tree the Gate's clean-tree guard does not cover.
+    ``<rev>:./<path>`` is relative to ``repo_dir``, so a project or sibling in
+    a subdirectory of its repository names the same file.
+    """
+    spec = "%s:./%s" % (_COMMITTED_REV, posixpath.normpath(rel))
+    proc = _git(repo_dir, ["cat-file", "-e", spec])
+    if proc is None:
+        return "cannot be checked: git could not be run"
+    if proc.returncode != 0:
+        return "is not committed (not in HEAD)"
+    proc = _git(repo_dir, ["cat-file", "blob", spec])
+    if proc is None:
+        return "cannot be checked: git could not be run"
+    if proc.returncode != 0:
+        return "is not committed (not a file in HEAD)"
+    if not cites(proc.stdout, bug_id):
+        return "does not cite %s in its committed copy (HEAD)" % bug_id
+    return None
+
+
 # --- classification (BR-9) ------------------------------------------------------
 
 #: ``<repo-id>:`` at the start of an entry (ADR-691-D).
@@ -1124,8 +1200,13 @@ class Checker(object):
             return None, "repo '%s' is not cloned at %s" % (repo_id, shown)
         return target, None
 
-    def entry_reason(self, entry, position, bug_id):
-        """``None`` when one ``regression_tests`` entry passes, else why it fails."""
+    def entry_reason(self, entry, position, bug_id, require_committed=False):
+        """``None`` when one ``regression_tests`` entry passes, else why it fails.
+
+        ``require_committed`` (``--require-recorded``) also requires the file to
+        be committed in its repository's ``HEAD``, that copy citing the id
+        (:func:`committed_reason`).
+        """
         match = _PREFIX_RE.match(entry)
         repo_id, rel = (match.group(1), match.group(2)) if match else (None, entry)
         shown = entry
@@ -1166,6 +1247,10 @@ class Checker(object):
             return "%s cannot be read (%s)" % (shown, _reason(exc))
         if not cites(data, bug_id):
             return "%s does not cite %s" % (shown, bug_id)
+        if require_committed:
+            why = committed_reason(repo_dir, rel, bug_id)
+            if why:
+                return "%s %s" % (shown, why)
         return None
 
     def classify(self, report, require_recorded):
@@ -1181,7 +1266,7 @@ class Checker(object):
         if has_tests:
             reasons = []
             for position, entry in enumerate(tests, start=1):
-                why = self.entry_reason(entry, position, report.bug_id)
+                why = self.entry_reason(entry, position, report.bug_id, require_recorded)
                 if why:
                     reasons.append(why)
             return (FAILED, reasons) if reasons else (PASSED, [])

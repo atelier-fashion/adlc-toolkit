@@ -9,7 +9,7 @@
 #     0) : ;;                     # `regression-test: required` or `regression-test: off`
 #     *) echo "stop" ;;           # 2 error: the setting is unreadable — never read as off
 #   esac
-#   adlc_regression_check check --require-recorded --base origin/main BUG-123; rc=$?
+#   adlc_regression_check check --require-recorded --base refs/remotes/origin/main BUG-123; rc=$?
 #   case $rc in
 #     0) : ;;                     # `regression-check: pass` or `regression-check: off`
 #     *) echo "stop" ;;           # 1 fail, 2 error — an error is never a pass and never off
@@ -17,7 +17,8 @@
 #
 # Contract — adlc_regression_check <mode|check> [args...]:
 #   runs <ToolkitRoot>/tools/adlc/regression_check.py with the arguments unchanged
-#   (`--base REF` reads the setting from REF's config; the /bugfix Gate passes it).
+#   (`--base REF`, a full refs/remotes/... or refs/heads/... ref, reads the setting from
+#   REF's config; the /bugfix Gate passes refs/remotes/origin/<integration-branch>).
 #   mode  stdout: `regression-test: required|off`, then where the value came from (set,
 #                 absent, or no config file); rc 0. `regression-test: error`, then why; rc 2.
 #   check stdout: `regression-check: pass|fail`, then `passed=N waived=N legacy=N failed=N`,
@@ -33,8 +34,10 @@
 # `regression-test: error` for `mode`, then one reason line) and rc 2: an error is never a
 # pass and never off (BR-17, LESSON-581). The engine has no --help for the same reason.
 # One answer needs no engine: with no `.adlc/config.yml` in the tree under check and no
-# `--base`, the wrapper prints the engine's own no-config `off` lines, rc 0, so a project
-# that never named the setting never needs Python. `--base REF` passes through untouched.
+# `--base`, the wrapper prints the engine's own no-config `off` lines, rc 0, so such a
+# run needs no Python. A run with `--base REF` always goes to the engine, and so needs
+# Python: the /bugfix Gate answers a base with no config itself, with `git cat-file`,
+# before it calls the wrapper. A `--root` with a `..` segment also goes to the engine.
 # Full contract: partials/regression-check.md.
 #
 # The engine is ALWAYS the installed toolkit's, <ToolkitRoot>/tools/adlc/regression_check.py —
@@ -55,20 +58,19 @@
 # the lane check and the regression check never pick different Pythons (the delegate
 # venv when it has PyYAML, else `python3`). Calling a `_`-prefixed function from
 # another partial is a documented coupling (REQ-652 ADR-3); extracting the resolver
-# into its own partial is a follow-up. forge.sh is sourced with the guarded two-level
-# spelling, and only when the function is not already defined; adlc_regression_check
-# re-checks that it is. The fallback operand reads a bare $HOME, so it is not reached
-# when neither ADLC_TOOLKIT_ROOT nor HOME is set: a `set -u` caller would abort on it.
-# The partial then loads without the resolver, and adlc_regression_check reports that.
-# A vendored .adlc/partials/forge.sh older than the resolver loads without defining it;
-# the installed toolkit's forge.sh is then sourced as well, when it exists, so a stale
-# vendored copy does not stop the check.
-if ! command -v _adlc_forge_python >/dev/null 2>&1 && { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/forge.sh ]; }; then
-  if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"; fi
-  if ! command -v _adlc_forge_python >/dev/null 2>&1 && [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ]; then
-    adlc_rgc_forge="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"
-    if [ -f "$adlc_rgc_forge" ]; then . "$adlc_rgc_forge"; fi
-  fi
+# into its own partial is a follow-up. forge.sh comes from the installed toolkit ONLY,
+# never from `.adlc/partials/forge.sh` in the current directory: the resolver picks
+# the interpreter that runs the engine, so a copy in the tree under check would pick
+# what judges that tree (LESSON-718), and a stale vendored copy without the resolver
+# can no longer be the one loaded either. It is sourced only when the function is
+# not already defined (a fence that sourced forge.sh itself keeps its own), behind a
+# `[ -f ]` guard; adlc_regression_check re-checks that it is defined. The operand
+# reads a bare $HOME, so it is not reached when neither ADLC_TOOLKIT_ROOT nor HOME is
+# set: a `set -u` caller would abort on it. The partial then loads without the
+# resolver, and adlc_regression_check reports that.
+if ! command -v _adlc_forge_python >/dev/null 2>&1 && [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ]; then
+  adlc_rgc_forge="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"
+  if [ -f "$adlc_rgc_forge" ]; then . "$adlc_rgc_forge"; fi
 fi
 
 # _adlc_regression_check_error <verdict-prefix> <detail> — the two-line error contract
@@ -163,6 +165,44 @@ adlc_regression_check() {
   done
   if [ "$adlc_rgc_want_value" = 1 ]; then adlc_rgc_plain=0; fi
   if [ -z "$adlc_rgc_root" ]; then adlc_rgc_root=.; fi
+  # A `..` segment is where `cd -P` and the engine part ways: the shell resolves it
+  # physically, after following any symlink before it, and the engine
+  # (os.path.abspath) lexically, by dropping the segment before it. `--root
+  # proj/link/..` would be the link target's parent to the tests below and `proj`
+  # to the engine, so an engine inside `proj` would never be seen. Such a root
+  # therefore goes to the engine, never to the no-config answer, and the tests below
+  # see it the engine's way: made absolute against the physical current directory
+  # (os.getcwd), normalized segment by segment as os.path.normpath does, and only
+  # then resolved with `cd -P`. A current directory that cannot be named leaves
+  # the root unresolved, which the engine reports.
+  adlc_rgc_resolve=1
+  case "/$adlc_rgc_root/" in
+    */../*)
+      adlc_rgc_plain=0
+      case "$adlc_rgc_root" in
+        /*) adlc_rgc_rest=$adlc_rgc_root ;;
+        *)
+          adlc_rgc_cwd=$(pwd -P 2>/dev/null) || adlc_rgc_cwd=
+          if [ -z "$adlc_rgc_cwd" ]; then adlc_rgc_resolve=0; fi
+          adlc_rgc_rest="$adlc_rgc_cwd/$adlc_rgc_root"
+          ;;
+      esac
+      adlc_rgc_lex=
+      while [ -n "$adlc_rgc_rest" ]; do
+        adlc_rgc_seg=${adlc_rgc_rest%%/*}
+        case "$adlc_rgc_rest" in
+          */*) adlc_rgc_rest=${adlc_rgc_rest#*/} ;;
+          *) adlc_rgc_rest= ;;
+        esac
+        case "$adlc_rgc_seg" in
+          '' | .) ;;
+          ..) adlc_rgc_lex=${adlc_rgc_lex%/*} ;;
+          *) adlc_rgc_lex="$adlc_rgc_lex/$adlc_rgc_seg" ;;
+        esac
+      done
+      adlc_rgc_root=${adlc_rgc_lex:-/}
+      ;;
+  esac
   # An engine inside the tree under check is that tree's own copy, whatever the
   # root says (ADLC_TOOLKIT_ROOT pointed at the worktree, or at a copy vendored in
   # it): it could certify itself, or print `off` and skip its own gate (LESSON-718).
@@ -170,7 +210,10 @@ adlc_regression_check() {
   # before the prefix test. A root that does not resolve is left to the engine,
   # which reports it as an error.
   adlc_rgc_eng_dir=$(CDPATH= cd -P -- "${adlc_rgc_script%/*}" 2>/dev/null && pwd -P) || adlc_rgc_eng_dir=
-  adlc_rgc_root_dir=$(CDPATH= cd -P -- "$adlc_rgc_root" 2>/dev/null && pwd -P) || adlc_rgc_root_dir=
+  adlc_rgc_root_dir=
+  if [ "$adlc_rgc_resolve" = 1 ]; then
+    adlc_rgc_root_dir=$(CDPATH= cd -P -- "$adlc_rgc_root" 2>/dev/null && pwd -P) || adlc_rgc_root_dir=
+  fi
   if [ -n "$adlc_rgc_eng_dir" ] && [ -n "$adlc_rgc_root_dir" ]; then
     adlc_rgc_inside=0
     case "$adlc_rgc_eng_dir" in

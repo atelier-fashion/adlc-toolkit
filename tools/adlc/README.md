@@ -877,15 +877,22 @@ adlc regression-check check [--root DIR] [--base REF] [--require-recorded] [BUG-
 **The setting.** Read from `.adlc/config.yml` in the working tree, or, with
 `--base REF`, from the copy committed at `REF` and never from the disk. A gate
 that reads the tree under check lets the fix branch switch its own gate off or
-re-point a sibling, so `/bugfix`'s Gate passes `--base origin/<integration-branch>`
-(the rule `lane_check.py` follows). The setting and `repos:` both come from
-`REF`, read with `git ls-tree` and `git cat-file` at the root's repo-relative
-prefix, so a project in a subdirectory reads its own config. The bug reports
-and test files still come from the working tree and the index. `REF` may hold
-only `A-Z a-z 0-9 . _ / -`, with no `..` and no leading `-`; anything else is a
-usage error, and a ref that names no commit is rc 2. A config that is a
-symlink, a directory or a submodule at `REF` is rc 2. No config at `REF` is
-`off`, and the line says `does not exist at REF`.
+re-point a sibling, so `/bugfix`'s Gate passes
+`--base refs/remotes/origin/<integration-branch>` (the rule `lane_check.py`
+follows). The setting and `repos:` both come from `REF`, read with
+`git ls-tree` and `git cat-file` at the root's repo-relative prefix, so a
+project in a subdirectory reads its own config. The bug reports and test files
+still come from the working tree and the index. `REF` must be a full ref,
+`refs/remotes/<remote>/<branch>` or `refs/heads/<branch>`, in
+`A-Z a-z 0-9 . _ / -`, with no `..`, no empty or dot-led component and no
+`.lock`. A short name is a usage error because git resolves `origin/main` to a
+tag of that name before the remote-tracking branch, so a tag could choose the
+config the gate reads; `HEAD`, `FETCH_HEAD`, `ORIG_HEAD` and a bare sha are
+usage errors too. `REF` is resolved with `git show-ref --verify`, which takes
+it exactly as written: a missing `refs/remotes/origin/main` is rc 2, never
+`refs/tags/refs/remotes/origin/main`, where plain `rev-parse` would fall
+through. A config that is a symlink, a directory or a submodule at `REF` is rc
+2. No config at `REF` is `off`, and the line says `does not exist at REF`.
 
 A missing config is `off`. So is one that names neither `regression_test` nor
 `bugfix` outside whole-line comments, and it is not parsed (the `lane_check.py`
@@ -932,7 +939,14 @@ each one in scope with the same reason a named run gives.
 `..` segment. It must exist, not be a symlink, resolve inside the repository,
 be a regular file, be tracked (`git ls-files --error-unmatch` with literal
 pathspecs), and its working-tree bytes must cite the bug id as `BUG-<n>` with
-no digit after it, so `BUG-26` never matches `BUG-261`. A cross-repo entry is
+no digit after it, so `BUG-26` never matches `BUG-261`. With
+`--require-recorded` it must also be committed in its repository's `HEAD`
+(`git cat-file` at `HEAD:./<path>`, relative to the project's or the sibling's
+directory), and that committed copy must cite the id too. A test that is only
+staged fails with `is not committed (not in HEAD)`, and one whose citation is
+only in the working tree with `does not cite BUG-nnn in its committed copy
+(HEAD)`: what merges is the commits, and `/bugfix`'s clean-tree guard covers
+only the primary checkout, not a sibling's. A cross-repo entry is
 `<repo-id>:<path>`, resolved through `repos.<repo-id>.path` in the same config.
 An absolute path is used as written. A relative path resolves from the
 project's directory in its repository's main worktree, the way `/proceed`
@@ -945,10 +959,11 @@ resolves from itself. The primary's own id (`primary: true`) and no prefix both
 mean this repo. An undeclared id or a sibling that isn't cloned fails, naming
 it.
 
-The verdict on each bug depends only on the working tree and git's index. The
-engine never fetches and never diffs. The only ref it reads is the one a caller
-names with `--base`, and only for the config, so two branches with the same
-bugs and tests get the same answer. Output names bug ids, the paths a report
+The verdict on each bug depends only on the working tree, git's index and,
+under `--require-recorded`, each repository's own `HEAD`. The engine never
+fetches and never diffs. The only other ref it reads is the one a caller names
+with `--base`, and only for the config, so two branches with the same bugs and
+tests get the same answer. Output names bug ids, the paths a report
 lists and reasons. It never names a file's contents, a symlink's target or the
 root's absolute path.
 

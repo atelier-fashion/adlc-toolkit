@@ -61,7 +61,13 @@ is cut per `RELEASING.md`.
   `bugfix/SKILL.md` is already past Antigravity's body cap. Phase 6 gains a Step 0 that
   runs the check on this bug with `--require-recorded`, in the fix worktree, before
   anything merges: a fail or an error stops `/bugfix` with nothing merged and the bug
-  unresolved. In `off` mode `/bugfix` writes neither field, its other test work is
+  unresolved. The gate runs only the installed toolkit's code, sourcing nothing under
+  `.adlc/partials`, and reads its policy only from the integration branch: it checks
+  that the PR targets that branch, fetches it without tags, and reads the setting at
+  `refs/remotes/origin/<integration-branch>`, so neither the fix branch's config nor a
+  tag named `origin/main` can turn it off. A project that is `off` there, or has no
+  config there, gets no guard and no new stop; a `required` one needs a clean, pushed
+  fix checkout and every listed test committed. In `off` mode `/bugfix` writes neither field, its other test work is
   unchanged, and the summary says regression tests are off, naming the key when it is
   not set. `templates/bug-template.md` documents both fields as optional and additive and
   adds the section. A cross-repo bug can fail the gate when its sibling is not reachable
@@ -75,14 +81,18 @@ is cut per `RELEASING.md`.
   waived=N legacy=N failed=N`, then one line per failed bug naming it, the path and the
   reason. An `off` project exits 0 without opening a bug report. A bug with neither field,
   which is every bug resolved before this release, reads as legacy: counted, never failed,
-  unless `--require-recorded` is passed. The verdict reads only the working tree and git's
-  index, never a remote ref, so every branch with the same bugs and tests gets the same
-  answer. The engine, `tools/adlc/regression_check.py`, is standard library only and reads
+  unless `--require-recorded` is passed, which also requires each listed test to be
+  committed, citing the id, in its repo's `HEAD`. The verdict reads only the working tree
+  and git's index (and that `HEAD`), never a remote ref, so every branch with the same bugs
+  and tests gets the same answer; `--base` takes a full ref (`refs/remotes/...` or
+  `refs/heads/...`, never a short name a tag could shadow) and reads only the setting and
+  `repos:` there. The engine, `tools/adlc/regression_check.py`, is standard library only and reads
   the setting with `harness_yaml`, the toolkit's stdlib YAML subset, so a plugin install
   with no PyYAML gets the same answer as any other. Skill fences reach it through the new
   partial `partials/regression-check.sh`, which always runs the installed toolkit's
-  engine and refuses one inside the tree under check, except in the symlink install's own
-  clone. No project's CI runs the check yet, the toolkit's included.
+  engine with the installed `forge.sh`'s interpreter and refuses an engine inside the tree
+  under check, except in the symlink install's own clone. No project's CI runs the check
+  yet, the toolkit's included.
 - **The `/sprint` exec engine (REQ-659).** Phase 6a of the multi-harness plan: a third engine,
   selected only by `--exec`, whose orchestrator is a program. `adlc sprint-exec` launches one
   `claude -p` per REQ with the prompt on stdin, stops each at the merge gate, and performs
@@ -846,14 +856,16 @@ reconciles:
 - The config scaffold's comment says "scaffolded by install.sh" and suggests
   `./install.sh --with-delegation` on both routes, because its bytes are pinned to
   `install.sh`'s. The plugin ships no delegation CLIs, and the README says so.
-- **A cross-repo bug's sibling test must be checked out where `repos:` points (REQ-691).**
-  The check resolves a `<repo-id>:<path>` entry through `repos.<repo-id>.path`, a
-  relative one from the primary's main checkout even when the gate runs in a fix
-  worktree. It reads the sibling's clone there, so a sibling fix made in a sibling
-  worktree is not seen until that branch is checked out at the path, and the gate stops
-  with `not cloned at` or `does not exist`. That is the safe direction, a stop before the
-  merge and never a pass; `/bugfix` reports it rather than looping, and an absolute
-  `repos.<id>.path` naming the sibling's fix worktree is the workaround.
+- **A cross-repo bug's sibling test must be committed where `repos:` points (REQ-691).**
+  The gate resolves a `<repo-id>:<path>` entry through `repos.<repo-id>.path` as the
+  integration branch's config gives it, a relative one from the primary's main checkout
+  even when the gate runs in a fix worktree, and only what is committed in that clone's
+  `HEAD` counts. So the sibling's fix branch must be checked out in that clone, committed
+  and pushed; a sibling fix made in a sibling worktree is not seen. The gate then stops
+  with `not cloned at`, `does not exist` or `not in HEAD`. That is the safe direction, a
+  stop before the merge and never a pass; `/bugfix` reports it to the user, never loops
+  on the gate and never merges. Since `repos:` is read at the integration branch, a path
+  changed on the fix branch cannot redirect it.
 
 ## [5.4.0] — 2026-10-27
 

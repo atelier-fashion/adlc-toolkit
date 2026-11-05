@@ -608,6 +608,9 @@ def test_named_ids_and_require_recorded(make_project):
     # A named run checks the open bug as it stands (the Phase 6 gate's case).
     assert result_of(p, "BUG-701") == (rc.PASSED, [], 0)
     assert result_of(p, "BUG-702") == (rc.WAIVED, [], 0)
+    # --require-recorded also needs the test committed (test_require_recorded_
+    # needs_committed_tests has the rule); committed, it passes.
+    p.commit("record the regression test")
     assert result_of(p, "BUG-701", "--require-recorded") == (rc.PASSED, [], 0)
     # An id with no report fails, naming the id.
     assert result_of(p, "BUG-799") == (
@@ -882,8 +885,10 @@ def test_engine_is_stdlib_only_and_reads_no_remote():
             assert "site-packages" not in origin, (name, origin)
 
     # The git subcommands the engine names: ls-files for the index, rev-parse to
-    # locate the checkout and resolve --base, ls-tree and cat-file to read the
-    # config at that ref. It never fetches, diffs or names a ref of its own.
+    # locate the checkout, show-ref and rev-parse to resolve --base exactly,
+    # ls-tree and cat-file to read the config at that ref, and cat-file for the
+    # committed check. It never fetches or diffs, and the one ref it names
+    # itself is each repository's own HEAD, for that check alone.
     words = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.List, ast.Tuple)):
@@ -892,8 +897,10 @@ def test_engine_is_stdlib_only_and_reads_no_remote():
     for word in ("fetch", "diff", "ls-remote", "remote", "log", "show", "merge-base",
                  "origin", "FETCH_HEAD", "HEAD", "main", "--path-format=absolute"):
         assert word not in words, word
-    for word in ("ls-files", "rev-parse", "ls-tree", "cat-file"):
+    for word in ("ls-files", "rev-parse", "show-ref", "--verify", "ls-tree", "cat-file"):
         assert word in words, word
+    heads = [n for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "HEAD"]
+    assert len(heads) == 1 and rc._COMMITTED_REV == "HEAD", heads
 
     # The git environment drops at least everything lane_check.py drops.
     assert set(lane_check._GIT_ENV_SCRUB) <= set(rc._GIT_ENV_SCRUB)
@@ -979,14 +986,14 @@ def test_base_reads_the_setting_and_repos_at_the_ref(make_project, tmp_path):
     assert p.run("check")[1][0] == "regression-check: off"
     expected = (1, ["regression-check: fail", "passed=1 waived=0 legacy=0 failed=1",
                     "BUG-1102: tests/missing.py does not exist"])
-    assert p.run("check", "--base", "main") == expected
-    assert p.run("mode", "--base", "main") == (0, [
+    assert p.run("check", "--base", "refs/heads/main") == expected
+    assert p.run("mode", "--base", "refs/heads/main") == (0, [
         "regression-test: required",
-        "bugfix.regression_test is required in .adlc/config.yml at main"])
+        "bugfix.regression_test is required in .adlc/config.yml at refs/heads/main"])
     # Deleted from the working tree: still required, and repos: still resolves.
     os.remove(str(p.root / ".adlc" / "config.yml"))
-    assert p.run("check", "--base", "main") == expected
-    assert p.run("check", "--base", "main", "BUG-1101") == (
+    assert p.run("check", "--base", "refs/heads/main") == expected
+    assert p.run("check", "--base", "refs/heads/main", "BUG-1101") == (
         0, ["regression-check: pass", "passed=1 waived=0 legacy=0 failed=0"])
     # Without --base the disk decides, as before.
     assert p.run("mode")[1][0] == "regression-test: off"
@@ -996,42 +1003,42 @@ def test_base_reads_the_setting_and_repos_at_the_ref(make_project, tmp_path):
     q.bug("BUG-1103", tests='["unclosed')
     q.commit("off on main")
     q.config(REQUIRED)
-    assert q.run("check", "--base", "main") == (0, [
+    assert q.run("check", "--base", "refs/heads/main") == (0, [
         "regression-check: off",
         "regression tests are off for this project: bugfix.regression_test is off in "
-        ".adlc/config.yml at main"])
+        ".adlc/config.yml at refs/heads/main"])
     # No config at the ref is off with the no-config wording, saying where.
     r = make_project(name="r")
     r.write("README.md", "no config here\n")
     r.commit("no config")
     r.config(REQUIRED)
-    assert r.run("mode", "--base", "main") == (0, [
+    assert r.run("mode", "--base", "refs/heads/main") == (0, [
         "regression-test: off",
-        ".adlc/config.yml does not exist at main, which means off; set "
+        ".adlc/config.yml does not exist at refs/heads/main, which means off; set "
         "bugfix.regression_test: required in it to turn regression tests on"])
     # A config at the ref without the key is absent there.
     s = make_project("project:\n  name: x\n", name="s")
     s.commit("keyless")
     s.config(REQUIRED)
-    code, lines = s.run("mode", "--base", "main")
+    code, lines = s.run("mode", "--base", "refs/heads/main")
     assert (code, lines[0]) == (0, "regression-test: off")
-    assert lines[1].startswith("bugfix.regression_test is not set in .adlc/config.yml at main")
+    assert lines[1].startswith("bugfix.regression_test is not set in .adlc/config.yml at refs/heads/main")
     # The same parse and validation rules apply to the bytes at the ref.
     t = make_project("bugfix:\n  regression_test: sometimes\n", name="t")
     t.commit("bad value")
     t.config(REQUIRED)
-    code, lines = t.run("check", "--base", "main")
+    code, lines = t.run("check", "--base", "refs/heads/main")
     assert (code, lines[0], len(lines)) == (2, "regression-check: error", 2)
-    assert "'sometimes'" in lines[1] and ".adlc/config.yml at main" in lines[1]
+    assert "'sometimes'" in lines[1] and ".adlc/config.yml at refs/heads/main" in lines[1]
     # A symlink in the config's place at the ref is refused, not followed.
     u = make_project(name="u")
     u.write("real.yml", REQUIRED)
     (u.root / ".adlc").mkdir()
     os.symlink("../real.yml", str(u.root / ".adlc" / "config.yml"))
     u.commit("linked config")
-    code, lines = u.run("mode", "--base", "main")
+    code, lines = u.run("mode", "--base", "refs/heads/main")
     assert (code, lines) == (2, ["regression-test: error",
-                                 ".adlc/config.yml is a symlink at main; the check reads "
+                                 ".adlc/config.yml is a symlink at refs/heads/main; the check reads "
                                  "only a regular file"])
 
 
@@ -1046,14 +1053,14 @@ def test_base_ref_is_validated(make_project, tmp_path):
             assert (code, lines[0], len(lines)) == (2, first, 2), bad
             assert lines[1].startswith("usage: "), (bad, lines)
     # A well-formed ref that names nothing is an error, never off.
-    code, lines = p.run("check", "--base", "nosuch")
+    code, lines = p.run("check", "--base", "refs/heads/nosuch")
     assert (code, lines) == (2, ["regression-check: error",
-                                 "--base nosuch does not resolve to a commit"])
+                                 "--base refs/heads/nosuch does not resolve to a commit"])
     # A root outside any git work tree cannot be read at a ref.
     plain = tmp_path / "plain"
     (plain / ".adlc").mkdir(parents=True)
     (plain / ".adlc" / "config.yml").write_text(REQUIRED)
-    code, lines = run_engine(["mode", "--root", str(plain), "--base", "main"])
+    code, lines = run_engine(["mode", "--root", str(plain), "--base", "refs/heads/main"])
     assert (code, lines[0]) == (2, "regression-test: error")
     assert "not inside a git work tree" in lines[1] and str(tmp_path) not in lines[1]
 
@@ -1067,9 +1074,113 @@ def test_base_reads_a_subdirectory_project_at_its_prefix(tmp_path):
     proj.bug("BUG-1201", tests='["tests/missing.py"]')
     _commit_all(repo, "a project in a subdirectory")
     proj.config(OFF)
-    code, lines = run_engine(["check", "--root", proj.path, "--base", "main"])
+    code, lines = run_engine(["check", "--root", proj.path, "--base", "refs/heads/main"])
     assert (code, lines) == (1, ["regression-check: fail", "passed=0 waived=0 legacy=0 failed=1",
                                  "BUG-1201: tests/missing.py does not exist"])
+
+
+# --- REQ-691 re-verify: --base is a full ref; --require-recorded needs commits --------
+
+def test_base_must_be_a_full_ref(make_project):
+    # A short name, HEAD, FETCH_HEAD, ORIG_HEAD or a bare sha is a usage error:
+    # none of them is certainly the integration branch, and git resolves a short
+    # origin/main to a tag of that name before the remote-tracking branch.
+    p = make_project(REQUIRED)
+    p.commit("config")
+    sha = p.git("rev-parse", "HEAD").stdout.strip()
+    p.git("update-ref", "refs/remotes/origin/main", "HEAD")
+    p.git("update-ref", "ORIG_HEAD", "HEAD")
+    (p.root / ".git" / "FETCH_HEAD").write_text("%s\t\tbranch 'main' of origin\n" % sha)
+    for bad in ("main", "origin/main", "heads/main", "remotes/origin/main", "HEAD",
+                "FETCH_HEAD", "ORIG_HEAD", sha, sha[:12], "refs/tags/v1", "refs/main",
+                "refs/heads/", "refs/remotes/origin/", "refs/heads//main", "refs/heads/.main",
+                "refs/heads/main.lock", "refs/heads/main.", "refs/remotes/origin/a..b",
+                "refs/heads/main^{commit}", "refs/heads/main:x", "refs/heads/main@{1}"):
+        for verb, first in (("check", "regression-check: error"),
+                            ("mode", "regression-test: error")):
+            code, lines = p.run(verb, "--base", bad)
+            assert (code, lines[0], len(lines)) == (2, first, 2), bad
+            assert lines[1].startswith("usage: ") and "name a full ref" in lines[1], (bad, lines)
+    # Both full forms are usable.
+    for good in ("refs/heads/main", "refs/remotes/origin/main"):
+        assert p.run("mode", "--base", good) == (0, [
+            "regression-test: required",
+            "bugfix.regression_test is required in .adlc/config.yml at %s" % good])
+
+
+def test_base_is_never_a_tag_of_the_same_name(make_project):
+    # A tag named origin/main, or refs/remotes/origin/main, never stands in for the
+    # remote-tracking branch. Plain rev-parse falls through to the second when the
+    # branch is missing, so the ref is resolved with show-ref --verify.
+    p = make_project(OFF)
+    p.commit("off: the commit both tags point at")
+    off = p.git("rev-parse", "HEAD").stdout.strip()
+    p.config(REQUIRED)
+    p.bug("BUG-1901", status="open")
+    p.commit("required: the integration branch")
+    for tag in ("origin/main", "refs/remotes/origin/main"):
+        p.git("tag", tag, off)
+    # The remote-tracking branch is not there yet: an error, never the tag's off.
+    for verb, first in (("mode", "regression-test: error"), ("check", "regression-check: error")):
+        code, lines = p.run(verb, "--base", "refs/remotes/origin/main")
+        assert (code, lines) == (2, [first, "--base refs/remotes/origin/main does not resolve "
+                                            "to a commit"]), verb
+    # Once it exists, the branch is read, whatever the tags say.
+    p.git("update-ref", "refs/remotes/origin/main", "HEAD")
+    assert p.run("mode", "--base", "refs/remotes/origin/main") == (0, [
+        "regression-test: required",
+        "bugfix.regression_test is required in .adlc/config.yml at refs/remotes/origin/main"])
+    assert p.run("check", "--require-recorded", "--base", "refs/remotes/origin/main",
+                 "BUG-1901") == (1, [
+        "regression-check: fail", "passed=0 waived=0 legacy=0 failed=1",
+        "BUG-1901: neither regression_tests nor regression_waiver is recorded"])
+
+
+def test_require_recorded_needs_committed_tests(make_project, tmp_path):
+    # Under --require-recorded a listed test must be committed in its repository's
+    # HEAD, and that copy must cite the id: what merges is the commits. A sibling's
+    # staged test was the hole, since the Gate's clean-tree guard covers only the
+    # primary checkout. Without the flag the worktree-and-index rules are unchanged.
+    api = tmp_path / "api"
+    _init_repo(api)
+    sib = Project(api)
+    sib.write("README.md", "api\n")
+    sib.commit("api")
+    p = make_project(REQUIRED + "repos:\n  api:\n    path: ../api\n", name="web")
+    p.test_file("tests/test_2001.py", "# BUG-2001\n")
+    p.bug("BUG-2001", status="open", tests='["tests/test_2001.py"]')
+    sib.test_file("tests/test_api.py", "# BUG-2002\n")
+    p.bug("BUG-2002", status="open", tests='["api:tests/test_api.py"]')
+    # Staged, not committed: passes the plain check, fails the recorded one.
+    for bug_id, entry in (("BUG-2001", "tests/test_2001.py"),
+                          ("BUG-2002", "api:tests/test_api.py")):
+        assert result_of(p, bug_id) == (rc.PASSED, [], 0), bug_id
+        assert result_of(p, bug_id, "--require-recorded") == (
+            rc.FAILED, ["%s: %s is not committed (not in HEAD)" % (bug_id, entry)], 1), bug_id
+    # Committed: passes both.
+    p.commit("record BUG-2001")
+    sib.commit("the sibling's test")
+    for bug_id in ("BUG-2001", "BUG-2002"):
+        assert result_of(p, bug_id, "--require-recorded") == (rc.PASSED, [], 0), bug_id
+    # Committed without the id, the id added only in the working tree (and the index).
+    sib.write("tests/test_old.py", "# an old test\n")
+    sib.commit("an old test")
+    sib.test_file("tests/test_old.py", "# an old test, now for BUG-2003\n")
+    p.bug("BUG-2003", status="open", tests='["api:tests/test_old.py"]')
+    assert result_of(p, "BUG-2003") == (rc.PASSED, [], 0)
+    assert result_of(p, "BUG-2003", "--require-recorded") == (
+        rc.FAILED, ["BUG-2003: api:tests/test_old.py does not cite BUG-2003 in its committed "
+                    "copy (HEAD)"], 1)
+    # A project in a subdirectory names its tests from its own directory.
+    mono = tmp_path / "mono"
+    _init_repo(mono)
+    proj = Project(mono / "sub" / "proj")
+    proj.config(REQUIRED)
+    proj.write("tests/test_2004.py", "# BUG-2004\n")
+    proj.bug("BUG-2004", status="open", tests='["tests/test_2004.py"]')
+    _commit_all(mono, "a project in a subdirectory")
+    code, lines = run_engine(["check", "--root", proj.path, "--require-recorded", "BUG-2004"])
+    assert (code, lines) == (0, ["regression-check: pass", "passed=1 waived=0 legacy=0 failed=0"])
 
 
 def test_unquoted_waiver_is_the_wrong_type(make_project):
@@ -1258,7 +1369,7 @@ def test_symlinks_out_of_the_root_are_refused(make_project, tmp_path):
     b.commit("config")
     shutil.rmtree(str(b.root / ".adlc"))
     os.symlink(str(outside), str(b.root / ".adlc"))
-    assert b.run("check", "--base", "main") == (
+    assert b.run("check", "--base", "refs/heads/main") == (
         2, ["regression-check: error", ".adlc resolves outside the project root"])
 
     # A disk config that is a symlink out of the root is an error, never followed.
@@ -1316,7 +1427,7 @@ def test_git_that_cannot_run_fails_the_bug(make_project, monkeypatch, tmp_path):
     code, lines = p.run("check")
     assert (code, lines[1]) == (1, "passed=0 waived=0 legacy=0 failed=1")
     # With --base, a git that cannot run is an error, never off.
-    code, lines = p.run("mode", "--base", "main")
+    code, lines = p.run("mode", "--base", "refs/heads/main")
     assert (code, lines[0]) == (2, "regression-test: error")
     assert "git could not be run" in lines[1]
 
