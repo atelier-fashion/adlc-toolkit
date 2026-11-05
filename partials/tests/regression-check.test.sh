@@ -358,11 +358,21 @@ out=$(ADLC_TOOLKIT_ROOT="$SANDBOX/selfload-link"; export ADLC_TOOLKIT_ROOT; adlc
 check "wrapper_errors_never_read_as_off: ADLC_TOOLKIT_ROOT named through a symlink: rc" 2 "$rc"
 check "wrapper_errors_never_read_as_off: the planted engine never ran" "no" "$([ -e "$SELF_RAN" ] && echo yes || echo no)"
 # The symlink route's self-hosting shape: the toolkit's own checkout as the root,
-# with ~/.claude/skills pointing at it. The engine is inside the tree, so it is refused.
+# with ~/.claude/skills pointing at it. That tree IS the install, so it runs (benign
+# path): /bugfix on the toolkit itself must not stop here.
 out=$(cd "$TOOLKIT" && adlc_regression_check mode 2>/dev/null); rc=$?
-check "wrapper_errors_never_read_as_off: the install's own checkout as the root: rc" 2 "$rc"
-check "wrapper_errors_never_read_as_off: the install's own checkout as the root: output" "regression-test: error
+check "install_checkout_is_exempt: the install's own checkout as the root: rc" 0 "$rc"
+check "install_checkout_is_exempt: the install's own checkout as the root: verdict" "regression-test: off" "$(nth "$out" 1)"
+out=$(cd "$TOOLKIT" && ADLC_TOOLKIT_ROOT="$TOOLKIT"; export ADLC_TOOLKIT_ROOT; adlc_regression_check mode 2>/dev/null); rc=$?
+check "install_checkout_is_exempt: ADLC_TOOLKIT_ROOT naming the same install: rc" 0 "$rc"
+# The exemption is that install only: the same checkout reached through a root that
+# is not the symlink's target is still the tree's own copy, and stays refused.
+out=$(HOME="$SANDBOX/emptyhome"; export HOME; ADLC_TOOLKIT_ROOT="$TOOLKIT"; export ADLC_TOOLKIT_ROOT; cd "$TOOLKIT" && adlc_regression_check mode 2>/dev/null); rc=$?
+check "install_checkout_is_exempt: no symlink install, same tree: rc" 2 "$rc"
+check "install_checkout_is_exempt: no symlink install, same tree: output" "regression-test: error
 the engine is inside the tree under check" "$out"
+out=$(ADLC_TOOLKIT_ROOT="$R2"; export ADLC_TOOLKIT_ROOT; cd "$TOOLKIT" && adlc_regression_check check --root "$R2" 2>/dev/null); rc=$?
+check "install_checkout_is_exempt: a planted engine in another tree: rc" 2 "$rc"
 
 # --- root_inside_toolkit (benign path) --------------------------------------
 # The toolkit's own layout: worktrees under <root>/.claude/worktrees/. The engine

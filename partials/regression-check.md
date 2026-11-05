@@ -114,12 +114,15 @@ must never be judged by code it can edit, and an engine the fix can edit could
 print `off` and switch its own gate off (LESSON-718). A root that does not
 resolve is left to the engine, which reports it as an error.
 
-One consequence on the symlink route: the clone behind the skills symlink is
-both the installed toolkit and, when the session runs in it, the tree
-under check. Run there, `adlc_regression_check` is refused, for `mode` as well as
-`check`. Run the toolkit's own `/bugfix` from a worktree, as `/proceed` already
-runs its lane check: a worktree under the clone (`.worktrees/`, `.claude/worktrees/`)
-carries its own copy of the engine but not the installed one, so the check runs.
+One exemption, the symlink route's own clone. The clone behind the skills
+symlink is both the installed toolkit and, when the session runs in it, the tree
+under check. When the skills symlink resolves to the tree under check, the engine
+is that install's, and `ADLC_TOOLKIT_ROOT` is unset or names the same directory,
+the wrapper runs: the skill text calling the gate is read from that same tree, so
+refusing would protect nothing and would stop `/bugfix` on the toolkit itself.
+Any other root that contains the engine stays refused. A worktree under the clone
+(`.worktrees/`, `.claude/worktrees/`) carries its own copy of the engine but not
+the installed one, so it is not inside-the-tree at all.
 
 ## Interpreter
 

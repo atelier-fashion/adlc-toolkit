@@ -139,6 +139,22 @@ adlc_regression_check() {
       "$adlc_rgc_root_dir" | "$adlc_rgc_root_dir"/*) adlc_rgc_inside=1 ;;
     esac
     if [ "$adlc_rgc_root_dir" = / ]; then adlc_rgc_inside=1; fi
+    # One exemption: the symlink install's own checkout. When ~/.claude/skills
+    # resolves to the tree under check and the engine is that install's (no
+    # ADLC_TOOLKIT_ROOT pointing anywhere else), the tree IS the installed toolkit:
+    # the skill text calling this gate is read from the same tree, so refusing
+    # protects nothing, and it would stop /bugfix on the toolkit itself. A root
+    # named by ADLC_TOOLKIT_ROOT, a vendored copy, or any other tree stays refused.
+    if [ "$adlc_rgc_inside" = 1 ] && [ -n "${HOME:-}" ]; then
+      adlc_rgc_sym_dir=$(CDPATH= cd -P -- "$HOME/.claude/skills" 2>/dev/null && pwd -P) || adlc_rgc_sym_dir=  # adlc-home: alias
+      if [ -n "$adlc_rgc_sym_dir" ] && [ "$adlc_rgc_sym_dir" = "$adlc_rgc_root_dir" ] && [ "$adlc_rgc_eng_dir" = "$adlc_rgc_sym_dir/tools/adlc" ]; then
+        adlc_rgc_tk_dir=$adlc_rgc_sym_dir
+        if [ -n "${ADLC_TOOLKIT_ROOT:-}" ]; then
+          adlc_rgc_tk_dir=$(CDPATH= cd -P -- "$ADLC_TOOLKIT_ROOT" 2>/dev/null && pwd -P) || adlc_rgc_tk_dir=
+        fi
+        if [ "$adlc_rgc_tk_dir" = "$adlc_rgc_sym_dir" ]; then adlc_rgc_inside=0; fi
+      fi
+    fi
     if [ "$adlc_rgc_inside" = 1 ]; then
       echo "adlc_regression_check: the engine at ${adlc_rgc_script%/regression_check.py}/ is inside the tree under check ($adlc_rgc_root); it would check itself — point ADLC_TOOLKIT_ROOT at the installed toolkit, or run from a tree that does not contain it" >&2
       _adlc_regression_check_error "$adlc_rgc_prefix" 'the engine is inside the tree under check'
