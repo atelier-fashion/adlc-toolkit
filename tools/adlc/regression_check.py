@@ -1130,8 +1130,20 @@ def report_committed_reason(root, name):
     merges the commits. Requiring the disk copy to equal the committed one
     judges exactly what merges.
     """
-    rel = "%s/%s" % (BUGS_RELDIR, name)
-    proc = _git(root, ["ls-tree", "-z", _COMMITTED_REV, "--", rel])
+    full = os.path.join(root, *BUGS_RELDIR.split("/"), name)
+    proc = _git(root, ["rev-parse", "--show-toplevel"])
+    if proc is None:
+        return "cannot be checked: git could not be run"
+    if proc.returncode != 0:
+        return "cannot be checked: the project root is in no git work tree"
+    top = os.path.realpath(os.fsdecode(proc.stdout.rstrip(b"\n")))
+    # The real path, so a committed symlink on the way (a linked .adlc that
+    # stays inside the repository) names the file git actually stores.
+    rel = os.path.relpath(os.path.realpath(full), top)
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):
+        return "resolves outside its repository"
+    rel = rel.replace(os.sep, "/")
+    proc = _git(top, ["ls-tree", "-z", "--full-tree", _COMMITTED_REV, "--", rel])
     if proc is None:
         return "cannot be checked: git could not be run"
     if proc.returncode != 0 or not proc.stdout:
@@ -1139,13 +1151,13 @@ def report_committed_reason(root, name):
     mode = proc.stdout.split(b" ", 1)[0]
     if mode not in (b"100644", b"100755"):
         return "is not a regular file in HEAD"
-    proc = _git(root, ["cat-file", "blob", "%s:./%s" % (_COMMITTED_REV, rel)])
+    proc = _git(top, ["cat-file", "blob", "%s:%s" % (_COMMITTED_REV, rel)])
     if proc is None:
         return "cannot be checked: git could not be run"
     if proc.returncode != 0:
         return "is not committed (not in HEAD); commit it"
     try:
-        with open(os.path.join(root, *rel.split("/")), "rb") as handle:
+        with open(full, "rb") as handle:
             data = handle.read()
     except OSError as exc:
         return "cannot be read (%s)" % _reason(exc)
