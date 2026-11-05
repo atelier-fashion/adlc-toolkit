@@ -1156,7 +1156,8 @@ def test_require_recorded_needs_committed_tests(make_project, tmp_path):
                           ("BUG-2002", "api:tests/test_api.py")):
         assert result_of(p, bug_id) == (rc.PASSED, [], 0), bug_id
         assert result_of(p, bug_id, "--require-recorded") == (
-            rc.FAILED, ["%s: %s is not committed (not in HEAD)" % (bug_id, entry)], 1), bug_id
+            rc.FAILED, ["%s: the bug report is not committed (not in HEAD); commit it; "
+                        "%s is not committed (not in HEAD)" % (bug_id, entry)], 1), bug_id
     # Committed: passes both.
     p.commit("record BUG-2001")
     sib.commit("the sibling's test")
@@ -1167,6 +1168,7 @@ def test_require_recorded_needs_committed_tests(make_project, tmp_path):
     sib.commit("an old test")
     sib.test_file("tests/test_old.py", "# an old test, now for BUG-2003\n")
     p.bug("BUG-2003", status="open", tests='["api:tests/test_old.py"]')
+    p.commit("record BUG-2003")
     assert result_of(p, "BUG-2003") == (rc.PASSED, [], 0)
     assert result_of(p, "BUG-2003", "--require-recorded") == (
         rc.FAILED, ["BUG-2003: api:tests/test_old.py does not cite BUG-2003 in its committed "
@@ -1444,3 +1446,29 @@ def test_unnamed_run_fails_duplicate_ids(make_project):
     assert p.run("check") == (1, ["regression-check: fail",
                                   "passed=0 waived=0 legacy=0 failed=2", reason, reason])
     assert result_of(p, "BUG-1801") == (rc.FAILED, [reason], 1)
+
+
+def test_require_recorded_needs_the_report_committed_as_on_disk(make_project):
+    # The report is read from the working tree, and the Gate's clean-tree guard
+    # trusts git status, which a skip-worktree (or assume-unchanged) entry
+    # silences. A waiver written only on disk and hidden that way must not pass
+    # the recorded check: the PR merges the commits, not the disk copy.
+    p = make_project(REQUIRED)
+    p.bug("BUG-2101", status="open")
+    p.commit("BUG-2101 with nothing recorded")
+    rel = ".adlc/bugs/BUG-2101-fixture.md"
+    assert result_of(p, "BUG-2101", "--require-recorded") == (
+        rc.FAILED, ["BUG-2101: neither regression_tests nor regression_waiver is recorded"], 1)
+    p.bug("BUG-2101", status="open", waiver='"only on disk"')
+    subprocess.run(["git", "-C", p.path, "update-index", "--skip-worktree", rel], check=True)
+    assert subprocess.run(["git", "-C", p.path, "status", "--porcelain"],
+                          capture_output=True, check=True).stdout == b""
+    # The plain check still judges the disk copy; the recorded one refuses it.
+    assert result_of(p, "BUG-2101") == (rc.WAIVED, [], 0)
+    assert result_of(p, "BUG-2101", "--require-recorded") == (
+        rc.FAILED, ["BUG-2101: the bug report differs from its committed copy (HEAD); "
+                    "commit it"], 1)
+    # Committed as it stands, the waiver counts.
+    subprocess.run(["git", "-C", p.path, "update-index", "--no-skip-worktree", rel], check=True)
+    p.commit("record the waiver")
+    assert result_of(p, "BUG-2101", "--require-recorded") == (rc.WAIVED, [], 0)

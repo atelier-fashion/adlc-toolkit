@@ -128,7 +128,8 @@ something shorter.
 | `regression-check: error` | stops exactly as for `fail`: the check could not decide, so the bug is not resolved |
 
 Phase 6 passes `--require-recorded` and the bug's id, so a bug that recorded
-neither a test nor a waiver fails there instead of reading as legacy (BR-13).
+neither a test nor a waiver fails there instead of reading as legacy (BR-13),
+and the report and each listed test must be committed as they stand on disk.
 An operator or CI run passes neither, so history never fails (BR-9, AC-11).
 
 ## The tree under check

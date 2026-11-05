@@ -959,6 +959,14 @@ resolves from itself. The primary's own id (`primary: true`) and no prefix both
 mean this repo. An undeclared id or a sibling that isn't cloned fails, naming
 it.
 
+Under `--require-recorded` the bug report itself must also be committed as it
+stands: its bytes on disk must equal a regular file at `HEAD`, or it fails with
+`the bug report is not committed (not in HEAD); commit it` or `the bug report
+differs from its committed copy (HEAD); commit it`. The report is read from the
+working tree, and `git status`, which `/bugfix`'s clean-tree guard trusts, says
+nothing about a file marked `skip-worktree` or `assume-unchanged`, so a waiver
+written only on disk would otherwise be judged though the PR merges the commits.
+
 The verdict on each bug depends only on the working tree, git's index and,
 under `--require-recorded`, each repository's own `HEAD`. The engine never
 fetches and never diffs. The only other ref it reads is the one a caller names

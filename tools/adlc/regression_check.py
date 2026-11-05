@@ -1119,6 +1119,41 @@ def committed_reason(repo_dir, rel, bug_id):
     return None
 
 
+def report_committed_reason(root, name):
+    """``None`` when the bug report ``name`` on disk is byte-identical to a
+    regular file committed at ``HEAD``, else why not.
+
+    Only under ``--require-recorded``. The report is read from the working
+    tree, and the Gate's clean-tree guard trusts ``git status``, which says
+    nothing about a file marked ``skip-worktree`` or ``assume-unchanged``: a
+    waiver or test list written only on disk would be judged, though the PR
+    merges the commits. Requiring the disk copy to equal the committed one
+    judges exactly what merges.
+    """
+    rel = "%s/%s" % (BUGS_RELDIR, name)
+    proc = _git(root, ["ls-tree", "-z", _COMMITTED_REV, "--", rel])
+    if proc is None:
+        return "cannot be checked: git could not be run"
+    if proc.returncode != 0 or not proc.stdout:
+        return "is not committed (not in HEAD); commit it"
+    mode = proc.stdout.split(b" ", 1)[0]
+    if mode not in (b"100644", b"100755"):
+        return "is not a regular file in HEAD"
+    proc = _git(root, ["cat-file", "blob", "%s:./%s" % (_COMMITTED_REV, rel)])
+    if proc is None:
+        return "cannot be checked: git could not be run"
+    if proc.returncode != 0:
+        return "is not committed (not in HEAD); commit it"
+    try:
+        with open(os.path.join(root, *rel.split("/")), "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return "cannot be read (%s)" % _reason(exc)
+    if data != proc.stdout:
+        return "differs from its committed copy (HEAD); commit it"
+    return None
+
+
 # --- classification (BR-9) ------------------------------------------------------
 
 #: ``<repo-id>:`` at the start of an entry (ADR-691-D).
@@ -1291,6 +1326,17 @@ def _duplicate_reason(count):
     return "%d reports in %s carry this id" % (count, BUGS_RELDIR)
 
 
+def _classify(checker, root, report, require_recorded):
+    """:meth:`Checker.classify`, plus, under ``--require-recorded``, the rule
+    that the report itself is committed as it stands on disk."""
+    cls, reasons = checker.classify(report, require_recorded)
+    if require_recorded and not report.errors:
+        why = report_committed_reason(root, report.name)
+        if why:
+            return FAILED, ["the bug report " + why] + (reasons if cls == FAILED else [])
+    return cls, reasons
+
+
 def check(root, ids=(), require_recorded=False, ref=None):
     """Run the check. Returns ``(setting, results)``; ``results`` is ``None`` when off.
 
@@ -1327,7 +1373,7 @@ def check(root, ids=(), require_recorded=False, ref=None):
                 results.append((bug_id, FAILED, [_duplicate_reason(len(found))]))
                 continue
             report = read_report(os.path.join(bugs_dir, found[0]), found[0])
-            cls, reasons = checker.classify(report, require_recorded)
+            cls, reasons = _classify(checker, root, report, require_recorded)
             results.append((report.label, cls, reasons))
         return setting, results
     for name in names:
@@ -1339,7 +1385,7 @@ def check(root, ids=(), require_recorded=False, ref=None):
             # The named run's verdict for this id, so the two runs agree.
             results.append((report.label, FAILED, [_duplicate_reason(carriers)]))
             continue
-        cls, reasons = checker.classify(report, require_recorded)
+        cls, reasons = _classify(checker, root, report, require_recorded)
         results.append((report.label, cls, reasons))
     return setting, results
 

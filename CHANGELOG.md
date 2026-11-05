@@ -82,7 +82,8 @@ is cut per `RELEASING.md`.
   reason. An `off` project exits 0 without opening a bug report. A bug with neither field,
   which is every bug resolved before this release, reads as legacy: counted, never failed,
   unless `--require-recorded` is passed, which also requires each listed test to be
-  committed, citing the id, in its repo's `HEAD`. The verdict reads only the working tree
+  committed, citing the id, in its repo's `HEAD`, and the bug report to equal its
+  committed copy, so a `skip-worktree` entry cannot hide a waiver written only on disk. The verdict reads only the working tree
   and git's index (and that `HEAD`), never a remote ref, so every branch with the same bugs
   and tests gets the same answer; `--base` takes a full ref (`refs/remotes/...` or
   `refs/heads/...`, never a short name a tag could shadow) and reads only the setting and
