@@ -1,7 +1,7 @@
 ---
 id: TASK-239
 title: "`partials/regression-check.sh` wrapper, its contract and its shell harness"
-status: draft
+status: complete
 parent: REQ-691
 created: 2026-11-04
 updated: 2026-11-04
@@ -23,10 +23,10 @@ Give skill fences one sourceable function, `adlc_regression_check <verb> [args]`
 
 ## Acceptance Criteria
 
-- [ ] Under bash, zsh, `/bin/sh` and dash, `adlc_regression_check mode` prints `regression-test: off` for a repo with no config, and `check` prints `regression-check: off`.
-- [ ] With a config setting `required`, a passing bug gives `regression-check: pass` rc 0, and a failing one gives `regression-check: fail` rc 1 with its `BUG-nnn:` line.
-- [ ] A missing engine, a relative `ADLC_TOOLKIT_ROOT`, and an engine stubbed to print nothing each give `regression-check: error` and rc 2.
-- [ ] `sh partials/tests/run.sh` passes with the new harness registered.
+- [x] Under bash, zsh, `/bin/sh` and dash, `adlc_regression_check mode` prints `regression-test: off` for a repo with no config, and `check` prints `regression-check: off`.
+- [x] With a config setting `required`, a passing bug gives `regression-check: pass` rc 0, and a failing one gives `regression-check: fail` rc 1 with its `BUG-nnn:` line.
+- [x] A missing engine, a relative `ADLC_TOOLKIT_ROOT`, and an engine stubbed to print nothing each give `regression-check: error` and rc 2.
+- [x] `sh partials/tests/run.sh` passes with the new harness registered.
 
 ## Verification
 

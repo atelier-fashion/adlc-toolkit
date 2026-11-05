@@ -158,6 +158,22 @@ behavior. Examples:
   `lanes.lite` config block, and the `<!-- lane-vocabulary -->` block that
   `tools/lint-skills`' `lane-vocabulary` check reads. Tested by
   `tests/lane-check.test.sh` under bash, zsh, sh and dash.
+- `regression-check.sh` — the regression-test setting and check (REQ-691).
+  Defines `adlc_regression_check <mode|check> [args…]`, run by `/bugfix` before
+  Phase 1 (`mode`) and before its Phase 6 merge (`check --require-recorded
+  BUG-nnn`). It runs `tools/adlc/regression_check.py` and passes its stdout and
+  exit code through unchanged. `mode` prints `regression-test: required` or
+  `off` with rc 0, or `regression-test: error` with rc 2. `check` prints
+  `regression-check: pass` or `off` (rc 0), `fail` (rc 1) or `error` (rc 2),
+  then the counts line and one `BUG-nnn:` line per failure. An error is never a
+  pass and never off: a run that breaks the verb's contract (another exit code,
+  no verdict, or a verdict its code or verb does not mean) becomes the verb's
+  error verdict and rc 2. The engine always comes from the installed toolkit,
+  and the wrapper refuses one that sits inside the tree under check. It resolves
+  the interpreter with `forge.sh`'s `_adlc_forge_python`, as `lane-check.sh`
+  does. The companion `regression-check.md` holds the return contract and what a
+  calling fence does with each answer. Tested by `tests/regression-check.test.sh`
+  under bash, zsh, sh and dash.
 - `lessons.sh` — LessonSet retrieval for the pipeline phases (REQ-647). Defines
   `adlc_lessons <select|text|log-line|ack-check> [args…]`, run by `/proceed`
   (Step 0, each Phase-4 task, Phase 5), `/bugfix` Phase 2, standalone
