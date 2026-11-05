@@ -82,6 +82,13 @@ def _cmd_renumber(argv):
     return renumber.main(argv)
 
 
+def _cmd_regression_check(argv):
+    """Lazy-import the regression-test check and delegate to its main() (REQ-691)."""
+    import regression_check  # noqa: E402  (lazy so --version works even if it breaks)
+
+    return regression_check.main(argv)
+
+
 # Data-driven subcommand registry. Adding a command = appending one entry;
 # dispatch below never changes. Each handler takes the remaining argv (the
 # args AFTER the subcommand name) and returns an int exit code.
@@ -107,6 +114,11 @@ SUBCOMMANDS = {
         "handler": _cmd_harness,
         "help": "agent harnesses: detect [--json] (read-only); probe <name> (§6 experiments); "
                 "install | render | doctor | drift --harness <name> (REQ-657 adapters)",
+    },
+    "regression-check": {
+        "handler": _cmd_regression_check,
+        "help": "bug regression tests: mode | check [--require-recorded] [BUG-nnn ...] "
+                "(REQ-691)",
     },
 }
 

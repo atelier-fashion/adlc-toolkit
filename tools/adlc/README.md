@@ -40,6 +40,7 @@ adlc --version
 | `harness probe` | The plan's §6 experiments against one installed harness, with one committed JSON result per harness (REQ-664, below). |
 | `sprint-exec run \| resume \| status \| approve \| reject \| answer \| abort \| reissue` | The `/sprint` exec engine, a program that runs one headless harness per REQ and performs every one-way move itself (REQ-659, below). |
 | `harness render \| install \| doctor \| drift` | The adapter framework: render any surface through `harness/<name>.yml`, write a harness's user-level surfaces, `render-currency:<name>`, and the project layer's template-posture drift (REQ-657, below). |
+| `regression-check mode \| check` | Read-only: the project's `bugfix.regression_test` setting, and whether every resolved bug still has its regression test or a waiver (REQ-691, `regression_check.py` below). |
 
 Each is one entry in the data-driven `SUBCOMMANDS` table (REQ-519 BR-11).
 
@@ -850,6 +851,73 @@ carrying on without lessons. Contract: `partials/lessons.md`.
 **Tests.** `tools/adlc/tests/test_lessons.py`. The corpus cases (the LESSON-604
 reproduction, the 40-line cap over every lesson) read this repo's own
 `.adlc/knowledge/lessons`.
+
+## `regression_check.py` (REQ-691)
+
+The regression-test check: it reads a project's `bugfix.regression_test`
+setting and sorts its bug reports into passed, waived, legacy and failed
+(REQ-691 architecture ADR-691-A to ADR-691-D). People and CI run it as
+`adlc regression-check`; skill fences reach it through
+`partials/regression-check.sh`, which runs the installed toolkit's copy. It
+reads `.adlc/` under `--root`, which defaults to the current directory, and
+writes nothing. Standard library only, plus the sibling `harness_yaml.py`.
+
+```bash
+adlc regression-check mode  [--root DIR]
+adlc regression-check check [--root DIR] [--require-recorded] [BUG-nnn ...]
+```
+
+| Verb | First line | rc |
+|---|---|---|
+| `mode` | `regression-test: required` or `off`, then a line saying whether the key was set, absent, or there is no config | 0; 2 with `regression-test: error` |
+| `check` | `regression-check: pass` / `fail`, then `passed=N waived=N legacy=N failed=N`, then one `BUG-nnn: <reason>` line per failed bug | 0 pass, 1 fail |
+| `check`, off project | `regression-check: off`, then a line saying regression tests are off; no bug report is opened | 0 |
+| either, error | `regression-check: error` (or `regression-test: error`), then the reason; no counts line, because none was made | 2 |
+
+**The setting.** A missing `.adlc/config.yml`, or one that names
+`regression_test` only in whole-line comments, is `off` without being parsed
+(the `lane_check.py` byte prefilter; a backslash or a NUL on a non-comment line
+forces a parse). Otherwise the file is parsed with `harness_yaml.loads`, so no
+PyYAML is needed. `bugfix` must be a mapping whose only key is
+`regression_test`, set to `required` or `off`. Anything else, a file the YAML
+subset refuses included, is rc 2 naming the key, the value and the two allowed
+values. An unreadable setting is never read as `off`.
+
+**The bugs.** Without ids, every `.adlc/bugs/BUG-*.md` whose status is
+`resolved` or `closed`; with ids, exactly those reports, whatever their status,
+and an id with no report fails. Frontmatter is read by the engine's own strict
+one-line reader, not `lessons.py`'s lenient one. A key given twice, a block
+list, an unclosed quote or flow list, a misspelt key and a wrong type each fail
+the report. `regression_tests` is a flow list of paths; `regression_waiver` is
+a string. An empty list, an empty string and an empty value all count as
+absent, so a report copied from the bug template and never filled reads as
+legacy.
+
+| Result | When |
+|---|---|
+| passed | `regression_tests` lists at least one path, and every path passes the rules below |
+| waived | `regression_waiver` is non-blank and `regression_tests` is empty |
+| legacy | neither is present. Reported, never failed, unless `--require-recorded` (which `/bugfix` Phase 6 passes) |
+| failed | anything else: both set, a whitespace-only waiver with no tests, a bad path, a malformed field |
+
+**The path rules.** A path is relative to its repository: no leading `/`, no
+`..` segment. It must exist, not be a symlink, resolve inside the repository,
+be a regular file, be tracked (`git ls-files --error-unmatch` with literal
+pathspecs), and its working-tree bytes must cite the bug id as `BUG-<n>` with
+no digit after it, so `BUG-26` never matches `BUG-261`. A cross-repo entry is
+`<repo-id>:<path>`, resolved through `repos.<repo-id>.path` in the same config,
+relative to the root. The primary's own id (`primary: true`) and no prefix both
+mean this repo. An undeclared id or a sibling that isn't cloned fails, naming
+it.
+
+The verdict depends only on the working tree and git's index. The engine never
+fetches, never reads a remote ref and never diffs, so two branches with the
+same bugs and tests get the same answer. Output names bug ids, the paths a
+report lists and reasons, never a file's contents or the root's absolute path.
+
+**Tests.** `tools/adlc/tests/test_regression_check.py`. Every case builds its
+repository, `.adlc/bugs/` and config under `tmp_path`, because a fixture bug
+report in this tree would become a real BUG record.
 
 ## Running the tests
 

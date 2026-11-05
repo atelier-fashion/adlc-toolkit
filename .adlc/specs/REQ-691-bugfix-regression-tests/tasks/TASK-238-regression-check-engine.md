@@ -1,7 +1,7 @@
 ---
 id: TASK-238
 title: "Regression-check engine and `adlc regression-check` subcommand"
-status: draft
+status: complete
 parent: REQ-691
 created: 2026-11-04
 updated: 2026-11-04
@@ -22,14 +22,14 @@ Build `tools/adlc/regression_check.py`, the stdlib-only engine that reads the pr
 
 ## Acceptance Criteria
 
-- [ ] `mode` returns `off` for a missing config, a config without the key, and a config whose only mention of the key is in a whole-line comment, without parsing in those cases.
-- [ ] `mode` returns `required` / `off` for those values and rc 2, with a message naming the key, the value and the allowed values, for any other value, a non-mapping `bugfix`, an unknown key under `bugfix`, and a file `harness_yaml` refuses.
-- [ ] `check` classifies passed, waived, legacy and every failed cause in BR-9, plus a duplicate key, a block-form list and an unclosed quote. It prints the verdict line, the counts line and one line per failure, with rc 0/1/2 as specified.
-- [ ] `check BUG-nnn` checks that bug whatever its status, and fails an id with no report. `--require-recorded` turns legacy into failed.
-- [ ] Path rules: an absolute path, a `..` segment, a symlink, an untracked file, and a file without the id each fail. `BUG-26` doesn't match a file citing only `BUG-261`.
-- [ ] A `<repo-id>:` path resolves through `repos.<id>.path`, and a missing clone or undeclared id fails, naming it.
-- [ ] The engine imports nothing outside the standard library and `tools/adlc`, and never calls `git fetch`, a remote ref or `git diff`.
-- [ ] `python3 -m pytest tools/adlc/tests/test_regression_check.py` passes and collects at least one case per row below.
+- [x] `mode` returns `off` for a missing config, a config without the key, and a config whose only mention of the key is in a whole-line comment, without parsing in those cases.
+- [x] `mode` returns `required` / `off` for those values and rc 2, with a message naming the key, the value and the allowed values, for any other value, a non-mapping `bugfix`, an unknown key under `bugfix`, and a file `harness_yaml` refuses.
+- [x] `check` classifies passed, waived, legacy and every failed cause in BR-9, plus a duplicate key, a block-form list and an unclosed quote. It prints the verdict line, the counts line and one line per failure, with rc 0/1/2 as specified.
+- [x] `check BUG-nnn` checks that bug whatever its status, and fails an id with no report. `--require-recorded` turns legacy into failed.
+- [x] Path rules: an absolute path, a `..` segment, a symlink, an untracked file, and a file without the id each fail. `BUG-26` doesn't match a file citing only `BUG-261`.
+- [x] A `<repo-id>:` path resolves through `repos.<id>.path`, and a missing clone or undeclared id fails, naming it.
+- [x] The engine imports nothing outside the standard library and `tools/adlc`, and never calls `git fetch`, a remote ref or `git diff`.
+- [x] `python3 -m pytest tools/adlc/tests/test_regression_check.py` passes and collects at least one case per row below.
 
 ## Verification
 
