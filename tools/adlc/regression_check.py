@@ -7,11 +7,13 @@ decided here; ``/bugfix`` keeps only the protocol. People and CI run it as
 ``adlc regression-check``; skill fences reach it through
 ``partials/regression-check.sh``, which runs the installed toolkit's copy::
 
-    python3 tools/adlc/regression_check.py mode  [--root DIR]
-    python3 tools/adlc/regression_check.py check [--root DIR] [--require-recorded] [BUG-nnn ...]
+    python3 tools/adlc/regression_check.py mode  [--root DIR] [--base REF]
+    python3 tools/adlc/regression_check.py check [--root DIR] [--base REF]
+                                                 [--require-recorded] [BUG-nnn ...]
 
 ``--root`` is the project root, the directory holding ``.adlc/``. It defaults
-to the current directory. Standard library only, plus the sibling
+to the current directory. ``--base`` names a commit whose ``.adlc/config.yml``
+supplies the setting and ``repos:`` (see The setting). Standard library only, plus the sibling
 ``harness_yaml.py``: the answer must be the same on every machine, including a
 plugin install with no delegate venv and so no PyYAML (ADR-691-A).
 
@@ -46,26 +48,44 @@ path, and an absolute path a report lists is named by its position instead.
 
 The setting (ADR-691-A)
 -----------------------
-``.adlc/config.yml`` in the working tree. A missing file is ``off`` (BR-1). A
-file whose bytes carry no ``regression_test`` outside whole-line comments is
-``off`` without being parsed, by the byte prefilter ``lane_check.may_carry_lanes``
+``.adlc/config.yml`` in the working tree, or, with ``--base REF``, the copy
+committed at ``REF`` (``git ls-tree`` and ``git cat-file`` at the root's
+repo-relative prefix), never the disk: a gate that reads the tree under check
+lets the branch switch its own gate off or re-point a sibling, so the
+``/bugfix`` Gate passes the integration branch (``lane_check.py``'s rule).
+``REF`` is branch-name characters only (``[A-Za-z0-9._/-]``, no ``..``, no
+leading ``-``); anything else is a usage error, and a ref that names no commit
+is an error. Bug reports and test files are still read from the working tree
+and the index (BR-12).
+
+A missing file is ``off`` (BR-1). A file whose bytes carry neither
+``regression_test`` nor ``bugfix`` outside whole-line comments is ``off``
+without being parsed, by the byte prefilter ``lane_check.may_carry_lanes``
 uses: a backslash (a quoted key spelled with escapes) or a NUL (a UTF-16 file)
 on a non-comment line forces a parse, which is the safe direction. Anything
 else is parsed by ``harness_yaml.loads``, the toolkit's stdlib closed-subset
-loader. ``bugfix`` must then be a mapping whose only key is
+loader. When the subset refuses the file, it stops the caller only if the file
+may still define the setting: ``regression_test`` shaped as a key anywhere,
+``bugfix`` as a top-level or flow key, or a double-quoted key holding a
+backslash, which an escape could spell as either. Otherwise (a backslash in a
+value, a ``>`` block, an anchor elsewhere) it cannot, and the setting is
+``off``. A parsed ``bugfix`` must be a mapping whose only key is
 ``regression_test``, with the value ``required`` or ``off``; an absent
 ``bugfix``, or a ``bugfix`` without the key, is ``off``. Everything else is an
-error: a file the subset refuses, a ``bugfix`` that is not a mapping, an
-unknown key under it, another value, a ``regression_test`` at the top level, a
-config that is a directory or a dangling symlink. A file that names the key
-and fails to parse stops the caller; it is never read as ``off``.
+error: a file that may define the setting and does not parse, one that is not
+UTF-8, a ``bugfix`` that is not a mapping, an unknown key under it (a typo
+included), another value, a ``regression_test`` at the top level, a config that
+is a directory, a dangling symlink, or a link that resolves outside the root.
 
 The bug reports (ADR-691-B)
 ---------------------------
 Without ids, every ``.adlc/bugs/BUG-*.md`` whose ``status`` is ``resolved`` or
 ``closed`` (the set ``/spec`` Step 1.6 uses). With ids, exactly those reports,
-whatever their status; an id with no report, or with two, is a failure. A
-report whose status cannot be read is checked, because it might be resolved.
+whatever their status; an id with no report, or with two, is a failure, and an
+unnamed run fails each in-scope report whose id another report also carries,
+with the same reason. A report whose status cannot be read is checked, because
+it might be resolved. A report that is a symlink fails without being opened,
+and a ``.adlc`` or ``.adlc/bugs`` that resolves outside the root is an error.
 
 Frontmatter is read by this module's own strict one-line reader, modelled on
 ``partials/lesson-check.sh``'s ``_alc_field``, not by ``lessons.py``'s lenient
@@ -76,7 +96,12 @@ other keys, except that any key given twice fails the report. One of the four
 keys fails the report when it is written in a spelling other than ``key: value``
 at column 0, when its value continues onto the next line (a block list), when
 a quote or a flow list is not closed on its line, or when its value is not the
-type the System Model gives it: a flow list of strings, and a string.
+type the System Model gives it: a flow list of strings, and a string, which
+for ``regression_waiver`` must be quoted (a plain ``false``, ``0`` or
+``reason: x`` means something different to every reader, LESSON-716). An
+indented line naming a read key is a misspelling only when no block is open
+above it: a key with no value on its line, or a ``|`` / ``>`` block scalar,
+opens one for every more-indented line below it (LESSON-404).
 
 Classification (BR-9): **passed** when ``regression_tests`` lists at least one
 path and every path passes the path rules; **waived** when
@@ -91,8 +116,12 @@ The path rules (ADR-691-C, ADR-691-D)
 -------------------------------------
 Each entry is a path relative to its repository, optionally prefixed
 ``<repo-id>:``. A prefix resolves through ``repos.<repo-id>.path`` in the same
-parse of the config, relative to the root; the primary's own id
-(``primary: true``) and no prefix both mean the root. An undeclared id, an
+parse of the config. A relative path is relative to the project's directory in
+the repository's main worktree, as ``/proceed`` resolves it from the primary
+checkout (``partials/id-alloc.sh``'s main-worktree rule, BUG-210), so a fix
+worktree under ``.worktrees/`` finds the same sibling; an absolute path is used
+as it is. The primary's own id (``primary: true``) and no prefix both mean the
+root. An undeclared id, an
 entry with no path, and a sibling that is not cloned at its path each fail,
 naming the repo. A prefix is a leading ``[A-Za-z0-9][A-Za-z0-9_.-]*:``, so a
 root-level file whose name holds a colon reads as a prefix and fails loudly.
@@ -102,9 +131,10 @@ symlink, resolves inside its repository, is a regular file, is tracked
 (``git ls-files --error-unmatch`` with literal pathspecs, its output equal to
 the path), and its working-tree bytes cite the bug id: ``BUG-<n>`` with no
 letter or digit before it and no digit after it, so BUG-26 never matches
-BUG-261. The verdict reads only the working tree and git's index. This module
-never fetches, never names a remote ref and never diffs (BR-12, LESSON-782),
-and git runs from a fixed argv, never through a shell.
+BUG-261. The verdict on a bug reads only the working tree and git's index. This
+module never fetches and never diffs, and the only ref it reads is the one a
+caller names with ``--base``, for the config alone (BR-12, LESSON-782). Git
+runs from a fixed argv, never through a shell.
 """
 
 import argparse
@@ -156,8 +186,17 @@ SOURCE_NO_CONFIG = "no-config"
 SOURCE_ABSENT = "absent"
 SOURCE_SET = "set"
 
-USAGE = ("regression_check.py mode [--root DIR] | "
-         "check [--root DIR] [--require-recorded] [BUG-nnn ...]")
+USAGE = ("regression_check.py mode [--root DIR] [--base REF] | "
+         "check [--root DIR] [--base REF] [--require-recorded] [BUG-nnn ...]")
+
+#: A ``--base`` ref: branch-name characters only, so it can never carry a
+#: revision suffix (``^``, ``~``, ``@{``), a path (``REF:path``), a range
+#: (``..``) or an option (a leading ``-``).
+_REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+_OID_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+_REGULAR_BLOB_MODES = (b"100644", b"100755")
+_SYMLINK_MODE = b"120000"
+_TREE_MODE = b"040000"
 
 
 class RegressionCheckError(Exception):
@@ -171,6 +210,9 @@ class RegressionCheckError(Exception):
 #: embeddings and isolates, the BOM, and lone surrogates (an undecodable byte
 #: in a file name). Each is written as an escape, so a path or a reason stays
 #: one printable line that no ``splitlines()`` reader splits (lane_check.py).
+#: A copy, not an import: this engine loads nothing but ``harness_yaml``, so a
+#: change to ``lane_check.py``'s import surface can never stop the gate.
+#: ``test_output_escaping_matches_lane_check`` pins the two copies together.
 _UNSAFE_RE = re.compile(
     "[\\\\\x00-\x1f\x7f-\x9f؜​-‏  ‪-‮"
     "⁦-⁩﻿\ud800-\udfff]")
@@ -195,6 +237,9 @@ def _reason(exc):
 
 
 def _type_name(value):
+    # lane_check._type_name with one deliberate difference: None is "empty", not
+    # "a null". Here it only ever names a key written with no value (`bugfix:`
+    # alone), and "bugfix ... is empty" is how its author would put it.
     if value is None:
         return "empty"
     if isinstance(value, bool):
@@ -213,12 +258,16 @@ def _type_name(value):
 # --- the setting (ADR-691-A) --------------------------------------------------
 
 #: Bytes whose presence means the config may carry the key: the word itself
-#: (bare, quoted, in a flow mapping, indented or in a comment), a backslash
-#: (a double-quoted key can spell it with escapes) and a NUL (a UTF-16 or
+#: (bare, quoted, in a flow mapping, indented or in a comment), ``bugfix``, so a
+#: ``bugfix:`` block is always validated and a misspelt key under it
+#: (``regresion_test``) stops rather than reading as off, a backslash (a
+#: double-quoted key can spell either with escapes) and a NUL (a UTF-16 or
 #: UTF-32 file carries the word as ``r\0e\0...``). A false positive only means
 #: the file is parsed and validated, the safe direction; a false negative would
 #: read a project's ``required`` as ``off``. lane_check.py's _LANES_MARKERS.
-_KEY_MARKERS = (b"regression_test", b"\\", b"\x00")
+_KEY_MARKERS = (b"regression_test", b"bugfix", b"\\", b"\x00")
+#: The same markers as text, for the per-line scan of a decoded config.
+_KEY_MARKER_TEXT = tuple(marker.decode("ascii") for marker in _KEY_MARKERS)
 
 #: Every character a YAML parser may treat as a line break. Splitting on a
 #: superset of the parser's breaks can only turn one line into several, and a
@@ -227,9 +276,10 @@ _YAML_LINE_BREAKS = re.compile("\r\n|[\r\n\x85  ]")
 
 
 def may_carry_setting(data):
-    """True unless the raw config bytes certainly carry no ``regression_test``.
+    """True unless the raw config bytes certainly carry no ``regression_test``
+    and no ``bugfix``.
 
-    Whole-line comments are skipped, so a config that only mentions the key in
+    Whole-line comments are skipped, so a config that only mentions either in
     a comment is not parsed. Bytes that are not UTF-8 are never skipped: the
     markers are searched in the raw bytes.
     """
@@ -244,20 +294,27 @@ def may_carry_setting(data):
     for line in _YAML_LINE_BREAKS.split(text):
         if line.lstrip(" \t").startswith("#"):
             continue
-        if any(marker.decode("ascii") in line for marker in _KEY_MARKERS):
+        if any(marker in line for marker in _KEY_MARKER_TEXT):
             return True
     return False
 
 
 class Setting(object):
-    """The resolved mode, where it came from, and the parsed config (or None)."""
+    """The resolved mode, where it came from, the parsed config (or None), and
+    the ``--base`` ref it was read at (``None``: the working tree)."""
 
-    __slots__ = ("mode", "source", "document")
+    __slots__ = ("mode", "source", "document", "ref")
 
-    def __init__(self, mode, source, document):
+    def __init__(self, mode, source, document, ref=None):
         self.mode = mode
         self.source = source
         self.document = document
+        self.ref = ref
+
+
+def config_where(ref=None):
+    """How output names the config: ``.adlc/config.yml``, ``... at <ref>``."""
+    return CONFIG_RELPATH if ref is None else "%s at %s" % (CONFIG_RELPATH, ref)
 
 
 def _setting_error(detail):
@@ -275,61 +332,105 @@ def _describe(value):
     return _type_name(value)
 
 
-def _parse_config(data):
+#: After the subset refuses a config, the shapes that mean it may still define
+#: the setting: ``regression_test`` as a key anywhere (block, flow, quoted or
+#: indented), ``bugfix`` as a top-level or flow key, and a double-quoted key
+#: holding a backslash, whose escapes could spell either name (the subset
+#: decodes no ``\x`` escape, so such a file never parses here). Searched on
+#: every line that is not a whole-line comment, with NULs removed, so a UTF-16
+#: file's ``b\0u\0g\0f\0i\0x\0:`` still reads as ``bugfix:``.
+_SETTING_KEY_SHAPES = (
+    re.compile(r"""regression_test["']?[ \t]*:"""),
+    re.compile(r"""^["']?bugfix["']?[ \t]*:"""),
+    re.compile(r"""[{,][ \t]*["']?bugfix["']?[ \t]*:"""),
+    re.compile(r'''"[^"]*\\[^"]*"[ \t]*:'''),
+)
+
+
+def may_define_setting(text):
+    """True when ``text``, a config the subset refused, may define the setting.
+
+    False only when neither key is written as a key anywhere: the prefilter's
+    false positives (a backslash in a value, the word in a trailing comment)
+    then read as ``off`` rather than stopping a project that never set it.
+    """
+    for line in _YAML_LINE_BREAKS.split(text.replace("\x00", "")):
+        if line.lstrip(" \t").startswith("#"):
+            continue
+        if any(shape.search(line) for shape in _SETTING_KEY_SHAPES):
+            return True
+    return False
+
+
+def _parse_config(data, ref=None):
+    """The parsed config, or ``None`` when the bytes cannot define the setting."""
+    where = config_where(ref)
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
-        raise _setting_error("%s is not UTF-8 text" % CONFIG_RELPATH)
+        # Nothing in it can be seen, so nothing can be ruled out (LESSON-716).
+        raise _setting_error("%s is not UTF-8 text" % where)
     if text.startswith("﻿"):
         text = text[1:]
+    if "\x00" in text:
+        if may_define_setting(text):
+            raise _setting_error("%s holds NUL bytes; save it as UTF-8" % where)
+        return None
     text = text.replace("\r\n", "\n")
     try:
         return harness_yaml.loads(text, CONFIG_RELPATH)
     except harness_yaml.YamlError as exc:
-        raise _setting_error("the config does not parse (%s)" % exc)
+        if not may_define_setting(text):
+            return None
+        raise _setting_error("the config%s does not parse (%s)"
+                             % ("" if ref is None else " at %s" % ref, exc))
 
 
-def setting_from_document(document):
+def setting_from_document(document, where=CONFIG_RELPATH):
     """``(mode, source)`` from a parsed config; raises on anything else."""
     if not isinstance(document, dict):
-        raise _setting_error("%s is %s, not a mapping"
-                             % (CONFIG_RELPATH, _type_name(document)))
+        raise _setting_error("%s is %s, not a mapping" % (where, _type_name(document)))
     if "regression_test" in document:
         raise _setting_error("regression_test is a top-level key in %s; it "
-                             "belongs under bugfix:" % CONFIG_RELPATH)
+                             "belongs under bugfix:" % where)
     if "bugfix" not in document:
         return MODE_OFF, SOURCE_ABSENT
     section = document["bugfix"]
     if not isinstance(section, dict):
         raise _setting_error("bugfix in %s is %s; it must be a mapping holding "
-                             "regression_test" % (CONFIG_RELPATH, _type_name(section)))
+                             "regression_test" % (where, _type_name(section)))
     unknown = [key for key in section if key != "regression_test"]
     if unknown:
         raise _setting_error("unknown key%s %s under bugfix in %s (bugfix holds "
                              "only regression_test)" % (
                                  "s" if len(unknown) > 1 else "",
-                                 ", ".join("'%s'" % k for k in unknown),
-                                 CONFIG_RELPATH))
+                                 ", ".join("'%s'" % k for k in unknown), where))
     if "regression_test" not in section:
         return MODE_OFF, SOURCE_ABSENT
     value = section["regression_test"]
     if isinstance(value, str) and value in MODES:
         return value, SOURCE_SET
-    raise _setting_error("%s in %s is %s" % (SETTING_KEY, CONFIG_RELPATH, _describe(value)))
+    raise _setting_error("%s in %s is %s" % (SETTING_KEY, where, _describe(value)))
 
 
-def read_setting(root):
-    """The project's :class:`Setting`. Raises :class:`RegressionCheckError`.
+def inside_root(root, path):
+    """True when ``path``, every symlink followed, stays under ``root``."""
+    real_root = os.path.realpath(root)
+    return os.path.commonpath([real_root, os.path.realpath(path)]) == real_root
 
-    A missing config is ``off``. One that exists but cannot be read, or is not
-    a regular file (a directory, a symlink that does not resolve), is an error,
-    never ``off`` (BR-17).
+
+def read_disk_config(root):
+    """The bytes of the working tree's config, or ``None`` when there is none.
+
+    One that exists but cannot be read, or is not a regular file (a directory,
+    a symlink that does not resolve), or resolves outside the root, is an
+    error, never ``off`` (BR-17). Its target is never named.
     """
     path = os.path.join(root, *CONFIG_RELPATH.split("/"))
     try:
         info = os.lstat(path)
     except FileNotFoundError:
-        return Setting(MODE_OFF, SOURCE_NO_CONFIG, None)
+        return None
     except OSError as exc:
         raise _setting_error("%s cannot be read (%s)" % (CONFIG_RELPATH, _reason(exc)))
     if stat.S_ISLNK(info.st_mode):
@@ -337,29 +438,127 @@ def read_setting(root):
             info = os.stat(path)
         except OSError:
             raise _setting_error("%s is a symlink that does not resolve" % CONFIG_RELPATH)
+    # Checked whether or not the file itself is a link: a symlinked .adlc moves
+    # a regular config.yml outside the root just as well.
+    if not inside_root(root, path):
+        raise _setting_error("%s resolves outside the project root; the check reads "
+                             "only a config inside it" % CONFIG_RELPATH)
     if not stat.S_ISREG(info.st_mode):
         raise _setting_error("%s is not a regular file" % CONFIG_RELPATH)
     try:
         with open(path, "rb") as handle:
-            data = handle.read()
+            return handle.read()
     except OSError as exc:
         raise _setting_error("%s cannot be read (%s)" % (CONFIG_RELPATH, _reason(exc)))
+
+
+def check_ref(ref):
+    """``ref`` when it is a usable ``--base``; a usage error otherwise."""
+    if not _REF_RE.match(ref) or ".." in ref or ref.startswith("-"):
+        raise RegressionCheckError(
+            "usage: %s ('%s' is not a usable --base ref: name a branch or a "
+            "remote-tracking branch)" % (USAGE, ref))
+    return ref
+
+
+def _git_stdout(repo_dir, args, what):
+    """stdout of ``git -C <repo_dir> <args>``, or an error naming ``what``.
+
+    git's stderr is never quoted: it can carry an absolute path.
+    """
+    proc = _git(repo_dir, args)
+    if proc is None:
+        raise RegressionCheckError("%s: git could not be run" % what)
+    if proc.returncode != 0:
+        raise RegressionCheckError("%s failed (git exit %d)" % (what, proc.returncode))
+    return proc.stdout
+
+
+def read_base_config(root, ref):
+    """The bytes of the project's config committed at ``ref``, or ``None``.
+
+    The path is the root's repo-relative prefix plus ``.adlc/config.yml``, so a
+    project in a subdirectory reads its own config. ``ls-tree`` names the
+    entry's mode first, so a symlink, directory or submodule in the config's
+    place is refused rather than read (lane_check.read_base_config).
+    """
+    check_ref(ref)
+    where = config_where(ref)
+    proc = _git(root, ["rev-parse", "--show-prefix"])
+    if proc is None:
+        raise RegressionCheckError("reading %s: git could not be run" % where)
+    if proc.returncode != 0:
+        raise RegressionCheckError("--base needs a git repository, and --root is not "
+                                   "inside a git work tree")
+    prefix = os.fsdecode(proc.stdout)
+    prefix = prefix[:-1] if prefix.endswith("\n") else prefix
+    proc = _git(root, ["rev-parse", "--verify", "--quiet", ref + "^{commit}"])
+    if proc is None:
+        raise RegressionCheckError("resolving --base %s: git could not be run" % ref)
+    oid = proc.stdout.decode("ascii", "replace").strip()
+    if proc.returncode != 0 or not _OID_RE.match(oid):
+        raise RegressionCheckError("--base %s does not resolve to a commit" % ref)
+    path = prefix + CONFIG_RELPATH
+    out = _git_stdout(root, ["ls-tree", "-l", "-z", "--full-tree", oid, "--", path],
+                      "listing %s" % where)
+    entries = [e for e in out.split(b"\0") if e]
+    if not entries:
+        # Absent, unless .adlc itself is not a plain directory at the ref: git
+        # does not descend through a symlinked .adlc, so the config would
+        # vanish and the setting would read as off.
+        top = _git_stdout(root, ["ls-tree", "-z", "--full-tree", oid, "--", prefix + ".adlc"],
+                          "listing .adlc at %s" % ref)
+        for entry in (e for e in top.split(b"\0") if e):
+            if not entry.startswith(_TREE_MODE + b" "):
+                raise RegressionCheckError(".adlc is not a directory at %s; the check reads "
+                                           "the config only from a real %s"
+                                           % (ref, CONFIG_RELPATH))
+        return None
+    meta, sep, name = entries[0].partition(b"\t")
+    fields = meta.split()
+    if len(entries) != 1 or not sep or len(fields) != 4 or name != os.fsencode(path):
+        raise RegressionCheckError("listing %s: unexpected git ls-tree output" % where)
+    mode, otype, blob = fields[0], fields[1], fields[2]
+    if mode == _SYMLINK_MODE:
+        raise RegressionCheckError("%s is a symlink at %s; the check reads only a regular "
+                                   "file" % (CONFIG_RELPATH, ref))
+    if otype != b"blob" or mode not in _REGULAR_BLOB_MODES:
+        raise RegressionCheckError("%s is not a regular file at %s" % (CONFIG_RELPATH, ref))
+    return _git_stdout(root, ["cat-file", "blob", blob.decode("ascii", "replace")],
+                       "reading %s" % where)
+
+
+def read_setting(root, ref=None):
+    """The project's :class:`Setting`. Raises :class:`RegressionCheckError`.
+
+    From the working tree, or, with ``ref``, from the config committed there
+    and never from the disk. Either way a missing config is ``off`` (BR-1), and
+    the bytes go through the same prefilter, parse and validation.
+    """
+    data = read_disk_config(root) if ref is None else read_base_config(root, ref)
+    if data is None:
+        return Setting(MODE_OFF, SOURCE_NO_CONFIG, None, ref)
     if not may_carry_setting(data):
-        return Setting(MODE_OFF, SOURCE_ABSENT, None)
-    document = _parse_config(data)
-    mode, source = setting_from_document(document)
-    return Setting(mode, source, document)
+        return Setting(MODE_OFF, SOURCE_ABSENT, None, ref)
+    document = _parse_config(data, ref)
+    if document is None:
+        return Setting(MODE_OFF, SOURCE_ABSENT, None, ref)
+    mode, source = setting_from_document(document, config_where(ref))
+    return Setting(mode, source, document, ref)
 
 
 def setting_line(setting):
     """The second line of ``mode``: where the value came from (BR-8)."""
+    where = config_where(setting.ref)
     if setting.source == SOURCE_SET:
-        return "%s is %s in %s" % (SETTING_KEY, setting.mode, CONFIG_RELPATH)
+        return "%s is %s in %s" % (SETTING_KEY, setting.mode, where)
     if setting.source == SOURCE_ABSENT:
         return ("%s is not set in %s, which means off; set it to required to turn "
-                "regression tests on" % (SETTING_KEY, CONFIG_RELPATH))
-    return ("%s does not exist, which means off; set %s: required in it to turn "
-            "regression tests on" % (CONFIG_RELPATH, SETTING_KEY))
+                "regression tests on" % (SETTING_KEY, where))
+    return ("%s does not exist%s, which means off; set %s: required in it to turn "
+            "regression tests on" % (CONFIG_RELPATH,
+                                     "" if setting.ref is None else " at %s" % setting.ref,
+                                     SETTING_KEY))
 
 
 # --- the strict frontmatter reader (ADR-691-B) --------------------------------
@@ -382,11 +581,19 @@ _KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]+(.*?))?[ \t]*$")
 #: key's value continues onto it (partials/lesson-check.sh's continuation rule).
 _ANY_KEY_RE = re.compile(r"""^["']?[A-Za-z_][A-Za-z0-9_-]*["']?[ \t]*:""")
 #: One of the read keys in any spelling, indented or not. Matched on a line
-#: that is not a canonical key line, it is a misspelling: one reader would see
-#: the key and another would not (``regression_tests:["x"]``, ``"id": x``).
+#: that is not a canonical key line and is not inside an open block, it is a
+#: misspelling: one reader would see the key and another would not
+#: (``regression_tests:["x"]``, ``"id": x``, ``  status: x`` under nothing).
 _MISSPELT_RE = dict((key, re.compile(r"""^[ \t]*["']?%s["']?[ \t]*:""" % key))
                     for key in READ_KEYS)
+#: A key in any spelling at any indent, with what follows its colon (group 2).
+_BLOCK_KEY_RE = re.compile(
+    r"""^([ \t]*)["']?[A-Za-z_][A-Za-z0-9_-]*["']?[ \t]*:(?:[ \t]+(.*?))?[ \t]*$""")
 _TRAILING_COMMENT_RE = re.compile(r"(^|[ \t])#.*$")
+#: The kinds of block a line can open: a key's nested mapping or sequence, and
+#: a ``|`` or ``>`` block scalar, whose every more-indented line is text.
+_BLOCK_NESTED = "nested"
+_BLOCK_SCALAR = "scalar"
 _NULLS = ("", "~", "null", "Null", "NULL")
 _UNCLOSED_LIST = "the flow list is not closed on the key's line"
 
@@ -478,8 +685,10 @@ def _flow_list(raw):
 def parse_value(raw):
     """``(kind, value, error)`` for the text after ``key:``.
 
-    ``kind`` is ``null``, ``str``, ``list`` or ``map``; ``error`` is set, and
-    the other two are ``None``, when the value cannot be read on its line.
+    ``kind`` is ``null``, ``quoted`` (a quoted string), ``plain`` (an unquoted
+    scalar, which YAML readers may each type differently), ``list`` or ``map``;
+    ``error`` is set, and the other two are ``None``, when the value cannot be
+    read on its line.
     """
     if raw == "" or raw.startswith("#"):
         return "null", None, None
@@ -490,7 +699,7 @@ def parse_value(raw):
             return None, None, error
         if not _rest_is_comment(rest):
             return None, None, "text follows the closing quote"
-        return "str", value, None
+        return "quoted", value, None
     if first == "[":
         items, rest, error = _flow_list(raw)
         if error:
@@ -507,7 +716,7 @@ def parse_value(raw):
     value = _TRAILING_COMMENT_RE.sub("", raw).strip()
     if value in _NULLS:
         return "null", None, None
-    return "str", value, None
+    return "plain", value, None
 
 
 def frontmatter_lines(text):
@@ -580,24 +789,61 @@ def _significant(line):
     return bool(stripped) and not stripped.startswith("#")
 
 
+def _opens_block(line):
+    """``(indent, kind)`` of the block ``line`` opens, or ``None``.
+
+    A key whose value is empty on its line (a comment aside) opens a nested
+    block; one whose value starts with ``|`` or ``>`` opens a block scalar.
+    """
+    match = _BLOCK_KEY_RE.match(line)
+    if not match:
+        return None
+    value = _TRAILING_COMMENT_RE.sub("", match.group(2) or "").strip()
+    if not value:
+        return len(match.group(1)), _BLOCK_NESTED
+    if value[0] in "|>":
+        return len(match.group(1)), _BLOCK_SCALAR
+    return None
+
+
+def _in_block(block, line):
+    """True when ``line`` belongs to the open ``block``, an ``(indent, kind)``."""
+    indent = len(line) - len(line.lstrip(" \t"))
+    if indent > block[0]:
+        return True
+    # A sequence may sit at its parent key's indentation (`checks:` then `- x`);
+    # a block scalar's text never does.
+    stripped = line.lstrip(" \t")
+    return (indent == block[0] and block[1] == _BLOCK_NESTED
+            and (stripped == "-" or stripped.startswith(("- ", "-\t"))))
+
+
 def read_fields(lines, report):
     """Read the four keys out of the frontmatter ``lines`` into ``report``."""
     counts = collections.Counter()
     first_at = {}
     misspelt = set()
+    block = None
     for index, line in enumerate(lines):
         if not _significant(line):
             continue
+        if block is not None:
+            if _in_block(block, line):
+                # Under another key, or text in a block scalar: a mention of a
+                # read key here is not the key (LESSON-404).
+                continue
+            block = None
         match = _KEY_LINE_RE.match(line)
         if match:
             key = match.group(1)
             counts[key] += 1
             if key in READ_KEYS and key not in first_at:
                 first_at[key] = (index, match.group(2) or "")
-            continue
-        for key in READ_KEYS:
-            if _MISSPELT_RE[key].match(line):
-                misspelt.add(key)
+        else:
+            for key in READ_KEYS:
+                if _MISSPELT_RE[key].match(line):
+                    misspelt.add(key)
+        block = _opens_block(line)
     for key in sorted(counts):
         if counts[key] > 1:
             # Filed under the key itself, so a repeated `tags` fails the report
@@ -634,7 +880,7 @@ def _type_fields(values, report):
         kind, value = values[key]
         if kind == "null":
             continue
-        if kind != "str":
+        if kind not in ("quoted", "plain"):
             report.fail(key, "must be a string, not %s" % ("a list" if kind == "list"
                                                           else "a mapping"))
             continue
@@ -653,15 +899,18 @@ def _type_fields(values, report):
                 report.tests = value
         elif kind != "null":
             report.fail("regression_tests", "must be a flow list of paths "
-                        "([\"tests/...\"]), not %s" % ("a string" if kind == "str"
-                                                       else "a mapping"))
+                        "([\"tests/...\"]), not %s" % ("a mapping" if kind == "map"
+                                                       else "a string"))
     if "regression_waiver" in values:
         kind, value = values["regression_waiver"]
-        if kind == "str":
+        if kind == "quoted":
             report.waiver = value
         elif kind != "null":
+            # LESSON-716: a plain `false`, `0` or `reason: x` is a boolean, an
+            # integer or a mapping to some reader, and is cut at ` #` by others.
             report.fail("regression_waiver", "must be a quoted string, not %s"
-                        % ("a list" if kind == "list" else "a mapping"))
+                        % {"plain": "an unquoted value", "list": "a list"}.get(
+                            kind, "a mapping"))
 
 
 def read_report_text(text, name):
@@ -678,12 +927,21 @@ def read_report_text(text, name):
 
 
 def read_report(path, name):
-    """A :class:`Report` read from ``path``; a read failure is a failure."""
+    """A :class:`Report` read from ``path``; a read failure is a failure.
+
+    A symlink is refused without being followed, wherever it points: its target
+    is not this project's report, and its contents are never read or echoed.
+    """
     try:
-        info = os.stat(path)
+        info = os.lstat(path)
     except OSError as exc:
         report = Report(name)
         report.fail("file", "cannot be read (%s)" % _reason(exc))
+        return report
+    if stat.S_ISLNK(info.st_mode):
+        report = Report(name)
+        report.fail("file", "is a symlink; a bug report must be a regular file in %s"
+                    % BUGS_RELDIR)
         return report
     if not stat.S_ISREG(info.st_mode):
         report = Report(name)
@@ -791,12 +1049,53 @@ def tracked_reason(repo_dir, rel):
 _PREFIX_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*):(.*)$", re.DOTALL)
 
 
+def sibling_base(root):
+    """``(directory, None)`` a relative ``repos.<id>.path`` is relative to, or
+    ``(None, why)``.
+
+    That is the project's directory in its repository's main worktree, because
+    ``/proceed`` resolves sibling paths from the primary checkout
+    (``proceed/phase-0-setup.md``). From a linked worktree, such as the
+    ``/bugfix`` fix worktree under ``.worktrees/``, the root itself would put
+    ``../api`` inside the worktree container (BUG-210's trap). The main worktree
+    is the parent of ``--git-common-dir``, as ``partials/id-alloc.sh``'s
+    ``adlc_main_worktree`` finds it, plus the root's repo-relative prefix for a
+    project in a subdirectory. Without ``--path-format`` (git 2.31), a relative
+    answer is made absolute against the root, as that function's fallback does.
+    A root that is the main checkout (its git dir is the common dir: a
+    submodule or a ``--separate-git-dir`` layout included), or that is in no git
+    work tree, is its own base.
+    """
+    proc = _git(root, ["rev-parse", "--git-dir", "--git-common-dir", "--show-prefix"])
+    if proc is None:
+        return None, "the primary checkout cannot be located: git could not be run"
+    if proc.returncode != 0:
+        return root, None
+    lines = os.fsdecode(proc.stdout).split("\n")
+    if len(lines) != 4 or lines[3] or not lines[0] or not lines[1]:
+        return None, ("the primary checkout cannot be located (unexpected git "
+                      "rev-parse output)")
+    git_dir = os.path.realpath(os.path.join(root, lines[0]))
+    common_dir = os.path.realpath(os.path.join(root, lines[1]))
+    if git_dir == common_dir:
+        return root, None
+    return os.path.normpath(os.path.join(os.path.dirname(common_dir), lines[2])), None
+
+
 class Checker(object):
     """The path rules, against one root and the config parse that set ``required``."""
 
-    def __init__(self, root, document):
+    def __init__(self, root, document, where=CONFIG_RELPATH):
         self.root = root
         self.document = document if isinstance(document, dict) else {}
+        self.where = where
+        self._base = None
+
+    def base(self):
+        """:func:`sibling_base` for this root, located once per run."""
+        if self._base is None:
+            self._base = sibling_base(self.root)
+        return self._base
 
     def repo_dir(self, repo_id):
         """``(directory, None)`` for a repo id (``None`` = the root), or ``(None, why)``."""
@@ -805,19 +1104,22 @@ class Checker(object):
         repos = self.document.get("repos")
         if not isinstance(repos, dict) or repo_id not in repos:
             return None, ("repo '%s' is not declared under repos: in %s"
-                          % (repo_id, CONFIG_RELPATH))
+                          % (repo_id, self.where))
         entry = repos[repo_id]
         if not isinstance(entry, dict):
-            return None, "repos.%s in %s is not a mapping" % (repo_id, CONFIG_RELPATH)
+            return None, "repos.%s in %s is not a mapping" % (repo_id, self.where)
         if entry.get("primary") in ("true", True):
             return self.root, None
         path = entry.get("path")
         if not isinstance(path, str) or not path.strip():
-            return None, "repos.%s in %s declares no path" % (repo_id, CONFIG_RELPATH)
+            return None, "repos.%s in %s declares no path" % (repo_id, self.where)
         if os.path.isabs(path):
             target, shown = path, "its repos.%s.path" % repo_id
         else:
-            target, shown = os.path.join(self.root, path), path
+            base, why = self.base()
+            if why:
+                return None, "repo '%s' cannot be resolved: %s" % (repo_id, why)
+            target, shown = os.path.normpath(os.path.join(base, path)), path
         if not os.path.isdir(target):
             return None, "repo '%s' is not cloned at %s" % (repo_id, shown)
         return target, None
@@ -900,33 +1202,44 @@ def cites(data, bug_id):
     return pattern.search(data) is not None
 
 
-def check(root, ids=(), require_recorded=False):
+def _duplicate_reason(count):
+    return "%d reports in %s carry this id" % (count, BUGS_RELDIR)
+
+
+def check(root, ids=(), require_recorded=False, ref=None):
     """Run the check. Returns ``(setting, results)``; ``results`` is ``None`` when off.
 
+    ``ref`` is ``--base``: the setting and ``repos:`` come from the config
+    committed there, the bug reports and tests from the working tree and index.
     Each result is ``(label, class, reasons)``. Raises :class:`RegressionCheckError`
     for anything that prevents a decision.
     """
-    setting = read_setting(root)
+    setting = read_setting(root, ref)
     if setting.mode == MODE_OFF:
         return setting, None  # BR-11: no bug report is opened
-    checker = Checker(root, setting.document)
+    checker = Checker(root, setting.document, config_where(ref))
+    for rel in (".adlc", BUGS_RELDIR):
+        # A link may stay inside the root; one that leaves it would judge
+        # another tree's reports as this project's.
+        full = os.path.join(root, *rel.split("/"))
+        if os.path.lexists(full) and not inside_root(root, full):
+            raise RegressionCheckError("%s resolves outside the project root" % rel)
     bugs_dir = os.path.join(root, *BUGS_RELDIR.split("/"))
     results = []
     names = list_reports(bugs_dir)
+    by_id = collections.defaultdict(list)
+    for name in names:
+        match = _REPORT_NAME_RE.match(name)
+        if match:
+            by_id[match.group(1)].append(name)
     if ids:
-        by_id = collections.defaultdict(list)
-        for name in names:
-            match = _REPORT_NAME_RE.match(name)
-            if match:
-                by_id[match.group(1)].append(name)
         for bug_id in ids:
             found = by_id.get(bug_id, [])
             if not found:
                 results.append((bug_id, FAILED, ["no bug report in %s" % BUGS_RELDIR]))
                 continue
             if len(found) > 1:
-                results.append((bug_id, FAILED, ["%d reports in %s carry this id"
-                                                 % (len(found), BUGS_RELDIR)]))
+                results.append((bug_id, FAILED, [_duplicate_reason(len(found))]))
                 continue
             report = read_report(os.path.join(bugs_dir, found[0]), found[0])
             cls, reasons = checker.classify(report, require_recorded)
@@ -935,6 +1248,11 @@ def check(root, ids=(), require_recorded=False):
     for name in names:
         report = read_report(os.path.join(bugs_dir, name), name)
         if report.status_known() and report.status not in IN_SCOPE_STATUSES:
+            continue
+        carriers = len(by_id.get(report.bug_id, ())) if report.bug_id else 0
+        if carriers > 1:
+            # The named run's verdict for this id, so the two runs agree.
+            results.append((report.label, FAILED, [_duplicate_reason(carriers)]))
             continue
         cls, reasons = checker.classify(report, require_recorded)
         results.append((report.label, cls, reasons))
@@ -976,12 +1294,15 @@ def _parse_args(argv):
     parser = _ArgumentParser(prog="regression_check.py " + verb, add_help=False,
                              allow_abbrev=False)
     parser.add_argument("--root", default=None)
+    parser.add_argument("--base", default=None)
     if verb == "check":
         parser.add_argument("--require-recorded", action="store_true")
         parser.add_argument("ids", nargs="*")
     # Intermixed, so `check BUG-1 --require-recorded BUG-2` keeps both ids.
     args = parser.parse_intermixed_args(argv[1:])
     args.verb = verb
+    if args.base is not None:
+        check_ref(args.base)
     if verb == "check":
         ids = []
         for bug_id in args.ids:
@@ -1018,10 +1339,10 @@ def main(argv=None):
         args = _parse_args(argv)
         root = _root(args.root)
         if args.verb == "mode":
-            setting = read_setting(root)
+            setting = read_setting(root, args.base)
             lines, rc = [MODE_LINE + setting.mode, setting_line(setting)], RC_PASS
         else:
-            setting, results = check(root, args.ids, args.require_recorded)
+            setting, results = check(root, args.ids, args.require_recorded, args.base)
             lines, rc = format_check(setting, results)
     except RegressionCheckError as exc:
         lines, rc = [prefix + RESULT_ERROR, one_line(exc)], RC_ERROR

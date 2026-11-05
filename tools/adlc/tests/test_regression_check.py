@@ -216,7 +216,6 @@ def test_mode_values_and_absent_means_off(make_project, monkeypatch):
     # YamlError, so an rc 0 proves the prefilter cleared it.
     absent = [
         "project:\n\tname: x\n",
-        "bugfix:\n  other: 1\n",
         "# bugfix:\n#   regression_test: required\nproject:\n  name: x\n"
         "    # regression_test: required\n\t\n",
     ]
@@ -333,10 +332,13 @@ def test_waiver_needs_a_reason(make_project):
                             "a waiver needs a one-line reason (BR-6)" % bug_id]
     for bug_id in ("BUG-103", "BUG-104", "BUG-105"):
         assert result_of(p, bug_id) == (rc.LEGACY, [], 0), bug_id
-    for bug_id in ("BUG-106", "BUG-107", "BUG-108"):
+    for bug_id in ("BUG-106", "BUG-107"):
         assert result_of(p, bug_id) == (rc.WAIVED, [], 0), bug_id
+    # An unquoted reason is the wrong type, not a waiver (LESSON-716).
+    assert result_of(p, "BUG-108") == (rc.FAILED, [
+        "BUG-108: regression_waiver: must be a quoted string, not an unquoted value"], 1)
     code, lines = p.run("check")
-    assert counts(lines) == {"passed": 0, "waived": 3, "legacy": 3, "failed": 2}
+    assert counts(lines) == {"passed": 0, "waived": 2, "legacy": 3, "failed": 3}
 
 
 def test_both_fields_set_fails(make_project):
@@ -879,16 +881,19 @@ def test_engine_is_stdlib_only_and_reads_no_remote():
                 os.path.realpath(origin).startswith(stdlib + os.sep), (name, origin)
             assert "site-packages" not in origin, (name, origin)
 
-    # The only git subcommand the engine names is ls-files.
+    # The git subcommands the engine names: ls-files for the index, rev-parse to
+    # locate the checkout and resolve --base, ls-tree and cat-file to read the
+    # config at that ref. It never fetches, diffs or names a ref of its own.
     words = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.List, ast.Tuple)):
             words.update(e.value for e in node.elts
                          if isinstance(e, ast.Constant) and isinstance(e.value, str))
-    for word in ("fetch", "diff", "ls-remote", "remote", "log", "show", "cat-file",
-                 "rev-parse", "merge-base", "origin", "FETCH_HEAD"):
+    for word in ("fetch", "diff", "ls-remote", "remote", "log", "show", "merge-base",
+                 "origin", "FETCH_HEAD", "HEAD", "main", "--path-format=absolute"):
         assert word not in words, word
-    assert "ls-files" in words
+    for word in ("ls-files", "rev-parse", "ls-tree", "cat-file"):
+        assert word in words, word
 
     # The git environment drops at least everything lane_check.py drops.
     assert set(lane_check._GIT_ENV_SCRUB) <= set(rc._GIT_ENV_SCRUB)
@@ -946,3 +951,385 @@ def test_output_names_no_home_path_and_no_contents(make_project, tmp_path):
     assert "sk-live" not in text
     assert str(tmp_path) not in text and os.path.realpath(str(tmp_path)) not in text
     assert " " not in text and "tests/evil\\u2028name.py does not exist" in text
+
+
+# --- REQ-691 Phase 5 findings ---------------------------------------------------------
+
+def _commit_all(path, msg="change"):
+    _git(path, "add", "-A")
+    _git(path, "commit", "-q", "--no-verify", "-m", msg)
+
+
+def test_base_reads_the_setting_and_repos_at_the_ref(make_project, tmp_path):
+    # The gate's config comes from the ref the caller names, so a fix branch
+    # cannot switch its own gate off or re-point a sibling (finding: gate config
+    # read from the tree under check).
+    p = make_project(REQUIRED + "repos:\n  web:\n    primary: true\n  api:\n    path: ../api\n",
+                     name="web")
+    api = tmp_path / "api"
+    _init_repo(api)
+    Project(api).test_file("tests/test_api.py", "# BUG-1101\n")
+    p.bug("BUG-1101", tests='["api:tests/test_api.py"]')
+    p.bug("BUG-1102", tests='["tests/missing.py"]')
+    p.commit("required on main")
+    p.git("checkout", "-q", "-b", "fix")
+
+    # The branch turns its gate off and drops repos: in its working tree.
+    p.config(OFF)
+    assert p.run("check")[1][0] == "regression-check: off"
+    expected = (1, ["regression-check: fail", "passed=1 waived=0 legacy=0 failed=1",
+                    "BUG-1102: tests/missing.py does not exist"])
+    assert p.run("check", "--base", "main") == expected
+    assert p.run("mode", "--base", "main") == (0, [
+        "regression-test: required",
+        "bugfix.regression_test is required in .adlc/config.yml at main"])
+    # Deleted from the working tree: still required, and repos: still resolves.
+    os.remove(str(p.root / ".adlc" / "config.yml"))
+    assert p.run("check", "--base", "main") == expected
+    assert p.run("check", "--base", "main", "BUG-1101") == (
+        0, ["regression-check: pass", "passed=1 waived=0 legacy=0 failed=0"])
+    # Without --base the disk decides, as before.
+    assert p.run("mode")[1][0] == "regression-test: off"
+
+    # The ref says off: off, naming the ref, and no bug report is opened.
+    q = make_project(OFF, name="q")
+    q.bug("BUG-1103", tests='["unclosed')
+    q.commit("off on main")
+    q.config(REQUIRED)
+    assert q.run("check", "--base", "main") == (0, [
+        "regression-check: off",
+        "regression tests are off for this project: bugfix.regression_test is off in "
+        ".adlc/config.yml at main"])
+    # No config at the ref is off with the no-config wording, saying where.
+    r = make_project(name="r")
+    r.write("README.md", "no config here\n")
+    r.commit("no config")
+    r.config(REQUIRED)
+    assert r.run("mode", "--base", "main") == (0, [
+        "regression-test: off",
+        ".adlc/config.yml does not exist at main, which means off; set "
+        "bugfix.regression_test: required in it to turn regression tests on"])
+    # A config at the ref without the key is absent there.
+    s = make_project("project:\n  name: x\n", name="s")
+    s.commit("keyless")
+    s.config(REQUIRED)
+    code, lines = s.run("mode", "--base", "main")
+    assert (code, lines[0]) == (0, "regression-test: off")
+    assert lines[1].startswith("bugfix.regression_test is not set in .adlc/config.yml at main")
+    # The same parse and validation rules apply to the bytes at the ref.
+    t = make_project("bugfix:\n  regression_test: sometimes\n", name="t")
+    t.commit("bad value")
+    t.config(REQUIRED)
+    code, lines = t.run("check", "--base", "main")
+    assert (code, lines[0], len(lines)) == (2, "regression-check: error", 2)
+    assert "'sometimes'" in lines[1] and ".adlc/config.yml at main" in lines[1]
+    # A symlink in the config's place at the ref is refused, not followed.
+    u = make_project(name="u")
+    u.write("real.yml", REQUIRED)
+    (u.root / ".adlc").mkdir()
+    os.symlink("../real.yml", str(u.root / ".adlc" / "config.yml"))
+    u.commit("linked config")
+    code, lines = u.run("mode", "--base", "main")
+    assert (code, lines) == (2, ["regression-test: error",
+                                 ".adlc/config.yml is a symlink at main; the check reads "
+                                 "only a regular file"])
+
+
+def test_base_ref_is_validated(make_project, tmp_path):
+    p = make_project(REQUIRED)
+    p.commit("config")
+    for bad in ("-x", "main..dev", "main^{tree}", "main:README.md", "a b", "main@{1}",
+                "main~1", ""):
+        for verb, first in (("check", "regression-check: error"),
+                            ("mode", "regression-test: error")):
+            code, lines = p.run(verb, "--base=" + bad)
+            assert (code, lines[0], len(lines)) == (2, first, 2), bad
+            assert lines[1].startswith("usage: "), (bad, lines)
+    # A well-formed ref that names nothing is an error, never off.
+    code, lines = p.run("check", "--base", "nosuch")
+    assert (code, lines) == (2, ["regression-check: error",
+                                 "--base nosuch does not resolve to a commit"])
+    # A root outside any git work tree cannot be read at a ref.
+    plain = tmp_path / "plain"
+    (plain / ".adlc").mkdir(parents=True)
+    (plain / ".adlc" / "config.yml").write_text(REQUIRED)
+    code, lines = run_engine(["mode", "--root", str(plain), "--base", "main"])
+    assert (code, lines[0]) == (2, "regression-test: error")
+    assert "not inside a git work tree" in lines[1] and str(tmp_path) not in lines[1]
+
+
+def test_base_reads_a_subdirectory_project_at_its_prefix(tmp_path):
+    repo = tmp_path / "mono"
+    _init_repo(repo)
+    (repo / "README.md").write_text("monorepo\n")
+    proj = Project(repo / "sub" / "proj")
+    proj.config(REQUIRED)
+    proj.bug("BUG-1201", tests='["tests/missing.py"]')
+    _commit_all(repo, "a project in a subdirectory")
+    proj.config(OFF)
+    code, lines = run_engine(["check", "--root", proj.path, "--base", "main"])
+    assert (code, lines) == (1, ["regression-check: fail", "passed=0 waived=0 legacy=0 failed=1",
+                                 "BUG-1201: tests/missing.py does not exist"])
+
+
+def test_unquoted_waiver_is_the_wrong_type(make_project):
+    # LESSON-716: a plain value means something different to every reader
+    # (false, 0, a cut at ' #'), so a waiver must be quoted.
+    p = make_project(REQUIRED)
+    plain = [("BUG-1401", "false"), ("BUG-1402", "0"), ("BUG-1403", "reason: a colon"),
+             ("BUG-1404", "- dash"), ("BUG-1405", "a plain reason  # and a comment")]
+    for bug_id, raw in plain:
+        p.bug(bug_id, waiver=raw)
+    for bug_id, _ in plain:
+        assert result_of(p, bug_id) == (rc.FAILED, [
+            "%s: regression_waiver: must be a quoted string, not an unquoted value" % bug_id],
+            1), bug_id
+    # Benign: either quote style is a waiver; the template's "" and an empty
+    # value are absent.
+    p.bug("BUG-1406", waiver='"false"')
+    p.bug("BUG-1407", waiver="'a reason: with a colon'")
+    p.bug("BUG-1408", waiver='""')
+    p.bug("BUG-1409", waiver="")
+    p.bug("BUG-1410", waiver="~")
+    assert result_of(p, "BUG-1406") == (rc.WAIVED, [], 0)
+    assert result_of(p, "BUG-1407") == (rc.WAIVED, [], 0)
+    for bug_id in ("BUG-1408", "BUG-1409", "BUG-1410"):
+        assert result_of(p, bug_id) == (rc.LEGACY, [], 0), bug_id
+
+
+def test_relative_sibling_resolves_from_the_main_worktree(tmp_path):
+    # /proceed resolves repos.<id>.path from the primary checkout, so a fix
+    # worktree under it must resolve ../api the same way (BUG-210's rule).
+    api = tmp_path / "api"
+    _init_repo(api)
+    Project(api).test_file("tests/test_api.py", "# BUG-1301 BUG-1302 BUG-1303\n")
+
+    primary = tmp_path / "web"
+    _init_repo(primary)
+    web = Project(primary)
+    web.config(REQUIRED + "repos:\n  web:\n    primary: true\n  api:\n    path: ../api\n"
+               "  abs:\n    path: %s\n" % api)
+    web.write(".gitignore", ".worktrees/\n")
+    web.commit("config")
+    web.git("worktree", "add", "-q", "-b", "fix", ".worktrees/fix")
+    fix = Project(primary / ".worktrees" / "fix")
+    fix.bug("BUG-1301", tests='["api:tests/test_api.py"]')
+    fix.bug("BUG-1302", tests='["abs:tests/test_api.py"]')
+    assert result_of(fix, "BUG-1301") == (rc.PASSED, [], 0)
+    # An absolute repos path to an existing clone passes, from either checkout.
+    assert result_of(fix, "BUG-1302") == (rc.PASSED, [], 0)
+    web.bug("BUG-1301", tests='["api:tests/test_api.py"]')
+    assert result_of(web, "BUG-1301") == (rc.PASSED, [], 0)
+
+    # A project in a subdirectory: the path is relative to the project's place
+    # in the primary checkout (mono/sub/proj/../../../api is the sibling).
+    mono = tmp_path / "mono"
+    _init_repo(mono)
+    proj = Project(mono / "sub" / "proj")
+    proj.config(REQUIRED + "repos:\n  api:\n    path: ../../../api\n")
+    (mono / ".gitignore").write_text(".worktrees/\n")
+    _commit_all(mono, "nested project")
+    _git(mono, "worktree", "add", "-q", "-b", "fix", ".worktrees/fix")
+    nested = Project(mono / ".worktrees" / "fix" / "sub" / "proj")
+    nested.bug("BUG-1303", tests='["api:tests/test_api.py"]')
+    assert result_of(nested, "BUG-1303") == (rc.PASSED, [], 0)
+    proj.bug("BUG-1303", tests='["api:tests/test_api.py"]')
+    assert result_of(proj, "BUG-1303") == (rc.PASSED, [], 0)
+
+
+def test_parse_failure_that_cannot_define_the_setting_is_off(make_project):
+    # The prefilter's backslash and trailing-comment hits force a parse; when the
+    # subset refuses the file and nothing in it is shaped like either key, the
+    # config cannot define the setting, so it is off, not a stop.
+    benign = [
+        'defaults: &d\na: 1\nlint:\n  pattern: "src\\\\.*"\n',
+        'lint:\n  pattern: "src\\.*"\n',
+        "notes: >\n  folded text\nwin: C:\\tools\n",
+        "anchor: &a 1\nfoo: 1  # regression_test\n",
+    ]
+    for text in benign:
+        p = make_project(text)
+        assert p.run("mode") == (0, [
+            "regression-test: off",
+            "bugfix.regression_test is not set in .adlc/config.yml, which means off; set it "
+            "to required to turn regression tests on"]), text
+        assert p.run("check")[0] == 0, text
+    # Positive control: a key-shaped occurrence of either key still stops.
+    stops = [
+        "defaults: &d\nbugfix:\n  regression_test: required\n",
+        "notes: >\n  x\nci:\n  regression_test: required\n",
+        "{bugfix: {regression_test: required}, a: &x 1}\n",
+        "a: &x 1\n'bugfix': x\n",
+        '"bug\\x66ix":\n  "regression\\x5ftest": required\n',
+        REQUIRED.encode("utf-16-le"),
+    ]
+    for text in stops:
+        p = make_project(text)
+        code, lines = p.run("mode")
+        assert (code, lines[0]) == (2, "regression-test: error"), text
+        assert "bugfix.regression_test" in lines[1]
+
+
+def test_bugfix_block_is_always_validated(make_project, monkeypatch):
+    for text, fragment in (("bugfix:\n  regresion_test: required\n", "'regresion_test'"),
+                           ("bugfix:\n  other: 1\n", "'other'"),
+                           ("bugfix: required\n", "bugfix in .adlc/config.yml is a string")):
+        p = make_project(text)
+        for verb, first in (("mode", "regression-test: error"),
+                            ("check", "regression-check: error")):
+            code, lines = p.run(verb)
+            assert (code, lines[0], len(lines)) == (2, first, 2), text
+            assert fragment in lines[1], (text, lines)
+    # Benign: bugfix named only in a comment is still never parsed.
+    parsed = []
+    real_loads = rc.harness_yaml.loads
+    monkeypatch.setattr(rc.harness_yaml, "loads",
+                        lambda text, source="<string>": parsed.append(source)
+                        or real_loads(text, source))
+    p = make_project("# bugfix:\n#   regresion_test: required\nproject:\n  name: x\n")
+    assert p.run("mode")[1][0] == "regression-test: off"
+    assert parsed == []
+
+
+def test_nested_keys_are_not_misspellings(make_project):
+    # LESSON-404 / LESSON-716: a read key's name under another key's block, or
+    # inside a block scalar, is a mention, not the key.
+    p = make_project(REQUIRED)
+    p.bug("BUG-1501", extra=["deploy:", "  status: live", "  id: rev-12"])
+    p.bug("BUG-1502", status="open",
+          extra=["notes: |", "  regression_tests: none yet", "  status: resolved"])
+    p.bug("BUG-1503", status="open", extra=["ci:", "  status: green"])
+    p.bug("BUG-1504", extra=["checks:", "- name: lint", "  status: green"])
+    assert p.run("check") == (0, ["regression-check: pass",
+                                  "passed=0 waived=0 legacy=2 failed=0"])
+    for bug_id in ("BUG-1501", "BUG-1502", "BUG-1503", "BUG-1504"):
+        assert result_of(p, bug_id) == (rc.LEGACY, [], 0), bug_id
+
+    # Positive control: with no block open above it, an indented read key is
+    # still a misspelling, and it makes the status unknown.
+    q = make_project(REQUIRED)
+    q.bug("BUG-1505", status="open", extra=["  status: resolved"])
+    q.bug("BUG-1506", status="open", extra=["deploy: live", "  status: resolved"])
+    q.bug("BUG-1507", extra=["  regression_tests: [\"tests/x.py\"]"])
+    code, lines = q.run("check")
+    assert (code, lines[1]) == (1, "passed=0 waived=0 legacy=0 failed=3")
+    assert [line.split(":")[0] for line in lines[2:]] == ["BUG-1505", "BUG-1506", "BUG-1507"]
+    for line in lines[2:]:
+        assert "written in a spelling not every reader agrees on" in line
+
+
+def test_symlinks_out_of_the_root_are_refused(make_project, tmp_path):
+    outside = tmp_path / "outside"
+    (outside / "bugs").mkdir(parents=True)
+    secret = bug_text("BUG-1601").replace("id: BUG-1601", "id: sk-live-0123456789")
+    (outside / "BUG-1601-x.md").write_text(secret)
+    (outside / "bugs" / "BUG-1604-x.md").write_text(secret.replace("1601", "1604"))
+    (outside / "config.yml").write_text(REQUIRED + "# sk-live-0123456789\n")
+
+    # A symlinked bug report fails, wherever it points, and its target is not read.
+    p = make_project(REQUIRED)
+    (p.root / ".adlc" / "bugs").mkdir(parents=True)
+    os.symlink(str(outside / "BUG-1601-x.md"), str(p.root / ".adlc" / "bugs" / "BUG-1601-x.md"))
+    p.write("docs/BUG-1602.md", bug_text("BUG-1602", status="open"))
+    os.symlink("../../docs/BUG-1602.md", str(p.root / ".adlc" / "bugs" / "BUG-1602-x.md"))
+    failed = ["BUG-1601: is a symlink; a bug report must be a regular file in .adlc/bugs",
+              "BUG-1602: is a symlink; a bug report must be a regular file in .adlc/bugs"]
+    code, lines = p.run("check")
+    assert (code, lines) == (1, ["regression-check: fail",
+                                 "passed=0 waived=0 legacy=0 failed=2"] + failed)
+    assert result_of(p, "BUG-1601") == (rc.FAILED, failed[:1], 1)
+    text = "\n".join(lines)
+    assert "sk-live" not in text and str(tmp_path) not in text
+
+    # A bugs directory, or a .adlc, that resolves outside the root is an error.
+    q = make_project(REQUIRED)
+    os.symlink(str(outside / "bugs"), str(q.root / ".adlc" / "bugs"))
+    assert q.run("check") == (2, ["regression-check: error",
+                                  ".adlc/bugs resolves outside the project root"])
+    r = make_project()
+    os.symlink(str(outside), str(r.root / ".adlc"))
+    for verb, first in (("mode", "regression-test: error"), ("check", "regression-check: error")):
+        code, lines = r.run(verb)
+        assert (code, lines[0], len(lines)) == (2, first, 2)
+        assert ".adlc/config.yml resolves outside the project root" in lines[1]
+        assert "sk-live" not in lines[1] and str(tmp_path) not in lines[1]
+    # With --base the config comes from the ref; the bugs still may not leave the root.
+    b = make_project(REQUIRED)
+    b.commit("config")
+    shutil.rmtree(str(b.root / ".adlc"))
+    os.symlink(str(outside), str(b.root / ".adlc"))
+    assert b.run("check", "--base", "main") == (
+        2, ["regression-check: error", ".adlc resolves outside the project root"])
+
+    # A disk config that is a symlink out of the root is an error, never followed.
+    s = make_project()
+    (s.root / ".adlc").mkdir()
+    os.symlink(str(outside / "config.yml"), str(s.root / ".adlc" / "config.yml"))
+    code, lines = s.run("mode")
+    assert (code, lines[0]) == (2, "regression-test: error")
+    assert ".adlc/config.yml resolves outside the project root" in lines[1]
+    assert "sk-live" not in lines[1]
+
+    # Benign: a config link and a bugs link that stay inside the root are followed.
+    t = make_project()
+    t.write("conf/adlc.yml", REQUIRED)
+    (t.root / ".adlc").mkdir()
+    os.symlink("../conf/adlc.yml", str(t.root / ".adlc" / "config.yml"))
+    t.write("docs/bugs/BUG-1603-x.md", bug_text("BUG-1603"))
+    os.symlink("../docs/bugs", str(t.root / ".adlc" / "bugs"))
+    assert t.run("mode")[1][0] == "regression-test: required"
+    assert t.run("check") == (0, ["regression-check: pass",
+                                  "passed=0 waived=0 legacy=1 failed=0"])
+
+
+def test_output_escaping_matches_lane_check():
+    # The copy is deliberate (the engine imports nothing but harness_yaml); this
+    # pins it to lane_check.py's, so a fix to one cannot miss the other.
+    assert rc._UNSAFE_RE.pattern == lane_check._UNSAFE_RE.pattern
+    samples = ["plain", "a\\b", "line\nbreak\r", "\x00\x1f\x7f\x85\x9f", "\u2028\u2029",
+               "\u202e\u2066\u2069", "\ufeff\u200b\u200f\u061c", "\udcff", "caf\u00e9"]
+    for sample in samples:
+        assert rc.one_line(sample) == lane_check.one_line(sample), sample
+    assert all("\n" not in rc.one_line(s) and len(rc.one_line(s).splitlines()) <= 1
+               for s in samples)
+
+
+def test_git_that_cannot_run_fails_the_bug(make_project, monkeypatch, tmp_path):
+    api = tmp_path / "api"
+    _init_repo(api)
+    Project(api).test_file("tests/test_api.py", "# BUG-1701\n")
+    p = make_project(REQUIRED + "repos:\n  api:\n    path: ../api\n", name="web")
+    p.test_file("tests/test_1701.py", "# BUG-1701\n")
+    p.bug("BUG-1701", tests='["tests/test_1701.py", "api:tests/test_api.py"]')
+    p.commit("config")
+    # Positive control: with git on PATH the bug passes.
+    assert result_of(p, "BUG-1701") == (rc.PASSED, [], 0)
+
+    nogit = tmp_path / "nogit"
+    nogit.mkdir()
+    monkeypatch.setenv("PATH", str(nogit))
+    cls, failures, code = result_of(p, "BUG-1701")
+    assert (cls, code) == (rc.FAILED, 1)
+    assert failures[0].startswith("BUG-1701: tests/test_1701.py cannot be checked: git could "
+                                  "not be run; api:tests/test_api.py")
+    assert "git could not be run" in failures[0].split("; ")[1]
+    code, lines = p.run("check")
+    assert (code, lines[1]) == (1, "passed=0 waived=0 legacy=0 failed=1")
+    # With --base, a git that cannot run is an error, never off.
+    code, lines = p.run("mode", "--base", "main")
+    assert (code, lines[0]) == (2, "regression-test: error")
+    assert "git could not be run" in lines[1]
+
+
+def test_unnamed_run_fails_duplicate_ids(make_project):
+    p = make_project(REQUIRED)
+    p.test_file("tests/test_1801.py", "# BUG-1801\n")
+    p.bug("BUG-1801", slug="one", tests='["tests/test_1801.py"]')
+    p.bug("BUG-1801", slug="two", waiver='"a reason"')
+    # Both open: out of an unnamed run's scope, like any open bug.
+    p.bug("BUG-1802", slug="one", status="open")
+    p.bug("BUG-1802", slug="two", status="open")
+    reason = "BUG-1801: 2 reports in .adlc/bugs carry this id"
+    assert p.run("check") == (1, ["regression-check: fail",
+                                  "passed=0 waived=0 legacy=0 failed=2", reason, reason])
+    assert result_of(p, "BUG-1801") == (rc.FAILED, [reason], 1)
