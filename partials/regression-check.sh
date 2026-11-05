@@ -9,14 +9,15 @@
 #     0) : ;;                     # `regression-test: required` or `regression-test: off`
 #     *) echo "stop" ;;           # 2 error: the setting is unreadable — never read as off
 #   esac
-#   adlc_regression_check check --require-recorded BUG-123; rc=$?
+#   adlc_regression_check check --require-recorded --base origin/main BUG-123; rc=$?
 #   case $rc in
 #     0) : ;;                     # `regression-check: pass` or `regression-check: off`
 #     *) echo "stop" ;;           # 1 fail, 2 error — an error is never a pass and never off
 #   esac
 #
 # Contract — adlc_regression_check <mode|check> [args...]:
-#   runs <ToolkitRoot>/tools/adlc/regression_check.py with the arguments unchanged.
+#   runs <ToolkitRoot>/tools/adlc/regression_check.py with the arguments unchanged
+#   (`--base REF` reads the setting from REF's config; the /bugfix Gate passes it).
 #   mode  stdout: `regression-test: required|off`, then where the value came from (set,
 #                 absent, or no config file); rc 0. `regression-test: error`, then why; rc 2.
 #   check stdout: `regression-check: pass|fail`, then `passed=N waived=N legacy=N failed=N`,
@@ -31,6 +32,9 @@
 # with rc 1) — is replaced by the two-line error contract (`regression-check: error`, or
 # `regression-test: error` for `mode`, then one reason line) and rc 2: an error is never a
 # pass and never off (BR-17, LESSON-581). The engine has no --help for the same reason.
+# One answer needs no engine: with no `.adlc/config.yml` in the tree under check and no
+# `--base`, the wrapper prints the engine's own no-config `off` lines, rc 0, so a project
+# that never named the setting never needs Python. `--base REF` passes through untouched.
 # Full contract: partials/regression-check.md.
 #
 # The engine is ALWAYS the installed toolkit's, <ToolkitRoot>/tools/adlc/regression_check.py —
@@ -56,8 +60,15 @@
 # re-checks that it is. The fallback operand reads a bare $HOME, so it is not reached
 # when neither ADLC_TOOLKIT_ROOT nor HOME is set: a `set -u` caller would abort on it.
 # The partial then loads without the resolver, and adlc_regression_check reports that.
+# A vendored .adlc/partials/forge.sh older than the resolver loads without defining it;
+# the installed toolkit's forge.sh is then sourced as well, when it exists, so a stale
+# vendored copy does not stop the check.
 if ! command -v _adlc_forge_python >/dev/null 2>&1 && { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/forge.sh ]; }; then
   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"; fi
+  if ! command -v _adlc_forge_python >/dev/null 2>&1 && [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ]; then
+    adlc_rgc_forge="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"
+    if [ -f "$adlc_rgc_forge" ]; then . "$adlc_rgc_forge"; fi
+  fi
 fi
 
 # _adlc_regression_check_error <verdict-prefix> <detail> — the two-line error contract
@@ -105,25 +116,52 @@ adlc_regression_check() {
       return 2
       ;;
   esac
+  # stderr names the engine by route, never by an absolute path under HOME.
+  if [ -n "${ADLC_TOOLKIT_ROOT:-}" ]; then
+    adlc_rgc_where='<ToolkitRoot>/tools/adlc/regression_check.py (ToolkitRoot from ADLC_TOOLKIT_ROOT)'
+  else
+    adlc_rgc_where='<ToolkitRoot>/tools/adlc/regression_check.py (ToolkitRoot is the symlink install under HOME)'
+  fi
   # The tree under check is the project root the engine will read, found the way
   # its argument parser finds it: the LAST `--root DIR` or `--root=DIR` wins, an
   # empty value means the current directory (os.path.abspath('')), nothing after a
   # `--` is an option, and with no `--root` it is the current directory. Reading it
   # any other way would let a second `--root` move the engine's root past the test.
+  # adlc_rgc_plain stays 1 only while every argument is one the no-config answer
+  # below can stand in for: `--root`, and for `check` `--require-recorded` and ids
+  # of BUG- and ASCII digits. Anything else (`--base`, `--`, an unknown option, an
+  # option-like `--root` value the engine's parser would reject) goes to the engine.
   adlc_rgc_root=.
   adlc_rgc_want_value=0
+  adlc_rgc_plain=1
+  adlc_rgc_seen_verb=0
   for adlc_rgc_arg in "$@"; do
+    # The first argument is the verb itself, already checked above.
+    if [ "$adlc_rgc_seen_verb" = 0 ]; then
+      adlc_rgc_seen_verb=1
+      continue
+    fi
     if [ "$adlc_rgc_want_value" = 1 ]; then
       adlc_rgc_root=$adlc_rgc_arg
       adlc_rgc_want_value=0
+      case "$adlc_rgc_arg" in -*) adlc_rgc_plain=0 ;; esac
       continue
     fi
     case "$adlc_rgc_arg" in
-      --) break ;;
+      --) adlc_rgc_plain=0; break ;;
       --root) adlc_rgc_want_value=1 ;;
       --root=*) adlc_rgc_root=${adlc_rgc_arg#--root=} ;;
+      --require-recorded) [ "$adlc_rgc_verb" = check ] || adlc_rgc_plain=0 ;;
+      BUG-*)
+        adlc_rgc_digits=${adlc_rgc_arg#BUG-}
+        case "$adlc_rgc_verb:$adlc_rgc_digits" in
+          check:*[!0-9]* | check: | mode:*) adlc_rgc_plain=0 ;;
+        esac
+        ;;
+      *) adlc_rgc_plain=0 ;;
     esac
   done
+  if [ "$adlc_rgc_want_value" = 1 ]; then adlc_rgc_plain=0; fi
   if [ -z "$adlc_rgc_root" ]; then adlc_rgc_root=.; fi
   # An engine inside the tree under check is that tree's own copy, whatever the
   # root says (ADLC_TOOLKIT_ROOT pointed at the worktree, or at a copy vendored in
@@ -138,14 +176,26 @@ adlc_regression_check() {
     case "$adlc_rgc_eng_dir" in
       "$adlc_rgc_root_dir" | "$adlc_rgc_root_dir"/*) adlc_rgc_inside=1 ;;
     esac
+    # On a case-insensitive filesystem (macOS by default) `pwd -P` keeps the case
+    # a path was typed in under bash and /bin/sh, so the same directory can come
+    # back in two spellings. The paths are compared case-folded as well, and
+    # either comparison saying inside refuses: on doubt, refuse.
+    adlc_rgc_eng_fold=$(printf '%s' "$adlc_rgc_eng_dir" | command tr '[:upper:]' '[:lower:]')
+    adlc_rgc_root_fold=$(printf '%s' "$adlc_rgc_root_dir" | command tr '[:upper:]' '[:lower:]')
+    case "$adlc_rgc_eng_fold" in
+      "$adlc_rgc_root_fold" | "$adlc_rgc_root_fold"/*) adlc_rgc_inside=1 ;;
+    esac
     if [ "$adlc_rgc_root_dir" = / ]; then adlc_rgc_inside=1; fi
-    # One exemption: the symlink install's own checkout. When ~/.claude/skills
-    # resolves to the tree under check and the engine is that install's (no
-    # ADLC_TOOLKIT_ROOT pointing anywhere else), the tree IS the installed toolkit:
-    # the skill text calling this gate is read from the same tree, so refusing
-    # protects nothing, and it would stop /bugfix on the toolkit itself. A root
-    # named by ADLC_TOOLKIT_ROOT, a vendored copy, or any other tree stays refused.
-    if [ "$adlc_rgc_inside" = 1 ] && [ -n "${HOME:-}" ]; then
+    # One exemption, for `mode` only: the symlink install's own checkout. When
+    # ~/.claude/skills resolves to the tree under check and the engine is that
+    # install's (no ADLC_TOOLKIT_ROOT pointing anywhere else), the tree IS the
+    # installed toolkit: the skill text reading the setting is read from the same
+    # tree, so refusing protects nothing, and it would stop /bugfix on the toolkit
+    # itself before Phase 1. `check` is the gate, and a gate never runs in the
+    # tree it judges: the toolkit's own /bugfix runs its Gate from a fix worktree,
+    # which does not contain the installed engine. A root named by
+    # ADLC_TOOLKIT_ROOT, a vendored copy, or any other tree stays refused.
+    if [ "$adlc_rgc_inside" = 1 ] && [ "$adlc_rgc_verb" = mode ] && [ -n "${HOME:-}" ]; then
       adlc_rgc_sym_dir=$(CDPATH= cd -P -- "$HOME/.claude/skills" 2>/dev/null && pwd -P) || adlc_rgc_sym_dir=  # adlc-home: alias
       if [ -n "$adlc_rgc_sym_dir" ] && [ "$adlc_rgc_sym_dir" = "$adlc_rgc_root_dir" ] && [ "$adlc_rgc_eng_dir" = "$adlc_rgc_sym_dir/tools/adlc" ]; then
         adlc_rgc_tk_dir=$adlc_rgc_sym_dir
@@ -156,13 +206,32 @@ adlc_regression_check() {
       fi
     fi
     if [ "$adlc_rgc_inside" = 1 ]; then
-      echo "adlc_regression_check: the engine at ${adlc_rgc_script%/regression_check.py}/ is inside the tree under check ($adlc_rgc_root); it would check itself — point ADLC_TOOLKIT_ROOT at the installed toolkit, or run from a tree that does not contain it" >&2
+      echo "adlc_regression_check: the engine, $adlc_rgc_where, is inside the tree under check (the --root, else the current directory); it would check itself — point ADLC_TOOLKIT_ROOT at the installed toolkit, or run from a tree that does not contain it (a fix worktree, for the gate)" >&2
       _adlc_regression_check_error "$adlc_rgc_prefix" 'the engine is inside the tree under check'
       return 2
     fi
   fi
+  # No config and no `--base`: the answer is the engine's no-config `off`, which
+  # needs no interpreter, so a project that never named the setting never needs
+  # Python. The lines are the engine's, byte for byte (the harness compares them
+  # with a real run). The shortcut holds only where the engine would read the same
+  # thing: a resolved root, arguments it can stand in for, no `.adlc/config.yml`
+  # (nor a symlink there, which the engine reads as an error), and a `.adlc` that
+  # is absent or a searchable real directory. Anything else goes to the engine.
+  if [ "$adlc_rgc_plain" = 1 ] && [ -n "$adlc_rgc_root_dir" ]; then
+    adlc_rgc_cfg="$adlc_rgc_root_dir/.adlc"
+    if [ ! -L "$adlc_rgc_cfg/config.yml" ] && [ ! -e "$adlc_rgc_cfg/config.yml" ] && [ ! -L "$adlc_rgc_cfg" ] && { [ ! -e "$adlc_rgc_cfg" ] || { [ -d "$adlc_rgc_cfg" ] && [ -x "$adlc_rgc_cfg" ]; }; }; then
+      adlc_rgc_why='.adlc/config.yml does not exist, which means off; set bugfix.regression_test: required in it to turn regression tests on'
+      if [ "$adlc_rgc_verb" = mode ]; then
+        printf 'regression-test: off\n%s\n' "$adlc_rgc_why"
+      else
+        printf 'regression-check: off\nregression tests are off for this project: %s\n' "$adlc_rgc_why"
+      fi
+      return 0
+    fi
+  fi
   if [ ! -f "$adlc_rgc_script" ]; then
-    echo "adlc_regression_check: regression_check.py not found at ${adlc_rgc_script%/regression_check.py}/ — the installed toolkit predates REQ-691 or is not installed (symlink route: ./install.sh, or git pull the clone; plugin route: claude plugin install adlc@adlc-toolkit)" >&2
+    echo "adlc_regression_check: regression_check.py not found at $adlc_rgc_where — the installed toolkit predates REQ-691 or is not installed (symlink route: ./install.sh, or git pull the clone; plugin route: claude plugin install adlc@adlc-toolkit)" >&2
     _adlc_regression_check_error "$adlc_rgc_prefix" 'regression_check.py not found in the installed toolkit'
     return 2
   fi

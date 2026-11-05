@@ -12,12 +12,20 @@ are tested in ``tools/adlc/tests/test_regression_check.py`` and the wrapper's in
 Both files are read by path from the repo root, as ``test_lessons_contract.py``
 reads its skills. Markers and fences are found by whole lines outside fenced
 blocks, never by a substring a prose mention could also carry (LESSON-404).
+
+The Gate's fence is also run, whole, in a sandbox git repo with a bare origin,
+under /bin/sh, bash, zsh and dash (a shell that is not installed is skipped by
+name, LESSON-618). Before it runs, every line is held to a token allowlist, and
+the allowlist itself is tested both ways (LESSON-619).
 """
 
 import json
 import os
 import re
+import shutil
 import subprocess
+
+import pytest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 SKILL = "bugfix/SKILL.md"
@@ -30,6 +38,21 @@ MODE_CALL = 'adlc_regression_check mode; echo "regression_mode_rc=$?"'
 UNIT_POINTER = "Read `bugfix/references/regression-test.md` and follow it before you continue."
 SECTION_POINTER = "Read the `{}` section of `bugfix/references/regression-test.md` and follow it before you continue."
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+
+# The Gate fence (BR-13, ADR-691-F): three single-quoted placeholders, the guards
+# that run before anything is sourced, and the call. LESSON-718: a branch must not
+# loosen its own gate through its config or a vendored partial.
+GATE_PLACEHOLDERS = ("'<bug-id>'", "'<fix-branch>'", "'<integration-branch>'")
+GATE_GUARDS = (
+    'elif [ -n "$(git rev-parse --show-prefix 2>&1)" ]; then',
+    'elif [ -n "$(git status --porcelain --untracked-files=normal)" ]; then',
+    'elif ! git fetch -q origin "$rgt_ib" "$rgt_fix"; then',
+    'elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$rgt_fix")" ]; then',
+    "elif ! git diff --quiet \"origin/$rgt_ib...HEAD\" -- ':(icase).adlc/partials' ':(icase).adlc/tools'; then",
+)
+GATE_CALL = 'adlc_regression_check check --require-recorded --base "origin/$rgt_ib" "$rgt_bug"; rgt_rc=$?'
+#: The shells a fence may run under; one that is not installed is skipped by name.
+SHELLS = ("/bin/sh", "bash", "zsh", "dash")
 
 
 def _read(rel):
@@ -111,18 +134,234 @@ def _step6(text):
     return "\n".join(out)
 
 
-def _run_gate_guard(value):
-    """Run the Gate fence with the placeholder substituted as conventions.md says
-    (one single-quoted literal, each ``'`` written ``'\\''``) and the engine
-    replaced by a stub that names its arguments. Returns stdout."""
+# --- LESSON-619: the Gate fence is executed below, so it is an execution surface.
+# Before any of it runs, every word of every line is held to a small allowlist:
+# the commands and git subcommands the fence uses, the arguments it passes, and
+# its own variables. Quoted spans are data, except that a `$( )` inside one is
+# checked as a command line of its own, and a backtick anywhere fails. The root
+# line and the guarded source line are taken whole, because conventions.md and
+# SOURCE pin them byte for byte. Anything else fails the test unexecuted.
+_ALLOWED_COMMANDS = frozenset({"printf", "echo", "git", ":", "[", "adlc_regression_check", "case", "for"})
+_KEYWORDS = frozenset({"if", "elif", "else", "then", "fi", "do", "done", "!"})
+_GIT_SUBCOMMANDS = frozenset({"status", "fetch", "rev-parse", "diff"})
+_ALLOWED_ARGS = frozenset({
+    "in", "rgt_ref", "0", "-n", "!=", "]", "-q", "origin", "HEAD", "--show-prefix", "--porcelain",
+    "--untracked-files=normal", "--quiet", "--", "check", "--require-recorded", "--base", "2>&1",
+})
+_ASSIGN_RE = re.compile(r"^rgt_(bug|fix|ib|rc)=(Q|0|2|\$\?)$")
+_PATTERN_RE = re.compile(r"^[A-Za-z0-9*?.\[\]!/_-]+$")
+_QUOTED_RE = re.compile(r"^[QD]+$")
+_REDIRECT_RE = re.compile(r"\d?>&\d")
+
+
+def _close_paren(text, i):
+    """Index of the ``)`` closing the ``$(`` whose ``(`` is at ``i``."""
+    depth, j = 0, i
+    while j < len(text):
+        c = text[j]
+        if c == "'":
+            j = text.index("'", j + 1)
+        elif c == '"':
+            j += 1
+            while text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+        j += 1
+    raise ValueError("unclosed $(")
+
+
+def _shell_words(line):
+    """``(words, subs)``: the line's words, a single-quoted span written ``Q`` and
+    a double-quoted one ``D``, operators as words of their own; and the bodies of
+    its ``$( )`` substitutions, quoted or not."""
+    words, subs, cur, i = [], [], "", 0
+    while i < len(line):
+        c = line[i]
+        if c == "`":
+            raise ValueError("a backtick")
+        if c == "'":
+            i = line.index("'", i + 1) + 1
+            cur += "Q"
+        elif c == '"':
+            j = i + 1
+            while line[j] != '"':
+                if line[j] == "`":
+                    raise ValueError("a backtick")
+                if line.startswith("$(", j):
+                    k = _close_paren(line, j + 1)
+                    subs.append(line[j + 2:k])
+                    j = k + 1
+                    continue
+                j += 2 if line[j] == "\\" else 1
+            cur += "D"
+            i = j + 1
+        elif line.startswith("$(", i):
+            k = _close_paren(line, i + 1)
+            subs.append(line[i + 2:k])
+            cur += "S"
+            i = k + 1
+        elif _REDIRECT_RE.match(line, i):
+            m = _REDIRECT_RE.match(line, i)
+            cur += m.group(0)
+            i = m.end()
+        elif c in " \t":
+            if cur:
+                words.append(cur)
+            cur, i = "", i + 1
+        elif c in ";|&()":
+            if cur:
+                words.append(cur)
+            op = line[i:i + 2] if line[i:i + 2] in (";;", "&&", "||") else c
+            words.append(op)
+            cur, i = "", i + len(op)
+        elif c == "\\":
+            cur, i = cur + line[i:i + 2], i + 2
+        else:
+            cur, i = cur + c, i + 1
+    if cur:
+        words.append(cur)
+    return words, subs
+
+
+def _line_offenders(line, pattern_mode):
+    """``(pattern_mode, offenders)`` for one line; ``pattern_mode`` is True while a
+    ``case`` is between ``in`` (or ``;;``) and an arm's ``)``."""
+    try:
+        words, subs = _shell_words(line)
+    except (ValueError, IndexError) as exc:
+        return pattern_mode, ["%s: %s" % (line, exc)]
+    bad = []
+    cmd_pos, cmd, want_git_sub = not pattern_mode, None, False
+    for w in words:
+        if pattern_mode:
+            if w == "esac":
+                pattern_mode, cmd_pos = False, False
+            elif w == ")":
+                pattern_mode, cmd_pos, cmd = False, True, None
+            elif not (w == "|" or w == "Q" or _PATTERN_RE.match(w)):
+                bad.append("%s: pattern %r" % (line, w))
+            continue
+        if w in (";", "&&", "||", "|", "("):
+            cmd_pos, cmd = True, None
+        elif w == ";;":
+            pattern_mode, cmd_pos, cmd = True, False, None
+        elif cmd_pos:
+            if w in _KEYWORDS or _ASSIGN_RE.match(w):
+                continue
+            if w in _ALLOWED_COMMANDS:
+                cmd_pos, cmd, want_git_sub = False, w, w == "git"
+            else:
+                bad.append("%s: command %r" % (line, w))
+                cmd_pos = False
+        elif want_git_sub:
+            want_git_sub = False
+            if w not in _GIT_SUBCOMMANDS:
+                bad.append("%s: git subcommand %r" % (line, w))
+        elif cmd == "case" and w == "in":
+            pattern_mode = True
+        elif not (w in _ALLOWED_ARGS or _QUOTED_RE.match(w)):
+            bad.append("%s: argument %r" % (line, w))
+    for sub in subs:
+        bad.extend(_line_offenders(sub, False)[1])
+    return pattern_mode, bad
+
+
+def _fence_offenders(lines):
+    """Every line of ``lines`` not on the allowlist, with the word that failed."""
+    whole = {_root_line(), SOURCE}
+    bad, pattern_mode = [], False
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or line in whole:
+            continue
+        pattern_mode, found = _line_offenders(line, pattern_mode)
+        bad.extend(found)
+    return bad
+
+
+def _gate_fence():
+    """The Gate's fence, held to the allowlist before anything can run it."""
     fence = _sh_fences(_companion_sections()["Gate"])[0]
-    assert fence[0] == _root_line() and fence[1] == SOURCE, fence[:2]
-    body = "\n".join(fence[2:])
-    assert body.count("'<bug-id>'") == 1, body
-    literal = "'" + value.replace("'", "'\\''") + "'"
-    stub = 'adlc_regression_check() { echo "STUB-CALLED: $*"; return 0; }\n'
-    script = stub + body.replace("'<bug-id>'", literal)
-    result = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True, timeout=30)
+    offenders = _fence_offenders(fence)
+    assert not offenders, offenders
+    return fence
+
+
+def _shell(name):
+    found = shutil.which(name)
+    if not found:
+        pytest.skip("%s is not installed" % name)
+    return found
+
+
+def _sandbox_env(home):
+    """No ToolkitRoot, no global or system git config, and a fixed identity."""
+    return {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(home),
+        "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+
+def _git(env, cwd, *args):
+    subprocess.run(["git", *args], cwd=str(cwd), env=env, check=True, capture_output=True, timeout=60)
+
+
+def _commit(env, work, rel, text):
+    path = work / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    _git(env, work, "add", "--", rel)
+    _git(env, work, "commit", "-q", "-m", "add " + rel)
+
+
+def _gate_sandbox(tmp_path, vendored_on_dev=False):
+    """``(env, work)``: a clone of a bare origin with ``dev`` and a pushed
+    ``fix/bug-123-thing``, and a HOME whose symlink-route install is a stub
+    partial that says when it is sourced and what the check was called with."""
+    home = tmp_path / "home"
+    partials = home / ".claude" / "skills" / "partials"
+    partials.mkdir(parents=True)
+    (partials / "regression-check.sh").write_text(
+        'echo "INSTALLED-PARTIAL-SOURCED"\n'
+        'adlc_regression_check() { echo "STUB-CALLED: $*"; return 0; }\n')
+    env = _sandbox_env(home)
+    origin, work = tmp_path / "origin.git", tmp_path / "work"
+    _git(env, tmp_path, "init", "-q", "--bare", str(origin))
+    _git(env, tmp_path, "init", "-q", "-b", "dev", str(work))
+    _git(env, work, "remote", "add", "origin", str(origin))
+    _commit(env, work, "README.md", "fixture\n")
+    if vendored_on_dev:
+        _commit(env, work, ".adlc/partials/regression-check.sh",
+                'adlc_regression_check() { echo "VENDORED-STUB: $*"; return 0; }\n')
+    _git(env, work, "push", "-q", "origin", "dev")
+    _git(env, work, "checkout", "-q", "-b", "fix/bug-123-thing")
+    _commit(env, work, "fix.txt", "the fix\n")
+    _git(env, work, "push", "-q", "-u", "origin", "fix/bug-123-thing")
+    return env, work
+
+
+def _run_gate(shell, env, cwd, tmp_path, bug="BUG-123", fix="fix/bug-123-thing", ib="dev"):
+    """Run the Gate fence under ``shell`` from ``cwd``, each placeholder replaced as
+    conventions.md says: one single-quoted literal, each ``'`` written ``'\\''``.
+    The script lives outside the work tree, so it never dirties it. Returns stdout."""
+    body = "\n".join(_gate_fence())
+    for placeholder, value in zip(GATE_PLACEHOLDERS, (bug, fix, ib)):
+        assert body.count(placeholder) == 1, placeholder
+        body = body.replace(placeholder, "'" + value.replace("'", "'\\''") + "'")
+    script = tmp_path / "gate.sh"
+    script.write_text(body + "\n")
+    result = subprocess.run([shell, str(script)], cwd=str(cwd), env=env,
+                            capture_output=True, text=True, timeout=60)
     return result.stdout
 
 
@@ -276,11 +515,14 @@ def test_off_mode_at_every_site():
         fences = _sh_fences(sec)
         assert fences, name
         first = fences[0]
-        assert first[:2] == [root_line, SOURCE], name
         if name == "Gate":
-            assert any("adlc_regression_check check --require-recorded" in line for line in first), name
+            # The Gate's guards come before its root line and source (LESSON-718).
+            stripped = [line.strip() for line in first]
+            assert root_line in stripped and SOURCE in stripped, name
+            assert GATE_CALL in stripped, name
             off = "- `regression-check: off` (rc 0)"
         else:
+            assert first[:2] == [root_line, SOURCE], name
             assert first[2] == MODE_CALL, name
             off = "- `regression-test: off`" if name != "PR body" else "- `off`: one line"
         # The mode read heads the section: nothing about off comes before it.
@@ -313,8 +555,9 @@ def test_off_mode_at_every_site():
 
 def test_gate_before_merge():
     """BR-13, AC-12 (ADR-691-F): the gate runs before Phase 6 merges, validates
-    the id before the check, and stops unmerged and unresolved on anything but
-    a pass or off."""
+    the id and both branch names, runs every guard before anything is sourced,
+    reads the setting at the integration branch (--base), and stops unmerged and
+    unresolved on anything but a pass or off (LESSON-718)."""
     skill = _read(SKILL)
     phase6 = _section(skill, "### Phase 6:", "## Branch Naming")
     order = [
@@ -332,29 +575,157 @@ def test_gate_before_merge():
     gate = _companion_sections()["Gate"]
     assert "| Phase 6 Step 0, before Step 1 merges | Gate |" in _read(COMPANION)
     assert "Run the fence from the root of the checkout that holds the fix branch" in gate
-    text = "\n".join(_sh_fences(gate)[0])
-    assert "rgt_bug='<bug-id>'" in text
-    assert text.index('case "$rgt_bug" in') < text.index('adlc_regression_check check --require-recorded "$rgt_bug"')
+    fence = _gate_fence()
+    stripped = [line.strip() for line in fence]
+    text = "\n".join(fence)
+    for placeholder in GATE_PLACEHOLDERS:
+        assert text.count(placeholder) == 1, placeholder
+    assert stripped[0] == "rgt_bug='<bug-id>'; rgt_fix='<fix-branch>'; rgt_ib='<integration-branch>'"
+    # The id and both branch names are checked first, then every guard, and only
+    # then is anything sourced: nothing the fix branch carries runs as its gate.
+    source_at = stripped.index(SOURCE)
+    assert stripped.index(_root_line()) == source_at - 1
+    assert text.index('case "$rgt_bug" in') < text.index('case "$rgt_ref" in') < text.index(GATE_GUARDS[0])
+    guard_at = [stripped.index(g) for g in GATE_GUARDS]
+    assert guard_at == sorted(guard_at) and guard_at[-1] < source_at, guard_at
+    # The setting comes from the integration branch, never from the tree under check.
+    assert stripped.index(GATE_CALL) == source_at + 1
+    assert '--base "origin/$rgt_ib"' in GATE_CALL
     for outcome in (
         "- `regression-check: pass` (rc 0): continue to Step 1, the merge.",
         "- `regression-check: fail` (rc 1): stop before merging. Merge no PR and do not set the bug `resolved` (AC-12).",
         "Show the engine's `BUG-nnn:` lines as printed",
-        "- `regression-check: error`, or `regression_gate_rc=2` from the id refusal: stop exactly as for `fail`.",
+        "- `regression-check: error`, or `regression_gate_rc=2` from a refusal or a guard: stop exactly as for `fail`.",
     ):
         assert outcome in gate, outcome
     assert "turns a bug that recorded neither tests nor a waiver from legacy into failed (BR-13)" in gate
+    why = _section(gate, "**Why the guards come first** (LESSON-718", "The check reads the mode itself")
+    for reason in ("the tree is clean", "`HEAD` is `origin/<fix-branch>`", "in any letter case",
+                   "`--base \"origin/<integration-branch>\"`", "cannot switch its own gate `off` by editing its config"):
+        assert reason in why, reason
+    limitation = gate[gate.index("**Known limitation, cross-repo.**"):]
+    for words in ("`not cloned at`", "`does not exist`", "do not loop on the fence, and merge nothing",
+                  "an absolute `repos.<id>.path`"):
+        assert words in limitation, words
 
-    # The id guard, run: a valid id reaches the check, anything else never does.
+    rec = _companion_sections()["Record"]
+    assert "Write the record in the bug report's copy on the fix branch, in the fix worktree" in rec
+    assert "push it before Phase 6: the Gate's guards refuse" in rec
+
+
+def test_gate_fence_allowlist_both_ways():
+    """LESSON-619: the allowlist that gates execution passes the real fence and
+    fails a fence carrying anything foreign, in the same run."""
+    fence = _sh_fences(_companion_sections()["Gate"])[0]
+    assert _fence_offenders(fence) == []
+    end = len(fence) - 1
+    for foreign in ('rm -rf "$HOME"', "printf x; curl https://example.com", 'elif [ -n "$(curl x)" ]; then',
+                    "git -c core.pager=sh log", 'echo "`id`"', '"$rgt_bug" --version', 'eval "$rgt_bug"',
+                    "rgt_rc=$(id)", "python3 -c pass"):
+        planted = fence[:end] + [foreign] + fence[end:]
+        assert _fence_offenders(planted), foreign
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_gate_runs_check_against_integration_branch(shell, tmp_path):
+    """BR-13, LESSON-718: a clean, pushed fix branch that ships no vendored partial
+    reaches the check, which reads the setting at origin/<integration-branch>."""
+    sh = _shell(shell)
+    env, work = _gate_sandbox(tmp_path)
+    out = _run_gate(sh, env, work, tmp_path)
+    assert "INSTALLED-PARTIAL-SOURCED" in out, out
+    assert "STUB-CALLED: check --require-recorded --base origin/dev BUG-123" in out, out
+    assert out.splitlines()[-1] == "regression_gate_rc=0", out
+    # The project's own vendored copy, unchanged by the branch, is still the one used.
+    env, work = _gate_sandbox(tmp_path / "vendored", vendored_on_dev=True)
+    out = _run_gate(sh, env, work, tmp_path / "vendored")
+    assert "VENDORED-STUB: check --require-recorded --base origin/dev BUG-123" in out, out
+    assert "INSTALLED-PARTIAL-SOURCED" not in out, out
+
+
+def _plant_untracked(env, work):
+    (work / "notes.txt").write_text("not committed\n")
+
+
+def _plant_unpushed(env, work):
+    _commit(env, work, "record.md", "a record that was never pushed\n")
+
+
+def _plant_vendored_partial(env, work):
+    _commit(env, work, ".adlc/partials/regression-check.sh",
+            'echo "VENDORED-RAN"\nadlc_regression_check() { echo "regression-check: pass"; return 0; }\n')
+    _git(env, work, "push", "-q", "origin", "fix/bug-123-thing")
+
+
+def _plant_vendored_tool_other_case(env, work):
+    _commit(env, work, ".ADLC/Tools/adlc/regression_check.py", 'print("regression-check: off")\n')
+    _git(env, work, "push", "-q", "origin", "fix/bug-123-thing")
+
+
+def _plant_unpublished_branch(env, work):
+    _git(env, work, "checkout", "-q", "-b", "fix/bug-124-never-pushed")
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("plant, fix, subdir, reason", [
+    (_plant_untracked, "fix/bug-123-thing", "", "the fix checkout has uncommitted changes"),
+    (_plant_unpushed, "fix/bug-123-thing", "", "HEAD is not origin/fix/bug-123-thing"),
+    (_plant_vendored_partial, "fix/bug-123-thing", "", "changes the vendored .adlc/partials or .adlc/tools"),
+    (_plant_vendored_tool_other_case, "fix/bug-123-thing", "", "changes the vendored .adlc/partials or .adlc/tools"),
+    (_plant_unpublished_branch, "fix/bug-124-never-pushed", "", "fetch of origin/dev or origin/fix/bug-124-never-pushed failed"),
+    (None, "fix/bug-123-thing", "sub", "run this fence from the root of the fix checkout"),
+], ids=["untracked", "unpushed", "vendored-partial", "vendored-tool-icase", "branch-not-pushed", "subdirectory"])
+def test_gate_guards_stop_before_sourcing(shell, plant, fix, subdir, reason, tmp_path):
+    """LESSON-718: an uncommitted or unpushed record, a branch that ships its own
+    partial or tool (in any letter case), a branch that was never pushed, or a run
+    from below the checkout's root stops the gate with one line, before anything
+    is sourced and with nothing checked."""
+    sh = _shell(shell)
+    env, work = _gate_sandbox(tmp_path)
+    if plant:
+        plant(env, work)
+    cwd = work
+    if subdir:
+        cwd = work / subdir
+        cwd.mkdir()
+        (cwd / ".gitkeep").write_text("")
+        _git(env, work, "add", "--", subdir)
+        _git(env, work, "commit", "-q", "-m", "a subdirectory")
+        _git(env, work, "push", "-q", "origin", fix)
+    out = _run_gate(sh, env, cwd, tmp_path, fix=fix)
+    assert reason in out, out
+    for never in ("INSTALLED-PARTIAL-SOURCED", "STUB-CALLED", "VENDORED-RAN", "regression-check: pass"):
+        assert never not in out, (never, out)
+    assert out.splitlines()[-1] == "regression_gate_rc=2", out
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+def test_gate_refuses_bad_ids_and_branch_names(shell, tmp_path):
+    """The id and both branch names are validated before anything else runs: a
+    valid id reaches the check, anything else never does, and a substituted value
+    can never inject a command."""
+    sh = _shell(shell)
+    env, work = _gate_sandbox(tmp_path)
     for good in ("BUG-123", "BUG-1234", "BUG-12345", "BUG-123456"):
-        out = _run_gate_guard(good)
-        assert f"STUB-CALLED: check --require-recorded {good}" in out, (good, out)
-        assert "regression_gate_rc=0" in out, (good, out)
-    for bad in ("BUG-12", "BUG-1234567", "bug-123", "BUG-12a", " BUG-123", "BUG-123 ", "",
-                "BUG-123\nBUG-456", "BUG-123'; echo INJECTED; '", "BUG-123; echo INJECTED"):
-        out = _run_gate_guard(bad)
-        assert "STUB-CALLED" not in out, (bad, out)
-        assert "INJECTED" not in out.splitlines(), (bad, out)
-        assert "regression_gate_rc=2" in out and "is not a bug id" in out, (bad, out)
+        out = _run_gate(sh, env, work, tmp_path, bug=good)
+        assert f"STUB-CALLED: check --require-recorded --base origin/dev {good}" in out, (good, out)
+        assert out.splitlines()[-1] == "regression_gate_rc=0", (good, out)
+    bad_ids = ("BUG-12", "BUG-1234567", "bug-123", "BUG-12a", " BUG-123", "BUG-123 ", "",
+               "BUG-123\nBUG-456", "BUG-123'; echo INJECTED; '", "BUG-123; echo INJECTED")
+    bad_refs = ("", "-x", "--upload-pack=echo INJECTED", "a..b", ".hidden", "a/.b", "/abs", "trail/",
+                "a//b", "x.lock", "x.", "foo bar", "x$(echo INJECTED)", "x`echo INJECTED`",
+                "x'; echo INJECTED; '", "x;echo INJECTED", "a\nb", "@{-1}", "x~1", "x^", "x:y")
+    cases = [(b, None, None, "is not a bug id") for b in bad_ids]
+    cases += [(None, r, None, "is not a branch name") for r in bad_refs]
+    cases += [(None, None, r, "is not a branch name") for r in bad_refs]
+    for bug, fix, ib, reason in cases:
+        kw = {k: v for k, v in (("bug", bug), ("fix", fix), ("ib", ib)) if v is not None}
+        out = _run_gate(sh, env, work, tmp_path, **kw)
+        assert reason in out, (kw, out)
+        assert "INJECTED" not in out.splitlines(), (kw, out)
+        for never in ("INSTALLED-PARTIAL-SOURCED", "STUB-CALLED"):
+            assert never not in out, (kw, never, out)
+        assert out.splitlines()[-1] == "regression_gate_rc=2", (kw, out)
 
 
 def test_contrast_sentence_outside_rules_block():

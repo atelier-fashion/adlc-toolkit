@@ -24,15 +24,20 @@ adlc_regression_check mode; echo "regression_mode_rc=$?"
 ```
 
 ```
-adlc_regression_check mode  [--root DIR]
-adlc_regression_check check [--root DIR] [--require-recorded] [BUG-nnn ...]
+adlc_regression_check mode  [--root DIR] [--base REF]
+adlc_regression_check check [--root DIR] [--base REF] [--require-recorded] [BUG-nnn ...]
 ```
 
 The arguments reach the engine unchanged. `--root` is the project root, the
 directory holding `.adlc/`. It defaults to the current directory, so a fence
 runs from the project root, or from the fix worktree for the Phase 6 gate
-(ADR-691-F). Each fence that branches on the mode calls `mode` itself; no fence
-reads a value another fence set (ADR-691-H).
+(ADR-691-F). `--base REF` makes the engine read `bugfix.regression_test` and
+`repos:` from `.adlc/config.yml` as committed at `REF`, not from the tree under
+check, so a branch cannot loosen its own gate by editing its config
+(LESSON-718); the Gate passes `--base origin/<integration-branch>`. No config
+at `REF` is `off`, and a `REF` git cannot resolve is the engine's error, rc 2.
+The wrapper passes it through like any other argument. Each fence that branches on the mode
+calls `mode` itself; no fence reads a value another fence set (ADR-691-H).
 
 ## Return contract
 
@@ -50,6 +55,23 @@ stdout is the engine's, line for line. The first line is always the verdict:
 
 `mode` never exits 1. A project with no resolved bugs passes with every count 0
 (BR-10): an empty history is a legitimate state, not a vacuous pass.
+
+**No config needs no engine.** When the tree under check has no
+`.adlc/config.yml` and no `--base` was passed, the wrapper prints the engine's
+own no-config lines itself, rc 0, without running the engine or resolving an
+interpreter: `regression-test: off` then `.adlc/config.yml does not exist, which
+means off; set bugfix.regression_test: required in it to turn regression tests
+on` for `mode`, and `regression-check: off` then that reason after `regression
+tests are off for this project: ` for `check`. So a project that never named the
+setting never needs Python. It does this only where the engine would read the
+same thing: the root resolves, every argument is `--root`, or for `check`
+`--require-recorded` or a `BUG-` id of ASCII digits, nothing is at
+`.adlc/config.yml` (not even a symlink, which the engine reads as an error), and
+`.adlc` is absent or a searchable directory that is not a symlink. Anything else,
+`--base` included, goes to the engine, and a missing engine is then an error.
+The harness compares these lines with a real engine run, so they cannot drift.
+The refusals below that come before it (usage, a relative root, an engine inside
+the tree) still refuse.
 
 **An error is never a pass and never off** (BR-17, LESSON-581). That holds for
 the wrapper too. It captures the engine's stdout and exit code and hands both
@@ -76,8 +98,12 @@ and rc 2, when:
 | `_adlc_forge_python` is not defined, or prints nothing | `interpreter resolver _adlc_forge_python is not defined` / `... printed nothing` |
 
 Each refusal also writes one line to stderr naming what it refused; the
-missing-engine line names both install routes. The wrapper adds no other line and
-swallows no stderr.
+missing-engine line names both install routes. Those lines name the engine as
+`<ToolkitRoot>/tools/adlc/regression_check.py` and say where ToolkitRoot came
+from (`ADLC_TOOLKIT_ROOT`, or the symlink install under `HOME`), never an
+absolute path under the home directory. The wrapper adds no other line and
+swallows no stderr: on a run in the contract the engine's stderr reaches the
+caller unchanged.
 
 ## What a calling fence does
 
@@ -111,18 +137,26 @@ The wrapper refuses when the engine's directory resolves inside that tree:
 `ADLC_TOOLKIT_ROOT` naming the tree itself, a copy vendored in it, or either
 reached through a symlink (both sides are resolved with `cd -P` first). A fix
 must never be judged by code it can edit, and an engine the fix can edit could
-print `off` and switch its own gate off (LESSON-718). A root that does not
-resolve is left to the engine, which reports it as an error.
+print `off` and switch its own gate off (LESSON-718). The two resolved paths are
+compared as they are and case-folded (`tr '[:upper:]' '[:lower:]'`), and either
+comparison saying inside refuses. On a case-insensitive filesystem, the macOS
+default, bash and `/bin/sh` keep the letter case a path was typed in through
+`cd -P` and `pwd -P`, so `ADLC_TOOLKIT_ROOT` naming the tree in upper case would
+otherwise read as another directory. A root that does not resolve is left to
+the engine, which reports it as an error.
 
-One exemption, the symlink route's own clone. The clone behind the skills
-symlink is both the installed toolkit and, when the session runs in it, the tree
-under check. When the skills symlink resolves to the tree under check, the engine
-is that install's, and `ADLC_TOOLKIT_ROOT` is unset or names the same directory,
-the wrapper runs: the skill text calling the gate is read from that same tree, so
-refusing would protect nothing and would stop `/bugfix` on the toolkit itself.
-Any other root that contains the engine stays refused. A worktree under the clone
-(`.worktrees/`, `.claude/worktrees/`) carries its own copy of the engine but not
-the installed one, so it is not inside-the-tree at all.
+One exemption, for `mode` only: the symlink route's own clone. The clone behind
+the skills symlink is both the installed toolkit and, when the session runs in
+it, the tree under check. When the skills symlink resolves to the tree under
+check, the engine is that install's, and `ADLC_TOOLKIT_ROOT` is unset or names
+the same directory, `mode` runs: the skill text reading the setting comes from
+that same tree, so refusing would protect nothing and would stop `/bugfix` on the
+toolkit itself before Phase 1. `check` is the gate, and stays refused there: a
+gate never runs in the tree it judges, so the toolkit's own `/bugfix` runs its
+Gate from a fix worktree. Any other root that contains the engine stays refused.
+A worktree under the clone (`.worktrees/`, `.claude/worktrees/`) carries its own
+copy of the engine but not the installed one, so it is not inside-the-tree at
+all.
 
 ## Interpreter
 
@@ -138,7 +172,13 @@ comes from the installed toolkit too. The toolkit's own tests point `HOME`, or
 
 The partial resolves Python with `forge.sh`'s `_adlc_forge_python`, as
 `lane-check.sh` and `lessons.sh` do, so every engine runs under one interpreter
-(the REQ-652 ADR-3 coupling). It needs no PyYAML: the engine is standard library
+(the REQ-652 ADR-3 coupling). A vendored `.adlc/partials/forge.sh` is sourced
+first, as the guarded spelling says; when it is older than the resolver and loads
+without defining `_adlc_forge_python`, the partial also sources the installed
+toolkit's `forge.sh`, read as
+`"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"` (a partial
+carries no root line), so a stale vendored copy does not stop the check. It
+needs no PyYAML: the engine is standard library
 only (ADR-691-A), so the answer is the same on a plugin install with no delegate
 venv. The call is `command "$py" -E <engine> "$@"`: `command` so a shell function
 named `python3` cannot intercept it (REQ-609 D5), and `-E` so a `PYTHONPATH`
@@ -154,6 +194,8 @@ no `case` inside `$( )`. It loads under a `set -u` caller with `HOME` and
 through `partials/tests/run.sh`. Each case builds a git repo in a sandbox, points
 `HOME` at a sandbox whose skills symlink is the checkout, and asserts on the
 verdict lines, never on the exit status alone (LESSON-754). Stub toolkit roots
-stand in for an engine that prints nothing, exits outside the contract, or
-prints a verdict its code or verb does not mean. The engine's own rules are
+stand in for an engine that prints nothing, exits outside the contract, prints a
+verdict its code or verb does not mean, or writes to stderr. The letter-case
+case runs only on a case-insensitive filesystem and prints a `SKIP:` line
+elsewhere. The engine's own rules are
 tested by `tools/adlc/tests/test_regression_check.py`.
