@@ -97,7 +97,7 @@ A bug report written before this REQ carries neither field. It parses and is pro
 - [ ] AC-13: `templates/config-template.yml` and `templates/bug-template.md` carry the documentation BR-15 lists, and `/template-drift` reports the bug template as stale in a project that vendored the old one. (The config template isn't a vendored template: `/init` copies it once as `.adlc/config.yml`, so drift doesn't track it.)
 - [ ] AC-14: `tools/lint-skills` and the full `partials/tests/run.sh` pass on the final tree, not only the tests named for this REQ (informed by LESSON-742, LESSON-752).
 - [ ] AC-15: The check, given the id of an open bug whose fields are valid, reports it as passed or waived; given an id with no bug report, it fails and names the id.
-- [ ] AC-16: With a `.adlc/config.yml` that doesn't parse, `/bugfix` and the check both stop and say why; with no config file at all, both behave as `off` (benign path).
+- [ ] AC-16: With a `.adlc/config.yml` that names the setting (or a `bugfix:` block) and doesn't parse, `/bugfix` and the check both stop and say why; with no config file at all, both behave as `off` (benign path).
 
 ## External Dependencies
 
