@@ -243,6 +243,9 @@ check "check_pass_and_fail_verdicts: a named passing id: output" "regression-che
 passed=1 waived=0 legacy=0 failed=0" "$out"
 bug "$R" BUG-003 open '[]' '""'
 out=$(adlc_regression_check check --require-recorded --root "$R" BUG-003); rc=$?
+check "check_pass_and_fail_verdicts: --require-recorded on an uncommitted report: its line" "BUG-003: the bug report is not committed (not in HEAD); commit it; neither regression_tests nor regression_waiver is recorded" "$(nth "$out" 3)"
+git -C "$R" add -A && git -C "$R" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit -q --no-verify -m "record BUG-003"
+out=$(adlc_regression_check check --require-recorded --root "$R" BUG-003); rc=$?
 check "check_pass_and_fail_verdicts: --require-recorded on a legacy bug: rc" 1 "$rc"
 check "check_pass_and_fail_verdicts: --require-recorded on a legacy bug: verdict" "regression-check: fail" "$(nth "$out" 1)"
 check "check_pass_and_fail_verdicts: --require-recorded on a legacy bug: its line" "BUG-003: neither regression_tests nor regression_waiver is recorded" "$(nth "$out" 3)"
