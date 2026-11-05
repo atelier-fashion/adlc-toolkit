@@ -1,7 +1,7 @@
 ---
 id: TASK-240
 title: "Bug and config templates carry the regression fields and setting"
-status: draft
+status: complete
 parent: REQ-691
 created: 2026-11-04
 updated: 2026-11-04
@@ -21,11 +21,11 @@ Document the two optional bug fields and the `## Regression Test` section in `te
 
 ## Acceptance Criteria
 
-- [ ] `regression_check.py mode`, run on a temp repo whose `.adlc/config.yml` is a copy of the template, prints `regression-test: required`.
-- [ ] `harness_yaml.loads` parses the template, and its `bugfix` mapping has exactly one key.
-- [ ] The template bug report, with its placeholders filled, reads as `legacy` with the empty fields absent, and as `passed` once `regression_tests` names a tracked file citing the id.
-- [ ] `tools/adlc/tests/test_lane_check.py`'s template case and `tools/lint-skills/tests/test_integration_branch_key.py` still pass.
-- [ ] Neither template gains a home-directory path or a bare `/init`.
+- [x] `regression_check.py mode`, run on a temp repo whose `.adlc/config.yml` is a copy of the template, prints `regression-test: required`.
+- [x] `harness_yaml.loads` parses the template, and its `bugfix` mapping has exactly one key.
+- [x] The template bug report, with its placeholders filled, reads as `legacy` with the empty fields absent, and as `passed` once `regression_tests` names a tracked file citing the id.
+- [x] `tools/adlc/tests/test_lane_check.py`'s template case and `tools/lint-skills/tests/test_integration_branch_key.py` still pass.
+- [x] Neither template gains a home-directory path or a bare `/init`.
 
 ## Verification
 
