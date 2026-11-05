@@ -1,7 +1,7 @@
 ---
 id: TASK-242
 title: "Docs, CHANGELOG and the full gate run"
-status: draft
+status: complete
 parent: REQ-691
 created: 2026-11-04
 updated: 2026-11-04
@@ -21,8 +21,8 @@ Record REQ-691 where people look for it, and run every gate the release checklis
 
 ## Acceptance Criteria
 
-- [ ] On the final tree, `tools/lint-skills/check.sh`, `python3 -m pytest tools -q`, `sh partials/tests/run.sh`, `node --test 'space/tests/*.test.js'` and `node --test 'workflows/tests/*.test.js'` all pass. Each reports a non-zero count of files scanned or cases run.
-- [ ] The README's skill-body-cap row still names exactly the skills over the cap.
+- [x] On the final tree, `tools/lint-skills/check.sh`, `python3 -m pytest tools -q`, `sh partials/tests/run.sh`, `node --test 'space/tests/*.test.js'` and `node --test 'workflows/tests/*.test.js'` all pass. Each reports a non-zero count of files scanned or cases run.
+- [x] The README's skill-body-cap row still names exactly the skills over the cap.
 
 ## Verification
 
