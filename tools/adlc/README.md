@@ -942,7 +942,8 @@ pathspecs), and its working-tree bytes must cite the bug id as `BUG-<n>` with
 no digit after it, so `BUG-26` never matches `BUG-261`. With
 `--require-recorded` it must also be committed in its repository's `HEAD`
 (`git cat-file` at `HEAD:./<path>`, relative to the project's or the sibling's
-directory), and that committed copy must cite the id too. A test that is only
+directory), as a regular file (a committed symlink fails with `is not committed
+as a regular file (HEAD)`), and that committed copy must cite the id too. A test that is only
 staged fails with `is not committed (not in HEAD)`, and one whose citation is
 only in the working tree with `does not cite BUG-nnn in its committed copy
 (HEAD)`: what merges is the commits, and `/bugfix`'s clean-tree guard covers

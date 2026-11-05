@@ -66,8 +66,11 @@ is cut per `RELEASING.md`.
   that the PR targets that branch, fetches it without tags, and reads the setting at
   `refs/remotes/origin/<integration-branch>`, so neither the fix branch's config nor a
   tag named `origin/main` can turn it off. A project that is `off` there, or has no
-  config there, gets no guard and no new stop; a `required` one needs a clean, pushed
-  fix checkout and every listed test committed. In `off` mode `/bugfix` writes neither field, its other test work is
+  config there, gets no guard and no new stop, and the forge is not asked; a `required`
+  one needs the PR to merge the fix branch into that branch, a clean, pushed fix checkout,
+  the PR's head at that commit, and the bug report and every listed test committed. A
+  pass prints the head it certified, and the merge is pinned to it with
+  `--match-head-commit`; the gate's own git calls run no hooks. In `off` mode `/bugfix` writes neither field, its other test work is
   unchanged, and the summary says regression tests are off, naming the key when it is
   not set. `templates/bug-template.md` documents both fields as optional and additive and
   adds the section. A cross-repo bug can fail the gate when its sibling is not reachable

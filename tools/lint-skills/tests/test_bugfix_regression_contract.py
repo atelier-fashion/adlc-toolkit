@@ -57,21 +57,29 @@ GATE_INSTALLED = 'elif [ ! -f "$rgt_home" ] || [ ! -f "$rgt_forge" ] || [ ! -f "
 GATE_SOURCES = ('. "$rgt_home"', '. "$rgt_forge"', '. "$rgt_part"')
 GATE_PROVIDER = ('rgt_prov=$(command "$(_adlc_forge_python)" -E '
                  '"$ADLC_TOOLKIT_ROOT/tools/adlc/forge_config.py" resolve-provider .)')
-GATE_PR_BASE = ('elif [ "$(ADLC_FORGE_PROVIDER_OVERRIDE="$rgt_prov" adlc_forge_pr_view "$rgt_pr" '
-                "--fields baseRefName | sed -n 's/^baseRefName=//p')\" != \"$rgt_ib\" ]; then")
-GATE_FETCH = ('elif ! git fetch -q --no-tags origin "+refs/heads/$rgt_ib:$rgt_base" '
-              '"+refs/heads/$rgt_fix:$rgt_head"; then')
+GATE_FETCH = ('if ! git -c core.hooksPath=/dev/null fetch -q --no-tags origin '
+              '"+refs/heads/$rgt_ib:$rgt_base"; then')
 GATE_CONFIG_AT_BASE = ('elif git cat-file -e "$rgt_at.adlc/config.yml" 2>/dev/null || '
                        '{ git cat-file -e "$rgt_at.adlc" 2>/dev/null && '
                        '! git cat-file -e "$rgt_at.adlc/" 2>/dev/null; }; then')
 GATE_MODE = 'rgt_mode=$(adlc_regression_check mode --base "$rgt_base"); rgt_rc=$?'
 GATE_OFF_ARM = "'0:regression-test: off'*) ;;"
 GATE_REQUIRED_ARM = "'0:regression-test: required'*)"
+GATE_PR_VIEW = ('[ -z "$rgt_prov" ] || rgt_view=$(ADLC_FORGE_PROVIDER_OVERRIDE="$rgt_prov" '
+                'adlc_forge_pr_view "$rgt_pr" --fields baseRefName,headRefName,headRefOid)')
+GATE_PR_BASE = ('elif [ "$(printf \'%s\\n\' "$rgt_view" | sed -n \'s/^baseRefName=//p\')" '
+                '!= "$rgt_ib" ]; then')
+GATE_PR_HEAD = ('elif [ "$(printf \'%s\\n\' "$rgt_view" | sed -n \'s/^headRefName=//p\')" '
+                '!= "$rgt_fix" ]; then')
+GATE_FETCH_FIX = ('elif ! git -c core.hooksPath=/dev/null fetch -q --no-tags origin '
+                  '"+refs/heads/$rgt_fix:$rgt_head"; then')
 GATE_GUARDS = (
-    'if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then',
-    'elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "$rgt_head")" ]; then',
+    'elif [ -n "$(git -c core.fsmonitor=false status --porcelain --untracked-files=normal)" ]; then',
+    'elif [ "$rgt_oid" != "$(git rev-parse "$rgt_head")" ]; then',
+    'elif [ "$(printf \'%s\\n\' "$rgt_view" | sed -n \'s/^headRefOid=//p\')" != "$rgt_oid" ]; then',
 )
 GATE_CALL = 'adlc_regression_check check --require-recorded --base "$rgt_base" "$rgt_bug"; rgt_rc=$?'
+GATE_PIN = '[ "$rgt_rc" != 0 ] || printf \'regression_gate_head=%s\\n\' "$rgt_oid"'
 GATE_NO_CONFIG = ("printf 'regression-test: off\\n.adlc/config.yml does not exist at %s, which "
                   "means off; set bugfix.regression_test: required in it to turn regression "
                   "tests on\\n' \"$rgt_base\"")
@@ -173,10 +181,13 @@ _GIT_SUBCOMMANDS = frozenset({"status", "fetch", "rev-parse", "cat-file"})
 _ALLOWED_ARGS = frozenset({
     "in", "rgt_ref", "0", "-n", "-z", "-f", "-e", "!", "=", "!=", "]", "-q", "origin", "HEAD",
     "--show-prefix", "--porcelain", "--untracked-files=normal", "--no-tags", "--fields",
-    "baseRefName", "mode", "check", "--require-recorded", "--base", "2>/dev/null",
+    "baseRefName,headRefName,headRefOid", "mode", "check", "--require-recorded", "--base", "2>/dev/null",
 })
 _ASSIGN_RE = re.compile(r"^(rgt_(bug|fix|ib|pr|rc)=(Q|0|2|\$\?)|rgt_(home|forge|part|base|head|at)=D"
-                        r"|rgt_mode=S|ADLC_FORGE_PROVIDER_OVERRIDE=D)$")
+                        r"|rgt_(mode|view|oid)=S|rgt_view=|ADLC_FORGE_PROVIDER_OVERRIDE=D)$")
+#: The only `git -c` settings the fence may pass: both switch off code the
+#: fix checkout could supply (a hook, a file-system monitor).
+_GIT_CONFIGS = frozenset({"core.hooksPath=/dev/null", "core.fsmonitor=false"})
 _PATTERN_RE = re.compile(r"^[A-Za-z0-9*?.\[\]!/_-]+$")
 _QUOTED_RE = re.compile(r"^[QD]+$")
 _REDIRECT_RE = re.compile(r"\d?>&\d")
@@ -264,7 +275,7 @@ def _line_offenders(line, pattern_mode):
     except (ValueError, IndexError) as exc:
         return pattern_mode, ["%s: %s" % (line, exc)]
     bad = []
-    cmd_pos, cmd, want_git_sub = not pattern_mode, None, False
+    cmd_pos, cmd, want_git_sub, want_git_cfg = not pattern_mode, None, False, False
     for w in words:
         if pattern_mode:
             if w == "esac":
@@ -286,6 +297,12 @@ def _line_offenders(line, pattern_mode):
             else:
                 bad.append("%s: command %r" % (line, w))
                 cmd_pos = False
+        elif want_git_cfg:
+            want_git_cfg = False
+            if w not in _GIT_CONFIGS:
+                bad.append("%s: git -c %r" % (line, w))
+        elif want_git_sub and w == "-c":
+            want_git_cfg = True
         elif want_git_sub:
             want_git_sub = False
             if w not in _GIT_SUBCOMMANDS:
@@ -393,15 +410,21 @@ class _Lab(object):
         _git(self.env, tmp_path, "init", "-q", "--bare", str(self.origin))
         _git(self.env, tmp_path, "init", "-q", "-b", "dev", str(self.work))
         self.git("remote", "add", "origin", "file://github.com" + str(self.origin))
+        # The mock reads each PR's head commit from this bare remote.
+        (self.store / "config.json").write_text(json.dumps({"remote": str(self.origin)}))
         self.prs((7, "dev"))
 
     def git(self, *args):
         _git(self.env, self.work, *args)
 
-    def prs(self, *pairs):
-        """The forge's PRs: ``(number, base)``, each with the fix branch as head."""
-        prs = [{"number": n, "url": "https://mock.forge/acme/widgets/pull/%d" % n, "state": "OPEN",
-                "headRefName": FIX, "baseRefName": base} for n, base in pairs]
+    def prs(self, *pairs, **pinned):
+        """The forge's PRs: ``(number, base)`` or ``(number, base, head)``, the head
+        the fix branch unless named; ``head_oid`` pins every PR's head commit."""
+        prs = [{"number": p[0], "url": "https://mock.forge/acme/widgets/pull/%d" % p[0], "state": "OPEN",
+                "headRefName": p[2] if len(p) > 2 else FIX, "baseRefName": p[1]} for p in pairs]
+        if pinned.get("head_oid"):
+            for pr in prs:
+                pr["headRefOidPinned"] = pinned["head_oid"]
         (self.store / "prs.json").write_text(json.dumps({"next": 100, "prs": prs}))
 
     def write(self, rel, text):
@@ -664,11 +687,15 @@ def test_gate_before_merge():
         SECTION_POINTER.format("Gate"),
         "**Step 1 — Merge each PR.**",
         "adlc_forge_pr_merge <prUrl> --squash --delete-branch",
+        "add `--match-head-commit <oid>`",
         "- Set status to `resolved`",
     ]
     at = [phase6.index(a) for a in order]
     assert at == sorted(at), list(zip(order, at))
     assert "in the fix worktree" in phase6[at[0]:at[2]]
+    # The merge is pinned to the head the Gate certified, and a rebase re-runs it.
+    assert "and run Step 0 again: the Gate certifies one head." in phase6
+    assert "When Step 0 printed `regression_gate_head=<oid>`" in phase6
     assert "stops `/bugfix` here, with nothing merged and the bug unresolved" in phase6[at[0]:at[2]]
 
     gate = _companion_sections()["Gate"]
@@ -681,18 +708,19 @@ def test_gate_before_merge():
         assert text.count(placeholder) == 1, placeholder
     assert stripped[0] == ("rgt_bug='<bug-id>'; rgt_fix='<fix-branch>'; "
                            "rgt_ib='<integration-branch>'; rgt_pr='<pr-number>'")
-    # Values first, then the installed partials, the PR's base, the fetch, the
-    # mode at the base, and only in the required arm the guards and the check.
+    # Values first, then the installed partials, the base's fetch and the mode at
+    # the base, and only in the required arm the forge, the guards and the check.
     order = ['case "$rgt_bug" in', 'case "$rgt_ref" in', 'case "$rgt_pr" in', GATE_ITSELF,
              _root_line(), GATE_PATHS, GATE_REFS, GATE_INSTALLED] + list(GATE_SOURCES) + [
-             GATE_PROVIDER, GATE_PR_BASE, GATE_FETCH, GATE_CONFIG_AT_BASE, GATE_MODE,
-             GATE_OFF_ARM, GATE_REQUIRED_ARM] + list(GATE_GUARDS) + [GATE_CALL, GATE_NO_CONFIG]
+             GATE_FETCH, GATE_CONFIG_AT_BASE, GATE_MODE, GATE_OFF_ARM, GATE_REQUIRED_ARM,
+             GATE_PROVIDER, GATE_PR_VIEW, GATE_PR_BASE, GATE_PR_HEAD, GATE_FETCH_FIX] + list(
+             GATE_GUARDS) + [GATE_CALL, GATE_PIN, GATE_NO_CONFIG]
     at = [stripped.index(line) for line in order]
     assert at == sorted(at), list(zip(order, at))
     assert stripped[-1] == 'echo "regression_gate_rc=$rgt_rc"'
     for outcome in (
         "- `regression-test: off` (rc 0): regression tests are off for this project, so there is nothing to gate.",
-        "- `regression-check: pass` (rc 0): continue to Step 1, the merge.",
+        "- `regression-check: pass` (rc 0): continue to Step 1, the merge, pinned with `--match-head-commit` to the `regression_gate_head=<oid>` line.",
         "- `regression-check: fail` (rc 1): stop before merging. Merge no PR and do not set the bug `resolved` (AC-12).",
         "Show the engine's `BUG-nnn:` lines as printed",
         "- `regression-test: error`, `regression-check: error`, or `regression_gate_rc=2` from a refusal or a guard: stop exactly as for `fail`.",
@@ -710,6 +738,10 @@ def test_gate_before_merge():
     for reason in ("nothing under `.adlc/partials` is sourced at all",
                    "A symlinked `.adlc`, a file git ignores and a `skip-worktree` entry",
                    "a PR retargeted at another branch is refused",
+                   "a wrong PR number is refused rather than merged",
+                   "the forge is never asked anything for an `off` project",
+                   "`core.hooksPath=/dev/null`", "run it from a fresh clone, or in CI",
+                   "which Step 1 pins the merge to",
                    "git resolves a short `origin/main` to a tag of that name",
                    "`off` has no guards** (BR-1)",
                    "the tree must be clean", "`HEAD` must equal `refs/remotes/origin/<fix-branch>`",
@@ -747,22 +779,30 @@ def test_gate_fence_runs_installed_code_against_full_refs():
         assert '[ ! -f "$%s" ]' % var in GATE_INSTALLED
     # The provider is resolved by the installed forge_config.py, so the adapter
     # never runs a forge_config.py from the tree.
-    assert "ADLC_FORGE_PROVIDER_OVERRIDE=\"$rgt_prov\" adlc_forge_pr_view" in GATE_PR_BASE
+    assert "ADLC_FORGE_PROVIDER_OVERRIDE=\"$rgt_prov\" adlc_forge_pr_view" in GATE_PR_VIEW
+    assert text.count("adlc_forge_pr_view") == 1
     # Full refs only: every `origin/` is `refs/remotes/origin/`, and `--base` is always it.
     for match in re.finditer(r"origin/", text):
         assert text[:match.start()].endswith("refs/remotes/"), text[match.start() - 30:match.end() + 10]
     assert re.findall(r"--base (\"[^\"]*\")", text) == ['"$rgt_base"', '"$rgt_base"']
     assert text.count("--base") == 2
     assert GATE_REFS in stripped
-    assert "--no-tags" in GATE_FETCH and text.count("git fetch") == 1
-    # The PR's base before the fetch, the fetch before the mode, the mode before any guard.
-    assert stripped.index(GATE_PR_BASE) < stripped.index(GATE_FETCH) < stripped.index(GATE_MODE)
+    # Every fetch takes no tags and runs no hook; the only status runs no monitor.
+    assert len(re.findall(r"\bgit\b[^\n;]*\bfetch -q\b", text)) == 2 and "git fetch" not in text
+    assert text.count("git -c core.hooksPath=/dev/null fetch -q --no-tags origin") == 2
+    assert text.count("status --porcelain") == 1 and "git -c core.fsmonitor=false status" in text
+    # Only the base's fetch comes before the mode; the forge, the fix branch's
+    # fetch and every guard are in the required arm (BR-1).
+    assert stripped.index(GATE_FETCH) < stripped.index(GATE_MODE)
     guards = [stripped.index(g) for g in GATE_GUARDS]
-    assert stripped.index(GATE_MODE) < stripped.index(GATE_OFF_ARM) < stripped.index(GATE_REQUIRED_ARM) < min(guards)
+    required = [stripped.index(g) for g in (GATE_PROVIDER, GATE_PR_VIEW, GATE_PR_BASE, GATE_PR_HEAD,
+                                            GATE_FETCH_FIX)]
+    assert stripped.index(GATE_MODE) < stripped.index(GATE_OFF_ARM) < stripped.index(GATE_REQUIRED_ARM) < min(required)
+    assert max(required) < min(guards) and max(guards) < stripped.index(GATE_CALL) < stripped.index(GATE_PIN)
     # The off arm is empty, and the no-config branch is the off lines alone.
     no_config = stripped.index(GATE_NO_CONFIG)
     assert stripped[no_config - 1] == "else" and stripped[no_config + 1] == "fi"
-    assert text.count("git status") == 1 and text.count("git rev-parse HEAD") == 1
+    assert text.count("git rev-parse HEAD") == 1
     # No checkout-root guard and no diff guard: code no longer comes from the tree.
     assert "git diff" not in text and "--show-prefix 2>&1" not in text
 
@@ -777,7 +817,9 @@ def test_gate_fence_allowlist_both_ways():
                     "git -c core.pager=sh log", 'echo "`id`"', '"$rgt_bug" --version', 'eval "$rgt_bug"',
                     "rgt_rc=$(id)", "python3 -c pass", '. "$rgt_bug"', ". .adlc/partials/forge.sh",
                     "sed -i s/a/b/ x", "git diff --quiet", "git cat-file -p HEAD", "adlc_forge_pr_merge 7",
-                    "{ id; }", 'rgt_mode=$(id)', 'ADLC_FORGE_PROVIDER_OVERRIDE=x id'):
+                    "{ id; }", 'rgt_mode=$(id)', 'ADLC_FORGE_PROVIDER_OVERRIDE=x id',
+                    "git -c core.hooksPath=.husky fetch -q origin", "git -c core.fsmonitor=true status",
+                    "git -c -c status", 'rgt_view=$(id)'):
         planted = fence[:end] + [foreign] + fence[end:]
         assert _fence_offenders(planted), foreign
 
@@ -796,6 +838,9 @@ def test_gate_required_pass_and_fail(shell, tmp_path):
         assert marker in out, (marker, out)
     assert ("regression-test: required\nbugfix.regression_test is required in .adlc/config.yml at "
             "refs/remotes/origin/dev\nregression-check: pass\npassed=1 waived=0 legacy=0 failed=0\n") in out, out
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(lab.work), env=lab.env,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    assert out.splitlines()[-2:] == ["regression_gate_head=" + head, "regression_gate_rc=0"], out
     assert _rc(out) == 0
 
     lab = _Lab(tmp_path / "fail")
@@ -804,6 +849,7 @@ def test_gate_required_pass_and_fail(shell, tmp_path):
     out = lab.run(sh)
     assert ("regression-check: fail\npassed=0 waived=0 legacy=0 failed=1\n"
             "BUG-123: neither regression_tests nor regression_waiver is recorded\n") in out, out
+    _never(out, "regression_gate_head=")
     assert _rc(out) == 1
 
 
@@ -873,8 +919,9 @@ def test_gate_never_runs_code_from_the_tree(shell, plant, tmp_path):
 def test_gate_refuses_itself_and_a_retargeted_pr(shell, tmp_path):
     """The integration branch is never the fix branch (a branch that names itself
     `branches.integration` and turns its gate off), and the PR must target it: one
-    retargeted at another branch, or one the forge does not know, is refused before
-    anything is fetched or read. A PR that targets it reads the base's setting."""
+    retargeted at another branch, one the forge does not know, or one whose head is
+    another branch, is refused before the check runs. A PR that targets it and
+    merges the fix branch reaches the check."""
     sh = _shell(shell)
     lab = _Lab(tmp_path)
     lab.base({".adlc/config.yml": REQUIRED})
@@ -884,12 +931,17 @@ def test_gate_refuses_itself_and_a_retargeted_pr(shell, tmp_path):
     assert "regression gate: the integration branch is the fix branch, fix/bug-123-thing" in out, out
     _never(out, "regression-test:", "regression-check:", *INSTALLED)
     assert _rc(out) == 2
-    lab.prs((7, "release"), (8, "dev"))
+    lab.prs((7, "release"), (8, "dev"), (9, "dev", "fix/another-bug"))
     for pr in ("7", "99"):
         out = lab.run(sh, pr=pr)
         assert "regression gate: PR %s does not target dev, or the forge could not say" % pr in out, out
-        _never(out, "regression-test:", "regression-check:")
+        assert "regression-test: required\n" in out, out
+        _never(out, "regression-check:")
         assert _rc(out) == 2
+    out = lab.run(sh, pr="9")
+    assert "regression gate: PR 9 does not merge fix/bug-123-thing" in out, out
+    _never(out, "regression-check:")
+    assert _rc(out) == 2
     out = lab.run(sh, pr="8")
     assert "regression-test: required\n" in out, out
     assert "BUG-123: neither regression_tests nor regression_waiver is recorded" in out, out
@@ -915,6 +967,10 @@ def test_gate_off_has_no_guards(shell, base, tmp_path):
     lines = out.splitlines()
     assert lines[-3] == "regression-test: off" and _rc(out) == 0, out
     assert "\n".join(lines[-3:-1]) + "\n" == lab.engine("mode", "--base", "refs/remotes/origin/dev"), out
+    # The forge is never asked for an off project: a PR it does not know changes nothing.
+    out = lab.run(sh, pr="99")
+    _never(out, "regression gate:")
+    assert out.splitlines()[-3] == "regression-test: off" and _rc(out) == 0, out
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -963,11 +1019,13 @@ def test_gate_reads_a_subdirectory_projects_own_config(shell, tmp_path):
 @pytest.mark.parametrize("plant, reason", [
     ("untracked", "regression gate: the fix checkout has uncommitted changes"),
     ("unpushed", "regression gate: HEAD is not refs/remotes/origin/fix/bug-123-thing"),
-    ("never-pushed", "regression gate: fetch of dev or fix/bug-123-thing from origin failed"),
+    ("never-pushed", "regression gate: fetch of fix/bug-123-thing from origin failed"),
+    ("stale-pr-head", "regression gate: PR 7 head is not "),
 ])
 def test_gate_required_guards(shell, plant, reason, tmp_path):
-    """LESSON-718, required mode only: an uncommitted file, an unpushed record, or a
-    fix branch that was never pushed stops the gate with one line, unchecked."""
+    """LESSON-718, required mode only: an uncommitted file, an unpushed record, a
+    fix branch that was never pushed, or a PR whose head the forge reports as
+    another commit stops the gate with one line, unchecked."""
     sh = _shell(shell)
     lab = _Lab(tmp_path)
     lab.base({".adlc/config.yml": REQUIRED})
@@ -977,11 +1035,12 @@ def test_gate_required_guards(shell, plant, reason, tmp_path):
         lab.write("notes.txt", "not committed\n")
     elif plant == "unpushed":
         lab.commit({"record.md": "a record that was never pushed\n"}, "unpushed")
+    elif plant == "stale-pr-head":
+        lab.prs((7, "dev"), head_oid="0" * 40)
     out = lab.run(sh)
     assert reason in out, out
     _never(out, "regression-check:")
-    if plant != "never-pushed":
-        assert "regression-test: required\n" in out, out
+    assert "regression-test: required\n" in out, out
     assert _rc(out) == 2
 
 

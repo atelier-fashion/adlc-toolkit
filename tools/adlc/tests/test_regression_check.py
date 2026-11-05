@@ -1472,3 +1472,20 @@ def test_require_recorded_needs_the_report_committed_as_on_disk(make_project):
     subprocess.run(["git", "-C", p.path, "update-index", "--no-skip-worktree", rel], check=True)
     p.commit("record the waiver")
     assert result_of(p, "BUG-2101", "--require-recorded") == (rc.WAIVED, [], 0)
+
+
+def test_require_recorded_refuses_a_committed_symlink_test(make_project):
+    # A symlink committed where the test should be, its target text citing the
+    # id, with a regular file on disk hidden by skip-worktree: the committed
+    # entry is not a test file, as the disk rule already says of a symlink.
+    p = make_project(REQUIRED)
+    rel = "tests/test_2201.py"
+    os.makedirs(os.path.join(p.path, "tests"))
+    os.symlink("BUG-2201.py", os.path.join(p.path, rel))
+    p.bug("BUG-2201", status="open", tests='["%s"]' % rel)
+    p.commit("a symlink in the test's place")
+    os.remove(os.path.join(p.path, rel))
+    p.write(rel, "# BUG-2201\n")
+    subprocess.run(["git", "-C", p.path, "update-index", "--skip-worktree", rel], check=True)
+    assert result_of(p, "BUG-2201", "--require-recorded") == (
+        rc.FAILED, ["BUG-2201: %s is not committed as a regular file (HEAD)" % rel], 1)

@@ -1109,6 +1109,13 @@ def committed_reason(repo_dir, rel, bug_id):
         return "cannot be checked: git could not be run"
     if proc.returncode != 0:
         return "is not committed (not in HEAD)"
+    # The committed entry's mode, like the disk rule: a symlink committed in
+    # its place (whose target text could cite the id) is not a test file.
+    proc = _git(repo_dir, ["ls-tree", "-z", _COMMITTED_REV, "--", posixpath.normpath(rel)])
+    if proc is None:
+        return "cannot be checked: git could not be run"
+    if proc.returncode != 0 or proc.stdout.split(b" ", 1)[0] not in (b"100644", b"100755"):
+        return "is not committed as a regular file (HEAD)"
     proc = _git(repo_dir, ["cat-file", "blob", spec])
     if proc is None:
         return "cannot be checked: git could not be run"
