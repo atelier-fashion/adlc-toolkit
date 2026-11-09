@@ -1,10 +1,10 @@
 ---
 id: REQ-682
 title: "Skill fences run under `/sprint --exec` without widening what the model can run"
-status: draft
+status: approved
 deployable: false
 created: 2026-11-02
-updated: 2026-11-02
+updated: 2026-11-09
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["sh", "python", "yaml", "markdown"]
@@ -76,15 +76,21 @@ This spec sets the boundary and the evidence that proves it. It does not choose 
 ## Business Rules
 
 - [ ] BR-1: Every fence in the FenceCensus has a route. A `runnable` fence runs to completion under the ExecPolicy on the installed `claude`: no statement is denied. An `engine` fence's work is done by the orchestrator, from the toolkit install, before the model needs its result. An `excised` fence is absent from every byte the model is given. The census covers both the delivered prompt and the skill and reference files it directs the model to follow, so a fence the model meets mid-run in `/review` or `/wrapup` counts the same as one in the prompt. This includes the three Phase-0 `git -C <repo-path>` fences, whose work the orchestrator already does when it prepares the working copy. (informed by REQ-659, LESSON-779)
-- [ ] BR-2: No widening (Rule B unchanged). The ExecPolicy, read as the harness enforces it, admits no command REQ-659 BR-8's deny tier names, and no engine-only deny from `harness/claude.yml`. That holds for every way a command can be admitted:
+- [ ] BR-2: No widening (Rule B unchanged). No entry this REQ adds to the ExecPolicy, and no fence route, admits a command REQ-659 BR-8's deny tier names, or an engine-only deny from `harness/claude.yml`. That holds for every way a command can be admitted:
   - a direct command;
   - one statement of a compound command (`;`, `&&`, `||`, a newline, `if … fi`);
   - an env-prefixed command, or one under `git -C`;
-  - code an admitted OpaqueEntry runs.
+  - code an OpaqueEntry this REQ admits runs.
 
-  "Deny tier" covers at least: the PR merge, any push that is not the exact branch push `allow_extra_exact` names, a force-push, deploy, branch or worktree removal, and the seven orchestrator sub-commands (LESSON-781). (informed by BUG-260, LESSON-796, REQ-657)
+  The declared residuals in `harness/claude.yml` and `tools/lint-skills/README.md` get no longer. Those are entries the tier held before this REQ whose arguments run code no prefix rule sees: `awk`, `sed`, `find -exec`, `npx`, `npm run`, and the REQ's own test runner, which runs code the model wrote. REQ-657 BR-18 declares them, and Rule B is why they are tolerable. They are outside BR-2, because no route can make a code-running allow safe, and removing them is not this REQ's work. (Amended 2026-11-09 after `/architect`: as first written, BR-2 made every one of them an OpaqueEntry with unbounded reach, which no route could satisfy.)
+
+  "Deny tier" covers at least: the PR merge, a force-push, deploy, branch or worktree removal, the seven orchestrator sub-commands (LESSON-781), and any push other than two kinds:
+  - the exact branch push `allow_extra_exact` names;
+  - the id-reservation push `git push origin <oid>:refs/adlc/ids/<kind>/<n>` that id allocation makes. That push is a non-force push of a new ref under `refs/adlc/ids/`, and it moves no branch (amended 2026-11-09, so the close-out can allocate lesson ids under exec).
+
+  (informed by BUG-260, LESSON-796, REQ-657)
 - [ ] BR-3: Opaque code is toolkit-owned. Every OpaqueEntry resolves by absolute path under ToolkitRoot, resolved once at orchestrator start (REQ-659 BR-23a). No admitted spelling resolves to a working-copy file such as `.adlc/partials/`, `.adlc/tools/` or `.adlc/workflows/`, and none to any path the exec model can write. Under exec, the canonical fence never takes its repo-local arm. No admitted prefix admits a path that leaves its directory: `..`, a symlink out, or a second statement appended after the path. A consumer's vendored partials therefore do not run under exec, and the README says so. (informed by REQ-659, REQ-610)
-- [ ] BR-4: Reach is checked against the code, and fails closed. Each OpaqueEntry's reach is derived from, or tested against, what its code actually runs, and a check in CI fails when any entry's reach contains a BR-2 deny-tier command. A declaration alone does not satisfy this rule. An entry with no reach record is not admitted, so a new partial function, or a new verb on an admitted CLI, starts refused until it is checked. An edit that adds a deny-tier call to an admitted entry fails CI and does not merge. (informed by LESSON-781, LESSON-716)
+- [ ] BR-4: Reach is checked against the code, and fails closed. Each OpaqueEntry this REQ admits, meaning the runner and every fence it runs, has its reach derived from, or tested against, what its code actually runs, and a check in CI fails when any entry's reach contains a BR-2 deny-tier command. A declaration alone does not satisfy this rule. An entry with no reach record is not admitted, so a new partial function, or a new verb on an admitted CLI, starts refused until it is checked. An edit that adds a deny-tier call to an admitted entry fails CI and does not merge. (informed by LESSON-781, LESSON-716)
 - [ ] BR-5: An entry that can do both safe and deny-tier work is not admitted whole. Either it is split so the admitted part cannot reach the deny-tier action, or under exec it refuses that action itself. `forge.sh` is the example: it holds both `adlc_forge_pr_create` and `adlc_forge_pr_merge`. A refusal must not rest on state the model's own command can change. If one admitted statement can unset or override the condition the refusal reads, that does not satisfy this rule.
 - [ ] BR-6: Arguments are data. An admitted entry that takes arguments from the model, such as a PR body, a REQ id, a path, a component or a lesson set, cannot be made to run a command outside its reach by any argument value. Each admitted entry has a test that passes hostile values, including `$(…)`, a backtick, `;`, a newline, `--force`, `main`, `HEAD:main`, `../` and a leading `-`, and shows that no command outside the reach ran.
 - [ ] BR-7: BUG-260's boundary stays. Config isolation (`--setting-sources "" --settings <runDir>/settings.json --strict-mcp-config`) is on every launch. Branch push, branch and worktree entries stay in `allow_extra_exact`, and `vet_extra` still refuses a prefix extra that shares a deny base. No exec allow is a first-token wildcard or an opener such as `if`, `sh`, `bash`, `zsh`, `eval`, `.`, `source`, `env`, `command`, `exec`, `xargs` or `python*`. `fence_broad_spelling`, which spells an opening no fence has had since REQ-669, is retired or replaced. The exec render does not keep reporting `widened` for an entry that matches nothing. (informed by REQ-656, REQ-657, LESSON-779)
