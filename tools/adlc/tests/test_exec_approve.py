@@ -606,6 +606,23 @@ def test_config_isolation(tmp_path):
     assert not (box.home / "closeout-argv-REQ-901.json").exists()
 
 
+
+def test_close_out_scopes_file_tools(tmp_path):
+    """BUG-265: the close-out writes its own working copy and, through --add-dir, the primary
+    repo's spec dir (close-out rule 3), and nothing else."""
+    box = eh.Sandbox(tmp_path)
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    box.approve(orch)
+    argv = json.loads(open(str(box.home / ("closeout-argv-%s.json" % REQ))).read())
+    allow = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
+    added = argv[argv.index("--add-dir") + 1]
+    wc = run.doc["closeOutWorkingCopy"]
+    assert sorted(a for a in allow if a.startswith("Edit(")) == sorted(
+        ["Edit(/%s/**)" % wc, "Edit(/%s/**)" % added])
+    for bare in ("Read", "Write", "Edit", "Glob", "Grep"):
+        assert bare not in allow
+
 DEPLOY = ("sprint:\n  exec:\n    child_gh_token: CHILD_GH\n    deploy:\n      target: prod\n"
           "      command: \"touch %s\"\n")
 

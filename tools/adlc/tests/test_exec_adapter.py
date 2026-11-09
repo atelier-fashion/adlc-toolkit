@@ -76,7 +76,8 @@ def test_deny_superset(adapter):
     for rule in allow:
         if rule.startswith(("Bash(git push", "Bash(git branch", "Bash(git worktree")):
             assert not rule.endswith(":*)"), rule
-    assert "Read" in allow and "Edit" in allow
+    # BUG-265: the file tools are never bare; with no roots they are not admitted at all.
+    assert "Read" not in allow and "Edit" not in allow and "Write" not in allow
 
 
 def test_extra_that_wraps_a_deny_is_refused(adapter):
@@ -182,3 +183,50 @@ def test_residuals_declared(adapter):
     text = " ".join(adapter.block["residuals"])
     for word in ("sh -c", "gh api", "gh -R", "semantic equivalent", "Azure DevOps", "merge bot"):
         assert word in text
+
+
+#: Claude's file tools. A bare name in an allow list admits the tool on every path.
+FILE_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep")
+
+
+def test_file_tools_are_scoped_to_roots(adapter):
+    """BUG-265: a bare `Write` wrote outside the working copy, so the toolkit the
+    orchestrator sources at approve time was writable by the model."""
+    allow, _deny = adapter.tiers(BRANCH, write_roots=["/w/wc", "/w/spec"],
+                                 read_roots=["/t/tk"])
+    assert not [a for a in allow if a in FILE_TOOLS]
+    for rule in ("Edit(//w/wc/**)", "Read(//w/wc/**)", "Edit(//w/spec/**)",
+                 "Read(//w/spec/**)", "Read(//t/tk/**)"):
+        assert rule in allow
+    assert not [a for a in allow if a.startswith(("Edit(", "Write(")) and "//w/" not in a]
+    assert "Edit(//t/tk/**)" not in allow
+
+
+def test_bare_file_tool_in_allow_tools_is_refused(tmp_path):
+    """BUG-265: the loader refuses a bare file tool, so no adapter can bring it back."""
+    text = open(os.path.join(TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
+    bad = tmp_path / "claude.yml"
+    bad.write_text(text.replace("  allow_tools: [", "  allow_tools: [Write, ", 1))
+    with pytest.raises(ha.AdapterError, match="Write"):
+        ha.load_adapter(str(bad), toolkit=TOOLKIT)
+
+
+@pytest.mark.parametrize("root", ["rel/path", "/a/../b", "/a b", "/a/*", "/a/", "//a", "/a/(x)", ""])
+def test_unsafe_file_root_is_refused(adapter, root):
+    """BUG-265: a root becomes a gitignore-style pattern, so a glob or a traversal in it
+    would widen the rule."""
+    with pytest.raises(ea.ExecRefused, match="root"):
+        adapter.tiers(BRANCH, write_roots=[root])
+
+
+def test_symlinked_root_gets_both_spellings(adapter, tmp_path):
+    """BUG-265: Claude matches a file rule against the path as written, and a live row's
+    write under /var/... was refused by a rule on /private/var/...: both spellings of a root
+    are emitted, and both name the one directory."""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    allow, _deny = adapter.tiers(BRANCH, write_roots=[str(link)])
+    edits = [a for a in allow if a.startswith("Edit(")]
+    assert edits == ["Edit(/%s/**)" % link, "Edit(/%s/**)" % os.path.realpath(str(real))]

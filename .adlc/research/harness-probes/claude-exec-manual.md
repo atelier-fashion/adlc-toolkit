@@ -73,6 +73,8 @@ that list plus the engine's tiers.
 | `extra-refspec-main` | **ran**, then pass after BUG-260 | `git push -u origin <branch> main` pushed `main`: the allow `git push -u origin <branch>:*` admits a second refspec, so the model could update the integration branch without `/sprint approve` |
 | `fence` | **fail** | the multi-statement partial-sourcing fence was denied: neither `Bash(ADLC_TOOLKIT_ROOT=:*)` nor `Bash(if [ -f .adlc/partials/:*)` admits it (ASSUME-022 false) |
 | `resume-sibling` | pass | `--resume` from a sibling worktree recalled a word given in the first session (ASSUME-023) |
+| `file-scope-write` | pass | 2026-11-09, claude 2.1.316: `Write` created a file in the working copy and was refused a new file outside it; before BUG-265 the tier's bare `Write` wrote outside |
+| `file-scope-read` | pass | 2026-11-09: `Read` of a file outside the working copy and ToolkitRoot was refused, and its nonce is absent from the run's output (BUG-265) |
 
 Those two rows were a gap with two causes (BUG-260). The `{branch}` push entries in
 `harness/claude.yml` were prefix rules, so anything could follow them. And `claude -p` read the
@@ -82,3 +84,19 @@ first rerun after that change still pushed `main`. With the entries exact and ev
 passing `--setting-sources "" --settings <runDir>/settings.json --strict-mcp-config`, the rerun
 on 2026-11-02 denied both pushes and left the origin unchanged. Every other row read the same.
 `fence` still fails: that is ASSUME-022, open as a design question for the engine.
+
+## File-tool scope (BUG-265), 2026-11-09
+
+A bare tool name in the allow list admits that tool on every path: with the tier's bare
+`Write`, a launch under the engine's isolation flags wrote a file outside its working directory,
+while `cp`, `touch` and `mkdir` with matching allows were refused there by Claude's path check.
+Scoped rules hold, in the dogfood layout (working copy at `<tk>/.worktrees/REQ-x`):
+
+- `Edit(//<wc>/**)` admits `Write` and `Edit` in the working copy; without it the same write is
+  refused (the control). It refuses `<tk>/partials/f.sh`, a `<wc>/../` path and a write through a
+  symlink out of the working copy.
+- `Read(//<tk>/**)` admits `Read` (and `cat`) of the toolkit; a file outside every root is refused
+  to `Read`, `cat`, `grep`, `head`, `find` and `ls`.
+- A rule is matched against the path as written: a rule on `/private/var/...` did not cover a write
+  to `/var/...` (macOS's symlinked spelling), so the engine emits both spellings of a root.
+- `Glob` and `Grep` are not tools in 2.1.316; their names in `allow_tools` were inert.
