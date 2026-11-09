@@ -531,7 +531,11 @@ class Orchestrator(object):
 
     def _argv(self, run, resume=None, extra=(), add_dir=None):
         adapter = self.adapter(run)
-        allow, deny = adapter.tiers(run.doc["branch"], run.doc["config"]["allow_extra"])
+        # Every repo's working copy, and nothing else, is writable (BUG-265).
+        roots = [spec["workingCopy"] for spec in run.doc["repos"].values()]
+        allow, deny = adapter.tiers(run.doc["branch"], run.doc["config"]["allow_extra"],
+                                    write_roots=roots + ([add_dir] if add_dir else []),
+                                    read_roots=[os.path.realpath(self.toolkit)])
         # Isolated like the close-out (BR-25): the tiers are the whole policy (BUG-260).
         settings = run.file("settings.json")
         el.atomic_json(settings, adapter.settings_document(allow, deny))
@@ -1451,12 +1455,16 @@ class Orchestrator(object):
             self._close_out_failed(run, "failed", str(exc))
             return
         el.atomic_write(run.file("close-out-prompt.txt"), data)
-        allow, deny = adapter.tiers(branch, run.doc["config"]["allow_extra"])
+        added = os.path.join(repo, run.doc["specDir"])
+        # The close-out writes its own working copy and, through --add-dir, the primary
+        # repo's pipeline-state.json (close-out rule 3); nothing else (BUG-265).
+        allow, deny = adapter.tiers(branch, run.doc["config"]["allow_extra"],
+                                    write_roots=[path, added],
+                                    read_roots=[os.path.realpath(self.toolkit)])
         settings = run.file("settings.json")
         el.atomic_json(settings, adapter.settings_document(allow, deny))
         argv = adapter.launch_argv(run.doc["binary"], allow, deny, resume=sid,
-                                   extra=adapter.isolation_flags(settings),
-                                   add_dir=os.path.join(repo, run.doc["specDir"]))
+                                   extra=adapter.isolation_flags(settings), add_dir=added)
         proc = self._spawn(run, argv, run.file("close-out-prompt.txt"), path, "close-out")
         run.exec["closeOutPid"] = proc.pid
         self._write_status(run)

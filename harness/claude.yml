@@ -94,9 +94,18 @@ exec:
   add_dir_flag: --add-dir
   shell_rule: "Bash(%s:*)"
   shell_rule_exact: "Bash(%s)"
-  # The non-shell tools a pipeline uses. Rules for the shell come from the exec-scope
-  # render of templates/permissions.yml.
-  allow_tools: [Read, Write, Edit, Glob, Grep, Agent, Skill, TodoWrite]
+  # The non-shell tools a pipeline uses that touch no file. Rules for the shell come from
+  # the exec-scope render of templates/permissions.yml.
+  allow_tools: [Agent, Skill, TodoWrite]
+  # The file tools, each scoped to a root and never bare: a bare `Write` wrote outside the
+  # working copy, so the model could rewrite the toolkit the orchestrator sources at approve
+  # (BUG-265). `{root}` is an absolute path, so the rule reads `Edit(//<root>/**)`, Claude's
+  # spelling for an absolute path; an `Edit` rule covers Write, Edit and NotebookEdit. The
+  # write roots are every repo's working copy (and a close-out's --add-dir); the read root is
+  # ToolkitRoot. Claude's own path check keeps shell reads and writes inside the same roots.
+  file_rules:
+    write: ["Edit(/{root}/**)", "Read(/{root}/**)"]
+    read: ["Read(/{root}/**)"]
   # The shared-base rule drops `git push`, `git branch` and `git worktree` at exec
   # scope, so the pipeline's own calls are listed here. Each shares a command base with
   # a deny, so each is exact: as a prefix rule, `git push -u origin <branch>` admitted

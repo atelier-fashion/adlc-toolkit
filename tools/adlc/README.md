@@ -547,7 +547,8 @@ Nothing branches on a harness name. `harness/claude.yml` is the reference block.
 | `trust_grant` | What the **engine** does per run: `none`, `flag`, `user-config-entry`, `trusted-folders-file`. Not the top-level `trust`, which is what the harness reads. Today only `none` runs; the rest refuse at pre-flight |
 | `launch`, `resume_flag`, `add_dir_flag` | the argv after the binary, on a prompt delivered on stdin |
 | `allow_flag`, `deny_flag`, `shell_rule`, `shell_rule_exact` | how the two tiers reach the argv. `deny_flag` renders only when `capabilities.deny` is `yes` |
-| `allow_tools` | the non-shell tools |
+| `allow_tools` | the non-shell tools that touch no file. A bare file tool (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `MultiEdit`, `NotebookEdit`) is refused by the loader, because a bare name admits every path (BUG-265) |
+| `file_rules` | the file tools, as rules with a `{root}` in each: `write` rules per write root (every repo's working copy, plus a close-out's `--add-dir`), `read` rules per read root (ToolkitRoot). A root is a plain absolute path, emitted under its given and its real spelling, because Claude matches a rule against the path as written (BUG-265) |
 | `allow_extra`, `allow_extra_exact` | routine spellings the exec-scope render cannot give, `{branch}` substituted in both. Each is vetted like an operator's `sprint.exec.allow_extra`: no token that runs its arguments, nothing that wraps a deny, and no prefix entry that shares a command base with a deny (`git push`, `git branch`, `rm`): those go in `allow_extra_exact` (BUG-260) |
 | `engine_deny` | denies that belong to this engine, never in `templates/permissions.yml` |
 | `forbidden_flags` | carries the engine-wide vocabulary and the harness's own equivalents |

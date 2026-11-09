@@ -67,6 +67,21 @@ def test_two_reqs(two):
     assert "Awaiting approval" in text and "/sprint reject REQ-902" in text
 
 
+
+def test_launch_scopes_file_tools(box):
+    """BUG-265: the file tools reach the working copy and read the toolkit, nothing else."""
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    argv = json.loads(open(str(box.home / "argv-REQ-901.json")).readline())
+    allow = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
+    for bare in ("Read", "Write", "Edit", "Glob", "Grep"):
+        assert bare not in allow
+    assert "Edit(/%s/**)" % run.wc in allow and "Read(/%s/**)" % run.wc in allow
+    assert "Read(/%s/**)" % os.path.realpath(orch.toolkit) in allow
+    assert [a for a in allow if a.startswith("Edit(")] == ["Edit(/%s/**)" % run.wc]
+    doc = json.load(open(argv[argv.index("--settings") + 1]))
+    assert doc["permissions"]["allow"] == allow
+
 def test_launch_refused_without_config_isolation(box):
     """BUG-260: a harness that cannot read only the engine's settings would let the
     operator's or the project's allowlist widen the tiers, so nothing launches."""

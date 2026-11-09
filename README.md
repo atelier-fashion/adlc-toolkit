@@ -425,6 +425,12 @@ Keys, all under `sprint.exec` in `.adlc/config.yml` and read once at launch:
 entries, each refused if it wraps a deny or shares a command base with one, such as `git push`). Without a scoped token, launch needs
 `--shared-credentials`. Against an unprotected branch it needs `--allow-unprotected`.
 
+The model's file tools write only inside the run's working copies (and a close-out's added
+spec directory) and read only those plus the toolkit: each is a path-scoped rule, never a bare
+`Write` or `Read`, which reached every path and let a model rewrite the toolkit the orchestrator
+sources at approve (BUG-265). Claude's own path check keeps shell reads and writes inside the
+same directories.
+
 **What this does not stop.** The allow and deny lists are defense in depth, not the gate. The
 gates are the approval ledger, the pinned merge, the detached-worktree trial merge and rebase,
 the local diff gates, the child credentials, branch protection and the exit checks. These

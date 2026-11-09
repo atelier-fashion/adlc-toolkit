@@ -22,6 +22,9 @@ ENGINE_FORBIDDEN_FLAGS = ha.ENGINE_FORBIDDEN_FLAGS
 _SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _CLAIM_RE = re.compile(r"^Terminal state: ([a-z_-]+)\s*$")
 _EXTRA_RE = re.compile(r"^[A-Za-z0-9_./=+:@%,*-]+$")
+#: A file root becomes a gitignore-style pattern, so it may hold no glob, quote, space or
+#: empty, `.` or `..` segment: any of those would widen the rule (BUG-265).
+_ROOT_RE = re.compile(r"^(/[A-Za-z0-9_.-]+)+$")
 
 
 #: Programs whose first argument names a subcommand: their command base is two tokens.
@@ -136,10 +139,32 @@ class ExecAdapter(object):
                                   % (" ".join(argv), " ".join(base),
                                      " ".join(entry["spelling"])))
 
-    def tiers(self, branch, config_extra=()):
-        """``(allow, deny)``: the argv elements of both tiers (BR-8, ADR-6)."""
+    def file_rules(self, write_roots=(), read_roots=()):
+        """The file-tool rules, one set per root: never a bare file tool (BUG-265)."""
+        rules = self.block.get("file_rules", {})
+        out = []
+        for kind, roots in (("write", write_roots), ("read", read_roots)):
+            for given in roots:
+                # Claude matches a file rule against the path as written, so a root reached
+                # through a symlink (macOS's /var is /private/var) gets both spellings: they
+                # name one directory, so neither widens the other.
+                for root in dict.fromkeys([given, os.path.realpath(given or "x")]):
+                    if (not _ROOT_RE.match(given or "") or not _ROOT_RE.match(root)
+                            or "/../" in root + "/" or "/./" in root + "/"):
+                        raise ExecRefused("file root %r is not a plain absolute path; it would "
+                                          "widen a file rule" % (given,))
+                    out += [rule.replace("{root}", root) for rule in rules.get(kind, [])]
+        return list(dict.fromkeys(out))
+
+    def tiers(self, branch, config_extra=(), write_roots=(), read_roots=()):
+        """``(allow, deny)``: the argv elements of both tiers (BR-8, ADR-6).
+
+        The file tools reach only ``write_roots`` (read and write) and ``read_roots`` (read):
+        every repo's working copy and ToolkitRoot at a launch (BUG-265).
+        """
         entries, _findings = hr.exec_entries(self.adapter, self.toolkit, None)
         allow = list(self.block.get("allow_tools", []))
+        allow += self.file_rules(write_roots, read_roots)
         deny = []
         for entry in entries:
             if entry["kind"] == "allow":

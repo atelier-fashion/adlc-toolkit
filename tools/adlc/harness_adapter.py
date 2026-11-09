@@ -89,11 +89,14 @@ ENGINE_FORBIDDEN_FLAGS = ("--dangerously-skip-permissions",
                           "--allow-all")
 _EXEC_REQUIRED = ("working_copy", "trust_grant", "launch", "allow_flag", "shell_rule",
                   "forbidden_flags", "exit_codes", "result_keys", "env_passthrough")
+#: Claude's file tools. A bare name in an allow list admits the tool on every path (BUG-265).
+EXEC_FILE_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep")
+
 _EXEC_KEYS = set(_EXEC_REQUIRED) | {
     "exec_schema_version", "trust_notice", "resume_flag", "deny_flag", "add_dir_flag",
     "shell_rule_exact", "allow_tools", "allow_extra", "allow_extra_exact", "engine_deny",
     "deny_render", "denied_result_key", "auth_env", "config_isolation",
-    "config_isolation_help", "settings_keys", "sandbox_refuse", "residuals"}
+    "config_isolation_help", "settings_keys", "sandbox_refuse", "residuals", "file_rules"}
 
 #: Every format an adapter may name, with what the loader needs to know of it.
 #: ``harness_render.FORMATS`` implements each one; a test holds the two equal.
@@ -378,6 +381,24 @@ def _exec_block(src, block):
                 if key == "config_isolation" and item == "":
                     continue   # an empty value is an argument: `--setting-sources ""` (BUG-260)
                 _need_str(src, "exec.%s[%d]" % (key, i), item)
+    for i, item in enumerate(block.get("allow_tools", [])):
+        if item in EXEC_FILE_TOOLS:
+            raise AdapterError(src, "exec.allow_tools[%d]" % i,
+                               "%s is a file tool, and a bare file tool admits every path; "
+                               "scope it under exec.file_rules (BUG-265)" % item)
+    if "file_rules" in block:
+        rules = block["file_rules"]
+        if not isinstance(rules, dict):
+            raise AdapterError(src, "exec.file_rules", "must be a mapping of write and read")
+        _unknown(src, "exec.file_rules.", rules, {"write", "read"})
+        for kind in ("write", "read"):
+            for i, item in enumerate(_need_list(src, "exec.file_rules." + kind,
+                                                rules.get(kind, []))):
+                _need_str(src, "exec.file_rules.%s[%d]" % (kind, i), item)
+                if "{root}" not in item:
+                    raise AdapterError(src, "exec.file_rules.%s[%d]" % (kind, i),
+                                       "must hold {root}: a file rule with no path admits "
+                                       "every path (BUG-265)")
     for key in ("allow_extra", "allow_extra_exact", "engine_deny"):
         for i, item in enumerate(_need_list(src, "exec." + key, block.get(key, []))):
             _token_list(src, "exec.%s[%d]" % (key, i), item)

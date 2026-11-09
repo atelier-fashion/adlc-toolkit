@@ -586,6 +586,13 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`/sprint --exec` no longer gives the model unscoped file tools (BUG-265).** The claude
+  adapter allowed `Read`, `Write` and `Edit` by bare name, which admits every path, so an exec
+  model could rewrite the toolkit's `partials/forge.sh`, which `/sprint approve` then sources.
+  The file tools are now path-scoped rules: they write each repo's working copy (and a
+  close-out's added spec directory) and read those plus the toolkit, each root under its given
+  and its real spelling. The loader refuses a bare file tool. The live rows `file-scope-write`
+  and `file-scope-read` in `tools/adlc/tests/e2e/claude-exec-live.sh` hold it.
 - **`/sprint --exec` no longer lets a model push `main` or force-push (BUG-260).** The claude
   adapter allowed `git push -u origin <branch>` as a prefix rule, so anything could follow it.
   A live `claude -p` run pushed `main` with `git push -u origin <branch> main` and force-pushed
