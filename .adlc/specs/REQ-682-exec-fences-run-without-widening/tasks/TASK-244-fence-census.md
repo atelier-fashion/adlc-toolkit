@@ -1,8 +1,9 @@
 ---
 id: TASK-244
 title: "Fence census: every fence an exec run can meet, with an id, a route and its placeholders"
-status: draft
+status: complete
 parent: REQ-682
+repo: adlc-toolkit
 created: 2026-11-09
 updated: 2026-11-09
 dependencies: [TASK-243]

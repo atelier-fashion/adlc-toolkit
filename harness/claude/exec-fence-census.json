@@ -1,0 +1,736 @@
+{
+  "comment": "REQ-682 exec fence census. Regenerate with `python3 tools/adlc/fence_census.py --write`; a diff here is a fence whose route, values or reach changed.",
+  "fences": [
+    {
+      "id": "proceed/SKILL.md#1:b9a5cf7b",
+      "route": "runner",
+      "sources": [
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/skill-flag.sh",
+        "awk",
+        "date",
+        "mktemp",
+        "rm"
+      ]
+    },
+    {
+      "id": "proceed/SKILL.md#2:901fb63a",
+      "route": "runner",
+      "placeholders": [
+        "flag"
+      ],
+      "sources": [
+        "delegate-gate",
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$ADLC_READ_BIN",
+        "$DELEGATE_TOOLS/skill-flag.sh",
+        "awk",
+        "git",
+        "mktemp",
+        "rm"
+      ]
+    },
+    {
+      "id": "proceed/SKILL.md#3:b5733ce5",
+      "route": "excised",
+      "reason": "the delegate pre-pass composes its steps 2 to 4 in one shell of your own, which no exec allow admits: under --exec the reviewers run without candidates (the fallback)"
+    },
+    {
+      "id": "proceed/SKILL.md#4:57169111",
+      "route": "runner",
+      "sources": [
+        "emit-step-telemetry"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/emit-telemetry.sh",
+        "$DELEGATE_TOOLS/skill-flag.sh",
+        "awk",
+        "basename",
+        "chmod",
+        "date",
+        "dirname",
+        "git rev-parse",
+        "mkdir",
+        "mktemp",
+        "rm",
+        "sed",
+        "tr"
+      ]
+    },
+    {
+      "id": "proceed/SKILL.md#5:e0023724",
+      "route": "runner",
+      "placeholders": [
+        "component",
+        "integrationBranch",
+        "spec",
+        "state",
+        "worktree"
+      ],
+      "sources": [
+        "lessons"
+      ],
+      "reach": [
+        "$adlc_ls_py",
+        "find",
+        "git"
+      ]
+    },
+    {
+      "id": "proceed/SKILL.md#6:e9a79242",
+      "route": "runner",
+      "placeholders": [
+        "integrationBranch",
+        "root",
+        "state",
+        "tasks",
+        "worktree"
+      ],
+      "sources": [
+        "lessons"
+      ],
+      "reach": [
+        "$adlc_ls_py",
+        "find",
+        "git"
+      ]
+    },
+    {
+      "id": "proceed/phases-telemetry.md#1:65c98b85",
+      "route": "runner",
+      "placeholders": [
+        "mode",
+        "state"
+      ],
+      "sources": [
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/emit-run-outcome.sh",
+        "chmod",
+        "dirname",
+        "git",
+        "mkdir"
+      ]
+    },
+    {
+      "id": "proceed/phases-telemetry.md#2:4319dc7b",
+      "route": "runner",
+      "placeholders": [
+        "attempt",
+        "phase",
+        "state"
+      ],
+      "sources": [
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/emit-run-outcome.sh",
+        "chmod",
+        "dirname",
+        "git",
+        "mkdir"
+      ]
+    },
+    {
+      "id": "proceed/phases-telemetry.md#3:7d0680d5",
+      "route": "excised",
+      "reason": "the findings record is your own JSON, and the runner binds no here-document: carry the Phase-5 findings in your final report instead"
+    },
+    {
+      "id": "proceed/phases-telemetry.md#4:d132a642",
+      "route": "runner",
+      "placeholders": [
+        "reason",
+        "state",
+        "terminal"
+      ],
+      "sources": [
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/emit-run-outcome.sh",
+        "chmod",
+        "dirname",
+        "git",
+        "mkdir"
+      ]
+    },
+    {
+      "id": "proceed/phase-0-setup.md#1:18768460",
+      "route": "engine",
+      "reason": "the orchestrator fetched origin in every touched repo before launch"
+    },
+    {
+      "id": "proceed/phase-0-setup.md#2:bef5ca01",
+      "route": "excised",
+      "reason": "the REQ id was allocated by /spec, and the orchestrator found this REQ's spec on the integration branch before it created the branch; the recheck needs the id written into the fence text, which the runner does not do"
+    },
+    {
+      "id": "proceed/phase-0-setup.md#3:67226979",
+      "route": "engine",
+      "reason": "the orchestrator checked `git worktree list` for a collision before launch"
+    },
+    {
+      "id": "proceed/phase-0-setup.md#4:c6f50983",
+      "route": "engine",
+      "reason": "the orchestrator created this working copy on the REQ's branch before launch"
+    },
+    {
+      "id": "proceed/phase-0-setup.md#5:f208cceb",
+      "route": "runner",
+      "placeholders": [
+        "mode",
+        "spec",
+        "state",
+        "worktree"
+      ],
+      "sources": [
+        "lessons"
+      ],
+      "reach": [
+        "$adlc_ls_py",
+        "find",
+        "git"
+      ]
+    },
+    {
+      "id": "proceed/phase-0-setup.md#6:877a6b41",
+      "route": "direct"
+    },
+    {
+      "id": "proceed/phase-0-setup.md#7:7b76cb2c",
+      "route": "runner",
+      "placeholders": [
+        "branch",
+        "integrationBranch",
+        "repo",
+        "req",
+        "title"
+      ],
+      "sources": [
+        "forge"
+      ],
+      "reach": [
+        "$adlc_fp_py",
+        "$adlc_mkp_py",
+        "az",
+        "cat",
+        "find",
+        "gh",
+        "gh pr create",
+        "git",
+        "git remote",
+        "mktemp",
+        "rm"
+      ]
+    },
+    {
+      "id": "proceed/phase-4-implementation.md#1:de52a50d",
+      "route": "runner",
+      "placeholders": [
+        "component",
+        "spec",
+        "state",
+        "task",
+        "worktree"
+      ],
+      "sources": [
+        "lessons"
+      ],
+      "reach": [
+        "$adlc_ls_py",
+        "find",
+        "git"
+      ]
+    },
+    {
+      "id": "proceed/phase-4-implementation.md#2:e4ee3cd8",
+      "route": "runner",
+      "placeholders": [
+        "state",
+        "task",
+        "worktree"
+      ],
+      "sources": [
+        "lessons"
+      ],
+      "reach": [
+        "$adlc_ls_py",
+        "find",
+        "git"
+      ]
+    },
+    {
+      "id": "proceed/phases-6-8-ship.md#1:65d2bbbb",
+      "route": "runner",
+      "placeholders": [
+        "FINAL_TITLE",
+        "NEW_BODY",
+        "prNumber"
+      ],
+      "sources": [
+        "forge"
+      ],
+      "reach": [
+        "$adlc_fp_py",
+        "$adlc_mkp_py",
+        "az",
+        "cat",
+        "find",
+        "gh",
+        "gh pr edit",
+        "gh pr view",
+        "git",
+        "git remote",
+        "mktemp",
+        "python3",
+        "rm",
+        "sed"
+      ]
+    },
+    {
+      "id": "proceed/phases-lite.md#1:727c7156",
+      "route": "direct"
+    },
+    {
+      "id": "proceed/phases-lite.md#2:a75800ba",
+      "route": "runner",
+      "placeholders": [
+        "branch",
+        "integrationBranch",
+        "worktree"
+      ],
+      "sources": [
+        "lane-check"
+      ],
+      "reach": [
+        "$adlc_lc_py",
+        "find",
+        "git",
+        "git diff",
+        "git fetch",
+        "git rev-parse",
+        "git status"
+      ]
+    },
+    {
+      "id": "proceed/phases-lite.md#3:638d3182",
+      "route": "runner",
+      "placeholders": [
+        "lane_escalated",
+        "pr"
+      ],
+      "sources": [
+        "forge"
+      ],
+      "reach": [
+        "$adlc_fp_py",
+        "$adlc_mkp_py",
+        "az",
+        "cat",
+        "find",
+        "gh",
+        "gh pr edit",
+        "gh pr view",
+        "git",
+        "git remote",
+        "mktemp",
+        "python3",
+        "rm"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#1:7e155d18",
+      "route": "runner",
+      "reach": [
+        "git branch",
+        "git log",
+        "grep",
+        "ls"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#2:7a122396",
+      "route": "runner",
+      "sources": [
+        "id-alloc"
+      ],
+      "reach": [
+        "awk",
+        "cat",
+        "date",
+        "dirname",
+        "find",
+        "gh api repos/$adlc_an_owner/contents/$adlc_an_apath",
+        "git commit-tree",
+        "git fetch",
+        "git hash-object",
+        "git ls-remote",
+        "git ls-tree",
+        "git push",
+        "git remote",
+        "git rev-parse",
+        "grep",
+        "mkdir",
+        "od",
+        "rmdir",
+        "sed",
+        "seq",
+        "setopt",
+        "sleep",
+        "sort",
+        "tail",
+        "tr"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#3:b9a5cf7b",
+      "route": "runner",
+      "sources": [
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/skill-flag.sh",
+        "awk",
+        "date",
+        "mktemp",
+        "rm"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#4:92e71c06",
+      "route": "runner",
+      "placeholders": [
+        "flag"
+      ],
+      "sources": [
+        "delegate-gate",
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$ADLC_READ_BIN",
+        "$DELEGATE_TOOLS/skill-flag.sh",
+        "awk",
+        "git",
+        "mktemp",
+        "rm"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#5:21bcab96",
+      "route": "excised",
+      "reason": "close-out rule 4: transcript discovery is skipped, and the lesson is drafted from the run evidence in this prompt"
+    },
+    {
+      "id": "wrapup/SKILL.md#6:2314a4e2",
+      "route": "excised",
+      "reason": "close-out rule 4: transcript discovery is skipped, and the lesson is drafted from the run evidence in this prompt"
+    },
+    {
+      "id": "wrapup/SKILL.md#7:1393a20a",
+      "route": "excised",
+      "reason": "close-out rule 4: transcript discovery is skipped, and the lesson is drafted from the run evidence in this prompt"
+    },
+    {
+      "id": "wrapup/SKILL.md#8:b097756b",
+      "route": "runner",
+      "sources": [
+        "id-alloc"
+      ],
+      "reach": [
+        "awk",
+        "cat",
+        "date",
+        "dirname",
+        "find",
+        "gh api repos/$adlc_an_owner/contents/$adlc_an_apath",
+        "git commit-tree",
+        "git fetch",
+        "git hash-object",
+        "git ls-remote",
+        "git ls-tree",
+        "git push",
+        "git remote",
+        "git rev-parse",
+        "grep",
+        "mkdir",
+        "od",
+        "rmdir",
+        "sed",
+        "seq",
+        "setopt",
+        "sleep",
+        "sort",
+        "tail",
+        "tr"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#9:e1b25438",
+      "route": "runner",
+      "placeholders": [
+        "id",
+        "slug"
+      ],
+      "sources": [
+        "lesson-check"
+      ],
+      "reach": [
+        "awk",
+        "grep",
+        "sed",
+        "tr"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#10:046f848a",
+      "route": "runner",
+      "placeholders": [
+        "LESSON_NUM"
+      ],
+      "sources": [
+        "id-recheck"
+      ],
+      "reach": [
+        "awk",
+        "dirname",
+        "gh api repos/$adlc_an_owner/contents/$adlc_an_apath",
+        "git fetch",
+        "git ls-remote",
+        "git ls-tree",
+        "git remote",
+        "git rev-parse",
+        "grep",
+        "sed",
+        "setopt",
+        "sort",
+        "tail",
+        "tr"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#11:a6cd7fe4",
+      "route": "runner",
+      "sources": [
+        "emit-step-telemetry"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/emit-telemetry.sh",
+        "$DELEGATE_TOOLS/skill-flag.sh",
+        "awk",
+        "basename",
+        "chmod",
+        "date",
+        "dirname",
+        "git rev-parse",
+        "mkdir",
+        "mktemp",
+        "rm",
+        "sed",
+        "tr"
+      ]
+    },
+    {
+      "id": "wrapup/SKILL.md#12:f8331b73",
+      "route": "runner",
+      "placeholders": [
+        "ids",
+        "state"
+      ],
+      "sources": [
+        "delegate-tools-path"
+      ],
+      "reach": [
+        "$DELEGATE_TOOLS/emit-run-outcome.sh",
+        "chmod",
+        "dirname",
+        "git",
+        "mkdir"
+      ]
+    },
+    {
+      "id": "architect/SKILL.md#1:4ad11e75",
+      "route": "runner",
+      "reach": [
+        "cat",
+        "grep"
+      ]
+    },
+    {
+      "id": "architect/SKILL.md#2:587fb45d",
+      "route": "runner",
+      "placeholders": [
+        "MAPPER_PATHS",
+        "REQ"
+      ],
+      "sources": [
+        "forge"
+      ],
+      "reach": [
+        "$adlc_fp_py",
+        "$adlc_mkp_py",
+        "awk",
+        "az",
+        "cat",
+        "dirname",
+        "find",
+        "gh",
+        "gh pr edit",
+        "gh pr view",
+        "git",
+        "git remote",
+        "grep",
+        "head",
+        "mktemp",
+        "python3",
+        "rm",
+        "sed",
+        "sort"
+      ]
+    },
+    {
+      "id": "manifest/SKILL.md#1:3c5b9eda",
+      "route": "runner",
+      "reach": [
+        "git for-each-ref",
+        "git rev-parse",
+        "which"
+      ]
+    },
+    {
+      "id": "manifest/SKILL.md#2:918a3794",
+      "route": "excised",
+      "reason": "the in-flight manifest is advisory, and the /sprint orchestrator ranked this batch before launch, as Step 0 item 4 says for a sprint run; an absent verdict never blocks"
+    },
+    {
+      "id": "review/SKILL.md#1:6c6de703",
+      "route": "runner",
+      "reach": [
+        "git branch",
+        "git diff-tree",
+        "git status"
+      ]
+    },
+    {
+      "id": "review/SKILL.md#2:7ae88c53",
+      "route": "runner",
+      "placeholders": [
+        "id"
+      ],
+      "reach": [
+        "awk",
+        "find"
+      ]
+    },
+    {
+      "id": "spec/SKILL.md#1:846a3bb2",
+      "route": "runner",
+      "reach": [
+        "cat"
+      ]
+    },
+    {
+      "id": "spec/SKILL.md#2:1c6e7568",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/SKILL.md#3:bf63699d",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/SKILL.md#4:4c9979c6",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/SKILL.md#5:953f2536",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/SKILL.md#6:7ae88c53",
+      "route": "runner",
+      "placeholders": [
+        "id"
+      ],
+      "reach": [
+        "awk",
+        "find"
+      ]
+    },
+    {
+      "id": "spec/SKILL.md#7:a16425e0",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/intake-source-read.md#1:f569882e",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/intake-source-read.md#2:a0308b1c",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/intake-source-read.md#3:3c05cf44",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/intake-source-read.md#4:a846fc09",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/intake-source-read.md#5:73238cec",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/retrieval-body-read.md#1:f569882e",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/retrieval-body-read.md#2:eaddff82",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/retrieval-body-read.md#3:197d9c47",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "spec/references/retrieval-body-read.md#4:26b1a499",
+      "route": "excised",
+      "reason": "/spec's intake, retrieval reads and id allocation run when a spec is written, never inside an exec pipeline, which reads /spec only for its Step 1.6 scoring rule"
+    },
+    {
+      "id": "validate/SKILL.md#1:c3191143",
+      "route": "runner",
+      "reach": [
+        "grep"
+      ]
+    },
+    {
+      "id": "validate/SKILL.md#2:3c5c4ddc",
+      "route": "excised",
+      "reason": "the standalone acknowledgement check: inside a pipeline, Phase 5 Step B runs it"
+    },
+    {
+      "id": "agents/test-auditor.md#1:28d266a3",
+      "route": "excised",
+      "reason": "an example search, not a step: run `find` yourself with the scope and name filled in"
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 ---
 id: TASK-247
 title: "Reach audit in CI: a static closure scan and a stubbed hostile run of every `runner` fence"
-status: draft
+status: complete
 parent: REQ-682
+repo: adlc-toolkit
 created: 2026-11-09
 updated: 2026-11-09
 dependencies: [TASK-246]

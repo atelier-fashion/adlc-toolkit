@@ -46,7 +46,9 @@
 # ADLC_TOOLKIT_ROOT nor HOME is set: a `set -u` caller would abort on it. The
 # partial then loads without the resolver, and adlc_lane_check reports that.
 if ! command -v _adlc_forge_python >/dev/null 2>&1 && { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/forge.sh ]; }; then
-  if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"; fi
+  # Under `fence-run` (ADLC_FENCE_TOOLKIT_ONLY=1) the working copy's arm is never taken
+  # (REQ-682 ADR-4); unset, it reads exactly as before.
+  if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/forge.sh"; fi
 fi
 
 # _adlc_lane_check_error <detail> — the three-line error contract on stdout.

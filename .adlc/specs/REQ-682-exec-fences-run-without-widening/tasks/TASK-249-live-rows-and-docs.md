@@ -1,8 +1,9 @@
 ---
 id: TASK-249
 title: "Live rows on the logged-in `claude`, the assumption records, and the docs"
-status: draft
+status: complete
 parent: REQ-682
+repo: adlc-toolkit
 created: 2026-11-09
 updated: 2026-11-09
 dependencies: [TASK-247, TASK-248]

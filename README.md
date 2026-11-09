@@ -436,8 +436,16 @@ gates are the approval ledger, the pinned merge, the detached-worktree trial mer
 the local diff gates, the child credentials, branch protection and the exit checks. These
 residuals stand, and `harness/claude.yml` declares them too:
 
-- **Fences.** A fence that sources a partial is matched by no per-command rule, so the routine
-  tier carries a broad entry, and a deny rule can be bypassed by such a fence.
+- **Fences.** No allow can admit a fence that sources a partial: Claude refuses `.` and
+  `source` whatever the allow says (REQ-682). So under `--exec` every toolkit fence runs through
+  one executable, `<ToolkitRoot>/tools/adlc/fence-run`, admitted by its absolute path and by
+  nothing broader. It runs only fences it reads from the toolkit install, binds every value as
+  data, and resolves every partial from the install, so **a consumer's vendored
+  `.adlc/partials/` do not run under `--exec`**. The code it runs is still opaque to the
+  permission check: a CI audit of each fence's reach (`tools/adlc/tests/test_exec_reach.py`),
+  not the allowlist, keeps a deny-tier command out of it. Toolkit skills and agents are not
+  loaded under the engine's isolation flags either, so they reach an exec model only through
+  `fence-run show`, and an agent's checklist runs inline.
 - **Wrappers and runners.** A command wrapped in `sh -c`, `env`, `xargs`, `python -c`, `npx`,
   `npm run` or `find -exec` is not seen by a prefix rule.
 - **`gh api`** reaches merge and ref-update endpoints without a `gh pr merge` prefix.

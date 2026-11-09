@@ -70,3 +70,22 @@ def test_adapter_contract_for_siblings():
     for word in ("trust_grant", "user-config-entry", "trusted-folders-file", "index.lock",
                  "exit 0 and an empty response"):
         assert word in section, word
+
+
+def test_readme_names_fence_runner_and_vendored_loss():
+    """REQ-682 AC-10: the README's exec section names the fence runner, says a consumer's
+    vendored partials do not run under --exec, and names how skills and agents reach the model."""
+    text = read("README.md")
+    section = text[text.index("### The `/sprint` exec engine"):]
+    section = " ".join(section[:section.index("### Harness adapters")].split())
+    assert "`<ToolkitRoot>/tools/adlc/fence-run`" in section
+    assert "a consumer's vendored `.adlc/partials/` do not run under `--exec`" in section
+    assert "`fence-run show`" in section and "checklist runs inline" in section
+    assert "tools/adlc/tests/test_exec_reach.py" in section
+    adapter_doc = read("tools", "adlc", "README.md")
+    assert "`fence_runner`" in adapter_doc and "opaque_entry_refused: <id>: <reason>" in adapter_doc
+    assumption = read(".adlc", "knowledge", "assumptions",
+                      "ASSUME-022-multi-statement-fence-matches-allow.md")
+    assert "Superseded by REQ-682 / ASSUME-030" in assumption
+    spec = read(".adlc", "specs", "REQ-659-sprint-exec-engine", "requirement.md")
+    assert "Answered by REQ-682 (ASSUME-022, superseded by ASSUME-030)" in spec

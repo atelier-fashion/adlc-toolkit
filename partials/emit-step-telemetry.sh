@@ -61,8 +61,10 @@
 # neither ADLC_TOOLKIT_ROOT nor HOME set it is not reached (a `set -u` caller
 # would abort on it) and DELEGATE_TOOLS keeps delegate-tools-path.sh's defensive
 # default: telemetry must never block a skill (REQ-424).
+# Under `fence-run` (ADLC_FENCE_TOOLKIT_ONLY=1) the working copy's arm is never taken
+# (REQ-682 ADR-4); unset, it reads exactly as before.
 if [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/delegate-tools-path.sh ]; then
-  if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/delegate-tools-path.sh"; fi
+  if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/delegate-tools-path.sh"; fi
 else
   DELEGATE_TOOLS="tools/delegate"
   export DELEGATE_TOOLS

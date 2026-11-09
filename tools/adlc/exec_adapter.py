@@ -11,6 +11,7 @@ import json
 import os
 import re
 
+import exec_matcher as em
 import harness_adapter as ha
 import harness_render as hr
 
@@ -22,6 +23,9 @@ ENGINE_FORBIDDEN_FLAGS = ha.ENGINE_FORBIDDEN_FLAGS
 _SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _CLAIM_RE = re.compile(r"^Terminal state: ([a-z_-]+)\s*$")
 _EXTRA_RE = re.compile(r"^[A-Za-z0-9_./=+:@%,*-]+$")
+#: The fence runner's resolved path: one a prefix rule matches unquoted (probe row 6), so no
+#: space, quote or glob, and never a relative one (REQ-682 ADR-8).
+_RUNNER_PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
 #: A file root becomes a gitignore-style pattern, so it may hold no glob, quote, space or
 #: empty, `.` or `..` segment: any of those would widen the rule (BUG-265).
 _ROOT_RE = re.compile(r"^(/[A-Za-z0-9_.-]+)+$")
@@ -113,7 +117,11 @@ class ExecAdapter(object):
         return template % text
 
     def vet_extra(self, argv, entries, exact=False):
-        """Refuse an extra allow that is a wildcard or wraps a deny (ADR-6)."""
+        """Refuse an extra allow that is a wildcard, an opener or wraps a deny (ADR-6).
+
+        A deny is looked for in every form REQ-682 BR-2 names, through ``exec_matcher``,
+        which judges a compound command one statement at a time as Claude does.
+        """
         gran = self.adapter["capabilities"]["allowlist_granularity"]
         for token in argv:
             if not _EXTRA_RE.match(token):
@@ -122,6 +130,7 @@ class ExecAdapter(object):
         if hr.forbidden_first_token(argv):
             raise ExecRefused("allow entry %r starts with a token that runs its arguments"
                               % " ".join(argv))
+        policy = em.Policy([self.spell(list(argv), exact)])
         for entry in entries:
             if entry["kind"] != "deny":
                 continue
@@ -129,6 +138,10 @@ class ExecAdapter(object):
                 if hr.allow_matches(argv, exact, gran, form, exact):
                     raise ExecRefused("allow entry %r would wrap deny-tier `%s`"
                                       % (" ".join(argv), " ".join(form)))
+            for shape, text in em.wrapped_forms(em._concrete(entry["spelling"])):
+                if em.admits(policy, text):
+                    raise ExecRefused("allow entry %r would wrap deny-tier `%s` (%s)"
+                                      % (" ".join(argv), text, shape))
             # A prefix rule admits any tokens after it, so one that shares a command base
             # with a deny admits that deny's flags at a later position: `git push -u origin
             # <branch>:*` let `<branch> --force` and `<branch> main` through (BUG-260).
@@ -156,15 +169,39 @@ class ExecAdapter(object):
                     out += [rule.replace("{root}", root) for rule in rules.get(kind, [])]
         return list(dict.fromkeys(out))
 
+    def fence_runner(self):
+        """The fence runner's absolute path, resolved once from ToolkitRoot and vetted, or
+        ``None`` when the adapter names none (REQ-682 ADR-8). A path that is not absolute,
+        holds a character an unquoted prefix rule cannot match, is not a regular file, or
+        leaves the root after ``realpath`` refuses the launch."""
+        rel = self.block.get("fence_runner")
+        if not rel:
+            return None
+        import toolkit_root
+        root = os.path.realpath(self.toolkit or toolkit_root.toolkit_root())
+        path = os.path.join(root, rel)
+        real = os.path.realpath(path)
+        if (not _RUNNER_PATH_RE.match(path) or "/../" in path + "/" or "/./" in path + "/"
+                or not os.path.isfile(path) or os.path.islink(path)
+                or os.path.commonpath([real, root]) != root):
+            raise ExecRefused("fence runner %r is not a regular file under the toolkit root at "
+                              "a path a prefix rule can match: nothing is launched" % path)
+        return path
+
     def tiers(self, branch, config_extra=(), write_roots=(), read_roots=()):
         """``(allow, deny)``: the argv elements of both tiers (BR-8, ADR-6).
 
         The file tools reach only ``write_roots`` (read and write) and ``read_roots`` (read):
-        every repo's working copy and ToolkitRoot at a launch (BUG-265).
+        every repo's working copy and ToolkitRoot at a launch (BUG-265). A fence runs through
+        the fence runner, admitted by its one absolute path (REQ-682 ADR-1).
         """
         entries, _findings = hr.exec_entries(self.adapter, self.toolkit, None)
         allow = list(self.block.get("allow_tools", []))
         allow += self.file_rules(write_roots, read_roots)
+        runner = self.fence_runner()
+        if runner:
+            self.vet_extra([runner], entries)
+            allow.append(self.spell([runner]))
         deny = []
         for entry in entries:
             if entry["kind"] == "allow":

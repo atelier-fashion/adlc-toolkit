@@ -97,8 +97,10 @@ adlc_recheck_id() {
   # The fallback operand reads a bare $HOME: with neither ADLC_TOOLKIT_ROOT nor HOME
   # set it is not reached (a `set -u` caller would abort on it), and the check below
   # returns 2.
+  # Under `fence-run` (ADLC_FENCE_TOOLKIT_ONLY=1) the working copy's arm is never taken
+  # (REQ-682 ADR-4); unset, it reads exactly as before.
   if ! command -v adlc_remote_high >/dev/null 2>&1 && { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/id-alloc.sh ]; }; then
-    if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/id-alloc.sh"; fi
+    if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/id-alloc.sh"; fi
   fi
   if ! command -v adlc_remote_high >/dev/null 2>&1; then
     echo "adlc_recheck_id: cannot source id-alloc.sh (kind mappers)" >&2
@@ -159,7 +161,7 @@ adlc_recheck_id() {
   # source it if the caller has not (both partials are always vendored together).
   # Same $HOME guard as above; id-alloc.sh is already loaded by this point.
   if [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] || [ -f .adlc/partials/id-alloc.sh ]; then
-    if [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/id-alloc.sh"; fi
+    if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/id-alloc.sh ]; then . .adlc/partials/id-alloc.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/id-alloc.sh"; fi
   fi
   adlc_rc_root="${ADLC_REPOS_ROOT:-$(cd "$(adlc_main_worktree)/.." 2>/dev/null && pwd)}"
   [ -n "$adlc_rc_root" ] || adlc_rc_root="."

@@ -24,3 +24,5 @@ REQ-659 allows.
 ## Resolution
 
 False. Row `fence`: a multi-statement partial-sourcing fence was denied. Neither `Bash(ADLC_TOOLKIT_ROOT=:*)` nor `Bash(if [ -f .adlc/partials/:*)` admits it, so every skill fence halts `denied` under `--exec` until the engine allows them or runs them another way.
+
+Superseded by REQ-682 / ASSUME-030: a compound command is checked statement by statement, and no allow admits `.` or `source`, so fences run through `<ToolkitRoot>/tools/adlc/fence-run` instead of an allow; the live row `fence` passes through it.

@@ -196,3 +196,36 @@ credential, spends nothing, and needs no login: a logged-out `claude -p` still r
 fires hooks, starts MCP servers and writes a transcript (LESSON-759). It prints one line per row
 and exits non-zero on a surprise. It is not part of the default test run, because it needs the
 binary. It says nothing about a tool call: those rows are owed to a logged-in run.
+
+## `claude-exec-live.sh` — the exec engine's rows on a logged-in `claude`
+
+`claude-exec-live.sh` runs the `/sprint --exec` rows that need the operator's logged-in
+`claude` (REQ-659, BUG-260, BUG-265, REQ-682). Each launch uses the engine's own argv: the
+claude adapter's tiers, its config-isolation flags and its settings file. It runs with the real
+`HOME`, because the login lives there, and spends a little of the operator's plan. Everything
+else is a throwaway repo, a local bare origin and worktrees of it under one temp directory,
+which it prints on stderr as `claude-exec-live: T=<dir>` and removes on exit. It never passes a
+bypass flag, and every push goes to the local origin.
+
+```sh
+bash tools/adlc/tests/e2e/claude-exec-live.sh              # every row
+bash tools/adlc/tests/e2e/claude-exec-live.sh fence opaque-merge
+ADLC_LIVE_KEEP=/tmp/live bash tools/adlc/tests/e2e/claude-exec-live.sh   # keep each run's JSON
+```
+
+Each row prints `<row> <pass|FAIL> <detail>`, and its verdict is a side effect, never what the
+model said: a state file a fence wrote, a ref on the local origin, the forge mock's call log, a
+recording `gh`'s argv, a sentinel that must not exist, or the harness's own record of each tool
+call in the session transcript under `~/.claude/projects`, read for exit status only.
+
+The REQ-682 rows prove the fence route. `fence` and `fence-every-partial` run toolkit fences
+through `<ToolkitRoot>/tools/adlc/fence-run`, one per partial the census reaches.
+`fence-working-copy-partial` plants a decoy at every working-copy arm and shows none runs.
+`source-model-written`, `source-traversal`, `compound-tail`, `opaque-merge` and `env-defeat`
+show what stays refused, and `subagent-scope` that a built-in subagent inherits the deny.
+`toolkit-write` and `skill-invoke` run in the dogfood layout, a throwaway clone of the toolkit
+with the working copy at `<clone>/.worktrees/REQ-x`.
+
+Claude Code may record each throwaway folder under `projects` in `~/.claude.json`. Count those
+entries before a run and after it; if the run added any, back the file up first and remove only
+the entries under the run's printed `T=` directory.

@@ -41,7 +41,6 @@ PIPELINE_ALLOW = {
         r"flag; `lessonsWritten` the `/wrapup` lesson outcome \(recorded at the end of its Step 4\).*",
         r"4\. \*\*Determine the integration branch, then fetch it in each touched repo\.\*\*.*"
         r"`/wrapup`, `/template-drift`.*",
-        r"   # /wrapup call sites\. Derivation \+ renumber message live in partials/id-recheck\.sh\.",
         r"   \*\*Then stamp the harness \(REQ-648 BR-10\)\*\*: .*even when `/wrapup` or `/sprint`.*",
         r"   were: they are the record of what triage decided, and `/wrapup`'s escalation",
     ),
@@ -59,9 +58,6 @@ CLOSEOUT_ALLOW = {
         r"- Name files: `ASSUME-xxx-slug\.md`\. Determine the next ID .*",
         r"  The reservation is PER-REPO scoped \(BR-12\): .*",
         r"   \*\*A miss refuses; it never falls back\.\*\* .*",
-        r"           command \"\$ADLC_READ_BIN\" --no-warn --paths \"\$TMPFILE\" --question .*",
-        r"           echo \"/wrapup: .*",
-        r"           case \"\$ADLC_READ_BIN\" in .*",
         r"   Capture stdout as the draft\. \*\*If `adlc-read` exits non-zero\*\*.*",
         r"6\. The success line `/wrapup: Lessons Learned drafted via the delegate` is emitted .*",
         r"- Emit `/wrapup: adlc-read unavailable — Claude drafting lesson directly` to stderr.*",
@@ -86,6 +82,21 @@ class PromptRefused(ValueError):
         self.token = token
         self.lineno = lineno
         self.line = line
+
+
+class ExecPromptRefused(PromptRefused):
+    """A fence in the delivered text has no route, or the text sends the model to a file the
+    exec set lacks: nothing launches (REQ-682 BR-8). Recorded as ``exec_prompt_refused``."""
+
+    def __init__(self, fence_id, statement, reason):
+        detail = "; the first statement no allow admits: %s" % statement if statement else ""
+        ValueError.__init__(self, "exec_prompt_refused: %s: %s%s" % (fence_id, reason, detail))
+        self.token = "exec_prompt_refused"
+        self.lineno = 0
+        self.line = statement or ""
+        self.fence_id = fence_id
+        self.statement = statement
+        self.reason = reason
 
 
 def _read(root, rel):
@@ -298,6 +309,9 @@ _UNATTENDED_PAIRS = (
 _EXEC_NOTES = """The argument to this pipeline is {req}, on branch `{branch}`.
 Every companion file the text names is inlined in this prompt, so do not look for them on disk.
 `git -C` is not on your allowlist: where the text writes `git -C <worktree> <command>`, run `<command>` from your working copy.
+Toolkit skills and agents are not loaded in this session. Wherever the text says to invoke `/<skill>`, or to follow a skill, reference or agent file, run `{runner} show <skill>/SKILL.md` (or `agents/<name>.md`, or the `references/` file the skill names) and follow what it prints. A file it refuses is not part of this run.
+Dispatch no toolkit agent by name: none is loaded, and a name the Agent tool does not list runs a generic agent without the checklist. Run each agent's checklist inline from `{runner} show agents/<name>.md`, as the dispatch paragraph's inline arm says: an inline review reports findings only, applies no fixes, and runs no test runner, build tool, package manager or interpreter.
+A fence shown as a `{runner} run <id>` call runs only that way. Replace each `'<…>'` stub with its value as one single-quoted literal, every `'` in it written `'\\''`, or pass a file with `--arg-file NAME=PATH`. Never source a partial yourself: no allow admits `.` or `source`. Exit 3 with an `opaque_entry_refused:` line is the runner refusing, so report the line and stop as the gate protocol says.
 """
 
 
@@ -386,8 +400,51 @@ def unattended_block(toolkit, req, branch, repo_path, worktree):
                                   "Run the /proceed pipeline below for %s in the repository at %s."
                                   % (req, repo_path)),))
     head = "WORKTREE PATH (mandatory): %s\n\n" % worktree
-    notes = _EXEC_NOTES.replace("{req}", req).replace("{branch}", branch)
+    notes = _EXEC_NOTES.replace("{req}", req).replace("{branch}", branch).replace(
+        "{runner}", _runner(toolkit))
     return head + block + notes
+
+
+def _runner(toolkit):
+    """The fence runner's absolute path, as the exec tiers admit it (REQ-682 ADR-8)."""
+    return os.path.join(os.path.realpath(toolkit), "tools", "adlc", "fence-run")
+
+
+def route_fences(toolkit, parts):
+    """``parts`` (``(rel, view)`` pairs) with every fence in its route's form (REQ-682).
+
+    The census is computed once, from the toolkit, over the same views. A fence with no
+    route raises :class:`ExecPromptRefused`, naming it and the first statement no allow
+    admits, before any byte reaches a model (BR-8).
+    """
+    import fence_census as fc
+    import fence_run as fr
+    try:
+        records = fc.census(toolkit)
+    except fc.CensusError as exc:
+        raise PromptBuildError(str(exc))
+    root = os.path.realpath(toolkit)
+    out = []
+    for rel, text in parts:
+        try:
+            out.append(fr.rewrite_text(text, rel, records, root))
+        except fc.CensusError as exc:
+            bad = [r for r in records if r["route"] == "unrouted" and
+                   r["id"].startswith(rel + "#")]
+            if not bad:
+                raise PromptBuildError(str(exc))
+            refused = bad[0].get("refused") or []
+            raise ExecPromptRefused(bad[0]["id"], refused[0] if refused else None,
+                                    bad[0]["reason"])
+    return out
+
+
+def _coverage(toolkit, text):
+    """A file the delivered text sends the model to that the exec set lacks refuses (BR-8)."""
+    import fence_census as fc
+    for problem in fc.coverage_problems(toolkit, [text]):
+        if " is named by the delivered text " in problem:
+            raise ExecPromptRefused("-", None, problem)
 
 
 def scan(text, kind="pipeline", extra_tokens=()):
@@ -417,16 +474,21 @@ def _finish(text, kind, extra_tokens=()):
 
 def pipeline_prompt(toolkit, primary, req, branch, repo_path, worktree, answer=None):
     """The exact bytes of a first launch, or of an ``answer`` relaunch (BR-6, BR-14)."""
-    parts = [ethos_text(toolkit, primary), _proceed_body(toolkit)]
-    for rel in PIPELINE_SOURCES:
-        parts.append("<!-- %s -->\n%s" % (rel, _companion(toolkit, rel)))
+    views = [("proceed/SKILL.md", _proceed_body(toolkit))]
+    views += [(rel, _companion(toolkit, rel)) for rel in PIPELINE_SOURCES]
+    routed = route_fences(toolkit, views)
+    parts = [ethos_text(toolkit, primary), routed[0]]
+    for (rel, _view), text in zip(views[1:], routed[1:]):
+        parts.append("<!-- %s -->\n%s" % (rel, text))
     parts.append(unattended_block(toolkit, req, branch, repo_path, worktree))
     if answer is not None:
         parts.append("This is a relaunch of a run that ended `blocked`. Read "
                      "`pipeline-state.json` and resume from its `currentPhase`. The operator's "
                      "answer:\n\n--- BEGIN OPERATOR ANSWER ---\n%s\n--- END OPERATOR ANSWER ---\n"
                      % answer)
-    return _finish("\n\n".join(parts), "pipeline")
+    text = "\n\n".join(parts)
+    _coverage(toolkit, text)
+    return _finish(text, "pipeline")
 
 
 _CLOSEOUT_PAIRS = (
@@ -466,8 +528,18 @@ def _section(text, heading, level):
     return "\n".join(out).rstrip() + "\n"
 
 
-def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command=""):
-    """The resumed close-out's bytes, built by section (BR-14)."""
+def proceed_view(toolkit):
+    """``proceed/SKILL.md`` as the pipeline prompt delivers it (the fence census reads it)."""
+    return _proceed_body(toolkit)
+
+
+def companion_view(toolkit, rel):
+    """A pipeline companion as the pipeline prompt delivers it (the fence census reads it)."""
+    return _companion(toolkit, rel)
+
+
+def closeout_view(toolkit):
+    """The close-out's ``wrapup/SKILL.md`` sections, cut and rewritten (BR-14)."""
     rel = "wrapup/SKILL.md"
     text = strip_frontmatter(_read(toolkit, rel))
     sections = [_section(text, "## Context", 2), _section(text, "## Input", 2),
@@ -478,12 +550,18 @@ def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command="")
                 _section(text, "### Step 4: Capture Knowledge", 3),
                 _section(text, "### Step 5: Generate Ship Summary", 3)]
     body = rewrite("\n".join(sections), rel, _CLOSEOUT_PAIRS)
-    body = re.sub(r"\n#* ?### Step [2678]\b", "\n", body)
+    return re.sub(r"\n#* ?### Step [2678]\b", "\n", body)
+
+
+def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command=""):
+    """The resumed close-out's bytes, built by section (BR-14)."""
+    body = route_fences(toolkit, [("wrapup/SKILL.md", closeout_view(toolkit))])[0]
     head = ("WORKTREE PATH (mandatory): %s\n\nYou are resuming this REQ's own session. Run "
             "the close-out mode below for %s (the argument carries `--close-out`), in that "
             "worktree, on branch `%s`, which the orchestrator created from the integration "
-            "branch. It is unattended: no operator is present. You never merge.\n\n"
-            % (worktree, req, branch))
+            "branch. It is unattended: no operator is present. You never merge. A fence shown "
+            "as a `%s run <id>` call runs only that way, as earlier in this session.\n\n"
+            % (worktree, req, branch, _runner(toolkit)))
     tail = "\n--- RUN EVIDENCE ---\n%s\n--- END RUN EVIDENCE ---\n" % evidence
     tokens = (deploy_command,) if deploy_command else ()
     return _finish(head + body + tail, "close-out", tokens)

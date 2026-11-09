@@ -65,8 +65,10 @@ fi
 if ! command -v adlc_home >/dev/null 2>&1; then
   if [ -n "$_ADLC_FORGE_DIR" ] && [ -f "$_ADLC_FORGE_DIR/adlc-home.sh" ]; then . "$_ADLC_FORGE_DIR/adlc-home.sh"; fi
 fi
-if ! command -v adlc_home >/dev/null 2>&1 && { [ -f .adlc/partials/adlc-home.sh ] || { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -f "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh" ]; }; }; then
-  if [ -f .adlc/partials/adlc-home.sh ]; then . .adlc/partials/adlc-home.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh"; fi
+# Under `fence-run` (ADLC_FENCE_TOOLKIT_ONLY=1, REQ-682 ADR-4) the working copy's arm is
+# never taken: the exec model can write it. Unset, every arm reads exactly as before.
+if ! command -v adlc_home >/dev/null 2>&1 && { { [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/adlc-home.sh ]; } || { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -f "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh" ]; }; }; then
+  if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/adlc-home.sh ]; then . .adlc/partials/adlc-home.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh"; fi
 fi
 
 # --- internal: resolve provider into ADLC_FORGE_PROVIDER --------------------
@@ -215,15 +217,19 @@ _adlc_forge_python() {
 # receive the forge_config path, making its stdout the resolved provider.
 # `command` bypasses function lookup, which is why the delegate gate's own probe
 # already used it; this is the site /proceed takes for every PR operation.
+#
+# Under `fence-run` (ADLC_FENCE_TOOLKIT_ONLY=1, REQ-682 ADR-4) neither the repo's own
+# copy nor the vendored one runs: both are in the working copy, which the exec model
+# can write. Only ToolkitRoot's copy does.
 _adlc_forge_py() {
   adlc_fp_repo=$1
   shift
   adlc_fp_py=$(_adlc_forge_python)
   adlc_fp_local="$adlc_fp_repo/tools/adlc/forge_config.py"
   adlc_fp_vend="$adlc_fp_repo/.adlc/tools/adlc/forge_config.py"
-  if [ -f "$adlc_fp_local" ]; then
+  if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f "$adlc_fp_local" ]; then
     command "$adlc_fp_py" "$adlc_fp_local" "$@"
-  elif [ -f "$adlc_fp_vend" ]; then
+  elif [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f "$adlc_fp_vend" ]; then
     command "$adlc_fp_py" "$adlc_fp_vend" "$@"
   elif [ -z "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ]; then
     echo "_adlc_forge_py: forge_config.py not found: no vendored copy, and neither ADLC_TOOLKIT_ROOT nor HOME is set" >&2
@@ -455,6 +461,13 @@ _adlc_forge_ado_run() {
 # block. Returns the command's rc (non-zero on failure).
 _adlc_forge_run() {
   [ "$1" = "--" ] && shift
+  # Under fence-run (REQ-682 BR-5) the Azure DevOps backend is not admitted: `az repos pr`
+  # is an exec-scope deny, and a runner fence must not reach it through this function.
+  # The flag is set by the runner itself, after it builds the fence's environment.
+  if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" = 1 ] && [ "${1:-}" = "az" ]; then
+    echo "opaque_entry_refused: forge: the Azure DevOps backend is not admitted under fence-run (REQ-662 owns its exec route)" >&2
+    return 3
+  fi
   adlc_rn_errf=$(mktemp 2>/dev/null || mktemp -t forge)
   # shellcheck disable=SC2068 — intentional: run the passed argv as the command.
   adlc_rn_out=$("$@" 2>"$adlc_rn_errf")

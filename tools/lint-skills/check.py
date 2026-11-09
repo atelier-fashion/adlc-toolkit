@@ -433,16 +433,25 @@ def _operand_re(operand: str) -> str:
     return re.escape(operand).replace("<name>", r"\1")
 
 
-def _canonical_source_re(operands: tuple[str, ...]) -> re.Pattern[str]:
+#: REQ-682 ADR-4: the one gated variant a partial may use. Under `fence-run` the runner sets
+#: ADLC_FENCE_TOOLKIT_ONLY=1, and a partial sourced inside another partial must then never
+#: take the working copy's arm, which the exec model can write. The test is prepended to
+#: the guard and nothing else changes, so with the flag unset the line is the canonical one.
+FENCE_TOOLKIT_ONLY_GATE = '[ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && '
+
+
+def _canonical_source_re(operands: tuple[str, ...], gated: bool = False) -> re.Pattern[str]:
+    gate = r"(?:" + re.escape(FENCE_TOOLKIT_ONLY_GATE) + r")?" if gated else ""
     return re.compile(
-        r"^\s*if \[ -f \.adlc/partials/([A-Za-z0-9_-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
+        r"^\s*if " + gate + r"\[ -f \.adlc/partials/([A-Za-z0-9_-]+)\.sh \]; then \. \.adlc/partials/\1\.sh; "
         r"else \. (?:" + "|".join(_operand_re(op) for op in operands) + r"); fi\s*(#.*)?$"
     )
 
 
 CANONICAL_SOURCE_RE = _canonical_source_re(ACCEPTED_SOURCE_OPERANDS)
-# The `partials/*.sh` walk alone also accepts PARTIAL_SOURCE_OPERAND (REQ-669 ADR-2).
-CANONICAL_PARTIAL_SOURCE_RE = _canonical_source_re(PARTIAL_ACCEPTED_SOURCE_OPERANDS)
+# The `partials/*.sh` walk alone also accepts PARTIAL_SOURCE_OPERAND (REQ-669 ADR-2), and
+# the REQ-682 gated variant of the guard (in a fence it is still a finding).
+CANONICAL_PARTIAL_SOURCE_RE = _canonical_source_re(PARTIAL_ACCEPTED_SOURCE_OPERANDS, gated=True)
 # REQ-669 TASK-124: the guarded REQ-610 spelling. It is a finding (it matches
 # neither regex above); this regex only selects the message that says the
 # operand, not the guard, is what has to change.

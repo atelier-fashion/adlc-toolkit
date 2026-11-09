@@ -279,9 +279,12 @@ def test_fidelity_claude_clean():
                    ("git.push.force", "git push --force", "residual:exact-deny"),
                    ("git.push.force", "git push -f", "residual:exact-deny")]
     assert all(f.verdict != "narrowed" for f in findings)
-    _r, exec_findings, _x = hr.render_permissions(claude(), perms(), "exec", result)
+    exec_rules, exec_findings, _x = hr.render_permissions(claude(), perms(), "exec", result)
     fence = [f for f in exec_findings if f.entry == "fence.partial-source"]
-    assert fence[0].verdict == "widened:if [ -f .adlc/partials/"
+    # REQ-682 BR-7: no fence rule at exec scope, which no rule could match (probe rows 8, 9);
+    # fences run through the fence runner. It was `widened:if [ -f .adlc/partials/`.
+    assert fence[0].verdict == "inexpressible" and fence[0].detail.startswith("runner:")
+    assert not [r for r in exec_rules if r.entry == "fence.partial-source"]
     assert claude()["accepted_fidelity"]["fence.partial-source"]["exec"] == fence[0].verdict
 
 
@@ -791,3 +794,31 @@ def test_no_renderer_branches_on_a_harness_name():
         assert not re.search(r"""==\s*["'](claude|copilot|codex|gemini|cursor)["']""", text), fn
     for fn in ("harness.py", "checks.py", "doctor.py", "adlc.py"):
         assert "if harness == " not in open(os.path.join(adlc_dir, fn)).read(), fn
+
+
+def test_project_render_unchanged_by_fence_runner():
+    """REQ-682 AC-7: the fence runner is exec scope only. At project scope the claude render,
+    its fence verdict and its remedy are what they were, and the golden holds byte for byte."""
+    a = claude()
+    assert a["exec"]["fence_runner"] == "tools/adlc/fence-run"
+    assert "fence_broad_spelling" not in a["capabilities"]
+    rules, findings, extras = hr.render_permissions(a, perms(), "project")
+    fence = [f for f in findings if f.entry == "fence.partial-source"]
+    assert [(f.verdict, f.detail) for f in fence] == [("inexpressible",
+                                                       "withheld by accepted_fidelity")]
+    assert not [r for r in rules if r.entry == "fence.partial-source"]
+    assert extras["remedies"] == [hr.fence_remedy(a)]
+    golden = os.path.join(TOOLKIT, "harness", "claude", "rendered", "settings.json")
+    with open(golden, encoding="utf-8") as fh:
+        assert "adlc/partials" not in json.loads(fh.read()).get("permissions", {}).get(
+            "allow", [""])[0]
+
+
+def test_fence_runner_path_is_toolkit_relative(tmp_path):
+    text = open(CLAUDE_YML, encoding="utf-8").read()
+    for bad in ("/abs/fence-run", "../fence-run", "tools/../../x", "tools/a b"):
+        path = tmp_path / "claude.yml"
+        path.write_text(text.replace("fence_runner: tools/adlc/fence-run",
+                                     "fence_runner: %s" % (repr(bad) if " " in bad else bad)))
+        with pytest.raises(ha.AdapterError, match="fence_runner"):
+            ha.load_adapter(str(path), toolkit=TOOLKIT)

@@ -338,6 +338,16 @@ def _probe_data(name, value):
     return value in (harness_probe.FENCE, harness_probe.CLAUDE_PROJECT_SKILLS)
 
 
+def _census_data(name, value):
+    """REQ-682: ``fence_census.py`` holds the canonical root line, byte for byte, to recognize
+    and rewrite it in a fence (``test_fence_census.py`` pins it equal to the lint's). It is
+    data the runner replaces with the literal root, never a toolkit read."""
+    if name != "fence_census.py":
+        return False
+    import fence_census
+    return value.strip() == fence_census.ROOT_LINE
+
+
 def _adapter_surface_name(name, value):
     """REQ-657: ``harness_adapter.py`` names ``skills`` as one of the five adapter
     surfaces (a schema key, which every adapter declares ``mounted``), never as a
@@ -364,6 +374,7 @@ def test_no_skills_dir_reads_outside_the_doctor_symlink_checks():
         for func, value in _code_strings(os.path.join(adlc_dir, name)):
             if (value == "skills" or ".claude/skills" in value) \
                     and not _probe_data(name, value) \
+                    and not _census_data(name, value) \
                     and not (func is None and _adapter_surface_name(name, value)) \
                     and not (func is None and name == "home_layout.py" and value == "skills"):
                 hits.append((name, func))
