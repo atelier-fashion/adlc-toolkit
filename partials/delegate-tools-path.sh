@@ -18,6 +18,11 @@
 #      guards at call sites keep this a silent no-op — telemetry must never block
 #      a skill: REQ-424 / LESSON-008 BR-4)
 #
+# Under `fence-run` (ADLC_FENCE_TOOLKIT_ONLY=1, REQ-682 ADR-4) neither cwd-relative
+# arm is taken, because the working copy is the exec model's to write: tier 1 is
+# skipped, and tier 3 names ToolkitRoot's directory instead of `tools/delegate`.
+# Unset, the resolution is exactly the three tiers above.
+#
 # POSIX sh only: no set -eu, no bashisms, no GNU-only utilities, no python/node.
 # Emits nothing on stdout/stderr on any path.
 
@@ -25,10 +30,12 @@
 # still has the var set.
 export DELEGATE_TOOLS="tools/delegate"
 
-if [ -x "tools/delegate/emit-telemetry.sh" ]; then
+if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -x "tools/delegate/emit-telemetry.sh" ]; then
   DELEGATE_TOOLS="tools/delegate"
 elif [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -x "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/delegate/emit-telemetry.sh" ]; then
   DELEGATE_TOOLS="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/tools/delegate"
+elif [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" = 1 ]; then
+  DELEGATE_TOOLS="${ADLC_TOOLKIT_ROOT:-/nonexistent}/tools/delegate"
 else
   DELEGATE_TOOLS="tools/delegate"
 fi

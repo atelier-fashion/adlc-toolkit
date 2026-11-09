@@ -125,14 +125,33 @@ def allow_matches(spelling, exact, granularity, command, renders_exact):
     return cmd == text or (cmd.startswith(text) and cmd[len(text)] == " ")
 
 
-def deny_forms(command):
-    """The closed set of evaluated spellings of a deny command, with their shapes."""
+#: The admitted statement a compound-tail form puts in front of a deny (REQ-682 BR-2).
+COMPOUND_HEAD = ("git", "status")
+#: Env prefixes a wrapped form tries beyond ``NAME=1``: the one an exec allow used to carry,
+#: and one that redirects git (REQ-682 BR-2).
+WRAPPED_ENV_PREFIXES = ("ADLC_TOOLKIT_ROOT=/x", "GIT_DIR=/tmp/x")
+
+
+def deny_forms(command, wrapped=False):
+    """The closed set of evaluated spellings of a deny command, with their shapes.
+
+    ``wrapped`` adds the exec-scope forms REQ-682 BR-2 names: an arbitrary env prefix, and
+    the deny as the second statement of a compound command. Those are judged one statement
+    at a time by ``exec_matcher``, never by :func:`allow_matches` on the whole text, which
+    would read ``git status ; git push --force`` as a ``git status`` command. The project
+    render calls this without ``wrapped``, so its output is unchanged.
+    """
     command = tuple(command)
     forms = [("prefix", command)]
     if command and command[0] == "git":
         forms.append(("git-c", ("git", "-C", ".") + command[1:]))
     forms.append(("env-prefix", ("NAME=1",) + command))
     forms.append(("shell-opener", ("bash", "-lc", "'%s'" % " ".join(command))))
+    if wrapped:
+        for prefix in WRAPPED_ENV_PREFIXES:
+            forms.append(("env-prefix", (prefix,) + command))
+        for op in (";", "&&", "||"):
+            forms.append(("compound-tail", COMPOUND_HEAD + (op,) + command))
     return forms
 
 
@@ -481,6 +500,14 @@ def _render_fence(adapter, e, argv, scope, gran):
     name = adapter["name"]
     command = _cmd(argv)
     if scope == "exec":
+        runner = (adapter.get("exec") or {}).get("fence_runner")
+        if runner:
+            # REQ-682: under --exec a fence runs through the toolkit's fence runner, which
+            # the adapter's tiers admit by absolute path. No fence rule is rendered, because
+            # none matches a fence (probe rows 8, 9): reporting `widened` for an entry that
+            # matches nothing would read as coverage (BR-7).
+            return [], [Finding(name, e["id"], command, "inexpressible", scope,
+                                "runner: fences run through %s (REQ-682)" % runner)], []
         broad = adapter["capabilities"].get("fence_broad_spelling")
         if not broad:
             return [], [Finding(name, e["id"], command, "inexpressible", scope,

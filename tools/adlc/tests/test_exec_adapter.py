@@ -230,3 +230,65 @@ def test_symlinked_root_gets_both_spellings(adapter, tmp_path):
     allow, _deny = adapter.tiers(BRANCH, write_roots=[str(link)])
     edits = [a for a in allow if a.startswith("Edit(")]
     assert edits == ["Edit(/%s/**)" % link, "Edit(/%s/**)" % os.path.realpath(str(real))]
+
+
+@pytest.mark.parametrize("extra", [["."], [".", "/abs/tk/partials/forge.sh"], ["source"],
+                                   ["source", "/abs/tk/partials/forge.sh"], ["["], ["if"],
+                                   ["eval"], ["python3"], ["git", "-C"]])
+def test_opener_extras_are_refused(adapter, extra):
+    """REQ-682 BR-7: no exec allow is an opener. `Bash(. :*)` and `Bash(source:*)` passed
+    before; `git -C` would admit `git -C <path> push --force`."""
+    with pytest.raises(ea.ExecRefused, match="runs its arguments|wrap deny-tier|will not spell"):
+        adapter.tiers(BRANCH, [extra])
+
+
+def test_opener_in_adapter_allow_extra_is_refused_by_the_loader(tmp_path):
+    text = open(os.path.join(TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
+    bad = tmp_path / "claude.yml"
+    for opener in ("source", "eval", "python3"):
+        bad.write_text(text.replace("  allow_extra_exact:\n",
+                                    "  allow_extra_exact:\n    - [%s, x]\n" % opener, 1))
+        with pytest.raises(ha.AdapterError, match="runs its arguments"):
+            ha.load_adapter(str(bad), toolkit=TOOLKIT)
+
+
+def test_current_extras_still_accepted(adapter):
+    """Benign path: the adapter's own extras and the usual project extras still render."""
+    allow, _deny = adapter.tiers(BRANCH, [["pytest"], ["make", "test"], ["tox"]])
+    for rule in ("Bash(pytest:*)", "Bash(make test:*)", "Bash(tox:*)", "Bash(git status:*)",
+                 "Bash(git push -u origin %s)" % BRANCH, "Bash(ls:*)"):
+        assert rule in allow, rule
+
+
+def test_inert_fence_allows_retired(adapter):
+    """REQ-682 BR-7: the exec tier admits fences through the fence runner by its one absolute
+    path, and no longer carries the two allows that matched nothing (probe rows 9, 14)."""
+    import exec_matcher as em
+    allow, _deny = adapter.tiers(BRANCH)
+    runner = os.path.join(os.path.realpath(TOOLKIT), "tools", "adlc", "fence-run")
+    assert "Bash(%s:*)" % runner in allow
+    assert "Bash(ADLC_TOOLKIT_ROOT=:*)" not in allow
+    assert not [a for a in allow if "partials/" in a]
+    assert em.opener_allows({"allow": allow}) == []
+    assert em.admits({"allow": allow}, "%s run validate/SKILL.md#1:00000000" % runner)
+    assert not em.admits({"allow": allow}, "%s-evil run x" % runner)
+    assert not em.admits({"allow": allow}, "%s run x; git push origin HEAD:main" % runner)
+
+
+def test_fence_runner_outside_the_root_refuses_the_launch(adapter, tmp_path):
+    root = tmp_path / "tk"
+    (root / "tools" / "adlc").mkdir(parents=True)
+    outside = tmp_path / "evil"
+    outside.write_text("#!/bin/sh\n")
+    (root / "tools" / "adlc" / "fence-run").symlink_to(outside)
+    moved = ea.ExecAdapter(adapter.adapter, str(root))
+    with pytest.raises(ea.ExecRefused, match="fence runner"):
+        moved.fence_runner()
+    (root / "tools" / "adlc" / "fence-run").unlink()
+    with pytest.raises(ea.ExecRefused, match="fence runner"):
+        moved.fence_runner()
+    spaced = tmp_path / "a b"
+    (spaced / "tools" / "adlc").mkdir(parents=True)
+    (spaced / "tools" / "adlc" / "fence-run").write_text("#!/bin/sh\n")
+    with pytest.raises(ea.ExecRefused, match="fence runner"):
+        ea.ExecAdapter(adapter.adapter, str(spaced)).fence_runner()

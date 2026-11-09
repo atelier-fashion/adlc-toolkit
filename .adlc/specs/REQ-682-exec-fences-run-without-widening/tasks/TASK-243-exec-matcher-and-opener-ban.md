@@ -1,8 +1,9 @@
 ---
 id: TASK-243
 title: "Exec-scope matcher that models Claude's per-statement checks, and the `.`/`source`/`[` opener ban"
-status: draft
+status: complete
 parent: REQ-682
+repo: adlc-toolkit
 created: 2026-11-09
 updated: 2026-11-09
 dependencies: []

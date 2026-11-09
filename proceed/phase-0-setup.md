@@ -138,11 +138,13 @@ Companion to `proceed/SKILL.md` (REQ-661). Its Step 0 sends you here first, befo
    Declared for `tools/lint-skills`'s `retrieval-status-parity` check (BUG-194). That commit is also the lite branch's first, which is what lets item 8a's draft PR open (LESSON-390).
 
    **Then stamp the harness (REQ-648 BR-10)**: run **Run-outcome telemetry** R1 (`proceed/phases-telemetry.md`), before item 8a pushes anything, so the stamp names the toolkit that ran this pipeline even when `/wrapup` or `/sprint` later pulls the toolkit clone itself.
-8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR through the forge adapter (so the step works on GitHub or Azure DevOps — REQ-520), making this REQ's intent — and, after `/architect`, its footprint — visible on the shared remote from the start (the precondition that makes cross-session ordering possible):
+8a. **Open a draft PR early (REQ-483, BR-1).** After state is initialized, for each touched repo push the feature branch and open a **draft** PR through the forge adapter (so the step works on GitHub or Azure DevOps — REQ-520), making this REQ's intent — and, after `/architect`, its footprint — visible on the shared remote from the start (the precondition that makes cross-session ordering possible). Push the branch first, then open the PR, in two fences: the push is a plain git command, and the PR goes through the forge adapter (REQ-682 runs the second under `/sprint --exec` through the toolkit's fence runner, which never pushes a branch):
+   ```bash
+   git -C <worktree> push -u origin <branch-name>
+   ```
    ```bash
    ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
    if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
-   git -C <worktree> push -u origin <branch-name>
    adlc_forge_pr_create -R <owner/repo> --draft --base <integration-branch> --head <branch-name> --title "[WIP] REQ-xxx: <short title>" --body "Draft opened at Step 0 by /proceed; body filled in at Phase 6."
    ```
    Then record `repos[<id>].prUrl`, `prNumber`, and `prCreatedAt` (from `adlc_forge_pr_view <n> --json number,url,createdAt`) into `pipeline-state.json`. The base is `<integration-branch>` from step 4 — never hardcode `main` (LESSON-036). **Resume-safe**: if `repos[<id>].prNumber` is already set, reuse it — never open a second PR. In subagent mode (`/sprint` pipeline-runner) this still runs per REQ. The PR is `--draft` (not review-ready); Phase 6 flips it to ready. (If GitHub rejects the draft because the branch has no commits yet, defer to the Phase 6 fallback once commits land — LESSON-004.)

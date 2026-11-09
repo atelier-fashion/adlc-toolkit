@@ -86,8 +86,10 @@ fi
 if ! command -v adlc_home >/dev/null 2>&1; then
   if [ -n "$_ADLC_ALLOC_DIR" ] && [ -f "$_ADLC_ALLOC_DIR/adlc-home.sh" ]; then . "$_ADLC_ALLOC_DIR/adlc-home.sh"; fi
 fi
-if ! command -v adlc_home >/dev/null 2>&1 && { [ -f .adlc/partials/adlc-home.sh ] || { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -f "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh" ]; }; }; then
-  if [ -f .adlc/partials/adlc-home.sh ]; then . .adlc/partials/adlc-home.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh"; fi
+# Under `fence-run` (ADLC_FENCE_TOOLKIT_ONLY=1) the working copy's arm is never taken
+# (REQ-682 ADR-4); unset, it reads exactly as before.
+if ! command -v adlc_home >/dev/null 2>&1 && { { [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/adlc-home.sh ]; } || { [ -n "${ADLC_TOOLKIT_ROOT:-}${HOME+x}" ] && [ -f "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh" ]; }; }; then
+  if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}" != 1 ] && [ -f .adlc/partials/adlc-home.sh ]; then . .adlc/partials/adlc-home.sh; else . "${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}/partials/adlc-home.sh"; fi
 fi
 
 # _adlc_id_home — the home, or rc 1 with one stderr line. Never a literal fallback:

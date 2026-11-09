@@ -31,7 +31,9 @@ What it declares, and why:
   allow matches `git push --force origin feature`) is accepted for the same reason.
 - **`fence.partial-source`** is `inexpressible` at project scope: a committed
   opening-token prefix would be a new pre-approval (Rule A). At `exec` scope it is
-  `fence_broad_spelling`, reported `widened`.
+  `inexpressible` too: no rule matches a fence (Claude refuses `.` and `source` under any
+  allow, REQ-682), so fences run through the fence runner `exec.fence_runner` names,
+  admitted by its one absolute path.
 - **Trust** is `user-config-entry`: Claude Code 2.1.258 ignores a project's
   `permissions.allow` in a workspace that has not been trusted (ASSUME-010,
   REQ-664's probe). Declared, not exercised; nothing in the framework writes it.

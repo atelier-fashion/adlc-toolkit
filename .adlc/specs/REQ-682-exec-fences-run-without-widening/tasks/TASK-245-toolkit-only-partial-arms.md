@@ -1,8 +1,9 @@
 ---
 id: TASK-245
 title: "Toolkit-only partial resolution: gate the working-copy arms preload cannot reach"
-status: draft
+status: complete
 parent: REQ-682
+repo: adlc-toolkit
 created: 2026-11-09
 updated: 2026-11-09
 dependencies: []

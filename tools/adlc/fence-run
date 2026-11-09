@@ -1,0 +1,39 @@
+#!/bin/sh
+# tools/adlc/fence-run — the one entry point an exec model has to the toolkit's fences
+# (REQ-682 ADR-1). `/sprint --exec` admits it with one absolute-path prefix allow,
+# `Bash(<ToolkitRoot>/tools/adlc/fence-run:*)`, and nothing else that sources or runs a
+# partial. It finds fence_run.py beside its own real path and runs it with the ONE
+# interpreter (REQ-609 BR-8, ADR-2): <ADLC_HOME>/delegate-venv/bin/python3 when that venv
+# carries PyYAML, else python3 from PATH, as install.sh's adlc shim does. `-I` keeps the
+# working copy, PYTHON* variables and the user site out of the interpreter's path.
+#
+#   fence-run run <id> [--arg NAME=VALUE]... [--arg-file NAME=PATH]...
+#   fence-run show <toolkit-relative file>
+#
+# Exit 3 is the runner's own refusal, one stderr line `opaque_entry_refused: <id>: <reason>`;
+# any other status is the fence's. See tools/adlc/fence_run.py.
+fr_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || fr_dir=
+if [ -z "$fr_dir" ] || [ ! -f "$fr_dir/fence_run.py" ]; then
+  printf 'opaque_entry_refused: fence-run: no fence_run.py beside %s\n' "$0" >&2
+  exit 3
+fi
+fr_h="$HOME/.claude"  # adlc-home: default
+if [ -n "${ADLC_HOME+x}" ]; then
+  case "$ADLC_HOME" in /*) fr_h="${ADLC_HOME%/}" ;; *) fr_h="" ;; esac
+elif [ -f "$fr_h/.adlc-home" ]; then
+  IFS= read -r fr_p < "$fr_h/.adlc-home" || :
+  case "$fr_p" in /*) fr_h="${fr_p%/}" ;; *) fr_h="" ;; esac
+fi
+fr_v="$fr_h/delegate-venv/bin/python3"
+fr_y=""
+if [ -n "$fr_h" ] && [ -d "$fr_h/delegate-venv/lib" ]; then
+  fr_y=$(find -L "$fr_h/delegate-venv/lib" -maxdepth 3 -type d -path '*/python*/site-packages/yaml' 2>/dev/null)
+fi
+if [ -n "$fr_h" ] && [ -f "$fr_v" ] && [ -x "$fr_v" ] && [ -n "$fr_y" ]; then
+  exec "$fr_v" -I "$fr_dir/fence_run.py" "$@"
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  printf '%s\n' 'opaque_entry_refused: fence-run: python3 not found on PATH' >&2
+  exit 3
+fi
+exec python3 -I "$fr_dir/fence_run.py" "$@"

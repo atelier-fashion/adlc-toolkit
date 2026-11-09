@@ -61,8 +61,10 @@ default_mode_map:
     acceptEdits: acceptEdits
 
 accepted_fidelity:
-  # A committed opening-token prefix would be a new pre-approval (Rule A): withheld.
-  fence.partial-source: {project: inexpressible, exec: "widened:if [ -f .adlc/partials/"}
+  # A committed opening-token prefix would be a new pre-approval (Rule A): withheld. Under
+  # --exec no rule matches a fence (REQ-682 probe rows 8, 9): fences run through the
+  # fence runner `exec.fence_runner` names, and no fence rule is rendered.
+  fence.partial-source: {project: inexpressible, exec: inexpressible}
   # `git push:*` matches `git push --force origin feature`; today's template has the
   # same exposure, grandfathered by Rule A (BR-9).
   git.push.force: residual:exact-deny
@@ -106,13 +108,16 @@ exec:
   file_rules:
     write: ["Edit(/{root}/**)", "Read(/{root}/**)"]
     read: ["Read(/{root}/**)"]
+  # The fence runner (REQ-682 ADR-1): the one executable an exec model runs a toolkit
+  # fence through, admitted as `Bash(<ToolkitRoot>/tools/adlc/fence-run:*)` with the root
+  # resolved once by the engine. It replaces `ADLC_TOOLKIT_ROOT=` and the
+  # `if [ -f .adlc/partials/` opener, which admitted nothing a fence needs (probe rows 9, 14).
+  fence_runner: tools/adlc/fence-run
   # The shared-base rule drops `git push`, `git branch` and `git worktree` at exec
   # scope, so the pipeline's own calls are listed here. Each shares a command base with
   # a deny, so each is exact: as a prefix rule, `git push -u origin <branch>` admitted
   # `<branch> main` and `<branch> --force` after it (BUG-260). `{branch}` is the REQ's
   # own branch.
-  allow_extra:
-    - [ADLC_TOOLKIT_ROOT=]
   allow_extra_exact:
     - [git, push]
     - [git, push, -u, origin, "{branch}"]
@@ -175,7 +180,7 @@ exec:
     - a semantic equivalent of a denied move under another spelling
     - the Azure DevOps flag routes, narrowed for the forge wrappers only
     - a merge bot on the forge that acts on a label or a comment
-    - a fence that sources a partial, which no per-command rule sees
+    - a fence-run fence runs toolkit code no per-command rule sees; the reach audit bounds it, not the allowlist
 
 hook_events:
   # A SessionStart group with no matcher also fires on compact, so session-start
@@ -202,4 +207,3 @@ capabilities:
   never_restore: []
   deny_under_allow:
     prefix: {mechanism: confirm, result: pass, harness_version: n/a, source: grandfathered}
-  fence_broad_spelling: [if, "[", -f, .adlc/partials/]

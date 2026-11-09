@@ -71,9 +71,11 @@ GRANDFATHERED = ("claude", "prefix")
 #: Tokens that, alone, are a first-token wildcard over every shell line (BR-8).
 FIRST_TOKEN_WILDCARDS = ("if", "sh", "bash", "zsh")
 #: First tokens no rendered routine allow may have: each one runs its arguments as
-#: a command, so an allow on it is a wildcard allow (REQ-656 BR-2).
+#: a command, so an allow on it is a wildcard allow (REQ-656 BR-2). ``.`` and ``source``
+#: run a file as shell code and ``[`` opens every partial-sourcing fence (REQ-682 BR-7):
+#: ``Bash(. :*)`` and ``Bash(source:*)`` are refused like ``Bash(eval:*)``.
 FORBIDDEN_FIRST_TOKENS = FIRST_TOKEN_WILDCARDS + ("env", "xargs", "eval", "exec", "sudo", "time",
-                                                  "command", "nohup", "node")
+                                                  "command", "nohup", "node", ".", "source", "[")
 #: ...and the same for any token starting with one of these (``python3``).
 FORBIDDEN_FIRST_TOKEN_PREFIXES = ("python",)
 
@@ -96,7 +98,10 @@ _EXEC_KEYS = set(_EXEC_REQUIRED) | {
     "exec_schema_version", "trust_notice", "resume_flag", "deny_flag", "add_dir_flag",
     "shell_rule_exact", "allow_tools", "allow_extra", "allow_extra_exact", "engine_deny",
     "deny_render", "denied_result_key", "auth_env", "config_isolation",
-    "config_isolation_help", "settings_keys", "sandbox_refuse", "residuals", "file_rules"}
+    "config_isolation_help", "settings_keys", "sandbox_refuse", "residuals", "file_rules",
+    "fence_runner"}
+#: A toolkit-relative path, as ``exec.fence_runner`` names the fence runner (REQ-682 ADR-8).
+_TOOLKIT_REL_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
 
 #: Every format an adapter may name, with what the loader needs to know of it.
 #: ``harness_render.FORMATS`` implements each one; a test holds the two equal.
@@ -399,9 +404,20 @@ def _exec_block(src, block):
                     raise AdapterError(src, "exec.file_rules.%s[%d]" % (kind, i),
                                        "must hold {root}: a file rule with no path admits "
                                        "every path (BUG-265)")
+    if "fence_runner" in block:
+        runner = _need_str(src, "exec.fence_runner", block["fence_runner"])
+        if not _TOOLKIT_REL_RE.match(runner) or ".." in runner.split("/"):
+            raise AdapterError(src, "exec.fence_runner", "must be a toolkit-relative path with no "
+                               "`..` segment: the engine resolves it under ToolkitRoot (REQ-682)")
     for key in ("allow_extra", "allow_extra_exact", "engine_deny"):
         for i, item in enumerate(_need_list(src, "exec." + key, block.get(key, []))):
             _token_list(src, "exec.%s[%d]" % (key, i), item)
+            first = str(item[0])
+            if key != "engine_deny" and (first in FORBIDDEN_FIRST_TOKENS or
+                                         first.startswith(FORBIDDEN_FIRST_TOKEN_PREFIXES)):
+                raise AdapterError(src, "exec.%s[%d]" % (key, i),
+                                   "first token %r runs its arguments, so the allow would admit "
+                                   "any command (REQ-682 BR-7)" % first)
     for code, klass in _need_map(src, "exec.exit_codes", block["exit_codes"]).items():
         if not str(code).lstrip("-").isdigit():
             raise AdapterError(src, "exec.exit_codes", "%r is not an exit code" % (code,))
@@ -796,9 +812,13 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
             raise AdapterError(src, "capabilities.fence_broad_spelling", "a bare %r is a "
                                "first-token wildcard over every shell line (BR-8)" % fbs[0])
     elif caps["allowlist_granularity"] != "command-base" and \
-            caps.get("fence_unmatchable") != "yes":
+            caps.get("fence_unmatchable") != "yes" and \
+            not (data.get("exec") or {}).get("fence_runner"):
+        # Its one reader is the exec render; an adapter whose exec block names a fence runner
+        # renders no fence rule there (REQ-682 ADR-8), so it has nothing to spell.
         raise AdapterError(src, "capabilities.fence_broad_spelling", "required unless the "
-                           "granularity is command-base or no rule can match the fence")
+                           "granularity is command-base, no rule can match the fence, or the "
+                           "exec block names a fence_runner")
     data["_path"] = os.path.abspath(path)
     return data
 

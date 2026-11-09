@@ -483,6 +483,7 @@ class Orchestrator(object):
             data = ep.pipeline_prompt(self.toolkit, self.primary, req, branch, self.primary,
                                       repos[rid]["workingCopy"])
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
+            self._prompt_refused(req, exc)
             raise Refused(str(exc))
         el.atomic_write(run.file("prompt.txt"), data)
         os.makedirs(run.file("gh-empty"), exist_ok=True)
@@ -491,6 +492,11 @@ class Orchestrator(object):
         self.boxes[req] = box
         self.adapters[batch.adapter.name] = batch.adapter
         return run
+
+    def _prompt_refused(self, req, exc):
+        """Say a prompt refusal; an unrouted fence is ``exec_prompt_refused`` (REQ-682 BR-8)."""
+        if isinstance(exc, ep.ExecPromptRefused):
+            self.say("%s %s" % (req, exc))
 
     def _collision_check(self, box, repo, path, branch):
         out = box.git(repo, ["worktree", "list", "--porcelain"]).stdout
@@ -1042,6 +1048,7 @@ class Orchestrator(object):
                                       "The REQ this run was held behind has merged, and this "
                                       "branch has been rebased. Continue.")
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
+            self._prompt_refused(run.req, exc)
             raise Refused(str(exc))
         name = "prompt.%d.txt" % (run.doc["launches"] + 1)
         el.atomic_write(run.file(name), data)
@@ -1452,6 +1459,7 @@ class Orchestrator(object):
             data = ep.closeout_prompt(self.toolkit, run.req, branch, path,
                                       self._evidence(run, plan), deploy)
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
+            self._prompt_refused(run.req, exc)
             self._close_out_failed(run, "failed", str(exc))
             return
         el.atomic_write(run.file("close-out-prompt.txt"), data)

@@ -3014,3 +3014,29 @@ def test_dispatch_fallback_fires_when_sentence_removed_from_real_skill(tmp_path,
     (sub / "SKILL.md").write_text(text.replace(sentence, ""))
     found = _dispatch_findings(_run(tmp_path))
     assert found and all(p == f"{sub.name}/SKILL.md" for p, _, _ in found), found
+
+
+def test_unguarded_source_gated_variant_only():
+    """REQ-682 ADR-4: a partial may prepend exactly one test, `ADLC_FENCE_TOOLKIT_ONLY`, to
+    the canonical guard. Any other variant stays a finding, and in a fence even the gated
+    one is a finding, because the runner rewrites fences and only partials need the gate."""
+    gate = _check.FENCE_TOOLKIT_ONLY_GATE
+    good = "  if " + gate + _check.guarded_source_line(
+        "forge", _check.PARTIAL_SOURCE_OPERAND)[len("if "):]
+    assert _check.check_unguarded_source(good, "partials/x.sh", whole_file=True) == []
+    plain = "  " + _check.guarded_source_line("forge", _check.PARTIAL_SOURCE_OPERAND)
+    assert _check.check_unguarded_source(plain, "partials/x.sh", whole_file=True) == []
+    bad_variants = (
+        good.replace("!= 1", "= 1"),
+        good.replace("ADLC_FENCE_TOOLKIT_ONLY", "ADLC_OTHER_FLAG"),
+        good.replace(" && [ -f", " || [ -f"),
+        good.replace(gate, gate + gate),
+        good.replace("then . .adlc/partials/forge.sh", "then . .adlc/partials/intake.sh"),
+    )
+    for line in bad_variants:
+        found = _check.check_unguarded_source(line, "partials/x.sh", whole_file=True)
+        assert [f.check for f in found] == ["unguarded-source"], line
+    fence = "```sh\n" + _check.TOOLKIT_ROOT_LINE + "\nif " + gate + \
+        _check.guarded_source_line("forge")[len("if "):] + "\n```\n"
+    assert [f.check for f in _check.check_unguarded_source(fence, "x/SKILL.md")] == [
+        "unguarded-source"]

@@ -164,6 +164,12 @@ def install_files(toolkit):
                 if not name.endswith((".pyc", ".pyo")):
                     out.append(os.path.relpath(os.path.join(base, name), toolkit))
     out += [rel for rel in INSTALL_FILES if os.path.isfile(os.path.join(toolkit, rel))]
+    # What fence-run reads at run time (REQ-682): the exec file set beyond the trees above,
+    # the adapter and template its policy comes from, and the executables its fences run.
+    import fence_census
+    for rel in fence_census.EXEC_FILES + fence_census.RUNNER_READS:
+        if rel not in out and os.path.isfile(os.path.join(toolkit, rel)):
+            out.append(rel)
     return out
 
 

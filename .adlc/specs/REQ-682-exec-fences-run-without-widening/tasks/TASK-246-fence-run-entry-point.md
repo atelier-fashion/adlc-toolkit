@@ -1,8 +1,9 @@
 ---
 id: TASK-246
 title: "`fence-run`: the one admitted entry point — `run` a census fence with values as data, `show` a skill with fences rewritten"
-status: draft
+status: complete
 parent: REQ-682
+repo: adlc-toolkit
 created: 2026-11-09
 updated: 2026-11-09
 dependencies: [TASK-244, TASK-245]

@@ -84,7 +84,11 @@ ERR="$SANDBOX/err"
 # names a partial. `else`/`elif` are statement positions too (a `. x` after
 # `else` is as live as one after `then`); the name class admits `_` and
 # uppercase so an unconventionally named partial cannot slip past.
-SRC_LINE_RE='^(\. |source |\[ -f |if \[ -f |elif \[ -f |else \. ).*partials/[A-Za-z0-9_-]+\.sh'
+SRC_LINE_RE='^(\. |source |\[ -f |if \[ -f |elif \[ -f |else \. |if \[ "\$\{ADLC_FENCE_TOOLKIT_ONLY:-0\}" != 1 \] && \[ -f ).*partials/[A-Za-z0-9_-]+\.sh'
+# REQ-682 ADR-4: a partial's gated variant of the guard, `if [ "${ADLC_FENCE_TOOLKIT_ONLY:-0}"
+# != 1 ] && [ -f …`, is extracted and run like the canonical one. Run here with the flag
+# unset, it must behave exactly as the canonical line; fence-toolkit-only.test.sh runs it
+# with the flag set.
 # REQ-691: the installed-only shape. A gate that must never load the tree under
 # check names each installed partial in a variable, on a line of nothing but such
 # assignments, tests it with `[ -f "$<var>" ]`, and sources it as `. "$<var>"`
@@ -151,7 +155,8 @@ extract() { # extract <root> — distinct sourcing lines, leading whitespace str
 # REQ-691: the installed-only shape's two tokens, `<var>="$ADLC_TOOLKIT_ROOT/
 # partials/<name>.sh";` and `"$<var>"`. The cut carries a `"$<var>"` only for a
 # variable its fence assigned that way (extract_fences).
-TOKEN_RE='^(if|then|elif|else|fi|\.|source|sh|\[|-f|\]|\];|;|\|\||&&|2>/dev/null|\.adlc/partials/[A-Za-z0-9_-]+\.sh;?|"\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh";?|"\$\{ADLC_TOOLKIT_ROOT:-\$HOME/\.claude/skills\}/partials/[A-Za-z0-9_-]+\.sh";?|[a-z_]+="\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh";?|"\$[a-z_]+")$'
+# REQ-682: the gated variant's three tokens, `"${ADLC_FENCE_TOOLKIT_ONLY:-0}"`, `!=` and `1`.
+TOKEN_RE='^("\$\{ADLC_FENCE_TOOLKIT_ONLY:-0\}"|!=|1|if|then|elif|else|fi|\.|source|sh|\[|-f|\]|\];|;|\|\||&&|2>/dev/null|\.adlc/partials/[A-Za-z0-9_-]+\.sh;?|"\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh";?|"\$\{ADLC_TOOLKIT_ROOT:-\$HOME/\.claude/skills\}/partials/[A-Za-z0-9_-]+\.sh";?|[a-z_]+="\$ADLC_TOOLKIT_ROOT/partials/[A-Za-z0-9_-]+\.sh";?|"\$[a-z_]+")$'
 conforms() { # conforms <line> — 0 iff every token is allowlisted
   if printf '%s\n' "$1" | tr '\t' ' ' | tr -s ' ' '\n' | grep -vqE "$TOKEN_RE"; then
     return 1

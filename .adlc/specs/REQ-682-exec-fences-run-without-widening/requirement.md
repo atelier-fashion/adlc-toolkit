@@ -1,7 +1,7 @@
 ---
 id: REQ-682
 title: "Skill fences run under `/sprint --exec` without widening what the model can run"
-status: approved
+status: complete
 deployable: false
 created: 2026-11-02
 updated: 2026-11-09

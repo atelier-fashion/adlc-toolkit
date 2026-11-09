@@ -9,8 +9,11 @@ import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.insert(0, HERE)
 
 import exec_prompt as ep  # noqa: E402
+import fence_census as fc  # noqa: E402
+import recording_stubs as rs  # noqa: E402
 import toolkit_root  # noqa: E402
 
 TOOLKIT = toolkit_root.toolkit_root()
@@ -30,15 +33,10 @@ def closeout(toolkit=TOOLKIT, deploy=""):
 
 @pytest.fixture
 def install(tmp_path):
-    """A copy of every prompt source, for fixtures that alter one."""
-    root = tmp_path / "toolkit"
-    root.mkdir()
-    for rel in ("proceed", "wrapup"):
-        shutil.copytree(os.path.join(TOOLKIT, rel), str(root / rel))
-    (root / "sprint").mkdir()
-    shutil.copy(os.path.join(TOOLKIT, "sprint", "SKILL.md"), str(root / "sprint" / "SKILL.md"))
-    shutil.copy(os.path.join(TOOLKIT, "ETHOS.md"), str(root / "ETHOS.md"))
-    return root
+    """A copy of every prompt source and of what the fence census reads (REQ-682: the
+    exec file set, partials, agents, the adapter), for fixtures that alter one."""
+    import pathlib
+    return pathlib.Path(rs.toolkit_copy(str(tmp_path / "toolkit")))
 
 
 def add_line(path, line):
@@ -153,7 +151,7 @@ def test_scan_refusals_closeout(install, token, line):
 
 
 def test_allowlist_is_full_line():
-    allowed = "   # /wrapup call sites. Derivation + renumber message live in partials/id-recheck.sh."
+    allowed = "   were: they are the record of what triage decided, and `/wrapup`'s escalation"
     assert ep.scan(allowed, "pipeline") == []
     assert ep.scan(allowed + " then run it", "pipeline")
     assert ep.scan("x" + allowed, "pipeline")
@@ -195,3 +193,66 @@ def test_ethos_from_primary_wins(tmp_path):
     assert ep.ethos_text(TOOLKIT, str(primary)).startswith("LOCAL ETHOS")
     (primary / ".adlc" / "ETHOS.md").write_text("  \n")
     assert "LOCAL ETHOS" not in ep.ethos_text(TOOLKIT, str(primary))
+
+
+# --------------------------------------------------------------------------- REQ-682
+RUNNER_CALL = re.compile(r"^\s*%s run (\S+)( |$)" % re.escape(
+    os.path.join(TOOLKIT, "tools", "adlc", "fence-run")))
+
+
+def test_delivered_fences_are_all_routed():
+    """BR-1: the delivered prompts hold no fence that sources a partial. Every runner fence
+    is a fence-run call naming a census runner id, every other fence is a direct one as
+    written, and the census re-reads the prompt with no unrouted fence."""
+    records = {r["id"]: r for r in fc.census(TOOLKIT)}
+    direct = {r["id"] for r in records.values() if r["route"] == "direct"}
+    direct_bodies = set()
+    for rel in fc.EXEC_FILES:
+        for fence in fc.fences(fc.view(TOOLKIT, rel), rel):
+            if fence.id in direct:
+                direct_bodies.add(fence.code)
+    calls = 0
+    for text in (pipeline().decode("utf-8"), closeout().decode("utf-8")):
+        assert "if [ -f .adlc/partials/" not in text
+        assert ". .adlc/partials/" not in text
+        for fence in fc.fences(text):
+            lines = [ln for ln in fence.code.split("\n") if ln.strip()]
+            match = RUNNER_CALL.match(lines[0]) if len(lines) == 1 else None
+            if match:
+                assert records[match.group(1)]["route"] == "runner", match.group(1)
+                calls += 1
+            else:
+                assert fence.code in direct_bodies, fence.code[:200]
+    assert calls >= 10
+
+
+def test_unrouted_fence_refuses_the_build(install):
+    """BR-8, AC-2: a fence a skill gains with no route stops the build, naming the fence and
+    the first statement no allow admits."""
+    path = install / "proceed" / "phase-4-implementation.md"
+    base = len(fc.fences(fc.view(str(install), "proceed/phase-4-implementation.md")))
+    with open(os.path.join(HERE, "fixtures", "exec-fence", "extra-fences.md"),
+              encoding="utf-8") as fh:
+        add_line(path, fh.read())
+    with pytest.raises(ep.ExecPromptRefused) as exc:
+        pipeline(str(install))
+    assert exc.value.fence_id.startswith("proceed/phase-4-implementation.md#%d:" % (base + 1))
+    assert exc.value.statement.startswith("scp ")
+    assert str(exc.value).startswith("exec_prompt_refused: ")
+    assert isinstance(exc.value, ep.PromptRefused)
+
+
+def test_a_skill_the_set_lacks_refuses_the_build(install, monkeypatch):
+    monkeypatch.setattr(fc, "EXEC_FILES", tuple(r for r in fc.EXEC_FILES
+                                                if r != "review/SKILL.md"))
+    with pytest.raises(ep.ExecPromptRefused, match="review/SKILL.md is named"):
+        pipeline(str(install))
+
+
+def test_notes_send_skills_and_agents_through_the_runner():
+    text = pipeline().decode("utf-8")
+    runner = os.path.join(TOOLKIT, "tools", "adlc", "fence-run")
+    assert "Toolkit skills and agents are not loaded in this session." in text
+    assert "`%s show <skill>/SKILL.md`" % runner in text
+    assert "`%s show agents/<name>.md`" % runner in text
+    assert "Never source a partial yourself" in text

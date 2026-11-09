@@ -1,8 +1,9 @@
 ---
 id: TASK-248
 title: "Wire the route into the engine: rewritten prompts, the runner allow, retired inert allows, `exec_prompt_refused`"
-status: draft
+status: complete
 parent: REQ-682
+repo: adlc-toolkit
 created: 2026-11-09
 updated: 2026-11-09
 dependencies: [TASK-243, TASK-244, TASK-246]

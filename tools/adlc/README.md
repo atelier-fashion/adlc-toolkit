@@ -558,6 +558,30 @@ Nothing branches on a harness name. `harness/claude.yml` is the reference block.
 | `config_isolation`, `config_isolation_help`, `settings_keys` | how the resumed close-out ignores working-copy config, and the flag names looked for in `<binary> --help` |
 | `sandbox_refuse` | a setting that refuses at pre-flight |
 | `residuals` | what the two tiers do not stop, stated, not enumerated away |
+| `fence_runner` | the toolkit-relative path of the fence runner (REQ-682), `tools/adlc/fence-run` on claude. `tiers()` resolves it once under ToolkitRoot and spells `Bash(<root>/<fence_runner>:*)`, refusing the launch unless the path is absolute, plain (`^/[A-Za-z0-9_./-]+$`, because a quoted path does not match a prefix rule), a regular file and still under the root after `realpath`. With it set, the exec render carries no fence rule and reports `fence.partial-source` as `inexpressible` (runner), and `capabilities.fence_broad_spelling` is not required |
+
+**The fence runner (REQ-682).** No allow admits a fence that sources a partial: Claude refuses `.`
+and `source` whatever the allow says, and judges a compound command one statement at a time
+(`exec_matcher.py` holds the measured rules). So an exec model runs toolkit fences through one
+executable:
+
+- `fence-run run <id> [--arg NAME=VALUE]... [--arg-file NAME=PATH]...` runs the census fence
+  `<id>` (`<toolkit-relative path>#<ordinal>:<sha8>`). It recomputes the census
+  (`fence_census.py`) from its own real path on every call, so it trusts no cache, manifest or
+  environment variable. It refuses an id whose fence changed or whose route is `direct`,
+  `engine` or `excised`, checks each value against its placeholder's full-match pattern, binds it
+  as an `ADLC_ARG_*` variable expanded once inside double quotes, and runs the fence under
+  `/bin/sh` after sourcing `adlc-home.sh` and `forge.sh` from the install, with
+  `ADLC_FENCE_TOOLKIT_ONLY=1` set last, so no partial takes a working-copy arm.
+- `fence-run show <file>` prints a file of the exec set with each fence in its route's form: a
+  runner call, the fence unchanged (`direct`), or one line naming why it does not run.
+- Exit codes: a fence's own status is passed through; **3** is the runner's refusal, always one
+  stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run.
+
+`harness/claude/exec-fence-census.json` is the committed census: every fence, its route, its
+values and its reach. `test_exec_reach.py` audits that reach statically over the function
+closure and dynamically under recording stubs, and fails on any deny-tier command, so a new
+fence or partial function starts refused until it is checked (BR-4).
 
 **Trust, for an adapter whose grant is real.** Grant before launch, per working copy, the
 close-out copy included. Revoke on every exit path: merge, reject, abort, crash. Remove exactly

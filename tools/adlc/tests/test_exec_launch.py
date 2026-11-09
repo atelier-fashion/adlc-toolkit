@@ -473,3 +473,37 @@ def test_draft_spec_refused_lite_draft_runs(tmp_path):
     subprocess.check_call(["git", "-C", str(box.repo), "push", "-q", "origin", "main"])
     with pytest.raises(se.Refused, match="not approved"):
         box.start(shared=True)
+
+
+def test_exec_prompt_refused_launches_nothing(box, monkeypatch):
+    """REQ-682 BR-8, BR-9: an unrouted fence in the delivered text stops the launch, said as
+    `exec_prompt_refused` with the fence and the statement, and no harness process starts."""
+    import fence_census as fc
+    real = fc.census
+
+    def one_unrouted(root, adapter=None):
+        records = [dict(r) for r in real(root, adapter)]
+        rec = next(r for r in records if r["id"].startswith("proceed/phase-4-implementation.md#"))
+        rec.update(route="unrouted", reason="a fixture fence with no route",
+                   refused=["scp .adlc host:/tmp", "no allow matches"])
+        return records
+    monkeypatch.setattr(fc, "census", one_unrouted)
+    with pytest.raises(se.Refused, match="exec_prompt_refused: proceed/phase-4-implementation"):
+        box.start(shared=True)
+    assert "exec_prompt_refused" in box.out.getvalue()
+    assert "scp .adlc host:/tmp" in box.out.getvalue()
+    assert not (box.home / "argv-REQ-901.json").exists()
+
+
+def test_child_env_adds_no_delegation_opt_in(box):
+    """REQ-682 BR-11, AC-8: the engine passes nothing that turns delegation on: an opt-in in
+    the operator's environment does not reach the child, and the child's opt-out does."""
+    orch = box.orch(ADLC_DELEGATE_ENABLED="1", KIMI_API_KEY="k", MOONSHOT_API_KEY="m")
+    box.go(orch=orch, shared=True)
+    lines = open(str(box.home / "env-raw-REQ-901.txt")).read().splitlines()
+    env = dict(line.split("=", 1) for line in lines if "=" in line)
+    assert not [k for k in env if k.startswith("ADLC_DELEGATE") or k in ("KIMI_API_KEY",
+                                                                         "MOONSHOT_API_KEY")]
+    assert env.get("ADLC_DISABLE_DELEGATE") == "1"
+    assert "ADLC_DELEGATE_ENABLED" not in orch.adapter(orch.runs["REQ-901"]).block[
+        "env_passthrough"]
