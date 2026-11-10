@@ -1,7 +1,7 @@
 ---
 id: BUG-267
 title: "`adlc harness probe claude` has never measured an allow: its allows go in the probe repo's `.claude/settings.json`, which an untrusted workspace ignores"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-10
 updated: 2026-11-10
@@ -145,3 +145,14 @@ A failing-first test was still written:
 `tools/adlc/tests/test_harness_probe_e2e.py::test_claude_allows_survive_an_untrusted_project`.
 Without the fix it fails on `{'broad-first-token': 'fail'} != {'broad-first-token': 'pass'}`,
 and with the fix it passes.
+
+## Deployment
+
+Merged as `89024ea` ([#261](https://github.com/atelier-fashion/adlc-toolkit/pull/261)) on
+2026-11-10. Nothing to deploy, since this is toolkit code. The committed claude probe
+result still holds the 2.1.258 run; a full run on the merged commit records 2.1.316.
+
+## Lessons
+
+- LESSON-854: a harness's trust gate can drop a project's allows while still loading
+  its hooks.
