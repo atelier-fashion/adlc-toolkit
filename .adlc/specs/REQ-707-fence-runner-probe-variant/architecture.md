@@ -85,6 +85,11 @@ act at all?
 
 ### ADR-4: one per-launch rule, then the variant rule
 
+On Codex the sentinels sit outside the writable roots, where `ask-tier-deny` puts its own.
+An un-allowed tail still runs there, sandboxed, but cannot write its sentinel, so it reads
+refused. That is the boundary the runner needs on Codex: the question is whether the
+runner's allow carries a tail out of the sandbox, not whether a sandboxed command can run.
+
 Each launch is decided by `decide_variant` (REQ-664's three-way rule plus the witness),
 read as follows:
 
@@ -98,17 +103,24 @@ For `runner-positive` and `runner-baseline`, the effect is the runner sentinel. 
 controls, it is the sentinel BR-3's table names. `runner-env-prefix`'s effect is a runner
 sentinel holding `X=1`.
 
-A refusal control that `decide_variant` reads as refused is then held to REQ-707 BR-4's
-`ask-split` rule, in `read_runner_launch(obs, asked)`. It stays refused only if:
+Any launch that `decide_variant` reads as refused is then held to REQ-707 BR-4 (as amended
+in implementation), in `read_runner_launch(obs)`. It stays refused only if:
 
-- the runner sentinel is absent; or
-- `asked` appears in `obs.evidence`'s captured output or session record, either raw or as
-  `json.dumps(asked)[1:-1]` (the JSON-escaped form a tool record carries).
+- the asked line is inside a string under a `command` key of the JSON values in the
+  launch's stdout or stderr (`record_commands`, which walks `_json_values` and never
+  descends into `result`, `response`, `text`, `message`, `content`, `reasoning` or
+  `aggregated_output`). A model quoting the command, in its reply or in a Codex
+  `agent_message` or `reasoning` item, is never a record; or
+- the harness refused a tool on stderr, the stderr names the stub's path
+  (`effects["denied_here"]`), and the runner sentinel is absent. `obs.denied` itself is
+  left alone, because REQ-664's "ask reached" test reads it.
 
-Otherwise the control is `unknown` with the reason `ask-split`. This is the one decision
-input that reads the harness's own record. It only ever downgrades a refusal to
-`unknown`; it never upgrades anything to `pass`. A record format the check cannot see
-into fails toward `unknown`, which is the safe side for a hard gate (LESSON-716).
+Otherwise it is `unknown`: `ask-split` if the runner ran, `not-attempted` if nothing did.
+This is the one decision input that reads the harness's own record. It only ever
+downgrades a refusal to `unknown`; it never upgrades anything to `pass`. A record format
+the check cannot see into fails toward `unknown`, which is the safe side for a hard gate
+(LESSON-716). On `claude`, `--output-format json` lists refused commands in
+`permission_denials`, so a real refusal is on record there.
 
 `decide_runner_prefix` then applies REQ-707 BR-5 in order: positive, baseline, refusal
 half. The launch sub-results are recorded with the words `admitted`, `refused` or

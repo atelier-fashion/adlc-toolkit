@@ -1,7 +1,7 @@
 ---
 id: TASK-251
 title: "The fake harness's `per-statement`, `split-ask` and `first-statement-only` flags, the witness-then-fence prompt, and the offline scenarios on all six profiles"
-status: draft
+status: complete
 parent: REQ-707
 repo: adlc-toolkit
 created: 2026-11-09

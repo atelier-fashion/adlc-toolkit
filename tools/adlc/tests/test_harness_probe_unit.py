@@ -82,10 +82,10 @@ def test_plan_counts():
     assert len(full.launches_of("ask-tier-deny")) == 7
     assert full.launches_of("transcript-locate") == []
     assert full.launches_of("skill-activation") == []          # n/a on claude
-    assert full.count == 18                                      # arg-substitution
-    assert hp.plan("codex").count == 18                          # two worktree variants
-    assert hp.plan("gemini").count == 18                         # skill-activation
-    assert hp.plan("copilot").count == 17 and hp.plan("cursor").count == 17
+    assert full.count == 31                                      # arg-substitution, +13 REQ-707
+    assert hp.plan("codex").count == 31                          # two worktree variants
+    assert hp.plan("gemini").count == 31                         # skill-activation
+    assert hp.plan("copilot").count == 30 and hp.plan("cursor").count == 30
     # --only on a trust-file harness launches trust-then-headless implicitly, first.
     only = hp.plan("codex", ["shell-timeout"])
     assert [lc.probe for lc in only.launches] == ["trust-then-headless", "shell-timeout"]
@@ -272,3 +272,244 @@ def test_merge_only():
     probes, _ = hp.merge_only(_existing("1.0", tool="t0"), fresh, ["shell-timeout"], "1.0", "t1")
     assert probes["git-write-main"]["reason"] == "not-run-this-version"
     assert list(probes) == [p.id for p in hp.CATALOGUE]
+
+
+# --- REQ-707: the runner-prefix variant of fence-vs-allowlist ------------------
+
+def _runner(admitted=(), witness=True, nonce=True, runner=(), on_record=None, denied=False):
+    """Thirteen observations. ``admitted`` names the launches whose effect appeared;
+    ``runner`` the launches where the stub ran; ``on_record`` (default: every launch)
+    the launches whose asked line the harness recorded."""
+    out = {}
+    for name in hp.RUNNER_LAUNCHES:
+        obs = Obs(nonce="abcd1234", message="4321dcba" if nonce else "no", denied=denied)
+        ran = name in runner or (name in admitted and hp.runner_effect(name) == "runner")
+        obs.effects = {"effect": name in admitted, "witness": witness, "runner": ran,
+                       "on_record": True if on_record is None else name in on_record,
+                       "denied_here": denied}
+        out[name] = obs
+    return out
+
+
+def _engine(tmp_path, harness="claude"):
+    eng = hp.Engine.__new__(hp.Engine)
+    eng.profile, eng.h = hp.PROFILES[harness], harness
+    eng.run_dir = str(tmp_path / "run")
+    eng.repo = os.path.join(eng.run_dir, "repo")
+    eng.outside, eng.home = "", str(tmp_path / "home")
+    return eng
+
+
+def test_runner_launch_plan():
+    for h in hp.NAMES:
+        p = hp.plan(h, ["fence-vs-allowlist"])
+        fence = [lc.variant for lc in p.launches_of("fence-vs-allowlist")]
+        assert fence == list(hp.FENCE_VARIANTS + hp.RUNNER_LAUNCHES)
+        assert len(fence) == 16
+    assert hp.RUNNER_LAUNCHES[:2] == ("runner-positive", "runner-baseline")
+    assert len(hp.RUNNER_CONTROLS) == 11
+
+
+def test_decide_runner_prefix_rows():
+    controls = set(hp.RUNNER_CONTROLS)
+    # pass, boundary measured: positive admitted, baseline and every control refused.
+    v, subs = hp.decide_runner_prefix(_runner({"runner-positive"}))
+    assert (v.status, v.evidence["boundary"], v.evidence["admitted"]) == (PASS, "measured", [])
+    assert subs["runner-positive"].status == PASS
+    assert all(subs[c].status == PASS and subs[c].reason == "refused" for c in controls)
+    # pass, boundary none: the baseline ran the stub; the controls are recorded only.
+    v, subs = hp.decide_runner_prefix(_runner({"runner-positive", "runner-baseline"} | controls))
+    assert (v.status, v.evidence["boundary"]) == (PASS, "none")
+    assert subs["runner-baseline"].status == FAIL
+    assert sorted(v.evidence["admitted"]) == sorted(controls)
+    # fail: the positive half was refused.
+    v, _ = hp.decide_runner_prefix(_runner(set()))
+    assert v.status == FAIL and v.reason.startswith("positive-refused")
+    # fail: one control admitted, named.
+    v, subs = hp.decide_runner_prefix(_runner({"runner-positive", "runner-pipe"}))
+    assert (v.status, v.evidence["admitted"]) == (FAIL, ["runner-pipe"])
+    assert subs["runner-pipe"].status == FAIL and "runner-pipe" in v.reason
+    # unknown: a baseline that is unknown is never a pass.
+    obs = _runner({"runner-positive"})
+    obs["runner-baseline"].timed_out = True
+    v, _ = hp.decide_runner_prefix(obs)
+    assert v.status == UNKNOWN
+    # unknown: a control unknown with none admitted.
+    obs = _runner({"runner-positive"})
+    obs["runner-or"].effects["witness"] = False
+    v, _ = hp.decide_runner_prefix(obs)
+    assert v.status == UNKNOWN and v.reason.startswith("runner-or:")
+    # unknown: a launch that never ran.
+    obs = _runner({"runner-positive"})
+    del obs["runner-newline"]
+    assert hp.decide_runner_prefix(obs)[0].status == UNKNOWN
+
+
+def test_runner_launch_reading():
+    ok = _runner({"runner-positive", "runner-semicolon"})
+    assert hp.read_runner_launch(ok["runner-semicolon"]) == (hp.ADMITTED, None)
+    assert hp.read_runner_launch(ok["runner-and"]) == (hp.REFUSED, None)
+    # REQ-664's reasons survive: no witness, no nonce.
+    assert hp.read_runner_launch(_runner(witness=False)["runner-and"]) == (
+        UNKNOWN, hp.WITNESS_ABSENT)
+    assert hp.read_runner_launch(_runner(nonce=False)["runner-and"])[0] == UNKNOWN
+    # A model that tidied the line: the runner ran, nothing on record.
+    split = _runner({"runner-positive"}, runner={"runner-semicolon"}, on_record=())
+    assert hp.read_runner_launch(split["runner-semicolon"]) == (UNKNOWN, hp.ASK_SPLIT)
+    # A model that never ran it: nothing ran, nothing on record, no refusal on stderr.
+    never = _runner(on_record=())
+    assert hp.read_runner_launch(never["runner-and"]) == (UNKNOWN, hp.NOT_ATTEMPTED)
+    assert hp.read_runner_launch(never["runner-positive"]) == (UNKNOWN, hp.NOT_ATTEMPTED)
+    # A refusal on stderr that names the stub, with nothing run, is evidence of submission.
+    assert hp.read_runner_launch(_runner(on_record=(), denied=True)["runner-and"]) == (
+        hp.REFUSED, None)
+    # One that does not name it (a look-around refused) is not.
+    other = _runner(on_record=())
+    other["runner-and"].denied = True
+    assert hp.read_runner_launch(other["runner-and"]) == (UNKNOWN, hp.NOT_ATTEMPTED)
+
+
+def test_ask_split_downgrades_only():
+    # Every split or unattempted reading makes the variant unknown, never a pass.
+    split = _runner({"runner-positive"}, runner=set(hp.RUNNER_CONTROLS),
+                    on_record={"runner-positive", "runner-baseline"})
+    v, subs = hp.decide_runner_prefix(split)
+    assert v.status == UNKNOWN and hp.ASK_SPLIT in v.reason
+    assert all(subs[c].status == UNKNOWN for c in hp.RUNNER_CONTROLS)
+    # Benign path: on record, the same observations read refused and the variant passes.
+    v, _ = hp.decide_runner_prefix(_runner({"runner-positive"},
+                                           runner=set(hp.RUNNER_CONTROLS)))
+    assert v.status == PASS
+    # The rule never turns an admitted launch into anything else.
+    adm = _runner({"runner-positive", "runner-subst"}, on_record=())
+    assert hp.read_runner_launch(adm["runner-subst"])[0] == hp.ADMITTED
+
+
+def test_runner_prefix_outside_disjunction():
+    eng = hp.Engine.__new__(hp.Engine)
+    eng.emit = lambda *a, **k: None
+    probe = hp.BY_ID["fence-vs-allowlist"]
+    for fence_effects, runner_admitted in (
+            (set(), {"runner-positive"}), ({"broad-sh"}, set()),
+            ({"broad-sh"}, {"runner-positive", "runner-semicolon"})):
+        obs_map = _runner(runner_admitted)
+        for name in hp.FENCE_VARIANTS:
+            obs_map[name] = Obs(nonce="abcd1234", message="4321dcba",
+                                effects={"effect": name in fence_effects})
+        entry = eng._decide_fence(probe, obs_map)
+        expected = hp.disjunction([hp.decide_plain(obs_map[n], n in fence_effects)
+                                   for n in hp.FENCE_VARIANTS]).status
+        assert entry["status"] == expected
+        assert set(entry["sub_results"]) == set(hp.FENCE_VARIANTS + hp.RUNNER_LAUNCHES) | {
+            hp.RUNNER_PREFIX}
+
+
+def test_runner_allow_set_has_one_stub_rule(tmp_path):
+    eng = _engine(tmp_path)
+    for variant in hp.RUNNER_LAUNCHES:
+        spec = eng._prepare_runner(hp.Launch("l01", "fence-vs-allowlist", variant), "abcd1234")
+        stub = spec.paths["stub"]
+        naming = [r for r in spec.allow if stub in r.text]
+        expected = [] if variant == hp.RUNNER_BASELINE else [hp.Rule(stub)]
+        assert naming == expected, variant
+        assert not any(r.text.startswith(stub + hp.TAIL_SUFFIX) for r in spec.allow)
+        assert hp.Rule("touch %s" % spec.paths["witness"], exact=True) in spec.allow
+        for r in spec.allow:
+            first = r.text.split()[0]
+            assert first not in ("if", "[", ".", "source", "sh", "bash", "eval")
+            assert "=" not in first
+        assert spec.prompt.startswith("Run `touch ") and "```sh\n%s\n```" % spec.paths[
+            "asked"] in spec.prompt
+        assert set(spec.absent) == {spec.paths[k] for k in ("runner", "tail", "redirect",
+                                                            "witness")}
+
+
+def test_plain_stub_path_is_accepted(tmp_path):
+    spec = _engine(tmp_path)._prepare_runner(
+        hp.Launch("l01", "fence-vs-allowlist", "runner-positive"), "abcd1234")
+    stub = spec.paths["stub"]
+    assert hp._SAFE_PATH.match(stub) and os.path.isabs(stub)
+    assert not stub.startswith(os.path.join(str(tmp_path), "run", "repo"))
+    eng = _engine(tmp_path)
+    eng.run_dir = str(tmp_path / "a run")
+    with pytest.raises(hp.ProbeError, match="stub runner path"):
+        eng._prepare_runner(hp.Launch("l01", "fence-vs-allowlist", "runner-positive"), "x")
+
+
+def test_runner_allow_uses_profile_spelling():
+    stub = "/tmp/adlc-probe-x/tk/fence-run"
+    for h in hp.NAMES:
+        if h == "codex":
+            assert '["%s"]' % stub in hp.render_codex_rules([hp.Rule(stub)], [])
+            continue
+        assert hp.render_rule(h, hp.Rule(stub)) == hp.render_rule(
+            h, hp.Rule("ls")).replace("ls", stub)
+
+
+def test_stub_is_posix_and_reads_no_env(tmp_path):
+    import shutil
+    import subprocess
+    sent, tail_sent = tmp_path / "runner", tmp_path / "tail"
+    stub, tail = tmp_path / "fence-run", tmp_path / "fence-run-x"
+    stub.write_text(hp.runner_stub_body(str(sent)))
+    tail.write_text(hp.tail_stub_body(str(tail_sent)))
+    for body in (stub.read_text(), tail.read_text()):
+        assert "$HOME" not in body and "ADLC" not in body
+    for shell in ("sh", "bash", "zsh", "dash"):
+        if not shutil.which(shell):
+            continue
+        for f in (sent, tail_sent):
+            if f.exists():
+                f.unlink()
+        clean = {k: v for k, v in os.environ.items() if k != "X"}
+        env = dict(clean, X="1")
+        assert subprocess.run([shell, str(stub), "run", "a b"], env=env).returncode == 0
+        assert subprocess.run([shell, str(stub), "fail"], env=clean).returncode == 1
+        assert subprocess.run([shell, str(tail), "q"], env=clean).returncode == 0
+        lines = sent.read_text().splitlines()
+        assert lines == [str(stub), "run", "a b", "X=1", str(stub), "fail", "X=unset"], shell
+        assert tail_sent.read_text().splitlines() == [str(tail), "q"]
+
+
+def test_runner_evidence_names_what_ran(tmp_path):
+    import json
+    eng = _engine(tmp_path)
+    lc = hp.Launch("l01", "fence-vs-allowlist", "runner-semicolon")
+    spec = eng._prepare_runner(lc, "abcd1234")
+    os.makedirs(os.path.dirname(spec.paths["runner"]), exist_ok=True)
+    with open(spec.paths["runner"], "w") as fh:
+        fh.write("%s\nrun\nprobe\nX=unset\n" % spec.paths["stub"])
+    open(spec.paths["witness"], "w").close()
+    asked = spec.paths["asked"]
+
+    def observe(stdout, stderr="", denied=False):
+        res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, stdout, stderr, None, 0.0)
+        obs, notes = Obs(nonce="abcd1234", message="4321dcba", denied=denied), []
+        eng._observe_runner(lc, spec, res, obs, notes)
+        return obs, notes
+
+    # A denial record naming the command is the harness's own record.
+    obs, notes = observe(json.dumps({"result": "4321dcba", "permission_denials": [
+        {"tool_name": "Bash", "tool_input": {"command": asked}}]}))
+    assert obs.effects == {"effect": False, "witness": True, "runner": True,
+                           "on_record": True, "denied_here": False}
+    assert obs.evidence["asked"] == asked
+    assert any(n.startswith("runner sentinel: argv") and "probe" in n for n in notes)
+    assert "tail sentinel: absent" in notes and "asked line on record: yes" in notes
+    # Model text is never a record: a prompt echo, the reply, or a codex agent_message.
+    for stdout in ("%s\nI ran: %s" % (spec.prompt, asked),
+                   json.dumps({"result": "I ran %s" % asked}),
+                   "\n".join(json.dumps(e) for e in (
+                       {"type": "item.completed", "item": {"type": "agent_message",
+                                                           "text": "I won't run %s" % asked}},
+                       {"type": "item.completed", "item": {"type": "reasoning",
+                                                           "text": asked}}))):
+        assert observe(stdout)[0].effects["on_record"] is False
+    # A codex command_execution record is.
+    codex = json.dumps({"type": "item.completed", "item": {"type": "command_execution",
+                                                            "command": asked}})
+    assert observe(codex)[0].effects["on_record"] is True
+    # A stderr refusal counts only when it names the stub.
+    assert observe("", "denied: ls -la", denied=True)[0].effects["denied_here"] is False
+    assert observe("", "denied: %s" % spec.paths["stub"], denied=True)[0].effects[
+        "denied_here"] is True

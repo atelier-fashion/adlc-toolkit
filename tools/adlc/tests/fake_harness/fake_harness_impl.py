@@ -27,7 +27,15 @@ whatever the config says), ``no-witness`` (``perform`` but refuse the witness),
 Flags modify a scenario: ``claim-only``, ``main-only``, ``needs-writable-roots``,
 ``no-hooks``, ``bare-nonce``, ``nonce-in-tool``, ``nonce-beyond-cap``,
 ``prompt-echo``, ``no-substitute``, ``literal-dollar``, ``leak``,
-``mutate-trust-file``, ``mutate-policy-file``, ``stale-writer``.
+``mutate-trust-file``, ``mutate-policy-file``, ``stale-writer``, and four for REQ-707's
+``runner-prefix`` launches: ``per-statement`` (judge a command line statement by statement
+and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measured
+``claude``), ``split-ask`` (a model that tidies the asked line down to its head),
+``first-statement-only`` (a harness that records the whole line, then runs its head) and
+``witness-only`` (a model that never runs the asked fence).
+
+The fake's own matcher is written here: it imports nothing from ``exec_matcher``, so the
+double cannot pass by sharing the code under test (REQ-707 BR-8).
 
 Under the no-side-effect scenarios the fake still writes its session record; on
 cursor that record is delivered by passing its ``transcript_path`` to the probe's
@@ -268,6 +276,55 @@ def matches(entry, cmd, harness=None):
     return cmd == text or cmd.startswith(text + " ")
 
 
+def statements(cmd):
+    """Split on `;`, `&&`, `||`, `|`, `&` and newlines outside quotes."""
+    out, cur, quote, i = [], "", None, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if quote:
+            cur += c
+            if c == quote:
+                quote = None
+        elif c in "'\"":
+            quote = c
+            cur += c
+        elif cmd.startswith("&&", i) or cmd.startswith("||", i):
+            out.append(cur)
+            cur = ""
+            i += 2
+            continue
+        elif c in ";|&\n":
+            out.append(cur)
+            cur = ""
+        else:
+            cur += c
+        i += 1
+    out.append(cur)
+    return [x.strip() for x in out if x.strip()]
+
+
+def per_statement_refusal(cmd):
+    """Why a per-statement judge refuses the whole line, or None."""
+    if "$(" in cmd or "`" in cmd:
+        return "nested command"
+    for m in re.finditer(r"\d?>+", cmd):
+        if not re.match(r"\s*/dev/null\b", cmd[m.end():]):
+            return "output redirection"
+    for stmt in statements(cmd):
+        if re.match(r"[A-Za-z_][A-Za-z0-9_]*=", stmt):
+            return "env prefix"
+    return None
+
+
+def tidy(cmd):
+    """``split-ask``: the asked line cut down to its head, the way a tidying model would."""
+    cmd = re.sub(r"\$\([^)]*\)", "", cmd)
+    cmd = re.sub(r"`[^`]*`", "", cmd)
+    cmd = re.split(r"[;&|>\n]", cmd)[0].strip()
+    cmd = re.sub(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+", "", cmd)
+    return cmd.replace('""', "").strip()
+
+
 def unwrap(cmd):
     """A plain deny also blocks its `git -C <path>` form (AC-2's perform)."""
     return re.sub(r"^git -C \S+ ", "git ", cmd)
@@ -283,6 +340,11 @@ def verdict(cfg, cmd, harness):
         return "refused"
     if any(matches(d, cmd, harness) or matches(d, unwrap(cmd), harness) for d in cfg.deny):
         return "denied"
+    if "per-statement" in FLAGS and (per_statement_refusal(cmd) or len(statements(cmd)) > 1):
+        if per_statement_refusal(cmd):
+            return "refused"
+        return "run" if all(verdict(cfg, part, harness) == "run"
+                            for part in statements(cmd)) else "refused"
     return "run" if any(matches(a, cmd, harness) for a in cfg.allow) else "refused"
 
 
@@ -298,6 +360,16 @@ def asked_commands(prompt, cwd, harness, cfg):
         m = re.search(r"```sh\n(.*?)```", prompt, re.S)
         fence = m.group(1) if m else ""
         return [(fence.splitlines()[0] if fence else "", fence)]
+    if prompt.startswith("Run `touch ") and "```sh\n" in prompt:
+        # REQ-707: a witness, then one fenced line judged whole.
+        head, _, rest = prompt.partition("```sh\n")
+        fence = rest.split("```", 1)[0].rstrip("\n")
+        asked = [(c, c) for c in re.findall(r"[Rr]un `([^`]+)`", head)]
+        if "witness-only" in FLAGS:
+            return asked
+        if "split-ask" in FLAGS:
+            fence = tidy(fence)
+        return asked + [(fence, fence)]
     if prompt.startswith("Commit the staged file"):
         branch = "probe-wt" if "`probe-wt`" in prompt else "main"
         return [("git commit -m probe", "git commit -q -m probe"),
@@ -347,6 +419,14 @@ def gemini_skill(prompt, cfg, harness):
 
 
 def run_command(match_text, command, cwd, cfg, harness, records, aborted):
+    if "first-statement-only" in FLAGS and len(statements(command)) > 1:
+        head = statements(command)[0]
+        if verdict(cfg, head, harness) == "run" and not per_statement_refusal(head):
+            records.append({"command": command, "decision": "partial",
+                            "output": sh(head, cwd)})
+        else:
+            records.append({"command": command, "decision": "refused"})
+        return
     parts = [p.strip() for p in match_text.split("&&")]
     decisions = [verdict(cfg, p, harness) for p in parts]
     if "denied" in decisions:
@@ -486,6 +566,9 @@ def compose(prompt, contexts):
 
 
 def emit(harness, opts, message, tool_text, records, sid):
+    # What the harness reports it refused, in its own output (REQ-707 ADR-5).
+    denials = [r["command"] for r in records
+               if r["decision"] in ("refused", "denied", "partial")]
     leak = ""
     if "leak" in FLAGS:
         leak = "debug token sk-%s from %s/secret, mail leak@example.com" % ("a" * 30, HOME)
@@ -494,11 +577,16 @@ def emit(harness, opts, message, tool_text, records, sid):
                "session_id": sid,
                "tool_records": [{"type": "tool_result", "content": tool_text}] if tool_text
                else []}
+        if denials:
+            out["permission_denials"] = [{"tool_name": "Bash", "tool_input": {"command": c}}
+                                         for c in denials]
         if leak:
             out["debug"] = leak
         print(json.dumps(out))
     elif harness == "antigravity":
         out = {"conversation_id": sid, "status": "SUCCESS", "response": message, "num_turns": 1}
+        if denials:
+            out["denied_actions"] = [{"command": c} for c in denials]
         if tool_text:
             out["tool_output"] = tool_text
         if leak:
@@ -506,6 +594,8 @@ def emit(harness, opts, message, tool_text, records, sid):
         print(json.dumps(out))
     elif harness == "gemini":
         out = {"response": message, "stats": {"tools": len(records)}}
+        if denials:
+            out["denied_actions"] = [{"command": c} for c in denials]
         if tool_text:
             out["tool_output"] = tool_text
         if leak:
@@ -513,6 +603,8 @@ def emit(harness, opts, message, tool_text, records, sid):
         print(json.dumps(out))
     elif harness == "copilot":
         print(message)
+        for c in denials:   # an invented record shape: copilot's is unverified (REQ-707)
+            sys.stderr.write(json.dumps({"denied": {"command": c}}) + "\n")
         if tool_text or leak:
             sys.stderr.write("%s %s\n" % (tool_text, leak))
     else:  # codex: JSONL events on stdout, the last message to -o

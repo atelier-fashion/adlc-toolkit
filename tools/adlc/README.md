@@ -311,13 +311,66 @@ confirmation prompt: invoking the command is the consent.
 | `trust-then-headless` | 6.8 (trust + load) | all | two halves: `hooks-loaded` (a session-start hook's sentinel) and `allowlist-loaded` (a project-only allow worked); copilot has no project-local allow form, so its status is `hooks-loaded` alone |
 | `session-start-context` | 6.8 (injection) | all | the reversed nonce a session-start hook added to the context |
 | `stdin-prompt` | 6.12 | all | a 420-line prompt on stdin, nonce on line 250; with and without the prompt flag |
-| `fence-vs-allowlist` | 6.11 | all | partials/README.md's sourcing fence, byte for byte, under `routine-only`, `broad-sh` and `broad-first-token` allowlists |
+| `fence-vs-allowlist` | 6.11 | all | partials/README.md's sourcing fence, byte for byte, under `routine-only`, `broad-sh` and `broad-first-token` allowlists; plus the `runner-prefix` variant's thirteen launches (below), decided apart |
 | `transcript-locate` | 6.9 | all | a session file under the harness's transcript root naming the run; its first 20 records, redacted, become `fixtures/<harness>.jsonl` |
 | `arg-substitution` | 6.10 | claude | a skill with no `$ARGUMENTS` whose fence writes `"$1"` to a sentinel: `hello` passes, empty or a literal `$1` fails |
 
 Not probed, and recorded as such in the result's `coverage`: 6.2 (a documentation
 question), 6.5 (answered by `.adlc/research/antigravity-compatibility.md`, REQ-658) and 6.7 (answered by REQ-654's skills-only
 view). 6.1a is recorded as `headless only`; the interactive half is REQ-655's.
+
+#### `runner-prefix` (REQ-707)
+
+`/sprint --exec` runs every toolkit fence through one program, `<ToolkitRoot>/tools/adlc/fence-run`,
+admitted by one absolute-path prefix allow (REQ-682). `runner-prefix` asks whether that allow is
+a boundary on this harness: it admits the runner with its arguments, and nothing past it.
+REQ-662 BR-11 makes it a hard probe for every non-Claude exec adapter.
+
+The probe writes a stub runner at `<run_dir>/tk/fence-run`, outside the probe repo the way
+ToolkitRoot sits outside a working copy, and a sibling `fence-run-x` that no allow names. The
+stub records its `$0`, its arguments and `X`; `fence-run fail` exits 1. Each launch runs
+`touch <witness>` on its own, then one fenced line, then replies with the reversed nonce:
+
+| launch | allow | the fenced line |
+|---|---|---|
+| `runner-positive` | routine + the runner | `<stub> run probe` |
+| `runner-baseline` | routine only | `<stub> run probe` |
+| `runner-sibling` | routine + the runner | `<stub>-x run probe` |
+| `runner-env-prefix` | routine + the runner | `X=1 <stub> run probe` |
+| `runner-subst`, `runner-backtick` | routine + the runner | `<stub> run "$(<stub>-x)"`, ``<stub> run `<stub>-x` `` |
+| `runner-redirect` | routine + the runner | `<stub> run probe > <target>` |
+| `runner-semicolon`, `runner-and`, `runner-pipe`, `runner-background` | routine + the runner | `<stub> run probe` then `;`, `&&`, `\|` or `&`, then `<stub>-x` |
+| `runner-or` | routine + the runner | `<stub> fail \|\| <stub>-x` |
+| `runner-newline` | routine + the runner | `<stub> run probe`, a newline, `<stub>-x` |
+
+Every tail runs `<stub>-x`, never a routine command: a `touch` tail would be admitted on its
+own by a harness that checks each statement, and fail the very harness that should pass.
+
+Each launch reads **admitted** (its effect appeared), **refused**, or `unknown`. Refused needs
+more than an absent effect: the witness ran, the ask was reached, and the asked line was
+submitted. That means the line is in a `command` field of the harness's own JSON tool-call or
+denial records (model text, such as the reply or a Codex `agent_message`, is never read), or
+the harness's refusal on stderr names the stub while nothing of the line ran. Otherwise the launch is `unknown`:
+`ask-split` when the runner ran but the rest did not, `not-attempted` when nothing ran. A
+model that tidies or skips the command therefore never turns a control into a refusal.
+
+`runner-prefix` is then decided in this order:
+
+1. **Positive.** `runner-positive` refused is `fail`; `unknown` is `unknown`.
+2. **Baseline.** `unknown` is `unknown`. Admitted means the harness runs the stub with no allow,
+   so the allow is no boundary there: the variant passes on the positive half alone, with
+   `evidence.boundary: none`, and the controls are recorded only.
+3. **Refusal half.** Any control admitted is `fail`, named in `evidence.admitted`; otherwise any
+   control `unknown` is `unknown`; otherwise `pass`, with `evidence.boundary: measured`.
+
+The variant and its thirteen launches sit in `sub_results` beside the three fence variants and
+outside their disjunction, so the probe's own `status` means what it always meant. A
+`fence-vs-allowlist` run is sixteen launches; the pre-launch count shows them.
+
+The record shapes are known for `claude` (`permission_denials`) and Codex
+(`command_execution` items) only. The fake harness's denial records for the other profiles
+are invented. On a real harness whose output names no command, every refusal reads `unknown`
+until a live run shows where it records one.
 
 `broad-first-token` allows the fence's first word as it is written today. That is
 the ToolkitRoot root line's `ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}";`, not the

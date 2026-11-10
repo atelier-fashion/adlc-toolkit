@@ -40,6 +40,19 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **A `runner-prefix` variant for `adlc harness probe`'s `fence-vs-allowlist` (REQ-707).**
+  REQ-682 runs every exec fence through `<ToolkitRoot>/tools/adlc/fence-run`, admitted by one
+  absolute-path allow, and REQ-662 BR-11 gates each non-Claude exec adapter on that allow
+  being a boundary. The variant measures it: a stub runner outside the probe repo, one
+  positive launch, a no-allow baseline, and eleven refusal controls (a sibling path, an env
+  prefix, `$(…)`, a backtick, a redirect, `;`, `&&`, `||`, `|`, `&`, a newline), each tail an
+  executable no allow names. A control reads refused only when the harness's own record or
+  its refusal on stderr shows the line was submitted, so a model that tidies or skips the
+  command reads `unknown`, never a pass. The variant sits outside the probe's existing
+  disjunction, so recorded verdicts keep their meaning. `fence-vs-allowlist` grows from three
+  launches to sixteen. The fake harness gains `per-statement`, `split-ask`,
+  `first-statement-only` and `witness-only`, so every outcome is tested offline. No result
+  file changes: the live runs are the operator's.
 - **`/bugfix` writes a failing-first regression test, when the project asks for one
   (REQ-691).** A new `.adlc/config.yml` setting, `bugfix.regression_test`, takes `required`
   or `off`. An absent key, an absent `bugfix` block and no config file all mean `off`, so

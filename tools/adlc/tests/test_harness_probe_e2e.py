@@ -278,8 +278,10 @@ def test_trust_and_fence_sub_results(tmp_path):
     assert trust["sub_results"]["allowlist-loaded"]["status"] == "pass"
     fence = result["probes"]["fence-vs-allowlist"]
     assert fence["status"] == "pass"
-    assert {k: v["status"] for k, v in fence["sub_results"].items()} == {
+    assert {k: fence["sub_results"][k]["status"] for k in hp.FENCE_VARIANTS} == {
         "routine-only": "fail", "broad-sh": "fail", "broad-first-token": "pass"}
+    assert set(fence["sub_results"]) == set(hp.FENCE_VARIANTS + hp.RUNNER_LAUNCHES) | {
+        hp.RUNNER_PREFIX}                                          # REQ-707
     sb = Sandbox(tmp_path / "no-hooks", flags=("no-hooks",))
     result, _ = _run_ok(sb, "claude", "--only", "trust-then-headless")
     trust = result["probes"]["trust-then-headless"]
@@ -473,7 +475,7 @@ def test_bare_refs_back_at_setup_before_each_launch(tmp_path, monkeypatch):
         monkeypatch.setattr(hp.Engine, "_stale", spy)
 
     code, _ = _engine_run(monkeypatch, sb, ["claude"], patch)
-    assert code == 0 and len(seen) == 18
+    assert code == 0 and len(seen) == 31                        # +13 runner launches (REQ-707)
     for refs in seen:
         assert refs["main"] == refs["probe-wt"] == refs["init"]
 
@@ -566,3 +568,153 @@ def test_antigravity_prep_allow_is_not_a_tested_command(tmp_path):
     result, _ = _run_ok(sb, "antigravity", "--only", "ask-tier-deny")
     assert result["probes"]["ask-tier-deny"]["sub_results"]["baseline"]["status"] == "fail"
 
+
+
+# --- REQ-707: the runner-prefix variant of fence-vs-allowlist ------------------
+
+def _fence(sb, h="claude"):
+    result, out = _run_ok(sb, h, "--only", "fence-vs-allowlist")
+    return result["probes"]["fence-vs-allowlist"], out
+
+
+@pytest.mark.parametrize("h", HARNESSES)
+def test_runner_prefix_per_statement_passes(tmp_path, h):
+    """AC-2: a harness that judges each statement passes, on every profile."""
+    fence, _ = _fence(Sandbox(tmp_path, flags=("per-statement",)), h)
+    subs = fence["sub_results"]
+    rp = subs[hp.RUNNER_PREFIX]
+    assert (rp["status"], rp["evidence"]["boundary"], rp["evidence"]["admitted"]) == (
+        "pass", "measured", [])
+    assert subs["runner-positive"]["status"] == "pass"
+    for name in (hp.RUNNER_BASELINE,) + hp.RUNNER_CONTROLS:
+        assert (subs[name]["status"], subs[name]["reason"]) == ("pass", "refused"), name
+    assert fence["status"] == hp.disjunction(
+        [hp.Verdict(subs[v]["status"]) for v in hp.FENCE_VARIANTS]).status
+
+
+def test_runner_prefix_whole_text_fails(tmp_path):
+    """AC-3: the fake's plain matcher carries every compound shape but `&&`."""
+    fence, _ = _fence(Sandbox(tmp_path))
+    rp = fence["sub_results"][hp.RUNNER_PREFIX]
+    assert rp["status"] == "fail"
+    assert rp["evidence"]["admitted"] == [
+        "runner-subst", "runner-backtick", "runner-redirect", "runner-semicolon",
+        "runner-or", "runner-pipe", "runner-background", "runner-newline"]
+    assert rp["evidence"]["refused"] == ["runner-sibling", "runner-env-prefix", "runner-and"]
+    semi = fence["sub_results"]["runner-semicolon"]
+    assert semi["reason"] == "admitted"
+    assert "tail sentinel: argv" in semi["evidence"]["observation"]
+    assert "runner sentinel: argv" in semi["evidence"]["observation"]
+
+
+def test_runner_prefix_ask_split_never_passes(tmp_path):
+    """AC-4: a model that tidies the line, or never runs it, measures nothing."""
+    fence, _ = _fence(Sandbox(tmp_path / "split", flags=("per-statement", "split-ask")))
+    subs = fence["sub_results"]
+    assert subs[hp.RUNNER_PREFIX]["status"] == "unknown"
+    for name in hp.RUNNER_CONTROLS:
+        if name == "runner-sibling":   # nothing to tidy: submitted whole, refused
+            assert subs[name]["reason"] == "refused"
+        else:
+            assert subs[name]["status"] == "unknown", name
+    assert subs["runner-semicolon"]["reason"] == hp.ASK_SPLIT
+    fence, _ = _fence(Sandbox(tmp_path / "never", flags=("per-statement", "witness-only")))
+    rp = fence["sub_results"][hp.RUNNER_PREFIX]
+    assert (rp["status"], rp["reason"]) == ("unknown", hp.NOT_ATTEMPTED)
+
+
+def test_runner_prefix_first_statement_only_passes(tmp_path):
+    """AC-4 benign path: the whole line on record, its head run, its tail refused."""
+    fence, _ = _fence(Sandbox(tmp_path, flags=("per-statement", "first-statement-only")))
+    subs = fence["sub_results"]
+    assert subs[hp.RUNNER_PREFIX]["status"] == "pass"
+    assert subs["runner-semicolon"]["reason"] == "refused"
+    assert "asked line on record: yes" in subs["runner-semicolon"]["evidence"]["observation"]
+
+
+def test_runner_prefix_baseline_and_unknowns(tmp_path):
+    """AC-5: no boundary reads pass on the positive half; no witness reads unknown."""
+    fence, _ = _fence(Sandbox(tmp_path / "all", scenario="runs-all"))
+    rp = fence["sub_results"][hp.RUNNER_PREFIX]
+    assert (rp["status"], rp["evidence"]["boundary"]) == ("pass", "none")
+    assert sorted(rp["evidence"]["admitted"]) == sorted(hp.RUNNER_CONTROLS)
+    assert fence["sub_results"][hp.RUNNER_BASELINE]["status"] == "fail"
+    for scenario, reason in (("refuse", hp.ASK_NOT_REACHED), ("no-witness", hp.WITNESS_ABSENT),
+                             ("refuse-silent", hp.ASK_NOT_REACHED)):
+        fence, _ = _fence(Sandbox(tmp_path / scenario, scenario=scenario))
+        rp = fence["sub_results"][hp.RUNNER_PREFIX]
+        assert (rp["status"], rp["reason"]) == ("unknown", reason), scenario
+
+
+def test_unquotable_temp_root_refuses_before_launch(tmp_path):
+    """AC-6: a temp root an unquoted prefix rule cannot match refuses before any launch."""
+    sb = Sandbox(tmp_path / "a space")
+    out = sb.run("claude", "--only", "fence-vs-allowlist")
+    assert out.returncode != 0
+    assert "plain path" in out.stderr
+    assert not os.path.exists(sb.log) or "argv" not in open(sb.log).read()
+
+
+def test_runner_variants_written_together(tmp_path):
+    """AC-7: all four variants in one entry; the probe status is the old disjunction."""
+    fence, _ = _fence(Sandbox(tmp_path, flags=("per-statement",)), "copilot")
+    assert set(fence["sub_results"]) == set(hp.FENCE_VARIANTS + hp.RUNNER_LAUNCHES) | {
+        hp.RUNNER_PREFIX}
+    assert {v: fence["sub_results"][v]["status"] for v in hp.FENCE_VARIANTS} == {
+        "routine-only": "fail", "broad-sh": "fail", "broad-first-token": "fail"}
+    assert fence["status"] == "fail"
+    assert fence["sub_results"][hp.RUNNER_PREFIX]["status"] == "pass"
+
+
+def test_runner_leaves_nothing_and_toolkit_untouched(tmp_path):
+    """AC-8: fresh state, nothing left behind, the user's fence-run never touched."""
+    sb = Sandbox(tmp_path, flags=("per-statement",))
+    real = os.path.join(sb.adlc_home, "skills", "tools", "adlc", "fence-run")
+    os.makedirs(os.path.dirname(real))
+    with open(real, "w") as fh:
+        fh.write("#!/bin/sh\nexit 0\n")
+    os.utime(real, (1000000000, 1000000000))
+    before = os.stat(real)
+    _fence(sb)
+    after = os.stat(real)
+    assert (after.st_mtime, after.st_size) == (before.st_mtime, before.st_size)
+    assert open(real).read() == "#!/bin/sh\nexit 0\n"
+    assert not [d for d in os.listdir(sb.tmp) if d.startswith(hp.RUN_PREFIX)]
+
+
+def test_fake_matcher_imports_no_exec_matcher():
+    """BR-8: the double does not share the code under test."""
+    impl = os.path.join(os.path.dirname(__file__), "fake_harness", "fake_harness_impl.py")
+    imports = [ln for ln in open(impl) if re.match(r"\s*(import|from)\s", ln)]
+    assert imports and not any("exec_matcher" in ln for ln in imports)
+
+
+def test_runner_launches_in_dry_run(tmp_path):
+    """AC-1: the dry run lists all sixteen fence launches, the runner's among them."""
+    out = Sandbox(tmp_path).run("claude", "--dry-run", "--only", "fence-vs-allowlist")
+    assert out.returncode == 0, out.stderr
+    assert "launches: 16" in out.stdout
+    for name in hp.FENCE_VARIANTS + hp.RUNNER_LAUNCHES:
+        assert "fence-vs-allowlist/%s" % name in out.stdout, name
+
+
+def test_runner_state_fresh_before_each_launch(tmp_path, monkeypatch):
+    """AC-8: after each reset no stub and no runner sentinel is left from before."""
+    sb = Sandbox(tmp_path, flags=("per-statement",))
+    seen = []
+
+    def patch():
+        def spy(self, lc, spec):
+            tk = os.path.join(self.run_dir, hp.RUNNER_STUB_DIR)
+            sent = self._allow_dir(self.repo)
+            left = [n for n in (os.listdir(sent) if os.path.isdir(sent) else [])
+                    if n.split("-")[0] in ("runner", "tail", "redirect", "witness")]
+            seen.append((lc.variant, os.path.exists(tk), left))
+        monkeypatch.setattr(hp.Engine, "_after_reset", spy)
+
+    code, result = _engine_run(monkeypatch, sb, ["claude", "--only", "fence-vs-allowlist"],
+                               patch)
+    assert code == 0 and len(seen) == 16
+    assert all(not tk and not left for _variant, tk, left in seen), seen
+    assert result["probes"]["fence-vs-allowlist"]["sub_results"][hp.RUNNER_PREFIX][
+        "status"] == "pass"
