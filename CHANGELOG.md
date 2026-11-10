@@ -599,6 +599,12 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`adlc harness probe claude` now measures its allows (BUG-267).** It wrote each launch's
+  allow rules into the throwaway repo's `.claude/settings.json`, which Claude Code ignores in
+  an untrusted workspace. No allow was ever in force, so every allow-dependent claude probe
+  read `unknown` or `fail`, on 2.1.258 and 2.1.316 alike. The rules now go in a per-launch
+  `--settings` file outside the repo. `trust-then-headless`'s `allowlist-loaded` keeps its
+  project allow, and on claude it records `fail`, the real answer.
 - **`/sprint --exec` no longer gives the model unscoped file tools (BUG-265).** The claude
   adapter allowed `Read`, `Write` and `Edit` by bare name, which admits every path, so an exec
   model could rewrite the toolkit's `partials/forge.sh`, which `/sprint approve` then sources.

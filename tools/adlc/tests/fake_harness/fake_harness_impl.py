@@ -32,7 +32,9 @@ Flags modify a scenario: ``claim-only``, ``main-only``, ``needs-writable-roots``
 and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measured
 ``claude``), ``split-ask`` (a model that tidies the asked line down to its head),
 ``first-statement-only`` (a harness that records the whole line, then runs its head) and
-``witness-only`` (a model that never runs the asked fence).
+``witness-only`` (a model that never runs the asked fence); and ``untrusted-project-allow``
+(claude 2.1.316: a project ``.claude/settings.json``'s allows are dropped in an untrusted
+folder, while ``--settings`` allows, project denies and hooks still load; BUG-267).
 
 The fake's own matcher is written here: it imports nothing from ``exec_matcher``, so the
 double cannot pass by sharing the code under test (REQ-707 BR-8).
@@ -63,7 +65,7 @@ HOME = os.path.expanduser("~")
 PERFORMING = SCENARIO in ("perform", "runs-all", "no-witness", "abort-on-deny")
 
 TAKES_VALUE = {
-    "claude": {"--output-format", "--setting-sources"},
+    "claude": {"--output-format", "--setting-sources", "--settings"},
     "copilot": {"-p", "--allow-tool", "--deny-tool"},
     "codex": {"--sandbox", "-C", "-o"},
     "gemini": {"-p", "--output-format"},
@@ -207,8 +209,17 @@ def load(harness, opts, cwd, is_trusted):
     if harness == "claude":
         s = read_json(os.path.join(cwd, ".claude", "settings.json")) or {}
         perms = s.get("permissions", {})
-        c.allow = [x for x in (paren(a, "Bash") for a in perms.get("allow", [])) if x]
-        c.deny = [x for x in (paren(d, "Bash") for d in perms.get("deny", [])) if x]
+        allow = list(perms.get("allow", []))
+        if allow and "untrusted-project-allow" in FLAGS:
+            # claude 2.1.316 drops a project's allows until the folder is trusted (BUG-267).
+            sys.stderr.write("Ignoring %d permissions.allow entries from .claude/settings.json: "
+                             "this workspace has not been trusted.\n" % len(allow))
+            allow = []
+        flagged = (read_json(opts.get("settings", "")) or {}).get("permissions", {})
+        allow += flagged.get("allow", [])
+        deny = list(perms.get("deny", [])) + list(flagged.get("deny", []))
+        c.allow = [x for x in (paren(a, "Bash") for a in allow) if x]
+        c.deny = [x for x in (paren(d, "Bash") for d in deny) if x]
         for group in s.get("hooks", {}).get("SessionStart", []):
             c.hooks += [h["command"] for h in group.get("hooks", [])]
         c.skills = sorted(glob.glob(os.path.join(cwd, ".claude", "skills", "*", "SKILL.md")))
