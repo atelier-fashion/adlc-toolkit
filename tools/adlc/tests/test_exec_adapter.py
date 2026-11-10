@@ -63,7 +63,12 @@ def test_deny_superset(adapter):
                    "adlc sprint-exec answer", "adlc sprint-exec abort"):
         assert "Bash(%s:*)" % needed in deny, needed
     assert "Bash(git push origin +*)" in deny
-    assert "Bash(git -C * push --force:*)" in deny
+    # BUG-269: a glob deny ends in its own `*`. claude 2.1.316 matched nothing with
+    # `Bash(git -C * push --force:*)`, so the engine's `git -C` force-push denies were inert.
+    assert "Bash(git -C * push --force*)" in deny and "Bash(git -C * push -f*)" in deny
+    for rule in deny:
+        body = rule[len("Bash("):-1]
+        assert not (body.endswith(":*") and "*" in body[:-2]), rule
     joined = " ".join(allow)
     assert "git -C" not in joined
     assert "Bash(git push:*)" not in allow and "Bash(git branch:*)" not in allow
@@ -78,6 +83,16 @@ def test_deny_superset(adapter):
             assert not rule.endswith(":*)"), rule
     # BUG-265: the file tools are never bare; with no roots they are not admitted at all.
     assert "Read" not in allow and "Edit" not in allow and "Write" not in allow
+
+
+def test_glob_spelling_is_deny_only(adapter):
+    """BUG-269: only a deny gets the glob spelling. An allow that holds an inner `*` keeps the
+    `:*` it had, which Claude matches with nothing, so this fix widens no allow."""
+    argv = ["git", "-C", "*", "push", "--force"]
+    assert adapter.spell(argv, deny=True) == "Bash(git -C * push --force*)"
+    assert adapter.spell(argv) == "Bash(git -C * push --force:*)"
+    assert adapter.spell(["git", "push", "origin", "+*"], deny=True) == "Bash(git push origin +*)"
+    assert adapter.spell(["git", "push", "--force"], deny=True) == "Bash(git push --force:*)"
 
 
 def test_extra_that_wraps_a_deny_is_refused(adapter):
