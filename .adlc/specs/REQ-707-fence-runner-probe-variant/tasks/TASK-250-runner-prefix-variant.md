@@ -1,7 +1,7 @@
 ---
 id: TASK-250
 title: "The `runner-prefix` variant in the probe module: thirteen launches, stubs, observation and the decision rule"
-status: draft
+status: complete
 parent: REQ-707
 repo: adlc-toolkit
 created: 2026-11-09

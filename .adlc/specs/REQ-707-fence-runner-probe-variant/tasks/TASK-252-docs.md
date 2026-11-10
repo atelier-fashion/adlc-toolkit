@@ -1,7 +1,7 @@
 ---
 id: TASK-252
 title: "Document the `runner-prefix` variant: tools/adlc/README.md, README.md, CHANGELOG.md"
-status: draft
+status: complete
 parent: REQ-707
 repo: adlc-toolkit
 created: 2026-11-09

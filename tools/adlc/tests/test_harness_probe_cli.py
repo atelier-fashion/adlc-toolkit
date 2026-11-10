@@ -27,7 +27,7 @@ def test_dry_run_lists_launches_and_user_files(tmp_path):
     out = sb.run("codex", "--dry-run")
     assert out.returncode == 0, out.stderr
     text = out.stdout
-    assert "launches: 18" in text
+    assert "launches: 31" in text
     assert sum(1 for line in text.splitlines() if "ask-tier-deny/" in line) == 7
     assert "<run_dir>/repo" in text and "<run_dir>/wt" in text and "bare origin" in text
     edits = text.split("user files it would edit")[1].split("\n")
@@ -125,7 +125,7 @@ def test_dry_run_antigravity_edits_no_user_file(tmp_path):
     out = sb.run("antigravity", "--dry-run")
     assert out.returncode == 0, out.stderr
     assert "binary agy: absent" in out.stdout
-    assert "launches: 18" in out.stdout
+    assert "launches: 31" in out.stdout
     assert "skill-activation" in out.stdout and "arg-substitution" not in out.stdout
     assert "user files it would edit" in out.stdout and "\n  none" in out.stdout
     assert "recovery marker" not in out.stdout

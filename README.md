@@ -445,7 +445,12 @@ residuals stand, and `harness/claude.yml` declares them too:
   permission check: a CI audit of each fence's reach (`tools/adlc/tests/test_exec_reach.py`),
   not the allowlist, keeps a deny-tier command out of it. Toolkit skills and agents are not
   loaded under the engine's isolation flags either, so they reach an exec model only through
-  `fence-run show`, and an agent's checklist runs inline.
+  `fence-run show`, and an agent's checklist runs inline. Whether that one allow is a boundary
+  on a given harness is what `adlc harness probe`'s `fence-vs-allowlist` measures in its
+  `runner-prefix` variant (REQ-707). A stub runner gets one absolute-path allow; it must run,
+  and eleven controls (a sibling path, an env prefix, `$(…)`, a backtick, a redirect, `;`,
+  `&&`, `||`, `|`, `&` and a newline) must not carry anything past it. REQ-662 gates every
+  other harness's exec adapter on it.
 - **Wrappers and runners.** A command wrapped in `sh -c`, `env`, `xargs`, `python -c`, `npx`,
   `npm run` or `find -exec` is not seen by a prefix rule.
 - **`gh api`** reaches merge and ref-update endpoints without a `gh pr merge` prefix.
