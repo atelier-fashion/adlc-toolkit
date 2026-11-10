@@ -300,6 +300,32 @@ def test_trust_and_fence_sub_results(tmp_path):
     assert result["probes"]["fence-vs-allowlist"]["status"] == "fail"
 
 
+def test_claude_allows_survive_an_untrusted_project(tmp_path):
+    """BUG-267: claude 2.1.316 drops an untrusted project's allows, so the probe passes
+    claude's rules with ``--settings``; only ``allowlist-loaded`` keeps a project allow."""
+    sb = Sandbox(tmp_path / "untrusted", flags=("untrusted-project-allow",))
+    result, _ = _run_ok(sb, "claude", "--only", "trust-then-headless", "--only",
+                        "fence-vs-allowlist", "--only", "git-write-main")
+    fence = result["probes"]["fence-vs-allowlist"]
+    assert {k: fence["sub_results"][k]["status"] for k in hp.FENCE_VARIANTS} == {
+        "routine-only": "fail", "broad-sh": "fail", "broad-first-token": "pass"}
+    assert fence["sub_results"]["runner-positive"]["status"] == "pass"
+    assert result["probes"]["git-write-main"]["status"] == "pass"
+    trust = result["probes"]["trust-then-headless"]
+    assert trust["sub_results"]["hooks-loaded"]["status"] == "pass"
+    assert trust["sub_results"]["allowlist-loaded"]["status"] == "fail"
+    launches = [r for r in sb.log_records() if "argv" in r and "--version" not in r["argv"]]
+    flagged = [r for r in launches if "--settings" in r["argv"]]
+    assert len(launches) - len(flagged) == 1             # trust-then-headless alone
+    for r in flagged:
+        path = r["argv"][r["argv"].index("--settings") + 1]
+        assert not os.path.realpath(path).startswith(os.path.realpath(r["cwd"]) + os.sep)
+    # With claude's per-statement matcher too, the runner allow is a boundary again.
+    fence, _ = _fence(Sandbox(tmp_path / "per-statement",
+                              flags=("untrusted-project-allow", "per-statement")))
+    assert fence["sub_results"][hp.RUNNER_PREFIX]["status"] == "pass"
+
+
 # --- AC-8: stdin, session context, argument substitution ---------------------------
 
 def test_stdin_context_and_args(tmp_path):

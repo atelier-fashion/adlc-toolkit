@@ -2057,9 +2057,20 @@ class Engine:
                 perms["allow"] = [render_rule(h, r) for r in spec.allow]
             if spec.deny:
                 perms["deny"] = [render_rule(h, r) for r in spec.deny]
-            settings: Dict = {"permissions": perms}
+            settings: Dict = {}
             if hook_cmds:
                 settings["hooks"] = hook_config(h, hook_cmds)
+            if lc.probe == "trust-then-headless":
+                # allowlist-loaded asks whether a project-only allow loads headlessly,
+                # so its rules stay in the project file (BUG-267).
+                settings["permissions"] = perms
+            else:
+                # claude >= 2.1.316 ignores an untrusted project's allows; a --settings
+                # file outside the repo is not gated, as /sprint --exec relies on.
+                # Hooks stay project-local: they load untrusted (BUG-267).
+                flag_path = os.path.join(self.captures, "%s.settings.json" % lc.lid)
+                _write_text(flag_path, json.dumps({"permissions": perms}, indent=2) + "\n")
+                extra += ["--settings", flag_path]
             _write_text(os.path.join(cwd, ".claude", "settings.json"),
                         json.dumps(settings, indent=2) + "\n")
         elif h == "copilot":
@@ -2125,7 +2136,7 @@ class Engine:
         h, b, p = self.h, self.binary, spec.prompt
         mode = spec.stdin_mode
         if h == "claude":
-            tail_ = ["--output-format", "json", "--setting-sources", "project,local"]
+            tail_ = ["--output-format", "json", "--setting-sources", "project,local"] + extra
             argv = [b, "-p"] + tail_ if mode == "with-prompt-flag" else \
                 [b] + tail_ if mode == "without-prompt-flag" else [b, "-p", p] + tail_
         elif h == "copilot":
