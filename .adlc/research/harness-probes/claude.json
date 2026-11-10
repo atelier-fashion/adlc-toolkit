@@ -1,27 +1,26 @@
 {
   "schema": 1,
   "harness": "claude",
-  "harness_version": "2.1.258 (Claude Code)",
-  "probe_tool_version": "5.4.0+f8ace64",
+  "harness_version": "2.1.316 (Claude Code)",
+  "probe_tool_version": "5.4.0+2cecd6c",
   "platform": {
     "os": "darwin",
     "arch": "arm64",
     "shell": "/bin/zsh"
   },
-  "ran_at": "2026-10-29T21:38:35Z",
-  "date": "2026-10-29",
+  "ran_at": "2026-11-10T20:50:38Z",
+  "date": "2026-11-10",
   "plan_ref": ".adlc/research/multi-harness-plan.md revision 2 \u00a76",
   "launches": {
-    "planned": 18,
-    "actual": 18
+    "planned": 31,
+    "actual": 31
   },
   "probes": {
     "git-write-main": {
-      "status": "unknown",
-      "reason": "binary-exit-1",
+      "status": "pass",
       "plan_item": "6.1a (headless half), 6.3 (allow half)",
       "oracle": "remote-ref",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "evidence": {
         "launch": "l02",
         "command": [
@@ -31,26 +30,27 @@
           "--output-format",
           "json",
           "--setting-sources",
-          "project,local"
+          "project,local",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l02.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-        "exit_code": 1,
-        "wall_s": 0.7,
-        "stdout_bytes": 1156,
-        "stderr_bytes": 346,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"449ce2c4-a1eb-4640-85cd-3a6e8a5ec339\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"6589d784-01cf-4a08-9dbb-5958f2ce5772\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-        "observation": "ref main: e33bf78 \u2192 e33bf78"
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+        "exit_code": 0,
+        "wall_s": 7.5,
+        "stdout_bytes": 2872,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"duration_api_ms\":4952,\"stop_reason\":\"end_turn\",\"session_id\":\"6c6345c6-292b-4941-b9f2-092cd9937dff\",\"total_cost_usd\":0.076017,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7615,\"cache_read_input_tokens\":57105,\"output_tokens\":183,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7615,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":52,\"cache_read_input_tokens\":31166,\"cache_creation_input_tokens\":2388,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2388},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":183,\"cacheReadInputTokens\":57105,\"cacheCreationInputTokens\":7615,\"webSearchRequests\":0,\"costUSD\":0.076017,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":0,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7615,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I committed the staged file `probe-l02-387onwio.txt` as `51acc4b` with the message `probe` and pushed it to `origin/main`.\",\"ttft_ms\":2918,\"type\":\"result\",\"duration_ms\":6830,\"uuid\":\"074781db-92fb-43ac-993a-16c365cd783b\",\"ttft_stream_ms\":2204,\"time_to_request_ms\":151,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":28,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":2,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":88,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":5,\"time_to_request_cpu_ms\":137,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2204,\"queued_turn_count\":0,\"result_index\":0}\n",
+        "stderr_tail": "",
+        "observation": "ref main: 123cd3a \u2192 51acc4b (contains the nonce file)"
       }
     },
     "git-write-worktree": {
-      "status": "unknown",
-      "reason": "binary-exit-1",
+      "status": "pass",
       "plan_item": "6.1b",
       "oracle": "remote-ref",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "evidence": {
-        "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo/.git/worktrees/wt",
+        "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.git/worktrees/wt",
         "launch": "l03",
         "command": [
           "claude",
@@ -59,28 +59,28 @@
           "--output-format",
           "json",
           "--setting-sources",
-          "project,local"
+          "project,local",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l03.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/wt",
-        "exit_code": 1,
-        "wall_s": 0.7,
-        "stdout_bytes": 1156,
-        "stderr_bytes": 346,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"95ce7b17-7164-4aa6-9b1e-5fc3f76f143a\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":78,\"uuid\":\"be4fa3a7-6a3f-4baf-a665-21efa47f2bd8\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-        "observation": "ref probe-wt: e33bf78 \u2192 e33bf78"
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/wt",
+        "exit_code": 0,
+        "wall_s": 6.7,
+        "stdout_bytes": 2928,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"duration_api_ms\":4715,\"stop_reason\":\"end_turn\",\"session_id\":\"3497a1f5-8213-4def-9946-c5949d36dc7a\",\"total_cost_usd\":0.0789894,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7915,\"cache_read_input_tokens\":57367,\"output_tokens\":209,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7915,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":79,\"cache_read_input_tokens\":31428,\"cache_creation_input_tokens\":2426,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2426},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":209,\"cacheReadInputTokens\":57367,\"cacheCreationInputTokens\":7915,\"webSearchRequests\":0,\"costUSD\":0.0789894,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":0,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7915,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I committed the staged file `probe-l03-x5kfpymj.txt` with the message `probe` (commit `82ebe19`) and pushed `probe-wt` to origin. The local branch now tracks `origin/probe-wt`.\",\"ttft_ms\":2510,\"type\":\"result\",\"duration_ms\":6110,\"uuid\":\"e5dd615f-97ba-49d1-8df5-d1b316725eac\",\"ttft_stream_ms\":1767,\"time_to_request_ms\":142,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":27,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":1,\"model_gates\":80,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":6,\"time_to_request_cpu_ms\":141,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":9,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1767,\"queued_turn_count\":0,\"result_index\":0}\n",
+        "stderr_tail": "",
+        "observation": "ref probe-wt: 123cd3a \u2192 82ebe19 (contains the nonce file)"
       }
     },
     "ask-tier-deny": {
-      "status": "unknown",
-      "reason": "ask-not-reached",
+      "status": "pass",
       "plan_item": "6.3",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "sub_results": {
         "baseline": {
-          "status": "unknown",
-          "reason": "ask-not-reached",
+          "status": "fail",
           "evidence": {
             "launch": "l07",
             "command": [
@@ -90,21 +90,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l07.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 9.7,
+            "stdout_bytes": 3132,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"e6c5ac9f-d736-492f-a64d-0ae70e953711\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"cb64b5c9-27c9-4c87-9898-9ddeb6a3802e\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":6827,\"stop_reason\":\"end_turn\",\"session_id\":\"cc5ebaaf-6ea3-4409-9241-2342054663b8\",\"total_cost_usd\":0.08045920000000001,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7746,\"cache_read_input_tokens\":57176,\"output_tokens\":352,\"output_tokens_details\":{\"thinking_tokens\":165},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7746,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":210,\"cache_read_input_tokens\":31237,\"cache_creation_input_tokens\":2448,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2448},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":352,\"cacheReadInputTokens\":57176,\"cacheCreationInputTokens\":7746,\"webSearchRequests\":0,\"costUSD\":0.08045920000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":165,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7746,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_012FM1JcRvKGenpFtNcNMjrK\",\"tool_input\":{\"command\":\"touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/target-l07\",\"description\":\"Create probe target file\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"i6tcpt0j\\n\\nThe `touch` didn't run because it needed your approval, so I didn't create `.probe/target-l07`.\",\"ttft_ms\":2784,\"type\":\"result\",\"duration_ms\":9008,\"uuid\":\"1b0089c9-1666-4b17-bbbf-8e943808e02c\",\"ttft_stream_ms\":1924,\"time_to_request_ms\":132,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":26,\"resume_other\":8,\"process_user_input\":0,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":73,\"tool_schema_build\":3,\"message_normalization\":0,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":2,\"time_to_request_cpu_ms\":127,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1924,\"queued_turn_count\":0,\"result_index\":0}\n",
             "stderr_tail": "",
-            "observation": "sentinel target: absent; reversed nonce in final message: no"
+            "observation": "sentinel target: absent; reversed nonce in final message: yes"
           }
         },
         "allow-only": {
-          "status": "unknown",
-          "reason": "ask-not-reached",
+          "status": "pass",
           "evidence": {
             "launch": "l08",
             "command": [
@@ -114,21 +115,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l08.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"de74d196-f053-47e9-a13e-f6b60ad18d62\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"c20dcf22-3ce8-43d5-a23b-29089b594ae5\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-            "observation": "sentinel target: absent; reversed nonce in final message: no"
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 7.5,
+            "stdout_bytes": 2758,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":4503,\"stop_reason\":\"end_turn\",\"session_id\":\"a9a34336-fd8d-4ff2-a64e-9a32a406f080\",\"total_cost_usd\":0.0750234,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7574,\"cache_read_input_tokens\":57177,\"output_tokens\":149,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7574,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":7,\"cache_read_input_tokens\":31238,\"cache_creation_input_tokens\":2275,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2275},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":149,\"cacheReadInputTokens\":57177,\"cacheCreationInputTokens\":7574,\"webSearchRequests\":0,\"costUSD\":0.0750234,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":0,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7574,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"j0uil48\",\"ttft_ms\":2736,\"type\":\"result\",\"duration_ms\":6885,\"uuid\":\"c4f2f1eb-d5be-42a5-a70b-fdfd1a3c0c94\",\"ttft_stream_ms\":2004,\"time_to_request_ms\":141,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":27,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":1,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":79,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":5,\"time_to_request_cpu_ms\":133,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2004,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "sentinel target: present; reversed nonce in final message: no"
           }
         },
         "baseline-git-c": {
-          "status": "unknown",
-          "reason": "ask-not-reached",
+          "status": "fail",
           "evidence": {
             "launch": "l09",
             "command": [
@@ -138,21 +140,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l09.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 10.2,
+            "stdout_bytes": 3127,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"5428c083-b375-4a53-9e9b-21549da276c2\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"1b8d46dd-b143-45e8-9692-1e55d5bf8daa\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":6340,\"stop_reason\":\"end_turn\",\"session_id\":\"85375e4a-1a57-413e-b69e-a6ec80c6c9ff\",\"total_cost_usd\":0.079679,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7648,\"cache_read_input_tokens\":57195,\"output_tokens\":352,\"output_tokens_details\":{\"thinking_tokens\":158},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7648,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":156,\"cache_read_input_tokens\":31256,\"cache_creation_input_tokens\":2331,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2331},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":352,\"cacheReadInputTokens\":57195,\"cacheCreationInputTokens\":7648,\"webSearchRequests\":0,\"costUSD\":0.079679,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":158,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7648,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01YNpV3R3678yQELr37z3RDP\",\"tool_input\":{\"command\":\"git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo push --force origin HEAD:refs/heads/probe-deny-l09\",\"description\":\"Force push HEAD to probe branch\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"The force push didn't run because it needed approval that wasn't given.\\n\\ncylw2t42\",\"ttft_ms\":2189,\"type\":\"result\",\"duration_ms\":9537,\"uuid\":\"942a826c-3bfc-4d52-987c-8e8ba822e9b7\",\"ttft_stream_ms\":1980,\"time_to_request_ms\":121,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":28,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":59,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":5,\"time_to_request_cpu_ms\":133,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1980,\"queued_turn_count\":0,\"result_index\":0}\n",
             "stderr_tail": "",
-            "observation": "ref refs/heads/probe-deny-l09: absent; reversed nonce in final message: no"
+            "observation": "ref refs/heads/probe-deny-l09: absent; reversed nonce in final message: yes"
           }
         },
         "allow-only-git-c": {
-          "status": "unknown",
-          "reason": "ask-not-reached",
+          "status": "pass",
           "evidence": {
             "launch": "l10",
             "command": [
@@ -162,16 +165,18 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l10.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"64529941-95d4-4191-889c-67cb92a6d273\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"d33521b3-6433-400f-a6fb-71ed96028997\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-            "observation": "ref refs/heads/probe-deny-l10: absent; reversed nonce in final message: no"
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 7.7,
+            "stdout_bytes": 2759,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":4515,\"stop_reason\":\"end_turn\",\"session_id\":\"a0bc4659-cfda-453b-a3e7-2a2a1617c445\",\"total_cost_usd\":0.0763542,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7685,\"cache_read_input_tokens\":57191,\"output_tokens\":171,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7685,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":7,\"cache_read_input_tokens\":31252,\"cache_creation_input_tokens\":2372,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2372},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":171,\"cacheReadInputTokens\":57191,\"cacheCreationInputTokens\":7685,\"webSearchRequests\":0,\"costUSD\":0.0763542,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":0,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7685,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"q743a93t\",\"ttft_ms\":2971,\"type\":\"result\",\"duration_ms\":6982,\"uuid\":\"d8d13a8d-82d7-44ec-844e-31450b0aeca9\",\"ttft_stream_ms\":1962,\"time_to_request_ms\":144,\"time_to_request_phases_ms\":{\"other\":1,\"system_prompt\":28,\"resume_other\":8,\"process_user_input\":0,\"input_attachments\":5,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":1,\"model_gates\":82,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":5,\"time_to_request_cpu_ms\":131,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1962,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "ref refs/heads/probe-deny-l10: present; reversed nonce in final message: yes"
           }
         },
         "lone-deny": {
@@ -186,21 +191,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l04.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"217faf6f-94d4-4879-9849-a1e8650e40b9\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"f5f372b4-c4ad-46d0-860d-49b09dd2dab5\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-            "observation": "sentinel target: absent; witness: absent; reversed nonce in final message: no"
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 12.0,
+            "stdout_bytes": 3158,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":9045,\"stop_reason\":\"end_turn\",\"session_id\":\"e59dd238-e82d-4f29-b0a1-071bccdbd25c\",\"total_cost_usd\":0.09064720000000001,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":7894,\"cache_read_input_tokens\":90856,\"output_tokens\":465,\"output_tokens_details\":{\"thinking_tokens\":134},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7894,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":183,\"cache_read_input_tokens\":33596,\"cache_creation_input_tokens\":237,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":237},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":465,\"cacheReadInputTokens\":90856,\"cacheCreationInputTokens\":7894,\"webSearchRequests\":0,\"costUSD\":0.09064720000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":134,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7894,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01Fssj1rvJBsm5MyjQeLvJJj\",\"tool_input\":{\"command\":\"touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/target-l04\",\"description\":\"Create target file\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I created the witness file, but permission to run the second `touch` (for `target-l04`) was denied, so that file wasn't created.\\n\\nvwicinyd\",\"ttft_ms\":2746,\"type\":\"result\",\"duration_ms\":11284,\"uuid\":\"71e0ddf1-742c-4b82-9086-bf9811d85d6b\",\"ttft_stream_ms\":2008,\"time_to_request_ms\":141,\"time_to_request_phases_ms\":{\"other\":1,\"system_prompt\":28,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":2,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":80,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":5,\"time_to_request_cpu_ms\":132,\"time_to_request_major_faults\":1,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2008,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "sentinel target: absent; witness: present; reversed nonce in final message: yes"
           }
         },
         "deny-under-allow": {
-          "status": "unknown",
-          "reason": "precondition-unmet: allow-only control did not run the command",
+          "status": "pass",
           "evidence": {
             "launch": "l05",
             "command": [
@@ -210,21 +216,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l05.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.7,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 346,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"1a1d3f03-8ea3-4ff1-9b7e-0bf0236cbc0a\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"fdc11611-a49b-4a6e-a67b-4e50f273a426\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-            "observation": "sentinel target: absent; witness: absent; reversed nonce in final message: no"
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 11.7,
+            "stdout_bytes": 3104,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":9118,\"stop_reason\":\"end_turn\",\"session_id\":\"c153e83d-9d8e-46c6-b728-c664e0f0b092\",\"total_cost_usd\":0.0912472,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":7894,\"cache_read_input_tokens\":90856,\"output_tokens\":495,\"output_tokens_details\":{\"thinking_tokens\":175},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7894,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":213,\"cache_read_input_tokens\":33596,\"cache_creation_input_tokens\":237,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":237},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":495,\"cacheReadInputTokens\":90856,\"cacheCreationInputTokens\":7894,\"webSearchRequests\":0,\"costUSD\":0.0912472,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":175,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7894,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01EdcsDPjXDaYSfGyssWYB4F\",\"tool_input\":{\"command\":\"touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/target-l05\",\"description\":\"Create target file\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"0eyxgs9x\\n\\nThe witness file was created. Creating the target file was denied, so that file doesn't exist.\",\"ttft_ms\":2720,\"type\":\"result\",\"duration_ms\":11126,\"uuid\":\"0fa9332b-2b79-4ac5-9f83-dba0e3bc4b0e\",\"ttft_stream_ms\":1932,\"time_to_request_ms\":136,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":27,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":2,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":3,\"query_setup\":0,\"model_gates\":74,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":5,\"time_to_request_cpu_ms\":131,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1932,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "sentinel target: absent; witness: present; reversed nonce in final message: yes"
           }
         },
         "wrapped-allow": {
-          "status": "unknown",
-          "reason": "precondition-unmet: allow-only-git-c control did not run the command",
+          "status": "fail",
           "evidence": {
             "launch": "l06",
             "command": [
@@ -234,33 +241,34 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l06.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 346,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"5829fe45-a1d6-464f-ac67-383e314d21e5\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"70640151-f13c-4cd7-9463-08e02fab4794\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-            "observation": "ref refs/heads/probe-deny-l06: absent; witness: absent; reversed nonce in final message: no"
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 10.6,
+            "stdout_bytes": 2779,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":7824,\"stop_reason\":\"end_turn\",\"session_id\":\"44b705f7-42cb-4d09-a323-099b85afa1d2\",\"total_cost_usd\":0.08926120000000001,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":7975,\"cache_read_input_tokens\":90886,\"output_tokens\":363,\"output_tokens_details\":{\"thinking_tokens\":48},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7975,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":8,\"cache_read_input_tokens\":33611,\"cache_creation_input_tokens\":303,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":303},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":363,\"cacheReadInputTokens\":90886,\"cacheCreationInputTokens\":7975,\"webSearchRequests\":0,\"costUSD\":0.08926120000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":48,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7975,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"0y94kg89\",\"ttft_ms\":2776,\"type\":\"result\",\"duration_ms\":9860,\"uuid\":\"58d6aab5-dd35-49bc-95bb-54b3424c63c6\",\"ttft_stream_ms\":1976,\"time_to_request_ms\":131,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":28,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":1,\"transcript_persist\":1,\"tool_pool_refresh\":2,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":70,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":4,\"time_to_request_cpu_ms\":129,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1976,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "ref refs/heads/probe-deny-l06: present; witness: present; reversed nonce in final message: yes"
           }
         }
       }
     },
     "skill-activation": {
       "status": "n/a",
-      "reason": "not-applicable: plan \u00a76.4 is a Gemini question (automatic skill activation)",
+      "reason": "not-applicable: plan \u00a76.4 asks about automatic skill activation, which is probed where a harness documents it",
       "plan_item": "6.4",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-29T21:38:35Z"
+      "ran_at": "2026-11-10T20:50:37Z"
     },
     "shell-timeout": {
-      "status": "unknown",
-      "reason": "ask-not-reached",
+      "status": "pass",
       "plan_item": "6.6",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "evidence": {
         "launch": "l11",
         "command": [
@@ -270,28 +278,28 @@
           "--output-format",
           "json",
           "--setting-sources",
-          "project,local"
+          "project,local",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l11.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-        "exit_code": 1,
-        "wall_s": 0.6,
-        "stdout_bytes": 1156,
-        "stderr_bytes": 346,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"be1b26ed-4bf3-40ed-9a21-d678018747c1\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":52,\"uuid\":\"62fc51bb-af22-4d8a-8672-f63f915368ac\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
-        "observation": "sentinel: absent; reversed nonce in final message: no"
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+        "exit_code": 0,
+        "wall_s": 133.1,
+        "stdout_bytes": 2855,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"duration_api_ms\":15639,\"stop_reason\":\"end_turn\",\"session_id\":\"a6e96093-b94d-41ef-84d9-53b82478ac76\",\"total_cost_usd\":0.168152,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":538,\"cache_read_input_tokens\":37067,\"output_tokens\":7,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":538,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":4,\"output_tokens\":7,\"cache_read_input_tokens\":37067,\"cache_creation_input_tokens\":538,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":538},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":16,\"outputTokens\":830,\"cacheReadInputTokens\":161880,\"cacheCreationInputTokens\":14889,\"webSearchRequests\":0,\"costUSD\":0.168152,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":525,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":14889,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"origin\":{\"kind\":\"task-notification\",\"producer\":\"session-task\",\"runId\":\"0mwb5rlaa-1ee36f2f\"},\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"576bvglc\",\"ttft_ms\":1698,\"type\":\"result\",\"duration_ms\":3528,\"uuid\":\"1d350aeb-ad52-4df0-a7d0-668a03f96749\",\"ttft_stream_ms\":1698,\"time_to_request_ms\":29,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":1,\"resume_other\":0,\"process_user_input\":0,\"input_attachments\":2,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":1,\"tool_pool_refresh\":0,\"init_message\":1,\"init_frame_send\":0,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":0,\"query_setup\":0,\"model_gates\":0,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":13,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":1,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":27,\"time_to_request_major_faults\":6,\"input_attachments_detail\":{\"slowest_producer\":\"deferred_tools_delta\",\"slowest_producer_ms\":0,\"cpu_ms\":3,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":0,\"render_ms\":0,\"producers\":38,\"token_counts\":0},\"first_content_frame_ms\":1698,\"queued_turn_count\":0,\"result_index\":1}\n",
+        "stderr_tail": "",
+        "observation": "sentinel: present; reversed nonce in final message: yes"
       }
     },
     "trust-then-headless": {
-      "status": "unknown",
-      "reason": "binary-exit-1",
+      "status": "fail",
       "plan_item": "6.8 (trust + load)",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "sub_results": {
         "hooks-loaded": {
-          "status": "unknown",
-          "reason": "binary-exit-1",
+          "status": "pass",
           "evidence": {
             "launch": "l01",
             "command": [
@@ -303,19 +311,18 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 9.9,
+            "stdout_bytes": 3425,
             "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"76eed50d-30ee-4520-8bf3-18d41c6df6bf\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":44,\"uuid\":\"efbb8d55-6932-416e-b085-c255fef27132\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":6864,\"stop_reason\":\"end_turn\",\"session_id\":\"001651f6-306b-4934-927c-0a371cfe217b\",\"total_cost_usd\":0.0955406,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":9581,\"cache_read_input_tokens\":55283,\"output_tokens\":391,\"output_tokens_details\":{\"thinking_tokens\":72},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":9581,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":242,\"cache_read_input_tokens\":31204,\"cache_creation_input_tokens\":2456,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2456},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":391,\"cacheReadInputTokens\":55283,\"cacheCreationInputTokens\":9581,\"webSearchRequests\":0,\"costUSD\":0.0955406,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":72,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":9581,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_012tAB3eEfp4udWLSRK2Avwq\",\"tool_input\":{\"command\":\"touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/allow-l01\",\"description\":\"Create the allow-l01 probe file\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I didn't create the file. Running `touch .probe/allow-l01` needs your approval, because Claude Code asks before a shell command creates, changes or removes files in this repo.\\n\\nTo go ahead, approve the command when I retry it, or add a permission rule for it. You can also run it yourself:\\n\\n```\\ntouch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/allow-l01\\n```\",\"ttft_ms\":2914,\"type\":\"result\",\"duration_ms\":9148,\"uuid\":\"774e36e3-4cdb-4dbb-a166-f29de4adda92\",\"ttft_stream_ms\":1990,\"time_to_request_ms\":126,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":15,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":5,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":76,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":108,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":9,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1990,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel A (hook): present; sentinel B (allow): absent"
           }
         },
         "allowlist-loaded": {
-          "status": "unknown",
-          "reason": "binary-exit-1",
+          "status": "fail",
           "evidence": {
             "launch": "l01",
             "command": [
@@ -327,24 +334,23 @@
               "--setting-sources",
               "project,local"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 9.9,
+            "stdout_bytes": 3425,
             "stderr_bytes": 344,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"76eed50d-30ee-4520-8bf3-18d41c6df6bf\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":44,\"uuid\":\"efbb8d55-6932-416e-b085-c255fef27132\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "stdout_tail": "{\"duration_api_ms\":6864,\"stop_reason\":\"end_turn\",\"session_id\":\"001651f6-306b-4934-927c-0a371cfe217b\",\"total_cost_usd\":0.0955406,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":9581,\"cache_read_input_tokens\":55283,\"output_tokens\":391,\"output_tokens_details\":{\"thinking_tokens\":72},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":9581,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":242,\"cache_read_input_tokens\":31204,\"cache_creation_input_tokens\":2456,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2456},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":391,\"cacheReadInputTokens\":55283,\"cacheCreationInputTokens\":9581,\"webSearchRequests\":0,\"costUSD\":0.0955406,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":72,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":9581,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_012tAB3eEfp4udWLSRK2Avwq\",\"tool_input\":{\"command\":\"touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/allow-l01\",\"description\":\"Create the allow-l01 probe file\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I didn't create the file. Running `touch .probe/allow-l01` needs your approval, because Claude Code asks before a shell command creates, changes or removes files in this repo.\\n\\nTo go ahead, approve the command when I retry it, or add a permission rule for it. You can also run it yourself:\\n\\n```\\ntouch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/allow-l01\\n```\",\"ttft_ms\":2914,\"type\":\"result\",\"duration_ms\":9148,\"uuid\":\"774e36e3-4cdb-4dbb-a166-f29de4adda92\",\"ttft_stream_ms\":1990,\"time_to_request_ms\":126,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":15,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":5,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":76,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":108,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":9,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1990,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
             "observation": "sentinel A (hook): present; sentinel B (allow): absent"
           }
         }
       }
     },
     "session-start-context": {
-      "status": "unknown",
-      "reason": "binary-exit-1",
+      "status": "pass",
       "plan_item": "6.8 (injection)",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "evidence": {
         "launch": "l12",
         "command": [
@@ -354,32 +360,35 @@
           "--output-format",
           "json",
           "--setting-sources",
-          "project,local"
+          "project,local",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l12.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-        "exit_code": 1,
-        "wall_s": 0.7,
-        "stdout_bytes": 1156,
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+        "exit_code": 0,
+        "wall_s": 4.8,
+        "stdout_bytes": 2755,
         "stderr_bytes": 0,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"87c38f61-a815-4a3a-ba61-93f30741b604\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":45,\"uuid\":\"57d2345b-d0d1-4ccf-9d1c-7a0566bf05f8\",\"queued_turn_count\":0}\n",
+        "stdout_tail": "{\"duration_api_ms\":1963,\"stop_reason\":\"end_turn\",\"session_id\":\"ba84894d-1096-45b0-9699-a5177433db4b\",\"total_cost_usd\":0.0472798,\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":5238,\"cache_read_input_tokens\":25939,\"output_tokens\":9,\"output_tokens_details\":{\"thinking_tokens\":0},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":5238,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":9,\"cache_read_input_tokens\":25939,\"cache_creation_input_tokens\":5238,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":5238},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":2,\"outputTokens\":9,\"cacheReadInputTokens\":25939,\"cacheCreationInputTokens\":5238,\"webSearchRequests\":0,\"costUSD\":0.0472798,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":0,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":5238,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"i56dzn7o\",\"ttft_ms\":2092,\"type\":\"result\",\"duration_ms\":3982,\"uuid\":\"d8c3fae4-afad-49d7-9d80-8d0f6c4d6f0d\",\"ttft_stream_ms\":1585,\"time_to_request_ms\":135,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":17,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":4,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":84,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":108,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":8,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1585,\"queued_turn_count\":0,\"result_index\":0}\n",
         "stderr_tail": "",
-        "observation": "reversed nonce in final message: no"
+        "observation": "reversed nonce in final message: yes"
       }
     },
     "stdin-prompt": {
-      "status": "unknown",
-      "reason": "binary-exit-1",
+      "status": "pass",
       "plan_item": "6.12",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "evidence": {
-        "returned_reversed_nonce": [],
-        "observation": "variants that made stdin the task (returned the reversed nonce): none"
+        "returned_reversed_nonce": [
+          "with-prompt-flag",
+          "without-prompt-flag"
+        ],
+        "observation": "variants that made stdin the task (returned the reversed nonce): with-prompt-flag, without-prompt-flag"
       },
       "sub_results": {
         "with-prompt-flag": {
-          "status": "unknown",
-          "reason": "binary-exit-1",
+          "status": "pass",
           "evidence": {
             "launch": "l13",
             "command": [
@@ -388,21 +397,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l13.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.7,
-            "stdout_bytes": 1156,
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 6.5,
+            "stdout_bytes": 2786,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"fc320bc7-4115-4bab-9723-3cf4116a2951\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":51,\"uuid\":\"47c46d3f-c0de-44a0-9882-6ef8f7bc261b\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":3097,\"stop_reason\":\"end_turn\",\"session_id\":\"cc657a46-c423-4cf7-9ae1-aa8f8088a4af\",\"total_cost_usd\":0.13481179999999998,\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":16127,\"cache_read_input_tokens\":25939,\"output_tokens\":30,\"output_tokens_details\":{\"thinking_tokens\":21},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":16127,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":30,\"cache_read_input_tokens\":25939,\"cache_creation_input_tokens\":16127,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":16127},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":2,\"outputTokens\":30,\"cacheReadInputTokens\":25939,\"cacheCreationInputTokens\":16127,\"webSearchRequests\":0,\"costUSD\":0.13481179999999998,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":21,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":16127,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"n9m3s32l\",\"ttft_ms\":3246,\"type\":\"result\",\"duration_ms\":5891,\"uuid\":\"deef3f2c-5833-4166-ba5f-d7324e25ded2\",\"ttft_stream_ms\":2941,\"time_to_request_ms\":156,\"time_to_request_phases_ms\":{\"other\":3,\"system_prompt\":27,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":5,\"input_hooks\":0,\"conversation_append\":0,\"transcript_persist\":4,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":1,\"model_gates\":92,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":6,\"time_to_request_cpu_ms\":136,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2941,\"queued_turn_count\":0,\"result_index\":0}\n",
             "stderr_tail": "",
-            "observation": "reversed nonce in final message: no"
+            "observation": "reversed nonce in final message: yes"
           }
         },
         "without-prompt-flag": {
-          "status": "unknown",
-          "reason": "binary-exit-1",
+          "status": "pass",
           "evidence": {
             "launch": "l14",
             "command": [
@@ -410,30 +420,30 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l14.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 5.4,
+            "stdout_bytes": 2766,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"bfbdc4ff-1e7a-4703-9991-5b54bd69ecbc\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":57,\"uuid\":\"68b91df9-e466-4fc4-ae63-baecaad7863d\",\"queued_turn_count\":0}\n",
+            "stdout_tail": "{\"duration_api_ms\":2611,\"stop_reason\":\"end_turn\",\"session_id\":\"6ffc6ae3-7dde-47fd-85e2-ac759b005267\",\"total_cost_usd\":0.1353158,\"usage\":{\"input_tokens\":2,\"cache_creation_input_tokens\":16125,\"cache_read_input_tokens\":25939,\"output_tokens\":56,\"output_tokens_details\":{\"thinking_tokens\":48},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":16125,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":56,\"cache_read_input_tokens\":25939,\"cache_creation_input_tokens\":16125,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":16125},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":2,\"outputTokens\":56,\"cacheReadInputTokens\":25939,\"cacheCreationInputTokens\":16125,\"webSearchRequests\":0,\"costUSD\":0.1353158,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":48,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":16125,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"c94rkctr\",\"ttft_ms\":2749,\"type\":\"result\",\"duration_ms\":4592,\"uuid\":\"1bfa1650-ee55-401b-8870-c71fabb6d45d\",\"ttft_stream_ms\":2339,\"time_to_request_ms\":145,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":29,\"resume_other\":9,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":2,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":1,\"model_gates\":77,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":2,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":9,\"time_to_request_cpu_ms\":139,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":9,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2339,\"queued_turn_count\":0,\"result_index\":0}\n",
             "stderr_tail": "",
-            "observation": "reversed nonce in final message: no"
+            "observation": "reversed nonce in final message: yes"
           }
         }
       }
     },
     "fence-vs-allowlist": {
-      "status": "unknown",
-      "reason": "binary-exit-1",
+      "status": "fail",
       "plan_item": "6.11",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:37Z",
       "sub_results": {
         "routine-only": {
-          "status": "unknown",
-          "reason": "binary-exit-1",
+          "status": "fail",
           "evidence": {
             "launch": "l15",
             "command": [
@@ -443,21 +453,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l15.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 347,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"c76a0d9e-e1ca-48a3-b1b4-2ee3ff073fd2\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":50,\"uuid\":\"5decf6fe-e218-40d3-a5fa-3a8b948414ac\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 43 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 15.9,
+            "stdout_bytes": 4508,
+            "stderr_bytes": 0,
+            "stdout_tail": "\"ephemeral_1h_input_tokens\":8290,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":498,\"cache_read_input_tokens\":31501,\"cache_creation_input_tokens\":2728,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2728},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":1079,\"cacheReadInputTokens\":57440,\"cacheCreationInputTokens\":8290,\"webSearchRequests\":0,\"costUSD\":0.09940399999999999,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":290,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8290,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_017mSxDDrdALGFsBMdUkxDMW\",\"tool_input\":{\"command\":\"ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?\",\"description\":\"Source the ADLC probe script and run its probe function\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I didn't run the block. The harness refused the command before it started, with: \\\"A variable in braces in this command can't be checked before it runs.\\\" It rejects `${CLAUDE_PLUGIN_ROOT}` and `${ADLC_TOOLKIT_ROOT:-...}` because it can't check what they will expand to.\\n\\nI could get around this by saving the block to a script file and running that, but the check exists to make you approve this kind of command, so I won't. Any of these would work:\\n\\n1. **Run it yourself** by typing `!` followed by the block at the prompt. It runs in this session and I'll see the output.\\n2. **Allow it** by adding a Bash permission rule in `.claude/settings.json` or with `/permissions`. Then ask me again and I'll run it unchanged.\\n3. **Use a version without the braced variables.** If you tell me which toolkit root to use, such as `$HOME/.claude/skills` or a specific plugin path, I can write the same logic with plain paths.\\n\\nAlso, `result=$?` only lives in that one shell. If you want the probe's exit code reported back, add `echo \\\"result=$result\\\"` at the end.\",\"ttft_ms\":3827,\"type\":\"result\",\"duration_ms\":15417,\"uuid\":\"55459935-ab2a-472f-a4bf-a8737b32dac4\",\"ttft_stream_ms\":1748,\"time_to_request_ms\":155,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":25,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":5,\"input_hooks\":0,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":98,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":4,\"time_to_request_cpu_ms\":125,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1748,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
             "observation": "sentinel: absent"
           }
         },
         "broad-sh": {
-          "status": "unknown",
-          "reason": "binary-exit-1",
+          "status": "fail",
           "evidence": {
             "launch": "l16",
             "command": [
@@ -467,21 +478,22 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l16.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 347,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"de6f6a88-e7bf-41df-a239-561f3adfcad6\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":58,\"uuid\":\"80e9d678-2f7e-4016-8401-021c3921947a\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 44 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 13.3,
+            "stdout_bytes": 4278,
+            "stderr_bytes": 0,
+            "stdout_tail": "s\":7317,\"cache_read_input_tokens\":58367,\"output_tokens\":947,\"output_tokens_details\":{\"thinking_tokens\":229},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7317,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":404,\"cache_read_input_tokens\":31497,\"cache_creation_input_tokens\":2690,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2690},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":947,\"cacheReadInputTokens\":58367,\"cacheCreationInputTokens\":7317,\"webSearchRequests\":0,\"costUSD\":0.0891654,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":229,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7317,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01AwmjsRPd1vzJwZXdwYXBeo\",\"tool_input\":{\"command\":\"ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?\\necho \\\"result=$result\\\"\",\"description\":\"Source the ADLC probe script and run its probe function\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I couldn't run the block. The harness rejected it before execution with: \\\"A variable in braces in this command can't be checked before it runs.\\\" The `${CLAUDE_PLUGIN_ROOT}`-style expansions trip the pre-run safety check, so `probe.sh` was never sourced, `adlc_probe_function` never ran, and there's no `result` value.\\n\\nOne correction: I added `echo \\\"result=$result\\\"` to the end of my attempt to show the exit code, so what I submitted wasn't exactly your block. That line has no braces, so it isn't what got blocked.\\n\\nYou have two ways forward:\\n- **Run it yourself:** type `! <command>` in the prompt to run it in your own shell.\\n- **Allow it:** approve this kind of command in your permission settings, then ask me to retry.\\n\\nI didn't rewrite the block to dodge the check, because you asked for it exactly as written.\",\"ttft_ms\":2728,\"type\":\"result\",\"duration_ms\":12641,\"uuid\":\"33922a3a-06fd-4b9d-a3f8-c4b8bdfb5cc2\",\"ttft_stream_ms\":1397,\"time_to_request_ms\":131,\"time_to_request_phases_ms\":{\"other\":1,\"system_prompt\":26,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":1,\"model_gates\":73,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":128,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1397,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
             "observation": "sentinel: absent"
           }
         },
         "broad-first-token": {
-          "status": "unknown",
-          "reason": "binary-exit-1",
+          "status": "fail",
           "evidence": {
             "launch": "l17",
             "command": [
@@ -491,16 +503,389 @@
               "--output-format",
               "json",
               "--setting-sources",
-              "project,local"
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l17.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-            "exit_code": 1,
-            "wall_s": 0.6,
-            "stdout_bytes": 1156,
-            "stderr_bytes": 347,
-            "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"5d17beda-bd6f-4ed8-af15-4b46590230c7\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":56,\"uuid\":\"c19643df-34a0-4ba7-b984-0266d8ba5db0\",\"queued_turn_count\":0}\n",
-            "stderr_tail": "Ignoring 44 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 25.7,
+            "stdout_bytes": 4895,
+            "stderr_bytes": 0,
+            "stdout_tail": "s\":8,\"outputTokens\":2099,\"cacheReadInputTokens\":126824,\"cacheCreationInputTokens\":8823,\"webSearchRequests\":0,\"costUSD\":0.1379608,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":249,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8823,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_012nNCKHzvByhEehgVxost5b\",\"tool_input\":{\"command\":\"ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?\\necho \\\"result=$result\\\"\",\"description\":\"Run the adlc probe block\"}},{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_0113uh1gktk9TcxYyWPBzEwC\",\"tool_input\":{\"command\":\"sh /private/tmp/claude-501/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/63ee299a-9fef-4804-bb95-f1e9569bcbe8/scratchpad/probe-fence.sh; ls -la .probe/ 2>&1\",\"description\":\"Run the probe block from a script file and check the marker\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":5,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"The block did not run, so the probe never executed. `.probe/fence-l17` was not created and `result` was never set.\\n\\n1. **Running it inline failed.** The harness refused the command because it can't check variables in braces like `${CLAUDE_PLUGIN_ROOT}` before running them.\\n2. **Running it from a file needed approval I didn't get.** I saved the same text to `/private/tmp/claude-501/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/63ee299a-9fef-4804-bb95-f1e9569bcbe8/scratchpad/probe-fence.sh`, but running it with `sh` required approval, and I don't have it in this session.\\n\\nThe local `.adlc/partials/probe.sh` exists, so the block would have used it. Its `adlc_probe_function` only runs `touch` on `.probe/fence-l17` in the repo.\\n\\nTo get it to run, either approve running that script, or add a Bash allow rule for it. You could also change the fence to avoid brace expansions, for example `$CLAUDE_PLUGIN_ROOT` instead of `${CLAUDE_PLUGIN_ROOT}`. The `${ADLC_TOOLKIT_ROOT:-...}` default would then need rewriting as a separate `[ -n ... ] ||` check.\",\"ttft_ms\":3131,\"type\":\"result\",\"duration_ms\":25258,\"uuid\":\"735d76b7-0ff7-4a71-b750-0a948ec8cece\",\"ttft_stream_ms\":1615,\"time_to_request_ms\":261,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":38,\"resume_other\":8,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":1,\"tool_pool_refresh\":1,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":1,\"model_gates\":190,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":2,\"request_build\":2},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":6,\"time_to_request_cpu_ms\":137,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1615,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
             "observation": "sentinel: absent"
+          }
+        },
+        "runner-positive": {
+          "status": "pass",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe",
+            "launch": "l18",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l18.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 11.1,
+            "stdout_bytes": 2760,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":8222,\"stop_reason\":\"end_turn\",\"session_id\":\"c91fc988-90ee-45f9-99f9-bd872497527b\",\"total_cost_usd\":0.088088,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":7876,\"cache_read_input_tokens\":90880,\"output_tokens\":344,\"output_tokens_details\":{\"thinking_tokens\":48},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7876,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":10,\"cache_read_input_tokens\":33608,\"cache_creation_input_tokens\":207,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":207},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":344,\"cacheReadInputTokens\":90880,\"cacheCreationInputTokens\":7876,\"webSearchRequests\":0,\"costUSD\":0.088088,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":48,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7876,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"bfi6ikvk\",\"ttft_ms\":3110,\"type\":\"result\",\"duration_ms\":10448,\"uuid\":\"519512ff-9b6f-4ba1-8819-cf1b697b90dc\",\"ttft_stream_ms\":2308,\"time_to_request_ms\":166,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":24,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":109,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":126,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2308,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: no"
+          }
+        },
+        "runner-baseline": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe",
+            "launch": "l19",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l19.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 11.1,
+            "stdout_bytes": 3113,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":8432,\"stop_reason\":\"end_turn\",\"session_id\":\"c97facda-61ff-4671-baf2-748efbabc746\",\"total_cost_usd\":0.0895388,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":7825,\"cache_read_input_tokens\":90874,\"output_tokens\":437,\"output_tokens_details\":{\"thinking_tokens\":113},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7825,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":153,\"cache_read_input_tokens\":33605,\"cache_creation_input_tokens\":159,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":159},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":437,\"cacheReadInputTokens\":90874,\"cacheCreationInputTokens\":7825,\"webSearchRequests\":0,\"costUSD\":0.0895388,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":113,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7825,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_019SzZD26NHyRNZ55P4ZvYLG\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe\",\"description\":\"Run the fence-run probe\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I created the witness file, but the `fence-run run probe` command didn't run because it needed approval.\\n\\n8sgamv9p\",\"ttft_ms\":3020,\"type\":\"result\",\"duration_ms\":10482,\"uuid\":\"4463f8d2-2ac5-4e13-a471-b1e56836b3d0\",\"ttft_stream_ms\":2179,\"time_to_request_ms\":139,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":25,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":1,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":82,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":123,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2179,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-sibling": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x run probe",
+            "launch": "l20",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l20.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 10.0,
+            "stdout_bytes": 3135,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":7398,\"stop_reason\":\"end_turn\",\"session_id\":\"fb59cc18-05c9-4376-be6a-7bfe927e62db\",\"total_cost_usd\":0.0839954,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7868,\"cache_read_input_tokens\":57277,\"output_tokens\":479,\"output_tokens_details\":{\"thinking_tokens\":148},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7868,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":200,\"cache_read_input_tokens\":31338,\"cache_creation_input_tokens\":2469,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2469},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":479,\"cacheReadInputTokens\":57277,\"cacheCreationInputTokens\":7868,\"webSearchRequests\":0,\"costUSD\":0.0839954,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":148,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7868,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_019qbXBkUwGoD21RcLw1vQb9\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x run probe\",\"description\":\"Run probe script\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"tt6t6s3m\\n\\n(The witness file was created, but the `fence-run-x run probe` command didn't run because it needed approval that wasn't granted.)\",\"ttft_ms\":2855,\"type\":\"result\",\"duration_ms\":9366,\"uuid\":\"4860c64d-001f-4629-b154-71ea023757a9\",\"ttft_stream_ms\":1921,\"time_to_request_ms\":144,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":24,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":3,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":88,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":121,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1921,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-env-prefix": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe",
+            "launch": "l21",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l21.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 12.4,
+            "stdout_bytes": 3122,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":9240,\"stop_reason\":\"end_turn\",\"session_id\":\"78475c3e-b5e7-4ab6-97f2-9a6b69b04877\",\"total_cost_usd\":0.0906312,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":7836,\"cache_read_input_tokens\":90896,\"output_tokens\":487,\"output_tokens_details\":{\"thinking_tokens\":158},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7836,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":203,\"cache_read_input_tokens\":33616,\"cache_creation_input_tokens\":159,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":159},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":487,\"cacheReadInputTokens\":90896,\"cacheCreationInputTokens\":7836,\"webSearchRequests\":0,\"costUSD\":0.0906312,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":158,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7836,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_016bHkTHeTzbx6HMQXZGBvKw\",\"tool_input\":{\"command\":\"X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe\",\"description\":\"Run probe script\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"8cdhgo4s\\n\\nThe witness file was created, but the `fence-run` command didn't run because it needed approval that wasn't granted.\",\"ttft_ms\":2755,\"type\":\"result\",\"duration_ms\":11790,\"uuid\":\"27a797cd-0a0a-4e49-a2ac-554693c5242e\",\"ttft_stream_ms\":1977,\"time_to_request_ms\":152,\"time_to_request_phases_ms\":{\"other\":1,\"system_prompt\":24,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":1,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":97,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":4},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":122,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1978,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-subst": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run \"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x)\"",
+            "launch": "l22",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l22.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 14.6,
+            "stdout_bytes": 3257,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":9941,\"stop_reason\":\"end_turn\",\"session_id\":\"32a01909-3a60-452d-9c6e-aa98a04af1c8\",\"total_cost_usd\":0.094208,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8058,\"cache_read_input_tokens\":91100,\"output_tokens\":575,\"output_tokens_details\":{\"thinking_tokens\":171},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8058,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":142,\"cache_read_input_tokens\":33758,\"cache_creation_input_tokens\":239,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":239},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":575,\"cacheReadInputTokens\":91100,\"cacheCreationInputTokens\":8058,\"webSearchRequests\":0,\"costUSD\":0.094208,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":171,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8058,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_019LpzJ5LhjZ9Sxf5ZkwPjWs\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run \\\"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x)\\\"\",\"description\":\"Run the fenced probe command\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"The witness file was created. The fenced command didn't run: it was blocked with \\\"Quoted text in this command can't be checked before it runs.\\\"\\n\\nisrq042a\",\"ttft_ms\":3634,\"type\":\"result\",\"duration_ms\":14028,\"uuid\":\"9f4eb38b-b1b5-45dd-a3cc-a2f65b267a4a\",\"ttft_stream_ms\":2307,\"time_to_request_ms\":148,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":25,\"resume_other\":7,\"process_user_input\":0,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":0,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":91,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":122,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2307,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-backtick": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x`",
+            "launch": "l23",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l23.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 14.5,
+            "stdout_bytes": 3298,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":10468,\"stop_reason\":\"end_turn\",\"session_id\":\"27467ead-9f8b-413f-bf00-557249163d92\",\"total_cost_usd\":0.0941372,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8069,\"cache_read_input_tokens\":91006,\"output_tokens\":568,\"output_tokens_details\":{\"thinking_tokens\":149},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8069,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":116,\"cache_read_input_tokens\":33671,\"cache_creation_input_tokens\":337,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":337},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":568,\"cacheReadInputTokens\":91006,\"cacheCreationInputTokens\":8069,\"webSearchRequests\":0,\"costUSD\":0.0941372,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":149,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8069,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_015SbNjqxJ3zSbddnJYuH3fG\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x`\",\"description\":\"Run fence-run with output of fence-run-x\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"The fenced command didn't run. The permission check refused it because it can't inspect the nested backtick command before running it. The `touch` of `witness-l23` did succeed.\\n\\n3120g4kz\",\"ttft_ms\":2948,\"type\":\"result\",\"duration_ms\":13869,\"uuid\":\"1246ec88-bfaa-47b4-8c1b-2bfb1fc41893\",\"ttft_stream_ms\":2066,\"time_to_request_ms\":132,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":24,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":77,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":119,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2066,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-redirect": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/redirect-l24",
+            "launch": "l24",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l24.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 14.0,
+            "stdout_bytes": 3268,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":10148,\"stop_reason\":\"end_turn\",\"session_id\":\"6dc30969-fec3-49fb-87a9-783f58e518e2\",\"total_cost_usd\":0.09514,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8149,\"cache_read_input_tokens\":91020,\"output_tokens\":586,\"output_tokens_details\":{\"thinking_tokens\":172},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8149,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":227,\"cache_read_input_tokens\":33678,\"cache_creation_input_tokens\":410,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":410},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":586,\"cacheReadInputTokens\":91020,\"cacheCreationInputTokens\":8149,\"webSearchRequests\":0,\"costUSD\":0.09514,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":172,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8149,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01Eag1EfvdfnmS8eJnFgrZbW\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/redirect-l24\",\"description\":\"Run fence-run probe, redirect output\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"s6221218\\n\\n(The second command didn't run: writing its output to `.probe/redirect-l24` needed your approval, which wasn't given. The `touch` worked.)\",\"ttft_ms\":2826,\"type\":\"result\",\"duration_ms\":13364,\"uuid\":\"d1c813ed-b619-4ab4-a868-9424d2b9ff07\",\"ttft_stream_ms\":2028,\"time_to_request_ms\":145,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":25,\"resume_other\":7,\"process_user_input\":0,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":2,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":88,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":126,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2028,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-semicolon": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x",
+            "launch": "l25",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l25.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 15.4,
+            "stdout_bytes": 3283,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":11591,\"stop_reason\":\"end_turn\",\"session_id\":\"8e4f4c2f-8657-4cde-8b64-9427142522c5\",\"total_cost_usd\":0.09584720000000001,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8045,\"cache_read_input_tokens\":91016,\"output_tokens\":663,\"output_tokens_details\":{\"thinking_tokens\":253},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8045,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":311,\"cache_read_input_tokens\":33676,\"cache_creation_input_tokens\":308,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":308},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":663,\"cacheReadInputTokens\":91016,\"cacheCreationInputTokens\":8045,\"webSearchRequests\":0,\"costUSD\":0.09584720000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":253,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8045,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01DSUzfaDD2P42JANRScxWxe\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x\",\"description\":\"Run the fenced probe commands\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"j9juakel\\n\\nThe fenced block did not run: approval was required for `fence-run-x`, so neither command in it executed. The `touch` of `witness-l25` did succeed.\",\"ttft_ms\":2853,\"type\":\"result\",\"duration_ms\":14783,\"uuid\":\"01a72382-9ade-4d3d-9099-f633dcddb4b2\",\"ttft_stream_ms\":2027,\"time_to_request_ms\":150,\"time_to_request_phases_ms\":{\"other\":1,\"system_prompt\":25,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":1,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":92,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":4},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":126,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2027,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-and": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x",
+            "launch": "l26",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l26.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 11.8,
+            "stdout_bytes": 3206,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":9450,\"stop_reason\":\"end_turn\",\"session_id\":\"cdace12d-c953-400b-abe3-4d00249c4cb2\",\"total_cost_usd\":0.09239040000000001,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8048,\"cache_read_input_tokens\":91012,\"output_tokens\":489,\"output_tokens_details\":{\"thinking_tokens\":102},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8048,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":132,\"cache_read_input_tokens\":33674,\"cache_creation_input_tokens\":313,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":313},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":489,\"cacheReadInputTokens\":91012,\"cacheCreationInputTokens\":8048,\"webSearchRequests\":0,\"costUSD\":0.09239040000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":102,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8048,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01XA3mWiztn9knKinZUvfwwr\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x\",\"description\":\"Run fence-run probe then fence-run-x\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"977fri7k\\n\\nThe fenced command did not run: `fence-run-x` needs approval.\",\"ttft_ms\":3275,\"type\":\"result\",\"duration_ms\":11056,\"uuid\":\"a08e10b4-3085-4e42-b88a-07f629424776\",\"ttft_stream_ms\":2472,\"time_to_request_ms\":179,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":24,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":0,\"transcript_persist\":3,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":123,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":131,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2472,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-or": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x",
+            "launch": "l27",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l27.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 12.3,
+            "stdout_bytes": 3256,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":8997,\"stop_reason\":\"end_turn\",\"session_id\":\"cb2c073e-00fa-43b3-bf8f-14d1f25d8ba1\",\"total_cost_usd\":0.09251720000000001,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8046,\"cache_read_input_tokens\":91026,\"output_tokens\":496,\"output_tokens_details\":{\"thinking_tokens\":97},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8046,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":148,\"cache_read_input_tokens\":33681,\"cache_creation_input_tokens\":304,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":304},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":496,\"cacheReadInputTokens\":91026,\"cacheCreationInputTokens\":8046,\"webSearchRequests\":0,\"costUSD\":0.09251720000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":97,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8046,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01CD1Cz1nNKBGpY4HxfASD1B\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x\",\"description\":\"Run fenced command block\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"The witness file was created, but the fenced command didn't run: approval was required for its `fence-run-x` part and wasn't given.\\n\\nsl2dgd8p\",\"ttft_ms\":2945,\"type\":\"result\",\"duration_ms\":11629,\"uuid\":\"7f2ba643-20e5-46d0-a9b7-5667d6a6c74d\",\"ttft_stream_ms\":2145,\"time_to_request_ms\":146,\"time_to_request_phases_ms\":{\"other\":1,\"system_prompt\":24,\"resume_other\":8,\"process_user_input\":0,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":90,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":4},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":124,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2145,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-pipe": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x",
+            "launch": "l28",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l28.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 12.3,
+            "stdout_bytes": 3213,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":9467,\"stop_reason\":\"end_turn\",\"session_id\":\"8ba29b32-5911-4c66-be48-0cc894a7e0d7\",\"total_cost_usd\":0.0934796,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8104,\"cache_read_input_tokens\":91018,\"output_tokens\":521,\"output_tokens_details\":{\"thinking_tokens\":123},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8104,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":111,\"cache_read_input_tokens\":33677,\"cache_creation_input_tokens\":366,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":366},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":521,\"cacheReadInputTokens\":91018,\"cacheCreationInputTokens\":8104,\"webSearchRequests\":0,\"costUSD\":0.0934796,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":123,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8104,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01QgPbQyCSfNLXmHULH37TkE\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x\",\"description\":\"Run fence-run probe piped into fence-run-x\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"The second command didn't run. It needed approval for `fence-run-x` and was blocked.\\n\\n8e18ti0u\",\"ttft_ms\":2752,\"type\":\"result\",\"duration_ms\":11691,\"uuid\":\"de678fe8-0ae2-4b66-b7c5-a5465740036f\",\"ttft_stream_ms\":1960,\"time_to_request_ms\":141,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":25,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":1,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":1,\"request_announcements\":1,\"query_setup\":0,\"model_gates\":85,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":121,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1960,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-background": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x",
+            "launch": "l29",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l29.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 12.8,
+            "stdout_bytes": 3215,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":10174,\"stop_reason\":\"end_turn\",\"session_id\":\"ba4678a8-d8d1-4ebf-abea-ad1d343e52c9\",\"total_cost_usd\":0.09569280000000001,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8133,\"cache_read_input_tokens\":91024,\"output_tokens\":620,\"output_tokens_details\":{\"thinking_tokens\":233},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8133,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":184,\"cache_read_input_tokens\":33680,\"cache_creation_input_tokens\":392,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":392},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":620,\"cacheReadInputTokens\":91024,\"cacheCreationInputTokens\":8133,\"webSearchRequests\":0,\"costUSD\":0.09569280000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":233,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8133,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01VAJn9YnbuZcWZ5RGra3C9P\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x\",\"description\":\"Run the probe fence command block\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"vncruazy\\n\\n(The fenced command didn't run: `fence-run-x` needs your approval first.)\",\"ttft_ms\":2876,\"type\":\"result\",\"duration_ms\":12152,\"uuid\":\"6cb92cc2-3a62-4dd4-8e86-cd63fb13c25f\",\"ttft_stream_ms\":2106,\"time_to_request_ms\":186,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":24,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":1,\"conversation_append\":0,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":1,\"loop_entry\":0,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":129,\"tool_schema_build\":2,\"message_normalization\":1,\"client_creation\":2,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":1,\"time_to_request_cpu_ms\":130,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":2,\"cpu_ms\":6,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":2106,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-newline": {
+          "status": "pass",
+          "reason": "refused",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x",
+            "launch": "l30",
+            "command": [
+              "claude",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--setting-sources",
+              "project,local",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l30.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+            "exit_code": 0,
+            "wall_s": 14.5,
+            "stdout_bytes": 3224,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"duration_api_ms\":11192,\"stop_reason\":\"end_turn\",\"session_id\":\"110ebad5-3cc6-4d62-8f19-c939a6a04101\",\"total_cost_usd\":0.09585,\"usage\":{\"input_tokens\":6,\"cache_creation_input_tokens\":8116,\"cache_read_input_tokens\":91090,\"output_tokens\":634,\"output_tokens_details\":{\"thinking_tokens\":230},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":8116,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":213,\"cache_read_input_tokens\":33748,\"cache_creation_input_tokens\":307,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":307},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":6,\"outputTokens\":634,\"cacheReadInputTokens\":91090,\"cacheCreationInputTokens\":8116,\"webSearchRequests\":0,\"costUSD\":0.09585,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":230,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":8116,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01BHDhxhVSG1Mcwsq7mt5dBx\",\"tool_input\":{\"command\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run run probe\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/tk/fence-run-x\",\"description\":\"Run the fenced probe block\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":3,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"The fenced block didn't run: it was blocked because `fence-run-x` needs approval. The witness `touch` did succeed.\\n\\nk7ps5cxh\",\"ttft_ms\":3312,\"type\":\"result\",\"duration_ms\":13865,\"uuid\":\"068892a3-da02-4117-87ef-33550f8605dd\",\"ttft_stream_ms\":1926,\"time_to_request_ms\":166,\"time_to_request_phases_ms\":{\"other\":1,\"system_prompt\":24,\"resume_other\":7,\"process_user_input\":1,\"input_attachments\":4,\"input_hooks\":0,\"conversation_append\":1,\"transcript_persist\":2,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":0,\"model_config_wait\":1,\"autocompact\":0,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":110,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":4},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":0,\"time_to_request_cpu_ms\":126,\"time_to_request_major_faults\":0,\"input_attachments_detail\":{\"slowest_producer\":\"skill_listing\",\"slowest_producer_ms\":1,\"cpu_ms\":7,\"major_faults\":0,\"setup_ms\":0,\"prompt_producers_ms\":0,\"ambient_start_ms\":1,\"ambient_wait_ms\":1,\"render_ms\":0,\"producers\":43,\"token_counts\":0},\"first_content_frame_ms\":1926,\"queued_turn_count\":0,\"result_index\":0}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes"
+          }
+        },
+        "runner-prefix": {
+          "status": "pass",
+          "evidence": {
+            "admitted": [],
+            "refused": [
+              "runner-sibling",
+              "runner-env-prefix",
+              "runner-subst",
+              "runner-backtick",
+              "runner-redirect",
+              "runner-semicolon",
+              "runner-and",
+              "runner-or",
+              "runner-pipe",
+              "runner-background",
+              "runner-newline"
+            ],
+            "boundary": "measured"
           }
         }
       }
@@ -509,45 +894,57 @@
       "status": "pass",
       "plan_item": "6.9",
       "oracle": "file-located",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:38Z",
       "evidence": {
-        "location": "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/0972795e-5ca8-4d87-be13-4698705499c3.jsonl",
+        "location": "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/2552eb5b-5855-4158-974a-7643dda030c4.jsonl",
         "discovery_rule": "directory-encoding",
-        "records_copied": 13,
+        "records_copied": 12,
         "fixture": ".adlc/research/harness-probes/fixtures/claude.jsonl",
         "session_files": [
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/0972795e-5ca8-4d87-be13-4698705499c3.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/5d17beda-bd6f-4ed8-af15-4b46590230c7.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/de6f6a88-e7bf-41df-a239-561f3adfcad6.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/c76a0d9e-e1ca-48a3-b1b4-2ee3ff073fd2.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/bfbdc4ff-1e7a-4703-9991-5b54bd69ecbc.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/fc320bc7-4115-4bab-9723-3cf4116a2951.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/87c38f61-a815-4a3a-ba61-93f30741b604.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/be1b26ed-4bf3-40ed-9a21-d678018747c1.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/64529941-95d4-4191-889c-67cb92a6d273.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/5428c083-b375-4a53-9e9b-21549da276c2.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/de74d196-f053-47e9-a13e-f6b60ad18d62.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/e6c5ac9f-d736-492f-a64d-0ae70e953711.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/5829fe45-a1d6-464f-ac67-383e314d21e5.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/1a1d3f03-8ea3-4ff1-9b7e-0bf0236cbc0a.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/217faf6f-94d4-4879-9849-a1e8650e40b9.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-wt/95ce7b17-7164-4aa6-9b1e-5fc3f76f143a.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/449ce2c4-a1eb-4640-85cd-3a6e8a5ec339.jsonl",
-          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-i49zz8ag-repo/76eed50d-30ee-4520-8bf3-18d41c6df6bf.jsonl"
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/2552eb5b-5855-4158-974a-7643dda030c4.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/110ebad5-3cc6-4d62-8f19-c939a6a04101.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/ba4678a8-d8d1-4ebf-abea-ad1d343e52c9.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/8ba29b32-5911-4c66-be48-0cc894a7e0d7.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/cb2c073e-00fa-43b3-bf8f-14d1f25d8ba1.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/cdace12d-c953-400b-abe3-4d00249c4cb2.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/8e4f4c2f-8657-4cde-8b64-9427142522c5.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/6dc30969-fec3-49fb-87a9-783f58e518e2.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/27467ead-9f8b-413f-bf00-557249163d92.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/32a01909-3a60-452d-9c6e-aa98a04af1c8.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/78475c3e-b5e7-4ab6-97f2-9a6b69b04877.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/fb59cc18-05c9-4376-be6a-7bfe927e62db.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/c97facda-61ff-4671-baf2-748efbabc746.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/c91fc988-90ee-45f9-99f9-bd872497527b.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/63ee299a-9fef-4804-bb95-f1e9569bcbe8.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/d0666b56-e2d7-4221-b54b-8679b6263350.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/b0eea416-4dac-4540-8f97-4ea15b8dbc8f.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/6ffc6ae3-7dde-47fd-85e2-ac759b005267.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/cc657a46-c423-4cf7-9ae1-aa8f8088a4af.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/ba84894d-1096-45b0-9699-a5177433db4b.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/a6e96093-b94d-41ef-84d9-53b82478ac76.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/a0bc4659-cfda-453b-a3e7-2a2a1617c445.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/85375e4a-1a57-413e-b69e-a6ec80c6c9ff.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/a9a34336-fd8d-4ff2-a64e-9a32a406f080.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/cc5ebaaf-6ea3-4409-9241-2342054663b8.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/44b705f7-42cb-4d09-a323-099b85afa1d2.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/c153e83d-9d8e-46c6-b728-c664e0f0b092.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/e59dd238-e82d-4f29-b0a1-071bccdbd25c.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-wt/3497a1f5-8213-4def-9946-c5949d36dc7a.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/6c6345c6-292b-4941-b9f2-092cd9937dff.jsonl",
+          "~/.claude/projects/-private-var-folders-h0-k0pw8vqx73dftb4cm7bdz5dw0000gn-T-adlc-probe-claude-6obyj8st-repo/001651f6-306b-4934-927c-0a371cfe217b.jsonl"
         ],
-        "launches_exited_zero": "0 of 18",
-        "observation": "located 18 session file(s) newer than the first launch; 0 of 18 launches exited 0",
-        "files_scanned": 5052
+        "launches_exited_zero": "31 of 31",
+        "observation": "located 31 session file(s) newer than the first launch; 31 of 31 launches exited 0",
+        "files_scanned": 7567
       }
     },
     "arg-substitution": {
-      "status": "unknown",
-      "reason": "binary-exit-1",
+      "status": "fail",
       "plan_item": "6.10",
       "oracle": "sentinel-content",
-      "ran_at": "2026-10-29T21:38:35Z",
+      "ran_at": "2026-11-10T20:50:38Z",
       "evidence": {
-        "launch": "l18",
+        "launch": "l31",
         "command": [
           "claude",
           "-p",
@@ -555,15 +952,17 @@
           "--output-format",
           "json",
           "--setting-sources",
-          "project,local"
+          "project,local",
+          "--settings",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/captures/l31.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo",
-        "exit_code": 1,
-        "wall_s": 0.7,
-        "stdout_bytes": 1156,
-        "stderr_bytes": 344,
-        "stdout_tail": "{\"duration_api_ms\":0,\"stop_reason\":\"stop_sequence\",\"session_id\":\"0972795e-5ca8-4d87-be13-4698705499c3\",\"total_cost_usd\":0,\"usage\":{\"output_tokens_details\":{\"thinking_tokens\":0},\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0,\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":0,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"\",\"iterations\":[],\"speed\":\"standard\"},\"modelUsage\":{},\"permission_denials\":[],\"terminal_reason\":\"api_error\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"is_error\":true,\"num_turns\":1,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"Not logged in \u00b7 Please run /login\",\"type\":\"result\",\"duration_ms\":61,\"uuid\":\"faf212fb-7709-41c3-9b6c-558973053703\",\"queued_turn_count\":0}\n",
-        "stderr_tail": "Ignoring 1 permissions.allow entry from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects[\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-i49zz8ag/repo\"].hasTrustDialogAccepted: true in ~/.claude.json.\n",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo",
+        "exit_code": 0,
+        "wall_s": 10.3,
+        "stdout_bytes": 3285,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"duration_api_ms\":6824,\"stop_reason\":\"end_turn\",\"session_id\":\"2552eb5b-5855-4158-974a-7643dda030c4\",\"total_cost_usd\":0.0816292,\"usage\":{\"input_tokens\":4,\"cache_creation_input_tokens\":7798,\"cache_read_input_tokens\":57346,\"output_tokens\":388,\"output_tokens_details\":{\"thinking_tokens\":73},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":7798,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":202,\"cache_read_input_tokens\":31407,\"cache_creation_input_tokens\":2330,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":2330},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":4,\"outputTokens\":388,\"cacheReadInputTokens\":57346,\"cacheCreationInputTokens\":7798,\"webSearchRequests\":0,\"costUSD\":0.0816292,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":73,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":7798,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[{\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01KdwPJt2cdP94fPZAoiACcL\",\"tool_input\":{\"command\":\"printf '%s' \\\"$1\\\" > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-claude-6obyj8st/repo/.probe/arg-l31\",\"description\":\"Write probe argument to file\"}}],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":2,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I didn't run the probe command. The harness refused it because the `$1` variable can't be checked before the command executes. Nothing was written to `.probe/arg-l31`.\\n\\nThe skill said to run the block exactly as written, so I didn't substitute `hello` for `$1` or change the command. Even if it had run, `$1` would probably have been empty in this shell, so the file would have been empty rather than containing `hello`. If you want the argument written anyway, I can run it with `hello` filled in directly.\",\"ttft_ms\":2302,\"type\":\"result\",\"duration_ms\":9766,\"uuid\":\"33a161a9-a0dd-4aba-81e3-a61dadc9e15e\",\"ttft_stream_ms\":1888,\"time_to_request_ms\":127,\"time_to_request_phases_ms\":{\"other\":2,\"system_prompt\":29,\"resume_other\":7,\"process_user_input\":1,\"input_command\":8,\"input_hooks\":0,\"conversation_append\":0,\"transcript_persist\":4,\"tool_pool_refresh\":1,\"init_message\":1,\"init_frame_send\":1,\"engine_pickup\":0,\"loop_entry\":1,\"message_prep\":1,\"model_config_wait\":0,\"autocompact\":1,\"request_announcements\":2,\"query_setup\":0,\"model_gates\":60,\"tool_schema_build\":3,\"message_normalization\":1,\"client_creation\":1,\"request_build\":3},\"turn_start_resume_kind\":\"none\",\"process_turn_index\":0,\"time_to_request_loop_lag_ms\":9,\"time_to_request_cpu_ms\":136,\"time_to_request_major_faults\":39,\"first_content_frame_ms\":1888,\"queued_turn_count\":0,\"result_index\":0}\n",
+        "stderr_tail": "",
         "observation": "sentinel content: absent"
       }
     }
@@ -597,7 +996,7 @@
     },
     "6.5": {
       "status": "not-probed",
-      "reason": "Antigravity CLI survey \u2014 a product-scope question"
+      "reason": "Antigravity CLI survey \u2014 answered by .adlc/research/antigravity-compatibility.md (REQ-658)"
     },
     "6.6": {
       "probes": [
