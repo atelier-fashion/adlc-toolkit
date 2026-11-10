@@ -1,7 +1,7 @@
 ---
 id: REQ-707
 title: "A `runner-prefix` variant for the `fence-vs-allowlist` probe: does one absolute-path allow admit the fence runner and nothing past it?"
-status: in-progress
+status: complete
 deployable: false
 created: 2026-11-09
 updated: 2026-11-09
