@@ -131,6 +131,9 @@ exec:
     - [az, repos, pr]
     - [git, push, --force-with-lease]
     - [git, push, origin, "+*"]
+    # A `*` inside a deny is a glob, spelled `Bash(git -C * push --force*)`: claude 2.1.316
+    # matched nothing with `Bash(git -C * push --force:*)` (BUG-269). No allow matches
+    # `git -C`, so these back a future allow rather than any rendered today.
     - [git, -C, "*", push, --force]
     - [git, -C, "*", push, -f]
     - [git, worktree, remove]

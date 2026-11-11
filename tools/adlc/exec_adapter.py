@@ -108,11 +108,17 @@ class ExecAdapter(object):
     def can_deny(self):
         return self.adapter["capabilities"].get("deny") == "yes"
 
-    def spell(self, argv, exact=False):
+    def spell(self, argv, exact=False, deny=False):
         text = " ".join(argv)
         if text.endswith("*"):
             # A token that ends in `*` is its own wildcard; `:*` after it would not parse.
             return self.block["shell_rule_exact"] % text
+        if deny and "*" in text:
+            # BUG-269: claude 2.1.316 matches no rule that holds a `*` and ends in `:*`, so
+            # `Bash(git -C * push --force:*)` let the push run. A glob deny ends in a `*` of
+            # its own, which matches the bare command and any arguments after it. Only a
+            # deny: the same spelling on an allow would admit `--forcefoo` as well.
+            return self.block["shell_rule_exact"] % (text + "*")
         template = self.block["shell_rule_exact"] if exact else self.block["shell_rule"]
         return template % text
 
@@ -207,7 +213,7 @@ class ExecAdapter(object):
             if entry["kind"] == "allow":
                 allow.append(self.spell(entry["spelling"], entry.get("exact", False)))
             elif self.can_deny:
-                deny.append(self.spell(entry["spelling"]))
+                deny.append(self.spell(entry["spelling"], deny=True))
         for argv in self.block.get("allow_extra", []):
             spelled = [t.replace("{branch}", branch) for t in argv]
             self.vet_extra(spelled, entries)

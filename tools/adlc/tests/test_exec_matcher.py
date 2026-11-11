@@ -117,7 +117,10 @@ def test_policy_fixture_with_opener_or_merge_allow_fails(adapter, policy):
     # The rendered policy itself is sound, so each problem below is the added entry's.
     assert em.policy_problems(policy, spellings) == []
     for bad in ("Bash(adlc_forge_pr_merge:*)", "Bash(. :*)", "Bash(source:*)", "Bash(if:*)",
-                "Bash(sh:*)", "Bash(eval:*)", "Bash(python3:*)", "Bash(git push origin:*)"):
+                "Bash(sh:*)", "Bash(eval:*)", "Bash(python3:*)", "Bash(git push origin:*)",
+                # BUG-269: Claude's denies do not see through `git -C <path>`, so a `git -C`
+                # allow admits `git -C <wc> reset --hard` past `Bash(git reset --hard:*)`.
+                "Bash(git -C:*)"):
         widened = {"allow": policy["allow"] + [bad], "deny": policy["deny"]}
         assert em.policy_problems(widened, spellings), bad
     # A deny-tier spelling the deny tier itself names stays refused under a wide allow.
@@ -137,11 +140,36 @@ def test_current_exec_allows_still_admitted(policy):
 
 
 def test_wildcard_rule_text():
-    rule = em.Rule("Bash(git -C * push --force:*)")
-    assert rule.matches("git -C /x push --force origin main")
-    assert not rule.matches("git -C /x push origin main")
+    """BUG-269, claude 2.1.316 under the engine's isolation flags: a `*` inside a rule is a glob
+    over paths and spaces, and a rule that holds one and ends in `:*` matched nothing."""
+    glued = em.Rule("Bash(git -C * push --force*)")
+    for cmd in ("git -C /x push --force origin main", "git -C . push --force"):
+        assert glued.matches(cmd), cmd                          # live rows y1, y2
+    assert not glued.matches("git -C /x push origin main")      # live row y4
+    spaced = em.Rule("Bash(git -C * push --force *)")
+    assert spaced.matches("git -C /x push --force origin a")    # live row w1
+    assert not spaced.matches("git -C . push --force")          # live row x1: bare ran
+    for raw in ("Bash(git -C * push --force:*)", "Bash(git -C * push:*)"):
+        rule = em.Rule(raw)
+        assert rule.inert and not rule.matches("git -C /x push --force origin a"), raw  # l4, w6
     exact = em.Rule("Bash(git push origin +*)")
     assert exact.matches("git push origin +HEAD:main") and not exact.matches("git push origin a")
+
+
+def test_a_deny_does_not_see_through_git_c():
+    """BUG-269: REQ-664's ask-tier-deny/wrapped-allow on claude 2.1.316. Under `Bash(git -C:*)`,
+    a deny on the plain spelling did not stop `git -C <wc> push --force`; the ref was pushed.
+    A deny still sees through an env prefix (row 15)."""
+    policy = {"allow": ["Bash(git -C:*)", "Bash(touch:*)"],
+              "deny": ["Bash(git push --force origin HEAD:refs/heads/x:*)", "Bash(touch d:*)"]}
+    assert em.admits(policy, "git -C /wc push --force origin HEAD:refs/heads/x")
+    assert not em.admits(policy, "X=1 touch d")
+    assert em.explain(policy, "X=1 touch d")[1] == em.REFUSE_ENV
+    # deny_hits still finds the move in its `git -C` spelling: it leans the other way.
+    assert em.deny_hits(policy, "git -C /wc push --force origin HEAD:refs/heads/x")
+    # The engine's glob deny is what refuses it (live rows y1, y2).
+    globbed = {"allow": policy["allow"], "deny": ["Bash(git -C * push --force*)"]}
+    assert not em.admits(globbed, "git -C /wc push --force origin HEAD:refs/heads/x")
 
 
 def test_deny_hits_see_through_wrappers(policy):
