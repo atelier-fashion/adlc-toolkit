@@ -14,13 +14,19 @@ is a fixture in ``tests/test_exec_matcher.py``.
   nested command (``$(…)`` or a backtick, row 5), a redirection other than to
   ``/dev/null`` (row 7) and an env prefix (rows 4, 13, 14).
 - A prefix rule ``Bash(X:*)`` admits ``X`` and ``X <anything>``, never ``X-more`` (row 12).
-- A deny matches through an env prefix (row 15).
+- A deny matches through an env prefix (row 15), but not through ``git -C <path>``: under
+  ``Bash(git -C:*)`` a deny on ``git push --force`` let ``git -C <wc> push --force`` run
+  (REQ-664's ``ask-tier-deny/wrapped-allow``, claude 2.1.316; BUG-269).
+- A ``*`` inside a rule is a glob over any characters, ``/`` and spaces included. A rule that
+  holds one and ends in ``:*`` matches nothing (BUG-269): ``Bash(git -C * push --force:*)``
+  let the push run, ``Bash(git -C * push --force*)`` refused it, bare or with arguments.
 
 Where the evidence is silent (a here-document, a subshell, a loop, a comment, a variable
 expansion) the statement's refusal is ``unmeasured``, so :func:`admits` is conservative and
-never says yes on a guess (LESSON-716). :func:`deny_hits` leans the other way: it strips env
-prefixes and ``git -C <path>`` before it compares a statement with the deny rules, so a deny
-is found in every wrapped form BR-2 names.
+never says yes on a guess (LESSON-716), and it judges a deny only where Claude was measured to
+see one. :func:`deny_hits` leans the other way: it strips env prefixes and ``git -C <path>``
+before it compares a statement with the deny rules, so a deny-tier move is found in every
+wrapped form BR-2 names, whether or not Claude's deny would catch it.
 
 Rows 16-18 are Claude's path checks (a path outside the working directories, a ``..``), not
 statement matching: this module does not model them, and BUG-265's live rows pin them.
@@ -260,8 +266,9 @@ def refusal(stmt):
 class Rule(object):
     """One ``Bash(...)`` rule: a prefix rule ``Bash(X:*)`` or an exact ``Bash(X)``.
 
-    A ``*`` inside the text is Claude's wildcard (``Bash(git -C * push --force:*)``)."""
-    __slots__ = ("raw", "text", "prefix", "_rx")
+    A ``*`` inside the text is Claude's glob (``Bash(git -C * push --force*)``). One inside a
+    prefix rule makes the rule inert: Claude matched nothing with it (BUG-269)."""
+    __slots__ = ("raw", "text", "prefix", "_rx", "inert")
 
     def __init__(self, raw):
         match = _RULE_RE.match(raw)
@@ -272,13 +279,16 @@ class Rule(object):
         self.prefix = body.endswith(":*")
         self.text = body[:-2] if self.prefix else body
         self._rx = None
-        if "*" in self.text:
+        self.inert = self.prefix and "*" in self.text
+        if "*" in self.text and not self.inert:
             pattern = ".*".join(re.escape(p) for p in self.text.split("*"))
             self._rx = re.compile("^%s%s$" % (pattern, r"(?:\s.*)?" if self.prefix else ""),
                                   re.S)
 
     def matches(self, text):
         """Whether this rule matches one statement's raw text."""
+        if self.inert:
+            return False
         if self._rx is not None:
             return bool(self._rx.match(text))
         return hr.allow_matches(tuple(self.text.split(" ")), not self.prefix, "prefix",
@@ -318,23 +328,25 @@ class Policy(object):
         return cls(allow, deny)
 
 
-def _deny_views(text):
-    """The spellings a deny is compared with: as written, without its env prefixes, and
-    without ``git -C <path>``, whitespace collapsed (row 15; BR-2's wrapped forms)."""
+def _deny_views(text, git_c=False):
+    """The spellings a deny is compared with: as written and without its env prefixes,
+    whitespace collapsed (row 15). With ``git_c``, also without ``git -C <path>``, which
+    Claude does not strip (BUG-269): only :func:`deny_hits` asks for it."""
     ws = words(text)
     views = [list(ws)]
     stripped = list(ws)
     while stripped and _ENV_RE.match(stripped[0]):
         stripped.pop(0)
     views.append(stripped)
-    for base in list(views):
+    for base in list(views) if git_c else ():
         if len(base) >= 3 and base[0] == "git" and base[1] == "-C":
             views.append(["git"] + base[3:])
     return list(dict.fromkeys(" ".join(v) for v in views if v))
 
 
-def _denied(policy, text):
-    return [rule.raw for view in _deny_views(text) for rule in policy.deny if rule.matches(view)]
+def _denied(policy, text, git_c=False):
+    return [rule.raw for view in _deny_views(text, git_c) for rule in policy.deny
+            if rule.matches(view)]
 
 
 def deny_hits(policy, cmd):
@@ -346,7 +358,7 @@ def deny_hits(policy, cmd):
     policy = Policy.of(policy)
     hits = []
     for stmt in statements(cmd):
-        for raw in _denied(policy, stmt.text):
+        for raw in _denied(policy, stmt.text, git_c=True):
             hits.append((stmt.text, raw))
     return list(dict.fromkeys(hits))
 

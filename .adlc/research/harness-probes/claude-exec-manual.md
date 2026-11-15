@@ -101,6 +101,28 @@ Scoped rules hold, in the dogfood layout (working copy at `<tk>/.worktrees/REQ-x
   to `/var/...` (macOS's symlinked spelling), so the engine emits both spellings of a root.
 - `Glob` and `Grep` are not tools in 2.1.316; their names in `allow_tools` were inert.
 
+## `git -C` and glob rules (BUG-269), 2026-11-10
+
+`claude` 2.1.316 logged in, the engine's isolation flags, a throwaway repo pushing to a
+throwaway local bare remote. A row's verdict is whether its ref reached the remote. Each row is
+one launch. `~/.claude.json` held 323 project entries before and after.
+
+- **An allow is matched against the raw text.** `Bash(git push:*)` and `Bash(git status:*)` do
+  not admit `git -C <repo> push --force …`: refused, with or without a deny or ask on
+  `git push --force`. So neither the project render nor the exec tiers, which hold no `git -C`
+  allow, reach a one-way move through the `-C` spelling.
+- **A deny is not matched through `git -C <path>`.** Under `Bash(git -C:*)`, a deny on the plain
+  spelling let the `-C` form run. This is REQ-664's `ask-tier-deny/wrapped-allow`, `fail` on
+  2.1.316, and it is why `capabilities.git_c_spelling` stays `[]`.
+- **A rule with an inner `*` and the `:*` suffix matches nothing.** `Bash(git -C * push --force:*)`
+  and `Bash(git -C * push:*)` let the push run under a `git -C` allow, with an absolute path and
+  with `.`. The same globs without `:*` refused it: `git -C *`, `git -C * push --force *`, and
+  `git push origin +*`.
+- **` *` needs an argument, a glued `*` does not.** `Bash(git -C * push --force *)` let a bare
+  `git -C . push --force` run. `Bash(git -C * push --force*)` refused it bare and with
+  arguments, and let a non-force `git -C . push origin …` through. The engine spells a glob deny
+  the glued way.
+
 ## The fence route (REQ-682), 2026-11-09
 
 ### The probes that chose it
