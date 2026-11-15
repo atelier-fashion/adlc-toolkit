@@ -206,7 +206,12 @@ capabilities:
   agent_tool_restriction: enforced
   allowlist_granularity: prefix
   committable_allowlist: "yes"
+  # No `git -C` allow is rendered. Under one, a deny on the plain spelling does not stop
+  # the `-C` form: ask-tier-deny/wrapped-allow reads `fail` on 2.1.316 (BUG-269).
   git_c_spelling: []
   never_restore: []
   deny_under_allow:
     prefix: {mechanism: confirm, result: pass, harness_version: n/a, source: grandfathered}
+    # The schema spells a failed probe `unverified`. The result file's wrapped-allow reads
+    # `fail`: the probe put the deny in permissions.deny and the `-C` push ran anyway.
+    git-c: {mechanism: deny, result: unverified, harness_version: "2.1.316 (Claude Code)", source: probe}
