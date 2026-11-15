@@ -1,10 +1,10 @@
 ---
 id: BUG-269
 title: "The exec engine's `git -C * push --force` denies were inert on claude: a glob rule that ends in `:*` matches nothing"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-10
-updated: 2026-11-10
+updated: 2026-11-15
 component: "adlc/tools/adlc/exec-adapter"
 domain: "adlc"
 stack: ["python", "yaml"]
@@ -102,3 +102,11 @@ No. `capabilities.git_c_spelling` lists the `git -C` **allow** prefixes a harnes
 ## Regression Test
 
 Regression tests: off for this project (`.adlc/config.yml` does not exist). The four new or changed tests failed against the unfixed source: `test_wildcard_rule_text`, `test_a_deny_does_not_see_through_git_c`, `test_deny_superset` and `test_glob_spelling_is_deny_only`, with 78 other tests passing. With the fix, all of them pass. The full suite (`pytest tools/adlc/tests`, throwaway `HOME` and `ADLC_HOME`) ran 1891 passed, 2 skipped and 1 failed: `test_exec_approve.py::test_rebase_mismatch_pushes_nothing`, which refused with "REQ-902 is blocked" during the 19-minute run. That test touches neither the matcher nor `spell()`, and it passes when run alone.
+
+## Deployment
+
+Merged as `723a33c` ([#264](https://github.com/atelier-fashion/adlc-toolkit/pull/264)) on 2026-11-15. Nothing to deploy, since this is toolkit code: the next `/sprint --exec` launch renders the glob denies as `Bash(git -C * push --force*)` and `Bash(git -C * push -f*)`.
+
+## Lessons
+
+- `.adlc/knowledge/lessons/LESSON-868-measure-a-deny-spelling-live.md` — measure a deny rule's spelling against the harness, and model a deny only where it was seen to refuse.
