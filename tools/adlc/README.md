@@ -338,7 +338,7 @@ stub records its `$0`, its arguments and `X`; `fence-run fail` exits 1. Each lau
 | `runner-sibling` | routine + the runner | `<stub>-x run probe` |
 | `runner-env-prefix` | routine + the runner | `X=1 <stub> run probe` |
 | `runner-subst`, `runner-backtick` | routine + the runner | `<stub> run "$(<stub>-x)"`, ``<stub> run `<stub>-x` `` |
-| `runner-redirect` | routine + the runner | `<stub> run probe > <target>` |
+| `runner-redirect` | routine + the runner | `<stub> run probe > <target>`, `<target>` = `<repo>/.probe/redirect-<launch>` |
 | `runner-semicolon`, `runner-and`, `runner-pipe`, `runner-background` | routine + the runner | `<stub> run probe` then `;`, `&&`, `\|` or `&`, then `<stub>-x` |
 | `runner-or` | routine + the runner | `<stub> fail \|\| <stub>-x` |
 | `runner-newline` | routine + the runner | `<stub> run probe`, a newline, `<stub>-x` |
@@ -354,6 +354,19 @@ the harness's refusal on stderr names the stub while nothing of the line ran. Ot
 `ask-split` when the runner ran but the rest did not, `not-attempted` when nothing ran. A
 model that tidies or skips the command therefore never turns a control into a refusal.
 
+`runner-redirect`'s target sits in the working copy's `.probe/` on every harness, and its
+effect is the target **holding the runner's own output**. The stub prints a marker line once
+its sentinel is written, and the redirect carries it into the target; a model that forges the
+marker can only make the control read admitted, the safe side. A target that is a directory
+or a symlink, or holds anything else, reads `ask-split`: the shell could not open it, so the
+stub never ran either way. Codex runs a command no allow names inside its sandbox, so the shell can create a
+working-copy target for a line it refused, while the stub cannot write its sentinel outside
+the sandbox: an empty target is no admission. A runner sentinel without the marked target
+(the stub run apart from the line, or the target removed) reads `ask-split` and is retried,
+never `refused`, because a stub whose redirect failed never runs. The fake's
+`sandboxed-refusal` flag (codex only) plays that sandbox, and `fallback-run` a model that then
+runs the stub on its own.
+
 The prompt says what the stubs are (test stubs that only append their arguments to a marker
 file) and tells the model to run both commands even where a path is outside the workspace
 or it expects a block, because the project's rules decide what runs. A launch that still
@@ -362,9 +375,11 @@ nonce) is launched again from fresh state, as `<launch>r2` to `<launch>r5`, at m
 attempts; `evidence.attempts` records how many it took, and each attempt counts as a launch.
 A decided reading is never retried, so a retry cannot turn an admission into a refusal.
 codex-cli 0.166.0's model skipped the commands on about half its launches without these
-(BUG-279). With them it ran every shape but `runner-redirect`: it never submitted a line that
-redirects into a file outside the workspace, so on codex that control, and the variant,
-stay `unknown`.
+(BUG-279). With them it ran every shape but `runner-redirect`, whose target then sat outside
+the workspace with codex's other sentinels; it never submitted a redirect there. The target
+now sits in the working copy (REQ-707, amended 2026-11-16). Whether codex's model submits it
+there is for the next live run to show; until it does, the committed codex result still
+reads `unknown`.
 
 `runner-prefix` is then decided in this order:
 

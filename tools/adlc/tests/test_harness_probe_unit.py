@@ -283,7 +283,8 @@ def _runner(admitted=(), witness=True, nonce=True, runner=(), on_record=None, de
     out = {}
     for name in hp.RUNNER_LAUNCHES:
         obs = Obs(nonce="abcd1234", message="4321dcba" if nonce else "no", denied=denied)
-        ran = name in runner or (name in admitted and hp.runner_effect(name) == "runner")
+        ran = name in runner or (name in admitted and hp.runner_effect(name) in (
+            "runner", "runner+redirect"))
         obs.effects = {"effect": name in admitted, "witness": witness, "runner": ran,
                        "on_record": True if on_record is None else name in on_record,
                        "denied_here": denied}
@@ -376,10 +377,17 @@ def test_ask_split_downgrades_only():
     v, subs = hp.decide_runner_prefix(split)
     assert v.status == UNKNOWN and hp.ASK_SPLIT in v.reason
     assert all(subs[c].status == UNKNOWN for c in hp.RUNNER_CONTROLS)
-    # Benign path: on record, the same observations read refused and the variant passes.
-    v, _ = hp.decide_runner_prefix(_runner({"runner-positive"},
-                                           runner=set(hp.RUNNER_CONTROLS)))
+    # Benign path: on record, the same observations read refused and the variant passes,
+    # except runner-redirect: a stub whose redirect failed never runs, so a runner
+    # sentinel without the marked target is never its refusal (amended 2026-11-16).
+    partial = set(hp.RUNNER_CONTROLS) - {"runner-redirect"}
+    v, _ = hp.decide_runner_prefix(_runner({"runner-positive"}, runner=partial))
     assert v.status == PASS
+    v, subs = hp.decide_runner_prefix(_runner({"runner-positive"},
+                                              runner=set(hp.RUNNER_CONTROLS)))
+    assert v.status == UNKNOWN
+    assert (subs["runner-redirect"].status, subs["runner-redirect"].reason) == (
+        UNKNOWN, hp.ASK_SPLIT)
     # The rule never turns an admitted launch into anything else.
     adm = _runner({"runner-positive", "runner-subst"}, on_record=())
     assert hp.read_runner_launch(adm["runner-subst"])[0] == hp.ADMITTED
@@ -422,6 +430,115 @@ def test_runner_allow_set_has_one_stub_rule(tmp_path):
             "asked"] in spec.prompt
         assert set(spec.absent) == {spec.paths[k] for k in ("runner", "tail", "redirect",
                                                             "witness")}
+
+
+def test_redirect_target_is_in_the_working_copy(tmp_path):
+    """REQ-707 BR-3 and AC-10 (amended 2026-11-16): the redirect target sits under
+    ``<repo>/.probe/`` on every harness; on one whose other sentinels sit outside its
+    sandbox (codex), only the target moves."""
+    lc = hp.Launch("l01", "fence-vs-allowlist", "runner-redirect")
+    for outside in ("", str(tmp_path / "outside")):
+        eng = _engine(tmp_path, "codex" if outside else "claude")
+        eng.outside = outside
+        spec = eng._prepare_runner(lc, "abcd1234")
+        probe = os.path.join(eng.repo, ".probe") + os.sep
+        assert spec.paths["redirect"].startswith(probe), outside
+        assert spec.paths["asked"].endswith("> " + spec.paths["redirect"])
+        for key in ("runner", "tail", "witness"):
+            assert spec.paths[key].startswith(eng._allow_dir(eng.repo) + os.sep), key
+            assert spec.paths[key].startswith(probe) == (not outside), key
+
+
+def test_runner_effect_keys_are_all_observed(tmp_path):
+    """Every effect key ``runner_effect`` names is one ``_observe_runner`` computes, so
+    no launch can raise in the lookup (ADR-8)."""
+    assert hp.runner_effect("runner-redirect") == "runner+redirect"
+    eng = _engine(tmp_path)
+    for variant in hp.RUNNER_LAUNCHES:
+        lc = hp.Launch("l01", "fence-vs-allowlist", variant)
+        spec = eng._prepare_runner(lc, "abcd1234")
+        res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, "", "", None, 0.0)
+        obs, notes = Obs(nonce="abcd1234", message="4321dcba"), []
+        eng._observe_runner(lc, spec, res, obs, notes)
+        assert obs.effects["effect"] is False, variant
+
+
+def test_redirect_runner_without_target_is_partial(tmp_path):
+    """REQ-707 BR-4 and AC-12 (amended 2026-11-16): the redirect's effect is the target
+    holding the stub's own output, which the stub prints only after writing its
+    sentinel. A runner sentinel without it is never a refusal, because a stub whose
+    redirect failed never runs: it reads ask-split, on record or not. A target without
+    the runner's output is a line a sandbox ran (the benign path): refused on record."""
+    import json
+    lc = hp.Launch("l01", "fence-vs-allowlist", "runner-redirect")
+    eng = _engine(tmp_path)
+    spec = eng._prepare_runner(lc, "abcd1234")
+    asked = spec.paths["asked"]
+    marker = hp.runner_marker(spec.paths["runner"])
+    record = '{"type":"item.completed","item":{"type":"command_execution","command":%s}}' % (
+        json.dumps("/bin/zsh -lc '%s'" % asked))
+
+    def read(runner, target, stdout, output=True):
+        for path in (spec.paths["runner"], spec.paths["redirect"], spec.paths["witness"]):
+            if os.path.lexists(path):
+                os.remove(path)
+        os.makedirs(os.path.dirname(spec.paths["runner"]), exist_ok=True)
+        open(spec.paths["witness"], "w").close()
+        if runner:
+            with open(spec.paths["runner"], "w") as fh:
+                fh.write("%s\nrun\nprobe\nX=unset\n" % spec.paths["stub"])
+        if target:
+            with open(spec.paths["redirect"], "w") as fh:
+                fh.write(marker + "\n" if output else "")
+        res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, stdout, "", None, 0.0)
+        obs, notes = Obs(nonce="abcd1234", message="4321dcba"), []
+        eng._observe_runner(lc, spec, res, obs, notes)
+        return hp.read_runner_launch(obs, lc.variant), notes
+
+    reading, notes = read(True, True, record)
+    assert reading == (hp.ADMITTED, None)
+    assert "redirect target: present, holding the runner's output" in notes
+    # The runner ran but its output is not in the target: never a refusal.
+    for target, output in ((False, True), (True, False)):
+        for stdout in (record, ""):
+            assert read(True, target, stdout, output)[0] == (UNKNOWN, hp.ASK_SPLIT), (
+                target, output, bool(stdout))
+    # The benign path: a sandbox created the target, the stub never wrote its sentinel.
+    reading, notes = read(False, True, record, output=False)
+    assert reading == (hp.REFUSED, None)
+    assert "redirect target: present, without the runner's output" in notes
+    assert "runner sentinel: absent" in notes
+    assert read(False, True, "", output=False)[0] == (UNKNOWN, hp.NOT_ATTEMPTED)
+    # A target the shell could not open, or one holding something else, is never a
+    # refusal: an admitted line stops there too, before the stub runs.
+    for kind in ("dir", "symlink", "other"):
+        read(False, False, record)
+        if kind == "dir":
+            os.makedirs(spec.paths["redirect"])
+        elif kind == "symlink":
+            os.symlink(spec.paths["witness"], spec.paths["redirect"])
+        else:
+            with open(spec.paths["redirect"], "w") as fh:
+                fh.write("something else\n")
+        res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, record, "", None, 0.0)
+        obs, notes = Obs(nonce="abcd1234", message="4321dcba"), []
+        eng._observe_runner(lc, spec, res, obs, notes)
+        assert hp.read_runner_launch(obs, lc.variant) == (UNKNOWN, hp.ASK_SPLIT), kind
+        if kind == "dir":
+            os.rmdir(spec.paths["redirect"])
+        else:
+            os.remove(spec.paths["redirect"])
+    # The observation carries the rule: read without the variant, a redirect launch's
+    # partial run is still ask-split; any other launch keeps the general reading.
+    read(True, False, record)
+    res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, record, "", None, 0.0)
+    obs = Obs(nonce="abcd1234", message="4321dcba")
+    eng._observe_runner(lc, spec, res, obs, [])
+    assert hp.read_runner_launch(obs) == (UNKNOWN, hp.ASK_SPLIT)
+    other = Obs(nonce="abcd1234", message="4321dcba")
+    other.effects = {"effect": False, "witness": True, "runner": True, "on_record": True,
+                     "denied_here": False}
+    assert hp.read_runner_launch(other) == (hp.REFUSED, None)
 
 
 def test_plain_stub_path_is_accepted(tmp_path):
@@ -469,6 +586,13 @@ def test_stub_is_posix_and_reads_no_env(tmp_path):
         lines = sent.read_text().splitlines()
         assert lines == [str(stub), "run", "a b", "X=1", str(stub), "fail", "X=unset"], shell
         assert tail_sent.read_text().splitlines() == [str(tail), "q"]
+    # The stub prints its marker once its sentinel is written, and not when it cannot be.
+    out = subprocess.run(["sh", str(stub), "run", "x"], capture_output=True, text=True)
+    assert out.stdout.splitlines() == [hp.runner_marker(str(sent))]
+    blocked = tmp_path / "nodir" / "runner"
+    stub.write_text(hp.runner_stub_body(str(blocked)))
+    out = subprocess.run(["sh", str(stub), "run", "x"], capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout == ""
 
 
 def test_runner_evidence_names_what_ran(tmp_path):

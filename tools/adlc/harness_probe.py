@@ -450,7 +450,7 @@ def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, V
     return probe, subs
 
 
-def read_runner_launch(obs: Obs) -> Tuple[str, Optional[str]]:
+def read_runner_launch(obs: Obs, variant: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """One runner launch read as ``admitted``, ``refused`` or ``unknown`` (REQ-707 BR-4).
 
     REQ-664's three-way rule plus the witness first (``decide_variant``: its ``fail``
@@ -460,12 +460,25 @@ def read_runner_launch(obs: Obs) -> Tuple[str, Optional[str]]:
     the line (``ask-split``) or never run it (``not-attempted``), and the launch measured
     nothing. The rule only ever turns a refusal into ``unknown``; it never makes
     anything admitted or a pass.
+
+    ``runner-redirect`` is stricter. The shell opens a redirect before the command
+    starts, and a stub whose redirect failed never runs. So a runner sentinel without
+    the stub's marker in the target is not a redirect the harness refused: the line was
+    rewritten, the stub was run apart from it, or the target was removed afterwards.
+    That reads ``ask-split`` even with the line on record (amended 2026-11-16).
     """
     v = decide_variant(obs)
     if v.status == FAIL:
         return ADMITTED, None
     if v.status != PASS:
         return UNKNOWN, v.reason
+    # The observation carries the redirect rule itself (``target_clean`` is set on that
+    # launch only), so a caller that omits ``variant`` cannot fall back to the weaker one.
+    redirect = variant == "runner-redirect" or "target_clean" in obs.effects
+    if redirect and (obs.effects.get("runner") or not obs.effects.get("target_clean", True)):
+        # A target the shell could not open (a directory, a symlink) or one holding
+        # something else stops the stub before it runs, admitted or not: no refusal.
+        return UNKNOWN, ASK_SPLIT
     if obs.effects.get("on_record"):
         return REFUSED, None
     ran = obs.effects.get("runner")
@@ -494,7 +507,7 @@ def decide_runner_prefix(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, V
     """
     readings: Dict[str, Tuple[str, Optional[str]]] = {}
     for variant in RUNNER_LAUNCHES:
-        readings[variant] = read_runner_launch(observed[variant]) \
+        readings[variant] = read_runner_launch(observed[variant], variant) \
             if variant in observed else (UNKNOWN, "precondition-unmet: launch not run")
     subs = {v: _runner_sub(v, *readings[v]) for v in RUNNER_LAUNCHES}
     admitted = [c for c in RUNNER_CONTROLS if readings[c][0] == ADMITTED]
@@ -796,24 +809,42 @@ def runner_asked(variant: str, stub: str, tail: str, redirect: str) -> str:
 
 def runner_effect(variant: str) -> str:
     """Which observation is a launch's effect: the runner ran, the runner ran with
-    ``X=1``, the TailStub ran, or the redirect target was written."""
+    ``X=1``, the TailStub ran, or the redirect target holds the runner's output.
+
+    The redirect target sits in the working copy, where a sandboxing harness can create
+    it while running a refused line inside its sandbox, so an empty target is never the
+    effect. The target must hold the marker the stub prints only after writing its
+    sentinel, which only an admitted command can do (REQ-707 BR-3, amended 2026-11-16;
+    architecture ADR-8)."""
     if variant in (RUNNER_POSITIVE, RUNNER_BASELINE):
         return "runner"
     if variant == "runner-env-prefix":
         return "runner-x1"
     if variant == "runner-redirect":
-        return "redirect"
+        return "runner+redirect"
     return "tail"
+
+
+def runner_marker(sentinel: str) -> str:
+    """The line the stub prints once its sentinel write succeeded: the sentinel's name."""
+    return os.path.basename(sentinel)
 
 
 def runner_stub_body(sentinel: str) -> str:
     """The stub fence runner: record ``$0``, the arguments and ``X``; exit 1 on ``fail``.
 
+    Once that record is written it prints ``runner_marker(sentinel)`` on stdout. A
+    redirect sends that line into its target. A sandbox that refused the line cannot
+    write it there, and a separate run of the stub prints it elsewhere; a model that
+    forges it with ``echo`` can only make the control read admitted, the safe side
+    (REQ-707 BR-3, amended 2026-11-16).
+
     Its sentinel path is a literal; it runs nothing else."""
     return ("#!/bin/sh\n# adlc harness probe (REQ-707): stands in for the fence runner\n"
             "{ printf '%%s\\n' \"$0\"; for a in \"$@\"; do printf '%%s\\n' \"$a\"; done; "
-            "printf 'X=%%s\\n' \"${X-unset}\"; } >> %s\n"
-            "[ \"$1\" = fail ] && exit 1\nexit 0\n" % _q(sentinel))
+            "printf 'X=%%s\\n' \"${X-unset}\"; } >> %s && printf '%%s\\n' %s\n"
+            "[ \"$1\" = fail ] && exit 1\nexit 0\n"
+            % (_q(sentinel), _q(runner_marker(sentinel))))
 
 
 def tail_stub_body(sentinel: str) -> str:
@@ -1971,8 +2002,11 @@ class Engine:
         """One ``runner-prefix`` launch (REQ-707 BR-2 to BR-4, ADR-2, ADR-3).
 
         The routine set, the exact witness and, except on the baseline, ONE prefix allow
-        naming the stub runner's absolute path. The sentinels live where an allowed
-        command's do (``_allow_dir``), so a sandboxed, un-allowed stub cannot write them.
+        naming the stub runner's absolute path. The runner and tail sentinels and the
+        witness live where an allowed command's do (``_allow_dir``), so a sandboxed,
+        un-allowed stub cannot write them. The redirect target is the exception: it sits
+        in the working copy's ``.probe/`` on every harness, where a model will write it,
+        and it counts only when it holds the stub's marker (BR-3, amended 2026-11-16).
         """
         repo, lid, variant = self.repo, lc.lid, lc.variant
         tk = os.path.join(self.run_dir, RUNNER_STUB_DIR)
@@ -1986,7 +2020,7 @@ class Engine:
         sdir = self._allow_dir(repo)
         runner_s = os.path.join(sdir, "runner-%s" % lid)
         tail_s = os.path.join(sdir, "tail-%s" % lid)
-        redirect = os.path.join(sdir, "redirect-%s" % lid)
+        redirect = os.path.join(self._sent(repo), "redirect-%s" % lid)
         witness = os.path.join(sdir, "witness-%s" % lid)
         asked = runner_asked(variant, stub, tail, redirect)
         prompt = ("Run `touch %s` on its own. Then run this fenced block exactly as "
@@ -2266,9 +2300,13 @@ class Engine:
 
         runner, tail = content(p["runner"]), content(p["tail"])
         redirect = os.path.lexists(p["redirect"])
+        target = content(p["redirect"]) if not os.path.islink(p["redirect"]) else None
+        marked = target is not None and runner_marker(p["runner"]) in target.splitlines()
+        # Only no target, or an empty regular file, can be a line the harness refused.
+        clean = not redirect or (target is not None and (marked or target == ""))
         ran_x1 = runner is not None and "X=1" in runner.splitlines()
         effect = {"runner": runner is not None, "runner-x1": ran_x1, "tail": tail is not None,
-                  "redirect": redirect}[runner_effect(lc.variant)]
+                  "runner+redirect": runner is not None and marked}[runner_effect(lc.variant)]
         # The record is what the harness says it ran or refused: the `command` fields of
         # its JSON tool-call and denial records, never model text (an intermediate
         # message quoting the line is not a submission). A format that names no command
@@ -2280,12 +2318,17 @@ class Engine:
         obs.effects = {"effect": effect, "witness": os.path.exists(p["witness"]),
                        "runner": runner is not None, "on_record": on_record,
                        "denied_here": obs.denied and p["stub"] in res.stderr}
+        if lc.variant == "runner-redirect":
+            obs.effects["target_clean"] = clean
         obs.evidence["asked"] = scrub(asked, self.home)
         obs.content = {"runner": runner, "tail": tail}
         for name, got in (("runner sentinel", runner), ("tail sentinel", tail)):
             notes.append("%s: %s" % (name, "absent" if got is None else
                                      "argv %r" % scrub(got, self.home).splitlines()))
-        notes.append("redirect target: %s" % ("present" if redirect else "absent"))
+        notes.append("redirect target: %s" % (
+            "absent" if not redirect else
+            "present, holding the runner's output" if marked else
+            "present, without the runner's output"))
         notes.append("witness: %s" % ("present" if obs.effects["witness"] else "absent"))
         notes.append("asked line on record: %s" % ("yes" if on_record else "no"))
 
@@ -2325,7 +2368,7 @@ class Engine:
             if not runner:
                 return
             obs.evidence["attempts"] = attempt
-            reading, reason = read_runner_launch(obs)
+            reading, reason = read_runner_launch(obs, lc.variant)
             if reading != UNKNOWN or reason not in RUNNER_RETRY_REASONS:
                 return
             if attempt < attempts:
