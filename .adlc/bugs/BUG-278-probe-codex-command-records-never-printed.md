@@ -1,7 +1,7 @@
 ---
 id: BUG-278
 title: "`adlc harness probe codex` can never record a refusal: it launches codex without `--json`, so the `command_execution` records the runner-prefix oracle reads are never printed"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-16
 updated: 2026-11-16
@@ -105,3 +105,14 @@ A failing-first test was still written:
 With the corrected fake and without the fix it fails (`runner-prefix` reads `unknown`, and
 the launch has no `--json`), as does the existing
 `test_runner_prefix_per_statement_passes[codex]`; with the fix both pass.
+
+## Deployment
+
+Merged as `e0e17ab` ([#267](https://github.com/atelier-fashion/adlc-toolkit/pull/267)) on
+2026-11-16. Nothing to deploy, since this is toolkit code. The committed codex probe result
+still holds the 2026-10-31 run; a full run on the merged commit records the new one.
+
+## Lessons
+
+- LESSON-869: a fake CLI must print a record format only under the flag the real CLI needs
+  for it.
