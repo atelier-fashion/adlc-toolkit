@@ -472,8 +472,10 @@ def read_runner_launch(obs: Obs, variant: Optional[str] = None) -> Tuple[str, Op
         return ADMITTED, None
     if v.status != PASS:
         return UNKNOWN, v.reason
-    if variant == "runner-redirect" and (obs.effects.get("runner")
-                                         or not obs.effects.get("target_clean", True)):
+    # The observation carries the redirect rule itself (``target_clean`` is set on that
+    # launch only), so a caller that omits ``variant`` cannot fall back to the weaker one.
+    redirect = variant == "runner-redirect" or "target_clean" in obs.effects
+    if redirect and (obs.effects.get("runner") or not obs.effects.get("target_clean", True)):
         # A target the shell could not open (a directory, a symlink) or one holding
         # something else stops the stub before it runs, admitted or not: no refusal.
         return UNKNOWN, ASK_SPLIT

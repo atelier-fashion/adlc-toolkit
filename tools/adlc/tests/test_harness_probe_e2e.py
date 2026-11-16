@@ -686,8 +686,8 @@ def test_sandboxed_redirect_target_is_not_admission(tmp_path):
     redirect = fence["sub_results"]["runner-redirect"]
     obs = redirect["evidence"]["observation"]
     assert (redirect["status"], redirect["reason"]) == ("pass", "refused")
-    assert "redirect target: present" in obs and "runner sentinel: absent" in obs, obs
-    assert "asked line on record: yes" in obs, obs
+    assert "redirect target: present, without the runner's output" in obs, obs
+    assert "runner sentinel: absent" in obs and "asked line on record: yes" in obs, obs
     rp = fence["sub_results"][hp.RUNNER_PREFIX]
     assert (rp["status"], rp["evidence"]["boundary"], rp["evidence"]["admitted"]) == (
         "pass", "measured", [])
@@ -697,7 +697,8 @@ def test_sandboxed_redirect_target_is_not_admission(tmp_path):
     redirect = whole["sub_results"]["runner-redirect"]
     obs = redirect["evidence"]["observation"]
     assert redirect["reason"] == "admitted"
-    assert "redirect target: present" in obs and "runner sentinel: argv" in obs, obs
+    assert "redirect target: present, holding the runner's output" in obs, obs
+    assert "runner sentinel: argv" in obs, obs
 
 
 def test_fallback_stub_run_is_not_a_redirect_admission(tmp_path):

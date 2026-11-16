@@ -528,11 +528,17 @@ def test_redirect_runner_without_target_is_partial(tmp_path):
             os.rmdir(spec.paths["redirect"])
         else:
             os.remove(spec.paths["redirect"])
-    # Read without the variant, as before, the partial run keeps its old reading.
+    # The observation carries the rule: read without the variant, a redirect launch's
+    # partial run is still ask-split; any other launch keeps the general reading.
+    read(True, False, record)
+    res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, record, "", None, 0.0)
     obs = Obs(nonce="abcd1234", message="4321dcba")
-    obs.effects = {"effect": False, "witness": True, "runner": True, "on_record": True,
-                   "denied_here": False}
-    assert hp.read_runner_launch(obs) == (hp.REFUSED, None)
+    eng._observe_runner(lc, spec, res, obs, [])
+    assert hp.read_runner_launch(obs) == (UNKNOWN, hp.ASK_SPLIT)
+    other = Obs(nonce="abcd1234", message="4321dcba")
+    other.effects = {"effect": False, "witness": True, "runner": True, "on_record": True,
+                     "denied_here": False}
+    assert hp.read_runner_launch(other) == (hp.REFUSED, None)
 
 
 def test_plain_stub_path_is_accepted(tmp_path):
