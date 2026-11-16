@@ -839,9 +839,11 @@ def test_runner_launches_in_dry_run(tmp_path):
 def test_runner_state_fresh_before_each_launch(tmp_path, monkeypatch, h):
     """AC-8: after each reset no stub and no runner sentinel is left from before. Both
     sentinel directories are scanned: on codex the redirect target sits in the working
-    copy's ``.probe/`` and the others outside (REQ-707 BR-3, amended 2026-11-16)."""
-    sb = Sandbox(tmp_path, flags=("per-statement",))
-    seen = []
+    copy's ``.probe/`` and the others outside (REQ-707 BR-3, amended 2026-11-16). On codex
+    ``sandboxed-refusal`` makes the refused redirect line create its target mid-run, so the
+    scan of ``.probe/`` has a file it must not find on the next launch."""
+    sb = Sandbox(tmp_path, flags=("per-statement", "sandboxed-refusal"))
+    seen, paths = [], {}
 
     def patch():
         def spy(self, lc, spec):
@@ -851,6 +853,8 @@ def test_runner_state_fresh_before_each_launch(tmp_path, monkeypatch, h):
                 left += [n for n in (os.listdir(sent) if os.path.isdir(sent) else [])
                          if n.split("-")[0] in ("runner", "tail", "redirect", "witness")]
             seen.append((lc.variant, os.path.exists(tk), left))
+            if lc.variant == "runner-redirect":
+                paths.update(spec.paths, probe=self._sent(self.repo), outside=self.outside)
         monkeypatch.setattr(hp.Engine, "_after_reset", spy)
 
     code, result = _engine_run(monkeypatch, sb, [h, "--only", "fence-vs-allowlist"],
@@ -859,5 +863,13 @@ def test_runner_state_fresh_before_each_launch(tmp_path, monkeypatch, h):
     fence = [v for v, _tk, _left in seen if v in hp.FENCE_VARIANTS + hp.RUNNER_LAUNCHES]
     assert code == 0 and len(fence) == 16
     assert all(not tk and not left for _variant, tk, left in seen), seen
-    assert result["probes"]["fence-vs-allowlist"]["sub_results"][hp.RUNNER_PREFIX][
-        "status"] == "pass"
+    subs = result["probes"]["fence-vs-allowlist"]["sub_results"]
+    assert subs[hp.RUNNER_PREFIX]["status"] == "pass"
+    assert paths["redirect"].startswith(paths["probe"] + os.sep)
+    if h == "codex":
+        # The positive control: the target was written, and the next reset cleared it.
+        assert "redirect target: present" in subs["runner-redirect"]["evidence"][
+            "observation"]
+        # AC-10 through the real run dir: only the target moved into the working copy.
+        for key in ("runner", "tail", "witness"):
+            assert paths["outside"] and paths[key].startswith(paths["outside"]), key

@@ -86,7 +86,8 @@ act at all?
 
 ### ADR-4: one per-launch rule, then the variant rule
 
-On Codex the sentinels sit outside the writable roots, where `ask-tier-deny` puts its own.
+On Codex the sentinels sit outside the writable roots, where `ask-tier-deny` puts its own
+(the redirect target excepted, ADR-8).
 An un-allowed tail still runs there, sandboxed, but cannot write its sentinel, so it reads
 refused. That is the boundary the runner needs on Codex: the question is whether the
 runner's allow carries a tail out of the sandbox, not whether a sandboxed command can run.

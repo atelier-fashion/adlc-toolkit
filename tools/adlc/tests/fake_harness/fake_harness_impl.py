@@ -35,9 +35,10 @@ and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measu
 ``witness-only`` (a model that never runs the asked fence), ``skip-first-attempt`` (a model
 that runs nothing on a runner launch's first attempt and does the work on a retry, as
 codex-cli 0.166.0's model often did; BUG-279), ``sandboxed-refusal`` (codex only: a
-refused command still runs in an emulated sandbox where only the working copy is
-writable, so a redirect target inside it is created and nothing else runs, as Codex runs a
-command no allow names; REQ-707 BR-8, amended 2026-11-16), ``fallback-run`` (with
+refused command's working-copy redirect targets are created, as Codex's sandbox would let
+the shell create them, and nothing else runs: faithful for the runner stubs, whose own
+writes all go outside the working copy on this profile, and not a general sandbox;
+REQ-707 BR-8, amended 2026-11-16), ``fallback-run`` (with
 ``sandboxed-refusal``: after a refused runner line the model runs ``fence-run run probe``
 on its own); and ``untrusted-project-allow``
 (claude 2.1.316: a project ``.claude/settings.json``'s allows are dropped in an untrusted
