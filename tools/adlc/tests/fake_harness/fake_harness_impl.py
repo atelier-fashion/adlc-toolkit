@@ -32,7 +32,9 @@ Flags modify a scenario: ``claim-only``, ``main-only``, ``needs-writable-roots``
 and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measured
 ``claude``), ``split-ask`` (a model that tidies the asked line down to its head),
 ``first-statement-only`` (a harness that records the whole line, then runs its head) and
-``witness-only`` (a model that never runs the asked fence); and ``untrusted-project-allow``
+``witness-only`` (a model that never runs the asked fence), ``skip-first-attempt`` (a model
+that runs nothing on a runner launch's first attempt and does the work on a retry, as
+codex-cli 0.166.0's model often did; BUG-279); and ``untrusted-project-allow``
 (claude 2.1.316: a project ``.claude/settings.json``'s allows are dropped in an untrusted
 folder, while ``--settings`` allows, project denies and hooks still load; BUG-267).
 
@@ -382,6 +384,8 @@ def asked_commands(prompt, cwd, harness, cfg):
         head, _, rest = prompt.partition("```sh\n")
         fence = rest.split("```", 1)[0].rstrip("\n")
         asked = [(c, c) for c in re.findall(r"[Rr]un `([^`]+)`", head)]
+        if "skip-first-attempt" in FLAGS and re.search(r"witness-l\d+`", head):
+            return []   # a model that replies without running anything (BUG-279)
         if "witness-only" in FLAGS:
             return asked
         if "split-ask" in FLAGS:
