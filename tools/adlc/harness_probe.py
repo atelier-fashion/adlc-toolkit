@@ -2144,7 +2144,11 @@ class Engine:
             argv = [b, "-p", ""] + tail_ if mode == "with-prompt-flag" else \
                 [b] + tail_ if mode == "without-prompt-flag" else [b, "-p", p] + tail_
         elif h == "codex":
-            base = [b, "exec", "--sandbox", "workspace-write", "-C", spec.cwd, "-o", lastmsg]
+            # --json: codex prints its command_execution records, which a runner refusal
+            # needs on record, only as JSONL events (BUG-278). The final message still
+            # comes from -o.
+            base = [b, "exec", "--json", "--sandbox", "workspace-write", "-C", spec.cwd,
+                    "-o", lastmsg]
             argv = base + ["-"] if mode == "with-prompt-flag" else \
                 base if mode == "without-prompt-flag" else base + [p]
         elif h == "gemini":

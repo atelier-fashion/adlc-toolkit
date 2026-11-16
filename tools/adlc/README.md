@@ -368,7 +368,9 @@ outside their disjunction, so the probe's own `status` means what it always mean
 `fence-vs-allowlist` run is sixteen launches; the pre-launch count shows them.
 
 The record shapes are known for `claude` (`permission_denials`) and Codex
-(`command_execution` items) only. The fake harness's denial records for the other profiles
+(`command_execution` items) only. Codex prints those items only as `codex exec --json`
+events, so the probe launches codex with `--json` and reads the final message from `-o`
+(BUG-278: without it no codex refusal was ever on record). The fake harness's denial records for the other profiles
 are invented. On a real harness whose output names no command, every refusal reads `unknown`
 until a live run shows where it records one.
 
