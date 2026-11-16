@@ -34,7 +34,10 @@ and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measu
 ``first-statement-only`` (a harness that records the whole line, then runs its head) and
 ``witness-only`` (a model that never runs the asked fence), ``skip-first-attempt`` (a model
 that runs nothing on a runner launch's first attempt and does the work on a retry, as
-codex-cli 0.166.0's model often did; BUG-279); and ``untrusted-project-allow``
+codex-cli 0.166.0's model often did; BUG-279), ``sandboxed-refusal`` (codex only: a
+refused command still runs in an emulated sandbox where only the working copy is
+writable, so a redirect target inside it is created and nothing else runs, as Codex runs a
+command no allow names; REQ-707 BR-8, amended 2026-11-16); and ``untrusted-project-allow``
 (claude 2.1.316: a project ``.claude/settings.json``'s allows are dropped in an untrusted
 folder, while ``--settings`` allows, project denies and hooks still load; BUG-267).
 
@@ -439,6 +442,26 @@ def gemini_skill(prompt, cfg, harness):
     return []
 
 
+REDIRECT_RE = re.compile(r"(?<![0-9&<>])>>?[ \t]*([^ \t\n;&|<>]+)")
+
+
+def sandboxed_writes(command, cwd):
+    """``sandboxed-refusal``: Codex runs a refused command inside its sandbox, where only
+    the working copy is writable. The shell creates each redirect target that resolves
+    inside ``cwd`` before the command starts; nothing else runs, because the stubs write
+    absolute paths outside the working copy on this profile (REQ-707 BR-8, ADR-8)."""
+    root = os.path.realpath(cwd)
+    for target in REDIRECT_RE.findall(command):
+        if target == "/dev/null":
+            continue
+        path = os.path.join(cwd, target) if not os.path.isabs(target) else target
+        parent = os.path.realpath(os.path.dirname(path) or cwd)
+        if parent != root and not parent.startswith(root + os.sep):
+            continue
+        os.makedirs(parent, exist_ok=True)
+        open(os.path.join(parent, os.path.basename(path)), "a").close()
+
+
 def run_command(match_text, command, cwd, cfg, harness, records, aborted):
     if "first-statement-only" in FLAGS and len(statements(command)) > 1:
         head = statements(command)[0]
@@ -457,6 +480,8 @@ def run_command(match_text, command, cwd, cfg, harness, records, aborted):
         return
     if any(d != "run" for d in decisions):
         records.append({"command": command, "decision": "refused"})
+        if "sandboxed-refusal" in FLAGS and harness == "codex":
+            sandboxed_writes(command, cwd)
         return
     if command.startswith("git push") and "needs-writable-roots" in FLAGS and harness == "codex":
         branch = subprocess.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],

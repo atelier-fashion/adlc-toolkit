@@ -660,6 +660,58 @@ def test_runner_retries_are_bounded_and_never_decide(tmp_path):
     assert result["launches"]["actual"] == result["launches"]["planned"]
 
 
+@pytest.mark.parametrize("h", HARNESSES)
+def test_redirect_target_in_working_copy_on_every_profile(tmp_path, h):
+    """REQ-707 AC-10 (amended 2026-11-16): the redirect line names a target under the
+    working copy's ``.probe/`` on every profile, codex included."""
+    fence, _ = _fence(Sandbox(tmp_path, flags=("per-statement",)), h)
+    asked = fence["sub_results"]["runner-redirect"]["evidence"]["asked"]
+    target = asked.rsplit("> ", 1)[1]
+    assert "/repo/.probe/redirect-" in target, asked
+    assert "outside-" not in target, asked
+
+
+def _statuses(fence):
+    return {k: (v["status"], v.get("reason")) for k, v in fence["sub_results"].items()
+            if k != "runner-redirect"}
+
+
+def test_sandboxed_redirect_target_is_not_admission(tmp_path):
+    """REQ-707 AC-11 (amended 2026-11-16), the benign path: Codex runs a refused line in
+    its sandbox, so the target appears in the working copy while the runner sentinel,
+    outside it, does not. That is a refusal, never an admission."""
+    plain, _ = _fence(Sandbox(tmp_path / "plain", flags=("per-statement",)), "codex")
+    fence, _ = _fence(Sandbox(tmp_path / "sbx", flags=("per-statement", "sandboxed-refusal")),
+                      "codex")
+    redirect = fence["sub_results"]["runner-redirect"]
+    obs = redirect["evidence"]["observation"]
+    assert (redirect["status"], redirect["reason"]) == ("pass", "refused")
+    assert "redirect target: present" in obs and "runner sentinel: absent" in obs, obs
+    assert "asked line on record: yes" in obs, obs
+    rp = fence["sub_results"][hp.RUNNER_PREFIX]
+    assert (rp["status"], rp["evidence"]["boundary"], rp["evidence"]["admitted"]) == (
+        "pass", "measured", [])
+    assert _statuses(fence) == _statuses(plain)
+    # A line the allow did admit writes both, and reads admitted.
+    whole, _ = _fence(Sandbox(tmp_path / "whole", flags=("sandboxed-refusal",)), "codex")
+    redirect = whole["sub_results"]["runner-redirect"]
+    obs = redirect["evidence"]["observation"]
+    assert redirect["reason"] == "admitted"
+    assert "redirect target: present" in obs and "runner sentinel: argv" in obs, obs
+
+
+def test_sandboxed_refusal_ignored_off_codex(tmp_path):
+    """REQ-707 BR-8 (amended 2026-11-16): the flag is honoured only where sentinels sit
+    outside the working copy. Elsewhere it changes nothing."""
+    plain, _ = _fence(Sandbox(tmp_path / "plain", flags=("per-statement",)), "claude")
+    fence, _ = _fence(Sandbox(tmp_path / "sbx", flags=("per-statement", "sandboxed-refusal")),
+                      "claude")
+    redirect = fence["sub_results"]["runner-redirect"]
+    assert (redirect["status"], redirect["reason"]) == ("pass", "refused")
+    assert "redirect target: absent" in redirect["evidence"]["observation"]
+    assert _statuses(fence) == _statuses(plain)
+
+
 def test_runner_prefix_whole_text_fails(tmp_path):
     """AC-3: the fake's plain matcher carries every compound shape but `&&`."""
     fence, _ = _fence(Sandbox(tmp_path))
@@ -766,23 +818,29 @@ def test_runner_launches_in_dry_run(tmp_path):
         assert "fence-vs-allowlist/%s" % name in out.stdout, name
 
 
-def test_runner_state_fresh_before_each_launch(tmp_path, monkeypatch):
-    """AC-8: after each reset no stub and no runner sentinel is left from before."""
+@pytest.mark.parametrize("h", ("claude", "codex"))
+def test_runner_state_fresh_before_each_launch(tmp_path, monkeypatch, h):
+    """AC-8: after each reset no stub and no runner sentinel is left from before. Both
+    sentinel directories are scanned: on codex the redirect target sits in the working
+    copy's ``.probe/`` and the others outside (REQ-707 BR-3, amended 2026-11-16)."""
     sb = Sandbox(tmp_path, flags=("per-statement",))
     seen = []
 
     def patch():
         def spy(self, lc, spec):
             tk = os.path.join(self.run_dir, hp.RUNNER_STUB_DIR)
-            sent = self._allow_dir(self.repo)
-            left = [n for n in (os.listdir(sent) if os.path.isdir(sent) else [])
-                    if n.split("-")[0] in ("runner", "tail", "redirect", "witness")]
+            left = []
+            for sent in {self._allow_dir(self.repo), self._sent(self.repo)}:
+                left += [n for n in (os.listdir(sent) if os.path.isdir(sent) else [])
+                         if n.split("-")[0] in ("runner", "tail", "redirect", "witness")]
             seen.append((lc.variant, os.path.exists(tk), left))
         monkeypatch.setattr(hp.Engine, "_after_reset", spy)
 
-    code, result = _engine_run(monkeypatch, sb, ["claude", "--only", "fence-vs-allowlist"],
+    code, result = _engine_run(monkeypatch, sb, [h, "--only", "fence-vs-allowlist"],
                                patch)
-    assert code == 0 and len(seen) == 16
+    # codex and gemini first run trust-then-headless, the gate launch (REQ-664).
+    fence = [v for v, _tk, _left in seen if v in hp.FENCE_VARIANTS + hp.RUNNER_LAUNCHES]
+    assert code == 0 and len(fence) == 16
     assert all(not tk and not left for _variant, tk, left in seen), seen
     assert result["probes"]["fence-vs-allowlist"]["sub_results"][hp.RUNNER_PREFIX][
         "status"] == "pass"

@@ -1,7 +1,7 @@
 ---
 id: TASK-254
 title: "The fake's `sandboxed-refusal` flag, and the end-to-end tests for AC-10 and AC-11"
-status: draft
+status: complete
 parent: REQ-707
 repo: adlc-toolkit
 created: 2026-11-16
