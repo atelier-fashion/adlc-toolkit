@@ -7,7 +7,7 @@ Everything goes into the two files REQ-664 built. No new module is added.
 | File | Change |
 |---|---|
 | `tools/adlc/harness_probe.py` | the thirteen runner launches in `_VARIANTS["fence-vs-allowlist"]`; `_prepare_runner`; the runner branch of `_observe`; `decide_runner_prefix`; the runner branch of `_decide_probe` |
-| `tools/adlc/tests/fake_harness/fake_harness_impl.py` | the `per-statement`, `split-ask` and `first-statement-only` flags; `asked_commands` learns the witness-then-fence prompt |
+| `tools/adlc/tests/fake_harness/fake_harness_impl.py` | the `per-statement`, `split-ask` and `first-statement-only` flags; `asked_commands` learns the witness-then-fence prompt; `sandboxed-refusal` (amendment, ADR-8) |
 | `tools/adlc/tests/test_harness_probe_unit.py` | `decide_runner_prefix` over hand-built `Obs` maps; stub content; allow sets |
 | `tools/adlc/tests/test_harness_probe_e2e.py` | the fake scenarios of AC-2 to AC-8, on all six profiles |
 | `tools/adlc/README.md`, `README.md`, `CHANGELOG.md` | BR-11 |
@@ -58,9 +58,10 @@ make the old answer unreadable.
   `runner-or` needs, because `a || b` runs `b` only when `a` fails. This mirrors how the existing sentinels are named, so
   the stale-state check already covers them. Each stub's body names only its own
   sentinel path, as a literal, and reads no environment variable.
-- `runner-redirect`'s target is a third path under `.probe/`, the "redirect sentinel". It
-  is distinct from both stub sentinels, so a redirect that wrote it is told apart from a
-  stub that ran.
+- `runner-redirect`'s target is a third path, `<repo>/.probe/redirect-<launch>`, on every
+  harness, including Codex, whose other sentinels sit outside its sandbox (amended
+  2026-11-16, ADR-8). It is distinct from both stub sentinels. It is never evidence on its
+  own: the redirect's effect is the runner sentinel and the target together.
 - The paths are checked against `_SAFE_PATH` in `_prepare_runner` before the first launch,
   and a failure raises `ProbeError`, as an unquotable temp root does today.
 
@@ -101,7 +102,8 @@ read as follows:
 
 For `runner-positive` and `runner-baseline`, the effect is the runner sentinel. For the
 controls, it is the sentinel BR-3's table names. `runner-env-prefix`'s effect is a runner
-sentinel holding `X=1`.
+sentinel holding `X=1`. `runner-redirect`'s effect is the runner sentinel and the redirect
+target, both present (ADR-8).
 
 Any launch that `decide_variant` reads as refused is then held to REQ-707 BR-4 (as amended
 in implementation), in `read_runner_launch(obs)`. It stays refused only if:
@@ -136,7 +138,7 @@ Verdict row of the System Model).
 `_observe`'s runner branch adds three things to the launch's evidence:
 
 - the contents of each stub sentinel that exists (its argv, scrubbed with `scrub`);
-- which of the runner, tail and redirect sentinels exist;
+- which of the runner and tail sentinels and the redirect target exist;
 - whether the witness exists.
 
 The harness's own tool record is already in `stdout_tail` and `stderr_tail` via
@@ -172,6 +174,8 @@ Two more flags play the model habits that BR-4's `ask-split` rule guards against
   its first statement. It is a harness that refuses the tail but runs the head.
 - The fake imports nothing from `exec_matcher` (REQ-707 BR-8, AC-8). A test asserts it
   by reading the module's import lines.
+- `sandboxed-refusal` (amended 2026-11-16, ADR-8) plays Codex running a refused command
+  inside its sandbox. See ADR-8 for what it does.
 
 `asked_commands` learns one more prompt shape: backticked commands followed by a fenced
 block. It yields the backticked commands and then the whole fence as one asked command,
@@ -190,6 +194,50 @@ shows it before any launch.
 The first Open Question, whether to add `.` and `source` launches, is answered no.
 REQ-662 BR-3 bans those openers on every harness, so no gate reads them.
 
+### ADR-8: the redirect target is inside the working copy (amendment, 2026-11-16)
+
+Live Codex 0.166.0 runs never submitted `runner-redirect` (BUG-279). Codex's sentinels sit
+outside its sandbox (`has_allow_required_path`), and so did the redirect target, a file
+the model will not write to. The target moves into `<repo>/.probe/` on every harness.
+
+**Where.** `_prepare_runner` builds the target from `self._sent(repo)`, not from `sdir`
+(`_allow_dir`). The runner sentinel, tail sentinel and witness stay on `sdir`. This is the
+split `trust-then-headless` already makes between its hook sentinel and its allow target.
+`_reset`'s `git clean -x` and its `makedirs(_sent(cwd))` already clear and recreate
+`<repo>/.probe/` before every attempt, retries included, so the fresh-state rule needs no
+new code. `.probe/` is in `.git/info/exclude`.
+
+**The effect.** A sandboxing harness runs a refused command inside its sandbox. The shell
+then creates a working-copy target before the stub starts, but the stub cannot write its
+own sentinel outside the sandbox. So the target alone is no effect. `runner_effect` returns
+a new key, `"runner+redirect"`, for `runner-redirect`, and `_observe_runner`'s effect
+table adds it as `runner is not None and redirect`. Every other key is unchanged, and the
+table names every value `runner_effect` can return, so a lookup cannot raise.
+`read_runner_launch` is unchanged:
+- runner present, target absent: an absent effect. With the line on record it reads
+  refused (the harness ran it without its redirect); off record, `ask-split`.
+- target present, runner absent: an absent effect, read like any refusal.
+
+The observation note `redirect target: present|absent` is unchanged.
+
+**Residual.** A model can produce both files without submitting the asked line: it runs
+the allowed stub on its own, then writes the target with a separate allowed `touch`. That
+reads admitted, so `runner-prefix` reads `fail`. This is a false `fail`, the safe side, and
+the same residual every other control already has when a model runs the tail as its own
+command. BR-6's recorded command line is how a reader tells the two apart. The amendment
+does not add a record requirement to admission.
+
+**The fake.** `sandboxed-refusal` acts in `run_command` only when the harness is `codex`.
+Like `needs-writable-roots`, it keys on the harness name, because the fake imports nothing
+from the probe. When a command would be refused, the fake still records it, as a
+`command_execution` item under `--json`, so the asked line is on record. It then emulates
+the sandbox: each output redirection whose target resolves inside the launch's working
+copy is created as an empty file, and nothing else runs. The stubs' own writes go to
+absolute paths outside the working copy on this profile, so the emulation does not run
+them. The fake has no OS sandbox, and this emulation is exactly the property AC-11 needs:
+a target can appear without the runner sentinel. On any other profile the flag is
+ignored, as BR-8 says.
+
 ## Testing
 
 | Layer | Covers |
@@ -197,6 +245,7 @@ REQ-662 BR-3 bans those openers on every harness, so no gate reads them.
 | unit | `decide_runner_prefix` over hand-built `Obs` maps: every row of BR-5, including `runner-baseline` `unknown`, a single admitted control, and a control `unknown` with none admitted; `read_runner_launch`'s `ask-split` rule (runner present without the asked line on record, raw and JSON-escaped forms, the `X=unset` case); stub bodies; the allow set of each launch holding exactly one rule that names the stub; `_SAFE_PATH` refusal |
 | e2e (fake) | AC-2 (`perform` + `per-statement`, six profiles); AC-3 (`perform`); AC-4 (`split-ask`, `first-statement-only`); AC-5 (`runs-all`, a withheld runner allow, `refuse`, `no-witness`, `refuse-silent`); AC-7 (probe-level status unchanged, `merge_only` tests unchanged); AC-8 (fresh state, cleanup, the user's `fence-run` untouched, no `exec_matcher` import) |
 | lint | `bash tools/lint-skills/check.sh`; `sh partials/tests/run.sh` under four shells (no partial changes, run for AC-9) |
+| amendment (2026-11-16) | AC-10 (every profile: the asked redirect line names `<repo>/.probe/`; on codex the runner, tail and witness stay outside); AC-11 (codex + `per-statement` + `sandboxed-refusal`: `runner-redirect` refused with the target present and the runner absent, `runner-prefix` `pass`; plain `perform`: admitted with both; the flag ignored on a non-codex profile); AC-12 (unit: runner present without the target is refused on record, `ask-split` off it, never admitted); the fresh-state spy also scans `_sent(repo)` |
 
 REQ-664's existing AC-7 test (`test_harness_probe_e2e.py:270`) asserts the three
 variant names. It is updated to assert the three plus `runner-prefix` and the thirteen
