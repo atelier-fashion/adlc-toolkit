@@ -1,7 +1,7 @@
 ---
 id: TASK-255
 title: "Docs for the redirect amendment: the probe README and the CHANGELOG"
-status: draft
+status: complete
 parent: REQ-707
 repo: adlc-toolkit
 created: 2026-11-16

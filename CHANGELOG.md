@@ -553,6 +553,14 @@ is cut per `RELEASING.md`.
 
 ### Changed
 
+- **`runner-redirect`'s target moves into the working copy (REQ-707, amended 2026-11-16).**
+  On codex the target sat outside the sandbox with the probe's other sentinels, and the
+  model never submits a redirect there (BUG-279), so the control could not be measured. It
+  now sits under `<repo>/.probe/` on every harness, and the launch's effect is the runner
+  sentinel and the target together: codex runs a refused line inside its sandbox, where the
+  shell can still create a working-copy target, while the stub cannot write its sentinel
+  outside it. The fake gains `sandboxed-refusal` (codex only) to play that sandbox. The
+  committed codex result predates the change; the next live run records it.
 - **The framework's restraint sentence (REQ-655).** It now reads "do not create, edit, delete
   or write files, and do not run commands that do, unless your instructions say to", and
   fires only when `tools:` omits both Edit and Write. `harness_render.read_text` keeps line
@@ -606,8 +614,9 @@ is cut per `RELEASING.md`.
   launch that measured nothing is retried from fresh state, up to five attempts, with
   `evidence.attempts` recorded. A decided reading is never retried. Pinning codex's
   reasoning effort to `medium` was tried live and did not help. Live, 12 of the 13 runner
-  launches now decide on codex; `runner-redirect` does not, because the model never submits
-  a redirect into a file outside the workspace.
+  launches now decide on codex; `runner-redirect` did not, because the model never submitted
+  a redirect into a file outside the workspace, which is where its target then sat (see
+  REQ-707's amendment under Changed).
 - **`adlc harness probe codex` can now record a refusal (BUG-278).** A `runner-prefix`
   control reads `refused` only when the asked line is in the harness's own command
   records. Codex prints its `command_execution` records only under `codex exec --json`,
