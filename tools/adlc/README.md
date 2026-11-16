@@ -354,6 +354,18 @@ the harness's refusal on stderr names the stub while nothing of the line ran. Ot
 `ask-split` when the runner ran but the rest did not, `not-attempted` when nothing ran. A
 model that tidies or skips the command therefore never turns a control into a refusal.
 
+The prompt says what the stubs are (test stubs that only append their arguments to a marker
+file) and tells the model to run both commands even where a path is outside the workspace
+or it expects a block, because the project's rules decide what runs. A launch that still
+measured nothing (the witness absent, the line never submitted or tidied, or no reversed
+nonce) is launched again from fresh state, as `<launch>r2` to `<launch>r5`, at most five
+attempts; `evidence.attempts` records how many it took, and each attempt counts as a launch.
+A decided reading is never retried, so a retry cannot turn an admission into a refusal.
+codex-cli 0.166.0's model skipped the commands on about half its launches without these
+(BUG-279). With them it ran every shape but `runner-redirect`: it never submitted a line that
+redirects into a file outside the workspace, so on codex that control, and the variant,
+stay `unknown`.
+
 `runner-prefix` is then decided in this order:
 
 1. **Positive.** `runner-positive` refused is `fail`; `unknown` is `unknown`.

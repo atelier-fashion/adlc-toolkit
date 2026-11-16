@@ -599,6 +599,15 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`runner-prefix` launches retry when the model did nothing (BUG-279).** On codex-cli
+  0.166.0 the model skipped the asked commands on about half its launches, saying they
+  wrote outside the workspace, so `runner-prefix` stayed `unknown`. The prompt now says
+  what the stubs are and tells the model to run both commands whatever it expects, and a
+  launch that measured nothing is retried from fresh state, up to five attempts, with
+  `evidence.attempts` recorded. A decided reading is never retried. Pinning codex's
+  reasoning effort to `medium` was tried live and did not help. Live, 12 of the 13 runner
+  launches now decide on codex; `runner-redirect` does not, because the model never submits
+  a redirect into a file outside the workspace.
 - **`adlc harness probe codex` can now record a refusal (BUG-278).** A `runner-prefix`
   control reads `refused` only when the asked line is in the harness's own command
   records. Codex prints its `command_execution` records only under `codex exec --json`,

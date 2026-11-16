@@ -629,6 +629,37 @@ def test_codex_command_records_reach_the_probe(tmp_path):
         assert (subs[name]["status"], subs[name]["reason"]) == ("pass", "refused"), name
 
 
+def test_runner_launch_that_measured_nothing_is_retried(tmp_path):
+    """BUG-279: a model that runs nothing on a launch's first attempt measures nothing;
+    the launch is retried from fresh state, and the variant is decided on the retry."""
+    sb = Sandbox(tmp_path, flags=("per-statement", "skip-first-attempt"))
+    result, out = _run_ok(sb, "codex", "--only", "fence-vs-allowlist")
+    subs = result["probes"]["fence-vs-allowlist"]["sub_results"]
+    assert subs[hp.RUNNER_PREFIX]["status"] == "pass"
+    for name in hp.RUNNER_LAUNCHES:
+        assert subs[name]["evidence"]["attempts"] == 2, name
+        assert subs[name]["evidence"]["launch"].endswith("r2"), name
+    assert result["launches"]["actual"] == result["launches"]["planned"] + len(
+        hp.RUNNER_LAUNCHES)
+    assert (out.stdout + out.stderr).count("launch_retried") == len(hp.RUNNER_LAUNCHES)
+
+
+def test_runner_retries_are_bounded_and_never_decide(tmp_path):
+    """BUG-279: a model that never runs the line stays unknown after the last attempt,
+    and a decided reading is never retried."""
+    sb = Sandbox(tmp_path / "none", flags=("per-statement", "witness-only"))
+    result, _ = _run_ok(sb, "codex", "--only", "fence-vs-allowlist")
+    subs = result["probes"]["fence-vs-allowlist"]["sub_results"]
+    assert subs[hp.RUNNER_PREFIX]["status"] == "unknown"
+    assert subs["runner-sibling"]["evidence"]["attempts"] == hp.RUNNER_ATTEMPTS
+    sb = Sandbox(tmp_path / "decided", flags=("per-statement",))
+    result, out = _run_ok(sb, "codex", "--only", "fence-vs-allowlist")
+    subs = result["probes"]["fence-vs-allowlist"]["sub_results"]
+    assert all(subs[n]["evidence"]["attempts"] == 1 for n in hp.RUNNER_LAUNCHES)
+    assert "launch_retried" not in out.stdout + out.stderr
+    assert result["launches"]["actual"] == result["launches"]["planned"]
+
+
 def test_runner_prefix_whole_text_fails(tmp_path):
     """AC-3: the fake's plain matcher carries every compound shape but `&&`."""
     fence, _ = _fence(Sandbox(tmp_path))
