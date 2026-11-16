@@ -1,7 +1,7 @@
 ---
 id: TASK-253
 title: "The redirect target moves into the working copy, and its effect is the runner sentinel and the target together"
-status: draft
+status: complete
 parent: REQ-707
 repo: adlc-toolkit
 created: 2026-11-16

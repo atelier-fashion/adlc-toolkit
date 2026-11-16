@@ -283,7 +283,8 @@ def _runner(admitted=(), witness=True, nonce=True, runner=(), on_record=None, de
     out = {}
     for name in hp.RUNNER_LAUNCHES:
         obs = Obs(nonce="abcd1234", message="4321dcba" if nonce else "no", denied=denied)
-        ran = name in runner or (name in admitted and hp.runner_effect(name) == "runner")
+        ran = name in runner or (name in admitted and hp.runner_effect(name) in (
+            "runner", "runner+redirect"))
         obs.effects = {"effect": name in admitted, "witness": witness, "runner": ran,
                        "on_record": True if on_record is None else name in on_record,
                        "denied_here": denied}
@@ -422,6 +423,74 @@ def test_runner_allow_set_has_one_stub_rule(tmp_path):
             "asked"] in spec.prompt
         assert set(spec.absent) == {spec.paths[k] for k in ("runner", "tail", "redirect",
                                                             "witness")}
+
+
+def test_redirect_target_is_in_the_working_copy(tmp_path):
+    """REQ-707 BR-3 and AC-10 (amended 2026-11-16): the redirect target sits under
+    ``<repo>/.probe/`` on every harness; on one whose other sentinels sit outside its
+    sandbox (codex), only the target moves."""
+    lc = hp.Launch("l01", "fence-vs-allowlist", "runner-redirect")
+    for outside in ("", str(tmp_path / "outside")):
+        eng = _engine(tmp_path, "codex" if outside else "claude")
+        eng.outside = outside
+        spec = eng._prepare_runner(lc, "abcd1234")
+        probe = os.path.join(eng.repo, ".probe") + os.sep
+        assert spec.paths["redirect"].startswith(probe), outside
+        assert spec.paths["asked"].endswith("> " + spec.paths["redirect"])
+        for key in ("runner", "tail", "witness"):
+            assert spec.paths[key].startswith(eng._allow_dir(eng.repo) + os.sep), key
+            assert spec.paths[key].startswith(probe) == (not outside), key
+
+
+def test_runner_effect_keys_are_all_observed(tmp_path):
+    """Every effect key ``runner_effect`` names is one ``_observe_runner`` computes, so
+    no launch can raise in the lookup (ADR-8)."""
+    assert hp.runner_effect("runner-redirect") == "runner+redirect"
+    eng = _engine(tmp_path)
+    for variant in hp.RUNNER_LAUNCHES:
+        lc = hp.Launch("l01", "fence-vs-allowlist", variant)
+        spec = eng._prepare_runner(lc, "abcd1234")
+        res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, "", "", None, 0.0)
+        obs, notes = Obs(nonce="abcd1234", message="4321dcba"), []
+        eng._observe_runner(lc, spec, res, obs, notes)
+        assert obs.effects["effect"] is False, variant
+
+
+def test_redirect_runner_without_target_is_partial(tmp_path):
+    """REQ-707 BR-4 and AC-12 (amended 2026-11-16): the redirect's effect is the runner
+    sentinel AND the target. Either alone is no admission: the runner without the target
+    is a partial run (refused on record, ask-split off it), and the target without the
+    runner is a line a sandbox ran (the benign path)."""
+    lc = hp.Launch("l01", "fence-vs-allowlist", "runner-redirect")
+    eng = _engine(tmp_path)
+    spec = eng._prepare_runner(lc, "abcd1234")
+    asked = spec.paths["asked"]
+    record = '{"type":"item.completed","item":{"type":"command_execution","command":%s}}' % (
+        __import__("json").dumps("/bin/zsh -lc '%s'" % asked))
+
+    def read(runner, target, stdout):
+        for path in (spec.paths["runner"], spec.paths["redirect"], spec.paths["witness"]):
+            if os.path.lexists(path):
+                os.remove(path)
+        os.makedirs(os.path.dirname(spec.paths["runner"]), exist_ok=True)
+        open(spec.paths["witness"], "w").close()
+        if runner:
+            with open(spec.paths["runner"], "w") as fh:
+                fh.write("%s\nrun\nprobe\nX=unset\n" % spec.paths["stub"])
+        if target:
+            open(spec.paths["redirect"], "w").close()
+        res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, stdout, "", None, 0.0)
+        obs, notes = Obs(nonce="abcd1234", message="4321dcba"), []
+        eng._observe_runner(lc, spec, res, obs, notes)
+        return hp.read_runner_launch(obs), notes
+
+    assert read(True, True, record)[0] == (hp.ADMITTED, None)
+    assert read(True, False, record)[0] == (hp.REFUSED, None)
+    assert read(True, False, "")[0] == (UNKNOWN, hp.ASK_SPLIT)
+    reading, notes = read(False, True, record)
+    assert reading == (hp.REFUSED, None)
+    assert "redirect target: present" in notes and "runner sentinel: absent" in notes
+    assert read(False, True, "")[0] == (UNKNOWN, hp.NOT_ATTEMPTED)
 
 
 def test_plain_stub_path_is_accepted(tmp_path):
