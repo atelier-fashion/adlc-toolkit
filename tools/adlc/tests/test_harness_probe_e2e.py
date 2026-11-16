@@ -700,6 +700,23 @@ def test_sandboxed_redirect_target_is_not_admission(tmp_path):
     assert "redirect target: present" in obs and "runner sentinel: argv" in obs, obs
 
 
+def test_fallback_stub_run_is_not_a_redirect_admission(tmp_path):
+    """REQ-707 AC-11 (amended 2026-11-16): Codex refuses the redirect line and runs it in
+    its sandbox, which creates the target; the model then runs the stub on its own, which
+    the allow admits. The two together are not an admitted redirect."""
+    fence, _ = _fence(Sandbox(tmp_path, flags=("per-statement", "sandboxed-refusal",
+                                               "fallback-run")), "codex")
+    redirect = fence["sub_results"]["runner-redirect"]
+    obs = redirect["evidence"]["observation"]
+    assert (redirect["status"], redirect["reason"]) == ("unknown", hp.ASK_SPLIT), obs
+    assert "redirect target: present, without the runner's output" in obs, obs
+    assert "runner sentinel: argv" in obs, obs
+    assert redirect["evidence"]["attempts"] == hp.RUNNER_ATTEMPTS
+    rp = fence["sub_results"][hp.RUNNER_PREFIX]
+    assert rp["status"] == "unknown" and "runner-redirect" not in rp["evidence"].get(
+        "admitted", []), rp
+
+
 def test_sandboxed_refusal_ignored_off_codex(tmp_path):
     """REQ-707 BR-8 (amended 2026-11-16): the flag is honoured only where sentinels sit
     outside the working copy. Elsewhere it changes nothing."""

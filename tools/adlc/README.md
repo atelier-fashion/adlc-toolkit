@@ -355,12 +355,15 @@ the harness's refusal on stderr names the stub while nothing of the line ran. Ot
 model that tidies or skips the command therefore never turns a control into a refusal.
 
 `runner-redirect`'s target sits in the working copy's `.probe/` on every harness, and its
-effect is the runner sentinel **and** the target together. On codex every other sentinel sits
-outside the sandbox, where only an admitted command can write. Codex runs a command no allow
-names inside its sandbox, so the shell can create a working-copy target for a line it
-refused, but the stub cannot write its sentinel. The target alone is therefore never an
-admission. The runner sentinel without the target is a line run without its redirect, read
-like any partial run. The fake's `sandboxed-refusal` flag (codex only) plays that sandbox.
+effect is the target **holding the runner's own output**. The stub prints a marker line once
+its sentinel is written, and only that stub's output, carried by the redirect, can put it in
+the target. Codex runs a command no allow names inside its sandbox, so the shell can create a
+working-copy target for a line it refused, while the stub cannot write its sentinel outside
+the sandbox: an empty target is no admission. A runner sentinel without the marked target
+(the stub run apart from the line, or the target removed) reads `ask-split` and is retried,
+never `refused`, because a stub whose redirect failed never runs. The fake's
+`sandboxed-refusal` flag (codex only) plays that sandbox, and `fallback-run` a model that then
+runs the stub on its own.
 
 The prompt says what the stubs are (test stubs that only append their arguments to a marker
 file) and tells the model to run both commands even where a path is outside the workspace

@@ -377,10 +377,17 @@ def test_ask_split_downgrades_only():
     v, subs = hp.decide_runner_prefix(split)
     assert v.status == UNKNOWN and hp.ASK_SPLIT in v.reason
     assert all(subs[c].status == UNKNOWN for c in hp.RUNNER_CONTROLS)
-    # Benign path: on record, the same observations read refused and the variant passes.
-    v, _ = hp.decide_runner_prefix(_runner({"runner-positive"},
-                                           runner=set(hp.RUNNER_CONTROLS)))
+    # Benign path: on record, the same observations read refused and the variant passes,
+    # except runner-redirect: a stub whose redirect failed never runs, so a runner
+    # sentinel without the marked target is never its refusal (amended 2026-11-16).
+    partial = set(hp.RUNNER_CONTROLS) - {"runner-redirect"}
+    v, _ = hp.decide_runner_prefix(_runner({"runner-positive"}, runner=partial))
     assert v.status == PASS
+    v, subs = hp.decide_runner_prefix(_runner({"runner-positive"},
+                                              runner=set(hp.RUNNER_CONTROLS)))
+    assert v.status == UNKNOWN
+    assert (subs["runner-redirect"].status, subs["runner-redirect"].reason) == (
+        UNKNOWN, hp.ASK_SPLIT)
     # The rule never turns an admitted launch into anything else.
     adm = _runner({"runner-positive", "runner-subst"}, on_record=())
     assert hp.read_runner_launch(adm["runner-subst"])[0] == hp.ADMITTED
@@ -457,18 +464,21 @@ def test_runner_effect_keys_are_all_observed(tmp_path):
 
 
 def test_redirect_runner_without_target_is_partial(tmp_path):
-    """REQ-707 BR-4 and AC-12 (amended 2026-11-16): the redirect's effect is the runner
-    sentinel AND the target. Either alone is no admission: the runner without the target
-    is a partial run (refused on record, ask-split off it), and the target without the
-    runner is a line a sandbox ran (the benign path)."""
+    """REQ-707 BR-4 and AC-12 (amended 2026-11-16): the redirect's effect is the target
+    holding the stub's own output, which the stub prints only after writing its
+    sentinel. A runner sentinel without it is never a refusal, because a stub whose
+    redirect failed never runs: it reads ask-split, on record or not. A target without
+    the runner's output is a line a sandbox ran (the benign path): refused on record."""
+    import json
     lc = hp.Launch("l01", "fence-vs-allowlist", "runner-redirect")
     eng = _engine(tmp_path)
     spec = eng._prepare_runner(lc, "abcd1234")
     asked = spec.paths["asked"]
+    marker = hp.runner_marker(spec.paths["runner"])
     record = '{"type":"item.completed","item":{"type":"command_execution","command":%s}}' % (
-        __import__("json").dumps("/bin/zsh -lc '%s'" % asked))
+        json.dumps("/bin/zsh -lc '%s'" % asked))
 
-    def read(runner, target, stdout):
+    def read(runner, target, stdout, output=True):
         for path in (spec.paths["runner"], spec.paths["redirect"], spec.paths["witness"]):
             if os.path.lexists(path):
                 os.remove(path)
@@ -478,19 +488,32 @@ def test_redirect_runner_without_target_is_partial(tmp_path):
             with open(spec.paths["runner"], "w") as fh:
                 fh.write("%s\nrun\nprobe\nX=unset\n" % spec.paths["stub"])
         if target:
-            open(spec.paths["redirect"], "w").close()
+            with open(spec.paths["redirect"], "w") as fh:
+                fh.write(marker + "\n" if output else "")
         res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, stdout, "", None, 0.0)
         obs, notes = Obs(nonce="abcd1234", message="4321dcba"), []
         eng._observe_runner(lc, spec, res, obs, notes)
-        return hp.read_runner_launch(obs), notes
+        return hp.read_runner_launch(obs, lc.variant), notes
 
-    assert read(True, True, record)[0] == (hp.ADMITTED, None)
-    assert read(True, False, record)[0] == (hp.REFUSED, None)
-    assert read(True, False, "")[0] == (UNKNOWN, hp.ASK_SPLIT)
-    reading, notes = read(False, True, record)
+    reading, notes = read(True, True, record)
+    assert reading == (hp.ADMITTED, None)
+    assert "redirect target: present, holding the runner's output" in notes
+    # The runner ran but its output is not in the target: never a refusal.
+    for target, output in ((False, True), (True, False)):
+        for stdout in (record, ""):
+            assert read(True, target, stdout, output)[0] == (UNKNOWN, hp.ASK_SPLIT), (
+                target, output, bool(stdout))
+    # The benign path: a sandbox created the target, the stub never wrote its sentinel.
+    reading, notes = read(False, True, record, output=False)
     assert reading == (hp.REFUSED, None)
-    assert "redirect target: present" in notes and "runner sentinel: absent" in notes
-    assert read(False, True, "")[0] == (UNKNOWN, hp.NOT_ATTEMPTED)
+    assert "redirect target: present, without the runner's output" in notes
+    assert "runner sentinel: absent" in notes
+    assert read(False, True, "", output=False)[0] == (UNKNOWN, hp.NOT_ATTEMPTED)
+    # Read without the variant, as before, the partial run keeps its old reading.
+    obs = Obs(nonce="abcd1234", message="4321dcba")
+    obs.effects = {"effect": False, "witness": True, "runner": True, "on_record": True,
+                   "denied_here": False}
+    assert hp.read_runner_launch(obs) == (hp.REFUSED, None)
 
 
 def test_plain_stub_path_is_accepted(tmp_path):
@@ -538,6 +561,13 @@ def test_stub_is_posix_and_reads_no_env(tmp_path):
         lines = sent.read_text().splitlines()
         assert lines == [str(stub), "run", "a b", "X=1", str(stub), "fail", "X=unset"], shell
         assert tail_sent.read_text().splitlines() == [str(tail), "q"]
+    # The stub prints its marker once its sentinel is written, and not when it cannot be.
+    out = subprocess.run(["sh", str(stub), "run", "x"], capture_output=True, text=True)
+    assert out.stdout.splitlines() == [hp.runner_marker(str(sent))]
+    blocked = tmp_path / "nodir" / "runner"
+    stub.write_text(hp.runner_stub_body(str(blocked)))
+    out = subprocess.run(["sh", str(stub), "run", "x"], capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout == ""
 
 
 def test_runner_evidence_names_what_ran(tmp_path):

@@ -556,11 +556,13 @@ is cut per `RELEASING.md`.
 - **`runner-redirect`'s target moves into the working copy (REQ-707, amended 2026-11-16).**
   On codex the target sat outside the sandbox with the probe's other sentinels, and the
   model never submits a redirect there (BUG-279), so the control could not be measured. It
-  now sits under `<repo>/.probe/` on every harness, and the launch's effect is the runner
-  sentinel and the target together: codex runs a refused line inside its sandbox, where the
-  shell can still create a working-copy target, while the stub cannot write its sentinel
-  outside it. The fake gains `sandboxed-refusal` (codex only) to play that sandbox. The
-  committed codex result predates the change; the next live run records it.
+  now sits under `<repo>/.probe/` on every harness, and the launch's effect is the target
+  holding the runner's own output, a marker the stub prints only after writing its sentinel.
+  Codex runs a refused line inside its sandbox, where the shell can still create an empty
+  target, so a bare target is no admission; a runner sentinel without the marked target reads
+  `ask-split`, never `refused`. The fake gains `sandboxed-refusal` (codex only) and
+  `fallback-run` to play both. The committed codex result predates the change; the next live
+  run records it.
 - **The framework's restraint sentence (REQ-655).** It now reads "do not create, edit, delete
   or write files, and do not run commands that do, unless your instructions say to", and
   fires only when `tools:` omits both Edit and Write. `harness_render.read_text` keeps line

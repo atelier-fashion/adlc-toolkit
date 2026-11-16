@@ -37,7 +37,9 @@ that runs nothing on a runner launch's first attempt and does the work on a retr
 codex-cli 0.166.0's model often did; BUG-279), ``sandboxed-refusal`` (codex only: a
 refused command still runs in an emulated sandbox where only the working copy is
 writable, so a redirect target inside it is created and nothing else runs, as Codex runs a
-command no allow names; REQ-707 BR-8, amended 2026-11-16); and ``untrusted-project-allow``
+command no allow names; REQ-707 BR-8, amended 2026-11-16), ``fallback-run`` (with
+``sandboxed-refusal``: after a refused runner line the model runs ``fence-run run probe``
+on its own); and ``untrusted-project-allow``
 (claude 2.1.316: a project ``.claude/settings.json``'s allows are dropped in an untrusted
 folder, while ``--settings`` allows, project denies and hooks still load; BUG-267).
 
@@ -442,24 +444,37 @@ def gemini_skill(prompt, cfg, harness):
     return []
 
 
+#: A plain stdout redirection, ``>`` or ``>>``, and its target. The look-behind skips a
+#: descriptor-prefixed form (``2>``), ``&>``, the second ``>`` of ``>>`` and ``<>``.
 REDIRECT_RE = re.compile(r"(?<![0-9&<>])>>?[ \t]*([^ \t\n;&|<>]+)")
 
 
 def sandboxed_writes(command, cwd):
     """``sandboxed-refusal``: Codex runs a refused command inside its sandbox, where only
     the working copy is writable. The shell creates each redirect target that resolves
-    inside ``cwd`` before the command starts; nothing else runs, because the stubs write
-    absolute paths outside the working copy on this profile (REQ-707 BR-8, ADR-8)."""
+    inside ``cwd`` and whose directory exists, as a real shell does, before the command
+    starts; nothing else runs, because the stubs write absolute paths outside the
+    working copy on this profile (REQ-707 BR-8, ADR-8)."""
     root = os.path.realpath(cwd)
     for target in REDIRECT_RE.findall(command):
         if target == "/dev/null":
             continue
-        path = os.path.join(cwd, target) if not os.path.isabs(target) else target
-        parent = os.path.realpath(os.path.dirname(path) or cwd)
-        if parent != root and not parent.startswith(root + os.sep):
+        path = os.path.realpath(os.path.join(cwd, target))
+        if not path.startswith(root + os.sep) or not os.path.isdir(os.path.dirname(path)):
             continue
-        os.makedirs(parent, exist_ok=True)
-        open(os.path.join(parent, os.path.basename(path)), "a").close()
+        open(path, "a").close()
+
+
+def fallback_run(command, cwd, cfg, harness, records):
+    """``fallback-run``: after a refused runner line, the model runs the stub on its own,
+    with nothing after it, which the runner allow admits (REQ-707 AC-11, amended
+    2026-11-16)."""
+    head = command.split()[0] if command.split() else ""
+    if os.path.basename(head) != "fence-run":
+        return
+    alone = "%s run probe" % head
+    if verdict(cfg, alone, harness) == "run":
+        records.append({"command": alone, "decision": "run", "output": sh(alone, cwd)})
 
 
 def run_command(match_text, command, cwd, cfg, harness, records, aborted):
@@ -482,6 +497,8 @@ def run_command(match_text, command, cwd, cfg, harness, records, aborted):
         records.append({"command": command, "decision": "refused"})
         if "sandboxed-refusal" in FLAGS and harness == "codex":
             sandboxed_writes(command, cwd)
+            if "fallback-run" in FLAGS:
+                fallback_run(command, cwd, cfg, harness, records)
         return
     if command.startswith("git push") and "needs-writable-roots" in FLAGS and harness == "codex":
         branch = subprocess.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],

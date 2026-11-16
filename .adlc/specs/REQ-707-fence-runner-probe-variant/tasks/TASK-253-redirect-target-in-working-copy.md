@@ -28,8 +28,8 @@ Implement the probe-module half of the 2026-11-16 amendment (architecture ADR-8)
 ## Acceptance Criteria
 
 - [ ] On an engine with `outside` set, `_prepare_runner` for `runner-redirect` puts `paths["redirect"]` under `<repo>/.probe/`, puts `runner`, `tail` and `witness` under `outside/sent`, and the asked line names the `.probe/` target. On an engine without `outside`, every path is under `<repo>/.probe/`, as before.
-- [ ] `_observe_runner` on a `runner-redirect` launch reports an effect only when both the runner sentinel and the target exist. Either one alone is no effect.
-- [ ] AC-12: the runner sentinel present and the target absent read `refused` when the asked line is on record, and `unknown / ask-split` off record. Neither case ever reads `admitted`.
+- [ ] `_observe_runner` on a `runner-redirect` launch reports an effect only when the target holds the marker the stub prints after writing its sentinel (amended in Phase 5: the first draft took the runner sentinel and the target both present).
+- [ ] AC-12: a runner sentinel without the marked target reads `unknown / ask-split`, on record or not, never `refused` or `admitted` (amended in Phase 5).
 - [ ] Every value `runner_effect` returns is a key of `_observe_runner`'s effect table, checked over all of `RUNNER_LAUNCHES`.
 - [ ] The existing unit tests pass. `test_harness_probe_unit.py`'s pin of the `runner-semicolon` effects dict is unchanged.
 
@@ -48,3 +48,5 @@ Implement the probe-module half of the 2026-11-16 amendment (architecture ADR-8)
 - `_reset` already runs `git clean -x` and `makedirs(_sent(cwd))` before every attempt, so no fresh-state code changes (LESSON-847 still governs refusal: an absent effect reads refused only with the line on record).
 - Do not change `read_runner_launch`, `decide_runner_prefix` or the observation notes.
 - Lessons in play: LESSON-847 (proof of submission), LESSON-768 (read what ran), LESSON-870 (a model-driven probe measures the model first).
+
+> Phase 5 note (2026-11-16): review replaced the "both files present" effect with the marker rule; see the spec's BR-3 and BR-4 and architecture ADR-8.

@@ -17,7 +17,7 @@ Bring `tools/adlc/README.md` and `CHANGELOG.md` in line with the amendment (REQ-
 
 - `tools/adlc/README.md`, the `runner-prefix` section:
   - the `runner-redirect` row names the target `<repo>/.probe/redirect-<launch>`;
-  - the "Each launch reads" paragraph says the redirect's effect is the runner sentinel and the target together, and why the target alone is not evidence;
+  - the "Each launch reads" paragraph says the redirect's effect is the target holding the runner's output, and why the target alone is not evidence;
   - the BUG-279 paragraph no longer says codex's redirect stays `unknown` because of where the target was. It says the target was moved into the working copy, and that a live run decides whether codex's model now submits it.
 - `CHANGELOG.md`, `## [Unreleased]`: one Changed entry for the amendment. It covers the target location, the effect, and the `sandboxed-refusal` flag. It names that the committed codex result predates it. Reword the BUG-279 Fixed entry's sentence about `runner-redirect` so it is not contradicted. Add no new `###` heading above `### Reversed decisions (REQ-666 BR-6)`.
 
