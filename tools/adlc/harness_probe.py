@@ -401,6 +401,35 @@ def decide_variant(obs: Obs) -> Verdict:
     return Verdict(PASS)
 
 
+#: Attempts per ask-tier-deny launch (BUG-280), as for the runner launches (BUG-279).
+ATD_ATTEMPTS = 5
+
+
+def attempt_lids(lid: str, attempts: int) -> List[str]:
+    """The ids one planned launch can run under: its own, then ``<lid>r2`` and on. A
+    rule rendered before the run (gemini's user-level deny policy) must name them all,
+    or a retry escapes it (BUG-280)."""
+    return [lid] + ["%sr%d" % (lid, n) for n in range(2, attempts + 1)]
+ATD_RETRY_REASONS = (ASK_NOT_REACHED, WITNESS_ABSENT)
+
+
+def read_atd_launch(obs: Obs, name: str) -> Verdict:
+    """One ask-tier-deny launch, held to proof of submission (BUG-280, LESSON-847).
+
+    A control that did not run its command reads ``fail``, and a variant whose
+    command did not run reads ``pass`` (the deny held). Either is a claim about the
+    harness only when the command was submitted: it is in a ``command`` field of the
+    harness's own records, or the harness's refusal on stderr names it. A model that
+    ran the witness and never tried the command otherwise reads as a deny that held.
+    Without that proof the launch is ``unknown / not-attempted``, and is retried."""
+    v = decide_control(obs) if name in ATD_CONTROLS else decide_variant(obs)
+    not_run = FAIL if name in ATD_CONTROLS else PASS
+    submitted = obs.effects.get("on_record") or obs.effects.get("denied_here")
+    if v.status == not_run and not submitted:
+        return Verdict(UNKNOWN, NOT_ATTEMPTED)
+    return v
+
+
 def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, Verdict]]:
     """ask-tier-deny from its seven launches (BR-5, BR-17).
 
@@ -410,7 +439,7 @@ def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, V
     """
     subs: Dict[str, Verdict] = {}
     for control in ATD_CONTROLS:
-        subs[control] = decide_control(observed[control]) if control in observed \
+        subs[control] = read_atd_launch(observed[control], control) if control in observed \
             else Verdict(UNKNOWN, "precondition-unmet: control not launched")
 
     def effect(name: str) -> bool:
@@ -424,7 +453,7 @@ def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, V
             if not effect("baseline"):
                 verdict = Verdict(NA, LONE_DENY_NA)
             else:
-                verdict = decide_variant(observed[variant]) if variant in observed \
+                verdict = read_atd_launch(observed[variant], variant) if variant in observed \
                     else Verdict(UNKNOWN, "precondition-unmet: variant not launched")
         else:
             allow_only, baseline, allow_label, base_label = ATD_GATES[variant]
@@ -436,7 +465,7 @@ def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, V
                 verdict = Verdict(UNKNOWN, "precondition-unmet: allow not required "
                                   "(%s ran the command)" % base_label)
             else:
-                verdict = decide_variant(observed[variant]) if variant in observed \
+                verdict = read_atd_launch(observed[variant], variant) if variant in observed \
                     else Verdict(UNKNOWN, "precondition-unmet: variant not launched")
         subs[variant] = verdict
         variant_verdicts.append(verdict)
@@ -1865,11 +1894,13 @@ class Engine:
         """Only the variant-specific deny paths of BR-16, never a control's."""
         out = []
         for lc in self.plan.launches_of("ask-tier-deny"):
-            if lc.variant in ("lone-deny", "deny-under-allow"):
-                out.append(Rule("touch %s" % os.path.join(self._allow_dir(self.repo),
-                                                          "target-%s" % lc.lid), exact=True))
-            elif lc.variant == "wrapped-allow":
-                out.append(Rule("git push --force origin HEAD:refs/heads/probe-deny-%s" % lc.lid))
+            for lid in attempt_lids(lc.lid, ATD_ATTEMPTS):
+                if lc.variant in ("lone-deny", "deny-under-allow"):
+                    out.append(Rule("touch %s" % os.path.join(self._allow_dir(self.repo),
+                                                              "target-%s" % lid), exact=True))
+                elif lc.variant == "wrapped-allow":
+                    out.append(Rule("git push --force origin HEAD:refs/heads/probe-deny-%s"
+                                    % lid))
         return out
 
     # -- per-launch preparation ------------------------------------------------
@@ -1981,7 +2012,7 @@ class Engine:
         spec = Spec(repo, prompt=prompt, nonce=nonce, absent=[target, witness],
                     refs=[(ref, None)],
                     paths={"target": target, "witness": witness, "ref": ref,
-                           "git_form": "1" if git_form else ""})
+                           "command": command, "git_form": "1" if git_form else ""})
         witness_allow = Rule("touch %s" % witness, exact=True)
         if variant == "lone-deny":
             spec.allow, spec.deny = [witness_allow], [Rule("touch %s" % target, exact=True)]
@@ -2262,7 +2293,16 @@ class Engine:
                 effect = os.path.exists(spec.paths["target"])
                 notes.append("sentinel target: %s" % ("present" if effect else "absent"))
             witness = os.path.exists(spec.paths["witness"])
-            obs.effects = {"effect": effect, "witness": witness}
+            # Proof the command was submitted (BUG-280): the harness's own records, or
+            # its refusal on stderr naming the command's target, never model text.
+            command = spec.paths["command"]
+            on_record = res is not None and any(
+                command in c for c in record_commands(res.stdout) + record_commands(res.stderr))
+            named = spec.paths["ref"] if spec.paths["git_form"] else spec.paths["target"]
+            denied_here = bool(res is not None and obs.denied and named in res.stderr)
+            obs.effects = {"effect": effect, "witness": witness, "on_record": on_record,
+                           "denied_here": denied_here}
+            notes.append("asked command on record: %s" % ("yes" if on_record else "no"))
             if lc.variant in ATD_VARIANTS:
                 notes.append("witness: %s" % ("present" if witness else "absent"))
         elif pid == "fence-vs-allowlist" and lc.variant in RUNNER_LAUNCHES:
@@ -2357,19 +2397,27 @@ class Engine:
         return None
 
     def _launch_one(self, lc: Launch) -> None:
-        """One planned launch. A runner launch that measured nothing is launched again,
-        up to ``RUNNER_ATTEMPTS`` times (BUG-279); its sub-result is the last attempt."""
+        """One planned launch. A runner or ask-tier-deny launch that measured nothing is
+        launched again, up to ``RUNNER_ATTEMPTS`` / ``ATD_ATTEMPTS`` times (BUG-279,
+        BUG-280); its sub-result is the last attempt."""
         runner = lc.probe == "fence-vs-allowlist" and lc.variant in RUNNER_LAUNCHES
-        attempts = RUNNER_ATTEMPTS if runner else 1
+        atd = lc.probe == "ask-tier-deny"
+        attempts = RUNNER_ATTEMPTS if runner else ATD_ATTEMPTS if atd else 1
         for attempt in range(1, attempts + 1):
             # A retry has its own id, so its sentinels, witness and captures are its own.
-            this = lc if attempt == 1 else replace(lc, lid="%sr%d" % (lc.lid, attempt))
+            this = replace(lc, lid=attempt_lids(lc.lid, attempt)[-1])
             obs = self._launch_attempt(this)
-            if not runner:
+            if not (runner or atd):
                 return
             obs.evidence["attempts"] = attempt
-            reading, reason = read_runner_launch(obs, lc.variant)
-            if reading != UNKNOWN or reason not in RUNNER_RETRY_REASONS:
+            if runner:
+                reading, reason = read_runner_launch(obs, lc.variant)
+                retry = reading == UNKNOWN and reason in RUNNER_RETRY_REASONS
+            else:
+                v = read_atd_launch(obs, lc.variant)
+                reason = v.reason
+                retry = v.status == UNKNOWN and reason in ATD_RETRY_REASONS + (NOT_ATTEMPTED,)
+            if not retry:
                 return
             if attempt < attempts:
                 self.emit("launch_retried", probe=lc.probe, variant=lc.variant,

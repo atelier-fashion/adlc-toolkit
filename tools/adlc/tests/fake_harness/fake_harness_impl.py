@@ -32,7 +32,8 @@ Flags modify a scenario: ``claim-only``, ``main-only``, ``needs-writable-roots``
 and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measured
 ``claude``), ``split-ask`` (a model that tidies the asked line down to its head),
 ``first-statement-only`` (a harness that records the whole line, then runs its head) and
-``witness-only`` (a model that never runs the asked fence), ``skip-first-attempt`` (a model
+``witness-only`` (a model that never runs the asked fence, or on an ask-tier-deny
+variant the command after the witness; BUG-280), ``skip-first-attempt`` (a model
 that runs nothing on a runner launch's first attempt and does the work on a retry, as
 codex-cli 0.166.0's model often did; BUG-279), ``sandboxed-refusal`` (codex only: a
 refused command's working-copy redirect targets are created, as Codex's sandbox would let
@@ -405,7 +406,10 @@ def asked_commands(prompt, cwd, harness, cfg):
         return skill_commands(prompt, cfg)
     if harness in ("gemini", "antigravity") and cfg.skills and not prompt.startswith("Run"):
         return gemini_skill(prompt, cfg, harness)
-    return [(c, c) for c in re.findall(r"[Rr]un `([^`]+)`", prompt)]
+    asked = [(c, c) for c in re.findall(r"[Rr]un `([^`]+)`", prompt)]
+    if "witness-only" in FLAGS and prompt.startswith("Run `touch ") and " on its own" in prompt:
+        return asked[:1]   # ask-tier-deny: the witness, never the command (BUG-280)
+    return asked
 
 
 def skill_body(path):
