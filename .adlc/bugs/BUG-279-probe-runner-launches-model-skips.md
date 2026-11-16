@@ -1,7 +1,7 @@
 ---
 id: BUG-279
 title: "`runner-prefix` cannot be decided on codex: its model skips the asked commands on about half its launches, and each launch is one sample"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-16
 updated: 2026-11-16
@@ -121,3 +121,13 @@ Regression tests: off for this project (no `.adlc/config.yml`).
 Failing-first tests were still written. Against `main`'s `harness_probe.py`, both fail:
 the first reads `runner-prefix` `unknown`, the second finds no `evidence.attempts`. With the
 fix both pass.
+
+## Deployment
+
+Merged as `2f79f48` ([#270](https://github.com/atelier-fashion/adlc-toolkit/pull/270)) on
+2026-11-16. Nothing to deploy, since this is toolkit code. A full codex probe on the merged
+commit records the result.
+
+## Lessons
+
+- LESSON-870: a probe that asks a model to run commands measures the model first.
