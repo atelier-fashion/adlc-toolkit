@@ -36,6 +36,10 @@ and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measu
 (claude 2.1.316: a project ``.claude/settings.json``'s allows are dropped in an untrusted
 folder, while ``--settings`` allows, project denies and hooks still load; BUG-267).
 
+Codex prints its JSONL events (``command_execution`` items) only under ``--json``; without
+it, stdout is the final message in plain text and the transcript goes to stderr, as
+``codex-cli 0.166.0`` does (BUG-278).
+
 The fake's own matcher is written here: it imports nothing from ``exec_matcher``, so the
 double cannot pass by sharing the code under test (REQ-707 BR-8).
 
@@ -75,7 +79,7 @@ TAKES_VALUE = {
 BOOLEAN = {
     "claude": {"-p"},
     "copilot": {"-s", "--no-ask-user", "--trust-folder"},
-    "codex": set(),
+    "codex": {"--json"},
     "gemini": set(),
     "cursor": {"-p", "--trust"},
     "antigravity": set(),
@@ -143,6 +147,8 @@ def parse(harness, args):
         if a in BOOLEAN[harness]:
             if a in ("--trust-folder", "--trust"):
                 opts["trust"] = True
+            elif a == "--json":
+                opts["json"] = True
             i += 1
             continue
         if a.startswith("-") and a != "-":
@@ -618,16 +624,23 @@ def emit(harness, opts, message, tool_text, records, sid):
             sys.stderr.write(json.dumps({"denied": {"command": c}}) + "\n")
         if tool_text or leak:
             sys.stderr.write("%s %s\n" % (tool_text, leak))
-    else:  # codex: JSONL events on stdout, the last message to -o
+    elif opts.get("json"):  # codex --json: JSONL events on stdout, the last message to -o
         print(json.dumps({"type": "thread.started", "thread_id": sid}))
         for r in records:
             print(json.dumps({"type": "item.completed", "item": {
                 "type": "command_execution", "command": r["command"],
                 "aggregated_output": r.get("output", "") + tool_text}}))
         print(json.dumps({"type": "turn.completed", "debug": leak}))
-        if opts.get("lastmsg"):
-            with open(opts["lastmsg"], "w", encoding="utf-8") as fh:
-                fh.write(message + "\n")
+    else:  # codex without --json: plain text, the transcript on stderr (BUG-278)
+        print(message)
+        sys.stderr.write("session id: %s\n" % sid)
+        for r in records:
+            sys.stderr.write("exec\n%s in %s\n%s\n" % (r["command"], opts["cwd"],
+                                                     r.get("output", "") + tool_text))
+        sys.stderr.write("codex\n%s\n%s\n" % (message, leak))
+    if harness == "codex" and opts.get("lastmsg"):
+        with open(opts["lastmsg"], "w", encoding="utf-8") as fh:
+            fh.write(message + "\n")
 
 
 def mutate_user_files(harness):

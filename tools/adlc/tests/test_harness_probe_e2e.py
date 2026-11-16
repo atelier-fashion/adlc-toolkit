@@ -618,6 +618,17 @@ def test_runner_prefix_per_statement_passes(tmp_path, h):
         [hp.Verdict(subs[v]["status"]) for v in hp.FENCE_VARIANTS]).status
 
 
+def test_codex_command_records_reach_the_probe(tmp_path):
+    """BUG-278: codex prints its ``command_execution`` records only under ``--json``.
+    Without it no codex refusal is on record, and every runner control reads unknown."""
+    fence, _ = _fence(Sandbox(tmp_path, flags=("per-statement",)), "codex")
+    subs = fence["sub_results"]
+    assert "--json" in subs["runner-positive"]["evidence"]["command"]
+    assert subs[hp.RUNNER_PREFIX]["status"] == "pass"
+    for name in (hp.RUNNER_BASELINE,) + hp.RUNNER_CONTROLS:
+        assert (subs[name]["status"], subs[name]["reason"]) == ("pass", "refused"), name
+
+
 def test_runner_prefix_whole_text_fails(tmp_path):
     """AC-3: the fake's plain matcher carries every compound shape but `&&`."""
     fence, _ = _fence(Sandbox(tmp_path))

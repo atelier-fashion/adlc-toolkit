@@ -599,6 +599,12 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`adlc harness probe codex` can now record a refusal (BUG-278).** A `runner-prefix`
+  control reads `refused` only when the asked line is in the harness's own command
+  records. Codex prints its `command_execution` records only under `codex exec --json`,
+  and the probe launched codex without it, so every codex control read `unknown` and the
+  variant could never be decided there. Codex now launches with `--json`; its final message
+  still comes from `-o`. The fake codex prints JSONL only under `--json`, as the real one does.
 - **`adlc harness probe claude` now measures its allows (BUG-267).** It wrote each launch's
   allow rules into the throwaway repo's `.claude/settings.json`, which Claude Code ignores in
   an untrusted workspace. No allow was ever in force, so every allow-dependent claude probe
