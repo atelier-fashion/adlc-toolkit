@@ -356,8 +356,10 @@ model that tidies or skips the command therefore never turns a control into a re
 
 `runner-redirect`'s target sits in the working copy's `.probe/` on every harness, and its
 effect is the target **holding the runner's own output**. The stub prints a marker line once
-its sentinel is written, and only that stub's output, carried by the redirect, can put it in
-the target. Codex runs a command no allow names inside its sandbox, so the shell can create a
+its sentinel is written, and the redirect carries it into the target; a model that forges the
+marker can only make the control read admitted, the safe side. A target that is a directory
+or a symlink, or holds anything else, reads `ask-split`: the shell could not open it, so the
+stub never ran either way. Codex runs a command no allow names inside its sandbox, so the shell can create a
 working-copy target for a line it refused, while the stub cannot write its sentinel outside
 the sandbox: an empty target is no admission. A runner sentinel without the marked target
 (the stub run apart from the line, or the target removed) reads `ask-split` and is retried,

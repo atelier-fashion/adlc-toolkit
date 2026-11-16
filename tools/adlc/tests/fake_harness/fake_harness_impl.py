@@ -461,7 +461,8 @@ def sandboxed_writes(command, cwd):
         if target == "/dev/null":
             continue
         path = os.path.realpath(os.path.join(cwd, target))
-        if not path.startswith(root + os.sep) or not os.path.isdir(os.path.dirname(path)):
+        if (not path.startswith(root + os.sep) or not os.path.isdir(os.path.dirname(path))
+                or os.path.isdir(path)):
             continue
         open(path, "a").close()
 

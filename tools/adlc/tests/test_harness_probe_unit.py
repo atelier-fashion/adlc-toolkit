@@ -509,6 +509,25 @@ def test_redirect_runner_without_target_is_partial(tmp_path):
     assert "redirect target: present, without the runner's output" in notes
     assert "runner sentinel: absent" in notes
     assert read(False, True, "", output=False)[0] == (UNKNOWN, hp.NOT_ATTEMPTED)
+    # A target the shell could not open, or one holding something else, is never a
+    # refusal: an admitted line stops there too, before the stub runs.
+    for kind in ("dir", "symlink", "other"):
+        read(False, False, record)
+        if kind == "dir":
+            os.makedirs(spec.paths["redirect"])
+        elif kind == "symlink":
+            os.symlink(spec.paths["witness"], spec.paths["redirect"])
+        else:
+            with open(spec.paths["redirect"], "w") as fh:
+                fh.write("something else\n")
+        res = hp.LaunchResult([], eng.repo, 0, False, None, 1.0, record, "", None, 0.0)
+        obs, notes = Obs(nonce="abcd1234", message="4321dcba"), []
+        eng._observe_runner(lc, spec, res, obs, notes)
+        assert hp.read_runner_launch(obs, lc.variant) == (UNKNOWN, hp.ASK_SPLIT), kind
+        if kind == "dir":
+            os.rmdir(spec.paths["redirect"])
+        else:
+            os.remove(spec.paths["redirect"])
     # Read without the variant, as before, the partial run keeps its old reading.
     obs = Obs(nonce="abcd1234", message="4321dcba")
     obs.effects = {"effect": False, "witness": True, "runner": True, "on_record": True,

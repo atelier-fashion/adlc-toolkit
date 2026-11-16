@@ -230,10 +230,21 @@ removed afterwards (the target now sits where a sandboxed command can delete it)
 target with no runner sentinel reads by the general rule: refused on record. Called without a
 variant, the reading is unchanged for every other control.
 
+A target that is a directory, a symlink, or a file holding anything but the marker also
+reads `ask-split` (`obs.effects["target_clean"]`, set on this launch only): the shell cannot
+open such a target, so an admitted line stops before the stub runs and leaves nothing,
+which would otherwise read refused. Only no target or an empty regular file can be a
+refusal.
+
 **Residual.** A model that runs the stub with its own `> <target>` outside the asked line,
 as a separate allowed command, would produce the marked target. That is the same
 residual every compound control has when a model runs the tail as its own command, and BR-6's
-recorded command line tells the two apart. It reads `fail`, the safe side.
+recorded command line tells the two apart. It reads `fail`, the safe side. A second,
+unsafe residual predates the amendment and is not closed here: a model that deliberately
+wipes `.probe/` after an admitted line (for example a routine `git stash --all`) and then
+re-runs the witness leaves "witness present, runner absent, line on record". Off codex
+that reads refused for every control, and on codex, for the redirect, so can an absent
+target. Recording the sentinels where git cannot reach them is follow-up work.
 
 **The fake.** `sandboxed-refusal` acts in `run_command` only when the harness is `codex`.
 Like `needs-writable-roots`, it keys on the harness name, because the fake imports nothing

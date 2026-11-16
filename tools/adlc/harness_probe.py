@@ -472,7 +472,10 @@ def read_runner_launch(obs: Obs, variant: Optional[str] = None) -> Tuple[str, Op
         return ADMITTED, None
     if v.status != PASS:
         return UNKNOWN, v.reason
-    if variant == "runner-redirect" and obs.effects.get("runner"):
+    if variant == "runner-redirect" and (obs.effects.get("runner")
+                                         or not obs.effects.get("target_clean", True)):
+        # A target the shell could not open (a directory, a symlink) or one holding
+        # something else stops the stub before it runs, admitted or not: no refusal.
         return UNKNOWN, ASK_SPLIT
     if obs.effects.get("on_record"):
         return REFUSED, None
@@ -829,9 +832,10 @@ def runner_stub_body(sentinel: str) -> str:
     """The stub fence runner: record ``$0``, the arguments and ``X``; exit 1 on ``fail``.
 
     Once that record is written it prints ``runner_marker(sentinel)`` on stdout. A
-    redirect sends that line into its target, so a target holding it was written by
-    this stub's own admitted run, never by a sandbox that refused the line, and never
-    by a separate run of the stub (REQ-707 BR-3, amended 2026-11-16).
+    redirect sends that line into its target. A sandbox that refused the line cannot
+    write it there, and a separate run of the stub prints it elsewhere; a model that
+    forges it with ``echo`` can only make the control read admitted, the safe side
+    (REQ-707 BR-3, amended 2026-11-16).
 
     Its sentinel path is a literal; it runs nothing else."""
     return ("#!/bin/sh\n# adlc harness probe (REQ-707): stands in for the fence runner\n"
@@ -2000,7 +2004,7 @@ class Engine:
         witness live where an allowed command's do (``_allow_dir``), so a sandboxed,
         un-allowed stub cannot write them. The redirect target is the exception: it sits
         in the working copy's ``.probe/`` on every harness, where a model will write it,
-        and it counts only together with the runner sentinel (BR-3, amended 2026-11-16).
+        and it counts only when it holds the stub's marker (BR-3, amended 2026-11-16).
         """
         repo, lid, variant = self.repo, lc.lid, lc.variant
         tk = os.path.join(self.run_dir, RUNNER_STUB_DIR)
@@ -2294,8 +2298,10 @@ class Engine:
 
         runner, tail = content(p["runner"]), content(p["tail"])
         redirect = os.path.lexists(p["redirect"])
-        target = content(p["redirect"])
+        target = content(p["redirect"]) if not os.path.islink(p["redirect"]) else None
         marked = target is not None and runner_marker(p["runner"]) in target.splitlines()
+        # Only no target, or an empty regular file, can be a line the harness refused.
+        clean = not redirect or (target is not None and (marked or target == ""))
         ran_x1 = runner is not None and "X=1" in runner.splitlines()
         effect = {"runner": runner is not None, "runner-x1": ran_x1, "tail": tail is not None,
                   "runner+redirect": runner is not None and marked}[runner_effect(lc.variant)]
@@ -2310,6 +2316,8 @@ class Engine:
         obs.effects = {"effect": effect, "witness": os.path.exists(p["witness"]),
                        "runner": runner is not None, "on_record": on_record,
                        "denied_here": obs.denied and p["stub"] in res.stderr}
+        if lc.variant == "runner-redirect":
+            obs.effects["target_clean"] = clean
         obs.evidence["asked"] = scrub(asked, self.home)
         obs.content = {"runner": runner, "tail": tail}
         for name, got in (("runner sentinel", runner), ("tail sentinel", tail)):
