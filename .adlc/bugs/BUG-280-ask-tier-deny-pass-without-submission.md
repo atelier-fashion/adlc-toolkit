@@ -1,7 +1,7 @@
 ---
 id: BUG-280
 title: "`ask-tier-deny` reads a deny as held when the model never submitted the command, and launches that measured nothing are never retried"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-16
 updated: 2026-11-16
@@ -71,3 +71,11 @@ A retry runs under its own id (`<lid>r2` and on), and gemini's `ask-tier-deny` d
 Regression tests: off for this project (no `.adlc/config.yml`).
 
 Failing-first tests were still written: `test_ask_tier_deny_needs_proof_of_submission` and `test_ask_tier_deny_witness_only_is_not_a_held_deny` both fail against `main`'s `harness_probe.py`, and both pass with the fix.
+
+## Deployment
+
+Merged as `46a64bc` ([#277](https://github.com/atelier-fashion/adlc-toolkit/pull/277)) on 2026-11-16. Nothing to deploy, since this is toolkit code. A full codex probe on the merged commit records the result.
+
+## Lessons
+
+- LESSON-874: a retry under a new id must be covered by every rule rendered before the run.
