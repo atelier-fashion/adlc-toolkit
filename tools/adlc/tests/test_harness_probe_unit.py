@@ -772,3 +772,49 @@ def test_runner_evidence_names_what_ran(tmp_path):
     assert observe("", "denied: ls -la", denied=True)[0].effects["denied_here"] is False
     assert observe("", "denied: %s" % spec.paths["stub"], denied=True)[0].effects[
         "denied_here"] is True
+
+
+def _shell(started=True, done=True, slept=True, nonce=True, denied=False):
+    obs = Obs(nonce="abcd1234", message="4321dcba" if nonce else "", denied=denied)
+    obs.effects = {"started": started, "done": done, "slept": slept,
+                   "effect": done and slept}
+    return obs
+
+
+def test_shell_timeout_needs_the_sleep_and_a_started_command():
+    """BUG-286: `pass` needs the sentinel written at least the sleep's length after the
+    command's start marker, and `fail` needs the start marker, which shows the shell call
+    began. A sentinel without the sleep, a command the model never ran and a command the
+    harness refused each measured nothing about the shell timeout."""
+    def read(obs):
+        v = hp.decide_shell_timeout(obs)
+        return v.status, v.reason
+    assert read(_shell()) == (PASS, None)
+    assert read(_shell(nonce=False)) == (PASS, None)      # the effect decides without a reply
+    assert read(_shell(slept=False)) == (UNKNOWN, hp.SLEEP_UNMEASURED)
+    assert read(_shell(done=False, slept=False)) == (FAIL, None)     # began, never finished
+    assert read(_shell(started=False, done=False, slept=False)) == (
+        UNKNOWN, hp.SHELL_NOT_STARTED)
+    assert read(_shell(started=False, done=False, slept=False, denied=True, nonce=False)) == (
+        UNKNOWN, hp.SHELL_REFUSED)
+    assert read(_shell(done=False, slept=False, nonce=False)) == (UNKNOWN, hp.ASK_NOT_REACHED)
+    timed_out = _shell(done=False, slept=False)
+    timed_out.timed_out = True
+    assert read(timed_out) == (UNKNOWN, "timeout")
+
+
+def test_shell_elapsed_reads_the_two_markers(tmp_path):
+    """BUG-286: the elapsed time is the sentinel's mtime less the start marker's, and it
+    is unmeasured when either file is missing."""
+    start, done = str(tmp_path / "start"), str(tmp_path / "done")
+    assert hp.shell_elapsed(start, done) is None
+    open(start, "w").close()
+    assert hp.shell_elapsed(start, done) is None
+    open(done, "w").close()
+    os.utime(start, (1000, 1000))
+    os.utime(done, (1000 + hp.SHELL_TIMEOUT_SLEEP, 1000 + hp.SHELL_TIMEOUT_SLEEP))
+    assert hp.shell_elapsed(start, done) == hp.SHELL_TIMEOUT_SLEEP
+    assert hp.shell_slept(hp.shell_elapsed(start, done))
+    os.utime(done, (1003, 1003))
+    assert not hp.shell_slept(hp.shell_elapsed(start, done))
+    assert not hp.shell_slept(None)

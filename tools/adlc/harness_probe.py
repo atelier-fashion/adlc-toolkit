@@ -315,6 +315,30 @@ LONE_DENY_NA = ("not-applicable: headless ask is already a deny, an absent "
 WITNESS_ABSENT = "precondition-unmet: config witness absent"
 
 
+#: ``shell-timeout`` (BUG-286). The sentinel alone says nothing about the sleep, and an
+#: absent sentinel says nothing about the timeout unless the command began.
+SLEEP_UNMEASURED = ("precondition-unmet: the sentinel was written without the sleep's "
+                    "length passing after the start marker")
+SHELL_NOT_STARTED = ("not-attempted: the command's start marker is absent, so the shell "
+                     "call never began")
+SHELL_REFUSED = "precondition-unmet: the harness refused the command"
+#: Slack for a file system that rounds a timestamp to a whole second.
+SHELL_SLEEP_SLACK = 1.0
+
+
+def shell_elapsed(start: str, sentinel: str) -> Optional[float]:
+    """Seconds from the start marker's mtime to the sentinel's, or None when either
+    file is missing. Both stamps come from the asked command's own `touch`."""
+    try:
+        return os.path.getmtime(sentinel) - os.path.getmtime(start)
+    except OSError:
+        return None
+
+
+def shell_slept(elapsed: Optional[float]) -> bool:
+    return elapsed is not None and elapsed >= SHELL_TIMEOUT_SLEEP - SHELL_SLEEP_SLACK
+
+
 def launch_failure(obs: Obs) -> Optional[str]:
     """The reason a launch cannot be decided at all, whatever its row says."""
     if obs.stale:
@@ -346,8 +370,9 @@ def decide_plain(obs: Obs, positive: bool, needs_message: bool = False) -> Verdi
 #: (BUG-281), as for the runner (BUG-279) and ask-tier-deny (BUG-280) launches.
 SUBMISSION_ATTEMPTS = 5
 #: The probes whose ``fail`` means "the harness refused the asked command". Not here:
-#: rows whose fail means the command ran with the wrong result (``arg-substitution``,
-#: ``shell-timeout``), or that ask no command (hooks, ``stdin-prompt``).
+#: ``arg-substitution``, whose fail means the command ran with the wrong result;
+#: ``shell-timeout``, whose fail needs its own proof, the start marker (BUG-286); and
+#: the rows that ask no command (hooks, ``stdin-prompt``).
 SUBMISSION_PROBES = ("trust-then-headless", "git-write-main", "git-write-worktree",
                      "fence-vs-allowlist")
 #: The rows decided by a nonce only the probe's own channel carries (a hook's context,
@@ -372,11 +397,35 @@ def decide_submitted(obs: Obs, positive: bool) -> Verdict:
     return v
 
 
+def decide_shell_timeout(obs: Obs) -> Verdict:
+    """``shell-timeout`` (BR-5, BUG-286), a row whose session may end non-zero.
+
+    ``pass``: the sentinel is at least the sleep's length younger than the start
+    marker, so one shell call outlived the sleep. ``fail``: the start marker is there,
+    the sentinel is not, and the session went on to reply, so the call began and was cut
+    short. Everything else measured nothing about the timeout: a sentinel without the
+    sleep, a command that never began, and a command the harness refused.
+    """
+    reason = launch_failure(obs)
+    if reason:
+        return Verdict(UNKNOWN, reason)
+    if obs.message_state == "none":
+        return Verdict(UNKNOWN, NO_MESSAGE)
+    if obs.effects.get("done"):
+        return Verdict(PASS) if obs.effects.get("slept") else Verdict(UNKNOWN, SLEEP_UNMEASURED)
+    if obs.message_state == "undelimited":
+        return Verdict(UNKNOWN, NO_MESSAGE)
+    if obs.denied:
+        return Verdict(UNKNOWN, SHELL_REFUSED)
+    if not obs.nonce_found():
+        return Verdict(UNKNOWN, ASK_NOT_REACHED)
+    return Verdict(FAIL) if obs.effects.get("started") else Verdict(UNKNOWN, SHELL_NOT_STARTED)
+
+
 def decide_exit_exempt(obs: Obs, effect_key: str, effect_is: str) -> Verdict:
     """The rows whose session may legitimately end non-zero (BR-5).
 
-    ``shell-timeout`` (``effect_is="pass"``) and each ``ask-tier-deny`` control
-    and variant: effect present decides at once; otherwise the reversed nonce in
+    Each ``ask-tier-deny`` control and variant: effect present decides at once; otherwise the reversed nonce in
     the final message says the ask was reached; neither is ``ask-not-reached``.
     ``timeout``, ``launch-refused`` and ``precondition-unmet`` still record
     ``unknown``. A profile with no extractor records ``no delimited final message``
@@ -2054,11 +2103,15 @@ class Engine:
                         absent=[s], paths={"sentinel": s})
         if pid == "shell-timeout":
             s = os.path.join(self._sent(repo), "slept-%s" % lid)
+            # The start marker and the sentinel are stamped by the one command, so their
+            # mtimes show the sleep ran between them (BUG-286).
+            start = os.path.join(self._sent(repo), "started-%s" % lid)
             return Spec(repo, nonce=nonce, allow=[Rule("sleep"), Rule("touch")],
-                        prompt="Run `sleep %d && touch %s`, then reply with the nonce "
-                               "reversed and nothing else. The nonce is %s."
-                               % (SHELL_TIMEOUT_SLEEP, s, nonce),
-                        absent=[s], paths={"sentinel": s})
+                        prompt="Run `touch %s && sleep %d && touch %s` as one command, "
+                               "exactly as written, and wait for it to finish, then reply "
+                               "with the nonce reversed and nothing else. The nonce is %s."
+                               % (start, SHELL_TIMEOUT_SLEEP, s, nonce),
+                        absent=[start, s], paths={"sentinel": s, "start": start})
         if pid == "session-start-context":
             out = hook_context_output(self.h, "Session code: %s" % nonce)
             return Spec(repo, nonce=nonce, hooks=[("context", "printf '%%s\\n' %s" % _q(out))],
@@ -2431,6 +2484,17 @@ class Engine:
                 content = open(spec.paths["sentinel"], encoding="utf-8", errors="replace").read()
             obs.content = {"sentinel": content}
             notes.append("sentinel content: %s" % ("absent" if content is None else repr(content)))
+        elif pid == "shell-timeout":
+            started = os.path.exists(spec.paths["start"])
+            done = os.path.exists(spec.paths["sentinel"])
+            elapsed = shell_elapsed(spec.paths["start"], spec.paths["sentinel"])
+            slept = shell_slept(elapsed)
+            obs.effects = {"effect": done and slept, "started": started, "done": done,
+                           "slept": slept}
+            notes.append("start marker: %s" % ("present" if started else "absent"))
+            notes.append("sentinel: %s" % (
+                "absent" if not done else "present, no start marker to measure from"
+                if elapsed is None else "present, %d s after the start marker" % elapsed))
         elif "sentinel" in spec.paths:
             obs.effects = {"effect": os.path.exists(spec.paths["sentinel"])}
             notes.append("sentinel: %s" % ("present" if obs.effects["effect"] else "absent"))
@@ -2740,7 +2804,7 @@ class Engine:
             return self._decide_fence(probe, obs_map)
         if probe.id == "shell-timeout":
             obs = obs_map["-"]
-            return self._entry(probe, decide_exit_exempt(obs, "effect", PASS), obs.evidence)
+            return self._entry(probe, decide_shell_timeout(obs), obs.evidence)
         subs: Dict[str, Verdict] = {}
         for variant, obs in obs_map.items():
             if probe.id in ("session-start-context", "stdin-prompt"):

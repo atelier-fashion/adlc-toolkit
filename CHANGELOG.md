@@ -616,6 +616,12 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`shell-timeout` measures the sleep (BUG-286).** The probe row passed on a sentinel
+  alone, which a model that dropped the sleep also writes, and it read `fail` for a command
+  that never ran or that the harness refused. The ask now stamps a start marker before the
+  sleep. `pass` needs the sentinel at least 125 s younger than the marker, and `fail` needs
+  the marker. Anything else reads `unknown`. The committed `antigravity.json` entry
+  (`fail`, from a refused command) predates this and is not a timeout measurement.
 - **The `/adversary` audit's findings on `adlc harness probe` (BUG-285).** An audit of the
   codex work found rules that could make a pass hollow, and two committed sub-results that
   recorded the model, not codex. Now:

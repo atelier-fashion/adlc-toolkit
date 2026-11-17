@@ -307,7 +307,7 @@ confirmation prompt: invoking the command is the consent.
 | `git-write-worktree` | 6.1b | all; on codex two sub-variants, `root-is-worktree` and `writable-roots-repo` | the same, for `probe-wt` pushed from the linked worktree |
 | `ask-tier-deny` | 6.3 | all | the deny held: its effect absent, a config witness present, the reversed nonce in the reply; gated on four controls (below) |
 | `skill-activation` | 6.4 | gemini | the skill's sentinel |
-| `shell-timeout` | 6.6 | all | `sleep 125 && touch` left its sentinel (default shell timeout ≥ 120 s) |
+| `shell-timeout` | 6.6 | all | `touch <start> && sleep 125 && touch <sentinel>` left its sentinel at least 125 s after the start marker (default shell timeout ≥ 120 s) |
 | `trust-then-headless` | 6.8 (trust + load) | all | two halves: `hooks-loaded` (a session-start hook's sentinel) and `allowlist-loaded` (a project-only allow worked); copilot has no project-local allow form, so its status is `hooks-loaded` alone |
 | `session-start-context` | 6.8 (injection) | all | the reversed nonce a session-start hook added to the context |
 | `stdin-prompt` | 6.12 | all | a 420-line prompt on stdin, nonce on line 250; with and without the prompt flag |
@@ -440,8 +440,22 @@ A row whose `fail` means "the harness refused the asked command" (`trust-then-he
 `fence-vs-allowlist` variants) reads `fail` only when the command was submitted: it is in a
 `command` field of the harness's own records, or the harness's refusal on stderr names it.
 Otherwise the launch is `unknown / not-attempted` and is retried, up to five attempts (BUG-281).
-Rows whose `fail` means the command ran with the wrong result (`arg-substitution`,
-`shell-timeout`) or that ask no command (the hook rows, `stdin-prompt`) are unchanged.
+`arg-substitution`, whose `fail` means the command ran with the wrong result, and the rows
+that ask no command (the hook rows, `stdin-prompt`) are unchanged.
+
+**`shell-timeout` is decided from two files the one command stamps** (BUG-286): a start
+marker before the sleep and the sentinel after it.
+
+| what the launch left | reading |
+|---|---|
+| the sentinel, at least 125 s younger than the start marker | `pass` |
+| the sentinel, without that gap | `unknown`: the sleep did not run for its length |
+| the start marker only, and the model replied | `fail`: the shell call began and was cut short |
+| neither file, and the model replied | `unknown / not-attempted`: the command never began |
+| the harness refused the command | `unknown / precondition-unmet` |
+
+The launch is not retried. One limit remains: a model that runs the first `touch` alone and
+then replies reads `fail`.
 
 On codex and gemini, whose trust is a user-level file, `trust-then-headless` is
 the run's first launch and its `allowlist-loaded` half gates every other probe:
