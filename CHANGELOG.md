@@ -609,6 +609,13 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`ask-tier-deny`'s variant gate needs a measured baseline (BUG-283).** A variant was
+  decided once `allow-only` ran and `baseline` left no effect. That held even when the
+  model never tried the baseline, so "the allow was necessary" rested on nothing measured.
+  On codex the baseline read `not-attempted` on all five attempts while `deny-under-allow`
+  read `pass`. The gate now needs the baseline's proof-checked `fail`, and otherwise reads
+  `precondition-unmet: <control> not measured`. The `ask-tier-deny` prompts also tell the
+  model to run the command whatever it expects, as the runner prompts do (BUG-279).
 - **`adlc harness probe codex` reads codex's policy rejection as a refusal (BUG-282).**
   Codex rejects a command a `forbidden` rule matches before it runs. It writes no
   `command_execution` item, only a stderr line, `rejected: policy forbids commands
