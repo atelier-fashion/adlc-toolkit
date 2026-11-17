@@ -211,6 +211,28 @@ def test_codex_policy_rejection_is_proof_of_refusal(tmp_path):
     assert "policy forbids commands starting with" in dua["evidence"]["stderr_tail"]
 
 
+def test_codex_baseline_from_runner_baseline(tmp_path):
+    """REQ-664 BR-17(e): codex's model never tries a no-allow control. In a run with
+    fence-vs-allowlist, the runner-baseline refusal on record stands in for it, and
+    deny-under-allow is decided; without that launch it stays unmeasured. A profile
+    without allow_required_path never infers (the benign path)."""
+    flags = ("per-statement", "skip-unallowed-control")
+    sb = Sandbox(tmp_path / "both", flags=flags)
+    result, _ = _run_ok(sb, "codex", "--only", "ask-tier-deny", "--only", "fence-vs-allowlist")
+    subs = result["probes"]["ask-tier-deny"]["sub_results"]
+    assert subs["baseline"]["reason"] == hp.BASELINE_INFERRED
+    assert subs["deny-under-allow"]["status"] == "pass"
+    sb = Sandbox(tmp_path / "alone", flags=flags)
+    result, _ = _run_ok(sb, "codex", "--only", "ask-tier-deny")
+    subs = result["probes"]["ask-tier-deny"]["sub_results"]
+    assert subs["baseline"]["reason"] == hp.NOT_ATTEMPTED
+    assert subs["deny-under-allow"]["status"] == "unknown"
+    sb = Sandbox(tmp_path / "claude", flags=flags)
+    result, _ = _run_ok(sb, "claude", "--only", "ask-tier-deny", "--only", "fence-vs-allowlist")
+    subs = result["probes"]["ask-tier-deny"]["sub_results"]
+    assert subs["baseline"]["reason"] != hp.BASELINE_INFERRED
+
+
 def test_ask_tier_deny_variants(tmp_path):
     sb = Sandbox(tmp_path / "perform")
     result, _ = _run_ok(sb, "claude", "--only", "ask-tier-deny")

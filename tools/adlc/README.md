@@ -435,7 +435,11 @@ allowed; `wrapped-allow` denies `git push --force origin …` and asks the
 `allow-only-git-c` show whether the allow was necessary and effective: a variant
 is decided only when its `allow-only*` control ran the command and its
 `baseline*` control did not, read with proof of submission: a baseline the model never
-tried leaves the variant `precondition-unmet: <control> not measured` (BUG-283). A headless ask is already a deny on most harnesses,
+tried leaves the variant `precondition-unmet: <control> not measured` (BUG-283). On a profile
+with `allow_required_path` (codex), un-allowed commands run sandboxed and cannot write there, so
+an unattempted `baseline*` control reads `fail`, marked `inferred`, when the same run's
+`runner-baseline` was refused with its command on record (REQ-664 BR-17(e)). That needs a run
+that includes `fence-vs-allowlist`. A headless ask is already a deny on most harnesses,
 so `lone-deny` is `n/a` unless `baseline` ran its command.
 
 A variant whose command did not run reads `pass` (the deny held), and a control whose command

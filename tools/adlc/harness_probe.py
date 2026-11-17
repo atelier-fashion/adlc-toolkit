@@ -454,7 +454,14 @@ def read_atd_launch(obs: Obs, name: str) -> Verdict:
     return v
 
 
-def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, Verdict]]:
+#: A baseline control the model never attempted, read as "did not run" from the same
+#: run's runner-baseline (REQ-664 BR-17(e), amended 2026-11-17).
+BASELINE_INFERRED = ("inferred: runner-baseline was refused with its command on record, so an "
+                     "un-allowed command cannot write under allow_required_path")
+
+
+def decide_ask_tier_deny(observed: Dict[str, Obs],
+                         baseline_proof: bool = False) -> Tuple[Verdict, Dict[str, Verdict]]:
     """ask-tier-deny from its seven launches (BR-5, BR-17).
 
     Returns the probe verdict and every sub-result (variants and controls). The
@@ -465,6 +472,14 @@ def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, V
     for control in ATD_CONTROLS:
         subs[control] = read_atd_launch(observed[control], control) if control in observed \
             else Verdict(UNKNOWN, "precondition-unmet: control not launched")
+    if baseline_proof:
+        # BR-17(e): where un-allowed commands run sandboxed and allow_required_path is
+        # outside the sandbox, a measured runner-baseline refusal shows an un-allowed
+        # command cannot leave the effect. It stands in for a baseline the model would not
+        # attempt, never for one that ran or one with another unknown.
+        for control in ("baseline", "baseline-git-c"):
+            if subs[control].status == UNKNOWN and subs[control].reason == NOT_ATTEMPTED:
+                subs[control] = Verdict(FAIL, BASELINE_INFERRED)
 
     def effect(name: str) -> bool:
         obs = observed.get(name)
@@ -2631,7 +2646,11 @@ class Engine:
             verdict, subs = self._decide_trust(obs)
             return self._entry(probe, verdict, None, subs)
         if probe.id == "ask-tier-deny":
-            verdict, subs = decide_ask_tier_deny(obs_map)
+            runner_baseline = self.observed.get("fence-vs-allowlist", {}).get(RUNNER_BASELINE)
+            proof = bool(self.profile.has_allow_required_path and runner_baseline is not None
+                         and read_runner_launch(runner_baseline, RUNNER_BASELINE)
+                         == (REFUSED, None))
+            verdict, subs = decide_ask_tier_deny(obs_map, baseline_proof=proof)
             for name, sub in subs.items():
                 if name in obs_map:
                     sub.evidence = obs_map[name].evidence
