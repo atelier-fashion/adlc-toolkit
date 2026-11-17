@@ -212,6 +212,14 @@ _Permissions: not applicable — single-user machine tooling; the only authority
 
 ## Amendments
 
+- **2026-11-17, the `/adversary` audit (BUG-285).** Five rules tightened, none relaxed:
+  - **BR-5:** a record proves submission only when its command equals the asked command, after the one shell wrapper is stripped. For `git-write-*` the proof is a line of `git commit` / `git push` statements that pushes, or one that commits when the commit did not land. A stderr refusal counts only when it names the asked command.
+  - **BR-5:** a submitted command that left no effect is a measured reading even when the model then skips its reply. It is never retried. So AC-6's and AC-17's nonce conditions decide an `ask-tier-deny` launch only when no harness record shows the command was submitted; the nonce rows are unchanged.
+  - **Assumptions:** "a run that completes with exit 0 but does not perform the ask is reported as `fail`" no longer holds for a row whose `fail` means the harness refused. With no proof of submission such a row reads `unknown / not-attempted` (BUG-281).
+  - **BR-5:** `stdin-prompt` and `session-start-context` retry a missed nonce, up to five attempts. Their `pass` cannot be forged, so a retry cannot bias it.
+  - **BR-16:** fresh state includes the checkout's remote-tracking refs.
+  - **BR-17(c), (e):** the three older `fence-vs-allowlist` variants keep their sentinel under `allow_required_path`, as the runner launches do, and BR-17(e)'s inference needs `runner-baseline`'s command on record.
+
 - **2026-11-17, BR-17(e): a measured `runner-baseline` stands in for an unattempted `baseline` on a sandboxing harness.** BUG-283 made `ask-tier-deny`'s variant gate need a measured baseline. On codex-cli 0.166.0 the model never attempts a command no allow names when it expects the sandbox to block it: the `baseline` control read `not-attempted` on all five attempts in every run. So `deny-under-allow` could not be decided, although codex rejected the denied command itself, citing the rule (BUG-282). The same run's `runner-baseline` submits an un-allowed command that writes under the same `allow_required_path`, and codex refused it on record (ASSUME-032). BR-17(e) lets that refusal prove the baseline, only on a profile with `allow_required_path` and only for a control the model never attempted. The sub-result says it was inferred. Touches BR-17 and the new AC-19.
 
 ## Out of Scope

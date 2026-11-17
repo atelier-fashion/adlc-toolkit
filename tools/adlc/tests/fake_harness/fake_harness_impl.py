@@ -33,7 +33,10 @@ and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measu
 ``claude``), ``split-ask`` (a model that tidies the asked line down to its head),
 ``first-statement-only`` (a harness that records the whole line, then runs its head) and
 ``skip-unallowed-control`` (an ask-tier-deny control whose command no allow names is never
-tried; REQ-664 BR-17(e)), ``model-skips`` (a model that runs nothing at all and still replies, as codex-cli
+tried; REQ-664 BR-17(e)), ``tidy-git-c`` (a model that drops the `git -C <repo>` wrapper from an asked command),
+``chain-status-push`` (a model that pushes as `git status … && git push …`),
+``garble-nonce-once`` (the first reply of a run carries a mis-copied nonce; BUG-285),
+``model-skips`` (a model that runs nothing at all and still replies, as codex-cli
 0.166.0's did on the trust gate; BUG-281), ``witness-only`` (a model that never runs the
 asked fence, or on an ask-tier-deny
 variant the command after the witness; BUG-280), ``skip-first-attempt`` (a model
@@ -367,7 +370,10 @@ def verdict(cfg, cmd, harness):
         return "refused"
     if SCENARIO == "no-witness" and "witness-" in cmd:
         return "refused"
-    if any(matches(d, cmd, harness) or matches(d, unwrap(cmd), harness) for d in cfg.deny):
+    # Codex matches a rule against argv tokens, so a plain deny does not see through
+    # `git -C <path>`: codex-cli 0.166.0 ran the wrapped force-push (BUG-285).
+    if any(matches(d, cmd, harness) or (harness != "codex" and matches(d, unwrap(cmd), harness))
+           for d in cfg.deny):
         return "denied"
     if "per-statement" in FLAGS and (per_statement_refusal(cmd) or len(statements(cmd)) > 1):
         if per_statement_refusal(cmd):
@@ -405,13 +411,21 @@ def asked_commands(prompt, cwd, harness, cfg):
         return asked + [(fence, fence)]
     if prompt.startswith("Commit the staged file"):
         branch = "probe-wt" if "`probe-wt`" in prompt else "main"
+        push = "git push -q origin %s" % branch
+        if "chain-status-push" in FLAGS:
+            # a model that pushes behind a look-around the allow does not name (BUG-285)
+            push = "git status --short --branch && " + push
         return [("git commit -m probe", "git commit -q -m probe"),
-                ("git push origin %s" % branch, "git push -q origin %s" % branch)]
+                (push if "chain-status-push" in FLAGS else "git push origin %s" % branch, push)]
     if prompt.startswith("/") and harness == "claude":
         return skill_commands(prompt, cfg)
     if harness in ("gemini", "antigravity") and cfg.skills and not prompt.startswith("Run"):
         return gemini_skill(prompt, cfg, harness)
     asked = [(c, c) for c in re.findall(r"[Rr]un `([^`]+)`", prompt)]
+    if "tidy-git-c" in FLAGS and " on its own" in prompt:
+        # a model that drops `-C <repo>` from the variant's command because it is already
+        # in the repo; the controls keep the asked form, so the gate stays open (BUG-285)
+        asked = [(unwrap(m), unwrap(c)) for m, c in asked]
     if "witness-only" in FLAGS and prompt.startswith("Run `touch ") and " on its own" in prompt:
         return asked[:1]   # ask-tier-deny: the witness, never the command (BUG-280)
     if ("skip-unallowed-control" in FLAGS and " on its own" not in prompt
@@ -494,6 +508,11 @@ def fallback_run(command, cwd, cfg, harness, records):
 
 
 def run_command(match_text, command, cwd, cfg, harness, records, aborted):
+    if SCENARIO in ("refuse", "refuse-silent"):
+        # The model declined: it never called the tool, so the harness has nothing to
+        # record. Printing a denial here made a model's refusal look like the harness's
+        # (BUG-285).
+        return
     if "first-statement-only" in FLAGS and len(statements(command)) > 1:
         head = statements(command)[0]
         if verdict(cfg, head, harness) == "run" and not per_statement_refusal(head):
@@ -635,6 +654,11 @@ def compose(prompt, contexts):
         return prompt, ""
     if not (code and "reversed" in prompt):
         return "Done.", ""
+    if "garble-nonce-once" in FLAGS and os.environ.get("FAKE_HARNESS_LOG"):
+        marker = os.environ["FAKE_HARNESS_LOG"] + ".garbled"
+        if not os.path.exists(marker):
+            open(marker, "w").close()
+            return code[::-1][:3] + code[::-1][4:], ""   # one character dropped
     if "bare-nonce" in FLAGS:
         return code, ""
     if "nonce-in-tool" in FLAGS:

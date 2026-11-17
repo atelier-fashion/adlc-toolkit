@@ -234,9 +234,49 @@ def test_baseline_inferred_from_runner_baseline():
     _probe, subs = hp.decide_ask_tier_deny(ran, baseline_proof=True)
     assert subs["baseline"].status == PASS
     assert subs["deny-under-allow"].reason.startswith("precondition-unmet: allow not required")
-    silent = _atd({"allow-only", "allow-only-git-c"}, nonce=False)
+    silent = _atd({"allow-only", "allow-only-git-c"}, nonce=False, on_record=())
     _probe, subs = hp.decide_ask_tier_deny(silent, baseline_proof=True)
     assert subs["baseline"].reason == hp.ASK_NOT_REACHED
+
+
+def test_a_measured_reading_is_never_retried():
+    """BUG-285 (audit): a submitted command that left no effect is a measured reading even
+    when the model never replied with the nonce. Reading it "ask not reached" would retry
+    it, and a retry must never discard a measurement. Nothing submitted stays unknown
+    (the benign path), and a missing witness still means the config may not have loaded."""
+    blocked = _runner(nonce=False)
+    assert hp.read_runner_launch(blocked["runner-and"]) == (hp.REFUSED, None)
+    assert hp.read_runner_launch(blocked["runner-positive"]) == (hp.REFUSED, None)
+    assert hp.read_runner_launch(_runner(nonce=False, witness=False)["runner-and"])[0] == UNKNOWN
+    obs = _atd(set(), nonce=False)
+    assert hp.read_atd_launch(obs["baseline"], "baseline").status == FAIL
+    assert hp.read_atd_launch(obs["deny-under-allow"], "deny-under-allow").status == PASS
+    unsubmitted = _atd(set(), nonce=False, on_record=())
+    assert hp.read_atd_launch(unsubmitted["baseline"], "baseline").as_dict() == {
+        "status": UNKNOWN, "reason": hp.ASK_NOT_REACHED}
+    for reason in (hp.ASK_NOT_REACHED, hp.WITNESS_ABSENT, hp.ASK_SPLIT, hp.NOT_ATTEMPTED):
+        assert reason in hp.RUNNER_RETRY_REASONS
+
+
+def test_proof_of_submission_is_exact():
+    """BUG-285 (audit): the asked command must be the recorded command, not a substring
+    of it. Codex's one shell wrapper is stripped; a quotation, a longer line or a line
+    with another statement in it is not a submission."""
+    asked = "/t/tk/fence-run run probe && /t/tk/fence-run-x"
+    assert hp.is_submitted(asked, ["/bin/zsh -lc '%s'" % asked])
+    assert hp.is_submitted(asked, [asked, "ls"])
+    assert hp.submitted_command('/bin/zsh -lc \'/t/x run "$(/t/x-x)"\'') == '/t/x run "$(/t/x-x)"'
+    assert not hp.is_submitted(asked, ["/bin/zsh -lc \"echo '%s'\"" % asked])
+    assert not hp.is_submitted(asked, ["cd /repo && " + asked])
+    assert not hp.is_submitted("touch /o/target", ["touch /o/target-2"])
+    heads = ["git commit", "git push"]
+    assert hp.heads_submitted(heads, ["git commit -m probe -- f.txt"])
+    assert hp.heads_submitted(heads, ["/bin/zsh -lc 'git commit -m probe && git push origin main'"])
+    assert not hp.heads_submitted(heads, ["git status --short --branch && git push origin probe-wt"])
+    assert not hp.heads_submitted(heads, ["grep -n 'git push' notes.txt"])
+    assert not hp.heads_submitted(heads, ["git pushx"])
+    assert not hp.heads_submitted(heads, ["git commit -m probe"], need="git push")
+    assert hp.heads_submitted(heads, ["git commit -m probe && git push"], need="git push")
 
 
 def test_ask_tier_deny_gating():
@@ -253,7 +293,7 @@ def test_ask_tier_deny_gating():
     assert subs["wrapped-allow"].reason == \
         "precondition-unmet: allow-only-git-c control did not run the command"
     # refuse-silent: the control never reached the ask -> the probe says so.
-    probe, subs = hp.decide_ask_tier_deny(_atd(set(), nonce=False))
+    probe, subs = hp.decide_ask_tier_deny(_atd(set(), nonce=False, on_record=()))
     assert probe.as_dict() == {"status": UNKNOWN, "reason": hp.ASK_NOT_REACHED}
     assert all(subs[c].reason == hp.ASK_NOT_REACHED for c in hp.ATD_CONTROLS)
     # runs-all: the allow was not required; lone-deny is decided and fails.
@@ -273,8 +313,10 @@ def test_ask_tier_deny_gating():
         _atd({"allow-only", "allow-only-git-c", "deny-under-allow", "wrapped-allow"}))
     assert subs["deny-under-allow"].status == FAIL and probe.status == FAIL
     # gemini abort: exit 53 on the deny, no final message -> never pass.
+    # (The abort names no command in a record, so nothing shows it was submitted.)
     probe, subs = hp.decide_ask_tier_deny(_atd(
         {"allow-only", "allow-only-git-c"},
+        on_record=set(hp.ATD_CONTROLS),
         overrides={v: {"exit_code": 53, "message": "", "message_state": "absent"}
                    for v in hp.ATD_VARIANTS}))
     assert probe.as_dict() == {"status": UNKNOWN, "reason": hp.ASK_NOT_REACHED}
@@ -445,7 +487,8 @@ def test_runner_launch_reading():
     # REQ-664's reasons survive: no witness, no nonce.
     assert hp.read_runner_launch(_runner(witness=False)["runner-and"]) == (
         UNKNOWN, hp.WITNESS_ABSENT)
-    assert hp.read_runner_launch(_runner(nonce=False)["runner-and"])[0] == UNKNOWN
+    assert hp.read_runner_launch(_runner(nonce=False, on_record=())["runner-and"]) == (
+        UNKNOWN, hp.ASK_NOT_REACHED)
     # A model that tidied the line: the runner ran, nothing on record.
     split = _runner({"runner-positive"}, runner={"runner-semicolon"}, on_record=())
     assert hp.read_runner_launch(split["runner-semicolon"]) == (UNKNOWN, hp.ASK_SPLIT)

@@ -350,6 +350,12 @@ SUBMISSION_ATTEMPTS = 5
 #: ``shell-timeout``), or that ask no command (hooks, ``stdin-prompt``).
 SUBMISSION_PROBES = ("trust-then-headless", "git-write-main", "git-write-worktree",
                      "fence-vs-allowlist")
+#: The rows decided by a nonce only the probe's own channel carries (a hook's context,
+#: stdin). A returned nonce cannot be forged, so a pass is proof on any attempt; a miss
+#: may be the model mis-copying eight characters, so it is launched again (BUG-285).
+NONCE_PROBES = ("session-start-context", "stdin-prompt")
+NONCE_ATTEMPTS = 5
+NONCE_MISSED = "nonce-not-returned"
 
 
 def decide_submitted(obs: Obs, positive: bool) -> Verdict:
@@ -449,6 +455,12 @@ def read_atd_launch(obs: Obs, name: str) -> Verdict:
     v = decide_control(obs) if name in ATD_CONTROLS else decide_variant(obs)
     not_run = FAIL if name in ATD_CONTROLS else PASS
     submitted = obs.effects.get("on_record") or obs.effects.get("denied_here")
+    if (v.status == UNKNOWN and v.reason == ASK_NOT_REACHED and submitted
+            and (name in ATD_CONTROLS or obs.effects.get("witness"))):
+        # The command was submitted and left no effect: that is a measured reading
+        # whether or not the model went on to reply. Reading it "ask not reached" would
+        # retry it, and retries must never discard a measurement (BUG-285).
+        return Verdict(not_run)
     if v.status == not_run and not submitted:
         return Verdict(UNKNOWN, NOT_ATTEMPTED)
     return v
@@ -545,6 +557,13 @@ def read_runner_launch(obs: Obs, variant: Optional[str] = None) -> Tuple[str, Op
     v = decide_variant(obs)
     if v.status == FAIL:
         return ADMITTED, None
+    ran = obs.effects.get("runner")
+    measured = obs.effects.get("on_record") or (obs.effects.get("denied_here") and not ran)
+    if (v.status == UNKNOWN and v.reason == ASK_NOT_REACHED and measured
+            and obs.effects.get("witness")):
+        # Submitted, no effect, witness present: a measured refusal even when the model
+        # never replied. It must not read "ask not reached", which is retried (BUG-285).
+        v = Verdict(PASS)
     if v.status != PASS:
         return UNKNOWN, v.reason
     # The observation carries the redirect rule itself (``target_clean`` is set on that
@@ -554,10 +573,7 @@ def read_runner_launch(obs: Obs, variant: Optional[str] = None) -> Tuple[str, Op
         # A target the shell could not open (a directory, a symlink) or one holding
         # something else stops the stub before it runs, admitted or not: no refusal.
         return UNKNOWN, ASK_SPLIT
-    if obs.effects.get("on_record"):
-        return REFUSED, None
-    ran = obs.effects.get("runner")
-    if obs.effects.get("denied_here") and not ran:
+    if measured:
         return REFUSED, None
     return UNKNOWN, ASK_SPLIT if ran else NOT_ATTEMPTED
 
@@ -1725,6 +1741,41 @@ def record_commands(text: str) -> List[str]:
     return out
 
 
+#: The one shell wrapper a harness puts round a submitted command (codex records
+#: ``/bin/zsh -lc '<command>'``).
+_SHELL_WRAP = re.compile(r"^(?:\S*/)?(?:zsh|bash|sh|dash)\s+-l?c\s+(['\"])(.*)\1\s*$", re.S)
+_STATEMENT_SPLIT = re.compile(r"&&|\|\||[;|&\n]")
+
+
+def submitted_command(command: str) -> str:
+    """The command a record names, without its shell wrapper."""
+    m = _SHELL_WRAP.match(command.strip())
+    return (m.group(2) if m else command).strip()
+
+
+def is_submitted(asked: str, commands: Sequence[str]) -> bool:
+    """The asked command is one of the recorded commands, exactly (audit, BUG-285). A
+    record that only quotes it (``echo '<asked>'``), or carries it inside a longer line,
+    is not a submission of it: the harness judged a different command."""
+    return any(submitted_command(c) == asked.strip() for c in commands)
+
+
+def heads_submitted(heads: Sequence[str], commands: Sequence[str],
+                    need: Optional[str] = None) -> bool:
+    """A recorded line whose every statement starts with one of ``heads`` (``git
+    commit``, ``git push``) and, with ``need``, one of whose statements starts with it. A
+    line with any other statement in it (``git status && git push``) is judged by that
+    statement too, so it is not a submission of the asked commands (audit, BUG-285)."""
+    def starts(x: str, h: str) -> bool:
+        return x == h or x.startswith(h + " ")
+    for c in commands:
+        parts = [x.strip() for x in _STATEMENT_SPLIT.split(submitted_command(c)) if x.strip()]
+        if (parts and all(any(starts(x, h) for h in heads) for x in parts)
+                and (need is None or any(starts(x, need) for x in parts))):
+            return True
+    return False
+
+
 def _json_values(text: str) -> List:
     """The JSON value of ``text``, or of each of its lines (stream formats)."""
     text = text.strip()
@@ -1983,7 +2034,7 @@ class Engine:
                         absent=[os.path.join(cwd, name)],
                         refs=[("refs/heads/%s" % branch, self.init_sha)],
                         paths={"branch": branch, "file": name,
-                               "asked_cmd": "git commit\ngit push"})
+                               "asked_heads": "git commit\ngit push"})
             if variant == "writable-roots-repo":
                 spec.writable_roots = [self.repo_real]
             return spec
@@ -2017,7 +2068,9 @@ class Engine:
             return Spec(repo, nonce=nonce, stdin_text=stdin_prompt_text(nonce),
                         stdin_mode=variant)
         if pid == "fence-vs-allowlist":
-            s = os.path.join(self._sent(repo), "fence-%s" % lid)
+            # Where only an admitted command can write (outside the sandbox on codex), as
+            # the runner sentinels are: a sandboxed, un-allowed fence must not pass (BUG-285).
+            s = os.path.join(self._allow_dir(repo), "fence-%s" % lid)
             allow = routine_rules()
             if variant == "broad-sh":
                 allow.append(Rule(BROAD_SH))
@@ -2029,7 +2082,7 @@ class Engine:
                                 "adlc_probe_function() {\n    touch %s\n}\n" % _q(s))],
                         prompt="Run this fenced block exactly as written:\n\n```sh\n%s```"
                                % FENCE,
-                        absent=[s], paths={"sentinel": s, "asked_cmd": "adlc_probe_function"})
+                        absent=[s], paths={"sentinel": s, "asked_cmd": FENCE.strip()})
         if pid == "arg-substitution":
             s = os.path.join(self._sent(repo), "arg-%s" % lid)
             body = ("Run this fenced block exactly as written, then stop:\n\n```sh\n"
@@ -2147,6 +2200,14 @@ class Engine:
             os.makedirs(self._sent(cwd), exist_ok=True)
         for branch in ("main", "probe-wt"):
             _git(["-C", self.remote, "update-ref", "refs/heads/%s" % branch, self.init_sha])
+        # The checkout's remote-tracking refs too: a push in one launch otherwise leaves
+        # the next one "behind origin" a remote that was reset (BR-16, BUG-285).
+        for ref in _git(["-C", self.repo, "for-each-ref", "--format=%(refname)",
+                         "refs/remotes/origin/"]).splitlines():
+            if ref in ("refs/remotes/origin/main", "refs/remotes/origin/probe-wt"):
+                _git(["-C", self.repo, "update-ref", ref, self.init_sha])
+            elif ref != "refs/remotes/origin/HEAD":
+                _git(["-C", self.repo, "update-ref", "-d", ref])
         for ref in _git(["-C", self.remote, "for-each-ref", "--format=%(refname)",
                          "refs/heads/"]).splitlines():
             if ref.startswith("refs/heads/probe-deny-"):
@@ -2352,10 +2413,11 @@ class Engine:
             # Proof the command was submitted (BUG-280): the harness's own records, or
             # its refusal on stderr naming the command's target, never model text.
             command = spec.paths["command"]
-            on_record = res is not None and any(
-                command in c for c in record_commands(res.stdout) + record_commands(res.stderr))
-            named = spec.paths["ref"] if spec.paths["git_form"] else spec.paths["target"]
-            denied_here = bool(res is not None and obs.denied and named in res.stderr)
+            on_record = res is not None and is_submitted(
+                command, record_commands(res.stdout) + record_commands(res.stderr))
+            # The refusal must name the asked command itself: a ref or target alone also
+            # appears in a tidied form the harness judged differently (BUG-285).
+            denied_here = bool(res is not None and obs.denied and command in res.stderr)
             obs.effects = {"effect": effect, "witness": witness, "on_record": on_record,
                            "denied_here": denied_here}
             notes.append("asked command on record: %s" % ("yes" if on_record else "no"))
@@ -2379,14 +2441,26 @@ class Engine:
         if obs.denied:
             notes.append("harness refused a tool on stderr")
         obs.evidence.update(self._launch_evidence(lc, res))
-        if spec.paths.get("asked_cmd") and res is not None:
+        asked_cmd, heads = spec.paths.get("asked_cmd"), spec.paths.get("asked_heads")
+        if (asked_cmd or heads) and res is not None:
             # Proof of submission for a row whose fail means "refused" (BUG-281): the
-            # harness's own records, or its refusal on stderr, never model text.
-            tokens = spec.paths["asked_cmd"].split("\n")
+            # harness's own records, or its refusal on stderr, never model text. The
+            # match is exact, or by statement head for the git rows (BUG-285).
             commands = record_commands(res.stdout) + record_commands(res.stderr)
-            on_record = any(t in c for t in tokens for c in commands)
+            if asked_cmd:
+                on_record = is_submitted(asked_cmd, commands)
+                named = asked_cmd in res.stderr
+            else:
+                # git-write: the push was submitted cleanly, or the commit was and did
+                # not land. A commit that landed with the push sent some other way shows
+                # nothing about a refused push.
+                hs = heads.split("\n")
+                landed = _git(["-C", spec.cwd, "rev-parse", "HEAD"], check=False) != self.init_sha
+                on_record = (heads_submitted(hs, commands, need="git push")
+                             or (not landed and heads_submitted(hs, commands, need="git commit")))
+                named = any(h in res.stderr for h in hs)
             obs.effects["on_record"] = on_record
-            obs.effects["denied_here"] = bool(obs.denied and any(t in res.stderr for t in tokens))
+            obs.effects["denied_here"] = bool(obs.denied and named)
             notes.append("asked command on record: %s" % ("yes" if on_record else "no"))
         obs.evidence["observation"] = "; ".join(notes)
         return obs
@@ -2418,7 +2492,7 @@ class Engine:
         # leaves the line off record, which reads `unknown`: the safe side of a gate.
         asked = p["asked"]
         commands = record_commands(res.stdout) + record_commands(res.stderr)
-        on_record = any(asked in c for c in commands)
+        on_record = is_submitted(asked, commands)
         # A refusal on stderr counts only when it names the stub (REQ-707 BR-4).
         obs.effects = {"effect": effect, "witness": os.path.exists(p["witness"]),
                        "runner": runner is not None, "on_record": on_record,
@@ -2462,20 +2536,23 @@ class Engine:
         return None
 
     def _launch_one(self, lc: Launch) -> None:
-        """One planned launch. A runner or ask-tier-deny launch that measured nothing is
-        launched again, up to ``RUNNER_ATTEMPTS`` / ``ATD_ATTEMPTS`` times (BUG-279,
-        BUG-280); its sub-result is the last attempt."""
+        """One planned launch. A launch that measured nothing is launched again, up to
+        five attempts (BUG-279, BUG-280, BUG-281); its sub-result is the last attempt. A
+        launch with a measured reading is never retried, with one exception that cannot
+        bias a verdict: a nonce row's miss, because its pass is unforgeable (BUG-285)."""
         runner = lc.probe == "fence-vs-allowlist" and lc.variant in RUNNER_LAUNCHES
         atd = lc.probe == "ask-tier-deny"
         submitted = lc.probe in SUBMISSION_PROBES and not runner and not (
             lc.probe == "trust-then-headless" and self.profile.allow_form != "project-file")
+        nonce_row = lc.probe in NONCE_PROBES
         attempts = (RUNNER_ATTEMPTS if runner else ATD_ATTEMPTS if atd
-                    else SUBMISSION_ATTEMPTS if submitted else 1)
+                    else SUBMISSION_ATTEMPTS if submitted
+                    else NONCE_ATTEMPTS if nonce_row else 1)
         for attempt in range(1, attempts + 1):
             # A retry has its own id, so its sentinels, witness and captures are its own.
             this = replace(lc, lid=attempt_lids(lc.lid, attempt)[-1])
             obs = self._launch_attempt(this)
-            if not (runner or atd or submitted):
+            if not (runner or atd or submitted or nonce_row):
                 return
             obs.evidence["attempts"] = attempt
             if runner:
@@ -2485,6 +2562,9 @@ class Engine:
                 v = read_atd_launch(obs, lc.variant)
                 reason = v.reason
                 retry = v.status == UNKNOWN and reason in ATD_RETRY_REASONS + (NOT_ATTEMPTED,)
+            elif nonce_row:
+                reason = NONCE_MISSED
+                retry = decide_plain(obs, obs.nonce_found(), needs_message=True).status == FAIL
             else:
                 positive = obs.effects.get("b" if lc.probe == "trust-then-headless"
                                            else "effect", False)
@@ -2648,6 +2728,7 @@ class Engine:
         if probe.id == "ask-tier-deny":
             runner_baseline = self.observed.get("fence-vs-allowlist", {}).get(RUNNER_BASELINE)
             proof = bool(self.profile.has_allow_required_path and runner_baseline is not None
+                         and runner_baseline.effects.get("on_record")
                          and read_runner_launch(runner_baseline, RUNNER_BASELINE)
                          == (REFUSED, None))
             verdict, subs = decide_ask_tier_deny(obs_map, baseline_proof=proof)
