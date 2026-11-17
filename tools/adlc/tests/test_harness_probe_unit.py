@@ -133,18 +133,49 @@ def test_plain_and_exit_exempt_rules():
 
 # --- ask-tier-deny (BR-5, BR-17, AC-6, AC-16) --------------------------------
 
-def _atd(effects, nonce=True, witness=None, overrides=None):
-    """Seven observations. ``effects`` names the launches whose command ran."""
+def _atd(effects, nonce=True, witness=None, overrides=None, on_record=None):
+    """Seven observations. ``effects`` names the launches whose command ran;
+    ``on_record`` (default: every launch) those whose command the harness recorded."""
     out = {}
     for name in hp.ATD_VARIANTS + hp.ATD_CONTROLS:
         obs = Obs(nonce="abcd1234", message="4321dcba" if nonce else "no")
         obs.effects = {"effect": name in effects,
-                       "witness": (name in hp.ATD_VARIANTS) if witness is None else witness}
+                       "witness": (name in hp.ATD_VARIANTS) if witness is None else witness,
+                       "on_record": True if on_record is None else name in on_record,
+                       "denied_here": False}
         out[name] = obs
     for name, kw in (overrides or {}).items():
         for k, v in kw.items():
             setattr(out[name], k, v)
     return out
+
+
+def test_ask_tier_deny_needs_proof_of_submission():
+    """BUG-280 (LESSON-847): a deny that "held" or a control that "did not run" says so
+    only when the harness recorded the command. A model that ran the witness and never
+    tried the command reads not-attempted, never pass; a refusal on record still passes
+    (the benign path)."""
+    held = _atd({"allow-only", "allow-only-git-c"})
+    probe, subs = hp.decide_ask_tier_deny(held)
+    assert probe.status == PASS and subs["deny-under-allow"].status == PASS
+    skipped = _atd({"allow-only", "allow-only-git-c"},
+                   on_record={"allow-only", "allow-only-git-c", "baseline", "baseline-git-c"})
+    probe, subs = hp.decide_ask_tier_deny(skipped)
+    assert (subs["deny-under-allow"].status, subs["deny-under-allow"].reason) == (
+        UNKNOWN, hp.NOT_ATTEMPTED)
+    assert (subs["wrapped-allow"].status, subs["wrapped-allow"].reason) == (
+        UNKNOWN, hp.NOT_ATTEMPTED)
+    assert probe.status == UNKNOWN
+    # A control that "did not run" with nothing on record is not a measured baseline.
+    unbased = _atd({"allow-only"}, on_record={"allow-only"} | set(hp.ATD_VARIANTS))
+    _probe, subs = hp.decide_ask_tier_deny(unbased)
+    assert (subs["baseline"].status, subs["baseline"].reason) == (UNKNOWN, hp.NOT_ATTEMPTED)
+    # A refusal the harness reported on stderr is proof too.
+    denied = _atd({"allow-only", "allow-only-git-c"}, on_record=())
+    for obs in denied.values():
+        obs.effects["denied_here"] = True
+    _probe, subs = hp.decide_ask_tier_deny(denied)
+    assert subs["deny-under-allow"].status == PASS
 
 
 def test_ask_tier_deny_gating():

@@ -429,6 +429,13 @@ is decided only when its `allow-only*` control ran the command and its
 `baseline*` control did not. A headless ask is already a deny on most harnesses,
 so `lone-deny` is `n/a` unless `baseline` ran its command.
 
+A variant whose command did not run reads `pass` (the deny held), and a control whose command
+did not run reads `fail`, only when the command was submitted: it is in a `command` field of the
+harness's own records, or the harness's refusal on stderr names its target. Otherwise the launch
+is `unknown / not-attempted`, and, like a launch that never reached the ask or lost its witness,
+it is launched again from fresh state, up to five attempts. codex-cli 0.166.0's model ran the
+witness and skipped the denied command, which read as a deny that held (BUG-280).
+
 **Consumer mapping.** REQ-655, REQ-656 and REQ-662 read `sub_results` for which
 configuration passed. The `git-c` wrapper shape is read from `wrapped-allow` and
 the `prefix` shape from `deny-under-allow`. The `env-prefix` and `shell-opener`

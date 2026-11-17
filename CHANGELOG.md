@@ -609,6 +609,14 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`ask-tier-deny` needs proof the command was submitted, and retries (BUG-280).** A
+  variant read `pass` (the deny held) whenever its command left no effect. On codex-cli
+  0.166.0 the model ran the witness and never submitted the denied command, so
+  `deny-under-allow` read `pass` with nothing measured (#269). A variant's `pass`, and a
+  control's "did not run", now need the command in the harness's own records or its
+  refusal on stderr, as `runner-prefix` does (LESSON-847); otherwise the launch is
+  `unknown / not-attempted`. Such launches, and those that never reached the ask or lost
+  their witness, are retried from fresh state, up to five attempts.
 - **`runner-prefix` launches retry when the model did nothing (BUG-279).** On codex-cli
   0.166.0 the model skipped the asked commands on about half its launches, saying they
   wrote outside the workspace, so `runner-prefix` stayed `unknown`. The prompt now says
