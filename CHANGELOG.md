@@ -609,6 +609,14 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **A refusal row needs proof the command was submitted, and retries (BUG-281).** On
+  codex-cli 0.166.0 the model refused to run the trust gate's allowed `touch` at all, so
+  `allowlist-loaded` read `fail`, and the gate skipped every other probe. The run measured
+  nothing. `trust-then-headless`'s `allowlist-loaded`, `git-write-*` and the three older
+  `fence-vs-allowlist` variants now read `fail` only with the asked command in the
+  harness's records or its stderr refusal; otherwise `unknown / not-attempted`, retried up
+  to five attempts. The fake gains `model-skips`, and reports its `main-only` and
+  `needs-writable-roots` refusals as denials.
 - **`ask-tier-deny` needs proof the command was submitted, and retries (BUG-280).** A
   variant read `pass` (the deny held) whenever its command left no effect. On codex-cli
   0.166.0 the model ran the witness and never submitted the denied command, so

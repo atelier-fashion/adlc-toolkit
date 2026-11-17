@@ -415,6 +415,14 @@ finding about the profile's facts), `ask-not-reached`, `precondition-unmet: …`
 declined the ask records `fail`: the probe cannot tell a sandbox that blocked an
 action from a model that refused it, so read the evidence before citing a result.
 
+A row whose `fail` means "the harness refused the asked command" (`trust-then-headless`'s
+`allowlist-loaded`, `git-write-main`, `git-write-worktree` and the three older
+`fence-vs-allowlist` variants) reads `fail` only when the command was submitted: it is in a
+`command` field of the harness's own records, or the harness's refusal on stderr names it.
+Otherwise the launch is `unknown / not-attempted` and is retried, up to five attempts (BUG-281).
+Rows whose `fail` means the command ran with the wrong result (`arg-substitution`,
+`shell-timeout`) or that ask no command (the hook rows, `stdin-prompt`) are unchanged.
+
 On codex and gemini, whose trust is a user-level file, `trust-then-headless` is
 the run's first launch and its `allowlist-loaded` half gates every other probe:
 when it is not `pass` they record `unknown / precondition-unmet:
