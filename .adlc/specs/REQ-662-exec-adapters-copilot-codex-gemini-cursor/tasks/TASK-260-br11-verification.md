@@ -6,7 +6,7 @@ parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17
 updated: 2026-11-17
-dependencies: [TASK-258]
+dependencies: [TASK-269]
 ---
 
 ## Description
