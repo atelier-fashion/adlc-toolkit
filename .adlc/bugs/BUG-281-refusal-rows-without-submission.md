@@ -1,7 +1,7 @@
 ---
 id: BUG-281
 title: "A probe row whose fail means \"the harness refused\" reads fail when the model never tried, and the trust gate then skips the whole run"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-17
 updated: 2026-11-17
@@ -69,3 +69,11 @@ Attribution: REQ-664, derived from blame of `decide_plain` and the `allowlist-lo
 Regression tests: off for this project (no `.adlc/config.yml`).
 
 Failing-first tests were still written. `test_refusal_rows_need_proof_of_submission` and `test_trust_gate_skip_is_not_a_failed_allowlist` both fail against `main`'s `harness_probe.py`, and both pass with the fix.
+
+## Deployment
+
+Merged as `d354f9e` ([#280](https://github.com/atelier-fashion/adlc-toolkit/pull/280)) on 2026-11-17. Nothing to deploy, since this is toolkit code. A full codex probe on the merged commit records the result.
+
+## Lessons
+
+- LESSON-875: when one oracle gets a proof-of-submission rule, sweep every oracle of the same shape.
