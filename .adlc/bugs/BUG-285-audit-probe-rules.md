@@ -1,7 +1,7 @@
 ---
 id: BUG-285
 title: "`adlc harness probe`: rules an /adversary audit found could make a pass hollow, and two codex sub-results that recorded the model"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-17
 updated: 2026-11-17
@@ -91,3 +91,13 @@ Not fixed here:
 Regression tests: off for this project (no `.adlc/config.yml`).
 
 Failing-first tests were still written. Six of the new tests fail against `main`'s `harness_probe.py` and pass with the fix: the two unit tests, and the nonce-row, tidied `git -C`, chained-push and tracking-refs e2e tests. `test_codex_plain_deny_does_not_cover_git_c` is a test of the corrected fake.
+
+## Deployment
+
+Merged as `af5551d` ([#290](https://github.com/atelier-fashion/adlc-toolkit/pull/290)) on 2026-11-17. The REQ-662 wording the same audit found merged as `a3fbf72` ([#289](https://github.com/atelier-fashion/adlc-toolkit/pull/289)). Nothing to deploy, since this is toolkit code. A full codex probe on the merged commit records the result.
+
+Still open after the merge: `test_fresh_state_per_launch` failed once in a full suite run on the fix branch. It then passed 18 times in a row alone and in a full run of the end-to-end file. Its message was not captured, so the cause is unknown.
+
+## Lessons
+
+- LESSON-880: a retry rule must read the harness's record before the model's reply, and proof of submission is an exact match.
