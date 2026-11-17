@@ -1,7 +1,7 @@
 ---
 id: BUG-282
 title: "`adlc harness probe codex` cannot see codex refuse a command: a `forbidden` rule's rejection leaves no record and only a stderr line the profile does not name"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-17
 updated: 2026-11-17
@@ -68,3 +68,11 @@ The codex profile declares `refusal_stderr=r"rejected: policy forbids commands s
 Regression tests: off for this project (no `.adlc/config.yml`).
 
 A failing-first test was still written: `test_codex_policy_rejection_is_proof_of_refusal` fails against `main`'s `harness_probe.py`, with the corrected fake, and passes with the fix.
+
+## Deployment
+
+Merged as `ff2af44` ([#282](https://github.com/atelier-fashion/adlc-toolkit/pull/282)) on 2026-11-17. Nothing to deploy, since this is toolkit code. A full codex probe on the merged commit records the result.
+
+## Lessons
+
+- NO_ENTRY: covered by LESSON-869 (a fake must model the real CLI's output, here a rejection that leaves no record) and LESSON-847 (a stderr refusal naming the command is proof of submission).
