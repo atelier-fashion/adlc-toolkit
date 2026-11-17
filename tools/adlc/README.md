@@ -434,7 +434,8 @@ allowed; `wrapped-allow` denies `git push --force origin …` and asks the
 `git -C <repo>` form. The controls `baseline`, `allow-only`, `baseline-git-c` and
 `allow-only-git-c` show whether the allow was necessary and effective: a variant
 is decided only when its `allow-only*` control ran the command and its
-`baseline*` control did not. A headless ask is already a deny on most harnesses,
+`baseline*` control did not, read with proof of submission: a baseline the model never
+tried leaves the variant `precondition-unmet: <control> not measured` (BUG-283). A headless ask is already a deny on most harnesses,
 so `lone-deny` is `n/a` unless `baseline` ran its command.
 
 A variant whose command did not run reads `pass` (the deny held), and a control whose command

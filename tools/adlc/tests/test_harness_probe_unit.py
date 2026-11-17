@@ -200,6 +200,25 @@ def test_refusal_rows_need_proof_of_submission():
                                          "git-write-worktree", "fence-vs-allowlist"}
 
 
+def test_ask_tier_deny_gate_needs_a_measured_baseline():
+    """BUG-283: "the allow was necessary" needs the baseline control measured. A baseline
+    the model never tried (not-attempted) leaves the variant unknown, never a pass that
+    rests on an unmeasured gate; a measured baseline still decides it (the benign path)."""
+    unmeasured = _atd({"allow-only", "allow-only-git-c"},
+                      on_record=set(hp.ATD_VARIANTS) | {"allow-only", "allow-only-git-c"})
+    probe, subs = hp.decide_ask_tier_deny(unmeasured)
+    assert subs["baseline"].reason == hp.NOT_ATTEMPTED
+    assert subs["deny-under-allow"].status == UNKNOWN
+    assert subs["deny-under-allow"].reason.startswith(
+        "precondition-unmet: baseline control not measured")
+    assert subs["wrapped-allow"].reason.startswith(
+        "precondition-unmet: baseline-git-c control not measured")
+    assert probe.status == UNKNOWN
+    measured = _atd({"allow-only", "allow-only-git-c"})
+    probe, subs = hp.decide_ask_tier_deny(measured)
+    assert subs["deny-under-allow"].status == PASS and probe.status == PASS
+
+
 def test_ask_tier_deny_gating():
     # perform: the allow is necessary (baseline did nothing) and the deny held.
     probe, subs = hp.decide_ask_tier_deny(_atd({"allow-only", "allow-only-git-c"}))

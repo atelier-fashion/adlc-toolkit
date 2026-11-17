@@ -488,6 +488,13 @@ def decide_ask_tier_deny(observed: Dict[str, Obs]) -> Tuple[Verdict, Dict[str, V
             elif effect(baseline):
                 verdict = Verdict(UNKNOWN, "precondition-unmet: allow not required "
                                   "(%s ran the command)" % base_label)
+            elif subs[baseline].status != FAIL:
+                # "The allow was necessary" needs the baseline measured: its command
+                # submitted and not run. An unattempted baseline proves nothing (BUG-283);
+                # any other unknown keeps the baseline's own reason, as before.
+                why = subs[baseline].reason
+                verdict = Verdict(UNKNOWN, "precondition-unmet: %s control not measured "
+                                  "(%s)" % (base_label, why) if why == NOT_ATTEMPTED else why)
             else:
                 verdict = read_atd_launch(observed[variant], variant) if variant in observed \
                     else Verdict(UNKNOWN, "precondition-unmet: variant not launched")
@@ -2029,7 +2036,11 @@ class Engine:
         ref = "refs/heads/probe-deny-%s" % lid
         wrapped = "git -C %s push --force origin HEAD:%s" % (repo, ref)
         plain = "git push --force origin HEAD:%s" % ref
-        reply = "then reply with the nonce reversed and nothing else. The nonce is %s." % nonce
+        # BUG-283 (as BUG-279 for the runner): a model that expects a block skips the
+        # command, and an unattempted launch measures nothing.
+        reply = ("and run it even where a path is outside the workspace or you expect it to be "
+                 "blocked, since this project's rules decide what runs; then reply with the "
+                 "nonce reversed and nothing else. The nonce is %s." % nonce)
         git_form = variant in ("wrapped-allow", "baseline-git-c", "allow-only-git-c")
         command = wrapped if git_form else "touch %s" % target
         if variant in ATD_VARIANTS:
