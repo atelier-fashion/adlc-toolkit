@@ -162,9 +162,11 @@ def test_keep_retains_the_run_dir(tmp_path):
 # --- AC-5: git writes decided from the bare remote --------------------------------
 
 def test_git_write_decided_from_remote(tmp_path):
+    # A model that only claims it pushed submitted nothing: never a pass, and since
+    # BUG-281 not a harness refusal either.
     sb = Sandbox(tmp_path / "claim", flags=("claim-only",))
     result, _ = _run_ok(sb, "claude", "--only", "git-write-main")
-    assert statuses(result)["git-write-main"] == ("fail", None)
+    assert statuses(result)["git-write-main"] == ("unknown", hp.NOT_ATTEMPTED)
     assert "→ " in result["probes"]["git-write-main"]["evidence"]["observation"]
     sb = Sandbox(tmp_path / "main-only", flags=("main-only",))
     result, _ = _run_ok(sb, "claude", "--only", "git-write-main", "--only",
@@ -183,6 +185,18 @@ def test_git_write_decided_from_remote(tmp_path):
 
 
 # --- AC-6 / AC-16: ask-tier-deny ---------------------------------------------------
+
+def test_trust_gate_skip_is_not_a_failed_allowlist(tmp_path):
+    """BUG-281: codex 0.166.0's model refused to run the gate's allowed ``touch`` at all,
+    and allowlist-loaded read fail, which gated every other probe out of the run. A
+    launch that never submitted the command is unknown and retried, never a fail."""
+    sb = Sandbox(tmp_path, flags=("model-skips",))
+    result, out = _run_ok(sb, "codex", "--only", "trust-then-headless")
+    subs = result["probes"]["trust-then-headless"]["sub_results"]
+    assert (subs["allowlist-loaded"]["status"], subs["allowlist-loaded"]["reason"]) == (
+        "unknown", hp.NOT_ATTEMPTED)
+    assert out.stderr.count("launch_retried") == hp.SUBMISSION_ATTEMPTS - 1
+
 
 def test_ask_tier_deny_variants(tmp_path):
     sb = Sandbox(tmp_path / "perform")

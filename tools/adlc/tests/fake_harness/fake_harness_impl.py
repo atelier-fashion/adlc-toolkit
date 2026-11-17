@@ -32,7 +32,9 @@ Flags modify a scenario: ``claim-only``, ``main-only``, ``needs-writable-roots``
 and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measured
 ``claude``), ``split-ask`` (a model that tidies the asked line down to its head),
 ``first-statement-only`` (a harness that records the whole line, then runs its head) and
-``witness-only`` (a model that never runs the asked fence, or on an ask-tier-deny
+``model-skips`` (a model that runs nothing at all and still replies, as codex-cli
+0.166.0's did on the trust gate; BUG-281), ``witness-only`` (a model that never runs the
+asked fence, or on an ask-tier-deny
 variant the command after the witness; BUG-280), ``skip-first-attempt`` (a model
 that runs nothing on a runner launch's first attempt and does the work on a retry, as
 codex-cli 0.166.0's model often did; BUG-279), ``sandboxed-refusal`` (codex only: a
@@ -382,6 +384,8 @@ def sh(cmd, cwd):
 
 def asked_commands(prompt, cwd, harness, cfg):
     """[(match text, command to execute)] the prompt asks for."""
+    if "model-skips" in FLAGS:
+        return []   # a model that replies without running anything (BUG-281)
     if prompt.startswith("Run this fenced block exactly as written"):
         m = re.search(r"```sh\n(.*?)```", prompt, re.S)
         fence = m.group(1) if m else ""
@@ -637,7 +641,8 @@ def compose(prompt, contexts):
 def emit(harness, opts, message, tool_text, records, sid):
     # What the harness reports it refused, in its own output (REQ-707 ADR-5).
     denials = [r["command"] for r in records
-               if r["decision"] in ("refused", "denied", "partial")]
+               if r["decision"] in ("refused", "denied", "partial", "skipped",
+                                    "sandbox-denied")]   # harness refusals (BUG-281)
     leak = ""
     if "leak" in FLAGS:
         leak = "debug token sk-%s from %s/secret, mail leak@example.com" % ("a" * 30, HOME)

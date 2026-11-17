@@ -342,6 +342,30 @@ def decide_plain(obs: Obs, positive: bool, needs_message: bool = False) -> Verdi
     return Verdict(PASS if positive else FAIL)
 
 
+#: Attempts per launch of a probe whose negative reading needs proof of submission
+#: (BUG-281), as for the runner (BUG-279) and ask-tier-deny (BUG-280) launches.
+SUBMISSION_ATTEMPTS = 5
+#: The probes whose ``fail`` means "the harness refused the asked command". Not here:
+#: rows whose fail means the command ran with the wrong result (``arg-substitution``,
+#: ``shell-timeout``), or that ask no command (hooks, ``stdin-prompt``).
+SUBMISSION_PROBES = ("trust-then-headless", "git-write-main", "git-write-worktree",
+                     "fence-vs-allowlist")
+
+
+def decide_submitted(obs: Obs, positive: bool) -> Verdict:
+    """``decide_plain`` for a row whose ``fail`` means "the harness refused the asked
+    command" (BUG-281, LESSON-847). That reading stands only when the command was
+    submitted: one of the launch's asked commands is in a ``command`` field of the
+    harness's own records, or the harness's refusal on stderr names it. A model that
+    never tried reads ``unknown / not-attempted``, and the launch is retried. A row
+    with no ``on_record`` key was not asked to run a command; it reads as before."""
+    v = decide_plain(obs, positive)
+    if (v.status == FAIL and "on_record" in obs.effects
+            and not (obs.effects.get("on_record") or obs.effects.get("denied_here"))):
+        return Verdict(UNKNOWN, NOT_ATTEMPTED)
+    return v
+
+
 def decide_exit_exempt(obs: Obs, effect_key: str, effect_is: str) -> Verdict:
     """The rows whose session may legitimately end non-zero (BR-5).
 
@@ -1915,7 +1939,7 @@ class Engine:
             b = os.path.join(self._allow_dir(repo), "allow-%s" % lid)
             spec = Spec(repo, prompt="Run `touch %s`." % b, nonce=nonce,
                         hooks=[("touch-a", "touch %s" % _q(a))], absent=[a, b],
-                        paths={"a": a, "b": b})
+                        paths={"a": a, "b": b, "asked_cmd": "touch %s" % b})
             if self.profile.allow_form == "project-file":
                 spec.allow = [Rule("touch %s" % b, exact=True)]
             return spec
@@ -1931,7 +1955,8 @@ class Engine:
                         allow=[Rule("git commit"), Rule("git push")],
                         absent=[os.path.join(cwd, name)],
                         refs=[("refs/heads/%s" % branch, self.init_sha)],
-                        paths={"branch": branch, "file": name})
+                        paths={"branch": branch, "file": name,
+                               "asked_cmd": "git commit\ngit push"})
             if variant == "writable-roots-repo":
                 spec.writable_roots = [self.repo_real]
             return spec
@@ -1977,7 +2002,7 @@ class Engine:
                                 "adlc_probe_function() {\n    touch %s\n}\n" % _q(s))],
                         prompt="Run this fenced block exactly as written:\n\n```sh\n%s```"
                                % FENCE,
-                        absent=[s], paths={"sentinel": s})
+                        absent=[s], paths={"sentinel": s, "asked_cmd": "adlc_probe_function"})
         if pid == "arg-substitution":
             s = os.path.join(self._sent(repo), "arg-%s" % lid)
             body = ("Run this fenced block exactly as written, then stop:\n\n```sh\n"
@@ -2323,6 +2348,15 @@ class Engine:
         if obs.denied:
             notes.append("harness refused a tool on stderr")
         obs.evidence.update(self._launch_evidence(lc, res))
+        if spec.paths.get("asked_cmd") and res is not None:
+            # Proof of submission for a row whose fail means "refused" (BUG-281): the
+            # harness's own records, or its refusal on stderr, never model text.
+            tokens = spec.paths["asked_cmd"].split("\n")
+            commands = record_commands(res.stdout) + record_commands(res.stderr)
+            on_record = any(t in c for t in tokens for c in commands)
+            obs.effects["on_record"] = on_record
+            obs.effects["denied_here"] = bool(obs.denied and any(t in res.stderr for t in tokens))
+            notes.append("asked command on record: %s" % ("yes" if on_record else "no"))
         obs.evidence["observation"] = "; ".join(notes)
         return obs
 
@@ -2402,21 +2436,29 @@ class Engine:
         BUG-280); its sub-result is the last attempt."""
         runner = lc.probe == "fence-vs-allowlist" and lc.variant in RUNNER_LAUNCHES
         atd = lc.probe == "ask-tier-deny"
-        attempts = RUNNER_ATTEMPTS if runner else ATD_ATTEMPTS if atd else 1
+        submitted = lc.probe in SUBMISSION_PROBES and not runner and not (
+            lc.probe == "trust-then-headless" and self.profile.allow_form != "project-file")
+        attempts = (RUNNER_ATTEMPTS if runner else ATD_ATTEMPTS if atd
+                    else SUBMISSION_ATTEMPTS if submitted else 1)
         for attempt in range(1, attempts + 1):
             # A retry has its own id, so its sentinels, witness and captures are its own.
             this = replace(lc, lid=attempt_lids(lc.lid, attempt)[-1])
             obs = self._launch_attempt(this)
-            if not (runner or atd):
+            if not (runner or atd or submitted):
                 return
             obs.evidence["attempts"] = attempt
             if runner:
                 reading, reason = read_runner_launch(obs, lc.variant)
                 retry = reading == UNKNOWN and reason in RUNNER_RETRY_REASONS
-            else:
+            elif atd:
                 v = read_atd_launch(obs, lc.variant)
                 reason = v.reason
                 retry = v.status == UNKNOWN and reason in ATD_RETRY_REASONS + (NOT_ATTEMPTED,)
+            else:
+                positive = obs.effects.get("b" if lc.probe == "trust-then-headless"
+                                           else "effect", False)
+                reason = decide_submitted(obs, positive).reason
+                retry = reason == NOT_ATTEMPTED
             if not retry:
                 return
             if attempt < attempts:
@@ -2561,7 +2603,7 @@ class Engine:
         if self.profile.allow_form != "project-file":
             allow = Verdict(NA, COPILOT_ALLOW_NA)
         else:
-            allow = decide_plain(obs, obs.effects.get("b", False))
+            allow = decide_submitted(obs, obs.effects.get("b", False))
         hooks.evidence, allow.evidence = dict(obs.evidence), dict(obs.evidence)
         subs = {"hooks-loaded": hooks, "allowlist-loaded": allow}
         return conjunction([hooks, allow]), subs
@@ -2590,7 +2632,7 @@ class Engine:
             elif probe.id == "arg-substitution":
                 v = decide_plain(obs, obs.content.get("sentinel") == "hello")
             else:
-                v = decide_plain(obs, obs.effects.get("effect", False))
+                v = decide_submitted(obs, obs.effects.get("effect", False))
             v.evidence = obs.evidence
             subs[variant] = v
         if list(subs) == ["-"]:
@@ -2613,7 +2655,7 @@ class Engine:
         for variant in FENCE_VARIANTS:
             if variant in obs_map:
                 obs = obs_map[variant]
-                v = decide_plain(obs, obs.effects.get("effect", False))
+                v = decide_submitted(obs, obs.effects.get("effect", False))
                 v.evidence = obs.evidence
                 subs[variant] = v
         verdict = disjunction(list(subs.values())) if subs else Verdict(UNKNOWN)

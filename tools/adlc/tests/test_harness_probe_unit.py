@@ -178,6 +178,28 @@ def test_ask_tier_deny_needs_proof_of_submission():
     assert subs["deny-under-allow"].status == PASS
 
 
+def test_refusal_rows_need_proof_of_submission():
+    """BUG-281 (LESSON-847): a row whose fail means "the harness refused the asked
+    command" (the trust gate's allowlist-loaded, git-write-*, the fence variants) says so
+    only with the command on record or a stderr refusal naming it. A model that never
+    tried reads not-attempted. A refusal on record is still fail (the benign path), and a
+    row asked no command reads as before."""
+    def obs(effect, **effects):
+        o = Obs(exit_code=0, nonce="abcd1234", message="4321dcba")
+        o.effects = dict({"effect": effect}, **effects)
+        return o
+    assert hp.decide_submitted(obs(False, on_record=False, denied_here=False), False) \
+        .as_dict() == {"status": UNKNOWN, "reason": hp.NOT_ATTEMPTED}
+    assert hp.decide_submitted(obs(False, on_record=True, denied_here=False), False) \
+        .status == FAIL
+    assert hp.decide_submitted(obs(False, on_record=False, denied_here=True), False) \
+        .status == FAIL
+    assert hp.decide_submitted(obs(True, on_record=False), True).status == PASS
+    assert hp.decide_submitted(obs(False), False).status == FAIL   # no command asked
+    assert set(hp.SUBMISSION_PROBES) == {"trust-then-headless", "git-write-main",
+                                         "git-write-worktree", "fence-vs-allowlist"}
+
+
 def test_ask_tier_deny_gating():
     # perform: the allow is necessary (baseline did nothing) and the deny held.
     probe, subs = hp.decide_ask_tier_deny(_atd({"allow-only", "allow-only-git-c"}))
