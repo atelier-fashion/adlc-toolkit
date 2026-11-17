@@ -32,7 +32,8 @@ Flags modify a scenario: ``claim-only``, ``main-only``, ``needs-writable-roots``
 and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measured
 ``claude``), ``split-ask`` (a model that tidies the asked line down to its head),
 ``first-statement-only`` (a harness that records the whole line, then runs its head) and
-``model-skips`` (a model that runs nothing at all and still replies, as codex-cli
+``skip-unallowed-control`` (an ask-tier-deny control whose command no allow names is never
+tried; REQ-664 BR-17(e)), ``model-skips`` (a model that runs nothing at all and still replies, as codex-cli
 0.166.0's did on the trust gate; BUG-281), ``witness-only`` (a model that never runs the
 asked fence, or on an ask-tier-deny
 variant the command after the witness; BUG-280), ``skip-first-attempt`` (a model
@@ -413,6 +414,11 @@ def asked_commands(prompt, cwd, harness, cfg):
     asked = [(c, c) for c in re.findall(r"[Rr]un `([^`]+)`", prompt)]
     if "witness-only" in FLAGS and prompt.startswith("Run `touch ") and " on its own" in prompt:
         return asked[:1]   # ask-tier-deny: the witness, never the command (BUG-280)
+    if ("skip-unallowed-control" in FLAGS and " on its own" not in prompt
+            and ("target-" in prompt or "probe-deny-" in prompt)):
+        # an ask-tier-deny control a model expects the sandbox to block: with no allow
+        # it never tries, as codex-cli 0.166.0's did (REQ-664 BR-17(e))
+        return [(m, c) for m, c in asked if verdict(cfg, m, harness) == "run"]
     return asked
 
 

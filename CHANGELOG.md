@@ -553,6 +553,13 @@ is cut per `RELEASING.md`.
 
 ### Changed
 
+- **`ask-tier-deny` can prove a codex baseline from `runner-baseline` (REQ-664 BR-17(e),
+  amended 2026-11-17).** Codex's model never attempts a command no allow names, so
+  `ask-tier-deny`'s `baseline` stayed `not-attempted` and `deny-under-allow` undecided
+  (BUG-283). On a profile with `allow_required_path`, an unattempted `baseline*` control
+  now reads `fail` marked `inferred`, when the same run's `runner-baseline` was refused
+  with its command on record. That is a measured refusal of an un-allowed command
+  writing under the same path. The fake gains `skip-unallowed-control`.
 - **`runner-redirect`'s target moves into the working copy (REQ-707, amended 2026-11-16).**
   On codex the target sat outside the sandbox with the probe's other sentinels, and the
   model never submits a redirect there (BUG-279), so the control could not be measured. It

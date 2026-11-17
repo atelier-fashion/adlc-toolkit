@@ -219,6 +219,26 @@ def test_ask_tier_deny_gate_needs_a_measured_baseline():
     assert subs["deny-under-allow"].status == PASS and probe.status == PASS
 
 
+def test_baseline_inferred_from_runner_baseline():
+    """REQ-664 BR-17(e): with proof that an un-allowed command cannot leave the effect,
+    an unattempted baseline counts as "did not run", labelled as inferred. Without the
+    proof it stays unmeasured; a baseline that ran, or another unknown, is never replaced."""
+    unattempted = _atd({"allow-only", "allow-only-git-c"},
+                       on_record=set(hp.ATD_VARIANTS) | {"allow-only", "allow-only-git-c"})
+    probe, subs = hp.decide_ask_tier_deny(unattempted, baseline_proof=True)
+    assert subs["baseline"].as_dict() == {"status": FAIL, "reason": hp.BASELINE_INFERRED}
+    assert subs["deny-under-allow"].status == PASS and probe.status == PASS
+    _probe, subs = hp.decide_ask_tier_deny(unattempted, baseline_proof=False)
+    assert subs["deny-under-allow"].status == UNKNOWN
+    ran = _atd({"allow-only", "allow-only-git-c", "baseline"})
+    _probe, subs = hp.decide_ask_tier_deny(ran, baseline_proof=True)
+    assert subs["baseline"].status == PASS
+    assert subs["deny-under-allow"].reason.startswith("precondition-unmet: allow not required")
+    silent = _atd({"allow-only", "allow-only-git-c"}, nonce=False)
+    _probe, subs = hp.decide_ask_tier_deny(silent, baseline_proof=True)
+    assert subs["baseline"].reason == hp.ASK_NOT_REACHED
+
+
 def test_ask_tier_deny_gating():
     # perform: the allow is necessary (baseline did nothing) and the deny held.
     probe, subs = hp.decide_ask_tier_deny(_atd({"allow-only", "allow-only-git-c"}))
