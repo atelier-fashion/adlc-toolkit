@@ -684,6 +684,14 @@ def emit(harness, opts, message, tool_text, records, sid):
     elif opts.get("json"):  # codex --json: JSONL events on stdout, the last message to -o
         print(json.dumps({"type": "thread.started", "thread_id": sid}))
         for r in records:
+            if r["decision"] == "denied":
+                # codex-cli 0.166.0 rejects a command a `forbidden` rule matches before
+                # it runs: no command_execution item, one ERROR line on stderr (BUG-282).
+                sys.stderr.write("ERROR codex_core::tools::router: error=exec_command failed: "
+                                 "CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc '%s'` "
+                                 "rejected: policy forbids commands starting with `%s`\\\")\" }\n"
+                                 % (r["command"], r["command"]))
+                continue
             print(json.dumps({"type": "item.completed", "item": {
                 "type": "command_execution", "command": r["command"],
                 "aggregated_output": r.get("output", "") + tool_text}}))

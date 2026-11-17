@@ -624,8 +624,9 @@ class Profile:
     skill_dir: Optional[str]
     #: Codex only: a directory outside workspace-write's writable roots (ADR-4).
     has_allow_required_path: bool = False
-    #: Stderr, when the harness refuses a tool and ends the run with no reply. A
-    #: refused launch then has no nonce to read (REQ-658 ADR-7).
+    #: The harness's own stderr line when it refuses a tool. On antigravity it ends the
+    #: run with no reply, so a refused launch has no nonce to read (REQ-658 ADR-7); on
+    #: codex the run goes on, and the line is the only record of the refusal (BUG-282).
     refusal_stderr: Optional[str] = None
     #: Allowed on every launch where a refusal ends the run: a model that looks around
     #: first must not lose the launch before it reaches the command under test. None of
@@ -655,7 +656,11 @@ PROFILES: Dict[str, Profile] = {
         transcript_root="~/.codex/sessions", final_message="last-message-file",
         hook_file=".codex/hooks.json", hook_event="SessionStart",
         allow_form="project-file", skill_dir=".agents/skills",
-        has_allow_required_path=True),
+        has_allow_required_path=True,
+        # A command a `forbidden` rule matches is rejected before it runs, with no
+        # command_execution item; this stderr line, naming the command, is the record
+        # (BUG-282, seen on codex-cli 0.166.0).
+        refusal_stderr=r"rejected: policy forbids commands starting with"),
     "gemini": Profile(
         name="gemini", binaries=("gemini",), trust="trusted-folders-file",
         transcript_root="~/.gemini/tmp", final_message="json-response",

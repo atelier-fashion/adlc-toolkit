@@ -198,6 +198,19 @@ def test_trust_gate_skip_is_not_a_failed_allowlist(tmp_path):
     assert out.stderr.count("launch_retried") == hp.SUBMISSION_ATTEMPTS - 1
 
 
+def test_codex_policy_rejection_is_proof_of_refusal(tmp_path):
+    """BUG-282: codex rejects a command a `forbidden` rule matches before it runs, with no
+    command_execution item and one stderr line naming the command. That line is the
+    harness's own record of the refusal: the deny held, and deny-under-allow reads pass."""
+    sb = Sandbox(tmp_path)
+    result, out = _run_ok(sb, "codex", "--only", "ask-tier-deny")
+    subs = result["probes"]["ask-tier-deny"]["sub_results"]
+    dua = subs["deny-under-allow"]
+    assert dua["status"] == "pass", dua
+    assert "asked command on record: no" in dua["evidence"]["observation"]
+    assert "policy forbids commands starting with" in dua["evidence"]["stderr_tail"]
+
+
 def test_ask_tier_deny_variants(tmp_path):
     sb = Sandbox(tmp_path / "perform")
     result, _ = _run_ok(sb, "claude", "--only", "ask-tier-deny")

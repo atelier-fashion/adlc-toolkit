@@ -442,7 +442,9 @@ did not run reads `fail`, only when the command was submitted: it is in a `comma
 harness's own records, or the harness's refusal on stderr names its target. Otherwise the launch
 is `unknown / not-attempted`, and, like a launch that never reached the ask or lost its witness,
 it is launched again from fresh state, up to five attempts. codex-cli 0.166.0's model ran the
-witness and skipped the denied command, which read as a deny that held (BUG-280).
+witness and skipped the denied command, which read as a deny that held (BUG-280). Codex
+writes no record for a command a `forbidden` rule rejects; its stderr line `rejected: policy
+forbids commands starting with <command>` is the record instead (BUG-282).
 
 **Consumer mapping.** REQ-655, REQ-656 and REQ-662 read `sub_results` for which
 configuration passed. The `git-c` wrapper shape is read from `wrapped-allow` and
