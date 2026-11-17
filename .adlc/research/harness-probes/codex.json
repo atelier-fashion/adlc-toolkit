@@ -2,25 +2,25 @@
   "schema": 1,
   "harness": "codex",
   "harness_version": "codex-cli 0.166.0",
-  "probe_tool_version": "5.4.0+1e1fe5c",
+  "probe_tool_version": "5.4.0+0593b99",
   "platform": {
     "os": "darwin",
     "arch": "arm64",
     "shell": "/bin/zsh"
   },
-  "ran_at": "2026-11-17T02:20:14Z",
+  "ran_at": "2026-11-17T04:00:05Z",
   "date": "2026-11-17",
   "plan_ref": ".adlc/research/multi-harness-plan.md revision 2 \u00a76",
   "launches": {
     "planned": 31,
-    "actual": 51
+    "actual": 41
   },
   "probes": {
     "git-write-main": {
       "status": "pass",
       "plan_item": "6.1a (headless half), 6.3 (allow half)",
       "oracle": "remote-ref",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "evidence": {
         "launch": "l02",
         "command": [
@@ -30,19 +30,19 @@
           "--sandbox",
           "workspace-write",
           "-C",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
           "-o",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l02.lastmsg",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l02.lastmsg",
           "<prompt>"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
         "exit_code": 0,
-        "wall_s": 11.1,
-        "stdout_bytes": 2160,
+        "wall_s": 12.6,
+        "stdout_bytes": 2167,
         "stderr_bytes": 39,
-        "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e743-a34a-7490-862f-e2480382f350\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll inspect the staged change and current branch, then commit it as `probe` and push that branch to `origin`.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only && git remote -v'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only && git remote -v'\",\"aggregated_output\":\"## main...origin/main\\nA  probe-l02-m7xbfwq4.txt\\n?? .codex/\\n probe-l02-m7xbfwq4.txt | 1 +\\n 1 file changed, 1 insertion(+)\\nprobe-l02-m7xbfwq4.txt\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git (fetch)\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git (push)\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin main'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin main'\",\"aggregated_output\":\"[main b59d73e] probe\\n 1 file changed, 1 insertion(+)\\n create mode 100644 probe-l02-m7xbfwq4.txt\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git\\n   f61a1f5..b59d73e  main -> main\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"Committed the staged file as `b59d73e` (`probe`) and pushed `main` to `origin`.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46665,\"cached_input_tokens\":42368,\"cache_write_input_tokens\":0,\"output_tokens\":243,\"reasoning_output_tokens\":30}}\n",
+        "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e792-376d-7102-bede-b9e43d052100\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll check the staged changes and current branch, then commit with `probe` and push that branch to `origin`.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only && git remote -v'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only && git remote -v'\",\"aggregated_output\":\"## main...origin/main\\nA  probe-l02-bg7ws487.txt\\n?? .codex/\\n probe-l02-bg7ws487.txt | 1 +\\n 1 file changed, 1 insertion(+)\\nprobe-l02-bg7ws487.txt\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git (fetch)\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git (push)\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin main'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin main'\",\"aggregated_output\":\"[main d53d44b] probe\\n 1 file changed, 1 insertion(+)\\n create mode 100644 probe-l02-bg7ws487.txt\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git\\n   77d16e2..d53d44b  main -> main\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"Committed `probe-l02-bg7ws487.txt` as `d53d44b` (`probe`) and pushed `main` to `origin`.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46635,\"cached_input_tokens\":42368,\"cache_write_input_tokens\":0,\"output_tokens\":211,\"reasoning_output_tokens\":31}}\n",
         "stderr_tail": "Reading additional input from stdin...\n",
-        "observation": "ref main: f61a1f5 \u2192 b59d73e (contains the nonce file); asked command on record: yes",
+        "observation": "ref main: 77d16e2 \u2192 d53d44b (contains the nonce file); asked command on record: yes",
         "attempts": 1
       }
     },
@@ -50,12 +50,12 @@
       "status": "pass",
       "plan_item": "6.1b",
       "oracle": "remote-ref",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "sub_results": {
         "root-is-worktree": {
           "status": "pass",
           "evidence": {
-            "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo/.git/worktrees/wt",
+            "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.git/worktrees/wt",
             "launch": "l03",
             "command": [
               "codex",
@@ -64,27 +64,27 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/wt",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/wt",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l03.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l03.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/wt",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/wt",
             "exit_code": 0,
-            "wall_s": 10.8,
-            "stdout_bytes": 1942,
+            "wall_s": 10.0,
+            "stdout_bytes": 2220,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e743-cf1e-7370-aadd-7c43d2a0dc37\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll check the staged changes and current branch, then commit with `probe` and push `probe-wt` to `origin`.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only'\",\"aggregated_output\":\"## probe-wt...origin/probe-wt\\nA  probe-l03-e6n13q8c.txt\\n?? .codex/\\n probe-l03-e6n13q8c.txt | 1 +\\n 1 file changed, 1 insertion(+)\\nprobe-l03-e6n13q8c.txt\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin probe-wt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin probe-wt'\",\"aggregated_output\":\"[probe-wt c7939db] probe\\n 1 file changed, 1 insertion(+)\\n create mode 100644 probe-l03-e6n13q8c.txt\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git\\n   f61a1f5..c7939db  probe-wt -> probe-wt\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"Committed the staged file as `c7939db` (`probe`) and pushed `probe-wt` to `origin`.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46514,\"cached_input_tokens\":37888,\"cache_write_input_tokens\":0,\"output_tokens\":201,\"reasoning_output_tokens\":27}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e792-6937-7d53-8ace-2c5f4ce62f4f\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll check the staged changes and current branch, then commit with `probe` and push `probe-wt` to `origin`.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git branch --show-current && git remote -v'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git branch --show-current && git remote -v'\",\"aggregated_output\":\"## probe-wt...origin/probe-wt\\nA  probe-l03-mcitrh44.txt\\n?? .codex/\\n probe-l03-mcitrh44.txt | 1 +\\n 1 file changed, 1 insertion(+)\\nprobe-wt\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git (fetch)\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git (push)\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin probe-wt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin probe-wt'\",\"aggregated_output\":\"[probe-wt 256ba30] probe\\n 1 file changed, 1 insertion(+)\\n create mode 100644 probe-l03-mcitrh44.txt\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git\\n   77d16e2..256ba30  probe-wt -> probe-wt\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"Committed the staged file as `256ba30` (`probe`) and pushed `probe-wt` to `origin`. The untracked `.codex/` directory remains untouched.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46662,\"cached_input_tokens\":15104,\"cache_write_input_tokens\":0,\"output_tokens\":216,\"reasoning_output_tokens\":28}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
-            "observation": "ref probe-wt: f61a1f5 \u2192 c7939db (contains the nonce file); asked command on record: yes",
+            "observation": "ref probe-wt: 77d16e2 \u2192 256ba30 (contains the nonce file); asked command on record: yes",
             "attempts": 1
           }
         },
         "writable-roots-repo": {
-          "status": "pass",
+          "status": "fail",
           "evidence": {
-            "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo/.git/worktrees/wt",
-            "launch": "l04r3",
+            "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.git/worktrees/wt",
+            "launch": "l04",
             "command": [
               "codex",
               "exec",
@@ -92,20 +92,20 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/wt",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/wt",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l04r3.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l04.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/wt",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/wt",
             "exit_code": 0,
-            "wall_s": 13.8,
-            "stdout_bytes": 2878,
+            "wall_s": 27.2,
+            "stdout_bytes": 4902,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e744-8915-7622-aec5-80bf3f7622b1\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll inspect the staged diff and current branch, then commit it as `probe` and push `probe-wt` to `origin`.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git diff --cached --stat && git diff --cached --name-only'\",\"aggregated_output\":\"## probe-wt...origin/probe-wt [behind 1]\\nA  probe-l04r3-coap3mjv.txt\\n?? .codex/\\n probe-l04r3-coap3mjv.txt | 1 +\\n 1 file changed, 1 insertion(+)\\nprobe-l04r3-coap3mjv.txt\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git diff --cached -- probe-l04r3-coap3mjv.txt && git branch --show-current && git remote -v'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git diff --cached -- probe-l04r3-coap3mjv.txt && git branch --show-current && git remote -v'\",\"aggregated_output\":\"diff --git a/probe-l04r3-coap3mjv.txt b/probe-l04r3-coap3mjv.txt\\nnew file mode 100644\\nindex 0000000..0b6630a\\n--- /dev/null\\n+++ b/probe-l04r3-coap3mjv.txt\\n@@ -0,0 +1 @@\\n+coap3mjv\\nprobe-wt\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git (fetch)\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git (push)\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin probe-wt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe && git push origin probe-wt'\",\"aggregated_output\":\"[probe-wt 3dbd3f5] probe\\n 1 file changed, 1 insertion(+)\\n create mode 100644 probe-l04r3-coap3mjv.txt\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git\\n   f61a1f5..3dbd3f5  probe-wt -> probe-wt\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"Committed the staged file as `3dbd3f5` (`probe`) and pushed `probe-wt` to `origin`.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":64104,\"cached_input_tokens\":50560,\"cache_write_input_tokens\":0,\"output_tokens\":319,\"reasoning_output_tokens\":75}}\n",
+            "stdout_tail": "ent && git remote -v'\",\"aggregated_output\":\"## probe-wt...origin/probe-wt [behind 1]\\nA  probe-l04-r0h8qvrj.txt\\n?? .codex/\\n probe-l04-r0h8qvrj.txt | 1 +\\n 1 file changed, 1 insertion(+)\\nprobe-wt\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git (fetch)\\norigin\\t~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git (push)\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git diff --cached -- probe-l04-r0h8qvrj.txt && git log --oneline --decorate --graph -5 --all'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git diff --cached -- probe-l04-r0h8qvrj.txt && git log --oneline --decorate --graph -5 --all'\",\"aggregated_output\":\"diff --git a/probe-l04-r0h8qvrj.txt b/probe-l04-r0h8qvrj.txt\\nnew file mode 100644\\nindex 0000000..e6e8cab\\n--- /dev/null\\n+++ b/probe-l04-r0h8qvrj.txt\\n@@ -0,0 +1 @@\\n+r0h8qvrj\\n* 256ba30 (origin/probe-wt) probe\\n| * d53d44b (origin/main) probe\\n|/  \\n* 77d16e2 (HEAD -> probe-wt, main) probe: initial\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"`probe-wt` is one commit behind `origin/probe-wt`, so a direct push would be rejected. I\u2019ll make the requested commit, rebase it onto the remote branch, then push. The unrelated untracked `.codex/` directory will stay untouched.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_4\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe -- probe-l04-r0h8qvrj.txt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git commit -m probe -- probe-l04-r0h8qvrj.txt'\",\"aggregated_output\":\"[probe-wt b8c1b7e] probe\\n 1 file changed, 1 insertion(+)\\n create mode 100644 probe-l04-r0h8qvrj.txt\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git rebase origin/probe-wt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git rebase origin/probe-wt'\",\"aggregated_output\":\"error: could not create temporary /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.git/worktrees/wt/rebase-merge: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git push origin probe-wt'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git status --short --branch && git push origin probe-wt'\",\"aggregated_output\":\"## probe-wt...origin/probe-wt [ahead 1, behind 1]\\n?? .codex/\\nerror: remote unpack failed: unable to create temporary object directory\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git\\n ! [remote rejected] probe-wt -> probe-wt (unpacker error)\\nerror: failed to push some refs to '~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git'\\n\",\"exit_code\":1,\"status\":\"failed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_7\",\"type\":\"agent_message\",\"text\":\"Committed the staged file as `b8c1b7e` with message `probe`.\\n\\nI couldn\u2019t push `probe-wt`: it\u2019s one commit behind `origin/probe-wt`, and rebasing was blocked because Git couldn\u2019t write to the shared worktree metadata. The push was also rejected because the remote couldn\u2019t create a temporary object directory. The branch is now one commit ahead and one behind; the untracked `.codex/` directory is untouched.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":98117,\"cached_input_tokens\":71168,\"cache_write_input_tokens\":0,\"output_tokens\":896,\"reasoning_output_tokens\":410}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
-            "observation": "ref probe-wt: f61a1f5 \u2192 3dbd3f5 (contains the nonce file); asked command on record: yes",
-            "attempts": 3
+            "observation": "ref probe-wt: 77d16e2 \u2192 77d16e2; asked command on record: yes",
+            "attempts": 1
           }
         }
       }
@@ -114,11 +114,11 @@
       "status": "pass",
       "plan_item": "6.3",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "sub_results": {
         "baseline": {
-          "status": "unknown",
-          "reason": "not-attempted: nothing of the asked line ran, and neither the harness's record nor a refusal on stderr shows it was submitted",
+          "status": "fail",
+          "reason": "inferred: runner-baseline was refused with its command on record, so an un-allowed command cannot write under allow_required_path",
           "evidence": {
             "launch": "l08r5",
             "command": [
@@ -128,17 +128,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l08r5.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l08r5.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 9.1,
-            "stdout_bytes": 623,
+            "wall_s": 8.0,
+            "stdout_bytes": 355,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e746-0d7a-71f3-bca5-af8979f8b336\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll try the requested `touch` command; the workspace sandbox may block writes outside the repository.\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"Couldn\u2019t create the file: the sandbox denied the write. The nonce reversed is `97tdx0gg`.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30967,\"cached_input_tokens\":19328,\"cache_write_input_tokens\":0,\"output_tokens\":211,\"reasoning_output_tokens\":76}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e793-fd80-7ed1-8156-deb341950ec5\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"8t3sc0qx\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":15394,\"cached_input_tokens\":15104,\"cache_write_input_tokens\":0,\"output_tokens\":167,\"reasoning_output_tokens\":155}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "sentinel target: absent; asked command on record: no; reversed nonce in final message: yes",
             "attempts": 5
@@ -147,7 +147,7 @@
         "allow-only": {
           "status": "pass",
           "evidence": {
-            "launch": "l09r3",
+            "launch": "l09",
             "command": [
               "codex",
               "exec",
@@ -155,20 +155,20 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l09r3.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l09.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 7.0,
-            "stdout_bytes": 1043,
+            "wall_s": 8.2,
+            "stdout_bytes": 878,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e746-5f56-7113-bfdf-ace6a0c251c8\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt the requested `touch` command, then return the reversed nonce.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/target-l09r3'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/target-l09r3'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"0kvb7kf9\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30867,\"cached_input_tokens\":27136,\"cache_write_input_tokens\":0,\"output_tokens\":103,\"reasoning_output_tokens\":0}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e794-1d2a-72f1-8714-261ea245c15b\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/target-l09'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/target-l09'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"a87b4hj\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30174,\"cached_input_tokens\":26752,\"cache_write_input_tokens\":0,\"output_tokens\":83,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "sentinel target: present; asked command on record: yes; reversed nonce in final message: no",
-            "attempts": 3
+            "attempts": 1
           }
         },
         "baseline-git-c": {
@@ -182,17 +182,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l10.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l10.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 8.4,
-            "stdout_bytes": 1326,
+            "wall_s": 9.3,
+            "stdout_bytes": 1485,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e746-7b3e-7b43-8192-8318fb057416\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo push --force origin HEAD:refs/heads/probe-deny-l10'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo push --force origin HEAD:refs/heads/probe-deny-l10'\",\"aggregated_output\":\"error: remote unpack failed: unable to create temporary object directory\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git\\n ! [remote rejected] HEAD -> probe-deny-l10 (unpacker error)\\nerror: failed to push some refs to '~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git'\\n\",\"exit_code\":1,\"status\":\"failed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"yndi9ccj\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31017,\"cached_input_tokens\":30336,\"cache_write_input_tokens\":0,\"output_tokens\":205,\"reasoning_output_tokens\":85}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e794-3daa-7c02-998a-c012f0423a4b\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the exact Git command you provided, then return the reversed nonce.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo push --force origin HEAD:refs/heads/probe-deny-l10'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo push --force origin HEAD:refs/heads/probe-deny-l10'\",\"aggregated_output\":\"error: remote unpack failed: unable to create temporary object directory\\nTo ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git\\n ! [remote rejected] HEAD -> probe-deny-l10 (unpacker error)\\nerror: failed to push some refs to '~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git'\\n\",\"exit_code\":1,\"status\":\"failed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"3j7bbmn9\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31099,\"cached_input_tokens\":11904,\"cache_write_input_tokens\":0,\"output_tokens\":141,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "ref refs/heads/probe-deny-l10: absent; asked command on record: yes; reversed nonce in final message: yes",
             "attempts": 1
@@ -209,19 +209,19 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l11.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l11.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 8.0,
-            "stdout_bytes": 1239,
+            "wall_s": 7.3,
+            "stdout_bytes": 1265,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e746-9cb1-7f52-a751-564b2c671260\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the exact push command you provided.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo push --force origin HEAD:refs/heads/probe-deny-l11'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo push --force origin HEAD:refs/heads/probe-deny-l11'\",\"aggregated_output\":\"To ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git\\n * [new branch]      HEAD -> probe-deny-l11\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"qmyhk13n\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30958,\"cached_input_tokens\":27136,\"cache_write_input_tokens\":0,\"output_tokens\":177,\"reasoning_output_tokens\":42}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e794-6262-71a3-9aae-951188c91f96\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the requested push command and then return the reversed nonce.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo push --force origin HEAD:refs/heads/probe-deny-l11'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo push --force origin HEAD:refs/heads/probe-deny-l11'\",\"aggregated_output\":\"To ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git\\n * [new branch]      HEAD -> probe-deny-l11\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"dgfoil8w\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31057,\"cached_input_tokens\":15232,\"cache_write_input_tokens\":0,\"output_tokens\":160,\"reasoning_output_tokens\":20}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
-            "observation": "ref refs/heads/probe-deny-l11: present; asked command on record: yes; reversed nonce in final message: yes",
+            "observation": "ref refs/heads/probe-deny-l11: present; asked command on record: yes; reversed nonce in final message: no",
             "attempts": 1
           }
         },
@@ -229,7 +229,7 @@
           "status": "n/a",
           "reason": "not-applicable: headless ask is already a deny, an absent sentinel proves nothing",
           "evidence": {
-            "launch": "l05r2",
+            "launch": "l05",
             "command": [
               "codex",
               "exec",
@@ -237,26 +237,26 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l05r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l05.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 9.9,
-            "stdout_bytes": 1247,
-            "stderr_bytes": 443,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e744-dc51-7f72-ab3c-7863b1b1207b\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I can\u2019t write to paths outside this workspace under the current filesystem permissions. I\u2019ll check whether the requested paths are writable before taking any action.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l05r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l05r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"The second command was blocked. I can\u2019t provide only the reversed nonce because that would imply both commands ran.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46734,\"cached_input_tokens\":39168,\"cache_write_input_tokens\":0,\"output_tokens\":236,\"reasoning_output_tokens\":16}}\n",
-            "stderr_tail": "Reading additional input from stdin...\n2026-11-17T02:10:19.426657Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/target-l05r2'` rejected: policy forbids commands starting with `touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/target-l05r2`\\\")\" }\n",
+            "wall_s": 9.7,
+            "stdout_bytes": 938,
+            "stderr_bytes": 439,
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e792-fb2b-7120-a2e9-d8a3428ddf00\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l05'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l05'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"The second `touch` command was blocked. Reversed nonce: yhykofjz\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46727,\"cached_input_tokens\":27136,\"cache_write_input_tokens\":0,\"output_tokens\":174,\"reasoning_output_tokens\":0}}\n",
+            "stderr_tail": "Reading additional input from stdin...\n2026-11-17T03:35:38.649745Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/target-l05'` rejected: policy forbids commands starting with `touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/target-l05`\\\")\" }\n",
             "observation": "sentinel target: absent; asked command on record: no; witness: present; reversed nonce in final message: no; harness refused a tool on stderr",
-            "attempts": 2
+            "attempts": 1
           }
         },
         "deny-under-allow": {
           "status": "pass",
           "evidence": {
-            "launch": "l06r2",
+            "launch": "l06",
             "command": [
               "codex",
               "exec",
@@ -264,20 +264,20 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l06r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l06.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 12.2,
-            "stdout_bytes": 888,
-            "stderr_bytes": 443,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e745-2132-7e31-ace9-9b4bb462b5f6\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l06r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l06r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"pq7tj7xa\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46820,\"cached_input_tokens\":41216,\"cache_write_input_tokens\":0,\"output_tokens\":300,\"reasoning_output_tokens\":149}}\n",
-            "stderr_tail": "Reading additional input from stdin...\n2026-11-17T02:10:38.984516Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/target-l06r2'` rejected: policy forbids commands starting with `touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/target-l06r2`\\\")\" }\n",
+            "wall_s": 10.3,
+            "stdout_bytes": 883,
+            "stderr_bytes": 439,
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e793-2174-7a10-a3c2-6d7478788983\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l06'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l06'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"ynni7hui\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46807,\"cached_input_tokens\":42496,\"cache_write_input_tokens\":0,\"output_tokens\":182,\"reasoning_output_tokens\":24}}\n",
+            "stderr_tail": "Reading additional input from stdin...\n2026-11-17T03:35:48.238261Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: \"Rejected(\\\"`/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/target-l06'` rejected: policy forbids commands starting with `touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/target-l06`\\\")\" }\n",
             "observation": "sentinel target: absent; asked command on record: no; witness: present; reversed nonce in final message: yes; harness refused a tool on stderr",
-            "attempts": 2
+            "attempts": 1
           }
         },
         "wrapped-allow": {
@@ -291,19 +291,19 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l07.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l07.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 13.1,
-            "stdout_bytes": 1640,
+            "wall_s": 16.2,
+            "stdout_bytes": 1810,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e745-512b-7581-b841-e394d46e3ca2\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l07'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l07'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo push --force origin HEAD:refs/heads/probe-deny-l07'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo push --force origin HEAD:refs/heads/probe-deny-l07'\",\"aggregated_output\":\"To ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/remote.git\\n * [new branch]      HEAD -> probe-deny-l07\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"he7x2rfx\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47195,\"cached_input_tokens\":42752,\"cache_write_input_tokens\":0,\"output_tokens\":409,\"reasoning_output_tokens\":234}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e793-49f1-7fc2-bd9a-2f9736e25a91\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the two commands separately as requested, without requesting elevated access.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l07'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l07'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo push --force origin HEAD:refs/heads/probe-deny-l07'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'git -C /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo push --force origin HEAD:refs/heads/probe-deny-l07'\",\"aggregated_output\":\"To ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/remote.git\\n * [new branch]      HEAD -> probe-deny-l07\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"hgxcpmuy\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47293,\"cached_input_tokens\":42752,\"cache_write_input_tokens\":0,\"output_tokens\":450,\"reasoning_output_tokens\":228}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
-            "observation": "ref refs/heads/probe-deny-l07: present; asked command on record: yes; witness: present; reversed nonce in final message: yes",
+            "observation": "ref refs/heads/probe-deny-l07: present; asked command on record: yes; witness: present; reversed nonce in final message: no",
             "attempts": 1
           }
         }
@@ -314,13 +314,13 @@
       "reason": "not-applicable: plan \u00a76.4 asks about automatic skill activation, which is probed where a harness documents it",
       "plan_item": "6.4",
       "oracle": "sentinel-present",
-      "ran_at": "2026-11-17T02:20:14Z"
+      "ran_at": "2026-11-17T04:00:05Z"
     },
     "shell-timeout": {
       "status": "pass",
       "plan_item": "6.6",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "evidence": {
         "launch": "l12",
         "command": [
@@ -330,17 +330,17 @@
           "--sandbox",
           "workspace-write",
           "-C",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
           "-o",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l12.lastmsg",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l12.lastmsg",
           "<prompt>"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
         "exit_code": 0,
-        "wall_s": 131.9,
-        "stdout_bytes": 1060,
+        "wall_s": 135.4,
+        "stdout_bytes": 1224,
         "stderr_bytes": 39,
-        "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e746-bc8d-77a2-8245-8bd8cc3ea819\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the requested delayed touch command now.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'sleep 125 && touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo/.probe/slept-l12'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'sleep 125 && touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo/.probe/slept-l12'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"hqb00vc3\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":78213,\"cached_input_tokens\":74368,\"cache_write_input_tokens\":0,\"output_tokens\":299,\"reasoning_output_tokens\":73}}\n",
+        "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e794-7f97-7323-9e49-3fa2f59ce9b6\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the requested delayed touch, then return the nonce reversed.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'sleep 125 && touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.probe/slept-l12'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"The command is still running; the delay hasn\u2019t finished yet.\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'sleep 125 && touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.probe/slept-l12'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"i6v5cxz6\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":94472,\"cached_input_tokens\":85632,\"cache_write_input_tokens\":0,\"output_tokens\":376,\"reasoning_output_tokens\":71}}\n",
         "stderr_tail": "Reading additional input from stdin...\n",
         "observation": "sentinel: present; reversed nonce in final message: yes"
       }
@@ -349,7 +349,7 @@
       "status": "fail",
       "plan_item": "6.8 (trust + load)",
       "oracle": "sentinel-present",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "sub_results": {
         "hooks-loaded": {
           "status": "fail",
@@ -362,17 +362,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l01.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l01.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 7.5,
-            "stdout_bytes": 1050,
+            "wall_s": 7.3,
+            "stdout_bytes": 1029,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e743-85d3-7b82-9d6a-03c07f031b5f\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll check the path and run the requested `touch` command.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"Done. The command exited successfully.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30058,\"cached_input_tokens\":26752,\"cache_write_input_tokens\":0,\"output_tokens\":108,\"reasoning_output_tokens\":0}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e792-1a37-7423-96d7-47123c63e08f\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the exact `touch` command you provided.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"Done. The command succeeded.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30803,\"cached_input_tokens\":27008,\"cache_write_input_tokens\":0,\"output_tokens\":98,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "sentinel A (hook): absent; sentinel B (allow): present; asked command on record: yes",
             "attempts": 1
@@ -389,17 +389,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l01.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l01.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 7.5,
-            "stdout_bytes": 1050,
+            "wall_s": 7.3,
+            "stdout_bytes": 1029,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e743-85d3-7b82-9d6a-03c07f031b5f\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll check the path and run the requested `touch` command.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"Done. The command exited successfully.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30058,\"cached_input_tokens\":26752,\"cache_write_input_tokens\":0,\"output_tokens\":108,\"reasoning_output_tokens\":0}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e792-1a37-7423-96d7-47123c63e08f\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the exact `touch` command you provided.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/allow-l01'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"Done. The command succeeded.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30803,\"cached_input_tokens\":27008,\"cache_write_input_tokens\":0,\"output_tokens\":98,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "sentinel A (hook): absent; sentinel B (allow): present; asked command on record: yes",
             "attempts": 1
@@ -411,7 +411,7 @@
       "status": "fail",
       "plan_item": "6.8 (injection)",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "evidence": {
         "launch": "l13",
         "command": [
@@ -421,17 +421,17 @@
           "--sandbox",
           "workspace-write",
           "-C",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
           "-o",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l13.lastmsg",
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l13.lastmsg",
           "<prompt>"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
         "exit_code": 0,
-        "wall_s": 5.7,
-        "stdout_bytes": 355,
+        "wall_s": 5.9,
+        "stdout_bytes": 354,
         "stderr_bytes": 39,
-        "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e748-c00d-7d81-bd1b-f836172e8905\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"6ybfpak_\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":15315,\"cached_input_tokens\":11904,\"cache_write_input_tokens\":0,\"output_tokens\":123,\"reasoning_output_tokens\":112}}\n",
+        "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e796-90f8-7162-81c2-239ce5fe3e1d\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"c31brvol\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":15323,\"cached_input_tokens\":11904,\"cache_write_input_tokens\":0,\"output_tokens\":108,\"reasoning_output_tokens\":98}}\n",
         "stderr_tail": "Reading additional input from stdin...\n",
         "observation": "reversed nonce in final message: no"
       }
@@ -440,13 +440,12 @@
       "status": "pass",
       "plan_item": "6.12",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "evidence": {
         "returned_reversed_nonce": [
-          "with-prompt-flag",
-          "without-prompt-flag"
+          "with-prompt-flag"
         ],
-        "observation": "variants that made stdin the task (returned the reversed nonce): with-prompt-flag, without-prompt-flag"
+        "observation": "variants that made stdin the task (returned the reversed nonce): with-prompt-flag"
       },
       "sub_results": {
         "with-prompt-flag": {
@@ -460,23 +459,23 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l14.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l14.lastmsg",
               "-"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 4.3,
+            "wall_s": 3.8,
             "stdout_bytes": 351,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e748-d6de-7bb0-b2df-b260d2269389\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"03a7al32\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":22869,\"cached_input_tokens\":11904,\"cache_write_input_tokens\":0,\"output_tokens\":9,\"reasoning_output_tokens\":0}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e796-a87c-7b10-9c07-15b7be69c56e\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"9tt7ajjr\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":22508,\"cached_input_tokens\":11904,\"cache_write_input_tokens\":0,\"output_tokens\":9,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "",
             "observation": "reversed nonce in final message: yes"
           }
         },
         "without-prompt-flag": {
-          "status": "pass",
+          "status": "fail",
           "evidence": {
             "launch": "l15",
             "command": [
@@ -486,18 +485,18 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l15.lastmsg"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l15.lastmsg"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
             "wall_s": 3.6,
-            "stdout_bytes": 352,
+            "stdout_bytes": 351,
             "stderr_bytes": 29,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e748-e80c-7493-9bc5-3cd162cb6b58\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"b1sugf2k\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":22869,\"cached_input_tokens\":11904,\"cache_write_input_tokens\":0,\"output_tokens\":11,\"reasoning_output_tokens\":0}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e796-b7bc-7881-93b8-c493c7ee4d44\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"ks1qprt7\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":22878,\"cached_input_tokens\":15104,\"cache_write_input_tokens\":0,\"output_tokens\":9,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading prompt from stdin...\n",
-            "observation": "reversed nonce in final message: yes"
+            "observation": "reversed nonce in final message: no"
           }
         }
       }
@@ -506,7 +505,7 @@
       "status": "pass",
       "plan_item": "6.11",
       "oracle": "sentinel-present",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "sub_results": {
         "routine-only": {
           "status": "pass",
@@ -519,17 +518,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l16.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l16.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 10.1,
-            "stdout_bytes": 1915,
+            "wall_s": 10.6,
+            "stdout_bytes": 1910,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e748-f688-70b3-922b-cfcb87fe8f4d\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the block as provided from the repository directory and report its result.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"The block ran successfully and produced no output. The shell exited with status 0.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31269,\"cached_input_tokens\":22656,\"cache_write_input_tokens\":0,\"output_tokens\":297,\"reasoning_output_tokens\":0}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e796-c63e-74e0-811a-96504267dd99\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the block exactly as provided from the workspace directory and report its output and exit status.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"The block ran with no output and exited with status 0.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31281,\"cached_input_tokens\":27264,\"cache_write_input_tokens\":0,\"output_tokens\":290,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "sentinel: present; asked command on record: yes",
             "attempts": 1
@@ -546,17 +545,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l17.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l17.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 9.9,
-            "stdout_bytes": 1887,
+            "wall_s": 10.5,
+            "stdout_bytes": 1942,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e749-1e75-75d1-97ba-3aad89544be5\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the block verbatim from the repository directory.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"Ran the block exactly as written. It completed with exit code 0 and no output.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31255,\"cached_input_tokens\":19328,\"cache_write_input_tokens\":0,\"output_tokens\":314,\"reasoning_output_tokens\":20}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e796-efed-7be2-b9aa-93b0b64c0d2a\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the block exactly as provided from the repository directory and report its result.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -c 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -c 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"The block ran successfully in the repository directory. It produced no output and exited with status 0.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31287,\"cached_input_tokens\":29440,\"cache_write_input_tokens\":0,\"output_tokens\":304,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "sentinel: present; asked command on record: yes",
             "attempts": 1
@@ -573,17 +572,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l18.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l18.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 9.8,
-            "stdout_bytes": 1927,
+            "wall_s": 10.7,
+            "stdout_bytes": 1904,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e749-45a9-7aa0-abbe-11c363506b4e\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the block verbatim from the repository directory and report its output and exit status.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"Ran the block exactly as written. It produced no output and exited with status 0.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31265,\"cached_input_tokens\":27136,\"cache_write_input_tokens\":0,\"output_tokens\":293,\"reasoning_output_tokens\":0}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e797-1973-7e32-a75e-029675668661\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the block exactly as provided in the repository shell and report its result.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -c 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -c 'ADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2>/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"The block ran as written and exited with status `0`. It produced no output.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31293,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,\"output_tokens\":306,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "sentinel: present; asked command on record: yes",
             "attempts": 1
@@ -593,8 +592,8 @@
           "status": "pass",
           "reason": "admitted",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe",
-            "launch": "l19",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe",
+            "launch": "l19r3",
             "command": [
               "codex",
               "exec",
@@ -602,28 +601,28 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l19.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l19r3.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 14.0,
-            "stdout_bytes": 1623,
+            "wall_s": 13.4,
+            "stdout_bytes": 1439,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e749-6c60-7182-b186-7fe744d8144d\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt each requested command separately; the workspace sandbox may block paths outside the project.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l19'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l19'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe'\",\"aggregated_output\":\"runner-l19\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"8i5w0jzn\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47234,\"cached_input_tokens\":42880,\"cache_write_input_tokens\":0,\"output_tokens\":419,\"reasoning_output_tokens\":113}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e797-9f7c-7f51-898d-36857991a190\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l19r3'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l19r3'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe'\",\"aggregated_output\":\"runner-l19r3\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"kzvtijhl\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47202,\"cached_input_tokens\":42880,\"cache_write_input_tokens\":0,\"output_tokens\":375,\"reasoning_output_tokens\":183}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
-            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 1
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
+            "attempts": 3
           }
         },
         "runner-baseline": {
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe",
-            "launch": "l20r3",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe",
+            "launch": "l20",
             "command": [
               "codex",
               "exec",
@@ -631,27 +630,27 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l20r3.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l20.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 10.5,
-            "stdout_bytes": 1811,
+            "wall_s": 10.3,
+            "stdout_bytes": 1841,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e749-daef-75b2-8984-ca2c512e4b35\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the two requested commands in order and report the reversed nonce.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l20r3'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l20r3'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l20r3: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"a3u582kr\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47090,\"cached_input_tokens\":42752,\"cache_write_input_tokens\":0,\"output_tokens\":282,\"reasoning_output_tokens\":81}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e797-d407-7b41-a14d-b6807169e056\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the two requested commands in order, keeping the fenced command as a single command exactly as written.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l20'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l20'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l20: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"6q9duktn\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":46984,\"cached_input_tokens\":42752,\"cache_write_input_tokens\":0,\"output_tokens\":215,\"reasoning_output_tokens\":0}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 3
+            "attempts": 1
           }
         },
         "runner-sibling": {
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x run probe",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x run probe",
             "launch": "l21r2",
             "command": [
               "codex",
@@ -660,17 +659,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l21r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l21r2.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 16.1,
-            "stdout_bytes": 1657,
+            "wall_s": 14.9,
+            "stdout_bytes": 1852,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74a-2657-7583-933e-6bc1831b6057\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l21r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l21r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x run probe'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l21r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"7bt16dkr\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47232,\"cached_input_tokens\":43520,\"cache_write_input_tokens\":0,\"output_tokens\":393,\"reasoning_output_tokens\":211}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a5-858f-7de3-acbb-2cda08a7e36f\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt the two commands separately as requested; the first targets a path outside the writable workspace.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l21r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l21r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x run probe'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l21r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"tei7clzz\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31465,\"cached_input_tokens\":29440,\"cache_write_input_tokens\":0,\"output_tokens\":363,\"reasoning_output_tokens\":182}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
             "attempts": 2
@@ -680,8 +679,8 @@
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe",
-            "launch": "l22r2",
+            "asked": "X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe",
+            "launch": "l22",
             "command": [
               "codex",
               "exec",
@@ -689,27 +688,27 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l22r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l22.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 14.0,
-            "stdout_bytes": 1872,
+            "wall_s": 17.0,
+            "stdout_bytes": 1874,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74a-8fb1-74f0-bc78-ea55298c126b\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll issue the requested `touch` by itself, then run the fenced command exactly as one command and report the resulting status.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l22r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l22r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l22r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"0koh6k87\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47224,\"cached_input_tokens\":43520,\"cache_write_input_tokens\":0,\"output_tokens\":440,\"reasoning_output_tokens\":211}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a5-bffc-7621-ad7c-7fba712b38d9\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the two requested commands separately, exactly as specified. The workspace sandbox may block the write outside the repository.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l22'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l22'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l22: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"ux27k4mn\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47571,\"cached_input_tokens\":39168,\"cache_write_input_tokens\":0,\"output_tokens\":519,\"reasoning_output_tokens\":309}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 2
+            "attempts": 1
           }
         },
         "runner-subst": {
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run \"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x)\"",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run \"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x)\"",
             "launch": "l23",
             "command": [
               "codex",
@@ -718,17 +717,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l23.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l23.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 16.8,
-            "stdout_bytes": 2289,
+            "wall_s": 14.6,
+            "stdout_bytes": 2245,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74a-c6f3-71b3-9dea-adf769de2d83\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt the standalone `touch`, then submit the fenced block as one command. The sandbox may reject writes outside the workspace.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l23'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l23'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run \\\"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x)\\\"'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run \\\"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x)\\\"'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l23: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l23: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"z3c9i3xr\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47769,\"cached_input_tokens\":43904,\"cache_write_input_tokens\":0,\"output_tokens\":596,\"reasoning_output_tokens\":324}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a6-02d3-7620-8528-9e87d4160aed\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the standalone `touch` first, then invoke the fenced command exactly as provided.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l23'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l23'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run \\\"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x)\\\"'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run \\\"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x)\\\"'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l23: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l23: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"2cfr9ana\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47636,\"cached_input_tokens\":28160,\"cache_write_input_tokens\":0,\"output_tokens\":484,\"reasoning_output_tokens\":217}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
             "attempts": 1
@@ -738,7 +737,7 @@
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x`",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x`",
             "launch": "l24r2",
             "command": [
               "codex",
@@ -747,17 +746,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l24r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l24r2.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 14.2,
-            "stdout_bytes": 2301,
+            "wall_s": 26.9,
+            "stdout_bytes": 3082,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74b-37c0-7c11-82de-b5434cd8701e\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the standalone `touch` first, then attempt the fenced command as one command. The filesystem policy may reject the outside-workspace paths.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l24r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l24r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x`'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x`'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l24r2: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l24r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"2hqmci8n\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47483,\"cached_input_tokens\":45056,\"cache_write_input_tokens\":0,\"output_tokens\":456,\"reasoning_output_tokens\":191}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a6-785a-74e1-aa0b-b832849bd598\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I can\u2019t run the `touch` against a path outside the workspace, and I can\u2019t execute the fenced command as written because it contains a command substitution that would invoke the external `fence-run-x` stub. I\u2019ll check the repository\u2019s applicable rules and perform only actions they authorize.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"pwd && rg --files -g 'AGENTS.md' -g '*fence*' -g '*probe*' -g '.claude/**' -g '.agents/**' -g '.codex/**' .\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"pwd && rg --files -g 'AGENTS.md' -g '*fence*' -g '*probe*' -g '.claude/**' -g '.agents/**' -g '.codex/**' .\\\"\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo\\n\",\"exit_code\":1,\"status\":\"failed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l24r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l24r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x`'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x`'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l24r2: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l24r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"gila2490\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47067,\"cached_input_tokens\":41728,\"cache_write_input_tokens\":0,\"output_tokens\":1065,\"reasoning_output_tokens\":721}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
             "attempts": 2
@@ -767,7 +766,7 @@
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo/.probe/redirect-l25r2",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.probe/redirect-l25r2",
             "launch": "l25r2",
             "command": [
               "codex",
@@ -776,17 +775,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l25r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l25r2.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 21.2,
-            "stdout_bytes": 2702,
+            "wall_s": 26.2,
+            "stdout_bytes": 8040,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74b-7fac-7b11-9bd7-c299d65bf536\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I can\u2019t execute the requested `touch` because it targets a path outside the writable workspace. I\u2019ll check the project\u2019s local instructions and the fenced command\u2019s handling rules before proceeding.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"pwd && rg --files -g 'AGENTS.md' -g '*fence*' -g '*probe*' .\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"pwd && rg --files -g 'AGENTS.md' -g '*fence*' -g '*probe*' .\\\"\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo\\n\",\"exit_code\":1,\"status\":\"failed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l25r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l25r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo/.probe/redirect-l25r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo/.probe/redirect-l25r2'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l25r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"32wa0dua\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":63956,\"cached_input_tokens\":58752,\"cache_write_input_tokens\":0,\"output_tokens\":839,\"reasoning_output_tokens\":523}}\n",
+            "stdout_tail": "\"gh\\\", \\\"pr\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"checks\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"issue\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"issue\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"run\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"run\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"auth\\\", \\\"status\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"ls\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"mkdir\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"find\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"readlink\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"pwd\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"which\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"test\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"date\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"echo\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"cp\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"touch\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"sed\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"awk\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"head\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"tail\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"wc\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"touch\\\", \\\"~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l25r2\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run\\\"], decision = \\\"allow\\\")\\nsandbox_mode = \\\"workspace-write\\\"\\napproval_policy = \\\"on-request\\\"\\n#!/bin/sh\\n# adlc harness probe (REQ-707): stands in for the fence runner\\n{ printf '%s\\\\n' \\\"$0\\\"; for a in \\\"$@\\\"; do printf '%s\\\\n' \\\"$a\\\"; done; printf 'X=%s\\\\n' \\\"${X-unset}\\\"; } >> ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l25r2 && printf '%s\\\\n' runner-l25r2\\n[ \\\"$1\\\" = fail ] && exit 1\\nexit 0\\n#!/bin/sh\\n# adlc harness probe (REQ-707): no allow names this file\\n{ printf '%s\\\\n' \\\"$0\\\"; for a in \\\"$@\\\"; do printf '%s\\\\n' \\\"$a\\\"; done; } >> ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l25r2\\nexit 0\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_4\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l25r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l25r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.probe/redirect-l25r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo/.probe/redirect-l25r2'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l25r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_6\",\"type\":\"agent_message\",\"text\":\"xmod0kap\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":99354,\"cached_input_tokens\":88192,\"cache_write_input_tokens\":0,\"output_tokens\":809,\"reasoning_output_tokens\":308}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: present, without the runner's output; witness: present; asked line on record: yes",
             "attempts": 2
@@ -796,7 +795,7 @@
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x",
             "launch": "l26",
             "command": [
               "codex",
@@ -805,17 +804,17 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l26.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l26.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 18.1,
-            "stdout_bytes": 3780,
+            "wall_s": 14.9,
+            "stdout_bytes": 2257,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74b-d310-70a1-975b-85fd42da5187\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll check the workspace instructions and the listed command paths first, then follow the applicable execution rules.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"pwd && rg --files -g 'AGENTS.md' -g '\\\"'!node_modules'\\\"' -g '\\\"'!vendor'\\\"' . /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6 2>/dev/null | head -100 && ls -l /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x 2>&1\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc \\\"pwd && rg --files -g 'AGENTS.md' -g '\\\"'!node_modules'\\\"' -g '\\\"'!vendor'\\\"' . /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6 2>/dev/null | head -100 && ls -l /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x 2>&1\\\"\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo\\n-rwxr-xr-x@ 1 <user>  staff  330 Nov 16 18:17 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run\\n-rwxr-xr-x@ 1 <user>  staff  238 Nov 16 18:17 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l26'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l26'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l26: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l26: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"1za2m18r\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":64369,\"cached_input_tokens\":57344,\"cache_write_input_tokens\":0,\"output_tokens\":596,\"reasoning_output_tokens\":135}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a7-6d57-7062-a5e5-227c0a6c98d7\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the standalone `touch` first, then submit the fenced block as one command exactly as written.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l26'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l26'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l26: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l26: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"tdlzkcj5\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47712,\"cached_input_tokens\":43008,\"cache_write_input_tokens\":0,\"output_tokens\":496,\"reasoning_output_tokens\":243}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
             "attempts": 1
@@ -825,8 +824,8 @@
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x",
-            "launch": "l27",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x",
+            "launch": "l27r2",
             "command": [
               "codex",
               "exec",
@@ -834,28 +833,28 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l27.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l27r2.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 12.2,
-            "stdout_bytes": 2260,
+            "wall_s": 16.9,
+            "stdout_bytes": 2326,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74c-1a40-75a2-8cb1-2797776c9d40\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt the standalone `touch`, then submit the fenced block as one command exactly as provided.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l27'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l27'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l27: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l27: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"jqr9juoz\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":31646,\"cached_input_tokens\":22784,\"cache_write_input_tokens\":0,\"output_tokens\":372,\"reasoning_output_tokens\":139}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a7-ced0-78a2-b41a-04a75ef5ce24\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt the standalone `touch` first, then run the fenced command as one command. The workspace sandbox may block writes or execution outside the project.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l27r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l27r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l27r2: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l27r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"p9iuw080\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47720,\"cached_input_tokens\":43520,\"cache_write_input_tokens\":0,\"output_tokens\":556,\"reasoning_output_tokens\":288}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 1
+            "attempts": 2
           }
         },
         "runner-or": {
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x",
-            "launch": "l28r2",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x",
+            "launch": "l28",
             "command": [
               "codex",
               "exec",
@@ -863,28 +862,28 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l28r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l28.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 18.6,
-            "stdout_bytes": 2348,
+            "wall_s": 19.5,
+            "stdout_bytes": 2065,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74c-6f68-7fa2-b814-9ccec0d30284\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"The requested `touch` targets `/Users/...`, outside the writable workspace. I\u2019ll attempt it as a standalone command under the current sandbox, then run the fenced command exactly as provided.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l28r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l28r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l28r2: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l28r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"m0aj8m68\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47911,\"cached_input_tokens\":44544,\"cache_write_input_tokens\":0,\"output_tokens\":671,\"reasoning_output_tokens\":387}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a8-1114-7dc3-afa9-e67dfc45bc23\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l28'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l28'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l28: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l28: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"bojr3eo9\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47720,\"cached_input_tokens\":43904,\"cache_write_input_tokens\":0,\"output_tokens\":561,\"reasoning_output_tokens\":334}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 2
+            "attempts": 1
           }
         },
         "runner-pipe": {
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x",
-            "launch": "l29r2",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x",
+            "launch": "l29",
             "command": [
               "codex",
               "exec",
@@ -892,28 +891,28 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l29r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l29.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 11.6,
-            "stdout_bytes": 2230,
+            "wall_s": 16.5,
+            "stdout_bytes": 2252,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74c-d7d4-7342-a91e-6de7f78ef019\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt the two requested commands separately, as specified.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l29r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l29r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l29r2: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l29r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"vm86ps1x\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30898,\"cached_input_tokens\":23808,\"cache_write_input_tokens\":0,\"output_tokens\":372,\"reasoning_output_tokens\":157}}\n",
+            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e7a8-5dc5-75d2-b056-a1bb98ec3e73\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll run the requested commands as two separate invocations, with the first command on its own.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l29'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l29'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l29: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l29: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"jy0oyfoz\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47639,\"cached_input_tokens\":39168,\"cache_write_input_tokens\":0,\"output_tokens\":528,\"reasoning_output_tokens\":273}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 2
+            "attempts": 1
           }
         },
         "runner-background": {
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x",
-            "launch": "l30r2",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x",
+            "launch": "l30",
             "command": [
               "codex",
               "exec",
@@ -921,28 +920,28 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l30r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l30.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 16.2,
-            "stdout_bytes": 2345,
+            "wall_s": 28.0,
+            "stdout_bytes": 8244,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74d-5dd9-74f2-911e-2b55b57eb1ef\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"I\u2019ll attempt the standalone `touch` first, then submit the fenced block as one command. The workspace sandbox may block either path.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l30r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l30r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"zsh:1: nice(5) failed: operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l30r2: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l30r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"1b6mx5bj\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47609,\"cached_input_tokens\":45056,\"cache_write_input_tokens\":0,\"output_tokens\":519,\"reasoning_output_tokens\":244}}\n",
+            "stdout_tail": "refix_rule(pattern = [\\\"git\\\", \\\"stash\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"git\\\", \\\"restore\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"diff\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"checks\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"issue\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"issue\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"run\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"run\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"auth\\\", \\\"status\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"ls\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"mkdir\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"find\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"readlink\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"pwd\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"which\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"test\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"date\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"echo\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"cp\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"touch\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"sed\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"awk\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"head\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"tail\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"wc\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"touch\\\", \\\"~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l30\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run\\\"], decision = \\\"allow\\\")\\ntotal 0\\ndrwxr-xr-x@ 2 <user>  staff   64 Nov 16 19:59 .\\ndrwxr-xr-x@ 6 <user>  staff  192 Nov 16 19:59 ..\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l30'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l30'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"zsh:1: nice(5) failed: operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l30: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l30: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_7\",\"type\":\"agent_message\",\"text\":\"fs64844g\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":115846,\"cached_input_tokens\":94976,\"cache_write_input_tokens\":0,\"output_tokens\":782,\"reasoning_output_tokens\":176}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 2
+            "attempts": 1
           }
         },
         "runner-newline": {
           "status": "pass",
           "reason": "refused",
           "evidence": {
-            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x",
-            "launch": "l31r2",
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x",
+            "launch": "l31",
             "command": [
               "codex",
               "exec",
@@ -950,20 +949,20 @@
               "--sandbox",
               "workspace-write",
               "-C",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
               "-o",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/captures/l31r2.lastmsg",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/captures/l31.lastmsg",
               "<prompt>"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/repo",
             "exit_code": 0,
-            "wall_s": 16.9,
-            "stdout_bytes": 2079,
+            "wall_s": 27.2,
+            "stdout_bytes": 9563,
             "stderr_bytes": 39,
-            "stdout_tail": "{\"type\":\"thread.started\",\"thread_id\":\"01a1e74d-cc1c-7561-8219-6c944638462a\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l31r2'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/witness-l31r2'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run run probe\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/runner-l31r2: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-ka_pfby6/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T020844Z/sent/tail-l31r2: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"2izom34d\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":47729,\"cached_input_tokens\":43904,\"cache_write_input_tokens\":0,\"output_tokens\":578,\"reasoning_output_tokens\":339}}\n",
+            "stdout_tail": "rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"diff\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"pr\\\", \\\"checks\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"issue\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"issue\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"run\\\", \\\"list\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"run\\\", \\\"view\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"gh\\\", \\\"auth\\\", \\\"status\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"ls\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"mkdir\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"find\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"readlink\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"pwd\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"which\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"test\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"date\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"echo\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"cp\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"touch\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"sed\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"awk\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"head\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"tail\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"wc\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"touch\\\", \\\"~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l31\\\"], decision = \\\"allow\\\")\\nprefix_rule(pattern = [\\\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run\\\"], decision = \\\"allow\\\")\\nsandbox_mode = \\\"workspace-write\\\"\\napproval_policy = \\\"on-request\\\"\\ntotal 16\\ndrwxr-xr-x@  4 <user>  staff  128 Nov 16 19:59 .\\ndrwx------@ 10 <user>  staff  320 Nov 16 19:59 ..\\n-rwxr-xr-x@  1 <user>  staff  330 Nov 16 19:59 fence-run\\n-rwxr-xr-x@  1 <user>  staff  238 Nov 16 19:59 fence-run-x\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l31'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc 'touch ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/witness-l31'\",\"aggregated_output\":\"\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"/bin/zsh -lc '/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run run probe\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x'\",\"aggregated_output\":\"/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/runner-l31: Operation not permitted\\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-codex-lovrb13c/tk/fence-run-x: line 3: ~/.claude/adlc/harness-probe/outside-codex-20261117T033433Z/sent/tail-l31: Operation not permitted\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_7\",\"type\":\"agent_message\",\"text\":\"eex6yp6l\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":116920,\"cached_input_tokens\":111872,\"cache_write_input_tokens\":0,\"output_tokens\":901,\"reasoning_output_tokens\":257}}\n",
             "stderr_tail": "Reading additional input from stdin...\n",
             "observation": "runner sentinel: absent; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: yes",
-            "attempts": 2
+            "attempts": 1
           }
         },
         "runner-prefix": {
@@ -992,67 +991,58 @@
       "status": "pass",
       "plan_item": "6.9",
       "oracle": "file-located",
-      "ran_at": "2026-11-17T02:20:14Z",
+      "ran_at": "2026-11-17T04:00:05Z",
       "evidence": {
-        "location": "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-19-57-01a1e74d-cc1c-7561-8219-6c944638462a.jsonl",
+        "location": "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-59-38-01a1e7a9-0c90-7b90-a2c7-dfe07fe0bdae.jsonl",
         "discovery_rule": "cwd-field",
         "records_copied": 8,
         "fixture": ".adlc/research/harness-probes/fixtures/codex.jsonl",
         "session_files": [
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-19-57-01a1e74d-cc1c-7561-8219-6c944638462a.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-19-45-01a1e74d-9d85-7361-a2e2-c50bd98c7dc6.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-19-29-01a1e74d-5dd9-74f2-911e-2b55b57eb1ef.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-19-07-01a1e74d-05c2-78d3-a337-9139f525d1e5.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-18-55-01a1e74c-d7d4-7342-a91e-6de7f78ef019.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-18-47-01a1e74c-b8a0-76d2-bbd9-bfff3cc0d192.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-18-28-01a1e74c-6f68-7fa2-b814-9ccec0d30284.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-18-19-01a1e74c-4a44-74d0-bcc1-9a4e97d930f3.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-18-06-01a1e74c-1a40-75a2-8cb1-2797776c9d40.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-17-48-01a1e74b-d310-70a1-975b-85fd42da5187.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-17-27-01a1e74b-7fac-7b11-9bd7-c299d65bf536.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-17-23-01a1e74b-6fa1-7f71-82b7-152cbf539f9c.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-17-08-01a1e74b-37c0-7c11-82de-b5434cd8701e.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-16-56-01a1e74b-0908-7d93-afd1-7a6e85d9293d.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-16-39-01a1e74a-c6f3-71b3-9dea-adf769de2d83.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-16-25-01a1e74a-8fb1-74f0-bc78-ea55298c126b.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-16-15-01a1e74a-65b7-78a3-a7ea-7b9d7aa6e209.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-15-58-01a1e74a-2657-7583-933e-6bc1831b6057.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-15-50-01a1e74a-0464-7003-8120-d15745136044.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-15-39-01a1e749-daef-75b2-8984-ca2c512e4b35.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-15-29-01a1e749-b472-7791-8972-e343bcfc02f1.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-15-25-01a1e749-a394-7fc0-9fab-13d68abd0f9e.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-15-11-01a1e749-6c60-7182-b186-7fe744d8144d.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-15-01-01a1e749-45a9-7aa0-abbe-11c363506b4e.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-14-51-01a1e749-1e75-75d1-97ba-3aad89544be5.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-14-41-01a1e748-f688-70b3-922b-cfcb87fe8f4d.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-14-37-01a1e748-e80c-7493-9bc5-3cd162cb6b58.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-14-32-01a1e748-d6de-7bb0-b2df-b260d2269389.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-14-27-01a1e748-c00d-7d81-bd1b-f836172e8905.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-12-15-01a1e746-bc8d-77a2-8245-8bd8cc3ea819.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-12-06-01a1e746-9cb1-7f52-a751-564b2c671260.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-58-01a1e746-7b3e-7b43-8192-8318fb057416.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-51-01a1e746-5f56-7113-bfdf-ace6a0c251c8.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-45-01a1e746-4849-79e2-a2ab-30962a581317.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-39-01a1e746-3198-7183-be4a-074c68179122.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-30-01a1e746-0d7a-71f3-bca5-af8979f8b336.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-22-01a1e745-f051-78d1-975c-a39702a8535f.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-13-01a1e745-cc0f-7d50-8c36-08ba893310df.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-11-03-01a1e745-a362-7893-9125-ae1b97ee6e6f.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-10-55-01a1e745-84cc-7570-8f2f-8b5bad678745.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-10-42-01a1e745-512b-7581-b841-e394d46e3ca2.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-10-29-01a1e745-2132-7e31-ace9-9b4bb462b5f6.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-10-22-01a1e745-0351-7fa1-9fd9-3f05f0cf4fd2.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-10-12-01a1e744-dc51-7f72-ab3c-7863b1b1207b.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-10-04-01a1e744-bf72-7052-8711-ca4c41d0bbed.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-09-50-01a1e744-8915-7622-aec5-80bf3f7622b1.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-09-35-01a1e744-4bc4-7440-8b44-719b41885932.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-09-14-01a1e743-f9e8-7881-9c79-0a350b9fe3a1.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-09-03-01a1e743-cf1e-7370-aadd-7c43d2a0dc37.jsonl",
-          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T18-08-52-01a1e743-a34a-7490-862f-e2480382f350.jsonl"
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-59-38-01a1e7a9-0c90-7b90-a2c7-dfe07fe0bdae.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-59-10-01a1e7a8-9eb9-77f0-97d0-253f4cb2389e.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-58-53-01a1e7a8-5dc5-75d2-b056-a1bb98ec3e73.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-58-33-01a1e7a8-1114-7dc3-afa9-e67dfc45bc23.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-58-16-01a1e7a7-ced0-78a2-b41a-04a75ef5ce24.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-58-06-01a1e7a7-a7ed-7002-a006-0315350298b3.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-57-51-01a1e7a7-6d57-7062-a5e5-227c0a6c98d7.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-57-25-01a1e7a7-0694-7be0-8257-4bd292570891.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-57-16-01a1e7a6-e1af-7282-b272-54460fb2f06f.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-56-49-01a1e7a6-785a-74e1-aa0b-b832849bd598.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-56-33-01a1e7a6-3c3c-7b11-a79a-296f95b04485.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-56-19-01a1e7a6-02d3-7620-8528-9e87d4160aed.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-56-01-01a1e7a5-bffc-7621-ad7c-7fba712b38d9.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-55-46-01a1e7a5-858f-7de3-acbb-2cda08a7e36f.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-41-00-01a1e797-fd75-7a42-915c-c35c2ffe9733.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-40-49-01a1e797-d407-7b41-a14d-b6807169e056.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-40-36-01a1e797-9f7c-7f51-898d-36857991a190.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-40-27-01a1e797-7eed-7932-b785-6f5f03de3550.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-40-12-01a1e797-439b-7861-9d4d-91e464d1ee04.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-40-01-01a1e797-1973-7e32-a75e-029675668661.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-39-51-01a1e796-efed-7be2-b9aa-93b0b64c0d2a.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-39-40-01a1e796-c63e-74e0-811a-96504267dd99.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-39-36-01a1e796-b7bc-7881-93b8-c493c7ee4d44.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-39-32-01a1e796-a87c-7b10-9c07-15b7be69c56e.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-39-26-01a1e796-90f8-7162-81c2-239ce5fe3e1d.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-37-11-01a1e794-7f97-7323-9e49-3fa2f59ce9b6.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-37-03-01a1e794-6262-71a3-9aae-951188c91f96.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-36-54-01a1e794-3daa-7c02-998a-c012f0423a4b.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-36-46-01a1e794-1d2a-72f1-8714-261ea245c15b.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-36-38-01a1e793-fd80-7ed1-8156-deb341950ec5.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-36-32-01a1e793-e81c-7c41-90da-a940bdb16787.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-36-23-01a1e793-c510-74c2-a3fe-a08b17014ffb.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-36-14-01a1e793-a0c0-7df3-8465-9c4d5670c1bb.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-36-08-01a1e793-89c6-7782-98ae-7f9ab06ea27e.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-35-52-01a1e793-49f1-7fc2-bd9a-2f9736e25a91.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-35-41-01a1e793-2174-7a10-a3c2-6d7478788983.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-35-31-01a1e792-fb2b-7120-a2e9-d8a3428ddf00.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-35-04-01a1e792-90b6-7d20-9d46-23254b7dbe44.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-34-54-01a1e792-6937-7d53-8ace-2c5f4ce62f4f.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-34-41-01a1e792-376d-7102-bede-b9e43d052100.jsonl",
+          "~/.codex/sessions/2026/11/16/rollout-2026-11-16T19-34-35-01a1e792-1a37-7423-96d7-47123c63e08f.jsonl"
         ],
-        "launches_exited_zero": "51 of 51",
-        "observation": "located 51 session file(s) newer than the first launch; 51 of 51 launches exited 0",
-        "files_scanned": 428
+        "launches_exited_zero": "41 of 41",
+        "observation": "located 41 session file(s) newer than the first launch; 41 of 41 launches exited 0",
+        "files_scanned": 516
       }
     },
     "arg-substitution": {
@@ -1060,7 +1050,7 @@
       "reason": "not-applicable: plan \u00a76.10 is a Claude question ($N substitution); no other harness substitutes",
       "plan_item": "6.10",
       "oracle": "sentinel-content",
-      "ran_at": "2026-11-17T02:20:14Z"
+      "ran_at": "2026-11-17T04:00:05Z"
     }
   },
   "coverage": {
