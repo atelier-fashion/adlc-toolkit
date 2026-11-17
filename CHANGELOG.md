@@ -609,6 +609,14 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`adlc harness probe codex` reads codex's policy rejection as a refusal (BUG-282).**
+  Codex rejects a command a `forbidden` rule matches before it runs. It writes no
+  `command_execution` item, only a stderr line, `rejected: policy forbids commands
+  starting with <command>`. The codex profile now names that line as its
+  `refusal_stderr`, so a held deny counts as proof of refusal. Without it,
+  `deny-under-allow` read `not-attempted` on all five live attempts while codex was
+  refusing every one. The fake codex now rejects the same way instead of printing a
+  record.
 - **A refusal row needs proof the command was submitted, and retries (BUG-281).** On
   codex-cli 0.166.0 the model refused to run the trust gate's allowed `touch` at all, so
   `allowlist-loaded` read `fail`, and the gate skipped every other probe. The run measured
