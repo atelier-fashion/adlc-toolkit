@@ -100,8 +100,11 @@ def test_scenario_verdicts(tmp_path, h):
                     for control in hp.ATD_CONTROLS:
                         assert subs[control]["reason"] == "ask-not-reached"
                     assert subs["lone-deny"]["status"] == "n/a"
-            elif pid == "shell-timeout" and scenario != "refuse":
-                assert got == ("unknown", "ask-not-reached"), (scenario, got)
+            elif pid == "shell-timeout":
+                # A declined command never began, so it says nothing about the shell
+                # timeout (BUG-286); with no reply either, the ask was not reached.
+                want = hp.SHELL_NOT_STARTED if scenario == "refuse" else "ask-not-reached"
+                assert got == ("unknown", want), (scenario, got)
             elif scenario == "exit3":
                 assert got == ("unknown", "binary-exit-3"), (pid, got)
             elif pid in hp.SUBMISSION_PROBES:
@@ -1035,3 +1038,24 @@ def test_runner_state_fresh_before_each_launch(tmp_path, monkeypatch, h):
         # AC-10 through the real run dir: only the target moved into the working copy.
         for key in ("runner", "tail", "witness"):
             assert paths["outside"] and paths[key].startswith(paths["outside"]), key
+
+
+def test_shell_timeout_measures_the_sleep(tmp_path):
+    """BUG-286: the sentinel alone proved nothing about the sleep. The row passes when the
+    sentinel is at least the sleep's length younger than the start marker, reads unknown
+    when the model dropped the sleep or never ran the command, and fails only when the
+    command began and the harness cut it short."""
+    result, _ = _run_ok(Sandbox(tmp_path / "ok"), "claude", "--only", "shell-timeout")
+    entry = result["probes"]["shell-timeout"]
+    assert entry["status"] == "pass"
+    assert re.search(r"start marker: present; sentinel: present, 12\d s after the start "
+                     r"marker", entry["evidence"]["observation"])
+    dropped, _ = _run_ok(Sandbox(tmp_path / "drop", flags=("drop-sleep",)), "claude",
+                         "--only", "shell-timeout")
+    assert statuses(dropped)["shell-timeout"] == ("unknown", hp.SLEEP_UNMEASURED)
+    cut, _ = _run_ok(Sandbox(tmp_path / "cut", flags=("shell-cut-short",)), "claude",
+                     "--only", "shell-timeout")
+    assert statuses(cut)["shell-timeout"] == ("fail", None)
+    declined, _ = _run_ok(Sandbox(tmp_path / "refuse", scenario="refuse"), "claude",
+                          "--only", "shell-timeout")
+    assert statuses(declined)["shell-timeout"] == ("unknown", hp.SHELL_NOT_STARTED)

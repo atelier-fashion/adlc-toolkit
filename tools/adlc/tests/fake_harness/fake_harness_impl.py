@@ -36,6 +36,9 @@ and refuse ``$(…)``, backticks, redirection and env prefixes, as REQ-682 measu
 tried; REQ-664 BR-17(e)), ``tidy-git-c`` (a model that drops the `git -C <repo>` wrapper from an asked command),
 ``chain-status-push`` (a model that pushes as `git status … && git push …`),
 ``garble-nonce-once`` (the first reply of a run carries a mis-copied nonce; BUG-285),
+``drop-sleep`` (a model that tidies the `sleep` out of an asked command) and
+``shell-cut-short`` (a harness whose shell timeout kills the call at the `sleep`; both
+BUG-286),
 ``model-skips`` (a model that runs nothing at all and still replies, as codex-cli
 0.166.0's did on the trust gate; BUG-281), ``witness-only`` (a model that never runs the
 asked fence, or on an ask-tier-deny
@@ -57,6 +60,9 @@ it, stdout is the final message in plain text and the transcript goes to stderr,
 
 The fake's own matcher is written here: it imports nothing from ``exec_matcher``, so the
 double cannot pass by sharing the code under test (REQ-707 BR-8).
+
+The fake never waits out a ``sleep``. It moves the clock: a file a later ``touch`` writes
+is stamped that many seconds on, which is what ``shell-timeout`` reads (BUG-286).
 
 Under the no-side-effect scenarios the fake still writes its session record; on
 cursor that record is delivered by passing its ``transcript_path`` to the probe's
@@ -553,8 +559,37 @@ def run_command(match_text, command, cwd, cfg, harness, records, aborted):
     if command.startswith("git") and "claim-only" in FLAGS:
         records.append({"command": command, "decision": "claimed", "output": "pushed"})
         return
-    script = " && ".join(p for p in command.split(" && ") if not p.startswith("sleep "))
+    parts = command.split(" && ")
+    script = " && ".join(p for p in parts if not p.startswith("sleep "))
+    if any(p.startswith("sleep ") for p in parts):
+        if "shell-cut-short" in FLAGS:
+            # A harness whose shell timeout is shorter than the sleep: what came before
+            # the sleep ran, and the call was killed there (BUG-286).
+            head = " && ".join(parts[:[p.startswith("sleep ") for p in parts].index(True)])
+            records.append({"command": command, "decision": "partial",
+                            "output": sh(head, cwd) if head else ""})
+            return
+        if "drop-sleep" in FLAGS:
+            # A model that tidies the sleep away submits the rest (BUG-286).
+            records.append({"command": script, "decision": "run", "output": sh(script, cwd)})
+            return
     records.append({"command": command, "decision": "run", "output": sh(script, cwd)})
+    skip_sleeps(parts)
+
+
+def skip_sleeps(parts):
+    """The fake never waits out a `sleep N`. It moves the clock instead: every file a
+    later `touch` wrote is stamped N seconds on, as if the sleep had run (BUG-286)."""
+    ahead = 0.0
+    for part in parts:
+        words = shlex.split(part)
+        if words[:1] == ["sleep"] and len(words) == 2:
+            ahead += float(words[1])
+        elif ahead and words[:1] == ["touch"]:
+            for path in words[1:]:
+                if os.path.exists(path):
+                    stamp = time.time() + ahead
+                    os.utime(path, (stamp, stamp))
 
 
 # --- hooks, session records, output ------------------------------------------
