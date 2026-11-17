@@ -81,6 +81,14 @@ every mapped exit code. The README gains one exec section per harness stating
 what the engine does on it and what is lost there (plan §4). (informed by
 LESSON-619, LESSON-663, LESSON-718)
 
+**Delivered in stages, Codex first (amended 2026-11-17).** The REQ is built one
+harness at a time, and a harness's stage opens only when a full
+`adlc harness probe <name>` result from the current probe tool is on the
+integration branch for the installed version. So no exec block is built against
+the fake harness alone. Stage 1 is Codex, whose result is on `main`
+(`codex-cli 0.166.0`). The Amendments entry of this date says how every rule
+and criterion below reads under staging.
+
 The allow and deny rendering in this REQ is spelling-level and is **not the
 gate**. Rechecks of the Rule B specs found that allowlist and prefix-deny
 semantics cannot be made a gate (allows that execute their arguments, `gh api`
@@ -248,6 +256,23 @@ residuals (BR-19); REQ-659's structural halt is the gate.
 - [ ] On Codex, should the runner be allowed by a prefix rule, which REQ-655 records runs it outside the `workspace-write` sandbox, or left unmatched so it runs inside the sandbox? Inside, the network-using fences (`gh`, `git push` of id refs) may fail. Outside, ADR-7's audit is the only bound (BR-19 f). The `runner-prefix` variant and a sandboxed control run of the close-out's allocation fence decide it.
 
 ## Amendments
+
+- **2026-11-17, staged delivery, Codex first.** As written, this REQ lands four exec blocks in one change. Only `codex` and `agy` are installed on the machine that runs the probes, and only Codex has a result from the current probe tool: Antigravity's predates the `runner-prefix` variant and holds a `shell-timeout` reading BUG-286 found wrong, and Copilot and Cursor have none. An exec block for a harness with no result could be tested only against the fake, and the Codex probe work showed how far a fake can drift from the real CLI (LESSON-869, BUG-278 to BUG-286). So the REQ is delivered in stages.
+  - **A stage is one harness.** It lands that harness's exec block, its fake exec scenario, its parser fixture, its `exec-fence-census.json`, its README exec section, and whatever shared engine code that harness is the first to need.
+  - **When a stage opens.** Only when `.adlc/research/harness-probes/<name>.json` on the integration branch holds a full run by the current probe tool for the installed binary version. A stage may still end with its adapter `unverified`, with the failing probe cited, as BR-11 allows. It may not start without a result.
+  - **Stage 1 is Codex.** It also lands the shared parts: the widened exec sub-schema and its loader checks, the mechanical migration of `harness/claude.yml` (BR-1), the two lints, the BR-11 recomputation in the engine and in `adlc harness doctor`, and every orchestrator behaviour BR-11 lists. A shared behaviour that Codex does not exercise is tested with a fixture adapter.
+  - **Stage 1 also brings `harness/codex.yml` and the root `README.md` Codex rows up to the result on `main`.** The file's header and its `accepted_fidelity`, `deny_under_allow` and `fence_broad_spelling` entries still state the 2026-10-31 readings. Three of those readings have changed: `deny-under-allow` is `pass`, `wrapped-allow` is `fail`, and the three older `fence-vs-allowlist` variants are `fail`.
+  - **Later stages, in no fixed order: Antigravity, Cursor, Copilot.** Each needs its own `/architect` pass, because each is designed from that harness's result.
+  - **How the rules and criteria read.** In every BR and AC, "each adapter", "each of the four" and "every harness" mean each harness whose stage has run. A clause that names one harness belongs to that harness's stage. These clauses are therefore outside stage 1:
+    - **Rendering:** Copilot's `--allow-tool` and `--deny-tool` flags and its launch without `-p` (BR-2, BR-3, BR-4, AC-2, AC-4); the Antigravity settings file and policy deny file (BR-3, BR-4, AC-4, AC-14, AC-22); Cursor's two rules files (BR-3, AC-4).
+    - **Trust:** the `trustedFolders.json` grant and revoke (BR-5, AC-5).
+    - **Exit codes:** the `42` and `53` mappings (BR-8, AC-7).
+    - **Working copy:** a `clone` or `orchestrator-git` strategy the engine does not already implement is built in the stage of the first adapter that declares it (BR-9, AC-9). Codex's `git-write-worktree` `pass` allows `worktree`.
+    - **README:** the three other exec sections (BR-14, AC-13, AC-23).
+
+    Everything else in AC-1 to AC-25 is in stage 1, read for Codex. AC-11's closing clause and AC-12's "all four exec scenarios" apply to the staged adapters at each stage's merge.
+  - **An unstaged adapter.** `harness/copilot.yml`, `harness/cursor.yml` and `harness/antigravity.yml` keep their placeholder `exec: {flags: unverified}`. Each must still load under the widened schema. The exec engine refuses each by name as not exec-capable, and `--allow-unverified` does not launch it, because it has no exec block to launch.
+  - **Status.** The spec stays `in-progress` after stage 1's close-out, which names the stages still owed. It is `complete` when the last stage closes.
 
 - **2026-11-17, wording only.** An `/adversary` audit found the 2026-11-16 amendment left three statements of the required set that disagreed: BR-11 (a), BR-11's unamended "required set" sentence, and the `context_delivery` table row, which read as if only `allowlist-loaded` were required at all. The sentence and the row now say what (a) says. No requirement changes.
 
