@@ -1,7 +1,7 @@
 ---
 id: BUG-283
 title: "`ask-tier-deny` decides a variant on a baseline control that was never measured, so \"the allow was necessary\" can rest on nothing"
-status: open
+status: resolved
 severity: low
 created: 2026-11-17
 updated: 2026-11-17
@@ -65,3 +65,11 @@ Attribution: REQ-664, which built the gate.
 Regression tests: off for this project (no `.adlc/config.yml`).
 
 A failing-first test was still written: `test_ask_tier_deny_gate_needs_a_measured_baseline` fails against `main`'s `harness_probe.py` and passes with the fix.
+
+## Deployment
+
+Merged as `1caa9a3` ([#285](https://github.com/atelier-fashion/adlc-toolkit/pull/285)) on 2026-11-17. Nothing to deploy, since this is toolkit code. A full codex probe on the merged commit records the result.
+
+## Lessons
+
+- NO_ENTRY: this is the site LESSON-875's sweep missed, and LESSON-875 already states the rule (sweep every decision site of the same shape, gates included).
