@@ -616,6 +616,25 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **The `/adversary` audit's findings on `adlc harness probe` (BUG-285).** An audit of the
+  codex work found rules that could make a pass hollow, and two committed sub-results that
+  recorded the model, not codex. Now:
+  - A submitted command that left no effect is a measured reading even when the model skips
+    its reply, so retries no longer discard measured refusals.
+  - Proof of submission is an exact match after the shell wrapper is stripped, not a
+    substring. `git-write-*` needs the push submitted cleanly, or the commit submitted and
+    not landed.
+  - A stderr refusal counts only when it names the asked command, so a tidied `git push`
+    cannot make `wrapped-allow` read `pass`.
+  - `_reset` restores the checkout's remote-tracking refs, which left
+    `writable-roots-repo` "behind origin" after the launch before it pushed.
+  - The three older `fence-vs-allowlist` variants keep their sentinel where only an admitted
+    command can write, so codex's sandbox no longer makes them pass.
+  - `stdin-prompt` and `session-start-context` retry a missed nonce, since their pass
+    cannot be forged.
+  - BR-17(e)'s inference needs `runner-baseline`'s command on record.
+  - The fake codex no longer lets a plain deny cover `git -C`, and gains `tidy-git-c`,
+    `chain-status-push` and `garble-nonce-once`.
 - **`ask-tier-deny`'s variant gate needs a measured baseline (BUG-283).** A variant was
   decided once `allow-only` ran and `baseline` left no effect. That held even when the
   model never tried the baseline, so "the allow was necessary" rested on nothing measured.

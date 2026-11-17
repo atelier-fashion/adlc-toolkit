@@ -59,7 +59,9 @@ def test_perform_all_pass(tmp_path, h):
 
 @pytest.mark.parametrize("h", HARNESSES)
 def test_scenario_verdicts(tmp_path, h):
-    """refuse, refuse-silent and exit3 exactly as AC-2 states them."""
+    """refuse, refuse-silent and exit3 as AC-2 states them, with one change (BUG-281,
+    BUG-285): a model that declines never calls the tool, so the harness records nothing,
+    and a row whose fail means "the harness refused" reads not-attempted, not fail."""
     for scenario in ("refuse", "refuse-silent", "exit3"):
         sb = Sandbox(tmp_path / scenario, scenario=scenario)
         result, _ = _run_ok(sb, h)
@@ -75,8 +77,8 @@ def test_scenario_verdicts(tmp_path, h):
                 continue
             got = st[pid]
             if h in GATED:
-                want = "precondition-unmet: trust-then-headless %s" % (
-                    "unknown" if scenario == "exit3" else "fail")
+                # The gate is allowlist-loaded, and a declined gate command is unmeasured.
+                want = "precondition-unmet: trust-then-headless unknown"
                 assert got == ("unknown", want), (scenario, pid, got)
                 continue
             if pid == "transcript-locate":
@@ -102,6 +104,8 @@ def test_scenario_verdicts(tmp_path, h):
                 assert got == ("unknown", "ask-not-reached"), (scenario, got)
             elif scenario == "exit3":
                 assert got == ("unknown", "binary-exit-3"), (pid, got)
+            elif pid in hp.SUBMISSION_PROBES:
+                assert got == ("unknown", hp.NOT_ATTEMPTED), (scenario, pid, got)
             else:
                 assert got == ("fail", None), (scenario, pid, got)
                 evidence = result["probes"][pid].get("evidence") or next(
@@ -233,6 +237,74 @@ def test_codex_baseline_from_runner_baseline(tmp_path):
     assert subs["baseline"]["reason"] != hp.BASELINE_INFERRED
 
 
+# --- BUG-285: the /adversary audit's findings -----------------------------------
+
+def test_nonce_row_retries_a_miscopied_nonce(tmp_path):
+    """A nonce row's pass cannot be forged, so a miss (the model dropping a character)
+    is launched again and the row is decided by the attempt that returned it."""
+    sb = Sandbox(tmp_path, flags=("garble-nonce-once",))
+    result, out = _run_ok(sb, "codex", "--only", "stdin-prompt")
+    subs = result["probes"]["stdin-prompt"]["sub_results"]
+    assert {k: v["status"] for k, v in subs.items()} == {
+        "with-prompt-flag": "pass", "without-prompt-flag": "pass"}
+    assert sorted(v["evidence"]["attempts"] for v in subs.values()) == [1, 2]
+    assert out.stderr.count("reason=%s" % hp.NONCE_MISSED) == 1
+
+
+def test_tidied_git_c_is_not_a_held_deny(tmp_path):
+    """A model that drops `git -C <repo>` submits the plain push, which the plain deny
+    rejects. That refusal names the ref, not the asked wrapped command, so wrapped-allow
+    must not read pass."""
+    sb = Sandbox(tmp_path, flags=("tidy-git-c",))
+    result, _ = _run_ok(sb, "codex", "--only", "ask-tier-deny")
+    subs = result["probes"]["ask-tier-deny"]["sub_results"]
+    assert subs["allow-only-git-c"]["status"] == "pass"     # the gate is open
+    wrapped = subs["wrapped-allow"]
+    assert (wrapped["status"], wrapped["reason"]) == ("unknown", hp.NOT_ATTEMPTED), wrapped
+    assert "harness refused a tool on stderr" in wrapped["evidence"]["observation"]
+
+
+def test_codex_plain_deny_does_not_cover_git_c(tmp_path):
+    """Real codex-cli 0.166.0 ran the `git -C` force-push under a plain deny; the fake
+    codex now does too, so wrapped-allow reads fail there and the probe still passes on
+    deny-under-allow."""
+    sb = Sandbox(tmp_path)
+    result, _ = _run_ok(sb, "codex", "--only", "ask-tier-deny")
+    subs = result["probes"]["ask-tier-deny"]["sub_results"]
+    assert subs["wrapped-allow"]["status"] == "fail"
+    assert "ref refs/heads/probe-deny-" in subs["wrapped-allow"]["evidence"]["observation"]
+    assert subs["deny-under-allow"]["status"] == "pass"
+
+
+def test_chained_push_is_not_a_refused_push(tmp_path):
+    """`git status … && git push …` is judged by its un-allowed head, so its failure is
+    not the harness refusing the asked push: not-attempted, never fail."""
+    sb = Sandbox(tmp_path, flags=("chain-status-push",))
+    result, _ = _run_ok(sb, "codex", "--only", "git-write-main")
+    assert statuses(result)["git-write-main"] == ("unknown", hp.NOT_ATTEMPTED)
+
+
+def test_tracking_refs_are_reset_between_launches(tmp_path, monkeypatch):
+    """REQ-664 BR-16: a push in one launch must not leave the next one behind a remote
+    that was reset. Every launch starts with origin/<branch> at the initial commit."""
+    sb = Sandbox(tmp_path)
+    seen = []
+
+    def patch():
+        def spy(self, lc, spec):
+            for branch in ("main", "probe-wt"):
+                ref = hp._git(["-C", self.repo, "rev-parse", "--verify", "-q",
+                               "refs/remotes/origin/%s" % branch], check=False)
+                seen.append((lc.label, branch, (ref or self.init_sha) == self.init_sha))
+        monkeypatch.setattr(hp.Engine, "_after_reset", spy)
+
+    code, result = _engine_run(monkeypatch, sb, ["codex", "--only", "git-write-main",
+                                                 "--only", "git-write-worktree"], patch)
+    assert code == 0 and len(seen) >= 6
+    assert all(fresh for _label, _branch, fresh in seen), seen
+    assert statuses(result)["git-write-main"] == ("pass", None)
+
+
 def test_ask_tier_deny_variants(tmp_path):
     sb = Sandbox(tmp_path / "perform")
     result, _ = _run_ok(sb, "claude", "--only", "ask-tier-deny")
@@ -259,10 +331,14 @@ def test_ask_tier_deny_variants(tmp_path):
                 for m in [re.search(r"`(git -C [^`]+)`", r["prompt"])] if m]
     assert len(commands) == 3 and all("--force" in c for c in commands)
     assert len({re.sub(r"probe-deny-l\d\d", "X", c) for c in commands}) == 1
-    # A bare (unreversed) nonce echo never yields pass.
+    # A bare (unreversed) nonce is never the evidence. Here the deny is on the harness's
+    # own record with the witness present, so it is measured without the reply (BUG-285).
     sb = Sandbox(tmp_path / "bare", flags=("bare-nonce",))
     result, _ = _run_ok(sb, "claude", "--only", "ask-tier-deny")
-    assert result["probes"]["ask-tier-deny"]["status"] != "pass"
+    dua = result["probes"]["ask-tier-deny"]["sub_results"]["deny-under-allow"]
+    assert dua["status"] == "pass"
+    assert "asked command on record: yes" in dua["evidence"]["observation"]
+    assert "reversed nonce in final message: no" in dua["evidence"]["observation"]
 
 
 @pytest.mark.parametrize("h", HARNESSES)
@@ -344,9 +420,11 @@ def test_trust_and_fence_sub_results(tmp_path):
     assert (allow["status"], allow["reason"]) == (
         "n/a", "not-applicable: no project-local allow form")
     assert trust["status"] == trust["sub_results"]["hooks-loaded"]["status"] == "pass"
+    # A model that declines the fence measured nothing about the allowlist (BUG-285).
     sb = Sandbox(tmp_path / "refuse", scenario="refuse")
     result, _ = _run_ok(sb, "claude", "--only", "fence-vs-allowlist")
-    assert result["probes"]["fence-vs-allowlist"]["status"] == "fail"
+    fence = result["probes"]["fence-vs-allowlist"]
+    assert (fence["status"], fence["reason"]) == ("unknown", hp.NOT_ATTEMPTED)
 
 
 def test_claude_allows_survive_an_untrusted_project(tmp_path):
@@ -481,8 +559,10 @@ def test_fresh_state_per_launch(tmp_path):
     sb = Sandbox(tmp_path / "stale", scenario="refuse", flags=("stale-writer",))
     result, out = _run_ok(sb, "claude", "--only", "ask-tier-deny")
     subs = result["probes"]["ask-tier-deny"]["sub_results"]
-    assert subs["baseline"]["status"] == "fail"           # previous launch left target-<its lid>
-    assert subs["allow-only-git-c"]["status"] == "fail"   # previous launch pushed its ref
+    # The previous launch left target-<its lid> and pushed its ref: neither may count for
+    # this launch. (The model declines here, so the controls read not-attempted.)
+    assert subs["baseline"]["status"] == "unknown"
+    assert subs["allow-only-git-c"]["status"] == "unknown"
     nonces = re.findall(r"launch_state_reset .*nonce=([a-z0-9]{8})", out.stderr)
     lids = re.findall(r"launch_state_reset .*launch=(l\d\d)(?:r\d)? ", out.stderr)
     # Retries (BUG-280) add launches; every one still gets its own fresh nonce.
@@ -568,7 +648,11 @@ def test_final_message_rules(tmp_path, monkeypatch):
         st = statuses(result)
         assert st["session-start-context"][0] != "pass"
         assert st["stdin-prompt"][0] != "pass"
-        assert st["ask-tier-deny"][0] != "pass"
+        # ask-tier-deny's deny is on the harness's own record, so it does not need the
+        # reply; the nonce in a tool record or a prompt echo is still never read (BUG-285).
+        dua = result["probes"]["ask-tier-deny"]["sub_results"]["deny-under-allow"]
+        assert "asked command on record: yes" in dua["evidence"]["observation"]
+        assert "reversed nonce in final message: no" in dua["evidence"]["observation"]
     sb = Sandbox(tmp_path / "cap", flags=("nonce-beyond-cap",))
     result, _ = _run_ok(sb, "claude", "--only", "session-start-context")
     probe = result["probes"]["session-start-context"]
