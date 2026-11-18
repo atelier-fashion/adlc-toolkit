@@ -5,6 +5,7 @@ adapter names (``paths.config.user``), so the file under test is the file the ha
 reads (LESSON-777), never the operator's own. No credential file is read.
 """
 
+import io
 import json
 import os
 import re
@@ -348,6 +349,21 @@ def test_install_exec_writes_the_policy_file(tmp_path, monkeypatch, capsys):
     assert _home_files() == before
     assert harness_cli.main(["install", "--exec", "--all"]) == 2
     assert "--exec names one harness" in capsys.readouterr().err
+
+
+def test_harness_cli_writes_to_the_streams_of_its_call(monkeypatch):
+    """`harness_cli`'s commands write to `sys.stdout` and `sys.stderr` as they are when each is
+    called, never as they were when the module was first imported, so a caller that redirects
+    them (a test's `capsys` among them) reads what the command said, whichever module imported
+    `harness_cli` first."""
+    import harness_cli
+    out, err = io.StringIO(), io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    assert harness_cli.main(["install", "--exec", "--harness", "claude"]) == 0
+    assert harness_cli.main(["install", "--exec", "--all"]) == 2
+    assert "claude: nothing to install" in out.getvalue()
+    assert "--exec names one harness" in err.getvalue()
 
 
 # --------------------------------------------------------------------------- BR-5: the probe's marker

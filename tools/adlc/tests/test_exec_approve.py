@@ -1041,6 +1041,15 @@ EXEC_PATH_CASES = {
                  "new.md", "git add .fake-exec-file/prompts/new.md"],
                 ["A", ".fake-exec-file/prompts/new.md"]),
 }
+#: What a case's fake does after its commit when its commands left the config surface in its
+#: working copy unlike the render: it puts the surface back, so its exit is clean and the
+#: halt-time gate is what finds the path in its PR. A surface left changed at exit blocks the
+#: run before any halt (`test_exec_launch.test_surface_edited_mid_run_blocks_the_run`).
+EXEC_PATH_PUT_BACK = {
+    "REQ-905": ["rm .fake-exec-file/README.md"],
+    "REQ-906": ["cp docs/config.toml %s" % eh.FILE_CONFIG],
+    "REQ-908": ["rm -r .fake-exec-file/prompts"],
+}
 
 
 def test_exec_path_touched_refuses_approve(tmp_path, monkeypatch):
@@ -1052,20 +1061,23 @@ def test_exec_path_touched_refuses_approve(tmp_path, monkeypatch):
     stays unspent. REQ-659's "changes the gate" list names each at the halt (AC-18). The PR
     that touches none, committed with `git add -A` over the hidden renders, leaves the list
     empty and merges (the must-not-refuse case); a plan without the gate result is refused and
-    re-halted, and the restore runs before the merge."""
-    monkeypatch.setattr(se, "MAX_CONCURRENT", 1)        # one fake at a time on the repo
+    re-halted, and the restore runs before the merge. The fakes run as many at a time as the
+    engine allows on the one repository, each run's own gitdir writes carried past the others'
+    checksums."""
     benign = "REQ-909"
     box = eh.file_sandbox(tmp_path, monkeypatch, reqs=tuple(sorted(EXEC_PATH_CASES)) + (benign,))
     eh.commit_on_main(box, {eh.FILE_CONFIG: 'model = "operator"\n',
                             eh.FILE_HOOKS: '{"hooks": {}}\n'})
     for req, (commands, _hit) in EXEC_PATH_CASES.items():
-        box.req(req, add=["src"], commands=commands)
+        box.req(req, add=["src"], commands=commands,
+                late_commands=EXEC_PATH_PUT_BACK.get(req, []))
     box.req(benign, closeout={"add": [".adlc"]})
     before = eh.git(box.repo, "status", "--porcelain", "-uall")
     orch = box.go(shared=True)
     for req, (_commands, (status, path)) in sorted(EXEC_PATH_CASES.items()):
         run = orch.runs[req]
-        assert run.status == "awaiting_approval", req
+        assert run.status == "awaiting_approval", (req, se.violations_of(run))
+        assert not eh.events(box, run, "config_surface_violation"), req
         plan = run.ledger().read()["plan"]
         assert plan[eg.EXEC_PATH_KEY] == [path], (req, plan["changedPaths"])
         assert [(e["status"], e["path"]) for e in eh.events(box, run, "exec_path_touched")] == [
@@ -1348,7 +1360,15 @@ def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path, mon
     orch = box.go(shared=True)
     run = orch.runs[REQ]
     box.approve(orch, drain=False)
-    box.write_scenario(version=UPGRADED)
+    # After the merge, which reads the verdict again (`test_the_verdict_is_read_again_before_
+    # the_merge`), and before the close-out: the binary is upgraded during the deploy step.
+    deploy = orch._deploy
+
+    def upgraded_meanwhile(*args, **kw):
+        box.write_scenario(version=UPGRADED)
+        return deploy(*args, **kw)
+
+    monkeypatch.setattr(orch, "_deploy", upgraded_meanwhile)
     orch.drain()
     closing = run.read_primary_state()["closeOut"]
     assert closing["status"] == "failed", closing
@@ -1356,3 +1376,209 @@ def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path, mon
         closing["reason"]
     assert run.status == "merged" and merged_count(box) == 1
     assert [launch["opts"]["resume"] for launch in box.launches()] == [False]
+
+
+# ---- review fixes, 2026-11-18 ------------------------------------------------------------------
+def test_the_verdict_is_read_again_before_the_merge(tmp_path, monkeypatch):
+    """REQ-662 BR-11, BR-18: `execute` reads the adapter's verdict again before anything merges,
+    so a run approved while the adapter read verified, then queued, does not merge once it
+    reads unverified: it is re-halted with a fresh plan and nothing merges, and approve then
+    refuses it as it refuses any unverified adapter. Verified again, it merges."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    token, _gate = box.tokens(REQ)
+    assert box.approve(orch, drain=False) == "approved"
+    box.write_scenario(version=UPGRADED)
+    orch.drain()
+    assert merged_count(box) == 0 and run.status == "awaiting_approval"
+    assert "harness fake-exec-file is unverified, so the approve is refused" in \
+        box.out.getvalue()
+    assert box.tokens(REQ)[0] != token and run.ledger().read()["decision"] is None
+    with pytest.raises(se.Refused, match="unverified, so the approve is refused"):
+        box.approve(orch)
+    assert merged_count(box) == 0
+    box.write_scenario(version=eh.PROBED_VERSION)
+    assert box.approve(orch) == "approved"
+    assert run.status == "merged" and merged_count(box) == 2
+
+
+def test_a_harness_that_cannot_start_at_relaunch_or_close_out_revokes(tmp_path, monkeypatch):
+    """REQ-662 BR-5: `Popen` raising `OSError` (the binary gone, or no longer executable) once
+    trust is granted. At an `answer`'s relaunch the run ends failed (setup-error) naming why,
+    its trust revoked and its render restored, and the answer is refused with it. At the
+    close-out, the close-out fails naming why, its own grant revoked; the merge stands. Each
+    user config ends byte-identical."""
+    (tmp_path / "answer").mkdir()
+    box = eh.trust_sandbox(tmp_path / "answer", monkeypatch)
+    box.req(status="blocked", claim="blocked", add=["src"],
+            blockers=[{"reason": "reflector-questions", "question": "which?"}],
+            after_answer={"status": "awaiting_approval", "claim": "awaiting_approval"})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    assert run.status == "blocked"
+    with monkeypatch.context() as patch:
+        eh.popen_fails(patch, run.doc["binary"], lambda argv, env: True)
+        with pytest.raises(se.Refused, match="could not be started.*No such file or directory"):
+            orch.answer(REQ, "the second option")
+    assert run.status == "failed" and not orch.children and len(box.launches()) == 1
+    assert "could not be started" in json.dumps(run.read_primary_state()["notes"])
+    assert run.doc["trustGrants"] == {}
+    assert [e["status"] for e in eh.events(box, run, "trust_revoked")] == [et.REVOKED] * 2
+    assert not os.path.lexists(os.path.join(run.wc, eh.FILE_RULE))
+    assert eh.read_text(box.user_config) == eh.USER_CONFIG
+
+    (tmp_path / "close-out").mkdir()
+    box = eh.trust_sandbox(tmp_path / "close-out", monkeypatch)
+    box.req(add=["src"], closeout={"add": [".adlc"]})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    with monkeypatch.context() as patch:
+        eh.popen_fails(patch, run.doc["binary"], lambda argv, env: "resume" in argv)
+        assert box.approve(orch) == "approved"
+    assert run.status == "merged" and merged_count(box) == 1
+    closing = run.read_primary_state()["closeOut"]
+    assert closing["status"] == "failed"
+    assert "the close-out's harness could not be started" in closing["reason"]
+    assert "No such file or directory" in closing["reason"]
+    close = os.path.realpath(run.doc["closeOutWorkingCopy"])
+    assert [(e["path"], e["status"]) for e in eh.events(box, run, "trust_revoked")][-1] == (
+        close, et.REVOKED)
+    assert run.doc["trustGrants"] == {} and eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+def _held(tmp_path, monkeypatch, files):
+    """A file-rendering sandbox whose REQ-901 merges cleanly and whose REQ-902, writing
+    ``files``, is held behind it, with a tracked rendered path on main."""
+    box = eh.file_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
+    eh.commit_on_main(box, {eh.FILE_CONFIG: 'model = "operator"\n'})
+    box.req("REQ-901", add=["src"], files={"src/a.txt": "901\n"}, closeout={"add": [".adlc"]})
+    box.req("REQ-902", add=sorted({p.split("/")[0] for p in files}), files=files,
+            status="blocked", claim="blocked",
+            blockers=[{"blockedBy": "REQ-901", "conflictFiles": ["src/a.txt"],
+                       "holdState": "held", "rebaseAttempts": 0}],
+            after_answer={"status": "awaiting_approval", "claim": "awaiting_approval",
+                          "blockers": None, "files": {"src/c.txt": "902 again\n"},
+                          "add": ["src"]})
+    return box
+
+
+def _upstream(box, files):
+    """``files`` committed to main and pushed, behind the runs' backs: a PR the forge knows of
+    (the mock's ``commit_prs``), so no exit check reads it as a direct push."""
+    eh.commit_on_main(box, files)
+    head = eh.git(box.bare, "rev-parse", "main").strip()
+    (box.store / "commit_prs.json").write_text(json.dumps({head: [55]}))
+
+
+def test_a_held_reqs_rebase_takes_the_upstream_render_base(tmp_path, monkeypatch):
+    """REQ-662 BR-17: the unblock pass restores a held REQ's working copy, rebases it onto the
+    integration branch the blocker merged into, and relaunches it. When the rebase brings an
+    upstream change to a tracked path the engine renders, the relaunch records the rebased
+    blob as the launch state, so the restore that leaves the working copy to a person writes
+    the upstream content and `git status` is clean, never the pre-rebase blob over it."""
+    box = _held(tmp_path, monkeypatch, {"src/b.txt": "902\n"})
+    orch = box.go(shared=True)
+    held = orch.runs["REQ-902"]
+    assert held.status == "blocked"
+    before = held.doc["hidden"][held.wc]["launchBlobs"][eh.FILE_CONFIG]["oid"]
+    upstream = 'model = "upstream"\n'
+    _upstream(box, {eh.FILE_CONFIG: upstream})
+    box.approve(orch, REQ)
+    assert orch.runs[REQ].status == "merged"
+    box.wait(orch)
+    assert held.status == "awaiting_approval" and held.doc["launches"] == 2
+    assert eh.git(held.wc, "show", "HEAD:" + eh.FILE_CONFIG) == upstream
+    after = held.doc["hidden"][held.wc]["launchBlobs"][eh.FILE_CONFIG]["oid"]
+    assert after != before and after == eh.git(box.bare, "rev-parse",
+                                                "main:" + eh.FILE_CONFIG).strip()
+    orch.reject("REQ-902", "enough", decided_by="operator")
+    assert eh.read_text(os.path.join(held.wc, eh.FILE_CONFIG)) == upstream
+    assert eh.git(held.wc, "status", "--porcelain", "--untracked-files=all") == ""
+    assert "S" not in [ln.split()[0] for ln in eh.git(held.wc, "ls-files", "-t").splitlines()]
+
+
+def test_a_held_reqs_rebase_conflict_leaves_no_skip_worktree_bit(tmp_path, monkeypatch):
+    """REQ-662 BR-17, REQ-659 BR-12: a held REQ whose rebase onto the merged integration branch
+    conflicts ends needs-manual-rebase, the rebase aborted, with its working copy restored
+    and no `skip-worktree` bit left for a person to trip over."""
+    box = _held(tmp_path, monkeypatch, {"README.md": "BBB\nline two\nline three\n"})
+    orch = box.go(shared=True)
+    held = orch.runs["REQ-902"]
+    assert held.status == "blocked"
+    _upstream(box, {"README.md": "CCC\nline two\nline three\n"})
+    box.approve(orch, REQ)
+    assert orch.runs[REQ].status == "merged"
+    [entry] = held.read_primary_state()["blockers"]
+    assert entry["holdState"] == "needs-manual-rebase" and entry["conflictFiles"] == ["README.md"]
+    assert held.doc["launches"] == 1 and held.status == "blocked"
+    assert "S" not in [ln.split()[0] for ln in eh.git(held.wc, "ls-files", "-t").splitlines()]
+    assert held.doc["hidden"][held.wc]["skipWorktree"] == []
+    assert eh.read_text(os.path.join(held.wc, eh.FILE_CONFIG)) == 'model = "operator"\n'
+
+
+@pytest.mark.parametrize("stream,words", [("cut", "last line is cut"),
+                                          ("no-terminal", "no turn.completed event")])
+def test_a_close_out_whose_output_did_not_parse_fails(tmp_path, stream, words):
+    """REQ-662 BR-6: the close-out's output is held to the parser as a launch's is. A stream that
+    did not parse (its last line cut, or no `turn.completed`) fails the close-out with the
+    parser's message even though the last-message file reads as a good close-out, so its chore
+    PR is not merged; the run's own merge stands."""
+    box = eh.adapter_sandbox(tmp_path, "codex")
+    box.req(closeout={"stream": stream})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    assert box.approve(orch) == "approved"
+    assert run.status == "merged" and merged_count(box) == 1
+    closing = run.read_primary_state()["closeOut"]
+    assert closing["status"] == "failed", closing
+    assert "did not parse" in closing["reason"] and words in closing["reason"], closing
+    assert "Chore PR:" in eh.read_text(run.last_message("close-out.json"))
+
+
+def test_abort_of_a_close_out_revokes_its_trust_grant(tmp_path, monkeypatch):
+    """REQ-662 BR-5, BR-20: an abort of a close-out in flight on a `user-config-entry` adapter
+    revokes the close-out's grant: the merge stands, the close-out is failed, no grant is
+    recorded and the user config is byte-identical."""
+    box = eh.trust_sandbox(tmp_path, monkeypatch)
+    box.req(add=["src"], closeout={"sleep": 30})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    worker = se.threading.Thread(target=lambda: box.approve(orch))
+    worker.start()
+    eh.until(lambda: se.pid_alive(run.exec.get("closeOutPid")), what="the close-out to start")
+    close = os.path.realpath(run.doc["closeOutWorkingCopy"])
+    assert et.trust_block(close) in eh.read_text(box.user_config)
+    orch.abort(REQ, by="operator")
+    worker.join(60)
+    assert not worker.is_alive()
+    assert run.status == "merged"
+    assert run.read_primary_state()["closeOut"]["status"] == "failed"
+    assert run.doc["trustGrants"] == {} and eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+@pytest.mark.parametrize("harness", eh.EXEC_ADAPTERS)
+def test_a_nested_launch_from_the_close_out_is_refused(tmp_path, harness):
+    """REQ-662 BR-18: the resumed close-out session is a live exec process too. A `run` and a
+    `resume` it starts through the engine's entry point, its environment scrubbed, are refused
+    through its pid ancestry, which holds the close-out's pid, logged `nested_launch_refused`
+    in its run; nothing is launched, and the close-out goes on."""
+    box = eh.adapter_sandbox(tmp_path, harness, reqs=("REQ-901", "REQ-903"))
+    del box.environ["XDG_STATE_HOME"]
+    box.req("REQ-901", closeout={"nested": [
+        ["run", "REQ-903", "--shared-credentials", "--harness", harness], ["resume"]]})
+    orch = box.go(["REQ-901"], shared=True)
+    run = orch.runs[REQ]
+    assert box.approve(orch) == "approved"
+    assert run.status == "merged" and run.read_primary_state()["closeOut"]["status"] == "ok"
+    tried = [json.loads(ln) for ln in (box.home / "nested-REQ-901.jsonl").read_text().splitlines()]
+    assert [t["argv"][0] for t in tried] == ["run", "resume"]
+    refused = eh.events(box, run, "nested_launch_refused")
+    assert len(refused) == 2
+    for attempt, detail in zip(tried, refused):
+        assert attempt["rc"] == 2 and "Rule B" in attempt["stderr"], attempt
+        assert ("pid %d descends from the live exec pid %d of REQ-901"
+                % (attempt["pid"], run.exec["closeOutPid"])) in attempt["stderr"], attempt
+        assert detail["execPid"] == run.exec["closeOutPid"] and detail["pid"] == attempt["pid"]
+    assert el.find_run(str(box.repo), "REQ-903", box.environ) is None
+    assert not (box.repo / ".worktrees" / "REQ-903").exists()

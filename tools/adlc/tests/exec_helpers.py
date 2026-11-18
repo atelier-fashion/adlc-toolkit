@@ -67,6 +67,20 @@ def git(cwd, *args):
                           stderr=subprocess.PIPE, universal_newlines=True, check=True).stdout
 
 
+def until(predicate, timeout=60, interval=0.05, what="the condition"):
+    """``predicate()``'s first truthy value, polled every ``interval`` seconds; fails the test
+    naming ``what`` when ``timeout`` passes first. Stands in for a bare sleep that means "the
+    child has started" or "the kill has landed", which a loaded machine outruns."""
+    end = time.time() + timeout
+    while True:
+        value = predicate()
+        if value:
+            return value
+        if time.time() >= end:
+            raise AssertionError("timed out after %ss waiting for %s" % (timeout, what))
+        time.sleep(interval)
+
+
 SPEC = """---
 id: {req}
 title: "Thing"
@@ -152,8 +166,15 @@ class Sandbox(object):
         self.bin.mkdir()
         fake = self.bin / self.binary
         # The environment is dumped here because Apple's python3 shim adds to it. The name
-        # the fake is installed under chooses its profile.
-        fake.write_text('#!/bin/sh\n/usr/bin/env > "$HOME/env-raw-$ADLC_EXEC_RUN.txt"\n'
+        # the fake is installed under chooses its profile. `--version` is answered here from
+        # the scenario's version (`write_scenario`), without starting python: the engine
+        # gives that call a few seconds (REQ-662 BR-11), which a loaded machine's python
+        # start-up can use up, and then the verdict reads unverified.
+        fake.write_text('#!/bin/sh\n'
+                        'if [ "$#" -eq 1 ] && [ "$1" = "--version" ] && '
+                        '[ -f "$HOME/.exec-version" ]; then\n'
+                        '  cat "$HOME/.exec-version"\n  exit 0\nfi\n'
+                        '/usr/bin/env > "$HOME/env-raw-$ADLC_EXEC_RUN.txt"\n'
                         'EXEC_FAKE_AS=${0##*/}\nexport EXEC_FAKE_AS\n'
                         'exec python3 "%s" "$@"\n' % FAKE)
         fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
@@ -221,6 +242,13 @@ class Sandbox(object):
             "reqs": self.scenarios, "lesson": LESSON, "forbidden": self.forbidden}
         doc.update(self.extra)
         (self.home / ".exec-scenario.json").write_text(json.dumps(doc))
+        # What the wrapper answers to `--version` on its own; without one the fake computes
+        # the adapter's declared version itself.
+        version = self.home / ".exec-version"
+        if self.extra.get("version"):
+            version.write_text("%s\n" % self.extra["version"])
+        elif version.exists():
+            version.unlink()
 
     def req(self, req="REQ-901", **behaviour):
         self.scenarios[req].update(behaviour)
@@ -577,16 +605,16 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
 
 
 def file_sandbox(tmp_path, monkeypatch, result="prompt-pass", rules_reload="unknown",
-                 trust_grant="none", **kw):
+                 trust_grant="none", context_delivery="prompt", **kw):
     """A Sandbox whose harness is :func:`file_adapter` on a sandbox ToolkitRoot holding its
     result file, with the jsonl fake installed as ``fake-exec-file``. The launch and the resume
     carry the Codex-shaped templates and nothing else, and the fake refuses any other option.
     ``box.home`` is the run's HOME, where the user config and the user policy folder live;
-    ``trust_grant`` is the adapter's (:func:`file_adapter`)."""
+    ``trust_grant`` and ``context_delivery`` are the adapter's (:func:`file_adapter`)."""
     doc = probe_result(result) if isinstance(result, str) else result
     toolkit = toolkit_copy(tmp_path / "toolkit")
     path = file_adapter(tmp_path / "adapter", doc, rules_reload=rules_reload,
-                        trust_grant=trust_grant)
+                        context_delivery=context_delivery, trust_grant=trust_grant)
     use_adapter(monkeypatch, path, toolkit)
     box = Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path, toolkit=toolkit, **kw)
     box.result = doc
@@ -686,3 +714,19 @@ def commit_on_main(box, files):
 def events(box, run, kind):
     """The run log's ``kind`` events' ``detail`` payloads, in order."""
     return [r["detail"] for r in box.log(run) if r["kind"] == kind]
+
+
+def popen_fails(monkeypatch, binary, when):
+    """``subprocess.Popen`` raising ``FileNotFoundError`` for each start of ``binary`` that
+    ``when(argv, env)`` picks, as a harness binary removed, or no longer executable, after the
+    pre-flight would. Every other process starts as before, the binary's own ``--version`` and
+    ``--help`` included, so the verdict and the isolation check still read it."""
+    real = subprocess.Popen
+
+    def popen(argv, *args, **kw):
+        if isinstance(argv, (list, tuple)) and argv and argv[0] == binary \
+                and list(argv[1:]) not in (["--version"], ["--help"]) \
+                and when(list(argv), kw.get("env") or {}):
+            raise FileNotFoundError(2, "No such file or directory", binary)
+        return real(argv, *args, **kw)
+    monkeypatch.setattr(subprocess, "Popen", popen)

@@ -125,7 +125,15 @@ def _writable_root_remedy(adapter, result, root, out):
               % (adapter["name"], path, hr.writable_root_stanza(adapter, path)))
 
 
-def cmd_render(args, out=sys.stdout, err=sys.stderr):
+def _streams(out, err):
+    """``out`` and ``err``, each ``sys.stdout`` or ``sys.stderr`` as it is now when not given:
+    read at the call, never bound at import, so a caller that redirects the streams after
+    this module was first imported (a test's ``capsys``) reads what the command wrote."""
+    return (sys.stdout if out is None else out), (sys.stderr if err is None else err)
+
+
+def cmd_render(args, out=None, err=None):
+    out, err = _streams(out, err)
     toolkit = ha.toolkit_dir()
     if args.check or args.write_goldens:
         if args.adapter_path:
@@ -311,7 +319,8 @@ def _install_exec(args, toolkit, out, err):
     return 0
 
 
-def cmd_install(args, out=sys.stdout, err=sys.stderr):
+def cmd_install(args, out=None, err=None):
+    out, err = _streams(out, err)
     import harness_doctor
     toolkit = ha.toolkit_dir()
     if getattr(args, "exec_policy", False):
@@ -361,7 +370,8 @@ def cmd_install(args, out=sys.stdout, err=sys.stderr):
     return rc
 
 
-def cmd_doctor(args, out=sys.stdout, err=sys.stderr):
+def cmd_doctor(args, out=None, err=None):
+    out, err = _streams(out, err)
     import harness_doctor
     toolkit = ha.toolkit_dir()
     if args.adapter_path:
@@ -415,7 +425,8 @@ def _drift_adapters(args, root, toolkit):
     return hr.opted_in_adapters(first, root, toolkit) if args.opted_in else [first]
 
 
-def cmd_drift(args, out=sys.stdout, err=sys.stderr):
+def cmd_drift(args, out=None, err=None):
+    out, err = _streams(out, err)
     toolkit = ha.toolkit_dir()
     root = project_root()
     try:

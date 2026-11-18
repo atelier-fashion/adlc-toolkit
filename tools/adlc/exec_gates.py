@@ -229,7 +229,9 @@ def gate_lines(paths, surface_hits, config_surfaces=()):
     :func:`exec_path_hits` compares, is named on a line of its own.
     """
     lines = []
-    touched = [p for p in paths if p.startswith(CHANGES_GATE_DIRS)]
+    # Folded as the surfaces are (LESSON-718), so a case variant of a gate directory is named.
+    gate_dirs = tuple(esf.fold(d) + "/" for d in CHANGES_GATE_DIRS)
+    touched = [p for p in paths if esf.fold(p).startswith(gate_dirs)]
     if touched:
         lines.append("changes the gate: touches %s" % ", ".join(sorted(touched)))
     if surface_hits:

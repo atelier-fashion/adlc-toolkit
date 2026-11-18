@@ -47,7 +47,22 @@ The nested-launch key (REQ-662 BR-18, both profiles): ``nested`` (argv lists, ea
 ``sprint-exec`` through the engine's own entry point under the scenario's toolkit, from the
 working copy, with ``ADLC_EXEC_RUN`` and its tag scrubbed from the environment: a model starting
 a nested run, resume or dispatch). Each attempt's argv, pid, exit code and output go to
-``$HOME/nested-<REQ>.jsonl``; the launch then carries on to the gate.
+``$HOME/nested-<REQ>.jsonl``; the launch then carries on to the gate. Under ``closeout`` the
+resumed session runs its own ``nested`` the same way.
+
+Under ``closeout``, ``stream`` and ``no_last_message`` shape the resumed session's output as
+they shape a launch's (REQ-662 BR-6).
+
+The trust key (REQ-662 BR-5, the jsonl profile): ``trust_itself`` (the user config, relative to
+``$HOME`` or absolute). As ``codex exec`` does (``codex-exec-manual.md``, fact 2), a launch that no
+``[projects."<p>"] trust_level = "trusted"`` entry covers, neither for its working directory (or
+a directory above it) nor for the main repository's root, appends one for the main
+repository's root to that file and leaves it there. A resume adds nothing.
+
+Two timing keys: ``wait_for`` (a path the launch waits for, mid-run, before its commit, up to two
+minutes: a run kept at work until a test lets it go) and ``late_commands`` (shell commands run
+in the working copy after the last state write, as ``surface_writes`` is: a model that puts a
+file back after its commit).
 
 A resume (REQ-662 BR-7, both profiles) must carry the session id this fake last printed for the
 REQ (each is kept in ``$HOME/sessions-<REQ>.txt``): any other fails loudly, as a forbidden flag
@@ -190,13 +205,51 @@ def jsonl_result(text, spec, sid):
             fh.write(text + "\n" if text else "")
 
 
-def run_commands(spec, wt):
+def run_commands(spec, wt, key="commands"):
     """Each scripted command, run in the working copy as the model would."""
-    for command in spec.get("commands", []):
+    for command in spec.get(key, []):
         res = subprocess.run(["sh", "-c", command], cwd=wt, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, universal_newlines=True)
         RUN["records"].append({"command": command, "output": res.stdout,
                                "exit_code": res.returncode})
+
+
+#: A ``[projects."<path>"]`` table that trusts its path, as the trust entry is spelled.
+TRUSTED_RE = re.compile(r'^\[projects\."([^"\n]*)"\]\n(?:[^\[\n][^\n]*\n)*?'
+                        r'trust_level\s*=\s*"trusted"', re.M)
+
+
+def trust_itself(spec, wt):
+    """``codex exec``'s own trust write (``codex-exec-manual.md``, fact 2): with no entry for
+    the working directory, a directory above it or the main repository's root, append one for
+    the main repository's root to the user config ``trust_itself`` names, and leave it."""
+    path = spec.get("trust_itself")
+    if not path or RUN["profile"] != "jsonl":
+        return
+    path = path if os.path.isabs(path) else os.path.join(HOME, path)
+    common = sh("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=wt)
+    root = os.path.realpath(os.path.dirname(common))
+    here = os.path.realpath(wt)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+    for trusted in TRUSTED_RE.findall(text):
+        if trusted in (here, root) or here.startswith(trusted.rstrip("/") + "/"):
+            return
+    sep = "" if not text else ("\n" if text.endswith("\n") else "\n\n")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write('%s[projects."%s"]\ntrust_level = "trusted"\n' % (sep, root))
+
+
+def wait_for(spec):
+    """Mid-run, until the file ``wait_for`` names exists: two minutes at most."""
+    path = spec.get("wait_for")
+    end = time.time() + 120
+    while path and not os.path.exists(path) and time.time() < end:
+        time.sleep(0.05)
 
 
 def nested_launches(top, spec, wt):
@@ -267,6 +320,7 @@ def first_launch(top, spec, prompt):
     write_state(wt, spec_dir, state)
     if spec.get("saw"):
         record_saw(spec["saw"], wt)
+    trust_itself(spec, wt)
     if spec.get("dump_env"):
         with open(os.path.join(HOME, "env-%s.json" % REQ), "w", encoding="utf-8") as fh:
             json.dump(dict(os.environ), fh)
@@ -288,6 +342,7 @@ def first_launch(top, spec, prompt):
         raise SystemExit(spec["exit_early"])
     if spec.get("sleep_first"):
         time.sleep(spec["sleep_first"])
+    wait_for(spec)
     if spec.get("double_fork"):
         subprocess.Popen([sys.executable, "-c",
                           "import os,sys,time\nif os.fork(): os._exit(0)\nos.setsid()\n"
@@ -346,6 +401,7 @@ def first_launch(top, spec, prompt):
         state.update(spec["state_extra"])
     write_state(wt, spec_dir, state)
     write_surfaces(spec, wt)
+    run_commands(spec, wt, "late_commands")
     for path, body in spec.get("plant_late", {}).items():
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(body)
@@ -368,6 +424,7 @@ def close_out(top, spec, argv, prompt):
     spec_dir = top["specDirs"][REQ]
     if close.get("saw"):
         record_saw(close["saw"], wt)
+    nested_launches(top, close, wt)
     planted = os.path.join(wt, ".claude", "settings.json")
     if os.path.exists(planted):
         with open(os.path.join(HOME, "closeout-saw-settings"), "w", encoding="utf-8"):
@@ -409,7 +466,8 @@ def close_out(top, spec, argv, prompt):
         doc.update(close.get("state_extra", {}))
         with open(target, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, indent=1)
-    result("Terminal state: closed-out\nChore PR: %s" % url, spec)
+    shaped = dict(spec, **{k: close[k] for k in ("stream", "no_last_message") if k in close})
+    result("Terminal state: closed-out\nChore PR: %s" % url, shaped)
     raise SystemExit(0)
 
 

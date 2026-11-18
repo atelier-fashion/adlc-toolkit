@@ -53,6 +53,12 @@ CLOSE_OUT_ENGINE_OWNED = ("status", "exec", "approval")
 STATES = ("running", "awaiting_approval", "approved", "merging", "merged", "blocked", "failed",
           "rejected", "stalled")
 PROTOCOL = "Rule B protocol violation"
+#: The statuses under which a run's launched harness is alive: only then is its ``exec.pid`` a
+#: live exec pid (REQ-662 BR-18).
+HARNESS_LIVE = ("running", "stalled")
+#: The statuses of a run with no harness at work for it: a trust grant it still records
+#: outlived the harness, and the sweep revokes it (REQ-662 BR-5).
+SWEPT = TERMINAL + ("blocked",)
 
 
 class Refused(Exception):
@@ -203,19 +209,126 @@ def run_tag(run_dir):
     return hashlib.sha256(os.path.realpath(run_dir).encode("utf-8")).hexdigest()[:32]
 
 
+#: The environment ``ps`` reads a start time in: fixed, so the supervisor that records one and a
+#: client in another time zone or locale (a model's process among them) print the same text.
+PS_ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "TZ": "UTC"}
+
+
+def process_start(pid):
+    """When ``pid`` started, as ``ps -o lstart=`` prints it under :data:`PS_ENV`, or None when
+    ``ps`` cannot say. Recorded beside each harness pid the engine spawns, so a pid the OS later
+    gives another process is not read as that harness (REQ-662 BR-18)."""
+    try:
+        res = subprocess.run([PS, "-o", "lstart=", "-p", str(int(pid))],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             universal_newlines=True, env=PS_ENV)
+    except (OSError, TypeError, ValueError):
+        return None
+    text = " ".join(res.stdout.split())
+    return text if res.returncode == 0 and text else None
+
+
 def parent_of(pid):
-    res = subprocess.run([PS, "-o", "ppid=", "-p", str(pid)], stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL, universal_newlines=True)
+    """``pid``'s parent, 0 for a process with none, or None when ``ps`` cannot say."""
+    try:
+        res = subprocess.run([PS, "-o", "ppid=", "-p", str(pid)], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, universal_newlines=True)
+    except OSError:
+        return None
     text = res.stdout.strip()
-    return int(text) if text.isdigit() else 0
+    return int(text) if res.returncode == 0 and text.isdigit() else None
 
 
 def ancestry(pid):
+    """``(chain, complete)``: ``pid`` and each ancestor of it below pid 1, and whether the walk
+    reached the top (pid 1, or a parent of 0). ``complete`` is False when ``ps`` could not read
+    a parent on the way (it failed, or printed nothing) or the chain is deeper than 64: the
+    chain holds what was read, and what is above it is unknown (REQ-662 BR-18)."""
     chain = []
-    while pid and pid > 1 and len(chain) < 64:
+    while pid and pid > 1:
+        if len(chain) >= 64:
+            return chain, False
         chain.append(pid)
         pid = parent_of(pid)
-    return chain
+        if pid is None:
+            return chain, False
+    return chain, True
+
+
+def live_harness_pids(doc):
+    """The harness pids a run record holds that are a live exec process now (REQ-662 BR-18):
+    ``exec.pid`` while the run's status says its harness is alive (:data:`HARNESS_LIVE`),
+    ``exec.closeOutPid`` while its close-out is in progress (``exec.closeOutLive``; on a record
+    without the key, an older engine's, while the run is ``merging``), and either only while
+    a process holds it that started when the engine's did (``pidStart``,
+    ``closeOutPidStart``). A record with no start time falls back to the status alone, and so
+    does a start time ``ps`` cannot read now: a pid that cannot be told apart from the
+    harness's counts as the harness's."""
+    record = doc.get("exec") if isinstance(doc.get("exec"), dict) else {}
+    keys = []
+    if doc.get("status") in HARNESS_LIVE:
+        keys.append(("pid", "pidStart"))
+    closing = record.get("closeOutLive") if "closeOutLive" in record \
+        else doc.get("status") == "merging"
+    if closing is True:
+        keys.append(("closeOutPid", "closeOutPidStart"))
+    out = []
+    for key, start_key in keys:
+        pid = record.get(key)
+        if not pid_alive(pid):
+            continue
+        started = record.get(start_key)
+        if started:
+            now = process_start(pid)
+            if now is not None and now != started:
+                continue                    # the OS gave the pid to another process
+        out.append(int(pid))
+    return out
+
+
+def supervisor_live(run):
+    """Whether a supervisor listens on the run's socket: a connect, with nothing sent, so a busy
+    supervisor is not waited on."""
+    sup = run.doc.get("supervisorDir")
+    if not sup or not os.path.isdir(sup):
+        return False
+    here = os.getcwd()
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        os.chdir(sup)
+        conn.settimeout(2)
+        conn.connect("s")
+        return True
+    except OSError:
+        return False
+    finally:
+        conn.close()
+        os.chdir(here)
+
+
+#: Every block an engine trust grant appends (``exec_trust.trust_block``): taken out of a user
+#: config before it is compared with itself, so runs that share the file do not read each
+#: other's grants as a change (REQ-662 BR-5).
+_ENGINE_BLOCK_RE = re.compile(r"\n" + re.escape(et.BLOCK_COMMENT)
+                              + r'\[projects\."[^"\n]*"\]\ntrust_level = "trusted"\n\n')
+#: A ``[projects."<path>"]`` table header, the path as it is spelled there.
+_PROJECT_TABLE_RE = re.compile(r'^[ \t]*\[projects\."((?:[^"\\\n]|\\.)*)"\][ \t]*(?:#.*)?$',
+                               re.M)
+
+
+def trust_snapshot(path):
+    """``(sha256, project paths)`` of the user config at ``path`` with every engine grant's block
+    taken out, an absent file reading as empty; None when it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8", errors="replace")
+    except FileNotFoundError:
+        text = ""
+    except OSError:
+        return None
+    text = _ENGINE_BLOCK_RE.sub("", text)
+    return (hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            sorted(set(_PROJECT_TABLE_RE.findall(text))))
 
 
 def stragglers(req, tag=None):
@@ -426,15 +539,21 @@ class Orchestrator(object):
             raise Refused(str(exc))
         adapter = batch.adapter
         if adapter.strategy != "worktree":
-            raise Refused("working_copy %s has no engine arm yet: %s" % (adapter.strategy,
-                                                                         ea.SIBLING_REQ))
+            raise Refused("working_copy %s has no engine arm yet (%s)"
+                          % (adapter.strategy, ea.EXEC_ADAPTERS_REQ))
         reach = adapter.adapter.get("sandbox_can_reach_common_gitdir")
         if reach != "true":
             raise Refused("working_copy worktree needs sandbox_can_reach_common_gitdir: true, "
                           "and harness/%s.yml says %s" % (adapter.name, reach))
         if adapter.trust_grant not in ("none", et.USER_CONFIG_ENTRY):
-            raise Refused("exec.trust_grant %s has no engine arm yet: %s"
-                          % (adapter.trust_grant, ea.SIBLING_REQ))
+            raise Refused("exec.trust_grant %s has no engine arm yet (%s)"
+                          % (adapter.trust_grant, ea.EXEC_ADAPTERS_REQ))
+        if adapter.block.get("context_delivery") == "hooks":
+            # The prompt carries ETHOS on every launch whatever the block says, so a `hooks`
+            # block would silently change nothing (REQ-662 BR-11).
+            raise Refused("exec.context_delivery hooks has no engine arm yet (%s): every launch "
+                          "carries ETHOS in its prompt, so harness %s's `hooks` would change "
+                          "nothing; declare `prompt`" % (ea.EXEC_ADAPTERS_REQ, adapter.name))
         if adapter.trust_grant not in et.NO_FILE:
             # REQ-662 BR-5, before any working copy is made: while REQ-664's recovery marker
             # exists a probe is editing the same user config, or died editing it, and a trust
@@ -444,6 +563,9 @@ class Orchestrator(object):
                 et.preflight(adapter.trust_grant, config, marker)
             except et.TrustRefused as exc:
                 raise Refused("harness %s: %s" % (adapter.name, exc))
+            # A grant a run that ended still records, its revoke failed or never reached, is
+            # revoked now: nothing else in an ended run retries it (REQ-662 BR-5).
+            self.sweep_grants([config])
         batch.binary = shutil.which(adapter.binary, path=self.environ.get("PATH", ""))
         if not batch.binary:
             raise Refused("%s is not on PATH" % adapter.binary)
@@ -541,7 +663,10 @@ class Orchestrator(object):
             if esf.renders_files(adapter.block):
                 for rid, spec in sorted(batch.repos.items()):
                     try:
-                        batch.worktree_config[rid] = esf.worktree_config(box, spec["path"])
+                        # A write to the main config the gitdir checksum reads: under the lock
+                        # every check of it waits on (`_gitdir_write`).
+                        with GITDIR_LOCK:
+                            batch.worktree_config[rid] = esf.worktree_config(box, spec["path"])
                     except esf.SurfaceRefused as exc:
                         raise Refused("harness %s: %s, so nothing is launched (REQ-662 BR-17)"
                                       % (adapter.name, exc))
@@ -673,7 +798,11 @@ class Orchestrator(object):
                "exec": {"engine": "exec", "harness": batch.adapter.name,
                         "strategy": batch.adapter.strategy,
                         "workingCopy": repos[rid]["workingCopy"], "pid": None,
-                        "closeOutPid": None, "sessionId": None, "startedAt": el.now(),
+                        # When each harness pid's process started, and whether the close-out's
+                        # is at work: what makes a recorded pid a live exec pid (REQ-662 BR-18).
+                        # Absent, as an older engine wrote the record: the status decides.
+                        "pidStart": None, "closeOutPid": None, "closeOutPidStart": None,
+                        "closeOutLive": False, "sessionId": None, "startedAt": el.now(),
                         "promptPath": "prompt.txt", "logPath": "stdout.json", "stalledAt": None,
                         "trustMechanism": batch.adapter.trust_grant, "trustGrantedAt": None,
                         "trustRevokedAt": None, "exitCode": None, "exitClass": None,
@@ -757,13 +886,14 @@ class Orchestrator(object):
         wc = run.wc if own else wc
         mechanism = run.exec["trustMechanism"]
         box = self.box(run)
+        adapter = self.adapter(run)
+        fresh = self._trust_baseline(run, wc, adapter)
         if mechanism in et.NO_FILE:
             if own:
                 run.exec["trustGrantedAt"] = el.now()
                 run.exec["trustRevokedAt"] = None
             box.log("trust_granted", [mechanism], wc, 0)
             return
-        adapter = self.adapter(run)
         config, marker = self._trust_file(adapter)
         # Every working copy is made as <repo>/.worktrees/<name>, the root its path must resolve
         # under.
@@ -784,8 +914,15 @@ class Orchestrator(object):
                 grants[wc] = before[0]
             if own:
                 run.exec.update({"trustGrantedAt": before[1], "trustRevokedAt": before[2]})
+            if fresh:
+                run.doc["trustBaseline"].pop(wc, None)
             run.save()
             raise Refused("harness %s: the trust grant for %s is refused: %s"
+                          % (adapter.name, wc, exc))
+        except OSError as exc:
+            # The write may have landed. The grant built from the path alone stays recorded, so
+            # the revoke that ends this run takes the block out if it is there (REQ-662 BR-5).
+            raise Refused("harness %s: the trust grant for %s failed: %s"
                           % (adapter.name, wc, exc))
         grants[wc] = grant.to_doc()
         if own:
@@ -797,12 +934,15 @@ class Orchestrator(object):
                         "pre_existing": grant.pre_existing, "adopted": grant.adopted,
                         "created": grant.created})
 
-    def _revoke_grants(self, run, only=None):
+    def _revoke_grants(self, run, only=None, box=None, sweep=False):
         """Each trust grant the run record holds (``only``: that working copy's alone), revoked
         through ``exec_trust`` and dropped from the record. Each is logged ``trust_revoked``
-        with what revoke found, and a warning also goes to the run's notes. A grant whose
-        revoke could not finish (the lock, a symlink) stays recorded for the next revoke, and is
-        said. Returns the working copies still held."""
+        with what revoke found (``sweep`` marks one :meth:`sweep_grants` revoked) in ``box``'s
+        log, the run's own by default, and a warning also goes to the run's notes. A grant
+        whose revoke could not finish (the lock, a symlink, a user config it could not read)
+        stays recorded for the next revoke, and is said. Returns the working copies still
+        held."""
+        box = box or self.box(run)
         grants = run.doc.get("trustGrants") or {}
         targets = [w for w in ([only] if only else list(grants)) if w in grants]
         for wc in targets:
@@ -818,19 +958,22 @@ class Orchestrator(object):
                 continue
             try:
                 revoked = et.revoke(grant)
-            except et.TrustRefused as exc:
+            except (et.TrustRefused, OSError) as exc:
                 run.doc.setdefault("notes", []).append(
                     "the trust revoke for %s did not finish, and the grant stays recorded for "
                     "the next one: %s" % (wc, exc))
                 self.say("WARNING: %s trust revoke for %s did not finish: %s" % (run.req, wc, exc))
                 continue
             del grants[wc]
-            self.box(run).log("trust_revoked", [grant.mechanism], wc, 0,
-                              detail={"status": revoked.status, "warning": revoked.warning,
-                                      "path": grant.path, "config": grant.config})
+            detail = {"status": revoked.status, "warning": revoked.warning, "path": grant.path,
+                      "config": grant.config}
+            if sweep:
+                detail["sweep"] = True
+            box.log("trust_revoked", [grant.mechanism], wc, 0, detail=detail)
             if revoked.warning:
                 run.doc.setdefault("notes", []).append("trust revoke for %s: %s"
                                                        % (wc, revoked.warning))
+            self._trust_file_check(run, wc, box)
         if targets:
             run.save()
         return [w for w in ([only] if only else grants) if w in grants]
@@ -838,9 +981,11 @@ class Orchestrator(object):
     def revoke_trust(self, run, wc=None):
         """``wc``'s grant alone (the close-out's), or every grant the run holds and then
         ``exec.trustRevokedAt``, set whatever revoke found once no grant is held (REQ-662
-        BR-5). Safe to call again. `none` writes nothing and records the moment."""
+        BR-5). Safe to call again. `none` writes nothing and records the moment. Then the user
+        config is compared with what it was before the grant (:meth:`_trust_file_check`)."""
         mechanism = run.exec["trustMechanism"]
         held = self._revoke_grants(run, wc)
+        self._trust_file_checks(run, wc)
         if wc is not None:
             if mechanism in et.NO_FILE:
                 self.box(run).log("trust_revoked", [mechanism], wc, 0)
@@ -849,6 +994,105 @@ class Orchestrator(object):
             run.exec["trustRevokedAt"] = el.now()
             if mechanism in et.NO_FILE:
                 self.box(run).log("trust_revoked", [mechanism], run.wc, 0)
+
+    # ---- REQ-662 BR-5: what the harness itself wrote into the user config ---------------------
+    def _user_config(self, adapter):
+        """The user config the adapter names (``paths.config.user``), expanded with the run's
+        environment, or None when it names none."""
+        try:
+            return et.user_config_path(adapter.adapter, self.environ)
+        except et.TrustRefused:
+            return None
+
+    def _trust_baseline(self, run, wc, adapter):
+        """Before ``wc``'s grant, what the adapter's user config holds, kept in the run record
+        under ``trustBaseline`` for the check after its revoke: on every adapter that names a
+        user config, whatever its mechanism, because the harness writes its own trust there
+        (``codex-exec-manual.md``, fact 2). A baseline still held from an earlier grant stays:
+        it is the earlier state. Returns whether one was taken now."""
+        path = self._user_config(adapter)
+        snap = trust_snapshot(path) if path else None
+        baselines = run.doc.setdefault("trustBaseline", {}) if snap else {}
+        if snap is None or wc in baselines:
+            return False
+        baselines[wc] = {"config": path, "sha256": snap[0], "projects": snap[1]}
+        return True
+
+    def _trust_file_check(self, run, wc, box=None):
+        """Once ``wc``'s grant is revoked (or, for a mechanism that writes no file, once its
+        harness is gone): the user config against its baseline, every engine grant's block taken
+        out of both. A difference is logged ``trust_file_changed`` and said in a note naming
+        each ``[projects."…"]`` table there now that was not before, which is what a harness
+        that trusted a path itself leaves (REQ-662 BR-5). It warns and refuses nothing: the
+        operator may have edited the file meanwhile. The baseline is dropped; the caller
+        saves."""
+        base = (run.doc.get("trustBaseline") or {}).pop(wc, None)
+        if not base:
+            return
+        snap = trust_snapshot(base["config"])
+        if snap is None or snap[0] == base["sha256"]:
+            return
+        added = [p for p in snap[1] if p not in base["projects"]]
+        (box or self.box(run)).log(
+            "trust_file_changed", [run.exec["trustMechanism"], base["config"]], wc, None,
+            detail={"config": base["config"], "path": wc, "before": base["sha256"],
+                    "after": snap[0], "added": added})
+        note = ("the user config %s is not what it was before the trust grant for %s%s; this "
+                "refuses nothing, since you may have edited it meanwhile (REQ-662 BR-5)"
+                % (base["config"], wc, ", and it now holds %s, which it did not" % ", ".join(
+                    '[projects."%s"]' % p for p in added) if added else ""))
+        run.doc.setdefault("notes", []).append(note)
+        self.say("WARNING: %s %s" % (run.req, note))
+
+    def _trust_file_checks(self, run, only=None):
+        """:meth:`_trust_file_check` for each baseline the run holds (``only``: that working
+        copy's) with no grant recorded for it any more, then the record saved."""
+        baselines = run.doc.get("trustBaseline") or {}
+        grants = run.doc.get("trustGrants") or {}
+        targets = [w for w in ([only] if only else sorted(baselines))
+                   if w in baselines and w not in grants]
+        for wc in targets:
+            self._trust_file_check(run, wc)
+        if targets:
+            run.save()
+
+    def sweep_grants(self, configs):
+        """REQ-662 BR-5: every trust grant a run in this machine's engine state still records for
+        one of the user configs ``configs`` names, once the run has ended or waits on a person
+        (:data:`SWEPT`) and no live supervisor holds it, revoked: a revoke that failed, or a
+        supervisor that died before its revoke, leaves one that nothing in the run retries. Each
+        is logged ``trust_revoked`` with ``sweep`` in that run's own log, and said on the
+        dashboard. A run at work (running, stalled, at the gate, merging) is never touched. A
+        grant whose revoke cannot finish stays recorded for the next sweep."""
+        configs = set(c for c in configs if c)
+        if not configs:
+            return
+        mine = {run.path: run for run in self.all_runs()}
+        for path in el.run_dirs(self.environ):
+            run = mine.get(path)
+            if run is None:
+                try:
+                    run = Run.load(path)
+                except Refused:
+                    continue
+            grants = run.doc.get("trustGrants")
+            if run.doc.get("status") not in SWEPT or not isinstance(grants, dict):
+                continue
+            held = sorted(wc for wc, doc in grants.items()
+                          if isinstance(doc, dict) and doc.get("config") in configs)
+            if not held or (path not in mine and supervisor_live(run)):
+                continue
+            box = es.Toolbox(run.path, self.toolkit, self.environ)
+            for wc in held:
+                config = grants[wc].get("config")
+                if not self._revoke_grants(run, wc, box=box, sweep=True):
+                    self.say("NOTE: swept the trust grant %s left for %s in %s, which no run at "
+                             "work holds (REQ-662 BR-5)" % (run.req, wc, config))
+            record = run.doc.get("exec") if isinstance(run.doc.get("exec"), dict) else {}
+            if not run.doc.get("trustGrants") and record.get("trustGrantedAt") \
+                    and not record.get("trustRevokedAt"):
+                record["trustRevokedAt"] = el.now()
+                run.save()
 
     # ---- REQ-662 ADR-4: config surfaces, rule files and the user policy folder -------------
     @staticmethod
@@ -890,12 +1134,15 @@ class Orchestrator(object):
         if record:
             try:
                 problems = esf.check_policy(record)
+                if problems:
+                    # Until the operator has looked, every pre-flight refuses (REQ-662 BR-4).
+                    esf.mark_policy_violation(adapter, self.environ, problems)
             except esf.SurfaceRefused as exc:
                 raise Refused(str(exc))
             if problems:
                 raise Refused(esf.policy_refusal(adapter.adapter, problems, where))
         self._bypass_check(adapter, wcs, where, run)
-        if not (adapter.block.get("config_surfaces") or adapter.block.get("rule_file")):
+        if not esf.renders_files(adapter.block):
             return
         try:
             files = adapter.rule_files(branch, run.doc["config"]["allow_extra"],
@@ -921,14 +1168,17 @@ class Orchestrator(object):
         run.save()
 
     def verify_surfaces(self, run, wcs, where):
-        """At exit (``where`` ``exit``) and at the halt (``halt``): each working copy in ``wcs``
-        against the manifest its last render recorded, and the user policy folder against the
-        run's record. Each change is a ``config_surface_violation``: logged, and recorded as a
-        Rule B protocol violation, which the halt reports (BR-15; REQ-659 owns what one does).
-        Nothing is repaired here: the next launch or resume re-renders. Returns the changes."""
+        """Once a harness has exited (``where`` ``exit``): each working copy in ``wcs`` against
+        the manifest its last render recorded, and the user policy folder against the run's
+        record, whose change also marks the engine's record of the folder (REQ-662 BR-4). Each
+        change is a ``config_surface_violation``: logged, and recorded as a Rule B protocol
+        violation (BR-15), and so are surfaces that cannot be verified at all. Nothing is
+        repaired here: the next launch or resume re-renders. Returns each violation's text,
+        which a launch's exit takes into its protocol hits, so the run is blocked."""
         adapter = self.adapter(run)
         block = adapter.block
         found = []
+        texts = []
         try:
             for wc in wcs:
                 manifest = (run.doc.get("surfaces") or {}).get(wc)
@@ -936,10 +1186,14 @@ class Orchestrator(object):
                     found += [(wc, change) for change in esf.verify(wc, manifest)]
             record = run.doc.get("policyManifest")
             if record:
-                found += [(None, change) for change in esf.check_policy(record)]
+                problems = esf.check_policy(record)
+                found += [(None, change) for change in problems]
+                if problems:
+                    esf.mark_policy_violation(adapter, self.environ, problems)
         except (esf.SurfaceRefused, OSError) as exc:
-            run.violation("config_surface_violation at %s: the surfaces could not be verified: "
-                          "%s" % (where, exc))
+            texts.append("config_surface_violation at %s: the surfaces could not be verified: "
+                         "%s" % (where, exc))
+            run.violation(texts[-1])
         for wc, change in found:
             self.box(run).log("config_surface_violation", [adapter.name, change.path], wc, None,
                               detail={"harness": adapter.name, "path": change.path,
@@ -947,8 +1201,9 @@ class Orchestrator(object):
                                       "where": where,
                                       "rules_reload": block.get("rules_reload"),
                                       "effective_mid_run": esf.reload_effective(block)})
-            run.violation(esf.violation_text(change, block, where))
-        return found
+            texts.append(esf.violation_text(change, block, where))
+            run.violation(texts[-1])
+        return texts
 
     # ---- REQ-662 BR-17: what the render wrote, hidden from git and restored ----------------
     @staticmethod
@@ -965,15 +1220,23 @@ class Orchestrator(object):
         box of this orchestrator's runs carried from the checksum just before it to the one
         just after. A box whose checksum already differed keeps its own, so a change the engine
         did not make still reads as a violation. Every check waits meanwhile."""
-        tree = self.box(run).trees.get(repo)
+        mine = self.box(run)
+        tree = mine.trees.get(repo)
         if tree is None:
             return write()
         with GITDIR_LOCK:
-            before = es.gitdir_digest(tree["common"])
+            # The digest each box checks (`Toolbox.tree_digest`): it leaves out what the engine
+            # writes there for itself, so most of the engine's writes change nothing. One still
+            # does, and is why the carry stays: a working copy that existed before its run, with
+            # a `config.worktree` holding something of the operator's, is counted, and the
+            # engine's `core.excludesFile` write into it, or the removal of that working copy,
+            # changes the digest every box on the repository holds
+            # (`test_an_operators_worktree_config_is_carried_past_the_engines_write`).
+            before = mine.tree_digest(tree["common"])
             try:
                 return write()
             finally:
-                after = es.gitdir_digest(tree["common"])
+                after = mine.tree_digest(tree["common"])
                 if after != before:
                     for other in self.all_runs():
                         try:
@@ -997,8 +1260,11 @@ class Orchestrator(object):
         record = run.doc.setdefault("hidden", {}).setdefault(wc, {})
         excludes = run.file("excludes-%s" % hashlib.sha256(wc.encode("utf-8")).hexdigest()[:12])
         try:
+            # The run record is saved before each git write the hiding makes, so a supervisor
+            # that dies after one leaves a record that names it for the restore.
             esf.hide(box, repo, wc, manifest, record, excludes, self.environ,
-                     lambda write: self._gitdir_write(run, repo, write))
+                     lambda write: self._gitdir_write(run, repo, write),
+                     checkpoint=lambda _record: run.save())
         except (esf.SurfaceRefused, OSError) as exc:
             raise Refused("harness %s: the %s is refused: hiding the render from git in %s: %s"
                           % (self.adapter(run).name, where, wc, exc))
@@ -1126,25 +1392,35 @@ class Orchestrator(object):
             # The verdict changed after the pre-flight: this REQ starts nothing.
             self._terminal(run, "failed", "setup-error", {}, note=str(exc))
             return
-        box = self.box(run)
-        for rid, spec in run.doc["repos"].items():
-            self._make_worktree(box, spec["path"], spec["workingCopy"], run.doc["branch"],
-                                run.doc["integrationBranches"][rid])
         try:
+            box = self.box(run)
+            for rid, spec in run.doc["repos"].items():
+                self._make_worktree(box, spec["path"], spec["workingCopy"], run.doc["branch"],
+                                    run.doc["integrationBranches"][rid])
             self.prepare_surfaces(run, self._working_copies(run), run.doc["branch"], "launch")
-        except Refused as exc:
+        except (Refused, OSError) as exc:
+            # This REQ starts nothing, and the supervisor goes on with the others.
             self.say("%s refused before launch: %s" % (run.req, exc))
             self._terminal(run, "failed", "setup-error", {}, note=str(exc))
             return
         try:
             self.grant_trust(run)
             self._launch_first(run, "prompt.txt")
-        except (Refused, ea.ExecRefused) as exc:
+        except (Refused, ea.ExecRefused, OSError) as exc:
             # The worktrees exist and trust may be granted: a grant the trust module refuses
-            # (it wrote nothing) or an argv the closed-world check refuses ends this REQ, its
-            # trust revoked (`_terminal`), and the supervisor goes on (REQ-662 BR-5, BR-16).
-            self.say("%s refused at launch: %s" % (run.req, exc))
-            self._terminal(run, "failed", "setup-error", {}, note=str(exc))
+            # (it wrote nothing), an argv the closed-world check refuses, or a harness that
+            # cannot be started ends this REQ, its trust revoked and its render restored
+            # (`_terminal`), and the supervisor goes on (REQ-662 BR-5, BR-16).
+            why = self._start_failure(run, exc)
+            self.say("%s refused at launch: %s" % (run.req, why))
+            self._terminal(run, "failed", "setup-error", {}, note=why)
+
+    def _start_failure(self, run, exc):
+        """What a launch that did not start says: an ``OSError`` from starting the harness (its
+        binary gone, or no longer executable, since the pre-flight) names the harness."""
+        if isinstance(exc, OSError):
+            return "harness %s could not be started: %s" % (self.adapter(run).name, exc)
+        return str(exc)
 
     def _launch_first(self, run, prompt_name):
         launch = run.doc["launches"] + 1
@@ -1156,10 +1432,13 @@ class Orchestrator(object):
         run.doc["launches"] = launch
         proc = self._spawn(run, argv, run.file(prompt_name), run.wc, stem)
         self.children[run.req] = proc
-        run.exec.update({"pid": proc.pid, "promptPath": prompt_name,
+        run.exec.update({"pid": proc.pid, "pidStart": None, "promptPath": prompt_name,
                          "logPath": stem + ".json", "exitCode": None, "exitClass": None,
                          "sessionId": None, "stalledAt": None})
         run.status = "running"
+        run.save()
+        # Saved with the pid first, so a nested launch finds it at once (REQ-662 BR-18).
+        run.exec["pidStart"] = process_start(proc.pid)
         run.save()
         self.say("%s launched, pid %d, working copy %s" % (run.req, proc.pid, run.wc))
 
@@ -1296,6 +1575,9 @@ class Orchestrator(object):
             # halt's included, so no trust entry outlives the launch it was made for. A
             # mechanism that writes no file holds none (REQ-662 BR-5).
             self.revoke_trust(run)
+        elif run.doc.get("trustBaseline"):
+            # No grant to revoke, but the harness may have trusted a path itself (BR-5).
+            self._trust_file_checks(run)
         stem = run.exec["logPath"]
         adapter = self.adapter(run)
         result = self._read_result(run, stem)
@@ -1311,7 +1593,9 @@ class Orchestrator(object):
         if notice:
             run.doc.setdefault("notes", []).append("harness said: %s" % notice)
         self.box(run).log("exec_exit", [str(rc), klass, str(claim)], run.wc, rc)
-        self.verify_surfaces(run, self._working_copies(run), "exit")
+        # A surface or the policy folder changed while the harness ran is a Rule B violation
+        # like any other exit check's: the run is blocked, never halted (REQ-662 BR-15).
+        surface_hits = self.verify_surfaces(run, self._working_copies(run), "exit")
         state = run.read_wc_state()
         self._model_values(run, state)
         if result["error"]:
@@ -1339,8 +1623,8 @@ class Orchestrator(object):
             run.violation("the harness claimed %s; an exec run stops at the merge gate" % claim)
         if left:
             self._block(run, state, "stragglers survived the sweep: %s" % left)
-        elif hits:
-            self._block(run, state, "%s: %s" % (PROTOCOL, "; ".join(hits)))
+        elif hits or surface_hits:
+            self._block(run, state, "%s: %s" % (PROTOCOL, "; ".join(hits + surface_hits)))
         elif adapter.exit_denied(rc):
             # Before the halt: the harness itself exited with a code its exit_codes map to
             # denied, so the run is blocked whatever the model wrote to state, never a completed
@@ -1515,7 +1799,8 @@ class Orchestrator(object):
                 "allowUnverified": list(run.doc.get("allowUnverified") or [])}
 
     def _halt(self, run, state, result):
-        self.verify_surfaces(run, self._working_copies(run), "halt")
+        # The surfaces were verified at this exit, which blocks the run on a change; the halt
+        # does not read them twice (REQ-662 BR-15).
         try:
             plan = self.compute_plan(run, state)
         except eg.Mismatch as exc:
@@ -1599,16 +1884,18 @@ class Orchestrator(object):
         marker = (caller_env or {}).get("ADLC_EXEC_RUN")
         pids = {run.exec.get("pid"), run.exec.get("closeOutPid")} - {None}
         live = {p for p in pids if pid_alive(p)}
-        inside = marker or (live & set(ancestry(caller_pid)) if caller_pid else None)
+        inside = marker or (live & set(ancestry(caller_pid)[0]) if caller_pid else None)
         if inside:
             message = "a decision attempted from inside a run (%s)" % (inside,)
             run.violation(message)
             raise Refused("%s: %s" % (PROTOCOL, message))
 
     def live_exec_pids(self):
-        """Each live harness pid (``exec.pid``, ``exec.closeOutPid``) that a run record in this
-        machine's engine state directory holds, or this supervisor's own runs, mapped to its
-        run. Read from the state directory, never from a working copy (REQ-662 BR-18)."""
+        """Each live exec pid (``live_harness_pids``: a launch's harness while its run says it is
+        alive, a close-out's while it is in progress, each started when the engine's process
+        did) that a run record in this machine's engine state directory holds, or this
+        supervisor's own runs, mapped to its run. Read from the state directory, never from a
+        working copy (REQ-662 BR-18)."""
         runs = []
         for path in el.run_dirs(self.environ):
             try:
@@ -1617,10 +1904,8 @@ class Orchestrator(object):
                 continue
         live = {}
         for run in runs + self.all_runs():
-            record = run.doc.get("exec") if isinstance(run.doc.get("exec"), dict) else {}
-            for pid in (record.get("pid"), record.get("closeOutPid")):
-                if pid_alive(pid):
-                    live[int(pid)] = run
+            for pid in live_harness_pids(run.doc):
+                live[pid] = run
         return live
 
     def nested_guard(self, what, caller_env, caller_pid):
@@ -1631,11 +1916,27 @@ class Orchestrator(object):
         anything is bound, prepared or launched: a refusal creates no run directory and writes
         no ledger entry. The refusal names ``nested_launch_refused``, and the run it came from
         (the exec pid's, else the one ``ADLC_EXEC_RUN`` names) logs that event and records the
-        attempt as a Rule B violation."""
+        attempt as a Rule B violation.
+
+        A caller whose ancestry ``ps`` cannot read is refused while any exec pid is live, naming
+        that it could not be verified; the live run logs the event, and no violation is written
+        to it, since nothing showed the caller came from it. With no live exec pid nothing is
+        refused, so a machine whose ``ps`` is broken still launches."""
         marker = (caller_env or {}).get("ADLC_EXEC_RUN") or None
-        chain = ancestry(caller_pid) if caller_pid else []
+        chain, complete = ancestry(caller_pid) if caller_pid else ([], True)
         live = self.live_exec_pids()
         hit = next((p for p in chain if p in live), None)
+        if marker is None and hit is None and not complete and live:
+            pid = min(live)
+            run = live[pid]
+            message = ("nested_launch_refused: %s refused: pid %s's ancestry could not be read, "
+                       "and the exec pid %s of %s is live, so the caller could not be verified "
+                       "to be outside that run" % (what, caller_pid, pid, run.req))
+            es.Toolbox(run.path, self.toolkit, self.environ).log(
+                "nested_launch_refused", [what], None, None,
+                detail={"pid": caller_pid, "ancestry": chain, "execPid": pid, "execRun": None,
+                        "verified": False})
+            raise Refused(message)
         if marker is None and hit is None:
             return
         run = live.get(hit)
@@ -1650,7 +1951,8 @@ class Orchestrator(object):
         if run is not None:
             es.Toolbox(run.path, self.toolkit, self.environ).log(
                 "nested_launch_refused", [what], None, None,
-                detail={"pid": caller_pid, "ancestry": chain, "execPid": hit, "execRun": marker})
+                detail={"pid": caller_pid, "ancestry": chain, "execPid": hit, "execRun": marker,
+                        "verified": True})
             run.violation(message)
         raise Refused("%s: %s" % (PROTOCOL, message))
 
@@ -1786,12 +2088,14 @@ class Orchestrator(object):
         self.grant_trust(run)
         try:
             self._launch_first(run, name)
-        except (Refused, ea.ExecRefused) as exc:
-            # Trust is granted: an argv the closed-world check refuses ends the run, its trust
-            # revoked (`_terminal`), and the caller is told (REQ-662 BR-5, BR-16).
-            self.say("%s refused at relaunch: %s" % (run.req, exc))
-            self._terminal(run, "failed", "setup-error", {}, note=str(exc))
-            raise Refused(str(exc))
+        except (Refused, ea.ExecRefused, OSError) as exc:
+            # Trust is granted: an argv the closed-world check refuses, or a harness that cannot
+            # be started, ends the run, its trust revoked and its render restored
+            # (`_terminal`), and the caller is told (REQ-662 BR-5, BR-16).
+            why = self._start_failure(run, exc)
+            self.say("%s refused at relaunch: %s" % (run.req, why))
+            self._terminal(run, "failed", "setup-error", {}, note=why)
+            raise Refused(why)
 
     def abort(self, req, by="", caller_pid=None, caller_env=None):
         """The only way a running or stalled harness is killed (BR-20)."""
@@ -1945,6 +2249,14 @@ class Orchestrator(object):
                 run.violation("the ledger changed between the approval and the merge")
                 self._block(run, run.read_primary_state(), "%s: the ledger does not match the "
                             "run record" % PROTOCOL)
+                return
+            try:
+                # Read again before anything merges: a run approved behind a hold waits, and the
+                # verdict may have changed since approve read it (REQ-662 BR-11, BR-18).
+                self._gate(self.adapter(run), run.doc["binary"], "approve")
+            except Refused as exc:
+                self.say("%s: the merge is refused: %s" % (run.req, exc))
+                self.rehalt(run, "the adapter's verdict")
                 return
             run.status = "merging"
             self._write_status(run)
@@ -2300,11 +2612,24 @@ class Orchestrator(object):
             self.revoke_trust(run, path)
             self._close_out_failed(run, "failed", str(exc))
             return
-        proc = self._spawn(run, argv, run.file("close-out-prompt.txt"), path, "close-out")
-        run.exec["closeOutPid"] = proc.pid
+        try:
+            proc = self._spawn(run, argv, run.file("close-out-prompt.txt"), path, "close-out")
+        except OSError as exc:
+            # The binary went, or stopped being executable, since the pre-flight: the close-out
+            # fails, its trust revoked; the merge stands (REQ-662 BR-5).
+            self.revoke_trust(run, path)
+            self._close_out_failed(run, "failed", "the close-out's harness could not be "
+                                   "started: %s" % exc)
+            return
+        run.exec.update({"closeOutPid": proc.pid, "closeOutPidStart": None, "closeOutLive": True})
         self._write_status(run)
+        # Saved with the pid first, so a nested launch finds it at once (REQ-662 BR-18).
+        run.exec["closeOutPidStart"] = process_start(proc.pid)
+        run.save()
         rc = proc.wait()
         self.reap(run, proc.pid)
+        run.exec["closeOutLive"] = False
+        run.save()
         self.verify_surfaces(run, [path], "exit")
         self.revoke_trust(run, path)
         if carried is not None:
@@ -2316,6 +2641,12 @@ class Orchestrator(object):
         if rc != 0 or claim != "closed-out" or match is None:
             self._close_out_failed(run, "failed", "the resumed session ended %s, rc %s"
                                    % (claim, rc))
+            return
+        if result["error"]:
+            # Output that did not parse is never ok, however good its last message reads
+            # (REQ-662 BR-6): the chore PR is not merged.
+            self._close_out_failed(run, "failed", "the close-out's output did not parse: %s"
+                                   % result["error"])
             return
         self._chore_gate(run, match.group(1), branch)
 
@@ -2418,6 +2749,12 @@ class Orchestrator(object):
             run.write_primary_state(state)
             self.say("%s re-halted: rebase conflicts on %s" % (run.req, ", ".join(files)))
             return
+        # The working copy is on the rebased tree now, so what it was at launch is gone: the
+        # relaunch's hiding records the rebased blobs, or a later restore would write the
+        # pre-rebase content over them (REQ-662 BR-17).
+        hidden = (run.doc.get("hidden") or {}).get(run.wc)
+        if isinstance(hidden, dict) and hidden.pop("launchBlobs", None) is not None:
+            run.save()
         branch = run.doc["branch"]
         push = box.git(repo, ["push", "--force-with-lease=%s:%s" % (branch, old), "origin",
                               "HEAD:refs/heads/%s" % branch], cwd=run.wc)
@@ -2555,6 +2892,17 @@ class Orchestrator(object):
             if client_call(run, {"op": "ping"}) is not None:
                 raise Refused("%s is held by a live supervisor" % run.req)
             self.runs[run.req] = run
+        # Before these runs are this supervisor's: a grant a run that ended still records for a
+        # user config one of them uses is revoked (REQ-662 BR-5).
+        configs = set()
+        for run in self.all_runs():
+            try:
+                adapter = self.adapter(run)
+                if adapter.trust_grant not in et.NO_FILE:
+                    configs.add(self._trust_file(adapter)[0])
+            except (ea.ExecRefused, Refused):
+                continue
+        self.sweep_grants(configs)
         if not self.runs:
             raise Refused("no unfinished exec run in this repo")
         for run in self.all_runs():

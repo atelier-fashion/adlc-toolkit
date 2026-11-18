@@ -338,10 +338,9 @@ def test_abort(box):
     orch = box.start(shared=True)
     run = orch.runs["REQ-901"]
     pid = run.exec["pid"]
-    time.sleep(0.2)
+    eh.until(lambda: os.path.exists(run.wc_state_path()), what="the harness to start")
     orch.abort("REQ-901", by="operator")
-    time.sleep(0.1)
-    assert not se.pid_alive(pid)
+    eh.until(lambda: not se.pid_alive(pid), timeout=10, what="the harness to be gone")
     assert run.status == "failed" and run.exec["abortedBy"] == "operator"
     assert run.exec["trustRevokedAt"] and os.path.isdir(run.wc)
     with pytest.raises(se.Refused, match="no live process"):
@@ -627,8 +626,8 @@ def test_straggler_sweep(box):
     box.req(double_fork=30)
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
-    time.sleep(0.2)
-    assert se.stragglers("REQ-901", se.run_tag(run.path)) == []
+    eh.until(lambda: se.stragglers("REQ-901", se.run_tag(run.path)) == [], timeout=10,
+             what="the swept straggler to be gone")
     assert run.status == "awaiting_approval"
 
 
@@ -648,7 +647,9 @@ def test_straggler_sweep_is_scoped_to_its_own_run(tmp_path):
             # Not /bin/sleep: ps does not show a platform binary's environment on macOS.
             procs.append(subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
                                           env=env))
-        time.sleep(0.3)
+        # Until ps shows each one's environment: the interpreter has started.
+        eh.until(lambda: sorted(se.stragglers(req)) == sorted(p.pid for p in procs),
+                 what="the three processes to start")
         assert se.stragglers(req, se.run_tag(mine)) == [procs[0].pid]
         assert se.stragglers(req, se.run_tag(other)) == [procs[1].pid]
         assert se.stragglers(req, se.run_tag(mine)[:-1]) == []
@@ -872,16 +873,13 @@ def test_an_operator_launch_is_not_refused_by_another_runs_harness(tmp_path):
     orch.abort("REQ-901", by="operator")
     assert not se.pid_alive(run.exec["pid"])
     assert box.orch().nested_guard("run", {}, os.getpid()) is None
-    # The recorded pid reused by a process that is not this one's ancestor.
-    holder = subprocess.Popen(
-        [sys.executable, "-c", "import subprocess, sys, time\nchild = subprocess.Popen("
-         "[sys.executable, '-c', 'import time; time.sleep(30)'])\nprint(child.pid, flush=True)\n"
-         "time.sleep(30)\n"], stdout=subprocess.PIPE, universal_newlines=True,
-        start_new_session=True)
+    # The recorded pid of a run whose harness is alive, held by a process that is not this
+    # one's ancestor (a record with no start time, as an older engine's has it).
+    holder, child = _holder()
     try:
-        child = int(holder.stdout.readline())
         record = se.Run.load(run.path)
-        record.exec["pid"] = holder.pid
+        record.status = "running"
+        record.exec.update({"pid": holder.pid, "pidStart": None})
         record.save()
         later = box.orch()
         assert later.live_exec_pids()[holder.pid].req == "REQ-901"
@@ -890,9 +888,130 @@ def test_an_operator_launch_is_not_refused_by_another_runs_harness(tmp_path):
                                              "of REQ-901" % (child, holder.pid)):
             later.nested_guard("run", {}, child)
     finally:
-        os.killpg(holder.pid, signal.SIGKILL)
-        holder.wait()
-        holder.stdout.close()
+        _release(holder)
+
+
+def _holder():
+    """A process in a session of its own holding a child, and the child's pid: a recorded exec
+    pid's stand-in, and a caller it is an ancestor of."""
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import subprocess, sys, time\nchild = subprocess.Popen("
+         "[sys.executable, '-c', 'import time; time.sleep(60)'])\nprint(child.pid, flush=True)\n"
+         "time.sleep(60)\n"], stdout=subprocess.PIPE, universal_newlines=True,
+        start_new_session=True)
+    return holder, int(holder.stdout.readline())
+
+
+def _release(holder):
+    os.killpg(holder.pid, signal.SIGKILL)
+    holder.wait()
+    holder.stdout.close()
+
+
+def test_a_recorded_pid_is_live_only_while_its_harness_is(tmp_path):
+    """REQ-662 BR-18: the launch authority counts a run's `exec.pid` only while the run's
+    status says its harness is alive (running, stalled), its `closeOutPid` only while its
+    close-out is in progress (`exec.closeOutLive`), and either only while the process holding
+    the pid started when the one the engine spawned did (`ps -o lstart=`, recorded at spawn
+    beside the pid). A finished run's pid that the OS has given to an ancestor of the caller
+    refuses nothing and writes nothing to the old run (the must-not-refuse case), and neither
+    does a live run's pid held by a process that started at another time. A live run's own
+    child is refused, by the start time and, on a record with none (an older engine's), by the
+    status alone."""
+    box = eh.Sandbox(tmp_path)
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval" and run.exec["pidStart"]
+    assert run.exec["closeOutLive"] is False and run.exec["closeOutPidStart"] is None
+    holder, child = _holder()
+    try:
+        held = se.process_start(holder.pid)
+        assert held
+        record = se.Run.load(run.path)
+
+        def put(status, drop=(), **fields):
+            record.status = status
+            record.exec.update(fields)
+            for key in drop:
+                record.exec.pop(key, None)
+            record.save()
+
+        def guard():
+            return box.orch().nested_guard("run", {}, child)
+
+        for status in ("awaiting_approval", "approved", "blocked", "failed", "rejected",
+                       "merged"):
+            put(status, pid=holder.pid, pidStart=held)
+            assert holder.pid not in box.orch().live_exec_pids(), status
+            assert guard() is None, status
+        put("merging", pid=None, closeOutPid=holder.pid, closeOutPidStart=held,
+            closeOutLive=False)
+        assert guard() is None
+        # A live run's pid, now held by a process that started at another time.
+        other = "Thu Jan  1 00:00:00 1970"
+        put("running", pid=holder.pid, pidStart=other, closeOutPid=None)
+        assert guard() is None
+        put("merging", pid=None, closeOutPid=holder.pid, closeOutPidStart=other,
+            closeOutLive=True)
+        assert guard() is None
+        assert not se.violations_of(run) and not eh.events(box, run, "nested_launch_refused")
+        # The live run's own child.
+        refused = "Rule B.*pid %d descends from the live exec pid %d of REQ-901" % (
+            child, holder.pid)
+        for status, start in (("running", held), ("stalled", held), ("running", None)):
+            put(status, pid=holder.pid, pidStart=start, closeOutPid=None)
+            with pytest.raises(se.Refused, match=refused):
+                guard()
+        put("merging", pid=None, closeOutPid=holder.pid, closeOutPidStart=held,
+            closeOutLive=True)
+        with pytest.raises(se.Refused, match=refused):
+            guard()
+        put("merging", drop=("closeOutLive", "closeOutPidStart"))
+        with pytest.raises(se.Refused, match=refused):
+            guard()
+        assert len(eh.events(box, run, "nested_launch_refused")) == 5
+    finally:
+        _release(holder)
+
+
+def test_an_ancestry_ps_cannot_read_refuses_only_beside_a_live_exec_pid(tmp_path, monkeypatch):
+    """REQ-662 BR-18: when `ps` fails or prints nothing, the caller's ancestry cannot be read,
+    which is not the same as reaching pid 1. With no live exec pid on the machine nothing is
+    refused (the must-not-refuse case: an operator whose `ps` is broken, with nothing
+    running). Beside a live one a launch is refused, saying the caller could not be verified:
+    a nested run with a scrubbed environment would pass otherwise. No violation is written to
+    the live run, which nothing showed the caller came from."""
+    box = eh.Sandbox(tmp_path)
+    broken = {}
+    for name, body in (("fails", "exit 1\n"), ("silent", "exit 0\n")):
+        ps = tmp_path / ("ps-" + name)
+        ps.write_text("#!/bin/sh\n" + body)
+        ps.chmod(0o755)
+        broken[name] = str(ps)
+    real = se.PS
+    chain, complete = se.ancestry(os.getpid())
+    assert complete and chain[0] == os.getpid() and os.getppid() in chain
+    for ps in broken.values():
+        monkeypatch.setattr(se, "PS", ps)
+        assert se.ancestry(os.getpid()) == ([os.getpid()], False)
+        assert box.orch().nested_guard("run", {}, os.getpid()) is None
+    monkeypatch.setattr(se, "PS", real)
+    box.req(sleep_first=60)
+    orch = box.start(shared=True)
+    run = orch.runs["REQ-901"]
+    for ps in broken.values():
+        monkeypatch.setattr(se, "PS", ps)
+        with pytest.raises(se.Refused) as info:
+            box.orch().nested_guard("run", {}, os.getpid())
+        assert ("nested_launch_refused: run refused: pid %d's ancestry could not be read, and "
+                "the exec pid %d of REQ-901 is live, so the caller could not be verified to be "
+                "outside that run" % (os.getpid(), run.exec["pid"])) in str(info.value)
+    monkeypatch.setattr(se, "PS", real)
+    assert box.orch().nested_guard("run", {}, os.getpid()) is None
+    refused = eh.events(box, run, "nested_launch_refused")
+    assert len(refused) == 2 and all(d["verified"] is False for d in refused)
+    assert not se.violations_of(run)
+    orch.abort("REQ-901", by="operator")
 
 
 def test_the_run_tag_refuses_a_launch_a_dispatch_and_a_resume(shipped):
@@ -1936,22 +2055,25 @@ def test_mutated_rule_file_is_rerendered(tmp_path, monkeypatch):
     assert "config_surface_violation" not in json.dumps(se.violations_of(run))
 
 
-def test_surface_edited_mid_run_is_a_violation_at_exit_and_halt(tmp_path, monkeypatch):
+def test_surface_edited_mid_run_blocks_the_run(tmp_path, monkeypatch):
     """BR-15, AC-18: a fake that widens the rule file and drops a stray rules file into the
-    directory surface mid-run is a `config_surface_violation` at exit; the next launch repairs
-    both (`rule_file_rerendered`, false); the same edit in the next run is a violation at exit
-    and again at the halt, which the halt row reports as a Rule B protocol violation.
-    `rules_reload: unknown` reads as `live`. A file the fake did not touch is not reported."""
+    directory surface mid-run is a `config_surface_violation` at exit, recorded once each, and
+    the run is blocked with the Rule B reason, as any other exit-check violation blocks it,
+    whatever the model wrote to state: this one wrote `awaiting_approval`, and it never halts.
+    `rules_reload: unknown` reads as `live`. The operator relaunches through `answer`, which
+    repairs both before the harness starts (`rule_file_rerendered`, false), and that run,
+    leaving the surfaces alone, halts (the must-not-refuse case) with nothing more reported. A
+    file the fake did not touch is not reported."""
     box = eh.file_sandbox(tmp_path, monkeypatch)
     fresh = eh.fresh_files(box).rule_file
     widened = fresh + 'prefix_rule(pattern=["git", "push"], decision="allow")\n'
     stray = ".fake-exec-file/rules/zz-extra.rules"
     edit = {eh.FILE_RULE: widened, stray: 'prefix_rule(pattern=["rm"], decision="allow")\n'}
-    box.req(status="blocked", claim="blocked", add=["src"], surface_writes=edit,
-            blockers=[{"reason": "reflector-questions", "question": "which?"}])
+    box.req(add=["src"], surface_writes=edit)
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
     assert run.status == "blocked"
+    assert not run.ledger().exists() and "REQ-901" not in orch.tokens
     seen = eh.events(box, run, "config_surface_violation")
     assert [(v["path"], v["where"], v["expected"], v["found"]) for v in seen] == [
         (eh.FILE_RULE, "exit", _sha(fresh), _sha(widened)),
@@ -1961,10 +2083,10 @@ def test_surface_edited_mid_run_is_a_violation_at_exit_and_halt(tmp_path, monkey
     assert len(violations) == 2 and all(
         v.startswith("config_surface_violation at exit: ") and "may have taken effect mid-run"
         in v for v in violations)
-    # The next launch repairs both before the harness starts; that run makes the same edit
-    # and halts, so it is a violation at exit and again at the halt.
-    box.req(status="awaiting_approval", claim="awaiting_approval", blockers=None,
-            files={"src/two.txt": "two\n"}, saw=[eh.FILE_RULE, stray])
+    [blocker] = run.read_primary_state()["blockers"]
+    assert blocker["reason"] == "%s: %s" % (se.PROTOCOL, "; ".join(violations))
+    # The relaunch repairs both before the harness starts, and that run halts.
+    box.req(surface_writes={}, files={"src/two.txt": "two\n"}, saw=[eh.FILE_RULE, stray])
     orch.answer("REQ-901", "go on")
     box.wait(orch)
     assert run.status == "awaiting_approval"
@@ -1973,13 +2095,8 @@ def test_surface_edited_mid_run_is_a_violation_at_exit_and_halt(tmp_path, monkey
     assert repaired[-2:] == [(eh.FILE_RULE, False, _sha(widened)),
                              (stray, False, _sha(edit[stray]))]
     assert _saw(box)[-1] == {eh.FILE_RULE: fresh, stray: None}
-    late = eh.events(box, run, "config_surface_violation")[2:]
-    assert [(v["path"], v["where"]) for v in late] == [
-        (eh.FILE_RULE, "exit"), (stray, "exit"), (eh.FILE_RULE, "halt"), (stray, "halt")]
-    halt_row = box.out.getvalue()[box.out.getvalue().rindex("| REQ-901 |"):]
-    assert ("Rule B protocol violation: config_surface_violation at halt: %s: expected sha256 "
-            "%s, found sha256 %s" % (eh.FILE_RULE, _sha(fresh)[:12], _sha(widened)[:12])
-            in halt_row)
+    assert eh.events(box, run, "config_surface_violation") == seen
+    assert len(se.violations_of(run)) == 2
     assert eh.FILE_CONFIG not in json.dumps(eh.events(box, run, "config_surface_violation"))
 
 
@@ -1987,9 +2104,9 @@ def test_prompt_delivery_renders_the_hook_file_absent(tmp_path, monkeypatch):
     """AC-25, BR-15: under `context_delivery: prompt` the harness's hook file is a surface
     rendered absent. A project that commits one has it removed from the working copy before the
     launch, so the harness starts with no hook file, and the run that leaves it alone reports
-    nothing (the must-not-fire case). A hook file the fake writes mid-run is a
-    `config_surface_violation` at exit. The prompt begins with ETHOS, and no engine write
-    touches the hook-review table in the user config."""
+    nothing and halts (the must-not-fire case). A hook file the fake writes mid-run is a
+    `config_surface_violation` at exit, and that run is blocked. The prompt begins with ETHOS,
+    and no engine write touches the hook-review table in the user config."""
     box = eh.file_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
     hooks = '{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "x"}]}]}}\n'
     eh.commit_on_main(box, {eh.FILE_HOOKS: hooks})
@@ -2002,9 +2119,9 @@ def test_prompt_delivery_renders_the_hook_file_absent(tmp_path, monkeypatch):
         box.req(req, add=["src"], saw=[eh.FILE_HOOKS])
     box.req("REQ-902", surface_writes={eh.FILE_HOOKS: hooks})
     orch = box.go(shared=True)
-    for req in ("REQ-901", "REQ-902"):
+    for req, status in (("REQ-901", "awaiting_approval"), ("REQ-902", "blocked")):
         run = orch.runs[req]
-        assert run.status == "awaiting_approval"
+        assert run.status == status, req
         assert _saw(box, req) == [{eh.FILE_HOOKS: None}]
         [row] = _rows(box, run, "rule_file_rerendered", eh.FILE_HOOKS)
         assert row == {"harness": "fake-exec-file", "path": eh.FILE_HOOKS,
@@ -2018,7 +2135,8 @@ def test_prompt_delivery_renders_the_hook_file_absent(tmp_path, monkeypatch):
     loud = orch.runs["REQ-902"]
     assert [(v["path"], v["where"], v["expected"], v["found"])
             for v in eh.events(box, loud, "config_surface_violation")] == [
-        (eh.FILE_HOOKS, "exit", None, _sha(hooks)), (eh.FILE_HOOKS, "halt", None, _sha(hooks))]
+        (eh.FILE_HOOKS, "exit", None, _sha(hooks))]
+    assert se.PROTOCOL in json.dumps(loud.read_primary_state()["blockers"])
     assert user.read_text(encoding="utf-8") == review
 
 
@@ -2037,3 +2155,362 @@ def test_a_flags_adapter_writes_no_surface(box):
     assert {ln[3:] for ln in untracked.splitlines()} <= {
         ".adlc/specs/REQ-901-thing/pipeline-state.json"}, untracked
     assert "src/REQ-901.txt" in tracked
+
+
+# ---- review fixes, 2026-11-18: a harness that cannot start, failed revokes, the trust file ----
+def test_a_harness_that_cannot_start_ends_its_run_and_revokes(tmp_path, monkeypatch):
+    """REQ-662 BR-5: a harness binary removed, or no longer executable, after the pre-flight
+    makes `Popen` raise `OSError` once trust is granted. That REQ ends failed (setup-error)
+    naming why, its trust revoked and its render restored, and the supervisor goes on: the
+    batch's other REQ launches and halts. The user config ends byte-identical."""
+    box = eh.trust_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
+    for req in box.reqs:
+        box.req(req, add=["src"])
+    orch = box.orch()
+    batch = orch.preflight(box.reqs, harness=box.harness, shared=True)
+    eh.popen_fails(monkeypatch, batch.binary,
+                   lambda argv, env: env.get("ADLC_EXEC_RUN") == "REQ-901")
+    orch.launch_batch(box.reqs, batch)
+    gone, other = orch.runs["REQ-901"], orch.runs["REQ-902"]
+    assert gone.status == "failed" and "REQ-901" not in orch.children
+    assert "REQ-902" in orch.children and not box.launches("REQ-901")
+    notes = json.dumps(gone.read_primary_state()["notes"])
+    assert "could not be started" in notes and "No such file or directory" in notes, notes
+    assert gone.doc["trustGrants"] == {} and gone.exec["trustRevokedAt"]
+    assert [e["status"] for e in eh.events(box, gone, "trust_revoked")] == [et.REVOKED]
+    assert eh.events(box, gone, "exec_paths_restored")
+    assert not os.path.lexists(os.path.join(gone.wc, eh.FILE_RULE))
+    box.wait(orch)
+    assert other.status == "awaiting_approval"
+    assert eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+def test_a_revoke_that_fails_is_kept_and_swept_at_the_next_preflight(tmp_path, monkeypatch):
+    """REQ-662 BR-5: a revoke that cannot read the user config (an `OSError`, here a permission
+    error) keeps the grant recorded, with a note and a dashboard line, and the supervisor goes
+    on. Nothing in a run that ended retries it, so the next pre-flight on the same user config
+    sweeps the grants of runs that ended (failed, rejected, blocked, merged) and that no live
+    supervisor holds, logging each: the block is gone. The sweep never touches the grant of a
+    run still at work, which keeps its block until its own exit."""
+    box = eh.trust_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902", "REQ-903"))
+    for req in box.reqs:
+        box.req(req, add=["src"])
+    box.req("REQ-901", exit_early=1, text="it broke")
+    box.req("REQ-903", sleep_first=60)
+    real = et.revoke
+    failed = []
+    unreadable = [True]
+
+    def fails_while_unreadable(grant, *args, **kw):
+        if unreadable[0]:
+            failed.append(grant.path)
+            raise PermissionError(13, "Permission denied", grant.config)
+        return real(grant, *args, **kw)
+
+    monkeypatch.setattr(et, "revoke", fails_while_unreadable)
+    stale = box.go(["REQ-901"], shared=True).runs["REQ-901"]
+    unreadable[0] = False
+    assert stale.status == "failed" and failed
+    assert set(failed) == {os.path.realpath(stale.wc)}
+    assert list(stale.doc["trustGrants"]) == [stale.wc] and not stale.exec["trustRevokedAt"]
+    assert "did not finish" in json.dumps(stale.doc["notes"])
+    assert "Permission denied" in json.dumps(stale.doc["notes"])
+    assert "trust revoke for %s did not finish" % stale.wc in box.out.getvalue()
+    assert _trust_block(box, "REQ-901") in eh.read_text(box.user_config)
+    # A run at work under a supervisor of its own: its grant is in place.
+    busy = box.start(["REQ-903"], shared=True)
+    assert _trust_block(box, "REQ-903") in eh.read_text(box.user_config)
+    later = box.go(["REQ-902"], shared=True)
+    assert later.runs["REQ-902"].status == "awaiting_approval"
+    swept = se.Run.load(stale.path)
+    assert swept.doc["trustGrants"] == {} and swept.exec["trustRevokedAt"]
+    [event] = [e for e in eh.events(box, swept, "trust_revoked") if e.get("sweep")]
+    assert event["status"] == et.REVOKED and event["path"] == os.path.realpath(stale.wc)
+    assert "swept the trust grant REQ-901 left for %s" % stale.wc in box.out.getvalue()
+    text = eh.read_text(box.user_config)
+    assert _trust_block(box, "REQ-901") not in text and _trust_block(box, "REQ-903") in text
+    assert busy.runs["REQ-903"].doc["trustGrants"]
+    busy.abort("REQ-903", by="operator")
+    assert eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+def test_the_grant_keeps_the_harness_from_trusting_the_repo_itself(tmp_path, monkeypatch):
+    """REQ-662 BR-5 (`codex-exec-manual.md`, fact 2): the fake does with trust what `codex exec`
+    does: at a launch no `[projects."…"]` entry covers, it appends one for the main
+    repository's root and leaves it there. With the engine's grant for the working copy in
+    place it writes nothing, and the user config ends byte-identical with no
+    `trust_file_changed` event (the must-not-fire case). The same sandbox on `trust_grant:
+    none` leaves that entry behind, and the engine says so after the run: a
+    `trust_file_changed` event and a note naming the table. It is a warning, and refuses
+    nothing: the run halts."""
+    (tmp_path / "grant").mkdir()
+    box = eh.trust_sandbox(tmp_path / "grant", monkeypatch)
+    box.req(add=["src"], trust_itself=eh.FILE_USER_CONFIG)
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval" and box.launches()
+    assert eh.read_text(box.user_config) == eh.USER_CONFIG
+    orch.reject("REQ-901", "enough", decided_by="operator")
+    assert eh.read_text(box.user_config) == eh.USER_CONFIG
+    assert not eh.events(box, run, "trust_file_changed")
+    (tmp_path / "none").mkdir()
+    box = eh.file_sandbox(tmp_path / "none", monkeypatch)
+    config = box.home / eh.FILE_USER_CONFIG
+    config.parent.mkdir(parents=True)
+    config.write_text(eh.USER_CONFIG, encoding="utf-8")
+    box.req(add=["src"], trust_itself=eh.FILE_USER_CONFIG)
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    root = os.path.realpath(str(box.repo))
+    table = '[projects."%s"]' % root
+    assert eh.read_text(config) == eh.USER_CONFIG + "\n" + table + '\ntrust_level = "trusted"\n'
+    [changed] = eh.events(box, run, "trust_file_changed")
+    assert changed["config"] == str(config) and changed["added"] == [root]
+    assert changed["before"] != changed["after"]
+    assert any(table in note for note in run.doc["notes"]), run.doc["notes"]
+    assert table in "\n".join(se.render_row(run))
+
+
+def test_a_policy_folder_change_marks_the_engines_record(tmp_path, monkeypatch):
+    """REQ-662 BR-4: a file the fake writes into the user policy folder mid-run is found at
+    exit, blocks the run, and marks the engine's record of the folder violated, naming the
+    file, so the next pre-flight refuses until `adlc harness install --exec` records the folder
+    again. A change found before a relaunch marks the record the same way, and that relaunch is
+    refused."""
+    box = eh.file_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
+    adapter = box.adapter()
+    planted = str(box.home / eh.FILE_POLICY_DIR / "fake.rules")
+    rule = 'prefix_rule(pattern=["git", "push"], decision="allow")\n'
+    box.req("REQ-901", add=["src"], surface_writes={planted: rule})
+    run = box.go(["REQ-901"], shared=True).runs["REQ-901"]
+    assert run.status == "blocked"
+    assert esf.read_record(adapter, box.environ)["violated"] == [planted]
+    with pytest.raises(se.Refused, match="changed during an exec run"):
+        box.orch().preflight(["REQ-902"], harness=box.harness, shared=True)
+    os.unlink(planted)
+    esf.install_policy_file(adapter, box.environ, eh.fresh_files(box).user_policy_file)
+    box.req("REQ-902", add=["src"], status="blocked", claim="blocked",
+            blockers=[{"reason": "reflector-questions", "question": "which?"}])
+    orch = box.go(["REQ-902"], shared=True)
+    assert orch.runs["REQ-902"].status == "blocked"
+    assert "violated" not in esf.read_record(adapter, box.environ)
+    with open(planted, "w", encoding="utf-8") as fh:
+        fh.write(rule)
+    with pytest.raises(se.Refused, match="the launch is refused"):
+        orch.answer("REQ-902", "go on")
+    assert esf.read_record(adapter, box.environ)["violated"] == [planted]
+    assert len(box.launches("REQ-902")) == 1
+
+
+def test_hide_saves_the_run_record_before_each_git_write(tmp_path, monkeypatch):
+    """REQ-662 BR-17: the hiding saves the run record before each git write it makes (the
+    skip-worktree marks, the working copy's core.excludesFile), so a supervisor killed just
+    after one leaves a record that names it, and the next supervisor's restore undoes it."""
+    box = eh.file_sandbox(tmp_path, monkeypatch)
+    eh.commit_on_main(box, {eh.FILE_CONFIG: 'model = "operator"\n'})
+    real = esf._git
+
+    def killed_after_the_mark(gbox, repo, args, what, cwd=None, ok=(0,)):
+        res = real(gbox, repo, args, what, cwd=cwd, ok=ok)
+        if list(args[:2]) == ["update-index", "--skip-worktree"]:
+            raise KeyboardInterrupt("the supervisor is killed after the mark")
+        return res
+
+    with monkeypatch.context() as patch:
+        patch.setattr(esf, "_git", killed_after_the_mark)
+        with pytest.raises(KeyboardInterrupt):
+            box.start(shared=True)
+    doc = se.Run.load(el.find_run(os.path.realpath(str(box.repo)), "REQ-901",
+                                  box.environ)).doc
+    wc = doc["repos"]["widgets"]["workingCopy"]
+    record = doc["hidden"][wc]
+    assert record["skipWorktree"] == [eh.FILE_CONFIG]
+    assert record["launchBlobs"][eh.FILE_CONFIG]["oid"]
+    assert eh.git(wc, "ls-files", "-t", "--", eh.FILE_CONFIG).split() == ["S", eh.FILE_CONFIG]
+    later = box.orch()
+    later.resume()
+    later.poll_once()
+    assert later.runs["REQ-901"].status == "failed"
+    assert eh.git(wc, "ls-files", "-t", "--", eh.FILE_CONFIG).split() == ["H", eh.FILE_CONFIG]
+
+
+def test_an_operators_worktree_config_is_carried_past_the_engines_write(tmp_path, monkeypatch):
+    """REQ-662 BR-17, REQ-659 BR-23 b: a working copy that exists before its run, with a
+    `config.worktree` holding a key of the operator's, is reused, so the engine's
+    `core.excludesFile` write into that file changes the common gitdir's checksum set, which
+    counts the file. Every box of the orchestrator's runs is carried past that write, each
+    compared as it checks, so neither the run nor the other one on the repository reads the
+    engine's own write as a violation, and both halt."""
+    box = eh.file_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
+    eh.git(box.repo, "config", "--local", "extensions.worktreeConfig", "true")
+    wc = os.path.join(os.path.realpath(str(box.repo)), ".worktrees", "REQ-901")
+    eh.git(box.repo, "worktree", "add", "-q", "-b", "feat/REQ-901-thing", wc, "origin/main")
+    eh.git(wc, "config", "--worktree", "adlc.operator", "kept")
+    for req in box.reqs:
+        box.req(req, add=["src"])
+    orch = box.go(shared=True)
+    for req in box.reqs:
+        run = orch.runs[req]
+        assert run.status == "awaiting_approval", (req, se.violations_of(run))
+        assert not [v for v in se.violations_of(run) if "gitdir" in v], req
+    assert eh.git(wc, "config", "--worktree", "--get", "adlc.operator").strip() == "kept"
+    assert orch.runs["REQ-901"].wc == wc
+
+
+def test_a_survivor_halts_past_another_runs_cleanup_and_abort(tmp_path, monkeypatch):
+    """REQ-662 BR-17, REQ-659 BR-23 b: REQs in one repository on a file-rendering adapter.
+    While one is still at work, another halts, is approved, merges and is cleaned up (its
+    working copy and its `config.worktree` removed), and a third is aborted (its
+    `core.excludesFile` unset). The survivor halts, with no "common gitdir checksum mismatch".
+    A change to the common gitdir the engine did not make, a model's own key in its working
+    copy's `config.worktree`, still reads as a violation and blocks that run."""
+    box = eh.file_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902", "REQ-903",
+                                                       "REQ-904"))
+    go = tmp_path / "go-901"
+    box.req("REQ-901", add=["src"], wait_for=str(go))
+    box.req("REQ-902", add=["src"], closeout={"add": [".adlc"]})
+    box.req("REQ-903", add=["src"], sleep_first=60)
+    orch = box.start(["REQ-901", "REQ-902", "REQ-903"], shared=True)
+    survivor, merged, aborted = (orch.runs[r] for r in ("REQ-901", "REQ-902", "REQ-903"))
+
+    def halted():
+        orch.poll_once()
+        return merged.status == "awaiting_approval"
+
+    eh.until(halted, what="REQ-902 to halt")
+    assert box.approve(orch, "REQ-902") == "approved"
+    assert merged.status == "merged" and not os.path.exists(merged.wc)
+    eh.until(lambda: os.path.exists(aborted.wc_state_path()), what="REQ-903 to start")
+    orch.abort("REQ-903", by="operator")
+    assert aborted.status == "failed"
+    assert survivor.status == "running" and "REQ-901" in orch.children
+    go.write_text("go\n")
+    box.wait(orch)
+    assert survivor.status == "awaiting_approval", se.violations_of(survivor)
+    assert not [v for v in se.violations_of(survivor) if "gitdir" in v]
+    box.req("REQ-904", add=["src"], commands=["git config --worktree adlc.model mine"])
+    model = box.go(["REQ-904"], shared=True).runs["REQ-904"]
+    assert model.status == "blocked"
+    assert any("common gitdir checksum mismatch" in v and "config.worktree" in v
+               for v in se.violations_of(model)), se.violations_of(model)
+
+
+def test_abort_revokes_a_real_trust_grant(tmp_path, monkeypatch):
+    """REQ-662 BR-5, BR-20: an abort of a harness at work on a `user-config-entry` adapter
+    revokes its grant: no grant is recorded and the user config is byte-identical."""
+    box = eh.trust_sandbox(tmp_path, monkeypatch)
+    box.req(add=["src"], sleep_first=60)
+    orch = box.start(shared=True)
+    run = orch.runs["REQ-901"]
+    eh.until(lambda: os.path.exists(run.wc_state_path()), what="the harness to start")
+    assert _trust_block(box, "REQ-901") in eh.read_text(box.user_config)
+    orch.abort("REQ-901", by="operator")
+    assert run.status == "failed" and run.doc["trustGrants"] == {}
+    assert run.exec["trustRevokedAt"]
+    assert eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+# ---- review fixes, 2026-11-18: the pre-flight's refusals ---------------------------------------
+def test_context_delivery_hooks_is_refused_at_the_preflight(tmp_path, monkeypatch):
+    """REQ-662 BR-11: `context_delivery: hooks` has no engine arm yet. The prompt carries ETHOS
+    on every launch and the engine renders no session-start hook, so a `hooks` block would
+    change nothing it says it does: it is refused at the pre-flight, as a `working_copy` or a
+    `trust_grant` with no arm is, before anything is prepared."""
+    box = eh.file_sandbox(tmp_path, monkeypatch, result="hooks-pass", context_delivery="hooks")
+    assert box.adapter().block["context_delivery"] == "hooks"
+    with pytest.raises(se.Refused) as info:
+        box.start(shared=True)
+    assert str(info.value).startswith(
+        "exec.context_delivery hooks has no engine arm yet (REQ-662)")
+    assert not box.argvs() and el.run_dirs(box.environ) == []
+
+
+def test_an_arm_the_engine_lacks_is_named(box, monkeypatch, tmp_path):
+    """REQ-662: a `working_copy` strategy or a `trust_grant` the engine has no arm for refuses
+    the pre-flight, saying so and naming the requirement that adds the arms."""
+    assert not hasattr(ea, "SIBLING_REQ")
+    for name in ("clone", "trust"):
+        (tmp_path / name).mkdir()
+    with monkeypatch.context() as patch:
+        _adapter_with(patch, tmp_path / "clone", ("  working_copy: {strategy: worktree}\n",
+                                                  "  working_copy: {strategy: clone}\n"))
+        with pytest.raises(se.Refused) as info:
+            box.start(shared=True)
+    assert str(info.value) == "working_copy clone has no engine arm yet (REQ-662)"
+    with monkeypatch.context() as patch:
+        _adapter_with(patch, tmp_path / "trust", ("  trust_grant: none\n",
+                                                  "  trust_grant: trusted-folders-file\n"))
+        with pytest.raises(se.Refused) as info:
+            box.start(shared=True)
+    assert str(info.value) == ("exec.trust_grant trusted-folders-file has no engine arm yet "
+                               "(REQ-662)")
+    assert not box.argvs() and el.run_dirs(box.environ) == []
+
+
+# ---- review fixes, 2026-11-18: branches no test reached ---------------------------------------
+def test_an_exit_check_that_cannot_be_evaluated_fails_the_run(box, monkeypatch):
+    """REQ-659: an exit check that cannot be evaluated (`GateError`) ends the run failed
+    (setup-error), with the reason in its notes; it never halts."""
+    def cannot(*_args, **_kw):
+        raise se.eg.GateError("the exit checks cannot read origin")
+
+    monkeypatch.setattr(se.eg, "exit_checks", cannot)
+    run = box.go(shared=True).runs["REQ-901"]
+    assert run.status == "failed" and not run.ledger().exists()
+    assert "the exit checks cannot read origin" in json.dumps(run.doc["notes"])
+
+
+def test_surfaces_that_cannot_be_verified_at_exit_block_the_run(tmp_path, monkeypatch):
+    """REQ-662 BR-15: surfaces the exit check cannot verify (the manifest's walk refused) are a
+    Rule B violation that blocks the run, as a change found there does: nothing shows the
+    render is what the harness ran against."""
+    box = eh.file_sandbox(tmp_path, monkeypatch)
+    box.req(add=["src"])
+
+    def refused(_root, _manifest):
+        raise esf.SurfaceRefused("a component is a symlink")
+
+    monkeypatch.setattr(esf, "verify", refused)
+    run = box.go(shared=True).runs["REQ-901"]
+    assert run.status == "blocked"
+    text = ("config_surface_violation at exit: the surfaces could not be verified: a component "
+            "is a symlink")
+    assert se.violations_of(run) == [text]
+    assert text in json.dumps(run.read_primary_state()["blockers"])
+
+
+def test_an_allow_unverified_request_without_its_invocation_is_refused(box):
+    """REQ-662 BR-18: an `answer` request that carries --allow-unverified without the
+    invocation that received it is a bad request, refused before anything is relaunched."""
+    box.req(status="blocked", claim="blocked",
+            blockers=[{"reason": "reflector-questions", "question": "which?"}])
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    for invocation in (None, {"id": "", "startedAt": "now"}, {"id": "x"},
+                       {"id": "x", "startedAt": 7}):
+        request = {"op": "answer", "req": "REQ-901", "text": "go", "allowUnverified": True,
+                   "invocation": invocation}
+        with pytest.raises(se.Refused, match="bad request: --allow-unverified without the "
+                                             "invocation that received it"):
+            orch.dispatch(request, None)
+    assert run.status == "blocked" and len(box.argvs()) == 1
+
+
+def test_the_fakes_event_types_are_the_real_captures(tmp_path):
+    """REQ-662 ADR-10: every event type the jsonl fake prints, and every item type, is one the
+    committed capture of a real `codex exec` launch holds, so the parser is never tested
+    against a shape the harness does not print."""
+    real = os.path.join(HERE, "fixtures", "exec-output", "codex-exec-launch.0.166.0.stdout.jsonl")
+    with open(real, encoding="utf-8") as fh:
+        captured = [json.loads(line) for line in fh if line.strip()]
+    box = eh.Sandbox(tmp_path, harness="codex")
+    box.req(exit_early=0, text="Done.", commands=["printf hi", "true"])
+    res = _jsonl_fake(box, "exec", "--json", "--sandbox", "workspace-write", "-C",
+                      str(box.repo), "-o", str(tmp_path / "last.txt"), prompt="x\n")
+    assert res.returncode == 0, res.stderr
+    ours = [json.loads(line) for line in res.stdout.splitlines()]
+    assert ours and {e["type"] for e in ours} <= {e["type"] for e in captured}
+    items = {e["item"]["type"] for e in ours if isinstance(e.get("item"), dict)}
+    assert items and items <= {e["item"]["type"] for e in captured
+                               if isinstance(e.get("item"), dict)}

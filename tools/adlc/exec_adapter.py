@@ -19,8 +19,6 @@ import harness_render as hr
 #: The requirement that gives the non-Claude harnesses their exec blocks, one harness per
 #: stage (REQ-662 Amendments, 2026-11-17). A refusal of a harness with no block names it.
 EXEC_ADAPTERS_REQ = "REQ-662"
-#: The constant's old name. Two refusals in sprint_exec.py still read it; drop it with them.
-SIBLING_REQ = EXEC_ADAPTERS_REQ
 #: Refused at launch whatever an adapter says (BR-8).
 ENGINE_FORBIDDEN_FLAGS = ha.ENGINE_FORBIDDEN_FLAGS
 
