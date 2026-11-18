@@ -1,0 +1,29 @@
+# exec-lints fixture (REQ-662 TASK-257): a two-token violation, --ask-for-approval never
+# Only the exec keys the lints read; the loader's schema is not under test here.
+name: codex
+exec:
+  exec_schema_version: 2
+  launch: [exec, --json, --sandbox, workspace-write, -C, "{worktree}", -o, "{last_message}", --ask-for-approval, never]
+  resume: [exec, resume, --json, -o, "{last_message}", "{session_id}", "-"]
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+    - --dangerously-bypass-approvals-and-sandbox
+    - --dangerously-bypass-hook-trust
+    - --approve-for-me
+    - --full-auto
+    - danger-full-access
+    - --ask-for-approval never
+    - --ignore-rules
+    - --ignore-user-config
+    - -c
+    - --config
+    - -p
+    - --profile
+    - --enable
+    - --disable
+  exit_codes: {"0": ok, "1": error}

@@ -1,7 +1,7 @@
 ---
 id: TASK-257
 title: "The `exec-no-bypass` and `exit-class-vocabulary` lints"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17

@@ -1,0 +1,16 @@
+# exec-lints fixture (REQ-662 TASK-257): the isolation tokens added to every launch hold --allow-all
+# Only the exec keys the lints read; the loader's schema is not under test here.
+name: claude
+exec:
+  exec_schema_version: 2
+  launch: [-p, --output-format, json]
+  resume: [-p, --output-format, json, --resume, "{session_id}"]
+  config_isolation: [--strict-mcp-config, --allow-all]
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+  exit_codes: {"0": ok, "1": error}

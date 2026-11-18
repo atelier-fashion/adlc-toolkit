@@ -817,6 +817,29 @@ a general markdown linter and NOT a general shell linter.
   of `capabilities.never_restore` covers fails whatever the records say, and at schema 3
   a restoration also needs the by-hand `strictest-wins` result for a `confirm` mechanism
   and a deny whose added tokens are fixed words, not flags or refspecs.
+- **`exec-no-bypass`** (REQ-662 BR-2) reads every `exec` block under `harness/*.yml`
+  and fails when one of its `forbidden_flags` entries, or one of the engine's seed tokens
+  (`ENGINE_FORBIDDEN_FLAGS`), is in `launch`, `resume`, `config_isolation` or a rendered
+  argv fixture (`harness/<name>/exec-argv.json`, a JSON object of label to argv), or when
+  a flag name the engine or an operator adds (`allow_flag`, `deny_flag`, `add_dir_flag`,
+  `operator_flags`) begins an entry. It matches with the engine's own
+  `exec_adapter.forbidden_in`: each entry is a contiguous token subsequence after any
+  `--flag=value` argv token is split at the first `=`, so `--ask-for-approval never`,
+  `--ask-for-approval=never` and `--approval-mode=yolo` all fail. Because only the argv is
+  split, an entry spelled with `=` would never match, and is itself a finding. It also fails
+  a `launch` or `resume` token that any other adapter forbids, so the union of every
+  template's tokens shares nothing with the union of `forbidden_flags`. The lint is a
+  backstop: the control is the engine's closed-world argv check (BR-16), applied to the
+  final argv at launch and at resume. A clean run shows only that no listed spelling sits
+  in a committed template. Tests: `tests/test_exec_lints.py`.
+- **`exit-class-vocabulary`** (REQ-662 BR-8) holds every `exec.exit_codes` value in every
+  adapter to REQ-659's closed ExitClass, `ok | denied | timeout | error`, and fails when
+  the engine's `EXIT_CLASSES` is anything else, so the vocabulary cannot widen in one
+  place. A block with no `exit_codes` map fails.
+- Both read the files raw, so a block the adapter loader would refuse is still named.
+  Both skip the `exec: {flags: unverified}` placeholder, print to stderr how many exec
+  blocks they scanned and which they skipped, and fail when they scanned none, so a
+  vacuous run is never a pass.
 - **`harness-loss-table`** (REQ-656) holds each `<!-- harness-loss: <name> -->` block in
   the root `README.md` to its adapter. It derives the expected facts from the adapter
   and a fresh render (committed allowlist, granularity, deny mechanism, the omitted

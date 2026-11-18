@@ -1,0 +1,5 @@
+# exec-lints fixture (REQ-662 TASK-257): the placeholder block, skipped; nothing
+# is scanned, so each lint fails rather than passing vacuously.
+name: cursor
+exec:
+  flags: unverified

@@ -57,6 +57,12 @@ order:
 * ``check_harness_loss_tables`` — ``harness-loss-table`` (REQ-656 BR-11, BR-17) —
   each ``<!-- harness-loss: <name> -->`` block in the README carries its rows, agrees
   with its adapter and a fresh render, and states the declared residuals.
+* ``check_exec_no_bypass`` — ``exec-no-bypass`` (REQ-662 BR-2) — no
+  ``forbidden_flags`` entry or engine seed token in an exec block's argv templates or
+  rendered argv fixture, matched by ``exec_adapter.forbidden_in``. A backstop: the
+  control is the engine's closed-world argv check (BR-16).
+* ``check_exit_class_vocabulary`` — ``exit-class-vocabulary`` (REQ-662 BR-8) —
+  every ``exec.exit_codes`` value is in REQ-659's closed ExitClass.
 * ``check_ethos_lines`` — ``ethos-line`` (REQ-666 BR-2) — the ETHOS line,
   read from conventions.md, exactly once and byte-identical in every skill, and
   no other inline bang command in a skill's prose.
@@ -5330,6 +5336,9 @@ def run(root: Path) -> tuple[list[Finding], int]:
     # Per-root (REQ-657 BR-9, BR-13, BR-16): the harness adapter framework's gates.
     findings.extend(check_allowlist_fidelity(root))
     findings.extend(check_render_parity(root))
+    # Per-root (REQ-662 BR-2, BR-8): the exec blocks' lint backstops.
+    findings.extend(check_exec_no_bypass(root))
+    findings.extend(check_exit_class_vocabulary(root))
     findings.extend(check_hook_sources(root))
     findings.extend(check_retired_settings_template(root))
     # Per-root (REQ-656 BR-11, BR-17): the README's loss tables against the adapters.
@@ -5636,6 +5645,289 @@ def check_render_parity(root: Path) -> list[Finding]:
                                 f"`adlc harness render --harness <name> --force` or "
                                 f"`adlc agents render`, or update the golden"
                                 + (f"; diff: {head}" if head else "")))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# REQ-662: the exec blocks' lint backstops
+# ---------------------------------------------------------------------------
+EXEC_NO_BYPASS_CHECK = "exec-no-bypass"
+EXIT_CLASS_VOCABULARY_CHECK = "exit-class-vocabulary"
+#: REQ-659's closed ExitClass (REQ-662 BR-8). The engine holds the same set as
+#: ``harness_adapter.EXIT_CLASSES``; the lint holds it as well, so a widened engine set
+#: is a finding rather than a vocabulary that grows on its own.
+EXIT_CLASS_VOCABULARY = ("ok", "denied", "timeout", "error")
+#: Every exec key, sorted by what reaches the harness's argv (LESSON-763). These are token
+#: lists the engine places whole: the template, the resume template, and the isolation
+#: tokens added to every launch.
+EXEC_ARGV_KEYS = ("launch", "resume", "config_isolation")
+#: These name one flag the engine or an operator puts on the argv with a value after it, so
+#: a name that begins a forbidden entry lets the value complete it. ``prompt_flag`` reaches
+#: the argv only inside ``launch``, which is read; ``config_isolation_help`` is matched
+#: against ``--help``; every other key holds rules, paths, environment names or output keys.
+EXEC_FLAG_NAME_KEYS = ("allow_flag", "deny_flag", "add_dir_flag", "operator_flags")
+#: Keys whose presence makes an ``exec`` map a block to check. ``exec: {flags: unverified}``
+#: holds none of them and is skipped, never failed.
+_EXEC_BLOCK_KEYS = ("exec_schema_version", "forbidden_flags", "exit_codes") + EXEC_ARGV_KEYS
+#: A rendered argv fixture, beside the adapter's census golden: a JSON object mapping a
+#: label to one argv (a list of strings).
+EXEC_ARGV_FIXTURE = "exec-argv.json"
+
+
+class _ExecBlock(NamedTuple):
+    name: str
+    rel: str
+    text: str
+    block: dict
+
+
+class _ExecScan(NamedTuple):
+    engine: tuple | None
+    harness_dir: Path
+    blocks: list
+    skipped: list
+    findings: list
+
+
+def _import_exec_engine(root: Path):
+    """``(exec_adapter, harness_adapter, harness_yaml)`` from ``root``'s tools/adlc.
+
+    ``None`` when ``root`` has no exec engine (outside the toolkit: zero findings, as for
+    ``_import_harness_engine``); the error's text when it has one that does not import,
+    which is a finding, never a silent pass.
+    """
+    adlc_dir = root / "tools" / "adlc"
+    if not (adlc_dir / "exec_adapter.py").is_file():
+        return None
+    if str(adlc_dir) not in sys.path:
+        sys.path.insert(0, str(adlc_dir))
+    try:
+        import exec_adapter  # noqa: E402
+        import harness_adapter  # noqa: E402
+        import harness_yaml  # noqa: E402
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return exec_adapter, harness_adapter, harness_yaml
+
+
+def _exec_scan(root: Path, harness_dir: Path | None, check_id: str) -> _ExecScan | None:
+    """Every ``harness/*.yml`` exec block, read raw with the adapters' own YAML reader.
+
+    Raw, not through ``load_adapter``: the loader refuses a defective block outright, and
+    a backstop must still name the defect. ``None`` outside the toolkit.
+    """
+    harness_dir = root / "harness" if harness_dir is None else harness_dir
+    if not harness_dir.is_dir():
+        return None
+    engine = _import_exec_engine(root)
+    if engine is None:
+        return None
+    if isinstance(engine, str):
+        return _ExecScan(None, harness_dir, [], [], [
+            Finding("tools/adlc/exec_adapter.py", 1, check_id,
+                    f"the exec engine failed to import, so no exec block was checked: {engine}")])
+    hy = engine[2]
+    blocks, skipped, findings = [], [], []
+    for path in sorted(harness_dir.glob("*.yml")):
+        rel = _safe_label(path, root)
+        try:
+            text = path.read_text(encoding="utf-8")
+            data = hy.loads(text, rel)
+        except OSError as exc:
+            findings.append(Finding(rel, 1, "io-error",
+                                    f"could not read: {exc.strerror or 'I/O error'}"))
+            continue
+        except hy.YamlError as exc:
+            findings.append(Finding(rel, 1, check_id,
+                                    f"could not be parsed, so its exec block is unchecked: {exc}"))
+            continue
+        block = data.get("exec") if isinstance(data, dict) else None
+        if isinstance(block, dict) and any(key in block for key in _EXEC_BLOCK_KEYS):
+            blocks.append(_ExecBlock(path.stem, rel, text, block))
+        else:
+            skipped.append(path.stem)
+    return _ExecScan(engine, harness_dir, blocks, skipped, findings)
+
+
+def _exec_key_line(text: str, key: str) -> int:
+    """The line of ``key`` inside the top-level ``exec:`` map, else of ``exec:``, else 1."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith("exec:")), None)
+    if start is None:
+        return 1
+    key_re = re.compile(r"^\s+%s\s*:" % re.escape(key))
+    for i in range(start + 1, len(lines)):
+        if lines[i] and not lines[i][0].isspace() and not lines[i].startswith("#"):
+            break
+        if key_re.match(lines[i]):
+            return i + 1
+    return start + 1
+
+
+def _is_token_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(tok, str) for tok in value)
+
+
+def _exec_scan_report(check_id: str, scan: _ExecScan, root: Path, what: str) -> list[Finding]:
+    """Print what was scanned; a scan of zero exec blocks is a finding (vacuous-run guard)."""
+    names = ", ".join(b.name for b in scan.blocks) or "none"
+    skipped = ", ".join(scan.skipped) or "none"
+    print(f"{check_id}: scanned {len(scan.blocks)} exec block(s) ({names}){what}; "
+          f"skipped {len(scan.skipped)} without one ({skipped})", file=sys.stderr)
+    if scan.blocks:
+        return []
+    return [Finding(_safe_label(scan.harness_dir, root), 1, check_id,
+                    "scanned 0 exec blocks: a run that checked nothing is not a pass")]
+
+
+def _argv_fixture(path: Path) -> tuple[dict | None, str]:
+    """``({label: argv}, "")`` from a rendered argv fixture, or ``(None, why)``."""
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"could not be read: {exc}"
+    if not isinstance(doc, dict) or not doc or \
+            not all(_is_token_list(argv) for argv in doc.values()):
+        return None, "must be a JSON object mapping each label to one argv (a list of strings)"
+    return doc, ""
+
+
+def check_exec_no_bypass(root: Path, harness_dir: Path | None = None) -> list[Finding]:
+    """REQ-662 BR-2: no ``forbidden_flags`` entry in an exec block's argv.
+
+    Each block is checked against its own ``forbidden_flags`` plus the engine's seed
+    (``ENGINE_FORBIDDEN_FLAGS``) in ``launch``, ``resume``, ``config_isolation``, the
+    flag names of ``EXEC_FLAG_NAME_KEYS`` and the rendered argv fixture
+    ``harness/<name>/exec-argv.json``. Matching is ``exec_adapter.forbidden_in``'s, so the
+    lint and the engine read one rule. An entry spelled ``--flag=value`` is a finding:
+    the matcher splits the argv at ``=``, not the entry, so it would never match. Then the
+    union of every ``launch`` and ``resume`` token must share nothing with the union of
+    every adapter's ``forbidden_flags`` (AC-2).
+
+    A backstop, not the gate: the control is the engine's closed-world argv check
+    (BR-16), applied to the final argv at launch and at resume.
+    """
+    scan = _exec_scan(root, harness_dir, EXEC_NO_BYPASS_CHECK)
+    if scan is None:
+        return []
+    if scan.engine is None:
+        return scan.findings
+    ea = scan.engine[0]
+    seed = list(ea.ENGINE_FORBIDDEN_FLAGS)
+    findings = list(scan.findings)
+
+    def finding(b: _ExecBlock, key: str, message: str) -> None:
+        findings.append(Finding(b.rel, _exec_key_line(b.text, key), EXEC_NO_BYPASS_CHECK,
+                                message))
+
+    own: dict[str, list[str]] = {}
+    for b in scan.blocks:
+        entries = b.block.get("forbidden_flags", [])
+        if not _is_token_list(entries):
+            finding(b, "forbidden_flags", "exec.forbidden_flags is not a list of strings, so "
+                    "only the engine's seed is checked here")
+            entries = []
+        forbidden = own[b.name] = list(dict.fromkeys(seed + entries))
+        for entry in entries:
+            if any(part.startswith("-") and "=" in part for part in entry.split()):
+                spelled = " ".join(p for part in entry.split() for p in part.split("=", 1))
+                finding(b, "forbidden_flags", f"exec.forbidden_flags entry {entry!r} never "
+                        f"matches: the engine splits `--flag=value` in the argv, not in the "
+                        f"entry; spell it {spelled!r}")
+        if "launch" not in b.block:
+            finding(b, "exec_schema_version", "the exec block declares no launch template")
+        for key in EXEC_ARGV_KEYS:
+            if key not in b.block:
+                continue
+            argv = b.block[key]
+            if not _is_token_list(argv):
+                finding(b, key, f"exec.{key} is not a list of string tokens, so it cannot "
+                        f"be checked")
+                continue
+            bad = ea.forbidden_in(argv, forbidden)
+            if bad:
+                finding(b, key, f"exec.{key} holds the forbidden entry {bad!r}")
+        firsts = list(dict.fromkeys(e.split()[0] for e in forbidden if e.split()))
+        for key in EXEC_FLAG_NAME_KEYS:
+            names = b.block.get(key, [])
+            for name in names if isinstance(names, list) else [names]:
+                if not isinstance(name, str):
+                    finding(b, key, f"exec.{key} holds {name!r}, which is not a flag name")
+                    continue
+                first = ea.forbidden_in([name], firsts)
+                if first:
+                    spelled = [e for e in forbidden if e.split()[0] == first]
+                    finding(b, key, f"exec.{key} puts {name!r} on the argv, which begins the "
+                            f"forbidden entry {spelled[0]!r}")
+
+    fixtures = 0
+    for name in [b.name for b in scan.blocks] + scan.skipped:
+        path = scan.harness_dir / name / EXEC_ARGV_FIXTURE
+        if not path.is_file():
+            continue
+        fixtures += 1
+        rel = _safe_label(path, root)
+        doc, why = _argv_fixture(path)
+        if doc is None:
+            findings.append(Finding(rel, 1, EXEC_NO_BYPASS_CHECK, f"the rendered argv {why}"))
+            continue
+        for label, argv in doc.items():
+            bad = ea.forbidden_in(argv, own.get(name, seed))
+            if bad:
+                findings.append(Finding(rel, 1, EXEC_NO_BYPASS_CHECK,
+                                        f"rendered argv {label!r} holds the forbidden entry "
+                                        f"{bad!r}"))
+
+    # AC-2's union, across adapters. An adapter's own entries were matched above, so only
+    # another adapter's are left here: each hit is reported once (LESSON-749).
+    union = list(dict.fromkeys(e for b in scan.blocks for e in own[b.name]))
+    for b in scan.blocks:
+        others = [e for e in union if e not in own[b.name]]
+        for key in ("launch", "resume"):
+            argv = b.block.get(key)
+            bad = ea.forbidden_in(argv, others) if others and _is_token_list(argv) else None
+            if bad:
+                owners = ", ".join(o.name for o in scan.blocks if bad in own[o.name])
+                finding(b, key, f"exec.{key} holds {bad!r}, which {owners} forbids: every "
+                        f"launch and resume token must be outside the union of forbidden_flags")
+
+    findings.extend(_exec_scan_report(EXEC_NO_BYPASS_CHECK, scan, root,
+                                      f" and {fixtures} rendered argv fixture(s)"))
+    return findings
+
+
+def check_exit_class_vocabulary(root: Path, harness_dir: Path | None = None) -> list[Finding]:
+    """REQ-662 BR-8: every ``exec.exit_codes`` value in every adapter is one of REQ-659's
+    closed ExitClass (``EXIT_CLASS_VOCABULARY``), and the engine's set is that set."""
+    scan = _exec_scan(root, harness_dir, EXIT_CLASS_VOCABULARY_CHECK)
+    if scan is None:
+        return []
+    if scan.engine is None:
+        return scan.findings
+    ha = scan.engine[1]
+    findings = list(scan.findings)
+    closed = " | ".join(EXIT_CLASS_VOCABULARY)
+    engine_set = tuple(getattr(ha, "EXIT_CLASSES", ()))
+    if sorted(engine_set) != sorted(EXIT_CLASS_VOCABULARY):
+        findings.append(Finding("tools/adlc/harness_adapter.py", 1, EXIT_CLASS_VOCABULARY_CHECK,
+                                f"EXIT_CLASSES is {engine_set!r}, not the closed ExitClass "
+                                f"{closed}"))
+    codes = 0
+    for b in scan.blocks:
+        line = _exec_key_line(b.text, "exit_codes")
+        mapping = b.block.get("exit_codes")
+        if not isinstance(mapping, dict):
+            findings.append(Finding(b.rel, line, EXIT_CLASS_VOCABULARY_CHECK,
+                                    "the exec block declares no exit_codes map"))
+            continue
+        for code, klass in mapping.items():
+            codes += 1
+            if klass not in EXIT_CLASS_VOCABULARY:
+                findings.append(Finding(b.rel, line, EXIT_CLASS_VOCABULARY_CHECK,
+                                        f"exec.exit_codes maps {code!r} to {klass!r}, outside "
+                                        f"the closed ExitClass {closed}"))
+    findings.extend(_exec_scan_report(EXIT_CLASS_VOCABULARY_CHECK, scan, root,
+                                      f" holding {codes} exit code(s)"))
     return findings
 
 
