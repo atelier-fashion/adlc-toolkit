@@ -11,13 +11,16 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
 
 import exec_gates as eg  # noqa: E402
+import exec_helpers as eh  # noqa: E402
 import exec_safety as es  # noqa: E402
 import toolkit_root  # noqa: E402
 
@@ -292,6 +295,119 @@ def test_surface_change_is_on_the_changes_the_gate_list(repo):
     # REQ-659's own lines are unchanged, and the two-argument call still reads as before.
     assert eg.gate_lines([".adlc/partials/forge.sh"], []) == [
         "changes the gate: touches .adlc/partials/forge.sh"]
+
+
+# -- the hiding the gate backs, through the engine (BR-17) ---------------------------------
+def _config(root, *args):
+    """``git config`` in ``root``, or None when the key is unset."""
+    res = subprocess.run(["git", "-C", str(root), "config"] + list(args),
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    return res.stdout.strip() if res.returncode == 0 else None
+
+
+def _status(root):
+    return eh.git(root, "status", "--porcelain", "-uall").splitlines()
+
+
+def _text(root, rel):
+    path = os.path.join(str(root), rel)
+    if not os.path.lexists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_tracked_restored_from_launch_blob_and_untracked_hidden(tmp_path, monkeypatch):
+    """AC-4, AC-20: run against a tracked and an untracked exec-rendered path, the working copy
+    shows neither, the main checkout's `git status` is unchanged and the shared `info/exclude`
+    is never written: the untracked render is named by the working copy's own
+    core.excludesFile, an engine file in the run directory that keeps the operator's global
+    excludes. When the run ends, a tracked path the fake edited and one whose HEAD it moved are
+    both restored from the blob oid recorded at launch, not from HEAD; the untracked render is
+    removed and every mark and setting the engine made in the working copy is undone."""
+    box = eh.file_sandbox(tmp_path, monkeypatch)
+    base = {eh.FILE_CONFIG: 'model = "operator"\n', eh.FILE_HOOKS: '{"hooks": {}}\n'}
+    eh.commit_on_main(box, base)
+    launch = {rel: eh.git(box.repo, "rev-parse", "HEAD:" + rel).strip() for rel in base}
+    ignore = box.home / ".config" / "git" / "ignore"
+    ignore.parent.mkdir(parents=True)
+    ignore.write_text("*.orig\n")
+    info = box.repo / ".git" / "info" / "exclude"
+    shared = info.read_bytes() if info.exists() else None
+    before = _status(box.repo)
+    moved, edited = "moved by the fake\n", 'model = "edited by the fake"\n'
+    # The fake un-hides the tracked hook file the render removed and commits its own version,
+    # which moves HEAD's blob for it; after its commit it edits the tracked config surface.
+    box.req(add=["src"], surface_writes={eh.FILE_CONFIG: edited}, commands=[
+        "git update-index --no-skip-worktree %s" % eh.FILE_HOOKS,
+        "printf 'moved by the fake\\n' > %s" % eh.FILE_HOOKS, "git add %s" % eh.FILE_HOOKS])
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    wc = run.wc
+    assert run.status == "awaiting_approval"
+    assert run.doc["worktreeConfig"] == {rid: "enabled" for rid in run.doc["repos"]}
+    assert _config(box.repo, "--local", "--get", "extensions.worktreeConfig") == "true"
+    # At the halt: hidden from the working copy, and nothing changed in the main checkout.
+    assert eh.git(wc, "ls-files", "-t", "--", eh.FILE_CONFIG).split() == ["S", eh.FILE_CONFIG]
+    assert _text(wc, eh.FILE_CONFIG) == edited and _text(wc, eh.FILE_RULE) is not None
+    assert _status(wc) == []
+    excludes = _config(wc, "--worktree", "--get", "core.excludesFile")
+    assert excludes and excludes.startswith(run.path + os.sep)
+    assert not os.path.realpath(excludes).startswith(os.path.realpath(wc) + os.sep)
+    lines = open(excludes, encoding="utf-8").read().splitlines()
+    assert "*.orig" in lines and lines[-1] == "/" + eh.FILE_RULE
+    assert _config(box.repo, "--local", "--get", "core.excludesFile") is None
+    assert _status(box.repo) == before
+    assert (info.read_bytes() if info.exists() else None) == shared
+    record = run.doc["hidden"][wc]
+    assert record["launchBlobs"] == {rel: {"mode": "100644", "oid": oid}
+                                     for rel, oid in launch.items()}
+    assert record["untracked"] == [eh.FILE_RULE] and record["excludesFile"] == excludes
+    head = eh.git(wc, "rev-parse", "HEAD:" + eh.FILE_HOOKS).strip()
+    assert head != launch[eh.FILE_HOOKS] and eh.git(wc, "show", head) == moved
+    plan = run.ledger().read()["plan"]
+    assert plan[eg.EXEC_PATH_KEY] == [eh.FILE_HOOKS]
+    assert eh.events(box, run, "exec_path_touched") == [
+        {"harness": box.harness, "repo": run.primary_repo, "path": eh.FILE_HOOKS,
+         "status": "M"}]
+    # The run ends with its working copy left to a person: restored from the launch blobs.
+    orch.reject("REQ-901", "touches an exec path", decided_by="operator")
+    assert _text(wc, eh.FILE_CONFIG) == base[eh.FILE_CONFIG]
+    assert _text(wc, eh.FILE_HOOKS) == base[eh.FILE_HOOKS]
+    assert _text(wc, eh.FILE_RULE) is None
+    assert "S" not in [ln.split()[0] for ln in eh.git(wc, "ls-files", "-t").splitlines()]
+    assert _config(wc, "--worktree", "--get", "core.excludesFile") is None
+    # HEAD still holds the fake's commit, so the restored launch blob reads as a change.
+    assert _status(wc) == [" M " + eh.FILE_HOOKS]
+    assert _status(box.repo) == before
+    assert (info.read_bytes() if info.exists() else None) == shared
+    [done] = eh.events(box, run, "exec_paths_restored")
+    assert done == {"restored": sorted(base), "removed": [eh.FILE_RULE],
+                    "unmarked": [eh.FILE_CONFIG], "problems": []}
+
+
+def test_abort_and_failure_restore_the_working_copy(tmp_path, monkeypatch):
+    """BR-17: a run aborted mid-run and a run that fails each leave the working copy to a
+    person, restored: the tracked surface back at its launch blob and no longer
+    skip-worktree, the untracked render gone and core.excludesFile unset."""
+    box = eh.file_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
+    base = 'model = "operator"\n'
+    eh.commit_on_main(box, {eh.FILE_CONFIG: base})
+    box.req("REQ-901", sleep_first=30)
+    box.req("REQ-902", exit_early=1, text="it broke")
+    orch = box.start(shared=True)
+    time.sleep(0.2)
+    orch.abort("REQ-901", by="operator")
+    box.wait(orch)
+    for req in ("REQ-901", "REQ-902"):
+        run = orch.runs[req]
+        assert run.status == "failed", req
+        assert run.doc["hidden"][run.wc]["skipWorktree"] == []
+        assert _text(run.wc, eh.FILE_CONFIG) == base and _text(run.wc, eh.FILE_RULE) is None
+        assert eh.git(run.wc, "ls-files", "-t", "--", eh.FILE_CONFIG).split() == [
+            "H", eh.FILE_CONFIG]
+        assert _config(run.wc, "--worktree", "--get", "core.excludesFile") is None
+        assert _status(run.wc) == [], req
 
 
 def test_targets_come_from_the_block_and_the_run_record():

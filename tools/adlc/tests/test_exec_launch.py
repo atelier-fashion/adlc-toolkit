@@ -155,6 +155,57 @@ def test_sandbox_setting_refused(box, monkeypatch):
         box.start(shared=True)
 
 
+def _local_config(root, key):
+    """``key`` in the repository's own git config, or None when it is unset."""
+    res = subprocess.run(["git", "-C", str(root), "config", "--local", "--get", key],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    return res.stdout.strip() if res.returncode == 0 else None
+
+
+def test_preflight_needs_worktree_config(tmp_path, monkeypatch):
+    """REQ-662 BR-17, AC-20: a file-rendering adapter hides its untracked renders through
+    `git config --worktree`, so the pre-flight refuses when extensions.worktreeConfig is
+    unavailable, naming it and launching nothing: a git too old for it, a config that sets it
+    false, one that sets core.worktree (enabling it would make every working copy read that),
+    and a write git refuses. Otherwise it sets it once, says so and leaves it set. A
+    flags-only adapter never reaches the check (BR-1)."""
+    import exec_surfaces as esf
+    (tmp_path / "claude").mkdir()
+    claude = eh.Sandbox(tmp_path / "claude")
+    claude.orch().preflight(claude.reqs, shared=True)
+    assert _local_config(claude.repo, esf.WORKTREE_CONFIG) is None
+    box = eh.file_sandbox(tmp_path / "file", monkeypatch)
+    key = "extensions.worktreeConfig"
+
+    def refused(match):
+        with pytest.raises(se.Refused, match=match) as caught:
+            box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+        assert key in str(caught.value) and "nothing is launched" in str(caught.value)
+        assert _local_config(box.repo, key) in (None, "false") and not box.launches()
+
+    floor = esf.WORKTREE_CONFIG_GIT
+    monkeypatch.setattr(esf, "WORKTREE_CONFIG_GIT", (99, 0))
+    refused(r"needs git 99\.0 or newer")
+    monkeypatch.setattr(esf, "WORKTREE_CONFIG_GIT", floor)
+    lock = box.repo / ".git" / "config.lock"
+    lock.write_text("")
+    refused(r"enabling extensions\.worktreeConfig in .* was refused")
+    lock.unlink()
+    eh.git(box.repo, "config", key, "false")
+    refused(r"extensions\.worktreeConfig is false")
+    eh.git(box.repo, "config", "--unset", key)
+    eh.git(box.repo, "config", "core.worktree", os.path.realpath(str(box.repo)))
+    refused(r"its git config sets core\.worktree")
+    eh.git(box.repo, "config", "--unset", "core.worktree")
+    note = "NOTE: set extensions.worktreeConfig = true in "
+    batch = box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    assert set(batch.worktree_config.values()) == {"enabled"} and batch.worktree_config
+    assert _local_config(box.repo, key) == "true"
+    batch = box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    assert set(batch.worktree_config.values()) == {"present"}
+    assert box.out.getvalue().count(note) == 1
+
+
 def test_scoped_token_or_shared(box):
     with pytest.raises(se.Refused, match="--shared-credentials"):
         box.start(orch=box.orch(CHILD_GH=""))

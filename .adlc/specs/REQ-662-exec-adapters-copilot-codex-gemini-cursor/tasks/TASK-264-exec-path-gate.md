@@ -1,11 +1,11 @@
 ---
 id: TASK-264
 title: "The halt-time exec-path PR-diff gate, and hiding and restoring exec-rendered paths"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 dependencies: [TASK-263]
 ---
 
@@ -36,6 +36,8 @@ Implement BR-17 (architecture ADR-4, last three bullets but one). Exec-rendered 
 |------|------|----------|-------------|
 | BR-17 | test-case | `tools/adlc/tests/test_exec_gates.py::test_exec_path_gate_fixtures` | yes |
 | AC-20 | test-case | `tools/adlc/tests/test_exec_gates.py::test_exec_path_gate_fixtures` | yes |
+| BR-17 | test-case | `tools/adlc/tests/test_exec_approve.py::test_exec_path_touched_refuses_approve` | yes |
+| AC-20 | test-case | `tools/adlc/tests/test_exec_launch.py::test_preflight_needs_worktree_config` | yes |
 | AC-4 | test-case | `tools/adlc/tests/test_exec_gates.py::test_tracked_restored_from_launch_blob_and_untracked_hidden` | yes |
 | AC-18 | test-case | `tools/adlc/tests/test_exec_gates.py::test_surface_change_is_on_the_changes_the_gate_list` | yes |
 

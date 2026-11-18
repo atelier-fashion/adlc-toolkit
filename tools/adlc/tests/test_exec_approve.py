@@ -712,6 +712,89 @@ def test_planted_partials_and_gate_change(tmp_path):
     assert all(r["argv"][0] != ".adlc/partials/forge.sh" for r in box.log(run))
 
 
+#: Each way a PR reaches an exec-rendered path or a config surface (REQ-662 BR-17): the shell
+#: commands the fake runs in its working copy before its commit, which defeat the engine's
+#: best-effort hiding, and the one ``[status, path]`` hit the halt-time gate must find.
+EXEC_PATH_CASES = {
+    "REQ-901": (["git add -f %s" % eh.FILE_RULE], ["A", eh.FILE_RULE]),
+    "REQ-902": (["git update-index --no-skip-worktree %s" % eh.FILE_CONFIG,
+                 "git add %s" % eh.FILE_CONFIG], ["M", eh.FILE_CONFIG]),
+    "REQ-903": (["git add --sparse --renormalize %s" % eh.FILE_CONFIG], ["M", eh.FILE_CONFIG]),
+    "REQ-904": (["git update-index --force-remove %s" % eh.FILE_HOOKS], ["D", eh.FILE_HOOKS]),
+    "REQ-905": (["git mv README.md .fake-exec-file/README.md"],
+                ["A", ".fake-exec-file/README.md"]),
+    "REQ-906": (["git update-index --no-skip-worktree %s" % eh.FILE_CONFIG, "mkdir -p docs",
+                 "git mv %s docs/config.toml" % eh.FILE_CONFIG], ["D", eh.FILE_CONFIG]),
+    "REQ-907": (["git update-index --add --cacheinfo 100644,$(printf 'x\\n' | git hash-object "
+                 "-w --stdin),.FAKE-EXEC-FILE/Config.TOML"], ["A", ".FAKE-EXEC-FILE/Config.TOML"]),
+    "REQ-908": (["mkdir -p .fake-exec-file/prompts", "printf 'new\\n' > .fake-exec-file/prompts/"
+                 "new.md", "git add .fake-exec-file/prompts/new.md"],
+                ["A", ".fake-exec-file/prompts/new.md"]),
+}
+
+
+def test_exec_path_touched_refuses_approve(tmp_path, monkeypatch):
+    """REQ-662 BR-17, AC-20: a PR that adds (past the excludes file), modifies (through
+    `--no-skip-worktree` or `add --sparse`), deletes, renames into or out of an exec-rendered
+    path or the config-surface directory, or adds a case variant of one, puts that path in the
+    plan's execPathTouched at the halt, one `exec_path_touched` event and a dashboard line;
+    approve refuses it with --ack-gate-change and its gate token or without, and the token
+    stays unspent. REQ-659's "changes the gate" list names each at the halt (AC-18). The PR
+    that touches none, committed with `git add -A` over the hidden renders, leaves the list
+    empty and merges (the must-not-refuse case); a plan without the gate result is refused and
+    re-halted, and the restore runs before the merge."""
+    monkeypatch.setattr(se, "MAX_CONCURRENT", 1)        # one fake at a time on the repo
+    benign = "REQ-909"
+    box = eh.file_sandbox(tmp_path, monkeypatch, reqs=tuple(sorted(EXEC_PATH_CASES)) + (benign,))
+    eh.commit_on_main(box, {eh.FILE_CONFIG: 'model = "operator"\n',
+                            eh.FILE_HOOKS: '{"hooks": {}}\n'})
+    for req, (commands, _hit) in EXEC_PATH_CASES.items():
+        box.req(req, add=["src"], commands=commands)
+    box.req(benign, closeout={"add": [".adlc"]})
+    before = eh.git(box.repo, "status", "--porcelain", "-uall")
+    orch = box.go(shared=True)
+    for req, (_commands, (status, path)) in sorted(EXEC_PATH_CASES.items()):
+        run = orch.runs[req]
+        assert run.status == "awaiting_approval", req
+        plan = run.ledger().read()["plan"]
+        assert plan[eg.EXEC_PATH_KEY] == [path], (req, plan["changedPaths"])
+        assert [(e["status"], e["path"]) for e in eh.events(box, run, "exec_path_touched")] == [
+            (status, path)], req
+        assert "changes the gate: touches a config surface: %s" % path in plan["changesGate"]
+        assert "exec path touched: %s; approve will refuse" % path in box.out.getvalue()
+        token, gate = box.tokens(req)
+        assert token and gate, req
+        for ack, gate_token in ((True, gate), (False, None), (True, gate)):
+            with pytest.raises(se.Refused, match="--ack-gate-change does not cover it") as caught:
+                orch.approve(req, token, gate_token, ack=ack, decided_by="operator")
+            assert path in str(caught.value) and "BR-17" in str(caught.value)
+        assert run.status == "awaiting_approval" and req in orch.tokens
+        assert run.ledger().read()["decision"] is None
+    assert merged_count(box) == 0
+    run = orch.runs[benign]
+    plan = run.ledger().read()["plan"]
+    assert plan[eg.EXEC_PATH_KEY] == [] and plan["changesGate"] == []
+    assert plan["changedPaths"] == ["src/%s.txt" % benign]
+    # A plan an engine without the gate wrote: refused, and re-halted with the gate's result.
+    stale = dict(plan)
+    del stale[eg.EXEC_PATH_KEY]
+    run.ledger().update_plan(stale)
+    run.save()
+    token, _gate = box.tokens(benign)
+    with pytest.raises(se.Refused, match="records no exec-path gate result.*re-halted"):
+        orch.approve(benign, token, decided_by="operator")
+    assert run.ledger().read()["plan"][eg.EXEC_PATH_KEY] == []
+    assert box.tokens(benign)[0] != token
+    assert box.approve(orch, benign) == "approved"
+    assert run.status == "merged" and merged_count(box) == 2
+    names = [(r["kind"], " ".join(r["argv"])) for r in box.log(run)]
+    restored = next(i for i, (kind, _a) in enumerate(names) if kind == "exec_paths_restored")
+    merge = next(i for i, (_k, argv) in enumerate(names) if "adlc_forge_pr_merge" in argv)
+    assert restored < merge
+    assert not os.path.exists(run.wc)
+    assert eh.git(box.repo, "status", "--porcelain", "-uall") == before
+
+
 def test_planted_hook_stops_everything(tmp_path):
     sentinel = tmp_path / "sentinel"
     box = eh.Sandbox(tmp_path)

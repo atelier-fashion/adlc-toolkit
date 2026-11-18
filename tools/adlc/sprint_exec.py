@@ -60,6 +60,21 @@ def _commands(items):
     return ", ".join("`%s`" % item.command for item in items)
 
 
+#: Held while the engine changes a file the common gitdir checksum covers and carries every
+#: box past it (``Orchestrator._gitdir_write``), and while any box checks that checksum, so no
+#: check, in the supervisor or the merge worker, reads the change before its box is carried.
+GITDIR_LOCK = threading.RLock()
+
+
+class Toolbox(es.Toolbox):
+    """REQ-659's Toolbox, whose common gitdir check waits on :data:`GITDIR_LOCK` (REQ-662
+    BR-17: the engine itself writes a working copy's ``config.worktree``)."""
+
+    def check_gitdir(self, repo):
+        with GITDIR_LOCK:
+            return es.Toolbox.check_gitdir(self, repo)
+
+
 class Run(object):
     """One REQ's run directory and its orchestrator-owned record."""
 
@@ -263,6 +278,9 @@ class Batch(object):
         # The user policy folder's manifest, as the pre-flight wrote and recorded it (REQ-662
         # BR-4); None when the adapter declares no user policy file.
         self.policy = None
+        # Per repo id, `present` or `enabled`: extensions.worktreeConfig, which hiding what a
+        # file-rendering adapter renders needs (REQ-662 BR-17). Empty for any other adapter.
+        self.worktree_config = {}
 
 
 class Orchestrator(object):
@@ -296,7 +314,7 @@ class Orchestrator(object):
 
     def box(self, run):
         if run.req not in self.boxes:
-            self.boxes[run.req] = es.Toolbox.load(run.path, self.toolkit, self.environ)
+            self.boxes[run.req] = Toolbox.load(run.path, self.toolkit, self.environ)
         return self.boxes[run.req]
 
     def adapter(self, run):
@@ -488,6 +506,21 @@ class Orchestrator(object):
             value = box.forge("adlc_forge_branch_protection", [ib], self.primary,
                               extra).stdout.strip() or "unknown"
             batch.protection = value if value in ("protected", "unprotected") else "unknown"
+            # What a file-rendering adapter renders untracked is hidden per working copy with
+            # `git config --worktree`, which needs extensions.worktreeConfig in each repo: set
+            # here when absent, and left set (REQ-662 BR-17). No other adapter reaches this.
+            if esf.renders_files(adapter.block):
+                for rid, spec in sorted(batch.repos.items()):
+                    try:
+                        batch.worktree_config[rid] = esf.worktree_config(box, spec["path"])
+                    except esf.SurfaceRefused as exc:
+                        raise Refused("harness %s: %s, so nothing is launched (REQ-662 BR-17)"
+                                      % (adapter.name, exc))
+                    if batch.worktree_config[rid] == "enabled":
+                        self.say("NOTE: set %s = true in %s's git config, so harness %s's "
+                                 "renders can be hidden per working copy; it stays set "
+                                 "(REQ-662 BR-17)" % (esf.WORKTREE_CONFIG, spec["path"],
+                                                      adapter.name))
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
         if batch.deny_unsupported and batch.config["require_branch_protection"] and \
@@ -569,7 +602,7 @@ class Orchestrator(object):
             raise
 
     def _prepare(self, req, batch, run_dir):
-        box = es.Toolbox(run_dir, self.toolkit, self.environ)
+        box = Toolbox(run_dir, self.toolkit, self.environ)
         box.prepare(batch.provider)
         repos = {}
         launch_tip = {}
@@ -620,6 +653,10 @@ class Orchestrator(object):
             # What this run checks the user policy folder against, before each launch and
             # resume and at exit and the halt (REQ-662 BR-4). Absent: no policy file.
             doc["policyManifest"] = batch.policy
+        if batch.worktree_config:
+            # Per repo id, whether the pre-flight found extensions.worktreeConfig or set it
+            # (REQ-662 BR-17). Absent for an adapter that renders nothing into a working copy.
+            doc["worktreeConfig"] = dict(batch.worktree_config)
         run = Run(run_dir, doc)
         try:
             data = ep.pipeline_prompt(self.toolkit, self.primary, req, branch, self.primary,
@@ -745,6 +782,7 @@ class Orchestrator(object):
                                 "checksum_matched": change.found == change.expected,
                                 "expected": change.expected, "found": change.found,
                                 "where": where})
+            self._hide(run, wc, manifest, where)
         run.save()
 
     def verify_surfaces(self, run, wcs, where):
@@ -776,6 +814,90 @@ class Orchestrator(object):
                                       "effective_mid_run": esf.reload_effective(block)})
             run.violation(esf.violation_text(change, block, where))
         return found
+
+    # ---- REQ-662 BR-17: what the render wrote, hidden from git and restored ----------------
+    @staticmethod
+    def _repo_of(run, wc):
+        """The repo a working copy of the run belongs to; the close-out's is the primary's."""
+        for spec in run.doc["repos"].values():
+            if spec["workingCopy"] == wc:
+                return spec["path"]
+        return run.primary_path
+
+    def _gitdir_write(self, run, repo, write):
+        """``write()``, the engine's own change to a file REQ-659's common gitdir checksum
+        covers (a working copy's ``config.worktree``, or the worktree's removal), with every
+        box of this orchestrator's runs carried from the checksum just before it to the one
+        just after. A box whose checksum already differed keeps its own, so a change the engine
+        did not make still reads as a violation. Every check waits meanwhile."""
+        tree = self.box(run).trees.get(repo)
+        if tree is None:
+            return write()
+        with GITDIR_LOCK:
+            before = es.gitdir_digest(tree["common"])
+            try:
+                return write()
+            finally:
+                after = es.gitdir_digest(tree["common"])
+                if after != before:
+                    for other in self.all_runs():
+                        try:
+                            box = self.box(other)
+                        except (OSError, ValueError, KeyError):
+                            continue        # a run whose toolbox is gone checks nothing
+                        held = [t for t in box.trees.values()
+                                if t["common"] == tree["common"] and t["digest"] == before]
+                        for entry in held:
+                            entry["digest"] = after
+                        if held:
+                            box.save()
+
+    def _hide(self, run, wc, manifest, where):
+        """BR-17, after each render: the render in ``wc`` hidden from git, best effort
+        (``exec_surfaces.hide``). The run record keeps, per working copy under ``hidden``, the
+        blob oids recorded at launch and what was hidden, which restoring needs. The excludes
+        file is the run directory's, outside the working copy. A refusal is :class:`Refused`."""
+        box = self.box(run)
+        repo = self._repo_of(run, wc)
+        record = run.doc.setdefault("hidden", {}).setdefault(wc, {})
+        excludes = run.file("excludes-%s" % hashlib.sha256(wc.encode("utf-8")).hexdigest()[:12])
+        try:
+            esf.hide(box, repo, wc, manifest, record, excludes, self.environ,
+                     lambda write: self._gitdir_write(run, repo, write))
+        except (esf.SurfaceRefused, OSError) as exc:
+            raise Refused("harness %s: the %s is refused: hiding the render from git in %s: %s"
+                          % (self.adapter(run).name, where, wc, exc))
+        box.log("exec_paths_hidden", [self.adapter(run).name, wc], wc, None,
+                detail={"skipWorktree": record["skipWorktree"], "untracked": record["untracked"],
+                        "excludesFile": record.get("excludesFile"), "where": where})
+
+    def restore_surfaces(self, run, wcs=None):
+        """BR-17: each working copy in ``wcs`` (by default every one the run hid a render in)
+        back to what it was at launch, from the blob oids the run record holds, never HEAD
+        (``exec_surfaces.restore``). Called before the final push and at cleanup, and where a
+        run ends with its working copy left to a person (rejected, aborted, failed). A path that
+        cannot be restored is a note on the run, and nothing stops. A run that hid nothing
+        (every flags-only adapter, BR-1) does nothing here."""
+        records = run.doc.get("hidden") or {}
+        if not records:
+            return
+        box = self.box(run)
+        for wc in sorted(records):
+            if wcs is not None and wc not in wcs:
+                continue
+            repo = self._repo_of(run, wc)
+            try:
+                done = esf.restore(box, repo, wc, records[wc], run.file("restore"),
+                                   lambda write: self._gitdir_write(run, repo, write))
+            except (esf.SurfaceRefused, OSError, es.RuleBViolation) as exc:
+                done = {"restored": [], "removed": [], "unmarked": [], "problems": [str(exc)]}
+            for problem in done["problems"]:
+                run.doc.setdefault("notes", []).append(
+                    "restoring %s after the run: %s (REQ-662 BR-17)" % (wc, problem))
+            if any(done.values()):
+                box.log("exec_paths_restored", [self.adapter(run).name, wc], wc, None,
+                        detail=done)
+        run.save()
 
     def _argv(self, run, log_name, resume=None, wc=None, branch=None, write_roots=None,
               add_dir=None, operator=None):
@@ -1149,6 +1271,9 @@ class Orchestrator(object):
         run.status = status
         self.revoke_trust(run)
         self._carry(run, state)
+        if status == "failed":
+            # The working copy is left to a person (REQ-662 BR-17).
+            self.restore_surfaces(run)
         if note and status == "failed":
             merged = run.read_primary_state()
             notes = merged.get("notes") if isinstance(merged.get("notes"), list) else []
@@ -1180,8 +1305,11 @@ class Orchestrator(object):
         """What approval will perform, from the run record and the forge (BR-16)."""
         box = self.box(run)
         ib = run.doc["integrationBranch"]
+        block = self.adapter(run).block
+        manifests = run.doc.get("surfaces") or {}
         prs = []
         changed = []
+        touched = []
         for rid in self._touched(run, state):
             repo = run.doc["repos"][rid]["path"]
             rib = run.doc["integrationBranches"][rid]
@@ -1192,6 +1320,12 @@ class Orchestrator(object):
                                    % (run.doc["branch"], pr["headRefOid"], oid))
             eg.fetch_integration(box, repo, rib)
             paths = eg.changed_paths(box, repo, rib, oid)
+            # REQ-662 BR-17: the exec-path gate over this PR's head and the diff just read. Its
+            # targets come from the adapter and the run record, never the working copy.
+            rendered = esf.rendered_paths(manifests.get(run.doc["repos"][rid]["workingCopy"])
+                                          or {})[0]
+            touched += eg.exec_path_touched(box, repo, rib, pr["headRefOid"],
+                                            eg.exec_path_targets(block, rendered), changed=paths)
             pr["repo"] = rid
             pr["changedPaths"] = paths
             prs.append(pr)
@@ -1203,11 +1337,12 @@ class Orchestrator(object):
         section = eg.exec_config(eg.show_blob(box, run.primary_path, "origin/%s" % ib,
                                               ".adlc/config.yml") or "").get("deploy") or {}
         hits = eg.deploy_surface_hits(changed, section.get("command") or "")
-        lines = eg.gate_lines(changed, hits)
+        lines = eg.gate_lines(changed, hits, block.get("config_surfaces") or [])
         protection = box.forge("adlc_forge_branch_protection", [ib],
                                run.primary_path).stdout.strip() or "unknown"
         return {"prs": prs, "deployPlan": deploy, "deploySkipped": skipped, "changesGate": lines,
                 "ackGateChange": False, "changedPaths": sorted(set(changed)),
+                eg.EXEC_PATH_KEY: sorted({path for _status, path in touched}),
                 "allowUnprotected": run.doc["allowUnprotected"],
                 "sharedCredentials": run.doc["sharedCredentials"], "protection": protection,
                 "allowUnverified": list(run.doc.get("allowUnverified") or [])}
@@ -1234,6 +1369,7 @@ class Orchestrator(object):
             run.violation(str(exc))
             self._block(run, state, "%s: %s" % (PROTOCOL, exc))
             return
+        self._exec_path_events(run, plan)
         run.status = "awaiting_approval"
         # Said at the halt, before approval is asked for: a run with no session id, or on a
         # harness with no resume template, cannot go on past the merge (REQ-662 BR-7).
@@ -1241,6 +1377,20 @@ class Orchestrator(object):
         run.doc["resume"] = "ok" if resumable else "impossible"
         self._carry(run, state)
         self.announce(run, self.mint(run))
+
+    def _exec_path_events(self, run, plan):
+        """One ``exec_path_touched`` event per hit of the plan's exec-path gate (REQ-662 BR-17):
+        the harness, the repo, the path as the diff spells it and its ``--no-renames`` status.
+        The dashboard row says that approve will refuse (:func:`render_row`)."""
+        touched = set(plan.get(eg.EXEC_PATH_KEY) or [])
+        name = self.adapter(run).name
+        for pr in plan["prs"]:
+            for status, path in pr.get("changedPaths") or []:
+                if path in touched:
+                    self.box(run).log("exec_path_touched", [name, status, path],
+                                      run.doc["repos"][pr["repo"]]["path"], None,
+                                      detail={"harness": name, "repo": pr["repo"], "path": path,
+                                              "status": status})
 
     def _crosscheck(self, run, state, plan):
         approval = state.get("approval") if isinstance(state.get("approval"), dict) else {}
@@ -1331,6 +1481,17 @@ class Orchestrator(object):
                 raise Refused("%s: the approve token is wrong or already spent; "
                               "the dashboard prints the current one" % req)
             plan = run.ledger().read()["plan"]
+            # REQ-662 BR-17, before any acknowledgement is read: --ack-gate-change does not
+            # reach this, and the token stays unspent. A plan with no gate result was halted by
+            # an engine without the gate: the run re-halts, so the operator approves a gated plan.
+            try:
+                eg.check_exec_path(plan)
+            except eg.ExecPathTouched as exc:
+                if exc.paths:
+                    raise Refused("%s: %s (REQ-662 BR-17)" % (req, exc))
+                self.rehalt(run, eg.EXEC_PATH_KEY)
+                raise Refused("%s: %s; it is re-halted with a fresh plan, so approve with the "
+                              "token the dashboard now prints (REQ-662 BR-17)" % (req, exc))
             lines = plan.get("changesGate") or []
             if lines:
                 if not ack:
@@ -1370,6 +1531,7 @@ class Orchestrator(object):
             self.tokens.pop(req, None)
             self.revoke_trust(run)
             self._carry(run, {})
+            self.restore_surfaces(run)          # the working copy is left (REQ-662 BR-17)
             self._emit(run, "failed", "other")
             self.say("%s rejected: %s" % (req, reason))
             self._release_holds()
@@ -1432,6 +1594,7 @@ class Orchestrator(object):
             self.reap(run, int(pid))
             if proc is not None:
                 proc.poll()
+            self.restore_surfaces(run)          # the working copy is left (REQ-662 BR-17)
             run.exec.update({"abortedBy": by, "abortedAt": el.now()})
             run.status = "failed"
             self.revoke_trust(run)
@@ -1527,6 +1690,8 @@ class Orchestrator(object):
             plan = run.ledger().read()["plan"]
             run.doc.setdefault("notes", []).append("the plan could not be recomputed: %s" % exc)
         run.ledger().supersede(plan, field)
+        # A fresh plan carries a fresh exec-path gate result (REQ-662 BR-17).
+        self._exec_path_events(run, plan)
         run.status = "awaiting_approval"
         run.doc["holdBehind"] = None
         self._carry(run, {})
@@ -1562,6 +1727,9 @@ class Orchestrator(object):
                     self._block(run, run.read_primary_state(),
                                 "%s: %s" % (PROTOCOL, "; ".join(hits)))
                     return
+            # Before the final push (a rebase's) and the merge, what the engine rendered and hid
+            # goes back to what it was at launch (REQ-662 BR-17).
+            self.restore_surfaces(run)
             for pr in plan["prs"]:
                 outcome = self._merge_one(run, pr, plan)
                 if outcome != "merged":
@@ -1887,10 +2055,14 @@ class Orchestrator(object):
             self._close_out_failed(run, "failed", "the close-out wrote no terminal record")
 
     def cleanup(self, run):
-        """Every working copy, touched or not, and the close-out's (BR-13)."""
+        """Every working copy, touched or not, and the close-out's (BR-13). What the engine
+        rendered and hid in each is restored first, and a removal that takes a working copy's
+        own config with it is the engine's own gitdir change (REQ-662 BR-17)."""
         box = self.box(run)
+        self.restore_surfaces(run)
         for spec in run.doc["repos"].values():
-            res = box.git(spec["path"], ["worktree", "remove", "--force", spec["workingCopy"]])
+            res = self._gitdir_write(run, spec["path"], lambda: box.git(
+                spec["path"], ["worktree", "remove", "--force", spec["workingCopy"]]))
             if res.returncode != 0:
                 run.doc.setdefault("notes", []).append("cleanup of %s: %s" % (
                     spec["workingCopy"], res.stderr.strip()[:200]))
@@ -1900,7 +2072,8 @@ class Orchestrator(object):
             box.log("one_way_move", ["cleanup", spec["workingCopy"]], spec["path"], 0)
         close = run.doc.get("closeOutWorkingCopy")
         if close:
-            box.git(run.primary_path, ["worktree", "remove", "--force", close])
+            self._gitdir_write(run, run.primary_path, lambda: box.git(
+                run.primary_path, ["worktree", "remove", "--force", close]))
             box.git(run.primary_path, ["branch", "-D", "chore/%s-close-out" % run.req])
 
     def unblock_after(self, merged):
@@ -1923,6 +2096,9 @@ class Orchestrator(object):
             self.say("manual resume needed for %s (worktree gone)" % run.req)
             return
         eg.fetch_integration(box, repo, ib)
+        # The rebase checks out over a hidden path, so the working copy goes back to what it
+        # was at launch first; the relaunch renders and hides again (REQ-662 BR-17).
+        self.restore_surfaces(run, [run.wc])
         old = box.git(repo, ["rev-parse", "HEAD"], cwd=run.wc).stdout.strip()
         res = box.git(repo, ["rebase", "origin/%s" % ib], cwd=run.wc)
         if res.returncode != 0:
@@ -2103,6 +2279,13 @@ def render_row(run, violations=()):
         lines.append("  then: close-out, cleanup")
         for line in plan.get("changesGate") or []:
             lines.append("  %s" % line)
+        touched = plan.get(eg.EXEC_PATH_KEY)
+        if touched:
+            lines.append("  exec path touched: %s; approve will refuse, and --ack-gate-change "
+                         "does not cover it (REQ-662 BR-17)" % ", ".join(touched))
+        elif not isinstance(touched, list):
+            lines.append("  exec-path gate: this plan records no result, so approve will refuse "
+                         "and re-halt the run (REQ-662 BR-17)")
         if plan.get("allowUnprotected"):
             lines.append("  allowUnprotected: %s is %s" % (run.doc["integrationBranch"],
                                                            plan.get("protection")))

@@ -30,9 +30,14 @@ case-insensitive filesystem resolves them.
 launch and before a resume. TOML is read with ``toml_merge.scan``, the reader the renderer
 uses (LESSON-716), and a file that cannot be read with certainty refuses the run.
 
-No harness name is compared here: every path and key comes from the adapter. Hiding these
-paths from git and the halt-time PR-diff gate (BR-17) are not done here, and neither is the
-trust entry in the user config (BR-5). Standard library only.
+What the render writes or removes in a working copy is hidden from git for the run, best
+effort (BR-17): a tracked path is marked ``skip-worktree`` and restored from the blob oid
+recorded at launch, an untracked one is listed in an engine-owned excludes file that the
+working copy's own ``core.excludesFile`` names. The control is the halt-time PR-diff gate,
+which is ``exec_gates``'; the trust entry in the user config (BR-5) is not done here either.
+
+No harness name is compared here: every path and key comes from the adapter. Standard library
+only.
 """
 
 import contextlib
@@ -41,6 +46,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import tempfile
 import time
 from collections import OrderedDict, namedtuple
@@ -499,6 +505,256 @@ def violation_text(change, block, where):
              "re-render")
     return "config_surface_violation at %s: %s changed since the engine rendered it; %s" % (
         where, change_text(change), reach)
+
+
+# ---- hiding what the render wrote from git, and restoring it (BR-17) -------------------------
+#: The setting a working copy's own ``core.excludesFile`` needs, and the git that first has it.
+WORKTREE_CONFIG = "extensions.worktreeConfig"
+WORKTREE_CONFIG_GIT = (2, 20)
+#: The index modes a hidden path is written back as: a file and an executable file.
+_RESTORABLE = {"100644": FILE_MODE, "100755": 0o755}
+#: One stage-0 index entry: its ``ls-files -t`` tag (``S`` is skip-worktree), mode and oid.
+Entry = namedtuple("Entry", "tag mode oid")
+
+
+def renders_files(block):
+    """Whether an adapter writes into a working copy for a run (a rule file or a config
+    surface). Only such an adapter hides anything from git or needs
+    ``extensions.worktreeConfig``; a flags-only one is unchanged (BR-1)."""
+    return bool(block.get("config_surfaces") or block.get("rule_file"))
+
+
+def _git(box, repo, args, what, cwd=None, ok=(0,)):
+    """``box.git``, which runs with hooks and fsmonitor disabled; any other exit status
+    refuses, naming ``what``."""
+    res = box.git(repo, args, cwd=cwd)
+    if res.returncode not in ok:
+        raise SurfaceRefused("%s failed in %s: %s" % (what, cwd or repo, res.stderr.strip()))
+    return res
+
+
+def worktree_config(box, repo):
+    """``repo`` reading config per working copy, which hiding an untracked render needs:
+    ``present`` when its git config already sets ``extensions.worktreeConfig``, ``enabled``
+    when this call has set it in the repository's own config, where it stays set.
+
+    Refused, naming the setting, when the git predates it, when the config sets it false, and
+    when the config sets ``core.worktree`` or a true ``core.bare``: with the extension on,
+    every linked working copy reads those, and git's worktree documentation moves them to the
+    main working tree's ``config.worktree`` first, a change the engine does not make."""
+    match = re.search(r"(\d+)\.(\d+)", box.git(repo, ["version"]).stdout)
+    version = (int(match.group(1)), int(match.group(2))) if match else (0, 0)
+    if version < WORKTREE_CONFIG_GIT:
+        raise SurfaceRefused("%s needs git %d.%d or newer, and this git is %d.%d" % (
+            (WORKTREE_CONFIG,) + WORKTREE_CONFIG_GIT + version), WORKTREE_CONFIG)
+
+    def local(key, kind=None):
+        args = ["config", "--local"] + (["--type=" + kind] if kind else []) + ["--get", key]
+        res = _git(box, repo, args, "reading %s" % key, ok=(0, 1))
+        return res.stdout.strip() if res.returncode == 0 else None
+
+    have = local(WORKTREE_CONFIG, "bool")
+    if have == "true":
+        return "present"
+    if have == "false":
+        raise SurfaceRefused("%s is false in %s's git config, and the engine hides what it "
+                             "renders in a working copy through `git config --worktree`, which "
+                             "needs it true" % (WORKTREE_CONFIG, repo), WORKTREE_CONFIG)
+    moved = [key for key, value in (("core.worktree", local("core.worktree")),
+                                    ("core.bare", local("core.bare", "bool")))
+             if value and value != "false"]
+    if moved:
+        raise SurfaceRefused("enabling %s in %s is refused: its git config sets %s, which every "
+                             "linked working copy would then read, and git's worktree "
+                             "documentation moves it to config.worktree first"
+                             % (WORKTREE_CONFIG, repo, " and ".join(moved)), WORKTREE_CONFIG)
+    res = box.git(repo, ["config", "--local", WORKTREE_CONFIG, "true"])
+    if res.returncode != 0 or local(WORKTREE_CONFIG, "bool") != "true":
+        raise SurfaceRefused("enabling %s in %s was refused: %s" % (
+            WORKTREE_CONFIG, repo, res.stderr.strip() or "it does not read back true"),
+            WORKTREE_CONFIG)
+    return "enabled"
+
+
+def _index(box, repo, wc, paths):
+    """``{path: Entry}`` for each stage-0 index entry of ``wc`` at or under one of ``paths``,
+    matched case-folded (``:(icase,literal)``), as a case-insensitive filesystem resolves
+    them. The keys are the index's own spelling."""
+    if not paths:
+        return {}
+    specs = [":(icase,literal)%s" % str(p).rstrip("/") for p in paths]
+    res = _git(box, repo, ["ls-files", "-z", "-s", "-t", "--"] + specs, "listing the index",
+               cwd=wc)
+    out = {}
+    for item in res.stdout.split("\0"):
+        head, _, rel = item.partition("\t")
+        fields = head.split(" ")
+        if rel and len(fields) == 4 and fields[3] == "0":
+            out[rel] = Entry(fields[0], fields[1], fields[2])
+    return out
+
+
+def inherited_excludes(box, repo, environ):
+    """The text of the excludes file a working copy of ``repo`` reads without the engine's
+    setting, which that setting replaces: the repository's ``core.excludesFile``, else the
+    operator's global one, else git's default (``$XDG_CONFIG_HOME/git/ignore``,
+    ``~/.config/git/ignore``). Read as patterns, never run; one that cannot be read is empty."""
+    environ = environ or {}
+    res = box.git(repo, ["config", "--local", "--path", "--get", "core.excludesFile"])
+    path = res.stdout.strip() if res.returncode == 0 else ""
+    env = {"HOME": environ.get("HOME", ""), "XDG_CONFIG_HOME": environ.get("XDG_CONFIG_HOME", ""),
+           "PATH": "/usr/bin:/bin"}
+    if not path:
+        res = subprocess.run([box.tools["git"], "config", "--global", "--path", "--get",
+                              "core.excludesFile"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, universal_newlines=True, env=env,
+                             cwd=box.run_dir)
+        path = res.stdout.strip() if res.returncode == 0 else ""
+    if not path and (env["XDG_CONFIG_HOME"] or env["HOME"]):
+        path = os.path.join(env["XDG_CONFIG_HOME"] or os.path.join(env["HOME"], ".config"),
+                            "git", "ignore")
+    if not os.path.isabs(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def _ignore_line(rel):
+    """``rel`` as one gitignore pattern matching that path alone, from the working-copy root."""
+    return "/" + "".join("\\" + c if c in "\\*?[ " else c for c in rel)
+
+
+def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=None):
+    """Keep what :func:`render` wrote or removed in ``wc``, a working copy of ``repo``, out of
+    git's view for the run. ``record`` is the run record's entry for ``wc`` (``{}`` the first
+    time), updated in place and returned:
+
+    * ``launchBlobs``: each tracked path the render covers (``manifest``'s files and absent
+      paths, and anything under a directory surface), with the index mode and blob oid it had
+      when first hidden. Recorded once: a path first tracked at a later launch or resume is
+      recorded as None, so a commit the model made is never taken for the launch state.
+    * ``skipWorktree``: each of those paths, marked ``skip-worktree``.
+    * ``untracked``: each rendered file git does not track, listed in ``excludes``, an
+      engine-owned file outside the working copy that this working copy's ``core.excludesFile``
+      names (``git config --worktree``; the shared ``info/exclude`` is never written), after
+      the excludes file that setting replaces (:func:`inherited_excludes`).
+
+    ``gitdir_write(write)`` runs ``write``, the one call here that changes a file the common
+    gitdir checksum covers (REQ-659 BR-23 b). This is best effort: ``git add --sparse`` and
+    ``git update-index --no-skip-worktree`` defeat it, a declared residual (BR-19), and the
+    halt-time PR-diff gate is the control."""
+    gitdir_write = gitdir_write or (lambda write: write())
+    paths, prefixes = rendered_paths(manifest)
+    for rel in paths + prefixes:
+        _parts(rel)
+        if "\n" in rel or "\r" in rel:
+            raise SurfaceRefused("%r holds a line break, so no excludes line can name it"
+                                 % (rel,), rel)
+    index = _index(box, repo, wc, paths + prefixes)
+    first = "launchBlobs" not in record
+    blobs = record.setdefault("launchBlobs", {})
+    for rel, entry in sorted(index.items()):
+        if rel not in blobs:
+            blobs[rel] = {"mode": entry.mode, "oid": entry.oid} if first else None
+    mark = sorted(rel for rel, entry in index.items() if entry.tag != "S")
+    if mark:
+        _git(box, repo, ["update-index", "--skip-worktree", "--"] + mark,
+             "marking skip-worktree", cwd=wc)
+    record["skipWorktree"] = sorted(set(record.get("skipWorktree") or []) | set(index))
+    tracked = {fold(rel) for rel in index}
+    record["untracked"] = sorted(r for r in manifest.get("files", {}) if fold(r) not in tracked)
+    if record["untracked"]:
+        record["excludesFile"] = excludes
+        text = ("# Written by the ADLC exec engine for one run (REQ-662 BR-17): the excludes "
+                "file this setting replaces, then the paths the engine renders untracked.\n"
+                + inherited_excludes(box, repo, environ).rstrip("\n") + "\n"
+                + "".join(_ignore_line(rel) + "\n" for rel in record["untracked"]))
+        el.atomic_write(excludes, text.encode("utf-8"))
+        res = _git(box, repo, ["config", "--worktree", "--get", "core.excludesFile"],
+                   "reading core.excludesFile", cwd=wc, ok=(0, 1))
+        if res.returncode != 0 or res.stdout.strip() != excludes:
+            gitdir_write(lambda: _git(
+                box, repo, ["config", "--worktree", "core.excludesFile", excludes],
+                "`git config --worktree core.excludesFile` (%s)" % WORKTREE_CONFIG, cwd=wc))
+    return record
+
+
+def _write_blob(box, repo, wc, rel, entry, staging):
+    """The blob ``entry`` names, written to ``rel`` under ``wc`` byte for byte: read with
+    ``git unpack-file`` in ``staging``, outside the working copy, then written by
+    :func:`guarded_write` with its index mode."""
+    if entry["mode"] not in _RESTORABLE:
+        raise SurfaceRefused("its launch entry has mode %s, which the engine does not write"
+                             % entry["mode"], rel)
+    os.makedirs(staging, exist_ok=True)
+    res = _git(box, repo, ["--git-dir=" + box.common_dir(repo), "unpack-file", entry["oid"]],
+               "reading blob %s" % entry["oid"], cwd=staging)
+    tmp = os.path.join(staging, os.path.basename(res.stdout.strip()))
+    try:
+        with open(tmp, "rb") as fh:
+            data = fh.read()
+    finally:
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+    guarded_write(wc, rel, data)
+    os.chmod(os.path.join(wc, *_parts(rel)), _RESTORABLE[entry["mode"]])
+
+
+def restore(box, repo, wc, record, staging, gitdir_write=None):
+    """Undo :func:`hide` in ``wc``, before the final push and at cleanup: each path tracked at
+    launch written back from the blob oid recorded then (never from HEAD, which may have
+    moved), each untracked render removed unless the branch now tracks it, each skip-worktree
+    mark the engine set cleared, and ``core.excludesFile`` unset where it is still the
+    engine's. Idempotent; a working copy that is gone is left alone.
+
+    Returns ``{"restored", "removed", "unmarked", "problems"}``. A path that cannot be
+    restored is a problem, never a stop, because cleanup goes on."""
+    gitdir_write = gitdir_write or (lambda write: write())
+    out = {"restored": [], "removed": [], "unmarked": [], "problems": []}
+    if not os.path.isdir(wc):
+        return out
+    excludes = record.get("excludesFile")
+    if excludes:
+        res = box.git(repo, ["config", "--worktree", "--get", "core.excludesFile"], cwd=wc)
+        if res.returncode == 0 and res.stdout.strip() == excludes:
+            res = gitdir_write(lambda: box.git(
+                repo, ["config", "--worktree", "--unset", "core.excludesFile"], cwd=wc))
+            if res.returncode != 0:
+                out["problems"].append("core.excludesFile: %s" % res.stderr.strip())
+    blobs = record.get("launchBlobs") or {}
+    marked = record.get("skipWorktree") or []
+    index = _index(box, repo, wc, sorted(set(marked) | set(blobs) |
+                                         set(record.get("untracked") or [])))
+    unmark = [rel for rel in marked if rel in index and index[rel].tag == "S"]
+    if unmark:
+        res = box.git(repo, ["update-index", "--no-skip-worktree", "--"] + unmark, cwd=wc)
+        if res.returncode != 0:
+            out["problems"].append("skip-worktree: %s" % res.stderr.strip())
+        else:
+            out["unmarked"] = unmark
+    if out["unmarked"] == unmark:
+        record["skipWorktree"] = []
+    for rel in sorted(blobs):
+        if blobs[rel] is None:
+            continue
+        try:
+            _write_blob(box, repo, wc, rel, blobs[rel], staging)
+            out["restored"].append(rel)
+        except (SurfaceRefused, OSError) as exc:
+            out["problems"].append("%s: %s" % (rel, exc))
+    tracked = {fold(rel) for rel in index}
+    for rel in record.get("untracked") or []:
+        if fold(rel) in tracked:
+            continue
+        try:
+            if guarded_remove(wc, rel):
+                out["removed"].append(rel)
+        except (SurfaceRefused, OSError) as exc:
+            out["problems"].append("%s: %s" % (rel, exc))
+    return out
 
 
 # ---- bypass_config_keys (BR-16) --------------------------------------------------------------
