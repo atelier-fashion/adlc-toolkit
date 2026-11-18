@@ -17,6 +17,7 @@ Run REQ-659's approval-protocol suite against `harness/codex.yml` through the Co
 
 - `tools/adlc/tests/test_exec_launch.py`, `tools/adlc/tests/test_exec_approve.py` — the suites parameterized over the exec-capable adapters.
 - `tools/adlc/tests/fake_harness/exec_harness.py` — whatever the Codex profile still lacks: scripted un-allowed commands, a mid-run surface edit, a write to the user policy folder, a nested launch.
+- `tools/adlc/sprint_exec.py` — the nested-launch refusal by process ancestry for `run`, a dispatch and a resume, logging `nested_launch_refused` (BR-18). TASK-260 found that only decisions are checked that way today (`caller_guard`); `run` and `resume` check `ADLC_EXEC_RUN` alone.
 - `partials/tests/exec-engine.test.sh` — any new shell, under every shell `partials/tests/run.sh` loops over.
 
 ## Acceptance Criteria
