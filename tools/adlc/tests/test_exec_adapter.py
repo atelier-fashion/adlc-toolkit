@@ -1,8 +1,11 @@
 """The exec block and exec_adapter (REQ-659 BR-3, BR-8, BR-21, BR-22)."""
 
+import ast
+import importlib.util
 import json
 import os
 import sys
+import sysconfig
 
 import pytest
 
@@ -642,3 +645,284 @@ def test_unstaged_adapters_load_and_are_refused_by_name(name):
     with pytest.raises(ea.ExecRefused) as exc:
         ea.load(name, TOOLKIT)
     assert name in str(exc.value) and "REQ-662" in str(exc.value)
+
+
+# ------------------------------- launch and resume from the templates, closed world (REQ-662)
+RUN_DIR = "/run/0123abcd"
+WT = "/repo/.worktrees/REQ-901"
+LAST = RUN_DIR + "/stdout.last-message.txt"
+SETTINGS = RUN_DIR + "/settings.json"
+ADDED = "/repo/.adlc/specs/REQ-901-thing"
+ALLOW = ["Bash(git status:*)", "Bash(git log:*)"]
+DENY = ["Bash(git push --force:*)"]
+
+
+def _schema2(base):
+    if base == "claude":
+        return ea.load("claude", TOOLKIT)
+    return ea.load(base, TOOLKIT, adapter_path=os.path.join(FIX, base + ".yml"))
+
+
+def _with(adapter, **block):
+    """``adapter`` reading a block with these exec keys replaced."""
+    return ea.ExecAdapter(dict(adapter.adapter, exec=dict(adapter.block, **block)), TOOLKIT)
+
+
+def _launch(adapter, resume=None, extra=(), add_dir=None, allow=ALLOW, values=None):
+    """The must-not-refuse launch of ``adapter``: its argv, and what ``closed_world`` reads."""
+    values = values or {"worktree": WT, "last_message": LAST, "branch": BRANCH}
+    settings = SETTINGS if adapter.block.get("config_isolation") else None
+    argv = adapter.launch_argv("/bin/fake", allow, DENY, resume=resume, extra=extra,
+                               add_dir=add_dir, settings=settings, values=values)
+    pairs = {"operator": list(extra), "isolation": settings is not None, "add_dir": add_dir,
+             "allow": list(allow), "deny": DENY}
+    return argv, pairs, dict(values, settings=settings, session_id=resume)
+
+
+def test_launch_argv_snapshot():
+    """AC-2: the launch and resume argv of each staged block, token for token. Claude's is
+    REQ-659's argv; the file-render fixture is the Codex shape ADR-6 measured, with no `-p`
+    and its prompt on stdin."""
+    claude = _schema2("claude")
+    isolation = ["--setting-sources", "", "--settings", SETTINGS, "--strict-mcp-config"]
+    tiers = ["--allowedTools"] + ALLOW + ["--disallowedTools"] + DENY
+    assert _launch(claude, extra=["--model", "m"])[0] == (
+        ["/bin/fake", "-p", "--output-format", "json", "--model", "m"] + isolation + tiers)
+    assert _launch(claude, resume="abc-1", add_dir=ADDED)[0] == (
+        ["/bin/fake", "-p", "--output-format", "json", "--resume", "abc-1"] + isolation
+        + ["--add-dir", ADDED] + tiers)
+    codex_shaped = _schema2("fake-exec-file")
+    fresh = _launch(codex_shaped)[0]
+    assert fresh == ["/bin/fake", "exec", "--json", "--sandbox", "workspace-write", "-C", WT,
+                     "-o", LAST]
+    resumed = _launch(codex_shaped, resume="T-1", extra=["--model", "m"])[0]
+    assert resumed == ["/bin/fake", "exec", "resume", "--json", "-o", LAST, "T-1", "-",
+                       "--model", "m"]
+    for argv in (fresh, resumed):
+        assert "-p" not in argv and ea.forbidden_in(argv, codex_shaped.forbidden) is None
+    flags = _schema2("fake-exec-flags")
+    assert _launch(flags, extra=["--model=m"])[0] == (
+        ["/bin/fake", "-s", "--output-format", "json", "--no-ask-user", "-C", WT, "--model=m",
+         "--allow-tool"] + ALLOW + ["--deny-tool"] + DENY)
+
+
+def test_placeholders_are_whole_tokens(tmp_path):
+    """BR-2: a placeholder is one whole argv token, filled once from a declared value. Inside a
+    longer token, undeclared, or with no value, it refuses the launch; so does a value that
+    would not read as one argument."""
+    stream = _schema2("fake-exec-file")
+    stream.check_templates()
+    argv = _launch(stream)[0]
+    assert argv[argv.index("-C") + 1] == WT and argv[argv.index("-o") + 1] == LAST
+    assert not [tok for tok in argv if "{" in tok]
+    # A value is never read for placeholders in turn.
+    odd = _launch(stream, values={"worktree": "/w/{branch}", "last_message": LAST,
+                                  "branch": BRANCH})[0]
+    assert odd[odd.index("-C") + 1] == "/w/{branch}"
+    for launch in (["exec", "--cd={worktree}", "-o", "{last_message}"],
+                   ["exec", "-C", "{worktree}/sub", "-o", "{last_message}"],
+                   ["exec", "-C", "x{worktree}", "-o", "{last_message}"],
+                   ["exec", "-C", "{worktree}", "-o", "{last_message}{branch}"]):
+        partial = _with(stream, launch=launch)
+        with pytest.raises(ea.ExecRefused, match="inside a longer token"):
+            partial.check_templates()
+        with pytest.raises(ea.ExecRefused, match="inside a longer token"):
+            _launch(partial)
+    with pytest.raises(ea.ExecRefused, match="inside a longer token"):
+        _with(stream, resume=["exec", "resume", "--id={session_id}", "-"]).resume_tokens("S-1")
+    # The loader reads such a template, so the engine's pre-flight is the check.
+    text = open(os.path.join(FIX, "fake-exec-file.yml"), encoding="utf-8").read()
+    loaded = ea.ExecAdapter(ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(
+        '-C, "{worktree}"', '"--cd={worktree}"')), toolkit=TOOLKIT), TOOLKIT)
+    with pytest.raises(ea.ExecRefused, match="inside a longer token"):
+        loaded.check_templates()
+    with pytest.raises(ea.ExecRefused, match="not a placeholder the engine fills"):
+        _launch(_with(stream, launch=["exec", "-C", "{home}", "-o", "{last_message}"]))
+    with pytest.raises(ea.ExecRefused, match="only a resume has one"):
+        _with(stream, launch=["exec", "{session_id}", "-o", "{last_message}"]).check_templates()
+    with pytest.raises(ea.ExecRefused, match="{last_message} has no value"):
+        _launch(stream, values={"worktree": WT})
+    for name, value, word in (("worktree", "repo/wt", "absolute"),
+                              ("worktree", "--yolo", "leading"),
+                              ("last_message", "/run/a\nb", "control"),
+                              ("last_message", "", "empty")):
+        values = {"worktree": WT, "last_message": LAST, "branch": BRANCH}
+        values[name] = value
+        with pytest.raises(ea.ExecRefused, match=word):
+            _launch(stream, values=values)
+    with pytest.raises(ea.ExecRefused, match="not a session id"):
+        _launch(stream, resume="x; rm -rf /")
+    # Claude's whole-token placeholders: the session id and the settings file.
+    claude = _schema2("claude")
+    argv = _launch(claude, resume="abc-1")[0]
+    assert argv[argv.index("--resume") + 1] == "abc-1"
+    assert argv[argv.index("--settings") + 1] == SETTINGS
+
+
+def _tampered(argv):
+    """Every argv one token away from ``argv``: one extra, one changed, one reordered."""
+    out = []
+    for i in range(1, len(argv) + 1):
+        out.append(argv[:i] + ["--verbose"] + argv[i:])
+        out.append(argv[:i] + ["value"] + argv[i:])
+    for i in range(1, len(argv)):
+        changed = list(argv)
+        changed[i] += "x"
+        out.append(changed)
+        if i + 1 < len(argv) and argv[i] != argv[i + 1]:
+            swapped = list(argv)
+            swapped[i], swapped[i + 1] = swapped[i + 1], swapped[i]
+            out.append(swapped)
+    out.append(argv[:-1])
+    return out
+
+
+@pytest.mark.parametrize("resume", (None, "S-1"), ids=("launch", "resume"))
+@pytest.mark.parametrize("base", SCHEMA_2)
+def test_closed_world_argv(base, resume):
+    """BR-16, AC-19: the final argv is the template with only declared placeholders filled and
+    the declared additions: the operator's flags, the isolation tokens, the --add-dir pair and
+    the renderer's allow and deny pairs. What the builder made is accepted (the must-not-refuse
+    case); one extra, one changed and one reordered token are each refused, at launch and at
+    resume."""
+    adapter = _schema2(base)
+    template = "resume" if resume else "launch"
+    extra = [adapter.block["operator_flags"][0], "m"]
+    add_dir = ADDED if adapter.block.get("add_dir_flag") else None
+    argv, pairs, values = _launch(adapter, resume=resume, extra=extra, add_dir=add_dir)
+    assert adapter.closed_world(argv, template, pairs, values) == argv
+    if adapter.block["allow_render"] == "flags":
+        assert adapter.block["allow_flag"] in argv and adapter.block["deny_flag"] in argv
+    tampered = _tampered(argv)
+    assert len(tampered) > 3 * len(argv)
+    for bad in tampered:
+        with pytest.raises(ea.ExecRefused, match="closed world"):
+            adapter.closed_world(bad, template, pairs, values)
+    other = "launch" if resume else "resume"
+    with pytest.raises(ea.ExecRefused, match="closed world"):
+        adapter.closed_world(argv, other, pairs, dict(values, session_id="S-2"))
+    with pytest.raises(ea.ExecRefused, match="not an addition"):
+        adapter.closed_world(argv, template, dict(pairs, env=["X=1"]), values)
+
+
+def test_only_the_renderer_pairs_are_added():
+    """AC-19: on a file-render block no allow or deny pair is an addition, and on a flags block
+    a rule that would read as a flag is not a rule."""
+    stream = _schema2("fake-exec-file")
+    argv, pairs, values = _launch(stream)
+    assert "--allow-tool" not in argv
+    for added in (["--allow-tool", "shell(rm)"], ["--deny-tool", "shell(ls)"]):
+        with pytest.raises(ea.ExecRefused, match="closed world"):
+            stream.closed_world(argv + added, "launch", pairs, values)
+    claude = _schema2("claude")
+    for smuggled in ("--add-dir", "-p", "--mcp-config"):
+        with pytest.raises(ea.ExecRefused, match="not one rule argument"):
+            _launch(claude, allow=ALLOW + [smuggled])
+
+
+@pytest.mark.parametrize("resume", (None, "S-1"), ids=("launch", "resume"))
+@pytest.mark.parametrize("token", (["-c", "sandbox_mode=danger-full-access"],
+                                   ["-c=sandbox_mode=danger-full-access"],
+                                   ["--config", "approval_policy=never"],
+                                   ["--config=approval_policy=never"],
+                                   ["-p", "yolo"], ["--profile", "yolo"], ["--profile=yolo"]),
+                         ids=lambda t: t[0].split("=")[0] + ("=" if "=" in t[0] else ""))
+def test_config_and_profile_tokens_off_the_template_are_refused(token, resume):
+    """BR-16: a `-c`, `--config`, `-p` or `--profile` token the template does not hold is
+    refused on the file-render fixture, at launch and at resume, wherever it sits and however
+    it reached the argv."""
+    stream = _schema2("fake-exec-file")
+    template = "resume" if resume else "launch"
+    argv, pairs, values = _launch(stream, resume=resume)
+    for at in range(1, len(argv) + 1):
+        with pytest.raises(ea.ExecRefused, match="closed world"):
+            stream.closed_world(argv[:at] + token + argv[at:], template, pairs, values)
+    with pytest.raises(ea.ExecRefused):
+        _launch(stream, resume=resume, extra=token)
+
+
+def test_operator_flags_filter_harness_flags(adapter):
+    """ADR-7: an operator's --harness-flag reaches the harness only when its flag is one
+    `operator_flags` names, with at most its value; the must-not-refuse case launches."""
+    assert adapter.block["operator_flags"] == ["--model", "--max-turns"]
+    for ok in ([], ["--model", "m"], ["--model=m"], ["--max-turns", "3", "--model", "m"]):
+        assert adapter.operator_tokens(ok) == ok
+        argv = adapter.launch_argv("/bin/fake", [], [], extra=ok)
+        assert argv[4:4 + len(ok)] == ok
+    for bad, word in ((["--add-dir", "/"], "operator_flags"),
+                      (["--permission-mode", "acceptEdits"], "operator_flags"),
+                      (["--settings", "/tmp/x.json"], "operator_flags"),
+                      (["--modelx", "m"], "operator_flags"),
+                      (["--model", "m", "n"], "neither"),
+                      (["a prompt"], "neither"),
+                      (["--model", "a\nb"], "control")):
+        with pytest.raises(ea.ExecRefused, match=word):
+            adapter.operator_tokens(bad)
+        with pytest.raises(ea.ExecRefused, match=word):
+            adapter.launch_argv("/bin/fake", [], [], extra=bad)
+    # A forbidden flag is still named as one: the backstop speaks first.
+    with pytest.raises(ea.ExecRefused, match="Rule B"):
+        adapter.launch_argv("/bin/fake", [], [], extra=["--yolo"])
+    with pytest.raises(ea.ExecRefused, match="operator_flags .none."):
+        _with(adapter, operator_flags=[]).operator_tokens(["--model", "m"])
+
+
+def test_child_env_disables_delegation_on_a_short_shell_timeout(adapter):
+    """BR-10: `delegate: unsupported` puts ADLC_DISABLE_DELEGATE=1 in the child over any value
+    the operator's environment holds; `supported` adds nothing of its own."""
+    environ = {"HOME": "/h", "PATH": "/b", "ADLC_DISABLE_DELEGATE": "0", "OTHER": "x"}
+    assert adapter.delegate_supported
+    assert adapter.child_env(environ, "REQ-901", None, "/g", True)["ADLC_DISABLE_DELEGATE"] == "0"
+    assert "ADLC_DISABLE_DELEGATE" not in adapter.child_env({"HOME": "/h"}, "REQ-901", None,
+                                                            "/g", True)
+    short = _with(adapter, shell_timeout_s={"value": 60, "verified": True,
+                                            "delegate": "unsupported"})
+    assert not short.delegate_supported
+    for given in (environ, {"HOME": "/h"}):
+        assert short.child_env(given, "REQ-901", None, "/g", True)["ADLC_DISABLE_DELEGATE"] == "1"
+    fixture = _schema2("fake-exec-flags")
+    assert "ADLC_DISABLE_DELEGATE" not in fixture.block["env_passthrough"]
+    assert fixture.child_env(environ, "REQ-901", None, "/g", True) == {
+        "HOME": "/h", "PATH": "/b", "ADLC_EXEC_RUN": "REQ-901", "ADLC_DISABLE_DELEGATE": "1"}
+
+
+#: The engine's own modules. Each is followed through every tools/adlc module it imports.
+EXEC_MODULES = ("exec_adapter", "sprint_exec", "exec_safety", "exec_gates", "exec_ledger",
+                "exec_matcher", "exec_prompt")
+
+
+def test_exec_modules_import_only_stdlib():
+    """BR-13: argv construction, rendering and parsing are stdlib Python. Every module the
+    engine imports, followed through tools/adlc, is the standard library or one of the
+    toolkit's own, and none is PyYAML."""
+    here = os.path.realpath(os.path.join(HERE, ".."))
+    stdlib = os.path.realpath(sysconfig.get_paths()["stdlib"])
+    seen, todo = set(), list(EXEC_MODULES)
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        path = os.path.join(here, name + ".py")
+        tree = ast.parse(open(path, encoding="utf-8").read(), path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                assert node.level == 0, (name, "relative import")
+                names = [node.module.split(".")[0]]
+            else:
+                continue
+            for imported in names:
+                assert imported != "yaml", name
+                if os.path.isfile(os.path.join(here, imported + ".py")):
+                    todo.append(imported)
+                    continue
+                spec = importlib.util.find_spec(imported)
+                assert spec is not None, (name, imported)
+                origin = spec.origin or ""
+                builtin = origin in ("built-in", "frozen") or imported in sys.builtin_module_names
+                in_stdlib = os.path.realpath(origin).startswith(stdlib + os.sep)
+                assert (builtin or in_stdlib) and "site-packages" not in origin, (
+                    name, imported, origin)
+    assert set(EXEC_MODULES) <= seen and "harness_adapter" in seen

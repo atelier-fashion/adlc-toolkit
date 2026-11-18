@@ -72,6 +72,13 @@ class Run(object):
     def file(self, name):
         return os.path.join(self.path, name)
 
+    def last_message(self, log_name):
+        """The file the harness writes its last message to on the launch whose stdout is
+        ``log_name``: the ``{last_message}`` placeholder. It is in this run directory, which is
+        mode 0700, and never in a working copy the model writes (REQ-662 ADR-6)."""
+        stem = log_name[:-len(".json")] if log_name.endswith(".json") else log_name
+        return self.file(stem + ".last-message.txt")
+
     def ledger(self):
         return el.Ledger(self.path, self.doc)
 
@@ -374,6 +381,10 @@ class Orchestrator(object):
         batch.flags = [str(f) for f in batch.config["harness_flags"]] + list(flags)
         try:
             ea.refuse_forbidden(batch.flags, adapter.forbidden)
+            # A flag outside the adapter's operator_flags never reaches the harness: the final
+            # argv is closed-world (REQ-662 BR-16), so it is refused here, before any launch.
+            adapter.operator_tokens(batch.flags)
+            adapter.check_templates()
             adapter.tiers("feat/preflight", batch.config["allow_extra"])
         except ea.ExecRefused as exc:
             raise Refused(str(exc))
@@ -535,19 +546,31 @@ class Orchestrator(object):
             run.exec["trustRevokedAt"] = el.now()
             self.box(run).log("trust_revoked", [run.exec["trustMechanism"]], run.wc, 0)
 
-    def _argv(self, run, resume=None, extra=(), add_dir=None):
+    def _argv(self, run, log_name, resume=None, wc=None, branch=None, write_roots=None,
+              add_dir=None, operator=None):
+        """The launch argv, or with ``resume`` the resume argv, filled from the adapter's
+        templates and checked closed-world (REQ-662 ADR-7). ``log_name`` is the launch's stdout
+        file, which names its ``{last_message}`` file. Without ``write_roots``, every repo's
+        working copy, and nothing else, is writable (BUG-265). ``operator`` defaults to the
+        run's --harness-flag tokens."""
         adapter = self.adapter(run)
-        # Every repo's working copy, and nothing else, is writable (BUG-265).
-        roots = [spec["workingCopy"] for spec in run.doc["repos"].values()]
-        allow, deny = adapter.tiers(run.doc["branch"], run.doc["config"]["allow_extra"],
-                                    write_roots=roots + ([add_dir] if add_dir else []),
+        branch = branch or run.doc["branch"]
+        if write_roots is None:
+            write_roots = [spec["workingCopy"] for spec in run.doc["repos"].values()]
+            write_roots += [add_dir] if add_dir else []
+        allow, deny = adapter.tiers(branch, run.doc["config"]["allow_extra"],
+                                    write_roots=write_roots,
                                     read_roots=[os.path.realpath(self.toolkit)])
         # Isolated like the close-out (BR-25): the tiers are the whole policy (BUG-260).
         settings = run.file("settings.json")
         el.atomic_json(settings, adapter.settings_document(allow, deny))
+        last = run.last_message(log_name)
+        if os.path.lexists(last):
+            os.unlink(last)         # never read an earlier launch's message as this one's
+        values = {"worktree": wc or run.wc, "last_message": last, "branch": branch}
         return adapter.launch_argv(run.doc["binary"], allow, deny, resume=resume,
-                                   extra=list(run.doc["flags"]) + adapter.isolation_flags(settings)
-                                   + list(extra), add_dir=add_dir)
+                                   extra=run.doc["flags"] if operator is None else operator,
+                                   add_dir=add_dir, settings=settings, values=values)
 
     def _child_env(self, run):
         adapter = self.adapter(run)
@@ -577,11 +600,16 @@ class Orchestrator(object):
             self._make_worktree(box, spec["path"], spec["workingCopy"], run.doc["branch"],
                                 run.doc["integrationBranches"][rid])
         self.grant_trust(run)
-        self._launch_first(run, "prompt.txt", self._argv(run))
+        self._launch_first(run, "prompt.txt")
 
-    def _launch_first(self, run, prompt_name, argv):
-        run.doc["launches"] += 1
-        stem = "stdout" if run.doc["launches"] == 1 else "stdout.%d" % run.doc["launches"]
+    def _launch_first(self, run, prompt_name):
+        launch = run.doc["launches"] + 1
+        stem = "stdout" if launch == 1 else "stdout.%d" % launch
+        try:
+            argv = self._argv(run, stem + ".json")
+        except ea.ExecRefused as exc:
+            raise Refused(str(exc))
+        run.doc["launches"] = launch
         proc = self._spawn(run, argv, run.file(prompt_name), run.wc, stem)
         self.children[run.req] = proc
         run.exec.update({"pid": proc.pid, "promptPath": prompt_name,
@@ -1053,7 +1081,7 @@ class Orchestrator(object):
         name = "prompt.%d.txt" % (run.doc["launches"] + 1)
         el.atomic_write(run.file(name), data)
         self.grant_trust(run)
-        self._launch_first(run, name, self._argv(run))
+        self._launch_first(run, name)
 
     def abort(self, req, by="", caller_pid=None, caller_env=None):
         """The only way a running or stalled harness is killed (BR-20)."""
@@ -1466,13 +1494,9 @@ class Orchestrator(object):
         added = os.path.join(repo, run.doc["specDir"])
         # The close-out writes its own working copy and, through --add-dir, the primary
         # repo's pipeline-state.json (close-out rule 3); nothing else (BUG-265).
-        allow, deny = adapter.tiers(branch, run.doc["config"]["allow_extra"],
-                                    write_roots=[path, added],
-                                    read_roots=[os.path.realpath(self.toolkit)])
-        settings = run.file("settings.json")
-        el.atomic_json(settings, adapter.settings_document(allow, deny))
-        argv = adapter.launch_argv(run.doc["binary"], allow, deny, resume=sid,
-                                   extra=adapter.isolation_flags(settings), add_dir=added)
+        # No --harness-flag reaches the close-out, as before REQ-662.
+        argv = self._argv(run, "close-out.json", resume=sid, wc=path, branch=branch,
+                          write_roots=[path, added], add_dir=added, operator=[])
         proc = self._spawn(run, argv, run.file("close-out-prompt.txt"), path, "close-out")
         run.exec["closeOutPid"] = proc.pid
         self._write_status(run)

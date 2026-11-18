@@ -1,7 +1,7 @@
 ---
 id: TASK-258
 title: "Launch and resume argv from the adapter's templates, with the closed-world check"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17

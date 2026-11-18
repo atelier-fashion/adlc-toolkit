@@ -29,6 +29,19 @@ _RUNNER_PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
 #: A file root becomes a gitignore-style pattern, so it may hold no glob, quote, space or
 #: empty, `.` or `..` segment: any of those would widen the rule (BUG-265).
 _ROOT_RE = re.compile(r"^(/[A-Za-z0-9_.-]+)+$")
+#: The placeholders a ``launch``, ``resume`` or ``config_isolation`` template may hold. Each is
+#: substituted as one whole token, never inside a longer one and never by a shell (REQ-662 BR-2).
+PLACEHOLDERS = ("worktree", "last_message", "session_id", "settings", "branch")
+#: Placeholders whose value is a path, and so must be absolute: a relative one would resolve
+#: against whatever directory the harness runs in.
+_PATH_VALUES = ("worktree", "last_message", "settings", "add_dir")
+#: Anything spelled like a placeholder, so one inside a longer token is found and refused.
+_BRACED_RE = re.compile(r"\{[A-Za-z0-9_]+\}")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+#: What a launch may add after its template, in this order and nothing else (REQ-662 ADR-7):
+#: the operator's --harness-flag tokens, the isolation tokens, the --add-dir pair and the
+#: renderer's allow and deny pairs.
+ADDITIONS = ("operator", "isolation", "add_dir", "allow", "deny")
 
 
 #: Programs whose first argument names a subcommand: their command base is two tokens.
@@ -80,6 +93,81 @@ def refuse_forbidden(argv, forbidden):
                           "orchestrator, so nothing is launched" % bad)
 
 
+def _placeholder(token):
+    """The placeholder ``token`` is, by name, or None for a literal token. A placeholder inside
+    a longer token, or one the engine does not fill, refuses the launch (REQ-662 BR-2)."""
+    found = _BRACED_RE.findall(token)
+    if not found:
+        return None
+    if found != [token]:
+        raise ExecRefused("template token %r holds a placeholder inside a longer token: a "
+                          "placeholder is substituted only as a whole token (REQ-662 BR-2), so "
+                          "nothing is launched" % token)
+    name = token[1:-1]
+    if name not in PLACEHOLDERS:
+        raise ExecRefused("template token %s is not a placeholder the engine fills (%s), so "
+                          "nothing is launched" % (token, ", ".join("{%s}" % p
+                                                                     for p in PLACEHOLDERS)))
+    return name
+
+
+def _vet_value(name, value):
+    """``value`` as the argv token for ``{name}``: one that can only be read as that value."""
+    if not isinstance(value, str) or not value or value.startswith("-") or \
+            _CONTROL_RE.search(value):
+        raise ExecRefused("{%s} would be %r: an empty value, a control character or a leading "
+                          "`-` would not read as one argument, so nothing is launched"
+                          % (name, value))
+    if name in _PATH_VALUES and not os.path.isabs(value):
+        raise ExecRefused("{%s} would be %r, which is not an absolute path, so nothing is "
+                          "launched" % (name, value))
+    if name == "session_id" and not _SESSION_RE.match(value):
+        raise ExecRefused("{session_id} would be %r, which is not a session id, so nothing is "
+                          "launched" % (value,))
+    return value
+
+
+def substitute(template, values, partial=False):
+    """``template`` with each placeholder replaced by its value in ``values`` (by name), as one
+    whole token and never by a shell (REQ-662 BR-2). A value is never read for placeholders in
+    turn. A placeholder with no value refuses, unless ``partial`` leaves it in place."""
+    out = []
+    for token in template:
+        name = _placeholder(token)
+        if name is None:
+            out.append(token)
+        elif values.get(name) is not None:
+            out.append(_vet_value(name, values[name]))
+        elif partial:
+            out.append(token)
+        else:
+            raise ExecRefused("%s has no value at this launch, so the template cannot be "
+                              "filled: nothing is launched" % token)
+    return out
+
+
+def _rules(kind, rules):
+    """The renderer's ``kind`` rules, each one argument that cannot be read as a flag."""
+    rules = list(rules)
+    for rule in rules:
+        if not isinstance(rule, str) or not rule or rule.startswith("-") or \
+                _CONTROL_RE.search(rule):
+            raise ExecRefused("closed world: %s rule %r is not one rule argument, so nothing is "
+                              "launched (REQ-662 BR-16)" % (kind, rule))
+    return rules
+
+
+def _first_difference(argv, expected):
+    for i, (got, want) in enumerate(zip(argv, expected)):
+        if got != want:
+            return "argv token %d is %r where the template allows %r" % (i, got, want)
+    if len(argv) > len(expected):
+        return "argv token %d, %r, is past everything the template allows" % (
+            len(expected), argv[len(expected)])
+    return "the argv stops at token %d where the template goes on with %r" % (
+        len(argv), expected[len(argv)])
+
+
 class ExecAdapter(object):
     """One harness's ``exec`` block, loaded and validated."""
 
@@ -99,14 +187,56 @@ class ExecAdapter(object):
         """Where the harness's output holds each result field (REQ-662 ADR-6)."""
         return self.block["output"]
 
+    def template(self, name):
+        """The ``launch`` or ``resume`` template: the whole argv after the binary, placeholders
+        unfilled. An adapter with no ``resume`` cannot be resumed (REQ-659 BR-7)."""
+        if name not in ("launch", "resume"):
+            raise ExecRefused("%r is not a launch template" % (name,))
+        tokens = self.block.get(name)
+        if not tokens:
+            raise ExecRefused("harness %s declares no %s, so %s is impossible on it"
+                              % (self.name, name, name))
+        return list(tokens)
+
     def resume_tokens(self, session_id):
-        """The ``resume`` template, the whole argv after the binary on a resume, with
-        ``{session_id}`` substituted as one whole token (REQ-662 BR-2)."""
-        template = self.block.get("resume")
-        if not template:
-            raise ExecRefused("harness %s declares no resume, so resume is impossible on it"
-                              % self.name)
-        return [session_id if tok == "{session_id}" else tok for tok in template]
+        """The ``resume`` template with ``{session_id}`` substituted as one whole token
+        (REQ-662 BR-2). Any other placeholder is left for :meth:`launch_argv` to fill."""
+        return substitute(self.template("resume"), {"session_id": session_id}, partial=True)
+
+    def check_templates(self):
+        """Refuse a template no launch could fill (REQ-662 BR-2): a placeholder inside a longer
+        token, one the engine does not fill, or ``{session_id}`` outside ``resume``."""
+        for key in ("launch", "resume", "config_isolation"):
+            for token in self.block.get(key) or []:
+                if _placeholder(token) == "session_id" and key != "resume":
+                    raise ExecRefused("exec.%s holds {session_id}, and only a resume has one: "
+                                      "nothing is launched" % key)
+
+    def operator_tokens(self, tokens):
+        """The operator's --harness-flag tokens, each flag one ``exec.operator_flags`` names and
+        each other token the value of the flag before it (REQ-662 ADR-7). Anything else refuses
+        the launch: forbidding one flag at a time never converges (LESSON-663)."""
+        declared = list(self.block.get("operator_flags") or [])
+        out = []
+        takes_value = False
+        for token in tokens:
+            token = str(token)
+            if _CONTROL_RE.search(token):
+                raise ExecRefused("--harness-flag %r holds a control character, so nothing is "
+                                  "launched" % token)
+            if token.startswith("-"):
+                if token.split("=", 1)[0] not in declared:
+                    raise ExecRefused("--harness-flag %s is not in harness %s's operator_flags "
+                                      "(%s), so nothing is launched (REQ-662 BR-16)"
+                                      % (token, self.name, ", ".join(declared) or "none"))
+                takes_value = "=" not in token
+            elif takes_value:
+                takes_value = False
+            else:
+                raise ExecRefused("--harness-flag %r is neither an operator flag nor the value of "
+                                  "the one before it, so nothing is launched" % token)
+            out.append(token)
+        return out
 
     @property
     def trust_grant(self):
@@ -120,6 +250,12 @@ class ExecAdapter(object):
     @property
     def can_deny(self):
         return self.adapter["capabilities"].get("deny") == "yes"
+
+    @property
+    def delegate_supported(self):
+        """Whether a delegated ``adlc-read`` fits in one shell call (REQ-662 BR-10). Anything
+        but a declared ``supported`` reads as unsupported."""
+        return (self.block.get("shell_timeout_s") or {}).get("delegate") == "supported"
 
     def spell(self, argv, exact=False, deny=False):
         text = " ".join(argv)
@@ -240,22 +376,88 @@ class ExecAdapter(object):
             allow.append(self.spell(argv))
         return list(dict.fromkeys(allow)), list(dict.fromkeys(deny))
 
-    def launch_argv(self, binary, allow, deny, resume=None, extra=(), add_dir=None):
-        """The whole argv. The prompt is on stdin, so nothing positional follows. A resume
-        runs the adapter's ``resume`` template in place of ``launch``."""
-        head = self.resume_tokens(resume) if resume else list(self.block["launch"])
-        argv = [binary] + head + list(extra)
+    def launch_argv(self, binary, allow, deny, resume=None, extra=(), add_dir=None,
+                    settings=None, values=None):
+        """The whole argv, built from the adapter's templates and checked closed-world before it
+        is returned (REQ-662 ADR-7). The prompt is on stdin, so nothing positional follows.
+
+        ``resume`` is a session id: the ``resume`` template runs in place of ``launch``.
+        ``extra`` is the operator's --harness-flag tokens. ``settings`` is the engine's settings
+        file, and with it the ``config_isolation`` tokens follow. ``values`` fills the other
+        placeholders by name: ``worktree``, ``last_message`` and ``branch``."""
+        extra = [str(tok) for tok in extra]
+        refuse_forbidden(extra, self.forbidden)
+        template = "resume" if resume else "launch"
+        vals = dict(values or {})
+        if resume:
+            vals["session_id"] = resume
+        if settings is not None:
+            vals["settings"] = settings
+        argv = [binary] + substitute(self.template(template), vals) + extra
+        if settings is not None:
+            argv += substitute(self.block.get("config_isolation", []), vals)
         if add_dir:
+            if not self.block.get("add_dir_flag"):
+                raise ExecRefused("harness %s declares no add_dir_flag, so a second directory "
+                                  "cannot be added" % self.name)
             argv += [self.block["add_dir_flag"], add_dir]
-        argv += [self.block["allow_flag"]] + list(allow)
-        if deny and self.can_deny:
+        if self.block["allow_render"] == "flags":
+            argv += [self.block["allow_flag"]] + list(allow)
+        if deny and self.can_deny and self.block["deny_render"] == "flags":
             argv += [self.block["deny_flag"]] + list(deny)
         refuse_forbidden(argv, self.forbidden)
+        pairs = {"operator": extra, "isolation": settings is not None, "add_dir": add_dir,
+                 "allow": list(allow), "deny": list(deny)}
+        return self.closed_world(argv, template, pairs, vals)
+
+    def expected_argv(self, binary, template, pairs, values=None):
+        """What ``template`` allows with ``pairs`` added, rebuilt from the adapter's own
+        declaration (REQ-662 ADR-7): the one argv :meth:`closed_world` accepts.
+
+        ``pairs`` holds the additions, each under the flag the adapter declares and in this
+        order: ``operator`` (--harness-flag tokens, each flag in ``operator_flags``),
+        ``isolation`` (true adds ``config_isolation``), ``add_dir`` (a path after
+        ``add_dir_flag``), and ``allow`` and ``deny`` (the renderer's rules after ``allow_flag``
+        and ``deny_flag``, each only where that tier renders as flags)."""
+        unknown = sorted(set(pairs) - set(ADDITIONS))
+        if unknown:
+            raise ExecRefused("closed world: %s is not an addition a launch makes (%s)"
+                              % (", ".join(unknown), ", ".join(ADDITIONS)))
+        vals = values or {}
+        out = [binary] + substitute(self.template(template), vals)
+        out += self.operator_tokens(pairs.get("operator") or ())
+        if pairs.get("isolation"):
+            out += substitute(self.block.get("config_isolation", []), vals)
+        if pairs.get("add_dir"):
+            if not self.block.get("add_dir_flag"):
+                raise ExecRefused("closed world: harness %s declares no add_dir_flag"
+                                  % self.name)
+            out += [self.block["add_dir_flag"], _vet_value("add_dir", pairs["add_dir"])]
+        if self.block["allow_render"] == "flags":
+            out += [self.block["allow_flag"]] + _rules("allow", pairs.get("allow") or ())
+        deny = pairs.get("deny") or ()
+        if deny and self.can_deny and self.block["deny_render"] == "flags":
+            out += [self.block["deny_flag"]] + _rules("deny", deny)
+        return out
+
+    def closed_world(self, argv, template, pairs, values=None):
+        """``argv`` when it is exactly :meth:`expected_argv`, or :class:`ExecRefused` naming the
+        first token that differs (REQ-662 BR-16, ADR-7). One extra, one changed or one
+        reordered token refuses the launch or the resume; ``forbidden_flags`` stays the lint
+        backstop."""
+        argv = list(argv)
+        if not argv:
+            raise ExecRefused("closed world: the argv is empty, so nothing is launched")
+        expected = self.expected_argv(argv[0], template, pairs, values)
+        if argv != expected:
+            raise ExecRefused("closed world: %s, so nothing is launched (REQ-662 BR-16)"
+                              % _first_difference(argv, expected))
         return argv
 
     def isolation_flags(self, settings_path):
-        return [t.replace("{settings}", settings_path)
-                for t in self.block.get("config_isolation", [])]
+        """The ``config_isolation`` tokens with ``{settings}`` filled as one whole token."""
+        return substitute(self.block.get("config_isolation", []), {"settings": settings_path},
+                          partial=True)
 
     def isolation_available(self, help_text):
         """Whether ``<binary> --help`` lists every config-isolation flag (BR-25)."""
@@ -278,10 +480,15 @@ class ExecAdapter(object):
         return doc
 
     def child_env(self, environ, req, scoped_token, gh_config_dir, shared):
-        """Exactly the adapter's list, plus what the orchestrator sets (BR-22)."""
+        """Exactly the adapter's list, plus what the orchestrator sets (BR-22): the run, the
+        child's forge credentials, and the delegation opt-out on a short shell timeout."""
         names = list(self.block["env_passthrough"]) + list(self.block.get("auth_env", []))
         env = {k: environ[k] for k in names if k in environ}
         env["ADLC_EXEC_RUN"] = req
+        if not self.delegate_supported:
+            # A delegated adlc-read would time out mid-call, so each delegation step takes its
+            # documented fallback through the gate (`disabled-via-env`) (REQ-662 BR-10).
+            env["ADLC_DISABLE_DELEGATE"] = "1"
         if shared:
             token = environ.get("GH_TOKEN")
             if token:

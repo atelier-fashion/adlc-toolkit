@@ -2,6 +2,7 @@
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -507,3 +508,119 @@ def test_child_env_adds_no_delegation_opt_in(box):
     assert env.get("ADLC_DISABLE_DELEGATE") == "1"
     assert "ADLC_DELEGATE_ENABLED" not in orch.adapter(orch.runs["REQ-901"]).block[
         "env_passthrough"]
+
+
+# ---- REQ-662 ADR-7: launch and resume from the adapter's templates ---------------------------
+def _adapter_with(monkeypatch, tmp_path, *swaps):
+    """`ea.load` answering with claude's block with each ``(old, new)`` swapped in, read
+    through the loader, so the engine meets a block the loader accepts."""
+    import exec_adapter as ea
+    import harness_adapter as ha
+    text = open(os.path.join(eh.TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
+    for old, new in swaps:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path = tmp_path / "adapter" / "claude.yml"
+    path.parent.mkdir()
+    path.write_text(text, encoding="utf-8")
+    loaded = ea.ExecAdapter(ha.load_adapter(str(path), toolkit=eh.TOOLKIT), eh.TOOLKIT)
+    monkeypatch.setattr(ea, "load", lambda name, toolkit=None, adapter_path=None: loaded)
+    return loaded
+
+
+def _child_env(box):
+    lines = open(str(box.home / "env-raw-REQ-901.txt")).read().splitlines()
+    return dict(line.split("=", 1) for line in lines if "=" in line)
+
+
+def test_delegate_unsupported_sets_the_env(tmp_path, monkeypatch):
+    """REQ-662 BR-10, AC-10: an adapter whose shell timeout cannot hold a delegated read
+    launches its fake with ADLC_DISABLE_DELEGATE=1 and nothing from the operator's environment
+    beyond its own lists and ADLC_EXEC_RUN; a verified >= 120 s adapter launches without it."""
+    a = tmp_path / "a"
+    a.mkdir()
+    box = eh.Sandbox(a)
+    environ = {k: v for k, v in box.environ.items() if k != "ADLC_DISABLE_DELEGATE"}
+    orch = box.go(orch=se.Orchestrator(str(box.repo), environ, box.out, eh.TOOLKIT), shared=True)
+    assert orch.adapter(orch.runs["REQ-901"]).delegate_supported
+    assert "ADLC_DISABLE_DELEGATE" not in _child_env(box)
+
+    b = tmp_path / "b"
+    b.mkdir()
+    box = eh.Sandbox(b)
+    adapter = _adapter_with(
+        monkeypatch, b,
+        ("shell_timeout_s: {value: 125, verified: true, delegate: supported}",
+         "shell_timeout_s: {value: 60, verified: true, delegate: unsupported}"),
+        ("ADLC_HOME, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK", "ADLC_HOME, ADLC_FORGE_MOCK"))
+    environ = {k: v for k, v in box.environ.items() if k != "ADLC_DISABLE_DELEGATE"}
+    environ["OPERATOR_ONLY"] = "x"
+    orch = box.go(orch=se.Orchestrator(str(box.repo), environ, box.out, eh.TOOLKIT), shared=True)
+    assert orch.runs["REQ-901"].status == "awaiting_approval"
+    env = _child_env(box)
+    assert env["ADLC_DISABLE_DELEGATE"] == "1"
+    assert "ADLC_DISABLE_DELEGATE" not in adapter.block["env_passthrough"]
+    allowed = set(adapter.block["env_passthrough"]) | set(adapter.block["auth_env"]) | {
+        "ADLC_EXEC_RUN", "ADLC_DISABLE_DELEGATE"}
+    # /bin/sh sets these four itself; the engine passed none of them.
+    assert set(env) - allowed <= {"PWD", "OLDPWD", "SHLVL", "_"}
+    assert "OPERATOR_ONLY" not in env and "GH_TOKEN" not in env
+
+
+def test_harness_flag_outside_operator_flags_is_refused(tmp_path):
+    """REQ-662 ADR-7: a --harness-flag whose flag `operator_flags` does not name is refused
+    before anything starts; one it names launches, with its value, after the template (the
+    must-not-refuse case), whether it came from the command line or from the config."""
+    a = tmp_path / "a"
+    a.mkdir()
+    box = eh.Sandbox(a)
+    for flags in (["--add-dir", "/"], ["--permission-mode", "acceptEdits"],
+                  ["--settings", "/tmp/x.json"], ["--setting-sources", "user"],
+                  ["a prompt"]):
+        with pytest.raises(se.Refused, match="operator_flags|neither"):
+            box.start(shared=True, flags=flags)
+        assert not (box.home / "argv-REQ-901.json").exists()
+        assert el.run_dirs(box.environ) == []
+    b = tmp_path / "b"
+    b.mkdir()
+    box = eh.Sandbox(b, config="sprint:\n  exec:\n    harness_flags: [--model, fake-model]\n")
+    orch = box.go(shared=True, flags=["--max-turns", "40"])
+    assert orch.runs["REQ-901"].status == "awaiting_approval"
+    argv = json.loads(open(str(box.home / "argv-REQ-901.json")).readline())
+    # The fake records the argv after the binary.
+    assert argv[:7] == ["-p", "--output-format", "json", "--model", "fake-model",
+                        "--max-turns", "40"]
+    assert argv[7] == "--setting-sources"
+
+
+def test_placeholders_at_the_launch_and_the_close_out(tmp_path, monkeypatch):
+    """REQ-662 ADR-6, ADR-7: {worktree} and {last_message} are filled as whole tokens at the
+    launch and at the close-out's resume: the working copy each runs in, and a file in the run
+    directory (mode 0700), never in a working copy."""
+    box = eh.Sandbox(tmp_path)
+    _adapter_with(
+        monkeypatch, tmp_path,
+        ("  launch: [-p, --output-format, json]\n",
+         '  launch: [-p, --output-format, json, --cwd, "{worktree}", --last, "{last_message}"]\n'),
+        ('  resume: [-p, --output-format, json, --resume, "{session_id}"]\n',
+         '  resume: [-p, --output-format, json, --resume, "{session_id}", --cwd, "{worktree}", '
+         '--last, "{last_message}"]\n'))
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    argv = json.loads(open(str(box.home / "argv-REQ-901.json")).readline())
+    last = run.file("stdout.last-message.txt")
+    assert argv[3:7] == ["--cwd", run.wc, "--last", last]     # the argv after the binary
+    assert last == run.last_message("stdout.json")
+    assert os.path.dirname(last) == run.path
+    assert stat.S_IMODE(os.stat(run.path).st_mode) == 0o700
+    for spec in run.doc["repos"].values():
+        assert not last.startswith(spec["workingCopy"] + os.sep)
+    assert box.approve(orch) == "approved"
+    assert run.read_primary_state()["closeOut"]["status"] == "ok"
+    closeout = json.load(open(str(box.home / "closeout-argv-REQ-901.json")))
+    at = closeout.index("--resume")
+    assert closeout[at:at + 6] == [
+        "--resume", "session-REQ-901", "--cwd", run.doc["closeOutWorkingCopy"], "--last",
+        run.file("close-out.last-message.txt")]
+    assert closeout[at + 6:at + 8] == ["--setting-sources", ""]
