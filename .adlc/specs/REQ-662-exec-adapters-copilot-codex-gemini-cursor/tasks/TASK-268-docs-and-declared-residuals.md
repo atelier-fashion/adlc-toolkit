@@ -1,11 +1,11 @@
 ---
 id: TASK-268
 title: "The README's Codex exec section, the declared residuals, and the rest of the documentation"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 dependencies: [TASK-266, TASK-267]
 ---
 

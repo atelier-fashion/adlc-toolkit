@@ -1,4 +1,4 @@
-# harness/codex — the Codex CLI adapter (REQ-655)
+# harness/codex — the Codex CLI adapter (REQ-655, REQ-662)
 
 `harness/codex.yml` is data, validated by `tools/adlc/harness_adapter.py` and rendered by
 `tools/adlc/harness_render.py`. The install steps, the "What is lost" table and the
@@ -18,3 +18,25 @@ Assumptions and in `.adlc/research/harness-probes/codex.json`.
 `rendered/` holds the goldens `render-parity` compares: `adlc.rules`, `hooks.json`,
 `config.toml`, and `agents.json`, which records which agents carry the restraint sentence
 in place of a `tools:` line. `adlc harness render --write-goldens` rewrites them.
+
+## The exec block (REQ-662)
+
+The `exec:` block is how `adlc sprint-exec run --harness codex` launches Codex headless. Its
+facts are `codex-cli 0.166.0`: `codex.json` (run at `2026-11-17T23:49:29Z`), `codex exec
+--help` and `codex exec resume --help`, and the real launches and resumes in
+`.adlc/research/harness-probes/codex-exec-manual.md` (2026-11-18). What the engine does on
+Codex, what is lost there and the declared residuals are in the root `README.md`, "Codex
+CLI under `/sprint --exec`". The surfaces it writes:
+
+| Surface | Where | How |
+|---|---|---|
+| exec rule file | `.codex/rules/adlc-exec.rules` (working copy) | rendered per run from `templates/permissions.yml`: `allow` for the routine tier and the fence runner's absolute path, `forbidden` for the deny tier and `engine_deny`. Never committed; checksummed before launch and resume, and again at exit and at the halt |
+| working-copy config | `.codex/` (working copy) | rendered whole for each launch and resume: the exec rule file and the project render of `config.toml`, and nothing else; `hooks.json` and `adlc.rules` are absent and a stray file is deleted |
+| user policy file | `$HOME/.codex/rules/adlc-exec.rules` | the deny tier and `engine_deny` as `forbidden`, never an allow; written by `adlc harness install --exec --harness codex` or a run's pre-flight, beside the operator's own rule files, which exec never edits. It applies in every project and in the operator's own sessions |
+| trust entry | `$HOME/.codex/config.toml` | one `[projects."<working copy>"]` block per run, appended before launch and removed when the run ends (`tools/adlc/exec_trust.py`) |
+| exec fence census | `exec-fence-census.json` (here) | every fence an exec model can meet and its route under `matcher: none`: no `direct` route, and the Step 0 branch push is a `runner` fence (REQ-662 ADR-9). `python3 tools/adlc/fence_census.py --check` holds it fresh |
+
+`exec.status` and `exec.probes` are caches of `tools/adlc/exec_verify.py`'s verdict over
+`codex.json`, which the engine recomputes at every launch: a cache that disagrees reads
+`unverified`. When `adlc harness probe codex` records a new result, copy each row's `status`
+and `ran_at` into `exec.probes`; a new binary version also changes `exec.harness_version`.

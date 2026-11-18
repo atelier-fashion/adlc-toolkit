@@ -102,6 +102,8 @@ Every path comes from the adapter. No `.codex` or `~/.codex` string appears unde
 - The close-out working copy gets its own grant and revoke.
 - No write touches `hooks.state` or any hook-review key.
 
+**Why the grant exists on Codex (amended 2026-11-18).** As first written, this ADR took the grant to be what lets Codex load the working copy's rules. The real runs showed otherwise (`.adlc/research/harness-probes/codex-exec-manual.md`, facts 2 and 3). On a launch that no entry covers, `codex exec` writes `[projects."<main repo root>"] trust_level = "trusted"` into the user config by itself and keeps it. The key is the main repository's root, even from a linked worktree, so an unattended run would leave the whole repository trusted for every later session of the operator's. The rule file and the working copy's config took effect either way. With the engine's entry for the working copy in place first, Codex wrote nothing, and the revoke left the file byte-identical. So the grant stays, for that reason: it keeps a run from leaving trust behind, and it is not what loads the rules. The key a harness writes was wider than the run, as LESSON-777 warns.
+
 The probe has its own trust edit (`harness_probe.codex_trust_edit`). The engine does not import it: the probe module is pinned to import only the standard library, and its backup-and-restore model is whole-file, which is wrong for a file two runs may edit at once. The block format is the same, so a test holds the two spellings equal.
 
 ### ADR-6: output is parsed by declared format, and Codex's launch carries `--json`
@@ -133,7 +135,7 @@ Anything else refuses the launch or the resume. `forbidden_flags` stays, as the 
 
 **`-p` is not in Codex's list.** BR-2 says Codex forbids every `-p` absent from its template, and AC-2 says no adapter's `launch` token may appear in any adapter's `forbidden_flags`. Claude's launch holds `-p`, its print flag, so listing it for Codex would fail AC-2. The closed-world check already refuses a `-p` the Codex template does not hold, which is the control BR-16 names, so the list leaves it out. An entry is spelled as separate tokens (`--approval-mode yolo`), never with `=`: the matcher splits `--flag=value` in the argv, not in the entry.
 
-**Resume on Codex.** `codex exec resume` takes no `--sandbox` and no `-C`. The resume template is `exec resume --json -o {last_message} {session_id} -`, run with the working copy as the process directory, and its sandbox comes from the rendered `.codex/config.toml`. That form is not measured by any probe, so TASK-266 records one real launch and resume before the block is written as final. If the record shows resume does not hold the sandbox or the rules, the block declares no `resume`, and BR-7's halt message ("resume is impossible") is the behaviour.
+**Resume on Codex.** `codex exec resume` takes no `--sandbox` and no `-C`. The resume template is `exec resume --json -o {last_message} {session_id} -`, run with the working copy as the process directory, and its sandbox comes from the rendered `.codex/config.toml`. That form is not measured by any probe, so TASK-266 records one real launch and resume before the block is written as final. If the record shows resume does not hold the sandbox or the rules, the block declares no `resume`, and BR-7's halt message ("resume is impossible") is the behaviour. (Amended 2026-11-18: the record holds it. The resume continued the same session, and under it an allowed write left the sandbox, an un-allowed one did not, and a deny refused, so the block keeps `resume`; `codex-exec-manual.md`, rows `resume-continues` and `resume-keeps-rules`.)
 
 ### ADR-8: one census per adapter, and the runner accepts the union
 
@@ -169,6 +171,12 @@ REQ-682 BR-2 is amended to name the mechanism. This is the one change stage 1 ma
 
 What the allow list still cannot stop is unchanged and declared (BR-19): the structural gates are branch protection, the pinned merge and the halt.
 
+**Amended 2026-11-18: two more bindings, and the runner's git environment.**
+
+- **The push is bound to the run's REQ id.** Under an exec run `ADLC_EXEC_RUN` holds the run's REQ id, and the runner pushes only a branch `<type>/<REQ id>-<rest>`; a value of `ADLC_EXEC_RUN` that is not a REQ id refuses the push. So a model that checks out another REQ's branch in its working copy still cannot push it. Outside an exec run the variable is unset, and the checked-out-branch binding is the only one.
+- **The runner's git environment.** The runner drops every caller `GIT_*` variable before the branch check and the fence, keeping only `GIT_TERMINAL_PROMPT=0`, and pins `core.fsmonitor=false` and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT`, which outranks every config file (`fence_run.GIT_PINS`). A caller's `GIT_DIR` or `GIT_WORK_TREE` would point the branch check and the push at different repositories, and a `GIT_CONFIG_*` or `GIT_SSH_COMMAND` would run a program of the caller's choosing. A fsmonitor program or a hook would run model-written code outside the sandbox. So the `GIT_SSH_COMMAND` the Codex block passes through to the child never reaches the push, and an operator who needs a custom ssh command sets it in ssh config. The rest of the repository's config is honoured, and a model can write it, so `core.sshCommand`, a credential helper and `url.<base>.insteadOf` stay open: BR-19 (f), declared in the README.
+- **Measured** on 2026-11-18 (`codex-exec-manual.md`, row `push-through-runner`): the runner line, exactly as the prompt prints it, pushed the branch to a local bare origin outside the sandbox's writable area. A push over the network to a forge was not part of the record.
+
 ### ADR-10: the exec fake gains a Codex profile
 
 `tools/adlc/tests/fake_harness/exec_harness.py` stays the engine's double and becomes profile-driven by the name it is installed under: `claude` (today's behaviour) and `codex`. The Codex profile:
@@ -193,13 +201,19 @@ BR-12 says the exec scenarios extend REQ-664's probe double. REQ-659 already shi
 | `working_copy.strategy` | `worktree` | `git-write-worktree` `pass`, both variants |
 | `allow_render`, `deny_render` | `file`, `file` | `ask-tier-deny` `pass`, `deny-under-allow` `pass` |
 | `matcher` | `none` | no measurement pins Codex's statement matching |
-| `trust_grant` | `user-config-entry` | `allowlist-loaded` `pass` |
+| `trust_grant` | `user-config-entry` | `codex-exec-manual.md`, facts 2 and 3: `codex exec` writes a lasting entry for the main repo root by itself when none covers it, and the engine's entry prevents that (amended 2026-11-18; first written as `allowlist-loaded` `pass`, which shows the rules load, not why the grant is needed) |
 | `shell_timeout_s` | `{value: 125, verified: true, delegate: supported}` | `shell-timeout` `pass` |
 | `rules_reload` | `unknown` | no probe variant yet; treated as `live` |
 | `config_surfaces` | the `.codex` directory | REQ-655: read once the folder is trusted |
 | `exit_codes` | `{"0": ok, "1": error}` | the committed captures; an unmapped code is `error` |
 
 `deny_under_allow` in `harness/codex.yml` moves to what the result measures: `prefix` is a `pass` with mechanism `deny`, and `git-c` is a `fail`, so the `git -C` allow stays omitted and a deny-tier `git -C` spelling is `deny_unsupported`. `env-prefix` and `shell-opener` stay `unverified`. The project render uses mechanism `confirm`, which these records do not match, so the committed goldens do not change.
+
+### Review note, 2026-11-18: the routine allows leave the sandbox on Codex
+
+The review of 2026-11-18 found that on Codex the exec-scope routine allows leave the sandbox. A matched `allow` runs outside `workspace-write`, so `ls` and `git status` do, and so do the allows that execute their arguments (`npx`, `npm run`, `find -exec`, `awk`, `git rebase -x`, `git fetch --upload-pack`, `gh api`), which then run arbitrary code with the operator's filesystem and network. Only some routine commands need an escape: a commit writes the common git dir, and `gh`, a fetch and the runner's push need the network. Every allowed one takes it.
+
+Stage 1 records this and does not close it. It is a declared residual in the README's Codex exec section (BR-19 b, with the sandbox named), and keeping in the sandbox the routine commands that need no escape is an input to a follow-up requirement. Nothing in this design depends on the sandbox: the gate is the approval halt (Rule B).
 
 ## Testing
 

@@ -619,7 +619,8 @@ naming the line (LESSON-716).
 | `adlc harness render` | writes `.codex/rules/adlc.rules`, `.codex/hooks.json`, `AGENTS.md`, and merges `.codex/config.toml` (TOML `write_mode: merge`, `tools/adlc/toml_merge.py`). A construct it cannot classify, or `danger-full-access` / `approval_policy = "never"` already there, leaves the file and exits non-zero |
 | `adlc harness render --check` | the parity check, plus the rendered agent copies once any exist, so a hand edit fails it naming the file |
 | `adlc harness install` | the agent copies; with the delegation CLIs present, also the routing block in `$HOME/.codex/AGENTS.md` and the three delegation rules in `$HOME/.codex/rules/adlc.rules`. `--only-if-detected` writes nothing without the binary, which is how `tools/delegate/install.sh` calls it. `--writable-root <path>` unions one absolute path into `writable_roots` in the user config, prints the diff, and is the only thing that writes that file |
-| `adlc harness doctor` | also refuses a shipped adapter whose `sandbox_can_reach_common_gitdir` reads `unverified` |
+| `adlc harness install --exec` | writes `$HOME/.codex/rules/adlc-exec.rules`, the exec engine's deny-tier file beside the operator's own rules (REQ-662; "The exec adapter contract", below) |
+| `adlc harness doctor` | also refuses a shipped adapter whose `sandbox_can_reach_common_gitdir` reads `unverified`, and prints `exec: verified` or `exec: unverified (<probe ids>)` |
 
 | Doctor row | Kind | Meaning |
 |---|---|---|
@@ -677,30 +678,85 @@ through the default column, so a `claude` column, present or absent, changes not
 - The allowlist is never the gate (Rule B). The orchestrator's structural gates (REQ-659) are.
 <!-- /declared-residuals -->
 
-## The exec adapter contract (REQ-659)
+## The exec adapter contract (REQ-659, REQ-662)
 
 A harness joins `/sprint --exec` by adding an `exec` block to its adapter. `harness_adapter.py`
-validates it when `exec_schema_version` is present, and `exec_adapter.py` is the only reader.
-Nothing branches on a harness name. `harness/claude.yml` is the reference block.
+validates it when `exec_schema_version` is present, and `exec_adapter.py` is the engine's view
+of it. Nothing branches on a harness name: every difference between harnesses is a key here.
+Two blocks ship, `harness/claude.yml` (rules as flags) and `harness/codex.yml` (rules as
+files). An adapter whose `exec` is the placeholder `{flags: unverified}` (Copilot CLI, Cursor,
+Antigravity CLI) has no `exec_schema_version`, so the loader leaves it opaque and the engine
+refuses it by name.
+
+**Schema 2 (REQ-662 ADR-1).** `exec_schema_version` is 2. The loader refuses version 1, REQ-659's
+shape, and any other version, and refuses the whole adapter on an unknown key, a missing
+required key or a wrong type, never half-reading it. Schema 2 keeps schema 1's keys, reshapes
+three (`working_copy`, `resume`, `output`) and adds the ExecBlock's. Keys one render form reads
+are required on that form and refused on any other, so a block carries no field the engine
+never reads: `allow_flag`, `shell_rule` and `settings_keys` (and optionally
+`shell_rule_exact`) with `allow_render: flags`, `rule_file` with `allow_render: file`, and
+`deny_flag` with `deny_render: flags`.
 
 | Key | Meaning |
 |---|---|
-| `working_copy` | `worktree`, allowed only when the top-level `sandbox_can_reach_common_gitdir` is exactly `true`; `clone`; or `orchestrator-git`. A scalar, or `{strategy: ...}` once REQ-662's migration lands. Only `worktree` runs today: the other two are pre-flight refusals until an adapter ships one |
-| `trust_grant` | What the **engine** does per run: `none`, `flag`, `user-config-entry`, `trusted-folders-file`. Not the top-level `trust`, which is what the harness reads. Today only `none` runs; the rest refuse at pre-flight |
-| `launch`, `resume_flag`, `add_dir_flag` | the argv after the binary, on a prompt delivered on stdin |
-| `allow_flag`, `deny_flag`, `shell_rule`, `shell_rule_exact` | how the two tiers reach the argv. `deny_flag` renders only when `capabilities.deny` is `yes` |
+| `harness_version`, `verification`, `status`, `probes` | the harness version the block was written against; `probes` (the four harnesses) or `recorded` (`claude`, which stands on REQ-659's recorded evidence); the cached BR-11 verdict; and, under `probes`, one `{id, ran_at, harness_version, status}` row per required probe, copied from `.adlc/research/harness-probes/<name>.json`. `status` and `probes` are caches: `exec_verify` recomputes the verdict (below) |
+| `working_copy` | `{strategy: worktree \| clone \| orchestrator-git}`. `worktree` needs the top-level `sandbox_can_reach_common_gitdir: true`, and `exec_verify` binds it to `git-write-worktree`. Only `worktree` runs today: the other two are pre-flight refusals until an adapter ships one |
+| `trust_grant` | What the **engine** does per run: `none`, `flag`, `user-config-entry`, `trusted-folders-file`. Not the top-level `trust`, which is what the harness reads. `none` (`claude`) and `user-config-entry` (`codex`, through `exec_trust.py`) run; the other two refuse at pre-flight until an adapter ships one |
+| `launch`, `resume` | argv templates after the binary, each placeholder one whole token: `{worktree}`, `{last_message}`, `{session_id}`, `{settings}`, `{branch}`. `resume` must hold `{session_id}`. A block without `resume` cannot resume, and the halt says so before approval is asked for |
+| `prompt_delivery`, `prompt_flag`, `prompt_variant` | `stdin`, always. `prompt_flag` is the token run that makes a launch `stdin-prompt`'s `with-prompt-flag` variant, and the loader holds `prompt_variant` to whether `launch` carries it |
+| `context_delivery` | `hooks`: the engine relies on the harness's session-start hooks. `prompt`: it relies on none, ETHOS is in the prompt, the hook file is a surface rendered absent, and BR-11 needs only `trust-then-headless`'s `allowlist-loaded` half |
+| `allow_render`, `deny_render` | how the two tiers travel: `flags` on the argv, or `file`, a rule file in the working copy (`rule_file`) and, for the deny tier, the user policy file too. `deny_render` may be `none`; `flags` and `file` need `capabilities.deny: yes` |
+| `allow_flag`, `deny_flag`, `add_dir_flag`, `shell_rule`, `shell_rule_exact`, `settings_keys` | the `flags` form: how the two tiers reach the argv |
+| `rule_file`, `user_policy_file` | the `file` form: the working-copy rule file, rendered for each run, and the toolkit-owned user-level deny file (`$HOME/...`), or `none`. The user file holds the deny tier only, never an allow |
 | `allow_tools` | the non-shell tools that touch no file. A bare file tool (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `MultiEdit`, `NotebookEdit`) is refused by the loader, because a bare name admits every path (BUG-265) |
 | `file_rules` | the file tools, as rules with a `{root}` in each: `write` rules per write root (every repo's working copy, plus a close-out's `--add-dir`), `read` rules per read root (ToolkitRoot). A root is a plain absolute path, emitted under its given and its real spelling, because Claude matches a rule against the path as written (BUG-265) |
-| `allow_extra`, `allow_extra_exact` | routine spellings the exec-scope render cannot give, `{branch}` substituted in both. Each is vetted like an operator's `sprint.exec.allow_extra`: no token that runs its arguments, nothing that wraps a deny, and no prefix entry that shares a command base with a deny (`git push`, `git branch`, `rm`): those go in `allow_extra_exact` (BUG-260) |
-| `engine_deny` | denies that belong to this engine, never in `templates/permissions.yml` |
-| `forbidden_flags` | carries the engine-wide vocabulary and the harness's own equivalents |
-| `exit_codes`, `denied_result_key` | raw code to `ok`, `denied`, `timeout`, `error`, an unmapped non-zero code being `error`; then a non-empty value at `denied_result_key`, with no terminal claim, is `denied` |
-| `result_keys` | where the JSON result holds the session id, error flag, turn count, final text and cost |
-| `env_passthrough`, `auth_env` | the only variables a child inherits |
-| `config_isolation`, `config_isolation_help`, `settings_keys` | how the resumed close-out ignores working-copy config, and the flag names looked for in `<binary> --help` |
-| `sandbox_refuse` | a setting that refuses at pre-flight |
-| `residuals` | what the two tiers do not stop, stated, not enumerated away |
-| `fence_runner` | the toolkit-relative path of the fence runner (REQ-682), `tools/adlc/fence-run` on claude. `tiers()` resolves it once under ToolkitRoot and spells `Bash(<root>/<fence_runner>:*)`, refusing the launch unless the path is absolute, plain (`^/[A-Za-z0-9_./-]+$`, because a quoted path does not match a prefix rule), a regular file and still under the root after `realpath`. With it set, the exec render carries no fence rule and reports `fence.partial-source` as `inexpressible` (runner), and `capabilities.fence_broad_spelling` is not required |
+| `allow_extra`, `allow_extra_exact` | routine spellings the exec-scope render cannot give, `{branch}` substituted in both. Each is vetted like an operator's `sprint.exec.allow_extra`: no token that runs its arguments, nothing that wraps a deny, and no prefix entry that shares a command base with a deny (`git push`, `git branch`, `rm`): those go in `allow_extra_exact` (BUG-260). Both stay empty under `matcher: none`, where nothing can vet them |
+| `engine_deny` | denies that belong to this engine, never in `templates/permissions.yml`: among them the orchestrator's own verbs, `approve` included, so the model cannot clear the gate itself |
+| `forbidden_flags`, `operator_flags` | the engine-wide vocabulary plus the harness's own bypass flags, a lint backstop (`exec-no-bypass`) to the closed-world argv check; and the flag names an operator's `--harness-flag` may add |
+| `exit_codes`, `output`, `denied_stderr` | raw code to `ok`, `denied`, `timeout`, `error`, an unmapped code being `error` with the code kept. `output` is `{format: json \| jsonl-stream, source: stdout \| file, final_message, session_id}`, with `terminal_event` under `jsonl-stream`: a truncated stream, a line that is not JSON or an empty final message is `error` with the parser's message in `notes`. A run with no terminal claim is `denied` on the result's denial list or on a stderr line matching `denied_stderr`, read from the harness's own output and never from the model's text |
+| `env_passthrough`, `auth_env` | the only variables a child inherits, beside the ones the engine sets (`ADLC_EXEC_RUN`, `ADLC_EXEC_RUN_TAG`, the child's forge credentials) |
+| `config_surfaces`, `bypass_config_keys`, `rules_reload` | every working-copy path the harness reads once trusted, each rendered whole or absent; the keys, per config file, that relax approval or sandboxing; and whether the harness re-reads a rule file mid-run (`startup`, `live`, or `unknown`, read as `live`) |
+| `shell_timeout_s` | `{value, verified, delegate}`. `delegate: supported` needs a verified value of at least 120 s; otherwise the engine sets `ADLC_DISABLE_DELEGATE=1` in the child |
+| `matcher` | `claude`, whose statement matching `exec_matcher` models, or `none`, on which no fence routes `direct` |
+| `config_isolation`, `config_isolation_help`, `sandbox_refuse`, `residuals`, `trust_notice` | how a `flags` harness's resumed close-out ignores working-copy config and the flag names looked for in `<binary> --help`; a setting that refuses at pre-flight; and what the two tiers do not stop, stated |
+| `fence_runner` | the toolkit-relative path of the fence runner (REQ-682), `tools/adlc/fence-run`. `tiers()` resolves it once under ToolkitRoot and spells it in the adapter's allow form (`Bash(<root>/<fence_runner>:*)` on claude, a prefix rule on codex), refusing the launch unless the path is absolute, plain (`^/[A-Za-z0-9_./-]+$`, because a quoted path does not match a prefix rule), a regular file and still under the root after `realpath`. With it set, the exec render carries no fence rule and reports `fence.partial-source` as `inexpressible` (runner), and `capabilities.fence_broad_spelling` is not required |
+
+**The modules REQ-662 adds.**
+
+- **`exec_verify.py` (BR-11, ADR-2).** `verdict(adapter, result, installed_version)` is the one
+  answer to whether an adapter may launch. It reads `verified` when every hard probe reads
+  `pass`, every declaration-bound probe reads `pass` or `fail` and agrees with what the block
+  declares, and the result's version, `exec.harness_version` and the installed binary's
+  version are equal. The result is read from
+  `<ToolkitRoot>/.adlc/research/harness-probes/<name>.json` only, never from a working copy,
+  and a missing file reads `unverified`. The engine calls it at launch, before a relaunch, at
+  the close-out and in `approve` before the merge; `adlc harness doctor` prints `exec:
+  verified` or `exec: unverified (<probe ids>)` from the same call. `verification: recorded`
+  skips the gate.
+- **`exec_trust.py` (BR-5, ADR-5).** For `user-config-entry`: one commented block,
+  `[projects."<working copy>"] trust_level = "trusted"`, appended to the adapter's
+  `paths.config.user` before a launch and removed byte for byte when the run ends. The path
+  must be absolute and under the run's working-copy root, or nothing is written. An entry
+  already there is `pre_existing` and survives; a block already gone is a warning. Writes are
+  serialized by a `mkdir` lock beside the file, a grant refuses while REQ-664's probe
+  recovery marker exists, and no write touches `hooks.state`.
+- **`exec_surfaces.py` (BR-4, BR-15, BR-16, ADR-4).** Everything the engine writes for a run
+  outside its run directory. Each `config_surfaces` entry is rendered whole or absent, and a
+  stray file in a directory surface is deleted. Every path component is `lstat`ed: a
+  symlink, a hardlink or a non-regular file refuses. One sha256 manifest is checked four
+  times: before launch and before resume, where a mismatch is repaired and logged
+  `rule_file_rerendered`, and at exit and at the halt, where it is a
+  `config_surface_violation`. It runs the `bypass_config_keys` scan (TOML through
+  `toml_merge.scan`; a file it cannot read refuses), and writes the user policy file whole
+  and atomically under a lock, checking its folder against the engine's record at launch and
+  resume. The halt-time exec-path gate is `exec_gates.check_exec_path`: a PR touching a
+  rendered path or a surface refuses `approve`, and `--ack-gate-change` does not reach it.
+
+| Command | Does |
+|---|---|
+| `adlc harness install --exec --harness <name>` | writes the adapter's `exec.user_policy_file` whole and atomically under the lock, and records its folder; a run's pre-flight writes it too when it was never installed. The file is user-level, so it persists across runs and projects and applies to the operator's own sessions |
+| `adlc harness render --harness <name> --scope exec` | prints the structured exec-scope entries and the fidelity findings; writes nothing |
+| `adlc sprint-exec run --harness <name> [--allow-unverified] <REQ>...` | launches. `--allow-unverified` launches an adapter the verdict reads `unverified`, with a loud line on every launch, and the ledger records it. It is read from the command line only, applies only to the launches of the invocation that received it, never covers `approve`, and bypasses nothing else |
 
 **The fence runner (REQ-682).** No allow admits a fence that sources a partial: Claude refuses `.`
 and `source` whatever the allow says, and judges a compound command one statement at a time
@@ -716,27 +772,53 @@ executable:
   `/bin/sh` after sourcing `adlc-home.sh` and `forge.sh` from the install, with
   `ADLC_FENCE_TOOLKIT_ONLY=1` set last, so no partial takes a working-copy arm.
 - `fence-run show <file>` prints a file of the exec set with each fence in its route's form: a
-  runner call, the fence unchanged (`direct`), or one line naming why it does not run.
+  runner call, the fence unchanged (`direct`), or one line naming why it does not run. A
+  runner call single-quotes its id: Codex matches no prefix rule against a command holding a
+  bare `#`, so a bare id ran the runner inside the sandbox (measured on codex-cli 0.166.0,
+  2026-11-18).
 - Exit codes: a fence's own status is passed through; **3** is the runner's refusal, always one
   stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run.
+- **Its git environment.** No caller `GIT_*` variable reaches a fence, so neither does a
+  caller's `GIT_SSH_COMMAND`, and every git call it makes is pinned to `core.fsmonitor=false`
+  and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT`, over the repository's own config.
+  The rest of that config is honoured, and a model can write it.
 
-`harness/claude/exec-fence-census.json` is the committed census: every fence, its route, its
-values and its reach. `test_exec_reach.py` audits that reach statically over the function
-closure and dynamically under recording stubs, and fails on any deny-tier command, so a new
-fence or partial function starts refused until it is checked (BR-4).
+**One census per adapter (REQ-662 ADR-8).** Each exec-capable adapter has its committed census,
+`harness/<name>/exec-fence-census.json`: every fence, its route, its values and its reach. On
+`matcher: claude` a fence may route `direct`; on `matcher: none` (Codex) none does. The runner
+accepts a fence that is `runner` in the census of any exec-capable adapter under its own root,
+and the reach of every `runner` route is audited against the union of every such adapter's deny
+tier and `engine_deny`, so whichever harness calls, no accepted route reaches a command any
+adapter denies. `test_exec_reach.py` audits that reach statically over the function closure and
+dynamically under recording stubs, and fails on any deny-tier command, so a new fence or
+partial function starts refused until it is checked (BR-4). `fence_census.py --check` holds
+each golden fresh.
+
+**The branch push through the runner (REQ-662 ADR-9).** Codex's prefix rules have no exact form,
+so no `git push` allow is rendered there, and a push left unmatched runs inside the sandbox,
+without network. Step 0's push fence is therefore a `runner` fence on `matcher: none`, audited
+as a second push kind: its argv must be exactly `git -C $ADLC_ARG_worktree push -u origin
+$ADLC_ARG_branch`. At run time `worktree` must be the directory the runner was called from,
+`branch` must match `^(feat|fix|chore)/[A-Za-z0-9][A-Za-z0-9._-]*$` and be the branch checked
+out there, and under an exec run (`ADLC_EXEC_RUN` set to the run's REQ id) it must be that REQ's
+branch. On `matcher: claude` the fence stays `direct`, under Claude's exact rule.
 
 **Trust, for an adapter whose grant is real.** Grant before launch, per working copy, the
 close-out copy included. Revoke on every exit path: merge, reject, abort, crash. Remove exactly
 what the run added, and never leave an entry for a path that is gone. A `user-config-entry` or
 `trusted-folders-file` grant edits a file the harness may rewrite while it runs, so re-read
-before writing, replace atomically, and verify after.
+before writing, replace atomically, and verify after. On Codex the grant is not what loads the
+rules: `codex exec` writes a lasting trust entry for the main repository root by itself when
+no entry covers its directory, and the engine's entry for the working copy is what keeps it
+from doing so (`.adlc/research/harness-probes/codex-exec-manual.md`).
 
-**Three things REQ-662 must carry.** Codex's `sandbox_can_reach_common_gitdir: true` holds because
-an allowed `git commit` runs outside the sandbox, while a sandboxed command stops at `index.lock`
-(REQ-655). A Codex hook's review key contains the absolute path, so every working copy starts
-unreviewed and `codex exec` skips the hook silently. `agy -p` ends at the first tool it would need
-to prompt for, with exit 0 and an empty response, and a failed run exits 3 (REQ-658), which is why
-`ok` with no terminal claim is `failed` for every harness.
+**What REQ-662 carried from REQ-659.** Codex's `sandbox_can_reach_common_gitdir: true` holds
+because an allowed `git commit` runs outside the sandbox, while a sandboxed command stops at
+`index.lock` (REQ-655). A Codex hook's review key contains the absolute path, so every working
+copy starts unreviewed and `codex exec` skips the hook silently, which is why the Codex block
+declares `context_delivery: prompt`. `agy -p` ends at the first tool it would need to prompt
+for, with exit 0 and an empty response, and a failed run exits 3 (REQ-658), which is why `ok`
+with no terminal claim is `failed` for every harness.
 
 ## `adlc agents render` (REQ-516)
 
