@@ -4,7 +4,7 @@ title: "/sprint exec engine — a shell orchestrator that runs one headless harn
 status: in-progress
 deployable: false
 created: 2026-10-27
-updated: 2026-11-01
+updated: 2026-11-18
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["sh", "python", "markdown", "claude-skills", "json"]
@@ -240,6 +240,10 @@ Phase 1 re-measured this spec against `main` at `5025e40` (LESSON-751) and again
 | BR-4's `clone` and `orchestrator-git` | No shipped adapter declares either, and each needs prompt and commit machinery no test could reach | The loader accepts both; the engine refuses them at pre-flight naming REQ-662, which ships the first adapter that needs one. BR-5's non-`none` trust arms are the same | `harness/*.yml` |
 | BR-14 "`adlc_lesson_check`" on `assumptions/*.md` | The check refuses a basename that is not `LESSON-<digits>-<slug>.md` | It runs on added lessons; an added assumption is gated by path and mode | `partials/lesson-check.md` |
 | AC-11 `bash tools/lint-skills/check.sh` | The lint is run by `sh` here | `sh tools/lint-skills/check.sh` | `.adlc/context/conventions.md` |
+
+## Amendment (2026-11-18)
+
+**BR-22, AC-33: the child's environment also carries `ADLC_EXEC_RUN_TAG`.** The orchestrator sets it beside `ADLC_EXEC_RUN`, to a digest of the run directory, and the straggler sweep matches both. The REQ id alone matched every process on the machine that carried it, so two projects with the same REQ number, or two orchestrators on one id, killed each other's harness processes. Found while REQ-662's tasks ran side by side. The tag is a digest because the run directory's path stays away from the model (AC-33).
 
 ## External Dependencies
 

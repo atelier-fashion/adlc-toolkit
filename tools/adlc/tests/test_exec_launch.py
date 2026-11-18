@@ -176,7 +176,7 @@ def test_child_env_and_denied(box):
         assert name not in env
     adapter = orch.adapter(run)
     allowed = set(adapter.block["env_passthrough"]) | set(adapter.block["auth_env"]) | {
-        "ADLC_EXEC_RUN", "GH_TOKEN", "GH_CONFIG_DIR"}
+        "ADLC_EXEC_RUN", "ADLC_EXEC_RUN_TAG", "GH_TOKEN", "GH_CONFIG_DIR"}
     # /bin/sh sets these four itself; the engine passed none of them.
     assert set(env) - allowed <= {"PWD", "OLDPWD", "SHLVL", "_"}
 
@@ -366,12 +366,39 @@ def test_straggler_sweep(box):
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
     time.sleep(0.2)
-    assert se.stragglers("REQ-901") == []
+    assert se.stragglers("REQ-901", se.run_tag(run.path)) == []
     assert run.status == "awaiting_approval"
 
 
+def test_straggler_sweep_is_scoped_to_its_own_run(tmp_path):
+    """Two runs of one REQ id on one machine (two projects number alike): the sweep names the
+    run's tag beside the id, so it finds its own run's processes and never the other's. The tag
+    is a digest: the run directory's path stays out of the child's environment (AC-33)."""
+    req = "REQ-977"
+    mine, other = str(tmp_path / "run a"), str(tmp_path / "run-b")
+    assert se.run_tag(mine) != se.run_tag(other) and mine not in se.run_tag(mine)
+    procs = []
+    try:
+        for run_dir in (mine, other, None):
+            env = {"PATH": os.environ["PATH"], "ADLC_EXEC_RUN": req}
+            if run_dir:
+                env[se.RUN_TAG_ENV] = se.run_tag(run_dir)
+            # Not /bin/sleep: ps does not show a platform binary's environment on macOS.
+            procs.append(subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                          env=env))
+        time.sleep(0.3)
+        assert se.stragglers(req, se.run_tag(mine)) == [procs[0].pid]
+        assert se.stragglers(req, se.run_tag(other)) == [procs[1].pid]
+        assert se.stragglers(req, se.run_tag(mine)[:-1]) == []
+        assert sorted(se.stragglers(req)) == sorted(p.pid for p in procs)
+    finally:
+        for proc in procs:
+            proc.kill()
+            proc.wait()
+
+
 def test_a_straggler_that_survives_is_surfaced(box, monkeypatch):
-    monkeypatch.setattr(se, "stragglers", lambda req: [999999])
+    monkeypatch.setattr(se, "stragglers", lambda req, tag=None: [999999])
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
     assert run.status == "blocked"
@@ -562,7 +589,7 @@ def test_delegate_unsupported_sets_the_env(tmp_path, monkeypatch):
     assert env["ADLC_DISABLE_DELEGATE"] == "1"
     assert "ADLC_DISABLE_DELEGATE" not in adapter.block["env_passthrough"]
     allowed = set(adapter.block["env_passthrough"]) | set(adapter.block["auth_env"]) | {
-        "ADLC_EXEC_RUN", "ADLC_DISABLE_DELEGATE"}
+        "ADLC_EXEC_RUN", "ADLC_EXEC_RUN_TAG", "ADLC_DISABLE_DELEGATE"}
     # /bin/sh sets these four itself; the engine passed none of them.
     assert set(env) - allowed <= {"PWD", "OLDPWD", "SHLVL", "_"}
     assert "OPERATOR_ONLY" not in env and "GH_TOKEN" not in env

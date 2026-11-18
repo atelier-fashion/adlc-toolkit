@@ -16,6 +16,7 @@ Standard library only (LESSON-395).
 
 import argparse
 import calendar
+import hashlib
 import json
 import os
 import re
@@ -173,6 +174,15 @@ def pid_alive(pid):
 
 PS = shutil.which("ps", path="/bin:/usr/bin") or "ps"
 
+#: Beside ``ADLC_EXEC_RUN`` in every child's environment: a digest of the run directory, so the
+#: straggler sweep is one run's own. A digest, because the directory's path is kept from the
+#: model (REQ-659 AC-33).
+RUN_TAG_ENV = "ADLC_EXEC_RUN_TAG"
+
+
+def run_tag(run_dir):
+    return hashlib.sha256(os.path.realpath(run_dir).encode("utf-8")).hexdigest()[:32]
+
 
 def parent_of(pid):
     res = subprocess.run([PS, "-o", "ppid=", "-p", str(pid)], stdout=subprocess.PIPE,
@@ -189,16 +199,23 @@ def ancestry(pid):
     return chain
 
 
-def stragglers(req):
-    """Live processes still carrying ``ADLC_EXEC_RUN=<req>`` in their environment."""
+def stragglers(req, tag=None):
+    """Live processes still carrying ``ADLC_EXEC_RUN=<req>`` in their environment and, when
+    ``tag`` is given, ``ADLC_EXEC_RUN_TAG=<tag>`` beside it.
+
+    The REQ id alone is not unique on a machine: two projects number their requirements
+    alike, and two orchestrators may run the same id at once. A run's tag is, so the sweep
+    that ends a run names both and never reaches another run's processes."""
     res = subprocess.run([PS, "eww", "-axo", "pid=,command="], stdout=subprocess.PIPE,
                          stderr=subprocess.DEVNULL, universal_newlines=True, errors="replace")
-    needle = "ADLC_EXEC_RUN=%s" % req
+    needles = ["ADLC_EXEC_RUN=%s" % req]
+    if tag:
+        needles.append("%s=%s" % (RUN_TAG_ENV, tag))
     out = []
     for line in res.stdout.splitlines():
         head = line.strip().split(None, 1)
         if len(head) == 2 and head[0].isdigit() and int(head[0]) != os.getpid():
-            if re.search(r"(^|\s)%s(\s|$)" % re.escape(needle), head[1]):
+            if all(re.search(r"(^|\s)%s(\s|$)" % re.escape(n), head[1]) for n in needles):
                 out.append(int(head[0]))
     return out
 
@@ -796,8 +813,10 @@ class Orchestrator(object):
             if not token:
                 raise Refused("%s is not set in this shell, and the child's token comes from it"
                               % var)
-        return adapter.child_env(self.environ, run.req, token, run.file("gh-empty"),
-                                 run.doc["sharedCredentials"])
+        env = adapter.child_env(self.environ, run.req, token, run.file("gh-empty"),
+                                run.doc["sharedCredentials"])
+        env[RUN_TAG_ENV] = run_tag(run.path)
+        return env
 
     def _spawn(self, run, argv, prompt, cwd, stem):
         env = self._child_env(run)
@@ -933,7 +952,7 @@ class Orchestrator(object):
         except OSError:
             pass
         deadline = time.time() + 2
-        left = stragglers(run.req)
+        left = stragglers(run.req, run_tag(run.path))
         while left and time.time() < deadline:
             for other in left:
                 try:
@@ -941,7 +960,7 @@ class Orchestrator(object):
                 except OSError:
                     pass
             time.sleep(0.1)
-            left = stragglers(run.req)
+            left = stragglers(run.req, run_tag(run.path))
         for other in left:
             try:
                 os.kill(other, signal.SIGKILL)
@@ -949,7 +968,7 @@ class Orchestrator(object):
                 pass
         if left:
             time.sleep(0.2)
-            left = stragglers(run.req)
+            left = stragglers(run.req, run_tag(run.path))
         try:
             os.killpg(pid, signal.SIGKILL)
         except OSError:
