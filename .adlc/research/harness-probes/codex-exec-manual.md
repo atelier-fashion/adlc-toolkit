@@ -11,7 +11,7 @@ the trust entry from `exec_trust.grant`. The prompt went on stdin.
 It spends a little of the operator's plan, and it leaves the user config byte-identical.
 
 No row here changes a probe verdict (BR-11). These are the real-run captures BR-6 asks for,
-the resume form architecture ADR-7 left provisional, and four facts no probe measures.
+the resume form architecture ADR-7 left provisional, and seven facts no probe measures.
 
 ## The engine's launch, as shipped
 
@@ -37,7 +37,7 @@ Environment: `ADLC_EXEC_RUN`, `HOME`, `PATH`, `SSH_AUTH_SOCK`, `TMPDIR` (an engi
 The committed parser fixtures (`tools/adlc/tests/fixtures/exec-output/codex-exec-*.0.166.0.*`)
 are the launch and resume of an earlier run of the same sequence, scrubbed.
 
-## Four facts no probe measures
+## Seven facts no probe measures
 
 **1. A bare `#` in a command defeats the prefix allow.** The runner line first printed the
 fence id bare (`fence-run run proceed/phase-0-setup.md#6:877a6b41 --arg …`). Codex matched no
@@ -82,6 +82,26 @@ launch and resume and scans it for sandbox keys (BR-15, BR-16).
 `/private/tmp`, an un-allowed command wrote them: `workspace-write` admits the temp roots as
 well as the directory. Every other row keeps its targets, its repository and its remote
 under the ADLC state area for that reason.
+
+**5. A resume works from a different working copy than the launch.** A session launched in
+one linked worktree was resumed, with the resume argv, from a second linked worktree of the
+same repository holding its own engine render and its own trust entry. It was the same
+session (it recalled a word from the first turn), its directory was the second worktree, and
+the second worktree's rules applied: an allowed write left the sandbox, an un-allowed one did
+not, the deny refused, and Codex added nothing to the user config. This is the close-out's
+case: the engine resumes the session in a working copy cut from the integration branch.
+
+**6. In a linked worktree, the main checkout's `.codex/` is not read.** With a rule file and a
+`config.toml` present only under the main repository root's `.codex/`, a session launched in
+a linked worktree got neither: a command only that rule file allowed stayed inside the
+sandbox, and a directory only that config made writable stayed unwritable. This held with
+the engine's trust entry on the worktree and with none (where Codex trusted the root itself).
+So the working copy's `.codex/` is the whole project layer for an engine run, and the main
+checkout's committed rules do not widen it.
+
+**7. `codex` has no approval flag to pin.** Neither `codex --help` nor `codex exec --help`
+at 0.166.0 lists an `--ask-for-approval` option, so approval rests on the rendered config
+and the bypass scan, as the block declares.
 
 ## What these do not show
 
