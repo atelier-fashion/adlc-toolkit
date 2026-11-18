@@ -1,11 +1,11 @@
 ---
 id: TASK-266
 title: "One recorded Codex launch and resume, and the parser fixtures it yields"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 dependencies: [TASK-265]
 ---
 

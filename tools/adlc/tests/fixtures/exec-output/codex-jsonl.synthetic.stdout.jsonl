@@ -1,7 +1,0 @@
-{"type":"thread.started","thread_id":"0199c0de-5a1e-7f00-9c0d-e00000000001"}
-{"type":"turn.started"}
-{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I will read the requirement, then run the pipeline."}}
-{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'git status --short --branch'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
-{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'git status --short --branch'","aggregated_output":"## feat/REQ-901-thing\n","exit_code":0,"status":"completed"}}
-{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Terminal state: awaiting_approval\n\nFindings: none."}}
-{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":800,"output_tokens":90}}

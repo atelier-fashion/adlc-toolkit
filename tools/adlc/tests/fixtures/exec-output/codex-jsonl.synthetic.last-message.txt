@@ -1,3 +1,0 @@
-Terminal state: awaiting_approval
-
-Findings: none.

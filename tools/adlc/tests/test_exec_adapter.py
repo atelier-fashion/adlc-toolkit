@@ -638,36 +638,44 @@ def stream():
     return ea.load("fake-exec-file", TOOLKIT, adapter_path=os.path.join(FIX, "fake-exec-file.yml"))
 
 
+#: The real captures (codex-cli 0.166.0, 2026-11-18): one `codex exec --json` launch and its
+#: resume, scrubbed. `.adlc/research/harness-probes/codex-exec-manual.md` records the runs.
+REAL_LAUNCH = "codex-exec-launch.0.166.0"
+REAL_RESUME = "codex-exec-resume.0.166.0"
+REAL_SESSION = "01a1f041-7762-7d33-9d97-dd6c651a05d4"
+
+
 def test_jsonl_parser_and_its_failures(stream):
     """REQ-662 BR-6, AC-6: a well-formed stream yields `thread.started`'s id and the -o file's
     message (the must-not-fail case); a truncated stream, a cut last line, non-JSON stdout and
     an empty or missing final message each yield the parser's message, which classifies the
-    run `error`, never `ok`, whatever the exit code said."""
-    good = _fixture("codex-jsonl.synthetic.stdout.jsonl")
-    message = _fixture("codex-jsonl.synthetic.last-message.txt")
+    run `error`, never `ok`, whatever the exit code said. The well-formed stream is a real
+    launch's, and the truncated ones are cut from it."""
+    good = _fixture(REAL_LAUNCH + ".stdout.jsonl")
+    message = _fixture(REAL_LAUNCH + ".last-message.txt")
     out = stream.parse_result(good, message)
     assert out["error"] is None and out["present"] is True
-    assert out["session_id"] == "0199c0de-5a1e-7f00-9c0d-e00000000001"
-    assert out["text"] == message and ea.terminal_claim(out["text"]) == "awaiting_approval"
+    assert out["session_id"] == REAL_SESSION
+    assert out["text"] == message and ea.terminal_claim(out["text"]) is None
     assert stream.exit_class(0, out, "awaiting_approval") == "ok"
     for name, last, words in (
-            ("codex-jsonl-no-terminal.synthetic.stdout.jsonl", message,
+            ("codex-exec-launch.no-terminal.derived.stdout.jsonl", message,
              "no turn.completed event"),
-            ("codex-jsonl-cut.synthetic.stdout.jsonl", message, "last line is cut"),
+            ("codex-exec-launch.cut.derived.stdout.jsonl", message, "last line is cut"),
             ("not-json.synthetic.stdout.txt", message, "line 1 is not JSON"),
-            ("codex-jsonl.synthetic.stdout.jsonl",
-             _fixture("codex-jsonl-empty-message.synthetic.last-message.txt"),
+            (REAL_LAUNCH + ".stdout.jsonl",
+             _fixture("codex-exec.empty.derived.last-message.txt"),
              "final message is empty"),
-            ("codex-jsonl.synthetic.stdout.jsonl", None, "no last-message file"),
-            ("codex-jsonl.synthetic.stdout.jsonl", "  \n", "final message is empty")):
+            (REAL_LAUNCH + ".stdout.jsonl", None, "no last-message file"),
+            (REAL_LAUNCH + ".stdout.jsonl", "  \n", "final message is empty")):
         out = stream.parse_result(_fixture(name), last)
         assert words in out["error"], (name, out["error"])
         claim = ea.terminal_claim(out["text"])
         assert stream.exit_class(0, out, claim) == "error", name
         assert stream.exit_class(1, out, claim) == "error", name
     # What parsed before a failure is still read: a cut stream keeps its session id.
-    cut = stream.parse_result(_fixture("codex-jsonl-cut.synthetic.stdout.jsonl"), message)
-    assert cut["session_id"] == "0199c0de-5a1e-7f00-9c0d-e00000000001"
+    cut = stream.parse_result(_fixture("codex-exec-launch.cut.derived.stdout.jsonl"), message)
+    assert cut["session_id"] == REAL_SESSION
     # An empty stdout, a JSON line that is not an event and a mid-stream non-JSON line fail.
     for text, words in (("", "stdout is empty"), ('[1, 2]\n', "is not an event"),
                         ('{"type": "thread.started", "thread_id": "t"}\nWARN x\n'
@@ -678,8 +686,30 @@ def test_jsonl_parser_and_its_failures(stream):
     lines = good.splitlines(True)
     assert stream.parse_result("".join(lines[1:]), message)["error"] is None
     assert stream.parse_result("".join(lines[1:]), message)["session_id"] is None
-    hostile = good.replace("0199c0de-5a1e-7f00-9c0d-e00000000001", "x; rm -rf /")
+    hostile = good.replace(REAL_SESSION, "x; rm -rf /")
     assert stream.parse_result(hostile, message)["session_id"] is None
+
+
+def test_the_real_codex_captures_parse_with_the_shipped_block():
+    """TASK-266: the shipped Codex block reads a real launch and its resume. Both carry the
+    same session id; the resume's final message is the word the first turn was told to keep;
+    and each run's stderr holds the harness's refusal of a `forbidden` command, which with no
+    terminal claim classifies the run `denied` and with one does not."""
+    codex = ea.load("codex", TOOLKIT)
+    seen = {}
+    for name in (REAL_LAUNCH, REAL_RESUME):
+        out = codex.parse_result(_fixture(name + ".stdout.jsonl"),
+                                 _fixture(name + ".last-message.txt"))
+        stderr = _fixture(name + ".stderr.txt")
+        assert out["error"] is None and out["session_id"] == REAL_SESSION, name
+        line = codex.refusal_line(stderr)
+        assert line and "policy forbids commands starting with `git clean -f`" in line, name
+        assert codex.refusal_line(_fixture(name + ".stdout.jsonl")) is None, name
+        assert codex.exit_class(0, out, None, stderr) == "denied", name
+        assert codex.exit_class(0, out, "awaiting_approval", stderr) == "ok", name
+        assert codex.exit_class(0, out, None, "") == "ok", name
+        seen[name] = out
+    assert seen[REAL_RESUME]["text"].strip() == "PLUM-7421"
 
 
 def test_jsonl_fields_take_the_first_session_and_the_last_message(stream):
@@ -759,17 +789,22 @@ def test_json_parser_is_unchanged_and_fails_closed(adapter):
         assert noisy["error"] is None and noisy["text"] == raw["result"], repr(brk)
 
 
-def test_output_fixtures_are_marked_synthetic():
-    """REQ-662 BR-6: while an adapter is unverified its parser fixture is marked synthetic, and
-    no fixture holds an absolute home path."""
+def test_output_fixtures_say_where_they_come_from():
+    """REQ-662 BR-6: every parser fixture says in its name whether it is a real capture (the
+    harness version it was captured from), cut from one, or written by hand; and no fixture
+    holds an absolute home path."""
     names = sorted(os.listdir(OUTPUT))
     assert "README.md" in names and "synthetic" in _fixture("README.md")
+    kinds = set()
     for name in names:
         if name != "README.md":
-            assert ".synthetic." in name, name
+            kind = next((k for k in (".synthetic.", ".derived.", ".0.166.0.") if k in name), None)
+            assert kind, name
+            kinds.add(kind)
         text = _fixture(name)
         for home in ("/Users/", "/home/", "/root/"):
             assert home not in text, (name, home)
+    assert kinds == {".synthetic.", ".derived.", ".0.166.0."}
 
 
 def test_denied_stderr_reads_the_harness_stderr_only():

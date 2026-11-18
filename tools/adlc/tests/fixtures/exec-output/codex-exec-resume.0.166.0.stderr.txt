@@ -1,0 +1,1 @@
+2026-11-18T20:03:28.664317Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(\"`/bin/zsh -lc 'git clean -f -n'` rejected: policy forbids commands starting with `git clean -f`\")" }
