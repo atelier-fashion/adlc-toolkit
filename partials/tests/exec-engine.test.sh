@@ -72,7 +72,9 @@ JSON
 adlc() { python3 "$ROOT/tools/adlc/adlc.py" "$@"; }
 
 cd "$REPO" || exit 1
-adlc sprint-exec run --harness codex --shared-credentials REQ-901 > "$SBX/refused.out" 2>&1
+# copilot: an adapter with no exec block yet. Codex has one since REQ-662 stage 1, and with a
+# real `codex` on PATH this line would launch it.
+adlc sprint-exec run --harness copilot --shared-credentials REQ-901 > "$SBX/refused.out" 2>&1
 check "a harness with no exec block is refused" "2" "$?"
 contains "the refusal names the sibling REQ" "REQ-662" "$(cat "$SBX/refused.out")"
 
