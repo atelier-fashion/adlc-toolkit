@@ -624,3 +624,280 @@ def test_placeholders_at_the_launch_and_the_close_out(tmp_path, monkeypatch):
         "--resume", "session-REQ-901", "--cwd", run.doc["closeOutWorkingCopy"], "--last",
         run.file("close-out.last-message.txt")]
     assert closeout[at + 6:at + 8] == ["--setting-sources", ""]
+
+
+# ---- REQ-662 TASK-269: output by declared format, exit classes, the jsonl fake ----------------
+REQS = ("REQ-901", "REQ-902", "REQ-903", "REQ-904", "REQ-905")
+
+
+def _block(out, req):
+    """The lines one REQ's halt printed: its dashboard row through its reject line."""
+    text = out.getvalue()
+    start = text.index("| %s |" % req)
+    return text[start:text.index("/sprint reject %s" % req, start)]
+
+
+def _logs_outside_the_working_copy(run):
+    """REQ-662 AC-6: stdout and stderr are on disk in the run directory, never in a working
+    copy."""
+    assert os.path.isfile(run.file(run.exec["logPath"]))
+    assert os.path.isfile(run.file(run.exec["logPath"].replace(".json", ".stderr.log")))
+    for spec in run.doc["repos"].values():
+        assert not run.path.startswith(spec["workingCopy"] + os.sep)
+        for _root, _dirs, files in os.walk(spec["workingCopy"]):
+            for name in files:
+                assert not name.endswith((".stderr.log", ".last-message.txt")), name
+                assert not name.startswith("stdout"), name
+
+
+def test_codex_shaped_launch_follows_the_fixture(tmp_path):
+    """The launch the engine runs the jsonl fake under today holds the Codex-shaped fixture's
+    binary, templates and output, so it cannot drift from the fixture it stands in for."""
+    import harness_adapter as ha
+    shaped = ha.load_adapter(eh.codex_shaped_adapter(tmp_path), toolkit=eh.TOOLKIT)
+    fixture = ha.load_adapter(eh.CODEX_SHAPED_FIXTURE, toolkit=eh.TOOLKIT)
+    assert shaped["binary"] == fixture["binary"]
+    for key in ("launch", "resume", "output", "prompt_variant"):
+        assert shaped["exec"][key] == fixture["exec"][key], key
+
+
+def test_parse_failures_are_error_with_the_message_in_notes(tmp_path, monkeypatch):
+    """REQ-662 BR-6, AC-6: a truncated stream, a cut last line, non-JSON stdout, an empty final
+    message and a missing -o file each record `exec.exitClass: error` with the parser's message
+    in `notes`, and no `reason` key under `exec`; stdout and stderr are kept in the run
+    directory, failures included, and none is in the working copy."""
+    box = eh.jsonl_sandbox(tmp_path, monkeypatch, reqs=REQS)
+    scripts = {"REQ-901": ({"stream": "no-terminal"}, "no turn.completed event"),
+               "REQ-902": ({"stream": "cut"}, "last line is cut"),
+               "REQ-903": ({"stream": "not-json"}, "is not JSON"),
+               "REQ-904": ({"text": ""}, "final message is empty"),
+               "REQ-905": ({"no_last_message": True}, "no last-message file")}
+    for req, (script, _words) in scripts.items():
+        box.req(req, exit_early=0, **script)
+    orch = box.go(shared=True)
+    for req, (_script, words) in scripts.items():
+        run = orch.runs[req]
+        state = run.read_primary_state()
+        assert run.exec["exitClass"] == "error" and run.exec["exitCode"] == 0, req
+        assert state["exec"]["exitClass"] == "error" and "reason" not in state["exec"], req
+        notes = [n for n in state["notes"] if "did not parse" in n]
+        assert notes and words in notes[0], (req, state["notes"])
+        assert run.status == "failed", req
+        _logs_outside_the_working_copy(run)
+
+
+def test_exit_codes_map_to_classes(tmp_path, monkeypatch):
+    """REQ-662 BR-8, AC-7: each declared code lands in pipeline-state.json as its class with the
+    raw code; an undeclared 99 is `error` with `exec.exitCode: 99`; a `denied` exit leaves the
+    REQ blocked with the harness's last message in `blockers`, even though the model wrote
+    `awaiting_approval`, never completed or merged."""
+    box = eh.jsonl_sandbox(tmp_path, monkeypatch, reqs=REQS,
+                           exit_codes='{"0": ok, "1": error, "77": denied, "124": timeout}')
+    box.req("REQ-901")
+    box.req("REQ-902", exit_early=1, text="it broke")
+    box.req("REQ-903", exit=77, text="Terminal state: awaiting_approval\n\nStopped at a "
+                                     "prompt headless mode cannot answer.")
+    box.req("REQ-904", exit_early=124, text="out of time")
+    box.req("REQ-905", exit_early=99, text="something else")
+    orch = box.go(shared=True)
+    expect = {"REQ-901": (0, "ok", "awaiting_approval"), "REQ-902": (1, "error", "failed"),
+              "REQ-903": (77, "denied", "blocked"), "REQ-904": (124, "timeout", "failed"),
+              "REQ-905": (99, "error", "failed")}
+    for req, (code, klass, status) in expect.items():
+        run = orch.runs[req]
+        state = run.read_primary_state()
+        assert (state["exec"]["exitCode"], state["exec"]["exitClass"]) == (code, klass), req
+        assert run.status == status and state["status"] == status, req
+        _logs_outside_the_working_copy(run)
+    denied = orch.runs["REQ-903"].read_primary_state()
+    assert "Stopped at a prompt headless mode cannot answer." in json.dumps(denied["blockers"])
+    assert denied["completed"] is False and 8 not in denied["completedPhases"]
+    assert not box.calls("pr_merge")
+
+
+def test_denied_stderr_marks_a_claimless_run_denied(tmp_path, monkeypatch):
+    """REQ-662 ADR-6, BR-8: the harness's own refusal line on stderr makes a claimless run
+    `denied` and blocked with its last message; the same words in the model's message do not;
+    a run that claims its terminal state keeps its exit code's class."""
+    box = eh.jsonl_sandbox(tmp_path, monkeypatch, reqs=REQS[:3])
+    box.req("REQ-901", exit_early=0, refused=["git push --force origin main"],
+            text="I could not push the branch.")
+    box.req("REQ-902", exit_early=0,
+            text="rejected: policy forbids commands starting with git push")
+    box.req("REQ-903", refused=["git push --force origin main"])
+    orch = box.go(shared=True)
+    first = orch.runs["REQ-901"]
+    assert first.exec["exitClass"] == "denied" and first.status == "blocked"
+    blockers = json.dumps(first.read_primary_state()["blockers"])
+    assert "I could not push the branch." in blockers and eh.CODEX_REFUSAL in blockers
+    assert eh.CODEX_REFUSAL in open(first.file("stdout.stderr.log")).read()
+    second = orch.runs["REQ-902"]
+    assert second.exec["exitClass"] == "ok" and second.status == "failed"
+    third = orch.runs["REQ-903"]
+    assert third.exec["exitClass"] == "ok" and third.status == "awaiting_approval"
+
+
+def test_missing_session_id_reports_resume_impossible(tmp_path, monkeypatch):
+    """REQ-662 BR-7: a run whose output carried no session id halts with the "resume is
+    impossible" line before approval is asked for, on either output format; a run with one
+    does not print it; and an adapter with no resume template is impossible to resume too."""
+    a = tmp_path / "a"
+    a.mkdir()
+    box = eh.jsonl_sandbox(a, monkeypatch, reqs=REQS[:2])
+    box.req("REQ-901", no_session=True)
+    orch = box.go(shared=True)
+    assert {orch.runs[r].status for r in REQS[:2]} == {"awaiting_approval"}
+    assert orch.runs["REQ-901"].exec["sessionId"] is None
+    shown = _block(box.out, "REQ-901")
+    said = shown.index("resume is impossible")
+    assert "carried no session id" in shown
+    assert said < shown.index("approve: /sprint approve REQ-901")
+    assert "resume is impossible" not in _block(box.out, "REQ-902")
+
+    b = tmp_path / "b"
+    b.mkdir()
+    box = eh.Sandbox(b)
+    box.req(no_session=True)
+    box.go(shared=True)
+    assert "resume is impossible" in _block(box.out, "REQ-901")
+
+    c = tmp_path / "c"
+    c.mkdir()
+    box = eh.Sandbox(c)
+    _adapter_with(monkeypatch, c,
+                  ('  resume: [-p, --output-format, json, --resume, "{session_id}"]\n', ""))
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.exec["sessionId"] == "session-REQ-901"
+    shown = _block(box.out, "REQ-901")
+    assert "declares no resume" in shown and "resume is impossible" in shown
+    assert box.approve(orch) == "approved"
+    assert "resume is impossible" in run.read_primary_state()["closeOut"]["reason"]
+
+
+def test_jsonl_launch_resumes_from_the_last_message_file(tmp_path, monkeypatch):
+    """REQ-662 ADR-6, ADR-10: through the engine the jsonl fake launches with the Codex-shaped
+    argv, halts on the session id `thread.started` carried and the -o file's message, and the
+    close-out resumes it with `exec resume` and reads its own -o file."""
+    box = eh.jsonl_sandbox(tmp_path, monkeypatch)
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval" and run.exec["sessionId"] == "session-REQ-901"
+    assert run.doc["finalReport"].startswith("Terminal state: awaiting_approval")
+    first = box.launches()[0]
+    assert first["installed_as"] == "fake-exec-file" and first["opts"]["json"] is True
+    assert first["argv"][:8] == ["exec", "--json", "--sandbox", "workspace-write", "-C", run.wc,
+                                 "-o", run.last_message("stdout.json")]
+    assert first["cwd"] == run.wc and first["opts"]["resume"] is False
+    assert box.approve(orch) == "approved"
+    assert run.read_primary_state()["closeOut"]["status"] == "ok"
+    resumed = box.launches()[1]
+    assert resumed["argv"][:6] == ["exec", "resume", "--json", "-o",
+                                   run.file("close-out.last-message.txt"), "session-REQ-901"]
+    assert resumed["opts"]["session"] == "session-REQ-901"
+
+
+def _jsonl_fake(box, *args, prompt="", env=None):
+    """The jsonl fake run by hand, as the engine would run it, under the sandbox HOME."""
+    full = {"HOME": str(box.home), "PATH": box.environ["PATH"], "ADLC_EXEC_RUN": "REQ-901",
+            "LANG": "C"}
+    full.update(env or {})
+    return subprocess.run([str(box.bin / box.binary)] + list(args), input=prompt,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=True, cwd=str(box.repo), env=full)
+
+
+def test_jsonl_fake_records_the_prompt_and_argv(tmp_path):
+    """REQ-662 BR-12, ADR-10: installed as `codex`, the fake reads the whole prompt from stdin
+    and records its line count, argv and environment; prints its events only under --json
+    (LESSON-869); writes the last message to the -o file; honours a scripted exit code and
+    stderr; refuses an option codex does not take; and fails the test loudly when launched
+    with a forbidden flag."""
+    box = eh.Sandbox(tmp_path, harness="codex")
+    assert box.binary == "codex" and (box.bin / "codex").exists()
+    box.req(exit_early=3, text="Terminal state: blocked", stderr="scripted stderr\n",
+            commands=["printf hi"])
+    last = tmp_path / "last.txt"
+    prompt = "".join("prompt line %d\n" % i for i in range(600))
+    argv = ["exec", "--json", "--sandbox", "workspace-write", "-C", str(box.repo), "-o",
+            str(last)]
+    res = _jsonl_fake(box, *argv, prompt=prompt)
+    assert res.returncode == 3 and res.stderr == "scripted stderr\n"
+    events = [json.loads(line) for line in res.stdout.splitlines()]
+    assert [e["type"] for e in events] == ["thread.started", "item.completed", "turn.completed"]
+    assert events[0]["thread_id"] == "session-REQ-901"
+    assert events[1]["item"] == {"type": "command_execution", "command": "printf hi",
+                                 "aggregated_output": "hi"}
+    assert last.read_text() == "Terminal state: blocked\n"
+    record = box.launches()[0]
+    assert record["prompt_lines"] == 600 and record["argv"] == argv
+    assert record["installed_as"] == "codex" and record["opts"]["sandbox"] == "workspace-write"
+    assert record["opts"]["cd"] == str(box.repo) and record["opts"]["last"] == str(last)
+    assert record["env"]["HOME"] == str(box.home) and "EXEC_FAKE_AS" not in record["env"]
+    assert (box.home / "env-raw-REQ-901.txt").exists()
+    assert (box.home / "prompt-REQ-901.txt").read_text() == prompt
+    # Without --json the real CLI prints plain text and its session id on stderr.
+    plain = _jsonl_fake(box, *[a for a in argv if a != "--json"], prompt="x\n")
+    assert plain.stdout == "Terminal state: blocked\n" and "session id:" in plain.stderr
+    # An option codex does not take is a usage error, and resume takes no --sandbox or -C.
+    for bad in (argv + ["--allowedTools", "Bash(ls:*)"],
+                ["exec", "resume", "--json", "-C", str(box.repo), "S-1", "-"],
+                ["run", "--json"], argv + ["do the thing"]):
+        res = _jsonl_fake(box, *bad, prompt="x\n")
+        assert res.returncode == 2 and res.stderr.startswith("error: "), bad
+    box.check_fake()
+    # A forbidden flag fails loudly, spelled whole or as --flag=value.
+    for flag in (["--yolo"], ["--permission-mode=bypassPermissions"]):
+        res = _jsonl_fake(box, *(argv + flag), prompt="x\n")
+        assert res.returncode == 86 and "forbidden flag" in res.stderr
+    with pytest.raises(AssertionError, match="forbidden flag"):
+        box.check_fake()
+
+
+def test_jsonl_fake_event_shape_equals_the_probe_double(tmp_path):
+    """REQ-662 ADR-10, BR-12: the exec fake's codex events have the event types and keys the
+    probe double (`fake_harness_impl.emit`) prints under --json, the same command item, and
+    the same refusal line on stderr. Neither fake imports the other or the engine's matcher.
+    `debug` is the probe double's leak slot for the redaction tests (REQ-664 BR-9), which no
+    real event carries, so it is left out of the comparison."""
+    probe_wc = tmp_path / "probe-wc"
+    (probe_wc / ".codex" / "rules").mkdir(parents=True)
+    (probe_wc / ".codex" / "rules" / "adlc.rules").write_text(
+        'prefix_rule(pattern = ["printf"], decision = "allow")\n'
+        'prefix_rule(pattern = ["git", "push"], decision = "forbidden")\n')
+    home = tmp_path / "probe-home"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex" / "config.toml").write_text(
+        '[projects."%s"]\ntrust_level = "trusted"\n' % os.path.realpath(str(probe_wc)))
+    impl = os.path.join(HERE, "fake_harness", "fake_harness_impl.py")
+    probe = subprocess.run(
+        [sys.executable, "-I", "-B", impl, "codex", "exec", "--json", "--sandbox",
+         "workspace-write", "-C", str(probe_wc), "-o", str(tmp_path / "probe-last.txt"), "-"],
+        input="Run `printf hi` now. Run `git push --force origin main` now.\n",
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+        env={"HOME": str(home), "PATH": os.environ["PATH"], "FAKE_HARNESS_SCENARIO": "perform"},
+        cwd=str(probe_wc))
+    assert probe.returncode == 0, probe.stderr
+
+    (tmp_path / "exec").mkdir()
+    box = eh.Sandbox(tmp_path / "exec", harness="codex")
+    box.req(exit_early=0, text="Done.", commands=["printf hi"],
+            refused=["git push --force origin main"])
+    ours = _jsonl_fake(box, "exec", "--json", "--sandbox", "workspace-write", "-C",
+                       str(box.repo), "-o", str(tmp_path / "exec-last.txt"), prompt="x\n")
+    assert ours.returncode == 0, ours.stderr
+
+    def shape(stdout):
+        out = []
+        for line in stdout.splitlines():
+            event = json.loads(line)
+            item = event.get("item")
+            out.append((event["type"], sorted(set(event) - {"debug"}),
+                        sorted(item) if isinstance(item, dict) else None))
+        return out
+
+    assert shape(ours.stdout) == shape(probe.stdout)
+    assert [e for e in map(json.loads, ours.stdout.splitlines())
+            if e["type"] == "item.completed"] == \
+        [e for e in map(json.loads, probe.stdout.splitlines()) if e["type"] == "item.completed"]
+    assert ours.stderr == probe.stderr and eh.CODEX_REFUSAL in ours.stderr

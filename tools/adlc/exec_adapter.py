@@ -243,6 +243,12 @@ class ExecAdapter(object):
         return self.block["trust_grant"]
 
     @property
+    def can_resume(self):
+        """Whether the adapter declares a ``resume`` template. Without one, resume is impossible
+        (REQ-659 BR-7, REQ-662 BR-7)."""
+        return bool(self.block.get("resume"))
+
+    @property
     def forbidden(self):
         return list(dict.fromkeys(list(ENGINE_FORBIDDEN_FLAGS)
                                   + list(self.block.get("forbidden_flags", []))))
@@ -271,12 +277,25 @@ class ExecAdapter(object):
         template = self.block["shell_rule_exact"] if exact else self.block["shell_rule"]
         return template % text
 
+    @property
+    def has_matcher(self):
+        """Whether ``exec_matcher`` models this harness's rule matching (``matcher: claude``).
+        On ``matcher: none`` nothing does (REQ-662 ADR-8)."""
+        return self.block.get("matcher") != "none"
+
     def vet_extra(self, argv, entries, exact=False):
         """Refuse an extra allow that is a wildcard, an opener or wraps a deny (ADR-6).
 
         A deny is looked for in every form REQ-682 BR-2 names, through ``exec_matcher``,
-        which judges a compound command one statement at a time as Claude does.
+        which judges a compound command one statement at a time as Claude does. On
+        ``matcher: none`` nothing models how the harness matches a rule, so no extra allow can
+        be vetted, and every one is refused (REQ-662 ADR-8).
         """
+        if not self.has_matcher:
+            raise ExecRefused("allow entry %r: harness %s declares matcher: none, so nothing "
+                              "can vet an extra allow against the deny tier; allow_extra and "
+                              "allow_extra_exact must be empty on it (REQ-662 ADR-8)"
+                              % (" ".join(argv), self.name))
         gran = self.adapter["capabilities"]["allowlist_granularity"]
         for token in argv:
             if not _EXTRA_RE.match(token):
@@ -355,7 +374,10 @@ class ExecAdapter(object):
         allow += self.file_rules(write_roots, read_roots)
         runner = self.fence_runner()
         if runner:
-            self.vet_extra([runner], entries)
+            # On matcher: none nothing can vet the runner allow further: it is admitted by the
+            # path fence_runner() vetted, and the reach audit bounds what it runs (REQ-682).
+            if self.has_matcher:
+                self.vet_extra([runner], entries)
             allow.append(self.spell([runner]))
         deny = []
         for entry in entries:
@@ -498,57 +520,153 @@ class ExecAdapter(object):
             env["GH_TOKEN"] = scoped_token
         return env
 
-    def parse_result(self, text):
-        """The harness's JSON result, normalized; every value still data (BR-17).
+    def parse_result(self, text, last_message=None):
+        """The harness's result, normalized; every value still data (BR-17), never an
+        instruction.
 
-        Read through ``output``: each field is a key path into the one result object."""
+        Read through ``output`` (REQ-662 ADR-6). ``text`` is the run's stdout. Under
+        ``source: file``, ``last_message`` is the text of the ``{last_message}`` file the launch
+        named, or None when the harness wrote none. ``format: json`` is one result object, or
+        the last line that is one; each field is a key path into it. ``format: jsonl-stream``
+        is one event per line; each field is ``{event, key}``, read from the first event of
+        that type where the key is set for ``session_id`` and from the last one for every
+        other field.
+
+        ``error`` is the parser's message when the output is not what the adapter declares
+        (REQ-662 BR-6): no result object, a line that is not a JSON event, a stream cut short
+        (its last line cut, or no ``terminal_event``), or an empty final message. Whatever did
+        parse is still returned. A missing session id is not a parse failure: it makes resume
+        impossible (BR-7)."""
         spec = self.output
-        if (spec["format"], spec["source"]) != ("json", "stdout"):
-            raise ExecRefused("harness %s declares output format %s from %s, which this engine "
-                              "has no parser for" % (self.name, spec["format"], spec["source"]))
-        doc = None
-        try:
-            parsed = json.loads(text)
-            doc = parsed if isinstance(parsed, dict) else None
-        except ValueError:
-            for line in reversed(text.splitlines()):
-                try:
-                    parsed = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(parsed, dict):
-                    doc = parsed
-                    break
-        out = {"present": doc is not None, "session_id": None, "is_error": None,
-               "num_turns": None, "text": "", "cost": None, "denials": []}
-        if doc is None:
-            return out
-        sid = _at(doc, spec.get("session_id"))
+        out = {"present": False, "session_id": None, "is_error": None, "num_turns": None,
+               "text": "", "cost": None, "denials": [], "error": None}
+        text = text or ""
+        if spec["format"] == "json":
+            doc = _json_result(text)
+            error = None if doc is not None else "stdout holds no JSON result object"
+            out["present"] = doc is not None
+
+            def field(key, first=False):
+                return _at(doc, spec.get(key)) if doc is not None else None
+        else:
+            events, error = _jsonl_events(text, spec.get("terminal_event"))
+            out["present"] = bool(events)
+
+            def field(key, first=False):
+                return _pick(events, spec.get(key), first)
+        sid = field("session_id", first=True)
         if isinstance(sid, str) and _SESSION_RE.match(sid):
             out["session_id"] = sid
-        out["is_error"] = _at(doc, spec.get("is_error"))
-        turns = _at(doc, spec.get("num_turns"))
+        out["is_error"] = field("is_error")
+        turns = field("num_turns")
         out["num_turns"] = turns if isinstance(turns, int) else None
-        body = _at(doc, spec.get("final_message"))
+        if spec["source"] == "file":
+            body = last_message
+            if body is None and error is None:
+                error = "the harness wrote no last-message file"
+        else:
+            body = field("final_message")
         out["text"] = body if isinstance(body, str) else ""
-        cost = _at(doc, spec.get("cost"))
+        if error is None and not out["text"].strip():
+            error = "the final message is empty"
+        cost = field("cost")
         out["cost"] = cost if isinstance(cost, (int, float)) else None
-        denied = _at(doc, spec.get("denials"))
+        denied = field("denials")
         if isinstance(denied, list):
             out["denials"] = denied
+        out["error"] = error
         return out
 
-    def exit_class(self, rc, result, claim):
-        """The closed ExitClass (BR-21): the raw code, then the result's denial list."""
+    def refusal_line(self, stderr):
+        """The first line of the harness's stderr that ``denied_stderr`` matches, or None.
+
+        Applied to the harness's own stderr log only, never to the model's message: a model
+        can write anything, and a refusal is read only from what the harness records
+        (REQ-662 ADR-6, LESSON-847)."""
+        pattern = self.block.get("denied_stderr")
+        if not pattern or not stderr:
+            return None
+        found = re.compile(pattern)
+        for line in stderr.splitlines():
+            if found.search(line):
+                return line.strip()[:300]
+        return None
+
+    def exit_class(self, rc, result, claim, stderr=""):
+        """The closed ExitClass (REQ-659 BR-21, REQ-662 BR-8). The raw code through
+        ``exit_codes``, an undeclared code ``error``; with no claim, a refusal the harness
+        recorded (the result's denial list, or its own refusal line on ``stderr``) is
+        ``denied``; output that did not parse is never ``ok`` (BR-6)."""
         if rc is None:
             klass = "error"
         else:
             klass = self.block["exit_codes"].get(str(rc))
             if klass is None:
                 klass = "ok" if rc == 0 else "error"
-        if claim is None and result.get("denials"):
+        if claim is None and (result.get("denials") or self.refusal_line(stderr)):
             return "denied"
+        if result.get("error") and klass == "ok":
+            return "error"
         return klass
+
+
+def _json_result(text):
+    """The one JSON result object in ``text``, or the last line that is one, or None."""
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except ValueError:
+        for line in reversed(text.splitlines()):
+            try:
+                parsed = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
+def _jsonl_events(text, terminal):
+    """``(events, error)``: each line of a JSONL stream as an event (a JSON object with a
+    ``type``), and the parser's message when the stream is not one. Blank lines are skipped.
+    A last line with no newline that does not parse was cut; with ``terminal`` declared, a
+    stream with no event of that type was cut short. The events read before an error are
+    kept."""
+    if not text.strip():
+        return [], "stdout is empty: the harness printed no event stream"
+    lines = text.splitlines()
+    whole = text.endswith(("\n", "\r"))
+    events = []
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            if number == len(lines) and not whole:
+                return events, "the stream's last line is cut (line %d is not JSON and ends " \
+                               "with no newline): the stream was truncated" % number
+            return events, "stdout line %d is not JSON: the output is not the jsonl-stream " \
+                           "the adapter declares" % number
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            return events, "stdout line %d is not an event (a JSON object with a type)" % number
+        events.append(event)
+    if terminal and not any(event["type"] == terminal for event in events):
+        return events, "the stream has no %s event: it was truncated" % terminal
+    return events, None
+
+
+def _pick(events, spec, first):
+    """The value at ``spec``'s key path in the first (``first``) or last event whose ``type``
+    is ``spec``'s event and where that path is set, or None."""
+    if not spec:
+        return None
+    for event in (events if first else reversed(events)):
+        if event.get("type") == spec["event"]:
+            value = _at(event, spec["key"])
+            if value is not None:
+                return value
+    return None
 
 
 def _at(doc, path):

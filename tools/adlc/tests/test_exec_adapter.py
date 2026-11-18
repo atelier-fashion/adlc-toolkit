@@ -582,11 +582,187 @@ def test_output_shapes(tmp_path):
             ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(old, new)),
                             toolkit=TOOLKIT)
         assert exc.value.field == field, new
-    # The engine parses only what it has a parser for, and says so.
-    stream = ea.load("fake-exec-file", TOOLKIT,
-                     adapter_path=os.path.join(FIX, "fake-exec-file.yml"))
-    with pytest.raises(ea.ExecRefused, match="jsonl-stream"):
-        stream.parse_result('{"type": "thread.started", "thread_id": "t"}\n')
+    # `terminal_event` is a jsonl-stream key, and an event type (REQ-662 TASK-269).
+    assert _refused(tmp_path, "claude", put=("output", "{format: json, source: stdout, "
+                                                       "session_id: a, final_message: b, "
+                                                       "terminal_event: done}")).field == \
+        "exec.output.terminal_event"
+    for bad in ("terminal_event: turn completed", "terminal_event: [turn.completed]"):
+        with pytest.raises(ha.AdapterError) as exc:
+            ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(
+                "terminal_event: turn.completed", bad)), toolkit=TOOLKIT)
+        assert exc.value.field == "exec.output.terminal_event", bad
+    assert ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(
+        "    terminal_event: turn.completed\n", "")), toolkit=TOOLKIT)
+
+
+# --------------------------------------- output parsed by declared format (REQ-662 ADR-6, BR-6)
+OUTPUT = os.path.join(HERE, "fixtures", "exec-output")
+
+
+def _fixture(name):
+    with open(os.path.join(OUTPUT, name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+@pytest.fixture(scope="module")
+def stream():
+    """The Codex-shaped fixture: JSONL events on stdout, the last message in the -o file."""
+    return ea.load("fake-exec-file", TOOLKIT, adapter_path=os.path.join(FIX, "fake-exec-file.yml"))
+
+
+def test_jsonl_parser_and_its_failures(stream):
+    """REQ-662 BR-6, AC-6: a well-formed stream yields `thread.started`'s id and the -o file's
+    message (the must-not-fail case); a truncated stream, a cut last line, non-JSON stdout and
+    an empty or missing final message each yield the parser's message, which classifies the
+    run `error`, never `ok`, whatever the exit code said."""
+    good = _fixture("codex-jsonl.synthetic.stdout.jsonl")
+    message = _fixture("codex-jsonl.synthetic.last-message.txt")
+    out = stream.parse_result(good, message)
+    assert out["error"] is None and out["present"] is True
+    assert out["session_id"] == "0199c0de-5a1e-7f00-9c0d-e00000000001"
+    assert out["text"] == message and ea.terminal_claim(out["text"]) == "awaiting_approval"
+    assert stream.exit_class(0, out, "awaiting_approval") == "ok"
+    for name, last, words in (
+            ("codex-jsonl-no-terminal.synthetic.stdout.jsonl", message,
+             "no turn.completed event"),
+            ("codex-jsonl-cut.synthetic.stdout.jsonl", message, "last line is cut"),
+            ("not-json.synthetic.stdout.txt", message, "line 1 is not JSON"),
+            ("codex-jsonl.synthetic.stdout.jsonl",
+             _fixture("codex-jsonl-empty-message.synthetic.last-message.txt"),
+             "final message is empty"),
+            ("codex-jsonl.synthetic.stdout.jsonl", None, "no last-message file"),
+            ("codex-jsonl.synthetic.stdout.jsonl", "  \n", "final message is empty")):
+        out = stream.parse_result(_fixture(name), last)
+        assert words in out["error"], (name, out["error"])
+        claim = ea.terminal_claim(out["text"])
+        assert stream.exit_class(0, out, claim) == "error", name
+        assert stream.exit_class(1, out, claim) == "error", name
+    # What parsed before a failure is still read: a cut stream keeps its session id.
+    cut = stream.parse_result(_fixture("codex-jsonl-cut.synthetic.stdout.jsonl"), message)
+    assert cut["session_id"] == "0199c0de-5a1e-7f00-9c0d-e00000000001"
+    # An empty stdout, a JSON line that is not an event and a mid-stream non-JSON line fail.
+    for text, words in (("", "stdout is empty"), ('[1, 2]\n', "is not an event"),
+                        ('{"type": "thread.started", "thread_id": "t"}\nWARN x\n'
+                         '{"type": "turn.completed"}\n', "line 2 is not JSON")):
+        assert words in stream.parse_result(text, message)["error"]
+    # No session id is not a parse failure (it makes resume impossible, BR-7), and a value
+    # that is not a session id is dropped, as under `json`.
+    lines = good.splitlines(True)
+    assert stream.parse_result("".join(lines[1:]), message)["error"] is None
+    assert stream.parse_result("".join(lines[1:]), message)["session_id"] is None
+    hostile = good.replace("0199c0de-5a1e-7f00-9c0d-e00000000001", "x; rm -rf /")
+    assert stream.parse_result(hostile, message)["session_id"] is None
+
+
+def test_jsonl_fields_take_the_first_session_and_the_last_message(stream):
+    """REQ-662 ADR-6: under jsonl-stream `session_id` is read from the first event of its type
+    where the key is set, and every other field from the last; under `source: stdout` the
+    final message comes from the stream."""
+    adapter = ea.ExecAdapter(dict(stream.adapter, exec=dict(stream.block, output={
+        "format": "jsonl-stream", "source": "stdout", "terminal_event": "turn.completed",
+        "session_id": {"event": "thread.started", "key": "thread_id"},
+        "final_message": {"event": "item.completed", "key": "item.text"},
+        "num_turns": {"event": "turn.completed", "key": "usage.turns"}})), TOOLKIT)
+    text = "".join(json.dumps(e) + "\n" for e in (
+        {"type": "thread.started", "thread_id": "first-1"},
+        {"type": "thread.started", "thread_id": "second-2"},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "early"}},
+        {"type": "item.completed", "item": {"type": "agent_message",
+                                            "text": "Terminal state: blocked"}},
+        {"type": "item.completed", "item": {"type": "command_execution", "command": "ls"}},
+        {"type": "turn.completed", "usage": {"turns": 3}}))
+    out = adapter.parse_result(text)
+    assert out["session_id"] == "first-1" and out["text"] == "Terminal state: blocked"
+    assert out["num_turns"] == 3 and out["error"] is None
+    assert "final message is empty" in adapter.parse_result(
+        text.replace("Terminal state: blocked", "").replace("early", ""))["error"]
+
+
+def test_json_parser_is_unchanged_and_fails_closed(adapter):
+    """Claude's `json` parser reads what it read before (REQ-662 BR-1); stdout with no result
+    object and an empty `result` are parse failures under it too (BR-6)."""
+    doc = json.loads(_fixture("claude-json.synthetic.stdout.json"))
+    out = adapter.parse_result(_fixture("claude-json.synthetic.stdout.json"))
+    assert out["error"] is None and out["session_id"] == doc["session_id"]
+    assert out["text"] == doc["result"] and out["num_turns"] == 7 and out["cost"] == 0.42
+    # A last-message file, if any, is not read under `source: stdout`.
+    assert adapter.parse_result(_fixture("claude-json.synthetic.stdout.json"), "x")["text"] == \
+        doc["result"]
+    bad = adapter.parse_result(_fixture("not-json.synthetic.stdout.txt"))
+    assert bad["present"] is False and "no JSON result object" in bad["error"]
+    empty = adapter.parse_result(json.dumps(dict(doc, result="")))
+    assert "final message is empty" in empty["error"] and empty["session_id"]
+    assert adapter.exit_class(0, empty, None) == "error"
+
+
+def test_output_fixtures_are_marked_synthetic():
+    """REQ-662 BR-6: while an adapter is unverified its parser fixture is marked synthetic, and
+    no fixture holds an absolute home path."""
+    names = sorted(os.listdir(OUTPUT))
+    assert "README.md" in names and "synthetic" in _fixture("README.md")
+    for name in names:
+        if name != "README.md":
+            assert ".synthetic." in name, name
+        text = _fixture(name)
+        for home in ("/Users/", "/home/", "/root/"):
+            assert home not in text, (name, home)
+
+
+def test_denied_stderr_reads_the_harness_stderr_only():
+    """REQ-662 ADR-6, BR-8: a run with no claim whose stderr holds the harness's refusal line is
+    `denied`; the same words in the model's message are never read as one, and a claim keeps
+    the exit code's class."""
+    flags = ea.load("fake-exec-flags", TOOLKIT,
+                    adapter_path=os.path.join(FIX, "fake-exec-flags.yml"))
+    said = {"denials": [], "text": "Permission denied: shell(rm -rf /)", "error": None}
+    assert flags.exit_class(0, said, None, stderr="") == "ok"
+    assert flags.exit_class(0, said, None, stderr="ok\n") == "ok"
+    line = "Permission denied: shell(git push --force)"
+    stderr = "starting\n%s\n" % line
+    assert flags.refusal_line(stderr) == line
+    assert flags.exit_class(0, {"denials": [], "text": "", "error": None}, None,
+                            stderr) == "denied"
+    assert flags.exit_class(0, {"denials": [], "text": "x", "error": None},
+                            "awaiting_approval", stderr) == "ok"
+    # Anchored as the adapter wrote it: a line that only mentions the words is not a refusal.
+    assert flags.refusal_line("note: Permission denied: x\n") is None
+    # An adapter that declares no pattern reads no refusal from stderr.
+    assert ea.load("claude", TOOLKIT).refusal_line(stderr) is None
+
+
+def test_exit_codes_keep_the_closed_vocabulary(adapter):
+    """REQ-662 BR-8: each declared code maps to its class, an undeclared one is `error`, and a
+    parse failure turns `ok` into `error` while a declared `denied` or `timeout` stands."""
+    mapped = ea.ExecAdapter(dict(adapter.adapter, exec=dict(
+        adapter.block, exit_codes={"0": "ok", "1": "error", "42": "error", "53": "denied",
+                                   "124": "timeout"})), TOOLKIT)
+    plain = {"denials": [], "error": None}
+    for rc, klass in ((0, "ok"), (1, "error"), (42, "error"), (53, "denied"), (124, "timeout"),
+                      (99, "error"), (None, "error")):
+        assert mapped.exit_class(rc, plain, "awaiting_approval") == klass, rc
+    broken = {"denials": [], "error": "the stream has no turn.completed event"}
+    for rc, klass in ((0, "error"), (53, "denied"), (124, "timeout"), (99, "error")):
+        assert mapped.exit_class(rc, broken, "awaiting_approval") == klass, rc
+    assert set(ha.EXIT_CLASSES) == {"ok", "denied", "timeout", "error"}
+
+
+def test_matcher_none_refuses_every_extra_allow(tmp_path):
+    """REQ-662 ADR-8: on `matcher: none` nothing can vet an extra allow against the deny tier, so
+    any `allow_extra`, `allow_extra_exact` or config extra is refused; with none the tiers
+    render (the must-not-refuse case), the fence runner included."""
+    plain = ea.ExecAdapter(_loads(tmp_path, "fake-exec-flags"), TOOLKIT)
+    allow, _deny = plain.tiers(BRANCH)
+    assert any("fence-run" in rule for rule in allow)
+    for key in ("allow_extra", "allow_extra_exact"):
+        extra = ea.ExecAdapter(_loads(tmp_path, "fake-exec-flags",
+                                      add="%s: [[make, test]]" % key), TOOLKIT)
+        with pytest.raises(ea.ExecRefused, match="matcher: none"):
+            extra.tiers(BRANCH)
+    with pytest.raises(ea.ExecRefused, match="matcher: none"):
+        plain.tiers(BRANCH, [["pytest"]])
+    with pytest.raises(ea.ExecRefused, match="matcher: none"):
+        plain.vet_extra(["make", "test"], [], exact=True)
 
 
 def test_probes_cache_follows_verification(tmp_path):

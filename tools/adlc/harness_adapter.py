@@ -139,6 +139,10 @@ _EXEC_KEYS = set(_EXEC_REQUIRED) | {
 _EXEC_OUTPUT_REQUIRED = ("format", "source", "final_message", "session_id")
 #: Where the parsed output holds each field. ``denials`` is the list a run's refusals land in.
 _EXEC_OUTPUT_PATHS = ("session_id", "final_message", "is_error", "num_turns", "cost", "denials")
+#: ``terminal_event`` (``format: jsonl-stream`` only): the event ``type`` a complete stream
+#: carries. A stream without one was cut short, which is a parse failure (REQ-662 BR-6).
+_EXEC_OUTPUT_OPTIONAL = ("terminal_event",)
+_EVENT_TYPE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 _KEY_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _PLACEHOLDER_RE = re.compile(r"^\{[a-z_]+\}$")
 _FLAG_NAME_RE = re.compile(r"^--?[A-Za-z0-9][A-Za-z0-9-]*$")
@@ -555,7 +559,8 @@ def _exec_output(src, block):
     """``output`` (REQ-662 ADR-6). ``format`` is how stdout is parsed; ``source`` is where the
     final message is read. Under ``format: json`` a field is a key path into the result object
     (``key`` or ``a.b``); under ``jsonl-stream`` it is ``{event, key}``, a key path inside the
-    event whose ``type`` is ``event``. Under ``source: file``, ``final_message`` is the
+    event whose ``type`` is ``event``, and the optional ``terminal_event`` names the event a
+    complete stream carries. Under ``source: file``, ``final_message`` is the
     placeholder that names the file the harness writes its last message to, and it must be a
     whole token of ``launch`` (and of ``resume``), or the engine would read a file the harness
     was never told to write."""
@@ -563,12 +568,21 @@ def _exec_output(src, block):
     if not isinstance(out, dict):
         raise AdapterError(src, "exec.output", "must be a mapping {format, source, final_message, "
                            "session_id} at exec_schema_version %d" % EXEC_SCHEMA_VERSION)
-    _unknown(src, "exec.output.", out, set(_EXEC_OUTPUT_REQUIRED) | set(_EXEC_OUTPUT_PATHS))
+    _unknown(src, "exec.output.", out, set(_EXEC_OUTPUT_REQUIRED) | set(_EXEC_OUTPUT_PATHS)
+             | set(_EXEC_OUTPUT_OPTIONAL))
     for key in _EXEC_OUTPUT_REQUIRED:
         if key not in out:
             raise AdapterError(src, "exec.output." + key, "is required")
     fmt = _enum(src, "exec.output.format", out["format"], OUTPUT_FORMATS)
     source = _enum(src, "exec.output.source", out["source"], OUTPUT_SOURCES)
+    if "terminal_event" in out:
+        if fmt != "jsonl-stream":
+            raise AdapterError(src, "exec.output.terminal_event", "is read under format: "
+                               "jsonl-stream only: a json result has no events")
+        event = _need_str(src, "exec.output.terminal_event", out["terminal_event"])
+        if not _EVENT_TYPE_RE.match(event):
+            raise AdapterError(src, "exec.output.terminal_event", "%r is not an event type"
+                               % (event,))
     for key in _EXEC_OUTPUT_PATHS:
         if key not in out:
             continue

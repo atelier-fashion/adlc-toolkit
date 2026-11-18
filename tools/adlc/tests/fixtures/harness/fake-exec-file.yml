@@ -90,6 +90,10 @@ exec:
     source: file
     final_message: "{last_message}"
     session_id: {event: thread.started, key: thread_id}
+    # Optional, and read under format: jsonl-stream only: the event type a complete stream
+    # carries. A stream with none of it was cut short, which is a parse failure, as is a
+    # last line cut with no newline (REQ-662 BR-6). Without it only a cut line is caught.
+    terminal_event: turn.completed
   env_passthrough: [HOME, PATH]
   auth_env: [FAKE_EXEC_FILE_API_KEY]
   config_surfaces: [.fake-exec-file/]

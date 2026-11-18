@@ -1,7 +1,7 @@
 ---
 id: TASK-269
 title: "Output parsing by declared format, exit classes, and the JSONL profile of the exec fake"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17

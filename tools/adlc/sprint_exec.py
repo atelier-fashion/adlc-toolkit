@@ -707,12 +707,24 @@ class Orchestrator(object):
             run.doc.setdefault("notes", []).append("stragglers survived the sweep: %s" % left)
         return left
 
-    def _read_result(self, run, name):
+    @staticmethod
+    def _read_text(path):
+        """A file the harness wrote, or None when there is none. Read only after the reap."""
         try:
-            with open(run.file(name), encoding="utf-8", errors="replace") as fh:
-                return self.adapter(run).parse_result(fh.read())
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                return fh.read()
         except OSError:
-            return self.adapter(run).parse_result("")
+            return None
+
+    def _read_result(self, run, name):
+        """The launch's output, parsed by the adapter's declared format and source (REQ-662
+        ADR-6): stdout from ``name``, and under ``source: file`` the ``{last_message}`` file
+        that launch named. A missing file reads as nothing, which the parser reports."""
+        adapter = self.adapter(run)
+        last = None
+        if adapter.output["source"] == "file":
+            last = self._read_text(run.last_message(name))
+        return adapter.parse_result(self._read_text(run.file(name)) or "", last)
 
     def _stderr_notice(self, run, stem):
         notice = self.adapter(run).block.get("trust_notice")
@@ -731,9 +743,13 @@ class Orchestrator(object):
         """The harness is gone. Nothing it wrote is read before the reap (BR-10)."""
         left = self.reap(run, run.exec["pid"])
         stem = run.exec["logPath"]
+        adapter = self.adapter(run)
         result = self._read_result(run, stem)
+        # The harness's own stderr, never the model's message, is where a refusal line is
+        # looked for (REQ-662 ADR-6).
+        stderr = self._read_text(run.file(stem.replace(".json", ".stderr.log"))) or ""
         claim = ea.terminal_claim(result["text"])
-        klass = self.adapter(run).exit_class(rc, result, claim)
+        klass = adapter.exit_class(rc, result, claim, stderr)
         run.exec.update({"exitCode": rc, "exitClass": klass,
                          "sessionId": result["session_id"], "stalledAt": None})
         run.doc["finalReport"] = result["text"]
@@ -743,6 +759,13 @@ class Orchestrator(object):
         self.box(run).log("exec_exit", [str(rc), klass, str(claim)], run.wc, rc)
         state = run.read_wc_state()
         self._model_values(run, state)
+        if result["error"]:
+            # A parse failure is exitClass error with the parser's message in notes, in the
+            # run record and in pipeline-state.json; no `reason` key is added to exec (BR-6).
+            parsed = "the harness output did not parse: %s" % result["error"]
+            run.doc.setdefault("notes", []).append(parsed)
+            notes = state.get("notes") if isinstance(state.get("notes"), list) else []
+            state = dict(state, notes=notes + [parsed])
         hits = []
         try:
             for rid, spec in run.doc["repos"].items():
@@ -763,11 +786,12 @@ class Orchestrator(object):
             self._block(run, state, "stragglers survived the sweep: %s" % left)
         elif hits:
             self._block(run, state, "%s: %s" % (PROTOCOL, "; ".join(hits)))
+        elif klass == "denied":
+            # Before the halt: a run the harness ended on a refusal is blocked, whatever the
+            # model wrote to state, never a completed phase (REQ-662 BR-8).
+            self._block(run, state, self._denied_reason(result, adapter.refusal_line(stderr)))
         elif state.get("status") == "awaiting_approval":
             self._halt(run, state, result)
-        elif klass == "denied":
-            self._block(run, state, "the harness was denied: %s"
-                        % json.dumps(result["denials"])[:300])
         elif state.get("status") == "blocked" or (claim == "blocked" and state.get("blockers")):
             self._terminal(run, "blocked", self._halt_token(state), state)
         else:
@@ -775,6 +799,18 @@ class Orchestrator(object):
             run.doc.setdefault("notes", []).append(
                 "exit %s, class %s, is_error %s: %s" % (rc, klass, result["is_error"], last))
             self._terminal(run, "failed", "other", state, note=last)
+
+    @staticmethod
+    def _denied_reason(result, refusal):
+        """Why a denied run is blocked: what the harness recorded, then its last message
+        (REQ-662 BR-8). Every part is data for a person to read, never an instruction."""
+        parts = []
+        if result["denials"]:
+            parts.append("denials %s" % json.dumps(result["denials"])[:300])
+        if refusal:
+            parts.append("stderr: %s" % refusal)
+        parts.append("last message: %s" % ((result["text"] or "").strip()[:300] or "(none)"))
+        return "the harness was denied: %s" % "; ".join(parts)
 
     def _model_values(self, run, state):
         """What state says that the orchestrator would act on is checked first (BR-17)."""
@@ -926,7 +962,10 @@ class Orchestrator(object):
             self._block(run, state, "%s: %s" % (PROTOCOL, exc))
             return
         run.status = "awaiting_approval"
-        run.doc["resume"] = "ok" if run.exec["sessionId"] else "impossible"
+        # Said at the halt, before approval is asked for: a run with no session id, or on a
+        # harness with no resume template, cannot go on past the merge (REQ-662 BR-7).
+        resumable = run.exec["sessionId"] and self.adapter(run).can_resume
+        run.doc["resume"] = "ok" if resumable else "impossible"
         self._carry(run, state)
         self.announce(run, self.mint(run))
 
@@ -1464,6 +1503,10 @@ class Orchestrator(object):
         if not sid:
             self._close_out_failed(run, "failed", "no session id")
             return
+        if not adapter.can_resume:
+            self._close_out_failed(run, "failed", "resume is impossible: harness %s declares "
+                                   "no resume" % adapter.name)
+            return
         help_out = subprocess.run([run.doc["binary"], "--help"], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, universal_newlines=True,
                                   env=self._child_env(run)).stdout
@@ -1770,7 +1813,10 @@ def render_row(run, violations=()):
         if plan.get("sharedCredentials"):
             lines.append("  sharedCredentials: the run used the operator's forge credentials")
         if run.doc.get("resume") == "impossible":
-            lines.append("  resume: impossible (no session id): the close-out will not run")
+            why = ("the harness declares no resume" if run.exec.get("sessionId")
+                   else "the run's output carried no session id")
+            lines.append("  resume: impossible: %s, so resume is impossible and the close-out "
+                         "will not run after the merge" % why)
     if run.status == "blocked":
         for item in run.read_primary_state().get("blockers") or []:
             lines.append("  blocked: a person must look: %s" % json.dumps(item)[:300])
