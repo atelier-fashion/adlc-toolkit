@@ -82,6 +82,10 @@ adlc sprint-exec run REQ-901 --shared-credentials --harness-flag=--yolo > "$SBX/
 check "a forbidden flag is refused" "2" "$?"
 contains "the refusal names Rule B" "Rule B" "$(cat "$SBX/refused.out")"
 
+out=$(ADLC_EXEC_RUN=REQ-901 adlc sprint-exec run REQ-901 --shared-credentials 2>&1); rc=$?
+check "a run from inside a run is refused" "2" "$rc"
+contains "it names Rule B" "Rule B protocol violation: nested_launch_refused" "$out"
+
 adlc sprint-exec run REQ-901 --shared-credentials > "$SBX/sup.out" 2>&1 &
 SUP_PID=$!
 

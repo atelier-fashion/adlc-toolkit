@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -533,6 +534,150 @@ def test_plain_shell_verbs(box):
                           "sprint-exec", "status"], cwd=str(box.repo), env=env,
                          stdout=subprocess.PIPE, universal_newlines=True)
     assert out.returncode == 0 and "| REQ | Phase |" in out.stdout
+
+
+ENTRY = os.path.join(eh.TOOLKIT, "tools", "adlc", "adlc.py")
+
+
+def _engine(box, argv, **env):
+    """`adlc sprint-exec <argv>` through the engine's own entry point, from an operator's shell
+    in the primary repo."""
+    return subprocess.run([sys.executable, ENTRY, "sprint-exec"] + argv, cwd=str(box.repo),
+                          env=dict(box.environ, PYTHONPATH="", **env), stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, universal_newlines=True, timeout=120)
+
+
+def test_nested_launch_is_refused(tmp_path, monkeypatch):
+    """REQ-662 BR-18, AC-21: a process the model started runs the engine's own entry point with
+    ADLC_EXEC_RUN and its tag scrubbed from its environment: a `run` of a REQ nothing holds, a
+    `resume`, and an `approve` of another run, which reaches the supervisor over its socket.
+    Each is refused through its pid ancestry, which holds the live exec pid the engine state
+    records (for the dispatch, the kernel's peer pid's), names Rule B and is logged
+    `nested_launch_refused` in the run it came from. Nothing is launched or decided and no run
+    directory is made."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902", "REQ-903"))
+    # The engine state under the HOME a harness is given, as on a machine with no
+    # XDG_STATE_HOME: a child's environment carries no such variable.
+    del box.environ["XDG_STATE_HOME"]
+    box.req("REQ-901", nested=[["run", "REQ-903", "--shared-credentials"], ["resume"],
+                               ["approve", "REQ-902", "--token", "0" * 32]])
+    orch = box.orch()
+    monkeypatch.chdir(str(box.repo))            # bind() moves this process into its directory
+    server = orch.bind()
+    try:
+        box.start(["REQ-901", "REQ-902"], orch=orch, shared=True)
+        end = time.time() + 120
+        while orch.children and time.time() < end:
+            orch.poll_once()
+            orch.serve_once(server, 0.05)
+    finally:
+        server.close()
+    box.wait(orch)
+    run, other = orch.runs["REQ-901"], orch.runs["REQ-902"]
+    path = box.home / "nested-REQ-901.jsonl"
+    tried = [json.loads(ln) for ln in path.read_text().splitlines()]
+    assert [t["argv"][0] for t in tried] == ["run", "resume", "approve"]
+    refused = eh.events(box, run, "nested_launch_refused")
+    assert len(refused) == 3
+    for attempt, detail in zip(tried, refused):
+        assert attempt["rc"] == 2 and "Rule B" in attempt["stderr"], attempt
+        assert ("nested_launch_refused: %s attempted from inside a run: pid %d descends from the "
+                "live exec pid %d of REQ-901" % (attempt["argv"][0], attempt["pid"],
+                                                 run.exec["pid"])) in attempt["stderr"], attempt
+        assert detail["pid"] == attempt["pid"] and detail["execPid"] == run.exec["pid"]
+        assert run.exec["pid"] in detail["ancestry"] and detail["execRun"] is None
+    assert [r["argv"] for r in box.log(run) if r["kind"] == "nested_launch_refused"] == [
+        ["run"], ["resume"], ["approve"]]
+    assert sum("nested_launch_refused" in v for v in se.violations_of(run)) == 3
+    assert run.status == other.status == "awaiting_approval"
+    assert other.ledger().read()["decision"] is None and "REQ-902" in orch.tokens
+    assert el.find_run(str(box.repo), "REQ-903", box.environ) is None
+    assert not (box.repo / ".worktrees" / "REQ-903").exists()
+    assert sorted(os.listdir(el.exec_root(box.environ))) == sorted(
+        os.path.basename(p) for p in (run.path, other.path, orch.sup_dir))
+
+
+def test_an_operator_launch_is_not_refused_by_another_runs_harness(tmp_path):
+    """REQ-662 BR-18, the must-not-refuse half: a shell that descends from no exec pid launches
+    through the engine's entry point while another run's harness is alive, on the claude
+    adapter as before (BR-1). A recorded exec pid that is dead, or alive in an unrelated
+    process that is not an ancestor, refuses nothing; a descendant of that process is
+    refused."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    box.req("REQ-901", sleep_first=60)
+    orch = box.start(["REQ-901"], shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.exec["pid"] in orch.live_exec_pids()
+    out = tmp_path / "operator.out"
+    with open(str(out), "w") as fh:
+        sup = subprocess.Popen([sys.executable, ENTRY, "sprint-exec", "run", "REQ-902",
+                                "--shared-credentials"], cwd=str(box.repo),
+                               env=dict(box.environ, PYTHONPATH=""), stdout=fh,
+                               stderr=subprocess.STDOUT)
+    try:
+        end = time.time() + 120
+        while "Awaiting approval" not in out.read_text() and sup.poll() is None \
+                and time.time() < end:
+            time.sleep(0.1)
+    finally:
+        sup.terminate()
+        sup.wait(timeout=30)
+    text = out.read_text()
+    assert "REQ-902 launched, pid" in text and "Awaiting approval" in text, text
+    assert "refused" not in text and se.pid_alive(run.exec["pid"])
+    assert not eh.events(box, run, "nested_launch_refused")
+    orch.abort("REQ-901", by="operator")
+    assert not se.pid_alive(run.exec["pid"])
+    assert box.orch().nested_guard("run", {}, os.getpid()) is None
+    # The recorded pid reused by a process that is not this one's ancestor.
+    holder = subprocess.Popen(
+        [sys.executable, "-c", "import subprocess, sys, time\nchild = subprocess.Popen("
+         "[sys.executable, '-c', 'import time; time.sleep(30)'])\nprint(child.pid, flush=True)\n"
+         "time.sleep(30)\n"], stdout=subprocess.PIPE, universal_newlines=True,
+        start_new_session=True)
+    try:
+        child = int(holder.stdout.readline())
+        record = se.Run.load(run.path)
+        record.exec["pid"] = holder.pid
+        record.save()
+        later = box.orch()
+        assert later.live_exec_pids()[holder.pid].req == "REQ-901"
+        assert later.nested_guard("run", {}, os.getpid()) is None
+        with pytest.raises(se.Refused, match="Rule B.*pid %d descends from the live exec pid %d "
+                                             "of REQ-901" % (child, holder.pid)):
+            later.nested_guard("run", {}, child)
+    finally:
+        os.killpg(holder.pid, signal.SIGKILL)
+        holder.wait()
+        holder.stdout.close()
+
+
+def test_the_run_tag_refuses_a_launch_a_dispatch_and_a_resume(box):
+    """REQ-662 AC-21: with ADLC_EXEC_RUN set, a `run` and a `resume` through the engine's entry
+    point, and a dispatched `approve` and `answer`, are each refused naming Rule B and logged
+    `nested_launch_refused`, before anything is made or decided."""
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    token, _ = box.tokens("REQ-901")
+    root = el.exec_root(box.environ)
+    before = sorted(os.listdir(root))
+    for argv in (["run", "REQ-901", "--shared-credentials"], ["resume"]):
+        res = _engine(box, argv, ADLC_EXEC_RUN="REQ-901")
+        assert res.returncode == 2, res.stderr
+        assert ("Rule B protocol violation: nested_launch_refused: %s attempted from inside a "
+                "run: ADLC_EXEC_RUN=REQ-901 is set" % argv[0]) in res.stderr, res.stderr
+    for op in se.LAUNCH_OPS:
+        request = {"op": op, "req": "REQ-901", "token": token, "text": "go",
+                   "execRun": "REQ-901"}
+        with pytest.raises(se.Refused, match="Rule B.*%s attempted from inside a run" % op):
+            orch.dispatch(request, os.getpid())
+    assert sorted(os.listdir(root)) == before
+    assert [r["argv"] for r in box.log(run) if r["kind"] == "nested_launch_refused"] == [
+        ["run"], ["resume"], ["approve"], ["answer"]]
+    assert all(d["execRun"] == "REQ-901" and d["execPid"] is None
+               for d in eh.events(box, run, "nested_launch_refused"))
+    assert run.status == "awaiting_approval" and run.ledger().read()["decision"] is None
+    assert "REQ-901" in orch.tokens
 
 
 def test_worktree_collision_refused(box):

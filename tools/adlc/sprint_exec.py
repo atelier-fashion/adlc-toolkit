@@ -246,6 +246,12 @@ def peer_pid(conn):
         return None
 
 
+#: The dispatched ops that start a harness: approve's close-out resume and answer's relaunch.
+#: Like `run` and `resume`, each is refused from inside a run by the caller's ancestry as well
+#: as by ``ADLC_EXEC_RUN`` (REQ-662 BR-18).
+LAUNCH_OPS = ("approve", "answer")
+
+
 class Batch(object):
     """What the pre-flight established, once, for every REQ of a launch."""
 
@@ -1438,6 +1444,55 @@ class Orchestrator(object):
             run.violation(message)
             raise Refused("%s: %s" % (PROTOCOL, message))
 
+    def live_exec_pids(self):
+        """Each live harness pid (``exec.pid``, ``exec.closeOutPid``) that a run record in this
+        machine's engine state directory holds, or this supervisor's own runs, mapped to its
+        run. Read from the state directory, never from a working copy (REQ-662 BR-18)."""
+        runs = []
+        for path in el.run_dirs(self.environ):
+            try:
+                runs.append(Run.load(path))
+            except Refused:
+                continue
+        live = {}
+        for run in runs + self.all_runs():
+            record = run.doc.get("exec") if isinstance(run.doc.get("exec"), dict) else {}
+            for pid in (record.get("pid"), record.get("closeOutPid")):
+                if pid_alive(pid):
+                    live[int(pid)] = run
+        return live
+
+    def nested_guard(self, what, caller_env, caller_pid):
+        """Refuse a launch, a dispatched launch or a resume from inside a run (REQ-662 BR-18):
+        with ``ADLC_EXEC_RUN`` set, or from a descendant of a live exec pid of any run
+        (``live_exec_pids``), whatever the caller's environment says, so a process the model
+        started cannot start a nested run after scrubbing its environment. It runs before
+        anything is bound, prepared or launched: a refusal creates no run directory and writes
+        no ledger entry. The refusal names ``nested_launch_refused``, and the run it came from
+        (the exec pid's, else the one ``ADLC_EXEC_RUN`` names) logs that event and records the
+        attempt as a Rule B violation."""
+        marker = (caller_env or {}).get("ADLC_EXEC_RUN") or None
+        chain = ancestry(caller_pid) if caller_pid else []
+        live = self.live_exec_pids()
+        hit = next((p for p in chain if p in live), None)
+        if marker is None and hit is None:
+            return
+        run = live.get(hit)
+        if run is None:
+            path = el.find_run(self.primary, marker, self.environ)
+            run = self.runs.get(marker) or (Run.load(path) if path else None)
+        if hit is not None:
+            where = "pid %s descends from the live exec pid %s of %s" % (caller_pid, hit, run.req)
+        else:
+            where = "ADLC_EXEC_RUN=%s is set" % marker
+        message = "nested_launch_refused: %s attempted from inside a run: %s" % (what, where)
+        if run is not None:
+            es.Toolbox(run.path, self.toolkit, self.environ).log(
+                "nested_launch_refused", [what], None, None,
+                detail={"pid": caller_pid, "ancestry": chain, "execPid": hit, "execRun": marker})
+            run.violation(message)
+        raise Refused("%s: %s" % (PROTOCOL, message))
+
     def _validate_state(self, run):
         state = run.read_primary_state()
         approval = state.get("approval") if isinstance(state.get("approval"), dict) else {}
@@ -2160,6 +2215,9 @@ class Orchestrator(object):
 
     def dispatch(self, request, pid):
         op = request.get("op")
+        if op in LAUNCH_OPS:
+            # The kernel's peer pid alone, never the pid the request claims (REQ-662 BR-18).
+            self.nested_guard(op, {"ADLC_EXEC_RUN": request.get("execRun")}, pid)
         pid = pid or request.get("callerPid")
         env = {"ADLC_EXEC_RUN": request.get("execRun")} if request.get("execRun") else {}
         if op == "approve":
@@ -2414,9 +2472,10 @@ def main(argv=None):
 def _dispatch(args):
     primary = repo_root(os.getcwd())
     orch = Orchestrator(primary)
+    if args.verb in ("run", "resume"):
+        # Before the supervisor's directory is made (REQ-662 BR-18).
+        orch.nested_guard(args.verb, orch.environ, os.getpid())
     if args.verb == "run":
-        if orch.environ.get("ADLC_EXEC_RUN"):
-            raise Refused("%s: run attempted from inside a run" % PROTOCOL)
         server = orch.bind()
         try:
             batch = orch.preflight(args.reqs, args.harness, args.shared_credentials,

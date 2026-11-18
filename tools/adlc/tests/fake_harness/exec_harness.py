@@ -42,6 +42,12 @@ copy or absolute, whose content this launch records as it finds them on starting
 rule file, a hook file or the user policy folder mid-run, after its commit) and ``add`` (the
 paths the commit stages, in place of ``git add -A``: a model that stages only its own files).
 Under ``closeout`` the same ``saw`` and ``add`` keys apply to the resumed session.
+
+The nested-launch key (REQ-662 BR-18, both profiles): ``nested`` (argv lists, each run after
+``sprint-exec`` through the engine's own entry point under the scenario's toolkit, from the
+working copy, with ``ADLC_EXEC_RUN`` and its tag scrubbed from the environment: a model starting
+a nested run, resume or dispatch). Each attempt's argv, pid, exit code and output go to
+``$HOME/nested-<REQ>.jsonl``; the launch then carries on to the gate.
 """
 
 import json
@@ -153,6 +159,28 @@ def run_commands(spec, wt):
                                "exit_code": res.returncode})
 
 
+def nested_launches(top, spec, wt):
+    """Each ``nested`` argv, run through the engine's own entry point from the working copy,
+    with the run's variables scrubbed: what a model that starts a nested run would do. A launch
+    the engine lets through is killed after a minute and recorded as ``timeout``."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ADLC_EXEC_RUN")}
+    entry = os.path.join(top["toolkit"], "tools", "adlc", "adlc.py")
+    for args in spec.get("nested", []):
+        proc = subprocess.Popen([sys.executable, entry, "sprint-exec"] + list(args), cwd=wt,
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                universal_newlines=True)
+        try:
+            out, err = proc.communicate(timeout=60)
+            rc = proc.returncode
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, err = proc.communicate()
+            rc = "timeout"
+        with open(os.path.join(HOME, "nested-%s.jsonl" % REQ), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"argv": list(args), "pid": proc.pid, "harness_pid": os.getpid(),
+                                 "rc": rc, "stdout": out, "stderr": err}) + "\n")
+
+
 def record_saw(paths, wt):
     """What each of ``paths`` holds as this launch starts: its text, or None when absent."""
     seen = {}
@@ -213,6 +241,7 @@ def first_launch(top, spec, prompt):
             if spec.get("plant_exec"):
                 os.chmod(full, 0o755)
     run_commands(spec, wt)
+    nested_launches(top, spec, wt)
     if spec.get("exit_early") is not None:
         sys.stdout.write(spec.get("stdout", ""))
         result(spec.get("text", ""), spec)
