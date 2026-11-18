@@ -48,7 +48,8 @@ Write `harness/codex.yml`'s exec block as architecture ADR-11 states it, bring t
 
 - Stage 1 only (spec Amendments, 2026-11-17): Copilot, Cursor and Antigravity clauses are out of scope.
 - Every value in the block comes from `.adlc/research/harness-probes/codex.json` or the installed CLI's help. Guess nothing; a value no evidence supports is `unknown` or `unverified`.
-- `forbidden_flags` for Codex is the list in architecture ADR-7.
+- `forbidden_flags` for Codex is the list in architecture ADR-7. It does not hold `-p`: Claude's launch does, and AC-2's cross-adapter check would fail. The closed-world check refuses it.
+- Add `harness/codex.yml` to TASK-258's launch snapshot test (`test_launch_argv_snapshot`).
 - The `resume` template is ADR-7's and is provisional until TASK-266's record; if that record fails, this block drops `resume`.
 - Keep the yml the source: enumerations in prose stay out (BR-14).
 - Lessons in play: LESSON-868 (model a deny only where it was seen to refuse), LESSON-755 (decide a capability from the installed binary, not the docs).

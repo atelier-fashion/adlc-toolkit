@@ -18,7 +18,6 @@ Implement architecture ADR-8 and ADR-9. Remove the census's `claude` defaults, a
 - `tools/adlc/fence_census.py` — `census(root, adapter)` with no harness default; `matcher: none` never routes `direct`; the golden path is per adapter; `--check` and `--write` cover every exec-capable adapter; a second `PUSH_REACH` kind for the exact branch push; the reach audit runs against the union of deny tiers; the `branch` placeholder pattern of ADR-9.
 - `tools/adlc/fence_run.py` — `find` accepts a fence that is `runner` in any exec-capable adapter's census; the push fence's `worktree` value must be the calling directory.
 - `tools/adlc/exec_prompt.py` — the fence rewrite takes the run's adapter; the one added sentence at the push fence for a `matcher: none` adapter, anchored and matched exactly once like every other rewrite.
-- `tools/adlc/exec_adapter.py` — `vet_extra` refuses any `allow_extra` or `allow_extra_exact` on `matcher: none`.
 - `harness/claude/exec-fence-census.json` — regenerated only if the file's format changes; its routes must not.
 - `.adlc/specs/REQ-682-exec-fences-run-without-widening/requirement.md` — BR-2's first push exception names both mechanisms, with a dated amendment entry.
 - `tools/adlc/tests/test_fence_census.py`, `tools/adlc/tests/test_fence_run.py`, `tools/adlc/tests/test_exec_reach.py`, `tools/adlc/tests/test_exec_prompt.py`.

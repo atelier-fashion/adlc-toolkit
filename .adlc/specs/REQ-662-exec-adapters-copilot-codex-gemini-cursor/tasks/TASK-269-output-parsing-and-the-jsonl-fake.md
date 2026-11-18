@@ -15,7 +15,7 @@ Implement architecture ADR-6 and ADR-10. The engine parses a run's output by the
 
 ## Files to Create/Modify
 
-- `tools/adlc/exec_adapter.py` — `parse_result` by `output.format` (`json`, `jsonl-stream`) and `output.source` (`stdout`, `file`); `denied_stderr`; `exit_class` unchanged in vocabulary.
+- `tools/adlc/exec_adapter.py` — `vet_extra` refuses any `allow_extra` or `allow_extra_exact` on `matcher: none`, because nothing can vet them there (architecture ADR-8; moved here from TASK-259 so the two tasks touch separate files); `parse_result` by `output.format` (`json`, `jsonl-stream`) and `output.source` (`stdout`, `file`); `denied_stderr`; `exit_class` unchanged in vocabulary.
 - `tools/adlc/sprint_exec.py` — `on_exit` and `_read_result` read the declared source; a missing session id is reported at the halt as "resume is impossible".
 - `tools/adlc/tests/fake_harness/exec_harness.py` — profiles chosen by the name the fake is installed under: `claude` (unchanged) and a JSONL profile that parses `exec … -o <file>` and `exec resume`, records argv, environment and the stdin line count, prints `thread.started`, `item.completed`, `turn.completed`, writes the last message to the `-o` file, and fails loudly on a forbidden flag.
 - `tools/adlc/tests/exec_helpers.py` — `Sandbox(harness=…)`; the fake binary takes the adapter's `binary` name.
