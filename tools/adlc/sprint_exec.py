@@ -492,7 +492,7 @@ class Orchestrator(object):
         run = Run(run_dir, doc)
         try:
             data = ep.pipeline_prompt(self.toolkit, self.primary, req, branch, self.primary,
-                                      repos[rid]["workingCopy"])
+                                      repos[rid]["workingCopy"], adapter=batch.adapter)
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
             self._prompt_refused(req, exc)
             raise Refused(str(exc))
@@ -1113,7 +1113,8 @@ class Orchestrator(object):
             data = ep.pipeline_prompt(self.toolkit, self.primary, run.req, branch, self.primary,
                                       run.wc, answer=text if text is not None else
                                       "The REQ this run was held behind has merged, and this "
-                                      "branch has been rebased. Continue.")
+                                      "branch has been rebased. Continue.",
+                                      adapter=self.adapter(run))
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
             self._prompt_refused(run.req, exc)
             raise Refused(str(exc))
@@ -1528,7 +1529,8 @@ class Orchestrator(object):
         try:
             deploy = (plan.get("deployPlan") or {}).get("command", "")
             data = ep.closeout_prompt(self.toolkit, run.req, branch, path,
-                                      self._evidence(run, plan), deploy)
+                                      self._evidence(run, plan), deploy,
+                                      adapter=self.adapter(run))
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
             self._prompt_refused(run.req, exc)
             self._close_out_failed(run, "failed", str(exc))
