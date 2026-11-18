@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 import signal
 import stat
 import subprocess
@@ -15,9 +16,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
 
+import exec_adapter as ea  # noqa: E402
 import exec_helpers as eh  # noqa: E402
 import exec_ledger as el  # noqa: E402
 import exec_prompt as ep  # noqa: E402
+import exec_surfaces as esf  # noqa: E402
 import exec_trust as et  # noqa: E402
 import sprint_exec as se  # noqa: E402
 
@@ -30,6 +33,13 @@ def box(tmp_path):
 @pytest.fixture
 def two(tmp_path):
     return eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+
+
+@pytest.fixture(params=eh.EXEC_ADAPTERS)
+def shipped(request, tmp_path):
+    """A sandbox on each exec-capable adapter as shipped (``exec_helpers.adapter_sandbox``):
+    a protocol test that holds for every adapter runs once per adapter (REQ-662 BR-12)."""
+    return eh.adapter_sandbox(tmp_path, request.param)
 
 
 def test_two_reqs(two):
@@ -95,7 +105,8 @@ def test_launch_refused_without_config_isolation(box):
     assert not (box.home / "argv-REQ-901.json").exists()
 
 
-def test_halt_record(box):
+def test_halt_record(shipped):
+    box = shipped
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
     plan = run.ledger().read()["plan"]
@@ -106,17 +117,19 @@ def test_halt_record(box):
     assert run.path not in json.dumps(run.read_primary_state())
 
 
-def test_forbidden_flag_refused(tmp_path):
-    box = eh.Sandbox(tmp_path, config="sprint:\n  exec:\n    harness_flags: "
-                                      "[--dangerously-skip-permissions]\n")
+@pytest.mark.parametrize("harness", eh.EXEC_ADAPTERS)
+def test_forbidden_flag_refused(tmp_path, harness):
+    box = eh.adapter_sandbox(tmp_path, harness, config="sprint:\n  exec:\n    harness_flags: "
+                                                       "[--dangerously-skip-permissions]\n")
     with pytest.raises(se.Refused, match="--dangerously-skip-permissions.*Rule B"):
         box.start(shared=True)
-    assert not (box.home / "argv-REQ-901.json").exists()
+    assert not box.argvs()
 
 
-def test_forbidden_flag_on_the_cli(box):
+def test_forbidden_flag_on_the_cli(shipped):
     with pytest.raises(se.Refused, match="--yolo"):
-        box.start(shared=True, flags=["--yolo"])
+        shipped.start(shared=True, flags=["--yolo"])
+    assert not shipped.argvs()
 
 
 def test_engine_selection(box, monkeypatch):
@@ -538,7 +551,8 @@ def test_a_supervisor_that_dies_after_the_grant_is_cleaned_up(tmp_path, monkeypa
     assert not box.launches("REQ-901") and not box.launches("REQ-902")
 
 
-def test_no_session_id(box):
+def test_no_session_id(shipped):
+    box = shipped
     box.req(no_session=True)
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
@@ -682,12 +696,15 @@ def test_unaccounted_ledger_at_the_halt(box):
     assert "does not account" in "\n".join(se.violations_of(run))
 
 
-def test_cross_repo(tmp_path):
+#: A registry of two repos: the sandbox's own, primary, and ``side`` beside it.
+CROSS_REPO = ("sprint:\n  exec:\n    child_gh_token: CHILD_GH\n"
+              "repos:\n  widgets:\n    primary: true\n  side:\n    path: ../side\n"
+              "merge_order:\n  - side\n  - widgets\n")
+
+
+def _sibling(tmp_path, box):
+    """The ``side`` repo :data:`CROSS_REPO` names, with its own bare origin."""
     sib_bare = tmp_path / "acme" / "side.git"
-    box = eh.Sandbox(tmp_path, config=(
-        "sprint:\n  exec:\n    child_gh_token: CHILD_GH\n"
-        "repos:\n  widgets:\n    primary: true\n  side:\n    path: ../side\n"
-        "merge_order:\n  - side\n  - widgets\n"))
     subprocess.check_call(["git", "init", "-q", "--bare", "-b", "main", str(sib_bare)])
     side = tmp_path / "side"
     subprocess.check_call(["git", "init", "-q", "-b", "main", str(side)])
@@ -697,6 +714,12 @@ def test_cross_repo(tmp_path):
                  ["remote", "add", "origin", str(sib_bare)], ["push", "-q", "origin", "main"]):
         subprocess.check_call(["git", "-C", str(side)] + args, env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return side
+
+
+def test_cross_repo(tmp_path):
+    box = eh.Sandbox(tmp_path, config=CROSS_REPO)
+    side = _sibling(tmp_path, box)
     box.req(siblings={"side": False})
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
@@ -711,6 +734,24 @@ def test_cross_repo(tmp_path):
     assert not os.path.exists(sibling), "the orchestrator removes it at cleanup"
     removed = [r for r in box.log(run) if r["kind"] == "git" and "remove" in r["argv"]]
     assert any(sibling in r["argv"] for r in removed)
+
+
+def test_a_multi_repo_run_needs_an_add_dir_flag(tmp_path):
+    """REQ-662 ADR-7: an adapter with no add_dir_flag (the shipped Codex block) hands its session
+    the primary repo's working copy as its one writable directory, so a run whose registry
+    lists more than one repo is refused at the pre-flight, naming why, before any working copy,
+    run directory or launch. Claude launches the same registry (`test_cross_repo`)."""
+    box = eh.adapter_sandbox(tmp_path, "codex", config=CROSS_REPO)
+    _sibling(tmp_path, box)
+    with pytest.raises(se.Refused) as info:
+        box.start(shared=True)
+    assert str(info.value) == (
+        "harness codex declares no add_dir_flag, so a session can write only the primary "
+        "repo's working copy, and this run has 2 repos (side, widgets): a multi-repo REQ is "
+        "refused on this harness")
+    assert not box.argvs() and el.run_dirs(box.environ) == []
+    assert not (box.repo / ".worktrees").exists()
+    assert not (tmp_path / "side" / ".worktrees").exists()
 
 
 def test_plan(box):
@@ -743,20 +784,21 @@ def _engine(box, argv, **env):
                           stderr=subprocess.PIPE, universal_newlines=True, timeout=120)
 
 
-def test_nested_launch_is_refused(tmp_path, monkeypatch):
+@pytest.mark.parametrize("harness", eh.EXEC_ADAPTERS)
+def test_nested_launch_is_refused(tmp_path, monkeypatch, harness):
     """REQ-662 BR-18, AC-21: a process the model started runs the engine's own entry point with
     ADLC_EXEC_RUN and its tag scrubbed from its environment: a `run` of a REQ nothing holds, a
     `resume`, and an `approve` of another run, which reaches the supervisor over its socket.
     Each is refused through its pid ancestry, which holds the live exec pid the engine state
     records (for the dispatch, the kernel's peer pid's), names Rule B and is logged
     `nested_launch_refused` in the run it came from. Nothing is launched or decided and no run
-    directory is made."""
-    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902", "REQ-903"))
+    directory is made. Run on each exec-capable adapter as shipped."""
+    box = eh.adapter_sandbox(tmp_path, harness, reqs=("REQ-901", "REQ-902", "REQ-903"))
     # The engine state under the HOME a harness is given, as on a machine with no
     # XDG_STATE_HOME: a child's environment carries no such variable.
     del box.environ["XDG_STATE_HOME"]
-    box.req("REQ-901", nested=[["run", "REQ-903", "--shared-credentials"], ["resume"],
-                               ["approve", "REQ-902", "--token", "0" * 32]])
+    box.req("REQ-901", nested=[["run", "REQ-903", "--shared-credentials", "--harness", harness],
+                               ["resume"], ["approve", "REQ-902", "--token", "0" * 32]])
     orch = box.orch()
     monkeypatch.chdir(str(box.repo))            # bind() moves this process into its directory
     server = orch.bind()
@@ -789,8 +831,13 @@ def test_nested_launch_is_refused(tmp_path, monkeypatch):
     assert other.ledger().read()["decision"] is None and "REQ-902" in orch.tokens
     assert el.find_run(str(box.repo), "REQ-903", box.environ) is None
     assert not (box.repo / ".worktrees" / "REQ-903").exists()
-    assert sorted(os.listdir(el.exec_root(box.environ))) == sorted(
-        os.path.basename(p) for p in (run.path, other.path, orch.sup_dir))
+    root = el.exec_root(box.environ)
+    # Beside the runs and the supervisor, the engine's record of the user policy folder, on an
+    # adapter with a policy file (`exec_surfaces.record_path`).
+    record = [os.path.relpath(esf.record_path(box.adapter(), box.environ), root).split(os.sep)[0]
+              ] if box.policy_file else []
+    assert sorted(os.listdir(root)) == sorted(
+        [os.path.basename(p) for p in (run.path, other.path, orch.sup_dir)] + record)
 
 
 def test_an_operator_launch_is_not_refused_by_another_runs_harness(tmp_path):
@@ -848,10 +895,11 @@ def test_an_operator_launch_is_not_refused_by_another_runs_harness(tmp_path):
         holder.stdout.close()
 
 
-def test_the_run_tag_refuses_a_launch_a_dispatch_and_a_resume(box):
+def test_the_run_tag_refuses_a_launch_a_dispatch_and_a_resume(shipped):
     """REQ-662 AC-21: with ADLC_EXEC_RUN set, a `run` and a `resume` through the engine's entry
     point, and a dispatched `approve` and `answer`, are each refused naming Rule B and logged
     `nested_launch_refused`, before anything is made or decided."""
+    box = shipped
     orch = box.go(shared=True)
     run = orch.runs["REQ-901"]
     token, _ = box.tokens("REQ-901")
@@ -1092,6 +1140,32 @@ def test_placeholders_at_the_launch_and_the_close_out(tmp_path, monkeypatch):
 
 # ---- REQ-662 TASK-269: output by declared format, exit classes, the jsonl fake ----------------
 REQS = ("REQ-901", "REQ-902", "REQ-903", "REQ-904", "REQ-905")
+#: The jsonl-stream sandboxes a parse or refusal test runs over: the Codex-shaped launch on
+#: claude's tiers (`exec_helpers.jsonl_sandbox`), and the shipped Codex block end to end
+#: (REQ-662 TASK-267). Both declare the same `output` and `denied_stderr`.
+JSONL_SANDBOXES = {
+    "fake-exec-file": lambda tmp, mp, **kw: eh.jsonl_sandbox(tmp, mp, **kw),
+    "codex": lambda tmp, mp, **kw: eh.adapter_sandbox(tmp, "codex", **kw),
+}
+#: The same two for the exit-code test: the fixture declares one code per exit class, and the
+#: Codex block its own map.
+EXIT_SANDBOXES = {
+    "fake-exec-file": lambda tmp, mp: eh.jsonl_sandbox(
+        tmp, mp, reqs=REQS, exit_codes='{"0": ok, "1": error, "77": denied, "124": timeout}'),
+    "codex": lambda tmp, mp: eh.adapter_sandbox(tmp, "codex", reqs=REQS),
+}
+#: A code no adapter here declares.
+UNDECLARED = 99
+STOPPED = "Stopped at a prompt headless mode cannot answer."
+#: How the fake is scripted to end with a code of each exit class, and the REQ's status after
+#: (REQ-662 BR-8): `ok` and `denied` exit after the model wrote `awaiting_approval`, the others
+#: before it.
+EXIT_SCRIPTS = {
+    "ok": ("exit", {}, "awaiting_approval"),
+    "denied": ("exit", {"text": "Terminal state: awaiting_approval\n\n" + STOPPED}, "blocked"),
+    "timeout": ("exit_early", {"text": "out of time"}, "failed"),
+    "error": ("exit_early", {"text": "it broke"}, "failed"),
+}
 
 
 def _block(out, req):
@@ -1125,12 +1199,14 @@ def test_codex_shaped_launch_follows_the_fixture(tmp_path):
         assert shaped["exec"][key] == fixture["exec"][key], key
 
 
-def test_parse_failures_are_error_with_the_message_in_notes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("shape", sorted(JSONL_SANDBOXES))
+def test_parse_failures_are_error_with_the_message_in_notes(tmp_path, monkeypatch, shape):
     """REQ-662 BR-6, AC-6: a truncated stream, a cut last line, non-JSON stdout, an empty final
     message and a missing -o file each record `exec.exitClass: error` with the parser's message
     in `notes`, and no `reason` key under `exec`; stdout and stderr are kept in the run
-    directory, failures included, and none is in the working copy."""
-    box = eh.jsonl_sandbox(tmp_path, monkeypatch, reqs=REQS)
+    directory, failures included, and none is in the working copy. On the Codex-shaped launch
+    and on the shipped Codex block."""
+    box = JSONL_SANDBOXES[shape](tmp_path, monkeypatch, reqs=REQS)
     scripts = {"REQ-901": ({"stream": "no-terminal"}, "no turn.completed event"),
                "REQ-902": ({"stream": "cut"}, "last line is cut"),
                "REQ-903": ({"stream": "not-json"}, "is not JSON"),
@@ -1150,33 +1226,35 @@ def test_parse_failures_are_error_with_the_message_in_notes(tmp_path, monkeypatc
         _logs_outside_the_working_copy(run)
 
 
-def test_exit_codes_map_to_classes(tmp_path, monkeypatch):
-    """REQ-662 BR-8, AC-7: each declared code lands in pipeline-state.json as its class with the
-    raw code; an undeclared 99 is `error` with `exec.exitCode: 99`; an exit code mapped to
-    `denied` leaves the REQ blocked with the harness's last message in `blockers`, even though
-    the model wrote `awaiting_approval`, never completed or merged. A denial the run recovered
-    from, with no such code, halts (`test_a_recovered_denial_halts_and_a_denied_code_blocks`)."""
-    box = eh.jsonl_sandbox(tmp_path, monkeypatch, reqs=REQS,
-                           exit_codes='{"0": ok, "1": error, "77": denied, "124": timeout}')
-    box.req("REQ-901")
-    box.req("REQ-902", exit_early=1, text="it broke")
-    box.req("REQ-903", exit=77, text="Terminal state: awaiting_approval\n\nStopped at a "
-                                     "prompt headless mode cannot answer.")
-    box.req("REQ-904", exit_early=124, text="out of time")
-    box.req("REQ-905", exit_early=99, text="something else")
-    orch = box.go(shared=True)
-    expect = {"REQ-901": (0, "ok", "awaiting_approval"), "REQ-902": (1, "error", "failed"),
-              "REQ-903": (77, "denied", "blocked"), "REQ-904": (124, "timeout", "failed"),
-              "REQ-905": (99, "error", "failed")}
-    for req, (code, klass, status) in expect.items():
+@pytest.mark.parametrize("shape", sorted(EXIT_SANDBOXES))
+def test_exit_codes_map_to_classes(tmp_path, monkeypatch, shape):
+    """REQ-662 BR-8, AC-7: each code the adapter declares lands in pipeline-state.json as its
+    class with the raw code, and ends the REQ as that class does: `ok` at the halt, `error` and
+    `timeout` failed, and `denied` blocked with the harness's last message in `blockers` even
+    though the model wrote `awaiting_approval`, never completed or merged. An undeclared 99 is
+    `error` with `exec.exitCode: 99`. On the Codex-shaped fixture, which declares a code for
+    each class, and on the shipped Codex block, which declares its own. A denial the run
+    recovered from, with no such code, halts
+    (`test_a_recovered_denial_halts_and_a_denied_code_blocks`)."""
+    box = EXIT_SANDBOXES[shape](tmp_path, monkeypatch)
+    declared = sorted((int(code), klass)
+                      for code, klass in box.adapter().block["exit_codes"].items())
+    assert UNDECLARED not in dict(declared) and len(declared) < len(REQS)
+    cases = dict(zip(REQS, declared + [(UNDECLARED, "error")]))
+    for req, (code, klass) in cases.items():
+        when, script, _status = EXIT_SCRIPTS[klass]
+        box.req(req, **dict(script, **{when: code}))
+    orch = box.go(sorted(cases), shared=True)
+    for req, (code, klass) in cases.items():
         run = orch.runs[req]
         state = run.read_primary_state()
         assert (state["exec"]["exitCode"], state["exec"]["exitClass"]) == (code, klass), req
+        status = EXIT_SCRIPTS[klass][2]
         assert run.status == status and state["status"] == status, req
         _logs_outside_the_working_copy(run)
-    denied = orch.runs["REQ-903"].read_primary_state()
-    assert "Stopped at a prompt headless mode cannot answer." in json.dumps(denied["blockers"])
-    assert denied["completed"] is False and 8 not in denied["completedPhases"]
+        if klass == "denied":
+            assert STOPPED in json.dumps(state["blockers"]), req
+            assert state["completed"] is False and 8 not in state["completedPhases"], req
     assert not box.calls("pr_merge")
 
 
@@ -1213,22 +1291,24 @@ def test_a_recovered_denial_halts_and_a_denied_code_blocks(tmp_path, monkeypatch
     assert not box.calls("pr_merge")
 
 
-def test_denied_stderr_marks_a_claimless_run_denied(tmp_path, monkeypatch):
+@pytest.mark.parametrize("shape", sorted(JSONL_SANDBOXES))
+def test_denied_stderr_marks_a_claimless_run_denied(tmp_path, monkeypatch, shape):
     """REQ-662 ADR-6, BR-8: the harness's own refusal line on stderr makes a claimless run
     `denied` and blocked with its last message; the same words in the model's message do not;
-    a run that claims its terminal state keeps its exit code's class."""
-    box = eh.jsonl_sandbox(tmp_path, monkeypatch, reqs=REQS[:3])
+    a run that claims its terminal state keeps its exit code's class. On the Codex-shaped
+    launch and on the shipped Codex block."""
+    box = JSONL_SANDBOXES[shape](tmp_path, monkeypatch, reqs=REQS[:3])
+    refusal = box.adapter().block["denied_stderr"]
     box.req("REQ-901", exit_early=0, refused=["git push --force origin main"],
             text="I could not push the branch.")
-    box.req("REQ-902", exit_early=0,
-            text="rejected: policy forbids commands starting with git push")
+    box.req("REQ-902", exit_early=0, text=refusal + " git push")
     box.req("REQ-903", refused=["git push --force origin main"])
     orch = box.go(shared=True)
     first = orch.runs["REQ-901"]
     assert first.exec["exitClass"] == "denied" and first.status == "blocked"
     blockers = json.dumps(first.read_primary_state()["blockers"])
-    assert "I could not push the branch." in blockers and eh.CODEX_REFUSAL in blockers
-    assert eh.CODEX_REFUSAL in open(first.file("stdout.stderr.log")).read()
+    assert "I could not push the branch." in blockers and refusal in blockers
+    assert refusal in open(first.file("stdout.stderr.log")).read()
     second = orch.runs["REQ-902"]
     assert second.exec["exitClass"] == "ok" and second.status == "failed"
     third = orch.runs["REQ-903"]
@@ -1344,10 +1424,18 @@ def test_jsonl_fake_records_the_prompt_and_argv(tmp_path):
         res = _jsonl_fake(box, *bad, prompt="x\n")
         assert res.returncode == 2 and res.stderr.startswith("error: "), bad
     box.check_fake()
-    # A forbidden flag fails loudly, spelled whole or as --flag=value.
-    for flag in (["--yolo"], ["--permission-mode=bypassPermissions"]):
+    # Every forbidden entry of the adapter fails loudly (REQ-662 BR-12): the engine's seed and
+    # Codex's own, spelled as separate tokens, and a two-token flag as --flag=value too.
+    assert set(box.adapter().forbidden) == set(box.forbidden)
+    spellings = [entry.split() for entry in box.forbidden]
+    spellings += [["=".join(parts)] for parts in spellings
+                  if len(parts) == 2 and parts[0].startswith("--")]
+    for flag in spellings:
         res = _jsonl_fake(box, *(argv + flag), prompt="x\n")
-        assert res.returncode == 86 and "forbidden flag" in res.stderr
+        assert res.returncode == 86 and "forbidden flag" in res.stderr, flag
+    logged = [json.loads(ln)["argv"][len(argv):] for ln in
+              (box.home / "exec-fake-forbidden-REQ-901.txt").read_text().splitlines()]
+    assert logged == spellings
     with pytest.raises(AssertionError, match="forbidden flag"):
         box.check_fake()
 
@@ -1399,6 +1487,75 @@ def test_jsonl_fake_event_shape_equals_the_probe_double(tmp_path):
             if e["type"] == "item.completed"] == \
         [e for e in map(json.loads, probe.stdout.splitlines()) if e["type"] == "item.completed"]
     assert ours.stderr == probe.stderr and eh.CODEX_REFUSAL in ours.stderr
+
+
+def test_codex_prompt_arrives_whole_on_stdin(tmp_path, monkeypatch):
+    """REQ-662 AC-3, BR-2: launched by the engine on the shipped Codex block with a 600-line
+    prompt, the fake installed as `codex` records exactly 600 lines on stdin, byte for byte the
+    prompt the engine wrote, and no prompt argument: the argv is the declared launch with its
+    placeholders filled. The block's `prompt_variant` names the `stdin-prompt` variant that
+    reads `pass` in the committed `codex.json`, and that variant's measured argv is the declared
+    launch, token for token; the other variant's is the launch with `prompt_flag` after it."""
+    box = eh.adapter_sandbox(tmp_path, "codex")
+    real = se.ep.pipeline_prompt
+
+    def six_hundred(*args, **kw):
+        lines = real(*args, **kw).decode("utf-8").splitlines(True)
+        assert len(lines) > 600
+        return "".join(lines[:599] + ["the six hundredth line\n"]).encode("utf-8")
+    monkeypatch.setattr(se.ep, "pipeline_prompt", six_hundred)
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    [launch] = box.launches()
+    assert launch["installed_as"] == "codex" and launch["prompt_lines"] == 600
+    sent = eh.read_text(run.file("prompt.txt"))
+    assert len(sent.splitlines()) == 600 and eh.read_text(box.home / "prompt-REQ-901.txt") == sent
+    block = box.adapter().block
+    assert launch["argv"] == ea.substitute(block["launch"], {
+        "worktree": run.wc, "last_message": run.last_message("stdout.json")})
+    assert launch["opts"]["positional"] == [] and launch["cwd"] == run.wc
+    rows = box.result["probes"]["stdin-prompt"]["sub_results"]
+    assert rows[block["prompt_variant"]]["status"] == "pass"
+
+    def measured(variant):
+        """The variant's recorded argv with each placeholder's position read back as it."""
+        command = rows[variant]["evidence"]["command"]
+        assert command[0] == box.binary
+        template = block["launch"] + (block["prompt_flag"] if variant == "with-prompt-flag"
+                                      else [])
+        assert len(command) - 1 == len(template), variant
+        return [t if t.startswith("{") else c for c, t in zip(command[1:], template)]
+    for variant in rows:
+        flag = block["prompt_flag"] if variant == "with-prompt-flag" else []
+        assert measured(variant) == block["launch"] + flag, variant
+    assert block["prompt_variant"] == "without-prompt-flag"
+
+
+def test_the_sandbox_path_reaches_no_real_harness(tmp_path, monkeypatch):
+    """REQ-662 BR-12, AC-12: the suite runs offline. A directory on PATH holding a harness
+    binary is replaced in a sandbox's PATH by a mirror of everything else in it, so on each
+    exec-capable adapter the binary resolves to the fake, no shipped adapter's binary resolves
+    anywhere else, and the tools beside it still do."""
+    planted = tmp_path / "planted"
+    planted.mkdir()
+    for name in eh.harness_binaries() + ["a-tool"]:
+        (planted / name).write_text("#!/bin/sh\nexit 99\n")
+        (planted / name).chmod(0o755)
+    monkeypatch.setenv("PATH", "%s:%s" % (planted, os.environ["PATH"]))
+    for harness in eh.EXEC_ADAPTERS:
+        (tmp_path / harness).mkdir()
+        box = eh.Sandbox(tmp_path / harness, harness=harness)
+        path = box.environ["PATH"]
+        assert shutil.which(box.binary, path=path) == str(box.bin / box.binary)
+        for name in eh.harness_binaries():
+            found = shutil.which(name, path=path)
+            assert found is None or os.path.dirname(found) == str(box.bin), found
+        tool = shutil.which("a-tool", path=path)
+        assert tool and os.path.realpath(tool) == str(planted / "a-tool")
+        assert str(planted) not in path.split(os.pathsep)
+        for name in ("git", "python3", "sh"):
+            assert shutil.which(name, path=path), name
 
 
 # ---- REQ-662 BR-11 / BR-18: the verdict at launch, and --allow-unverified --------------------

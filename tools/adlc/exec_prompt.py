@@ -588,9 +588,23 @@ def closeout_view(toolkit):
     return re.sub(r"\n#* ?### Step [2678]\b", "\n", body)
 
 
-def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command="", adapter=None):
+#: The note a close-out prompt opens with on a harness that cannot add the primary repo's spec
+#: directory (REQ-662 ADR-7): the state file the session writes in its place. The first line
+#: names the file, alone, so it reads as one path.
+STATE_FILE_NOTE = (
+    "STATE FILE (mandatory): %s\n\nOn this harness the session cannot write outside its "
+    "working copy. Wherever the instructions below name the primary repo path's "
+    "`pipeline-state.json`, read and write the STATE FILE above instead: the orchestrator "
+    "copied it there from the primary repo path and carries your changes back when the session "
+    "ends. Never commit it.\n\n")
+
+
+def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command="", adapter=None,
+                    state_file=None):
     """The resumed close-out's bytes, built by section (BR-14). ``adapter`` as for
-    :func:`pipeline_prompt`."""
+    :func:`pipeline_prompt`. ``state_file`` is the close-out working copy's copy of the primary
+    repo path's ``pipeline-state.json``, on a harness with no second writable directory: the
+    prompt then opens with :data:`STATE_FILE_NOTE`. Without it the bytes are as before."""
     body = route_fences(toolkit, [("wrapup/SKILL.md", closeout_view(toolkit))], adapter)[0]
     head = ("WORKTREE PATH (mandatory): %s\n\nYou are resuming this REQ's own session. Run "
             "the close-out mode below for %s (the argument carries `--close-out`), in that "
@@ -598,6 +612,8 @@ def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command="",
             "branch. It is unattended: no operator is present. You never merge. A fence shown "
             "as a `%s run <id>` call runs only that way, as earlier in this session.\n\n"
             % (worktree, req, branch, _runner(toolkit)))
+    if state_file:
+        head = STATE_FILE_NOTE % state_file + head
     tail = "\n--- RUN EVIDENCE ---\n%s\n--- END RUN EVIDENCE ---\n" % evidence
     tokens = (deploy_command,) if deploy_command else ()
     return _finish(head + body + tail, "close-out", tokens)

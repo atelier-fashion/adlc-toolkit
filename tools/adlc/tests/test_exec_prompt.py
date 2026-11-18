@@ -185,6 +185,25 @@ def test_closeout_prompt():
     assert "(Close-out mode rules 5–6)." in text
 
 
+def test_closeout_state_file_note_is_the_only_difference():
+    """REQ-662 ADR-7: a close-out on a harness with no second writable directory opens with one
+    note naming the state file it writes in place of the primary repo path's, and is otherwise
+    the same bytes; with no state file, as on Claude, the prompt is as it was. The note passes
+    the close-out scan."""
+    for adapter in (None, ea.load("claude", TOOLKIT), ea.load("codex", TOOLKIT)):
+        plain = closeout(adapter=adapter)
+        assert ep.closeout_prompt(TOOLKIT, REQ, "chore/REQ-901-close-out", "/abs/repo/co",
+                                  "EVIDENCE", "", adapter=adapter, state_file=None) == plain
+        state = "/abs/repo/co/.adlc/specs/REQ-901-thing/pipeline-state.json"
+        noted = ep.closeout_prompt(TOOLKIT, REQ, "chore/REQ-901-close-out", "/abs/repo/co",
+                                   "EVIDENCE", "", adapter=adapter, state_file=state)
+        assert noted == (ep.STATE_FILE_NOTE % state).encode("utf-8") + plain
+        assert noted.decode("utf-8").startswith("STATE FILE (mandatory): %s\n\n" % state)
+        assert plain.decode("utf-8").startswith("WORKTREE PATH (mandatory): /abs/repo/co\n")
+        assert "STATE FILE" not in plain.decode("utf-8")
+    assert not ep.scan(ep.STATE_FILE_NOTE % state, "close-out")
+
+
 def test_closeout_refuses_the_deploy_command(install):
     add_to_step_one(install, "Run ./ship-it --prod")
     closeout(str(install))

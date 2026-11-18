@@ -315,6 +315,14 @@ class ExecAdapter(object):
         return bool(self.block.get("resume"))
 
     @property
+    def can_add_dir(self):
+        """Whether the adapter declares an ``add_dir_flag``: a second writable directory beside
+        the working copy. Without one a session writes its working copy alone, so the
+        close-out's state file travels through it and a multi-repo run is refused (REQ-662
+        ADR-7)."""
+        return bool(self.block.get("add_dir_flag"))
+
+    @property
     def forbidden(self):
         return list(dict.fromkeys(list(ENGINE_FORBIDDEN_FLAGS)
                                   + list(self.block.get("forbidden_flags", []))))

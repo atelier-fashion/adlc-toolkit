@@ -47,6 +47,9 @@ MOCK_HOST = "mock.forge"
 TERMINAL = ("merged", "rejected", "failed")
 #: Keys the primary-path copy keeps over a working copy's (REQ-647, REQ-648).
 PRIMARY_OWNED = ("lessons", "harness", "validateAttempts", "verify", "lessonsWritten")
+#: Keys a close-out's carried state file never sets in the primary path's: the engine writes
+#: them (REQ-662 ADR-7).
+CLOSE_OUT_ENGINE_OWNED = ("status", "exec", "approval")
 STATES = ("running", "awaiting_approval", "approved", "merging", "merged", "blocked", "failed",
           "rejected", "stalled")
 PROTOCOL = "Rule B protocol violation"
@@ -472,6 +475,14 @@ class Orchestrator(object):
             batch.repos, batch.order = self.registry(text)
         except eg.GateError as exc:
             raise Refused(str(exc))
+        if len(batch.repos) > 1 and not adapter.can_add_dir:
+            # The launch hands the harness one working copy, and it has no flag for another, so
+            # a sibling repo's working copy would be outside what the session can write
+            # (REQ-662 ADR-7). Nothing is prepared.
+            raise Refused("harness %s declares no add_dir_flag, so a session can write only the "
+                          "primary repo's working copy, and this run has %d repos (%s): a "
+                          "multi-repo REQ is refused on this harness"
+                          % (adapter.name, len(batch.repos), ", ".join(batch.order)))
         batch.flags = [str(f) for f in batch.config["harness_flags"]] + list(flags)
         # The probe result reaches the render, so only a valid deny_under_allow pass restores
         # a wrapper allow (REQ-662 ADR-3). Read from ToolkitRoot, never a working copy.
@@ -2161,6 +2172,55 @@ class Orchestrator(object):
         lines.append(run.doc.get("finalReport") or "(none)")
         return "\n".join(lines)
 
+    @staticmethod
+    def _close_out_state_rel(run):
+        """Where a close-out working copy holds its copy of the state: the spec directory's."""
+        return os.path.join(run.doc["specDir"], "pipeline-state.json")
+
+    def _close_out_state(self, run, path):
+        """The primary repo path's pipeline-state.json copied into the close-out working copy
+        ``path`` at the same spec-relative path, through the guarded write, so a link or a
+        special file there refuses (REQ-662 ADR-7). Returns the copy's path, which the prompt
+        names."""
+        with open(run.primary_state_path(), encoding="utf-8") as fh:
+            text = fh.read()
+        rel = self._close_out_state_rel(run)
+        esf.guarded_write(path, rel, text)
+        return os.path.join(path, rel)
+
+    def _carry_close_out(self, run, path):
+        """The close-out's copy of the state, read back as data once the session has exited and
+        merged into the primary path's as :meth:`_carry` merges a working copy's, never taking
+        ``status``, ``exec`` or ``approval`` from it (REQ-662 ADR-7). The model wrote it: a link,
+        a special file or anything but one JSON object is no record, which the close-out's
+        terminal-record check then fails."""
+        rel = self._close_out_state_rel(run)
+        try:
+            esf.check(path, rel, "file")
+            doc = el.read_json(os.path.join(path, rel))
+        except esf.SurfaceRefused as exc:
+            doc, why = None, str(exc)
+        else:
+            why = "it is missing or is not one JSON object"
+        box = self.box(run)
+        if not isinstance(doc, dict):
+            box.log("close_out_state_carried", [rel], path, 1, detail={"record": False,
+                                                                       "why": why})
+            return
+        merged = run.read_primary_state()
+        taken, ignored = [], []
+        for key, value in doc.items():
+            if key in CLOSE_OUT_ENGINE_OWNED or (key in PRIMARY_OWNED and key in merged):
+                if merged.get(key) != value:
+                    ignored.append(key)
+                continue
+            if merged.get(key) != value:
+                taken.append(key)
+            merged[key] = value
+        run.write_primary_state(merged)
+        box.log("close_out_state_carried", [rel], path, 0, detail={
+            "record": True, "taken": sorted(taken), "ignored": sorted(ignored)})
+
     def close_out(self, run, plan):
         """The one place a session resumes: lesson drafting is model work (BR-14, BR-25)."""
         box = self.box(run)
@@ -2207,22 +2267,39 @@ class Orchestrator(object):
         except Refused as exc:
             self._close_out_failed(run, "failed", str(exc))
             return
+        # The close-out writes its own working copy and the primary repo's pipeline-state.json
+        # (close-out rule 3), nothing else (BUG-265): that file's spec directory through
+        # add_dir_flag, or, on a harness that cannot add a directory, a copy of the file in the
+        # working copy that is carried back after the session (REQ-662 ADR-7).
+        added = os.path.join(repo, run.doc["specDir"])
+        carried = None
+        if not adapter.can_add_dir:
+            try:
+                carried = self._close_out_state(run, path)
+            except (esf.SurfaceRefused, OSError) as exc:
+                self.revoke_trust(run, path)
+                self._close_out_failed(run, "failed", "the close-out's state file: %s" % exc)
+                return
         try:
             deploy = (plan.get("deployPlan") or {}).get("command", "")
             data = ep.closeout_prompt(self.toolkit, run.req, branch, path,
                                       self._evidence(run, plan), deploy,
-                                      adapter=self.adapter(run))
+                                      adapter=self.adapter(run), state_file=carried)
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
             self._prompt_refused(run.req, exc)
             self._close_out_failed(run, "failed", str(exc))
             return
         el.atomic_write(run.file("close-out-prompt.txt"), data)
-        added = os.path.join(repo, run.doc["specDir"])
-        # The close-out writes its own working copy and, through --add-dir, the primary
-        # repo's pipeline-state.json (close-out rule 3); nothing else (BUG-265).
-        # No --harness-flag reaches the close-out, as before REQ-662.
-        argv = self._argv(run, "close-out.json", resume=sid, wc=path, branch=branch,
-                          write_roots=[path, added], add_dir=added, operator=[])
+        # No --harness-flag reaches the close-out, as before REQ-662. An argv the adapter or the
+        # closed-world check refuses fails the close-out, its trust revoked; the merge stands.
+        roots, second = ([path, added], added) if carried is None else ([path], None)
+        try:
+            argv = self._argv(run, "close-out.json", resume=sid, wc=path, branch=branch,
+                              write_roots=roots, add_dir=second, operator=[])
+        except (ea.ExecRefused, Refused) as exc:
+            self.revoke_trust(run, path)
+            self._close_out_failed(run, "failed", str(exc))
+            return
         proc = self._spawn(run, argv, run.file("close-out-prompt.txt"), path, "close-out")
         run.exec["closeOutPid"] = proc.pid
         self._write_status(run)
@@ -2230,6 +2307,8 @@ class Orchestrator(object):
         self.reap(run, proc.pid)
         self.verify_surfaces(run, [path], "exit")
         self.revoke_trust(run, path)
+        if carried is not None:
+            self._carry_close_out(run, path)
         result = self._read_result(run, "close-out.json")
         lines = (result["text"] or "").strip().split("\n")
         claim = ea.terminal_claim(result["text"])

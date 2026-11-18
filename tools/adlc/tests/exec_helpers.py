@@ -1,5 +1,6 @@
 """A throwaway repo, bare origin, stateful forge and test harness for the exec engine."""
 
+import functools
 import io
 import json
 import os
@@ -14,6 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 
 import exec_adapter as ea  # noqa: E402
+import exec_surfaces as esf  # noqa: E402
+import exec_trust as et  # noqa: E402
 import exec_verify as ev  # noqa: E402
 import harness_adapter as ha  # noqa: E402
 import harness_render as hr  # noqa: E402
@@ -79,13 +82,52 @@ A thing.
 """
 
 
+@functools.lru_cache(maxsize=None)
+def _binaries():
+    folder = os.path.join(TOOLKIT, "harness")
+    return tuple(ha.resolve_adapter(name[:-4], None, TOOLKIT)["binary"]
+                 for name in sorted(os.listdir(folder)) if name.endswith(".yml"))
+
+
+def harness_binaries():
+    """The ``binary`` of every adapter this toolkit ships (``harness/*.yml``): the names a real
+    harness is installed under, which no sandbox PATH may resolve outside its own bin."""
+    return list(_binaries())
+
+
+def offline_path(fake_bin, mirror_root, path):
+    """``path`` with ``fake_bin`` first and no real harness on it (REQ-662 BR-12): a directory
+    holding any :func:`harness_binaries` name is replaced by a mirror under ``mirror_root``
+    that links every other entry of it, so the tools beside a real ``codex`` or ``claude``
+    (``git``, ``python3``) stay reachable and the harness does not."""
+    names = set(harness_binaries())
+    dirs = [str(fake_bin)]
+    for n, folder in enumerate(dict.fromkeys(p for p in path.split(os.pathsep) if p)):
+        try:
+            entries = os.listdir(folder)
+        except OSError:
+            continue
+        if not names & set(entries):
+            dirs.append(folder)
+            continue
+        mirror = os.path.join(str(mirror_root), str(n))
+        os.makedirs(mirror)
+        for entry in entries:
+            if entry not in names:
+                os.symlink(os.path.join(folder, entry), os.path.join(mirror, entry))
+        dirs.append(mirror)
+    return os.pathsep.join(dict.fromkeys(dirs))
+
+
 class Sandbox(object):
     """A repo, its bare origin, a mock forge and the exec fake, for one harness.
 
     ``harness`` names the adapter, read from ``adapter_path`` when given (a test-only adapter
     loads only by path); the fake is installed under that adapter's ``binary`` name, which
     chooses its profile (``fake_harness/exec_harness.py``). The engine is launched with
-    ``--harness <harness>`` unless a test passes another."""
+    ``--harness <harness>`` unless a test passes another. The sandbox PATH resolves the
+    adapter's binary to the fake and no shipped harness's binary to anything else, so the
+    suite never reaches a real harness (:func:`offline_path`)."""
 
     def __init__(self, tmp_path, reqs=("REQ-901",), config="", deployable="false", lane="full",
                  component="adlc/x", mock_scenario=None, harness="claude", adapter_path=None,
@@ -94,9 +136,10 @@ class Sandbox(object):
         self.harness = harness
         self.adapter_path = adapter_path
         # The ToolkitRoot the engine runs from: this toolkit, or a copy (`toolkit_copy`) that a
-        # test may write a probe result file into.
+        # test may write a probe result file into. A shipped adapter is read from it, as the
+        # engine reads it.
         self.toolkit = toolkit or TOOLKIT
-        adapter = ha.resolve_adapter(harness, adapter_path, TOOLKIT)
+        adapter = ha.resolve_adapter(harness, adapter_path, self.toolkit)
         self.binary = adapter["binary"]
         block = adapter.get("exec") or {}
         self.forbidden = list(dict.fromkeys(list(ha.ENGINE_FORBIDDEN_FLAGS)
@@ -140,9 +183,17 @@ class Sandbox(object):
         self.store.mkdir()
         (self.store / "config.json").write_text(json.dumps({
             "remote": str(self.bare), "owner": "acme", "name": "widgets"}))
+        path = offline_path(self.bin, tmp_path / "path", os.environ["PATH"])
+        # BR-12: the binary the engine resolves is the fake, and no real harness is reachable.
+        resolved = shutil.which(self.binary, path=path)
+        assert resolved == str(fake), "%s resolves to %s, not the fake" % (self.binary, resolved)
+        for name in harness_binaries():
+            found = shutil.which(name, path=path)
+            assert found is None or os.path.dirname(found) == str(self.bin), \
+                "a real %s is on the sandbox PATH: %s" % (name, found)
         self.environ = {
             "HOME": str(self.home), "USER": "operator",
-            "PATH": "%s:%s" % (self.bin, os.environ["PATH"]),
+            "PATH": path,
             "ADLC_HOME": str(self.home / ".claude"),
             "XDG_STATE_HOME": str(tmp_path / "state"),
             "ADLC_FORGE_MOCK": "1", "ADLC_FORGE_MOCK_STORE": str(self.store),
@@ -157,6 +208,9 @@ class Sandbox(object):
         self.extra = {"version": block.get("harness_version", "unknown")}
         self.write_scenario()
         self.out = io.StringIO()
+        # The operator's user-level files a run must leave as it found them (`user_files`):
+        # set by `adapter_sandbox` and `trust_sandbox`.
+        self.user_config = self.policy_dir = self.policy_file = None
 
     def write_scenario(self, **extra):
         """The fake's script. Top-level keys a test sets here (``help``, ``unknown_flags``,
@@ -194,9 +248,13 @@ class Sandbox(object):
         return orch
 
     def check_fake(self):
-        """Fail the test loudly if the fake was ever launched with a forbidden flag (BR-12)."""
+        """Fail the test loudly if the fake was ever launched with a forbidden flag (BR-12), or
+        resumed with a session id it did not last print (BR-7)."""
         hits = sorted(p.name for p in self.home.glob("exec-fake-forbidden-*.txt"))
         assert not hits, "the exec fake was launched with a forbidden flag: %s" % [
+            (self.home / name).read_text() for name in hits]
+        hits = sorted(p.name for p in self.home.glob("exec-fake-session-*.txt"))
+        assert not hits, "the exec fake was resumed with a session it did not print: %s" % [
             (self.home / name).read_text() for name in hits]
 
     def launches(self, req="REQ-901"):
@@ -204,6 +262,16 @@ class Sandbox(object):
         directory, the prompt's line count and the environment."""
         path = self.home / ("launch-%s.json" % req)
         return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
+
+    def argvs(self, req="REQ-901"):
+        """The argv after the binary of each launch the fake received, the close-out's included,
+        in order: either profile records it."""
+        path = self.home / ("argv-%s.json" % req)
+        return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
+
+    def adapter(self):
+        """The ``ExecAdapter`` the engine launches this sandbox's harness with."""
+        return ea.load(self.harness, self.toolkit)
 
     def go(self, reqs=None, **opts):
         return self.wait(self.start(reqs, **opts))
@@ -239,6 +307,21 @@ class Sandbox(object):
 
     def scenario_file(self, value):
         (self.store / "scenario").write_text(value)
+
+    def user_files(self):
+        """The operator's own files at user level, path to text (None when absent): the user
+        config a trust grant writes and every file in the user policy folder but the
+        toolkit's own (:func:`adapter_sandbox`). A run leaves each as it found it."""
+        out = {}
+        if self.user_config:
+            out[self.user_config] = read_text(self.user_config) \
+                if os.path.exists(self.user_config) else None
+        if self.policy_dir:
+            for name in sorted(os.listdir(self.policy_dir)):
+                if name != os.path.basename(self.policy_file):
+                    full = os.path.join(self.policy_dir, name)
+                    out[full] = read_text(full)
+        return out
 
     def write_result(self, doc):
         """Replace this harness's REQ-664 result file under the sandbox ToolkitRoot, where the
@@ -447,8 +530,9 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
     rules in a working-copy rule file and the deny tier in a user policy file, a working-copy
     config and hook file inside its one directory surface, the ``worktree`` working copy, and
     ``trust_grant`` (``none``, or the fixture's own ``user-config-entry``, which writes the
-    user config ``$HOME/`` + :data:`FILE_USER_CONFIG`; REQ-662 BR-5). Every exec-scope loss is
-    declared, as a maintainer would."""
+    user config ``$HOME/`` + :data:`FILE_USER_CONFIG`; REQ-662 BR-5). Like Codex it declares no
+    ``add_dir_flag``, so its close-out writes its state through the close-out working copy
+    (REQ-662 ADR-7). Every exec-scope loss is declared, as a maintainer would."""
     text = open(CODEX_SHAPED_FIXTURE, encoding="utf-8").read()
     block = ha.load_adapter(CODEX_SHAPED_FIXTURE, toolkit=TOOLKIT)["exec"]
     cache = "".join(
@@ -478,8 +562,6 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
         (old_cache, "  probes:\n" + cache),
         ("  working_copy: {strategy: clone}\n  trust_grant: user-config-entry\n",
          "  working_copy: {strategy: worktree}\n  trust_grant: %s\n" % trust_grant),
-        ("  operator_flags: [--model]\n",
-         "  operator_flags: [--model]\n  add_dir_flag: --add-dir\n"),
         ("  context_delivery: prompt\n", "  context_delivery: %s\n" % context_delivery),
         ("  rules_reload: unknown\n", "  rules_reload: %s\n" % rules_reload),
     ]
@@ -497,17 +579,16 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
 def file_sandbox(tmp_path, monkeypatch, result="prompt-pass", rules_reload="unknown",
                  trust_grant="none", **kw):
     """A Sandbox whose harness is :func:`file_adapter` on a sandbox ToolkitRoot holding its
-    result file, with the jsonl fake installed as ``fake-exec-file``. The launch carries the
-    Codex-shaped template and nothing else; the close-out's ``--add-dir`` is recorded by the
-    fake as an option it does not know. ``box.home`` is the run's HOME, where the user config
-    and the user policy folder live; ``trust_grant`` is the adapter's (:func:`file_adapter`)."""
+    result file, with the jsonl fake installed as ``fake-exec-file``. The launch and the resume
+    carry the Codex-shaped templates and nothing else, and the fake refuses any other option.
+    ``box.home`` is the run's HOME, where the user config and the user policy folder live;
+    ``trust_grant`` is the adapter's (:func:`file_adapter`)."""
     doc = probe_result(result) if isinstance(result, str) else result
     toolkit = toolkit_copy(tmp_path / "toolkit")
     path = file_adapter(tmp_path / "adapter", doc, rules_reload=rules_reload,
                         trust_grant=trust_grant)
     use_adapter(monkeypatch, path, toolkit)
     box = Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path, toolkit=toolkit, **kw)
-    box.write_scenario(unknown_flags="record")
     box.result = doc
     box.write_result(doc)
     return box
@@ -537,6 +618,43 @@ def trust_sandbox(tmp_path, monkeypatch, **kw):
     os.makedirs(os.path.dirname(box.user_config), exist_ok=True)
     with open(box.user_config, "w", encoding="utf-8") as fh:
         fh.write(USER_CONFIG)
+    return box
+
+
+# ---- the shipped adapters end to end (REQ-662 TASK-267) ---------------------------------------
+#: The exec-capable adapters the approval protocol runs over: each shipped one whose stage has
+#: run (REQ-662 Amendments, 2026-11-17).
+EXEC_ADAPTERS = ("claude", "codex")
+#: An operator's own rule file in a user policy folder, beside the toolkit's: no run changes it.
+OPERATOR_RULES = 'prefix_rule(pattern = ["make", "lint"], decision = "allow")\n'
+
+
+def adapter_sandbox(tmp_path, harness, **kw):
+    """A Sandbox on the shipped ``harness/<harness>.yml``, read from a copy of this toolkit
+    (``box.toolkit``) that holds the committed ``.adlc/research/harness-probes/<harness>.json``,
+    so the verdict is the committed one (``verified`` for each of :data:`EXEC_ADAPTERS`). The
+    fake on PATH is installed under the adapter's binary and answers ``--version`` with its
+    declared version; nothing else on PATH is a harness. What the adapter keeps at user level
+    lives under the sandbox HOME: ``box.user_config`` is its ``paths.config.user`` when its
+    trust grant writes that file (seeded with :data:`USER_CONFIG`, the operator's), else None;
+    ``box.policy_dir`` is the folder of its ``exec.user_policy_file`` (seeded with the
+    operator's :data:`OPERATOR_RULES`), else None. :meth:`Sandbox.user_files` reads both."""
+    toolkit = toolkit_copy(tmp_path / "toolkit")
+    box = Sandbox(tmp_path, harness=harness, toolkit=toolkit, **kw)
+    adapter = ha.resolve_adapter(harness, None, toolkit)
+    block = adapter.get("exec") or {}
+    if block.get("trust_grant") == et.USER_CONFIG_ENTRY:
+        box.user_config = et.user_config_path(adapter, box.environ)
+        os.makedirs(os.path.dirname(box.user_config), exist_ok=True)
+        with open(box.user_config, "w", encoding="utf-8") as fh:
+            fh.write(USER_CONFIG)
+    box.policy_file = esf.policy_path(adapter, box.environ)
+    if box.policy_file:
+        box.policy_dir = os.path.dirname(box.policy_file)
+        os.makedirs(box.policy_dir, exist_ok=True)
+        with open(os.path.join(box.policy_dir, "operator.rules"), "w", encoding="utf-8") as fh:
+            fh.write(OPERATOR_RULES)
+    box.result = ev.read_result(ea.load(harness, toolkit), toolkit)
     return box
 
 

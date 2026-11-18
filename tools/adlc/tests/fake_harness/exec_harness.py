@@ -48,10 +48,20 @@ The nested-launch key (REQ-662 BR-18, both profiles): ``nested`` (argv lists, ea
 working copy, with ``ADLC_EXEC_RUN`` and its tag scrubbed from the environment: a model starting
 a nested run, resume or dispatch). Each attempt's argv, pid, exit code and output go to
 ``$HOME/nested-<REQ>.jsonl``; the launch then carries on to the gate.
+
+A resume (REQ-662 BR-7, both profiles) must carry the session id this fake last printed for the
+REQ (each is kept in ``$HOME/sessions-<REQ>.txt``): any other fails loudly, as a forbidden flag
+does (exit 87 and ``$HOME/exec-fake-session-<REQ>.txt``). The close-out writes its terminal
+record where its prompt says: the file a ``STATE FILE (mandatory):`` line names, on a harness
+that cannot add the primary repo's spec directory (REQ-662 ADR-7), else the primary repo path's
+``pipeline-state.json``. Under ``closeout``, ``state_extra`` is merged into the record it writes
+(a model setting ``status``, ``approval`` or ``exec`` there), and ``state_text`` is written in
+place of the record.
 """
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -73,6 +83,9 @@ REJECTED = ("ERROR codex_core::tools::router: error=exec_command failed: CreateP
 JSONL_VALUE = {"--sandbox": "sandbox", "-C": "cd", "-o": "last", "--model": "model",
                "-m": "model"}
 JSONL_RESUME_REFUSES = ("--sandbox", "-C")
+#: The close-out prompt's line naming the state file it writes in place of the primary's
+#: (``exec_prompt.STATE_FILE_NOTE``), read as a model reads it.
+STATE_FILE_RE = re.compile(r"^STATE FILE \(mandatory\): (.+)$", re.M)
 
 
 def scenario():
@@ -97,6 +110,28 @@ def forge(top, *args):
               env=env)
 
 
+def issued(sid):
+    """Keep ``sid``, a session id this launch printed, for a later resume to be checked by."""
+    with open(os.path.join(HOME, "sessions-%s.txt" % REQ), "a", encoding="utf-8") as fh:
+        fh.write(sid + "\n")
+
+
+def check_session(session):
+    """A resume must carry the session id this fake last printed for the REQ (REQ-662 BR-7)."""
+    try:
+        with open(os.path.join(HOME, "sessions-%s.txt" % REQ), encoding="utf-8") as fh:
+            last = fh.read().splitlines()[-1:]
+    except OSError:
+        last = []
+    if [session] == last:
+        return
+    with open(os.path.join(HOME, "exec-fake-session-%s.txt" % REQ), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"resumed": session, "issued": last}) + "\n")
+    sys.stderr.write("EXEC FAKE: resumed with session %r, but the last one printed is %r\n"
+                     % (session, last))
+    raise SystemExit(87)
+
+
 def result(text, spec, sid="session-%s" % REQ):
     """The harness's output for this launch, in its profile's format, then any scripted
     stderr."""
@@ -108,6 +143,8 @@ def result(text, spec, sid="session-%s" % REQ):
                "permission_denials": spec.get("denials", [])}
         if spec.get("no_session"):
             doc.pop("session_id")
+        else:
+            issued(doc["session_id"])
         if spec.get("is_error"):
             doc["is_error"] = True
         print(json.dumps(doc))
@@ -125,6 +162,7 @@ def jsonl_result(text, spec, sid):
     if not opts.get("json"):
         print(text)
         sys.stderr.write("session id: %s\n" % sid)
+        issued(sid)
         for rec in RUN["records"]:
             sys.stderr.write("exec\n%s in %s\n%s\n" % (rec["command"], os.getcwd(),
                                                        rec["output"]))
@@ -133,6 +171,8 @@ def jsonl_result(text, spec, sid):
     else:
         events = [] if spec.get("no_session") else [{"type": "thread.started",
                                                       "thread_id": sid}]
+        if events:
+            issued(sid)
         for rec in RUN["records"]:
             events.append({"type": "item.completed", "item": {
                 "type": "command_execution", "command": rec["command"],
@@ -351,15 +391,24 @@ def close_out(top, spec, argv, prompt):
     created = forge(top, "pr_create", "--base", top["ib"], "--head", branch, "--title", "close-out",
                     "--body", "b")
     url = [ln for ln in created.splitlines() if ln.startswith("url=")][0][4:]
-    primary_state = os.path.join(top["primary"], spec_dir, "pipeline-state.json")
-    with open(primary_state, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    doc.update({"completed": True, "currentPhase": 8,
-                "completedPhases": sorted(set(doc.get("completedPhases", []) + [8])),
-                "closeOut": {"status": "ok", "at": "now"}})
-    doc.setdefault("phaseHistory", []).append({"phase": 8, "name": "Wrapup"})
-    with open(primary_state, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=1)
+    named = STATE_FILE_RE.search(prompt)
+    target = named.group(1) if named else os.path.join(top["primary"], spec_dir,
+                                                       "pipeline-state.json")
+    with open(os.path.join(HOME, "closeout-state-%s.txt" % REQ), "w", encoding="utf-8") as fh:
+        fh.write(target)
+    if "state_text" in close:
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(close["state_text"])
+    else:
+        with open(target, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc.update({"completed": True, "currentPhase": 8,
+                    "completedPhases": sorted(set(doc.get("completedPhases", []) + [8])),
+                    "closeOut": {"status": "ok", "at": "now"}})
+        doc.setdefault("phaseHistory", []).append({"phase": 8, "name": "Wrapup"})
+        doc.update(close.get("state_extra", {}))
+        with open(target, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=1)
     result("Terminal state: closed-out\nChore PR: %s" % url, spec)
     raise SystemExit(0)
 
@@ -477,6 +526,8 @@ def main():
                                  "env": dict(os.environ)}) + "\n")
     resume = RUN["opts"]["resume"] if RUN["profile"] == "jsonl" else "--resume" in argv
     if resume:
+        check_session(RUN["opts"]["session"] if RUN["profile"] == "jsonl" else
+                      argv[argv.index("--resume") + 1])
         close_out(top, spec, argv, prompt)
     if "OPERATOR ANSWER" in prompt and spec.get("after_answer"):
         spec = dict(spec, **spec["after_answer"])
