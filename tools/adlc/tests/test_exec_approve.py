@@ -841,3 +841,80 @@ def test_ledger_tampered_between_approve_and_merge(box):
 
 def test_es_kv():
     assert es.kv("a=1\nb=c=d\nnoise") == {"a": "1", "b": "c=d"}
+
+
+# ---- REQ-662 BR-11 / BR-18 -------------------------------------------------------------------
+#: What the fake answers to `--version` once "upgraded": not the adapter's declared version.
+UPGRADED = "0.0.0 (an upgraded binary)"
+
+
+def test_allow_unverified_is_per_invocation(box):
+    """REQ-662 AC-21: --allow-unverified covers the launches of the invocation that received
+    it. The ledger names that invocation; approve re-checks and refuses before the forge sees a
+    merge, in that invocation and in a later one; a later launch is refused."""
+    box.write_scenario(version=UPGRADED)
+    first = box.go(shared=True, allow_unverified=True)
+    run = first.runs[REQ]
+    assert run.status == "awaiting_approval"
+    [entry] = run.ledger().read()["plan"]["allowUnverified"]
+    assert entry["invocation"] == first.invocation and entry["invocation"]["pid"] == os.getpid()
+    assert entry["launch"] == "launch" and entry["unverified"] == ["installed-version"]
+    assert ("allowUnverified: the launch by invocation %s" % first.invocation["id"]) in \
+        "\n".join(se.render_row(run))
+    token, _ = box.tokens(REQ)
+    with pytest.raises(se.Refused, match="approve is refused.*installed-version"):
+        first.approve(REQ, token, decided_by="operator")
+    assert REQ in first.tokens and run.ledger().read()["decision"] is None
+    assert run.status == "awaiting_approval" and merged_count(box) == 0
+    # A later invocation (`resume`) received no flag; the ledger's record is not one.
+    later = box.orch()
+    later.resume()
+    assert later.allow_unverified is False and later.invocation["id"] != first.invocation["id"]
+    with pytest.raises(se.Refused, match="approve is refused"):
+        box.approve(later, drain=False)
+    assert merged_count(box) == 0 and not box.calls("pr_merge")
+    with pytest.raises(se.Refused, match="launch is refused"):
+        box.orch().preflight([REQ], harness="claude", shared=True)
+    # The verdict was the only thing in the way: with the declared version back, it merges.
+    box.write_scenario(version=later.adapter(later.runs[REQ]).block["harness_version"])
+    assert box.approve(later) == "approved"
+    assert later.runs[REQ].status == "merged"
+
+
+def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path):
+    """REQ-662 AC-17: the binary's version is compared at the launch, before a relaunch and at
+    the close-out (the session resume); without --allow-unverified each is refused."""
+    for name in ("launch", "relaunch", "close-out"):
+        (tmp_path / name).mkdir()
+    box = eh.Sandbox(tmp_path / "launch")
+    box.write_scenario(version=UPGRADED)
+    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+        box.start(shared=True)
+    assert not (box.home / ("argv-%s.json" % REQ)).exists()
+
+    box = eh.Sandbox(tmp_path / "relaunch")
+    box.req(status="blocked", claim="blocked",
+            blockers=[{"reason": "reflector-questions", "question": "which?"}],
+            after_answer={"status": "awaiting_approval", "claim": "awaiting_approval"})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    assert run.status == "blocked"
+    box.write_scenario(version=UPGRADED)
+    with pytest.raises(se.Refused, match="relaunch is refused.*installed-version"):
+        orch.answer(REQ, "the second option")
+    assert run.status == "blocked" and not orch.children
+    assert len(open(str(box.home / ("argv-%s.json" % REQ))).read().splitlines()) == 1
+
+    box = eh.Sandbox(tmp_path / "close-out")
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    box.approve(orch, drain=False)
+    box.write_scenario(version=UPGRADED)
+    orch.drain()
+    closing = run.read_primary_state()["closeOut"]
+    assert closing["status"] == "failed", closing
+    assert "close-out is refused" in closing["reason"] and "installed-version" in \
+        closing["reason"]
+    assert run.status == "merged" and merged_count(box) == 1
+    argv = open(str(box.home / ("argv-%s.json" % REQ))).read().splitlines()
+    assert len(argv) == 1 and "--resume" not in json.loads(argv[0])

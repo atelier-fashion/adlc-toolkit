@@ -20,6 +20,10 @@ Its profile is chosen by the name it is installed under, which the wrapper passe
   option it does not know is a usage error, exit 2, unless the scenario's ``unknown_flags`` is
   ``record``: then it and everything after it are recorded and ignored.
 
+``--version`` prints the scenario's ``version``, or, without one, the ``exec.harness_version``
+of ``harness/<installed name>.yml`` under the scenario's toolkit: the adapter's declared version,
+so the engine's version check (REQ-662 BR-11) passes unless a test sets another.
+
 Both profiles read the whole prompt from stdin, and fail loudly (exit 86 and
 ``$HOME/exec-fake-forbidden-<REQ>.txt``) when the argv holds any spelling in the scenario's
 ``forbidden`` list, matched token by token as a CLI parses it.
@@ -360,6 +364,14 @@ def parse_jsonl(argv, top):
     return opts
 
 
+def declared_version(top, installed):
+    """``exec.harness_version`` of the adapter this fake is installed as, from the toolkit."""
+    sys.path.insert(0, os.path.join(top["toolkit"], "tools", "adlc"))
+    import harness_yaml
+    doc = harness_yaml.load_file(os.path.join(top["toolkit"], "harness", installed + ".yml"))
+    return doc["exec"]["harness_version"]
+
+
 def main():
     installed = os.environ.pop("EXEC_FAKE_AS", "") or "claude"
     if installed not in PROFILES:
@@ -368,6 +380,9 @@ def main():
     RUN["profile"] = PROFILES[installed]
     argv = sys.argv[1:]
     top = scenario()
+    if argv == ["--version"]:
+        print(top.get("version") or declared_version(top, installed))
+        return 0
     if "--help" in argv:
         default = ("--setting-sources <s>\n--settings <f>\n--strict-mcp-config\n"
                    if RUN["profile"] == "claude" else

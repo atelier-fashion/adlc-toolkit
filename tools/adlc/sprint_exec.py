@@ -36,6 +36,7 @@ import exec_gates as eg  # noqa: E402
 import exec_ledger as el  # noqa: E402
 import exec_prompt as ep  # noqa: E402
 import exec_safety as es  # noqa: E402
+import exec_verify as ev  # noqa: E402
 import toolkit_root  # noqa: E402
 
 MAX_CONCURRENT = 5
@@ -224,6 +225,10 @@ class Batch(object):
         self.allow_unprotected = False
         self.protection = "unknown"
         self.child_token = None
+        # The adapter's BR-11 verdict at pre-flight (``exec_verify.Verdict``), and whether this
+        # invocation received --allow-unverified (REQ-662 ADR-2).
+        self.verdict = None
+        self.allow_unverified = False
 
 
 class Orchestrator(object):
@@ -243,6 +248,12 @@ class Orchestrator(object):
         self.lock = threading.RLock()
         self.worker = None
         self.sup_dir = None
+        # --allow-unverified reaches this invocation from its own command line alone, never
+        # from config, state or the environment, and only `run` passes it (REQ-662 BR-18).
+        self.allow_unverified = False
+        self.invocation = el.invocation()
+        # The latest verdict per adapter name, recomputed at each gate (REQ-662 ADR-2).
+        self.verdicts = {}
 
     # ---- small helpers ---------------------------------------------------------------
     def say(self, line):
@@ -335,8 +346,10 @@ class Orchestrator(object):
             raise Refused("the forge provider could not be resolved: %s" % res.stderr.strip())
         return name
 
-    def preflight(self, reqs, harness="claude", shared=False, allow_unprotected=False, flags=()):
+    def preflight(self, reqs, harness="claude", shared=False, allow_unprotected=False, flags=(),
+                  allow_unverified=False):
         batch = Batch()
+        self.allow_unverified = bool(allow_unverified)
         for req in reqs:
             try:
                 es.valid_req(req)
@@ -362,6 +375,10 @@ class Orchestrator(object):
         batch.binary = shutil.which(adapter.binary, path=self.environ.get("PATH", ""))
         if not batch.binary:
             raise Refused("%s is not on PATH" % adapter.binary)
+        # REQ-662 BR-11: recomputed from ToolkitRoot's result file, the adapter and the
+        # binary's version. --allow-unverified lets the batch on; every check below still runs.
+        batch.verdict = self._gate(adapter, batch.binary, "launch")
+        batch.allow_unverified = self.allow_unverified
         # Every launch reads only the engine's settings file. Without the flags that do
         # that, the operator's and the project's own allowlists would widen the tiers.
         help_out = subprocess.run([batch.binary, "--help"], stdout=subprocess.PIPE,
@@ -594,7 +611,37 @@ class Orchestrator(object):
             return subprocess.Popen(argv, stdin=stdin, stdout=out, stderr=err, cwd=cwd, env=env,
                                     start_new_session=True)
 
+    # ---- REQ-662 BR-11: the verdict at every launch, at the close-out and at approve ---------
+    def _gate(self, adapter, binary, where, run=None):
+        """The adapter's verdict now (``exec_verify.verdict``). Unverified is refused, naming
+        each problem, unless this invocation received --allow-unverified and ``where`` is a
+        launch; then the launch goes on with one loud line, and the run record keeps the
+        invocation, which the halt copies into the ledger. ``approve`` never honours it."""
+        verdict = ev.recompute(adapter, self.toolkit, binary, self.environ)
+        self.verdicts[adapter.name] = verdict
+        if verdict.verified:
+            return verdict
+        if where == "approve" or not self.allow_unverified:
+            raise Refused("harness %s is unverified, so the %s is refused (REQ-662 BR-11): %s; %s"
+                          % (adapter.name, where, verdict.summary(),
+                             "--allow-unverified covers launches only, never approve"
+                             if where == "approve" else
+                             "`adlc sprint-exec run --allow-unverified` launches it anyway"))
+        if run is not None:
+            self.say("WARNING: --allow-unverified: %s %s on harness %s, which is UNVERIFIED: %s"
+                     % (run.req, where, adapter.name, ", ".join(verdict.subjects)))
+            run.doc.setdefault("allowUnverified", []).append(
+                el.allow_unverified_entry(self.invocation, where, verdict.subjects))
+            run.save()
+        return verdict
+
     def spawn(self, run):
+        try:
+            self._gate(self.adapter(run), run.doc["binary"], "launch", run)
+        except Refused as exc:
+            # The verdict changed after the pre-flight: this REQ starts nothing.
+            self._terminal(run, "failed", "setup-error", {}, note=str(exc))
+            return
         box = self.box(run)
         for rid, spec in run.doc["repos"].items():
             self._make_worktree(box, spec["path"], spec["workingCopy"], run.doc["branch"],
@@ -938,7 +985,8 @@ class Orchestrator(object):
         return {"prs": prs, "deployPlan": deploy, "deploySkipped": skipped, "changesGate": lines,
                 "ackGateChange": False, "changedPaths": sorted(set(changed)),
                 "allowUnprotected": run.doc["allowUnprotected"],
-                "sharedCredentials": run.doc["sharedCredentials"], "protection": protection}
+                "sharedCredentials": run.doc["sharedCredentials"], "protection": protection,
+                "allowUnverified": list(run.doc.get("allowUnverified") or [])}
 
     def _halt(self, run, state, result):
         try:
@@ -1066,6 +1114,9 @@ class Orchestrator(object):
                 bound = el.token_digest(gate_token or "", "\n".join(lines))
                 if bound != held["gate"]:
                     raise Refused("%s: --ack-gate-change needs the token bound to that line" % req)
+            # Re-checked before anything merges; an unverified adapter refuses here whatever the
+            # launching invocation was given (REQ-662 BR-18). The token stays unspent.
+            self._gate(self.adapter(run), run.doc["binary"], "approve")
             self.tokens.pop(req)
             plan["ackGateChange"] = bool(lines)
             run.ledger().update_plan(plan)
@@ -1108,6 +1159,7 @@ class Orchestrator(object):
             self._relaunch(run, text)
 
     def _relaunch(self, run, text):
+        self._gate(self.adapter(run), run.doc["binary"], "relaunch", run)
         branch = run.doc["branch"]
         try:
             data = ep.pipeline_prompt(self.toolkit, self.primary, run.req, branch, self.primary,
@@ -1508,6 +1560,11 @@ class Orchestrator(object):
             self._close_out_failed(run, "failed", "resume is impossible: harness %s declares "
                                    "no resume" % adapter.name)
             return
+        try:
+            self._gate(adapter, run.doc["binary"], "close-out", run)
+        except Refused as exc:
+            self._close_out_failed(run, "failed", str(exc))
+            return
         help_out = subprocess.run([run.doc["binary"], "--help"], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, universal_newlines=True,
                                   env=self._child_env(run)).stdout
@@ -1652,7 +1709,10 @@ class Orchestrator(object):
         if push.returncode != 0:
             self.say("manual resume needed for %s (rebased, push failed)" % run.req)
             return
-        self._relaunch(run, None)
+        try:
+            self._relaunch(run, None)
+        except Refused as exc:
+            self.say("manual resume needed for %s (%s)" % (run.req, exc))
 
     # ---- the supervisor --------------------------------------------------------------
     def bind(self):
@@ -1814,6 +1874,10 @@ def render_row(run, violations=()):
                                                            plan.get("protection")))
         if plan.get("sharedCredentials"):
             lines.append("  sharedCredentials: the run used the operator's forge credentials")
+        for entry in plan.get("allowUnverified") or []:
+            lines.append("  allowUnverified: the %s by invocation %s (pid %s) ran unverified: %s"
+                         % (entry["launch"], entry["invocation"]["id"],
+                            entry["invocation"]["pid"], ", ".join(entry["unverified"])))
         if run.doc.get("resume") == "impossible":
             why = ("the harness declares no resume" if run.exec.get("sessionId")
                    else "the run's output carried no session id")
@@ -1896,6 +1960,9 @@ def _parser():
     run.add_argument("--allow-unprotected", action="store_true")
     run.add_argument("--shared-credentials", action="store_true")
     run.add_argument("--harness-flag", action="append", default=[])
+    run.add_argument("--allow-unverified", action="store_true",
+                     help="launch an adapter BR-11 reads unverified, with a loud line per launch; "
+                          "this invocation's launches only, never approve (REQ-662)")
     sub.add_parser("resume", help="a new supervisor over this repo's unfinished runs")
     status = sub.add_parser("status", help="the dashboard, without tokens")
     status.add_argument("--json", action="store_true")
@@ -1936,7 +2003,8 @@ def _dispatch(args):
         server = orch.bind()
         try:
             batch = orch.preflight(args.reqs, args.harness, args.shared_credentials,
-                                   args.allow_unprotected, args.harness_flag)
+                                   args.allow_unprotected, args.harness_flag,
+                                   allow_unverified=args.allow_unverified)
             orch.launch_batch(args.reqs, batch)
         except BaseException:
             server.close()

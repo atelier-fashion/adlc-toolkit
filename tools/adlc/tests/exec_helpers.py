@@ -141,13 +141,15 @@ class Sandbox(object):
         if mock_scenario:
             self.environ["ADLC_FORGE_MOCK_SCENARIO"] = mock_scenario
         self.scenarios = {req: {} for req in reqs}
-        self.extra = {}
+        # What the fake answers to `--version`: the adapter's declared version, so the
+        # engine's version check passes unless a test sets another (REQ-662 BR-11).
+        self.extra = {"version": block.get("harness_version", "unknown")}
         self.write_scenario()
         self.out = io.StringIO()
 
     def write_scenario(self, **extra):
-        """The fake's script. Top-level keys a test sets here (``help``, ``unknown_flags``) stay
-        set for every later write."""
+        """The fake's script. Top-level keys a test sets here (``help``, ``unknown_flags``,
+        ``version``) stay set for every later write."""
         self.extra.update(extra)
         doc = {"store": str(self.store), "toolkit": TOOLKIT, "primary": os.path.realpath(
             str(self.repo)), "repoId": "widgets", "ib": "main", "specDirs": self.spec_dirs,

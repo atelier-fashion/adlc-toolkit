@@ -1,7 +1,7 @@
 ---
 id: TASK-260
 title: "BR-11 as one function: the verdict, version equality, `--allow-unverified`, and the doctor line"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17

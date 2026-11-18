@@ -1,0 +1,100 @@
+{
+  "date": "2026-11-17",
+  "fixture": "REQ-662 TASK-260: shaped like codex.json's 0.166.0 run, acceptable for fake-exec-file.yml (context_delivery prompt, deny_render file, clone, delegate supported). Synthetic.",
+  "harness": "fake-exec-file",
+  "harness_version": "fake-exec-file 0.1.0",
+  "probes": {
+    "ask-tier-deny": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass",
+      "sub_results": {
+        "allow-only": {
+          "status": "pass"
+        },
+        "baseline": {
+          "status": "fail"
+        },
+        "deny-under-allow": {
+          "status": "pass"
+        },
+        "lone-deny": {
+          "status": "n/a"
+        },
+        "wrapped-allow": {
+          "status": "fail"
+        }
+      }
+    },
+    "fence-vs-allowlist": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "fail",
+      "sub_results": {
+        "broad-sh": {
+          "status": "fail"
+        },
+        "routine-only": {
+          "status": "fail"
+        },
+        "runner-baseline": {
+          "status": "pass"
+        },
+        "runner-positive": {
+          "status": "pass"
+        },
+        "runner-prefix": {
+          "status": "pass"
+        }
+      }
+    },
+    "git-write-main": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass"
+    },
+    "git-write-worktree": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass",
+      "sub_results": {
+        "root-is-worktree": {
+          "status": "pass"
+        },
+        "writable-roots-repo": {
+          "status": "pass"
+        }
+      }
+    },
+    "session-start-context": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "fail"
+    },
+    "shell-timeout": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass"
+    },
+    "stdin-prompt": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass",
+      "sub_results": {
+        "with-prompt-flag": {
+          "status": "pass"
+        },
+        "without-prompt-flag": {
+          "status": "pass"
+        }
+      }
+    },
+    "trust-then-headless": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "fail",
+      "sub_results": {
+        "allowlist-loaded": {
+          "status": "pass"
+        },
+        "hooks-loaded": {
+          "status": "fail"
+        }
+      }
+    }
+  },
+  "ran_at": "2026-11-17T00:00:00Z",
+  "schema": 1
+}

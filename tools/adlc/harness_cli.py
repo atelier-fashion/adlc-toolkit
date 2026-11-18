@@ -15,7 +15,9 @@ the other (LESSON-397).
   iterates the harnesses ``adlc harness detect`` reports present,
   ``--only-if-detected`` writes nothing without the binary, and ``--writable-root``
   unions one path into a user config's owned array (REQ-655).
-* ``doctor``   runs ``harness:<name>`` and ``render-currency:<name>`` (BR-15).
+* ``doctor``   runs ``harness:<name>`` and ``render-currency:<name>`` (BR-15), and for an
+  installed harness with an exec block prints ``exec: verified`` or ``exec: unverified
+  (<ids>)``, recomputed (REQ-662 BR-14).
 * ``drift``    classifies the project's rendered files with template posture for
   ``/template-drift`` (ADR-11); read-only. ``--opted-in`` adds each shipped adapter
   the project has the main file of.
@@ -352,6 +354,10 @@ def cmd_doctor(args, out=sys.stdout, err=sys.stderr):
             out.write("    [%s] row %s — %s\n" % (rstatus, row_id, rdetail))
             if rremedy:
                 out.write("        -> fix: %s\n" % rremedy)
+        # Report-only: the engine refuses an unverified launch; doctor says why.
+        line = harness_doctor.exec_line(adapter, toolkit)
+        if line:
+            out.write("    %s\n" % line)
     return 1 if fails else 0
 
 

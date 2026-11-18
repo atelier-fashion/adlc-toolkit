@@ -175,6 +175,20 @@ def mint_token():
     return secrets.token_hex(16)
 
 
+def invocation():
+    """This process's identity in the audit trail: a random id, its pid and when it started.
+    Minted once per orchestrator, so the ledger names the one invocation that received
+    ``--allow-unverified`` (REQ-662 BR-18)."""
+    return {"id": secrets.token_hex(8), "pid": os.getpid(), "startedAt": now()}
+
+
+def allow_unverified_entry(inv, where, subjects):
+    """One launch made under ``--allow-unverified``: the invocation that received the flag,
+    what was launched (``launch``, ``relaunch``, ``close-out``), when, and what was unverified.
+    The run record keeps each; the halt copies them into the ledger's plan."""
+    return {"invocation": dict(inv), "launch": where, "at": now(), "unverified": list(subjects)}
+
+
 def token_digest(token, binding=""):
     """A token's digest. A gate token's digest is bound to the plan line it answers."""
     return hashlib.sha256(("%s\0%s" % (binding, token)).encode("utf-8")).hexdigest()

@@ -901,3 +901,99 @@ def test_jsonl_fake_event_shape_equals_the_probe_double(tmp_path):
             if e["type"] == "item.completed"] == \
         [e for e in map(json.loads, probe.stdout.splitlines()) if e["type"] == "item.completed"]
     assert ours.stderr == probe.stderr and eh.CODEX_REFUSAL in ours.stderr
+
+
+# ---- REQ-662 BR-11 / BR-18: the verdict at launch, and --allow-unverified --------------------
+#: What the fake answers to `--version` once "upgraded": not the adapter's declared version.
+UPGRADED = "0.0.0 (an upgraded binary)"
+
+
+def test_allow_unverified_is_cli_only(tmp_path):
+    """REQ-662 AC-15: the flag reaches the engine from `run`'s command line alone. Config,
+    state and the environment do nothing; on the command line it lets every launch on with a
+    loud line, and a forbidden flag, a failed pre-flight and the approval gate still stand."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    box.write_scenario(version=UPGRADED)
+    orch = box.orch(ADLC_ALLOW_UNVERIFIED="1", ALLOW_UNVERIFIED="1",
+                    ADLC_SPRINT_EXEC_ALLOW_UNVERIFIED="1")
+    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+        box.start(orch=orch, shared=True)
+    config = box.repo / ".adlc" / "config.yml"
+    base = config.read_text()
+    config.write_text(base + "    allow_unverified: true\n    allow-unverified: true\n")
+    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+        box.start(shared=True)
+    config.write_text(base)
+    states = [box.repo / box.spec_dirs[req] / "pipeline-state.json" for req in box.reqs]
+    for path in states:
+        path.write_text(json.dumps({"allowUnverified": True, "allow_unverified": True}))
+    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+        box.start(shared=True)
+    for path in states:
+        path.unlink()
+    assert not (box.home / "argv-REQ-901.json").exists()
+    parser = se._parser()
+    assert parser.parse_args(["run", "REQ-901", "--allow-unverified"]).allow_unverified is True
+    assert parser.parse_args(["run", "REQ-901"]).allow_unverified is False
+    for argv in (["approve", "REQ-901", "--allow-unverified"], ["resume", "--allow-unverified"],
+                 ["answer", "REQ-901", "--allow-unverified"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+    # Passed on the command line, it bypasses nothing else.
+    with pytest.raises(se.Refused, match="--yolo"):
+        box.start(shared=True, flags=["--yolo"], allow_unverified=True)
+    box.write_scenario(help="--setting-sources <s>\n--settings <f>\n")
+    with pytest.raises(se.Refused, match="config-isolation flags"):
+        box.start(shared=True, allow_unverified=True)
+    box.write_scenario(help=eh.ISOLATION_HELP)
+    assert not (box.home / "argv-REQ-901.json").exists()
+    orch = box.go(shared=True, allow_unverified=True)
+    text = box.out.getvalue()
+    for req in box.reqs:
+        assert ("WARNING: --allow-unverified: %s launch on harness claude, which is UNVERIFIED: "
+                "installed-version\n" % req) in text
+        run = orch.runs[req]
+        # The approval gate stands: the run halts there and nothing merges.
+        assert run.status == "awaiting_approval"
+        [entry] = run.ledger().read()["plan"]["allowUnverified"]
+        assert entry["invocation"] == orch.invocation and entry["launch"] == "launch"
+    assert text.count("WARNING: --allow-unverified:") == 2
+    orch.drain()
+    assert not box.calls("pr_merge")
+
+
+def test_hand_set_status_without_a_result_file_refuses_launch(tmp_path, monkeypatch):
+    """REQ-662 AC-11: a `verification: probes` block whose yml says `status: verified`, with
+    no result file under ToolkitRoot, is unverified, and nothing launches."""
+    import exec_verify as ev
+    import harness_adapter as ha
+    path = eh.codex_shaped_adapter(tmp_path / "adapter")
+    version = ha.load_adapter(path, toolkit=eh.TOOLKIT)["exec"]["harness_version"]
+    text = open(path, encoding="utf-8").read()
+    old = "  verification: recorded\n"
+    assert text.count(old) == 1
+    text = text.replace(old, '  verification: probes\n  probes:\n    - id: stdin-prompt\n'
+                        '      ran_at: "2026-11-17T00:00:00Z"\n      harness_version: "%s"\n'
+                        '      status: pass\n' % version)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    adapter = eh.use_adapter(monkeypatch, path)
+    assert adapter.block["status"] == "verified" and adapter.block["verification"] == "probes"
+    assert not os.path.exists(ev.result_path(adapter, eh.TOOLKIT))
+    box = eh.Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path)
+    with pytest.raises(se.Refused, match="unverified.*result-file"):
+        box.start(shared=True)
+    assert not box.launches()
+
+
+def test_each_launch_rechecks_the_verdict(box):
+    """A verdict that changes between the pre-flight and the spawn starts nothing."""
+    orch = box.orch()
+    batch = orch.preflight(box.reqs, harness="claude", shared=True)
+    assert batch.verdict.verified and batch.allow_unverified is False
+    box.write_scenario(version=UPGRADED)
+    orch.launch_batch(box.reqs, batch)
+    run = orch.runs["REQ-901"]
+    assert run.status == "failed" and not orch.children
+    assert not (box.home / "argv-REQ-901.json").exists()
+    assert "installed-version" in json.dumps(run.read_primary_state()["notes"])
