@@ -92,8 +92,21 @@ class ExecAdapter(object):
 
     @property
     def strategy(self):
-        wc = self.block["working_copy"]
-        return wc["strategy"] if isinstance(wc, dict) else wc
+        return self.block["working_copy"]["strategy"]
+
+    @property
+    def output(self):
+        """Where the harness's output holds each result field (REQ-662 ADR-6)."""
+        return self.block["output"]
+
+    def resume_tokens(self, session_id):
+        """The ``resume`` template, the whole argv after the binary on a resume, with
+        ``{session_id}`` substituted as one whole token (REQ-662 BR-2)."""
+        template = self.block.get("resume")
+        if not template:
+            raise ExecRefused("harness %s declares no resume, so resume is impossible on it"
+                              % self.name)
+        return [session_id if tok == "{session_id}" else tok for tok in template]
 
     @property
     def trust_grant(self):
@@ -228,10 +241,10 @@ class ExecAdapter(object):
         return list(dict.fromkeys(allow)), list(dict.fromkeys(deny))
 
     def launch_argv(self, binary, allow, deny, resume=None, extra=(), add_dir=None):
-        """The whole argv. The prompt is on stdin, so nothing positional follows."""
-        argv = [binary] + list(self.block["launch"]) + list(extra)
-        if resume:
-            argv += [self.block["resume_flag"], resume]
+        """The whole argv. The prompt is on stdin, so nothing positional follows. A resume
+        runs the adapter's ``resume`` template in place of ``launch``."""
+        head = self.resume_tokens(resume) if resume else list(self.block["launch"])
+        argv = [binary] + head + list(extra)
         if add_dir:
             argv += [self.block["add_dir_flag"], add_dir]
         argv += [self.block["allow_flag"]] + list(allow)
@@ -279,7 +292,13 @@ class ExecAdapter(object):
         return env
 
     def parse_result(self, text):
-        """The harness's JSON result, normalized; every value still data (BR-17)."""
+        """The harness's JSON result, normalized; every value still data (BR-17).
+
+        Read through ``output``: each field is a key path into the one result object."""
+        spec = self.output
+        if (spec["format"], spec["source"]) != ("json", "stdout"):
+            raise ExecRefused("harness %s declares output format %s from %s, which this engine "
+                              "has no parser for" % (self.name, spec["format"], spec["source"]))
         doc = None
         try:
             parsed = json.loads(text)
@@ -293,22 +312,21 @@ class ExecAdapter(object):
                 if isinstance(parsed, dict):
                     doc = parsed
                     break
-        keys = self.block["result_keys"]
         out = {"present": doc is not None, "session_id": None, "is_error": None,
                "num_turns": None, "text": "", "cost": None, "denials": []}
         if doc is None:
             return out
-        sid = doc.get(keys.get("session_id", "session_id"))
+        sid = _at(doc, spec.get("session_id"))
         if isinstance(sid, str) and _SESSION_RE.match(sid):
             out["session_id"] = sid
-        out["is_error"] = doc.get(keys.get("is_error", "is_error"))
-        turns = doc.get(keys.get("num_turns", "num_turns"))
+        out["is_error"] = _at(doc, spec.get("is_error"))
+        turns = _at(doc, spec.get("num_turns"))
         out["num_turns"] = turns if isinstance(turns, int) else None
-        body = doc.get(keys.get("text", "result"))
+        body = _at(doc, spec.get("final_message"))
         out["text"] = body if isinstance(body, str) else ""
-        cost = doc.get(keys.get("cost", "cost"))
+        cost = _at(doc, spec.get("cost"))
         out["cost"] = cost if isinstance(cost, (int, float)) else None
-        denied = doc.get(self.block.get("denied_result_key", ""))
+        denied = _at(doc, spec.get("denials"))
         if isinstance(denied, list):
             out["denials"] = denied
         return out
@@ -324,6 +342,18 @@ class ExecAdapter(object):
         if claim is None and result.get("denials"):
             return "denied"
         return klass
+
+
+def _at(doc, path):
+    """The value at a dotted key path (``key`` or ``a.b``) in a parsed object, or None."""
+    if not path:
+        return None
+    node = doc
+    for part in path.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node
 
 
 def terminal_claim(text):

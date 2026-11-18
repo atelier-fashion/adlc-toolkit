@@ -1,0 +1,111 @@
+# Test-only adapter (REQ-662 TASK-256): a full exec schema 2 block of the `flags` render
+# form, with both tiers on the command line. Its name is not one `adlc harness detect`
+# knows, so it loads only through an explicit path. Tests rewrite single keys of a copy
+# (the basename must stay fake-exec-flags.yml). Every value is synthetic.
+name: fake-exec-flags
+schema_version: 1
+binary: fake-exec-flags
+paths:
+  permissions:
+    project: .fake-exec-flags/permissions.json
+    mode: rendered
+  hooks:
+    project: .fake-exec-flags/hooks.json
+    mode: rendered
+formats:
+  permissions: rules-json
+  hooks: claude-settings-json
+tool_map:
+  Read: read_file
+  Grep: grep
+  Glob: glob
+  Bash: shell
+tier_map:
+  opus: fake-large-1
+  sonnet: fake-mid-1
+  haiku: unverified
+deny_tier_render:
+  project: deny
+trust:
+  mechanism: flag
+  detail: --trust-folder
+sandbox_can_reach_common_gitdir: true
+hook_events:
+  session-start: sessionStart
+  session-compact: unsupported
+  subagent-start: unsupported
+hook_timeout_unit: s
+hook_payload:
+  session_id: sessionId
+  cwd: cwd
+  transcript_path: unsupported
+capabilities:
+  deny: "yes"
+  subagent_start_hook: "no"
+  compact_rehook: "no"
+  agent_tool_restriction: enforced
+  allowlist_granularity: command-base
+  committable_allowlist: "no"
+exec:
+  exec_schema_version: 2
+  harness_version: "fake-exec-flags 1.0.0"
+  verification: probes
+  status: unverified
+  probes:
+    - id: stdin-prompt
+      ran_at: "2026-11-17T00:00:00Z"
+      harness_version: "fake-exec-flags 1.0.0"
+      status: pass
+    - id: shell-timeout
+      ran_at: "2026-11-17T00:00:00Z"
+      harness_version: "fake-exec-flags 1.0.0"
+      status: unknown
+  working_copy: {strategy: worktree}
+  trust_grant: flag
+  prompt_delivery: stdin
+  # `-p` (spelled `-p ""` by some harnesses) would make the prompt an argument; this
+  # launch leaves it out, so stdin is the whole task.
+  prompt_flag: [-p]
+  prompt_variant: without-prompt-flag
+  launch: [-s, --output-format, json, --no-ask-user, -C, "{worktree}"]
+  resume: [-s, --output-format, json, --no-ask-user, -C, "{worktree}", --resume, "{session_id}"]
+  operator_flags: [--model]
+  context_delivery: hooks
+  allow_render: flags
+  deny_render: flags
+  user_policy_file: none
+  allow_flag: --allow-tool
+  deny_flag: --deny-tool
+  shell_rule: "shell(%s:*)"
+  shell_rule_exact: "shell(%s)"
+  settings_keys: {allow: [permissions, allow], deny: [permissions, deny]}
+  fence_runner: tools/adlc/fence-run
+  engine_deny:
+    - [adlc, sprint-exec, approve]
+    - [adlc, sprint-exec, reject]
+    - [adlc, sprint-exec, answer]
+    - [adlc, sprint-exec, abort]
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+    - --allow-all-tools
+  exit_codes: {"0": ok, "1": error}
+  output:
+    format: json
+    source: stdout
+    session_id: session.id
+    final_message: result.text
+    denials: denied
+  denied_stderr: "^Permission denied: "
+  env_passthrough: [HOME, PATH]
+  config_surfaces: [.fake-exec-flags/hooks.json, .fake-exec-flags/mcp.json]
+  bypass_config_keys:
+    "$HOME/.fake-exec-flags/config.json": [allowAllTools]
+    ".fake-exec-flags/mcp.json": [autoApprove]
+  rules_reload: unknown
+  shell_timeout_s: {value: unknown, verified: false, delegate: unsupported}
+  matcher: none

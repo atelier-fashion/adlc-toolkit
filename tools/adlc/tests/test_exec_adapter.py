@@ -33,10 +33,11 @@ def test_exec_block_validates(adapter, tmp_path):
     bad.write_text(text.replace("    - --yolo\n", ""))
     with pytest.raises(ha.AdapterError, match="--yolo"):
         ha.load_adapter(str(bad), toolkit=TOOLKIT)
-    bad.write_text(text.replace("  working_copy: worktree\n",
+    bad.write_text(text.replace("  working_copy: {strategy: worktree}\n",
                                 "  working_copy: {strategy: clone}\n"))
     assert ea.ExecAdapter(ha.load_adapter(str(bad), toolkit=TOOLKIT), TOOLKIT).strategy == "clone"
-    bad.write_text(text.replace("  working_copy: worktree\n", "  working_copy: floppy\n"))
+    bad.write_text(text.replace("  working_copy: {strategy: worktree}\n",
+                                "  working_copy: {strategy: floppy}\n"))
     with pytest.raises(ha.AdapterError, match="working_copy"):
         ha.load_adapter(str(bad), toolkit=TOOLKIT)
 
@@ -307,3 +308,337 @@ def test_fence_runner_outside_the_root_refuses_the_launch(adapter, tmp_path):
     (spaced / "tools" / "adlc" / "fence-run").write_text("#!/bin/sh\n")
     with pytest.raises(ea.ExecRefused, match="fence runner"):
         ea.ExecAdapter(adapter.adapter, str(spaced)).fence_runner()
+
+
+# ---------------------------------------------------------------- exec schema 2 (REQ-662)
+FIX = os.path.join(HERE, "fixtures", "harness")
+#: The three schema-2 blocks: the migrated claude block and one fixture of each render form.
+#: A check proven on one of them has only proven that one's branches (LESSON-756).
+SCHEMA_2 = ("claude", "fake-exec-flags", "fake-exec-file")
+
+
+def _source(base):
+    if base == "claude":
+        return open(os.path.join(TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
+    return open(os.path.join(FIX, base + ".yml"), encoding="utf-8").read()
+
+
+def _key_span(lines, key):
+    """The lines of ``exec.<key>``: its own line and every deeper-indented line after it."""
+    start = next(i for i, line in enumerate(lines) if line.startswith("  %s:" % key))
+    end = start + 1
+    while end < len(lines) and (lines[end].startswith("   ") or
+                                lines[end].startswith("  - ")):
+        end += 1
+    return start, end
+
+
+def _edit(text, drop=(), put=None, add=None):
+    """``text`` with exec keys dropped, one key's value replaced, or one line added."""
+    lines = text.split("\n")
+    for key in drop:
+        start, end = _key_span(lines, key)
+        del lines[start:end]
+    if put:
+        key, value = put
+        start, end = _key_span(lines, key)
+        lines[start:end] = ["  %s: %s" % (key, value)]
+    if add:
+        start, _end = _key_span(lines, "exec_schema_version")
+        lines.insert(start + 1, "  " + add)
+    return "\n".join(lines)
+
+
+def _write(tmp_path, base, text):
+    d = tmp_path / ("v%d" % len(list(tmp_path.glob("v*"))))
+    d.mkdir()
+    path = d / (base + ".yml")
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def _refused(tmp_path, base, **edit):
+    path = _write(tmp_path, base, _edit(_source(base), **edit))
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(path, toolkit=TOOLKIT)
+    return exc.value
+
+
+def _loads(tmp_path, base, **edit):
+    return ha.load_adapter(_write(tmp_path, base, _edit(_source(base), **edit)), toolkit=TOOLKIT)
+
+
+REFUSALS = [
+    ({"add": "surprise: 1"}, "exec.surprise"),
+    ({"drop": ["exit_codes"]}, "exec.exit_codes"),
+    ({"put": ("exit_codes", '{"1": error}')}, "exec.exit_codes"),
+    ({"put": ("exec_schema_version", "3")}, "exec.exec_schema_version"),
+    ({"put": ("exec_schema_version", "1")}, "exec.exec_schema_version"),
+    ({"drop": ["forbidden_flags"]}, "exec.forbidden_flags"),
+    ({"drop": ["config_surfaces"]}, "exec.config_surfaces"),
+    ({"drop": ["rules_reload"]}, "exec.rules_reload"),
+    ({"drop": ["bypass_config_keys"]}, "exec.bypass_config_keys"),
+    ({"drop": ["prompt_variant"]}, "exec.prompt_variant"),
+    ({"put": ("rules_reload", "sometimes")}, "exec.rules_reload"),
+    ({"drop": ["context_delivery"]}, "exec.context_delivery"),
+    ({"put": ("context_delivery", "telepathy")}, "exec.context_delivery"),
+    ({"drop": ["harness_version"]}, "exec.harness_version"),
+    ({"put": ("verification", "vibes")}, "exec.verification"),
+    ({"put": ("status", "probably")}, "exec.status"),
+    ({"put": ("prompt_delivery", "argv")}, "exec.prompt_delivery"),
+    ({"put": ("matcher", "regex")}, "exec.matcher"),
+    ({"put": ("allow_render", "telepathy")}, "exec.allow_render"),
+    ({"drop": ["output"]}, "exec.output"),
+    ({"put": ("output", "json")}, "exec.output"),
+    ({"put": ("resume", "[--resume, x]")}, "exec.resume"),
+    ({"put": ("shell_timeout_s", "{value: 60, verified: true, delegate: supported}")},
+     "exec.shell_timeout_s.delegate"),
+    ({"put": ("shell_timeout_s", "{value: 125, verified: maybe, delegate: supported}")},
+     "exec.shell_timeout_s.verified"),
+    ({"put": ("operator_flags", "[model]")}, "exec.operator_flags[0]"),
+    ({"drop": ["engine_deny"]}, "exec.engine_deny"),
+    ({"drop": ["fence_runner"]}, "exec.fence_runner"),
+]
+
+
+@pytest.mark.parametrize("base", SCHEMA_2)
+@pytest.mark.parametrize("edit, field", REFUSALS)
+def test_schema_2_refusals_name_the_key(tmp_path, base, edit, field):
+    """REQ-662 BR-1, AC-1: each defect refuses the whole adapter, never a partial load, and
+    the refusal names the key."""
+    assert _refused(tmp_path, base, **edit).field == field
+
+
+@pytest.mark.parametrize("base", SCHEMA_2)
+def test_prompt_variant_follows_the_launch(tmp_path, base):
+    """The variant is the one whose prompt_flag tokens the launch holds or lacks, so the gate
+    reads the stdin-prompt sub-result the launch actually implements."""
+    block = ha.load_adapter(_write(tmp_path, base, _source(base)), toolkit=TOOLKIT)["exec"]
+    other = [v for v in ha.PROMPT_VARIANTS if v != block["prompt_variant"]][0]
+    assert _refused(tmp_path, base, put=("prompt_variant", other)).field == \
+        "exec.prompt_variant"
+    assert _refused(tmp_path, base, put=("prompt_variant", "no-flag")).field == \
+        "exec.prompt_variant"
+    # Moving the flag in or out of launch with the variant kept is the same disagreement,
+    # and with the variant moved to match, the block loads again.
+    if block["prompt_variant"] == "with-prompt-flag":
+        moved = [t for t in block["launch"] if t not in block["prompt_flag"]]
+    else:
+        moved = block["launch"] + block["prompt_flag"]
+    assert _refused(tmp_path, base, put=("launch", json.dumps(moved))).field == \
+        "exec.prompt_variant"
+    text = _edit(_edit(_source(base), put=("launch", json.dumps(moved))),
+                 put=("prompt_variant", other))
+    assert ha.load_adapter(_write(tmp_path, base, text), toolkit=TOOLKIT)["exec"][
+        "prompt_variant"] == other
+    assert _refused(tmp_path, base, put=("prompt_flag", "[]")).field == "exec.prompt_flag"
+    assert _refused(tmp_path, base, put=("prompt_flag", '[-p, ""]')).field == \
+        "exec.prompt_flag[1]"
+
+
+@pytest.mark.parametrize("base, key, value", [
+    ("fake-exec-file", "allow_flag", "--allow-tool"),
+    ("fake-exec-file", "shell_rule", '"shell(%s:*)"'),
+    ("fake-exec-file", "shell_rule_exact", '"shell(%s)"'),
+    ("fake-exec-file", "settings_keys", "{allow: [a], deny: [d]}"),
+    ("fake-exec-file", "deny_flag", "--deny-tool"),
+    ("claude", "rule_file", ".claude/adlc-exec.rules"),
+    ("fake-exec-flags", "rule_file", ".fake-exec-flags/adlc-exec.rules"),
+])
+def test_a_key_for_the_other_render_form_is_refused(tmp_path, base, key, value):
+    """REQ-662 ADR-1: a key one form reads is refused on the other, so no block carries a
+    field the engine never reads."""
+    assert _refused(tmp_path, base, add="%s: %s" % (key, value)).field == "exec." + key
+
+
+@pytest.mark.parametrize("base, key", [
+    ("claude", "allow_flag"), ("claude", "shell_rule"), ("claude", "settings_keys"),
+    ("claude", "deny_flag"), ("fake-exec-flags", "allow_flag"),
+    ("fake-exec-file", "rule_file"),
+])
+def test_a_key_its_render_form_needs_is_required(tmp_path, base, key):
+    assert _refused(tmp_path, base, drop=[key]).field == "exec." + key
+
+
+def test_deny_render_and_the_user_policy_file(tmp_path):
+    """A rendered deny needs a harness that can deny; a user policy file holds a file-rendered
+    deny tier only, and lives under a user path."""
+    no_deny = _source("fake-exec-flags").replace('  deny: "yes"', '  deny: "no"')
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(_write(tmp_path, "fake-exec-flags", no_deny), toolkit=TOOLKIT)
+    assert exc.value.field == "exec.deny_render"
+    assert _refused(tmp_path, "claude", put=("user_policy_file", "$HOME/.claude/x.rules")).field \
+        == "exec.user_policy_file"
+    assert _refused(tmp_path, "fake-exec-file",
+                    put=("user_policy_file", "/etc/x.rules")).field == "exec.user_policy_file"
+    assert _refused(tmp_path, "fake-exec-file",
+                    put=("user_policy_file", "$HOME/../x.rules")).field == \
+        "exec.user_policy_file"
+    assert _loads(tmp_path, "fake-exec-file", put=("user_policy_file", "none"))
+
+
+def test_surfaces_and_bypass_keys(tmp_path):
+    """REQ-662 BR-15, BR-16: a surface is a working-copy path; a bypass key is scanned in a
+    user path or a declared surface. Both lists may be empty only under config_isolation."""
+    for base in ("fake-exec-flags", "fake-exec-file"):
+        assert _refused(tmp_path, base, put=("config_surfaces", "[]")).field == \
+            "exec.config_surfaces"
+        assert _refused(tmp_path, base, put=("bypass_config_keys", "{}")).field == \
+            "exec.bypass_config_keys"
+    assert _refused(tmp_path, "fake-exec-file",
+                    put=("config_surfaces", "[/etc/fake]")).field == "exec.config_surfaces[0]"
+    assert _refused(tmp_path, "fake-exec-file",
+                    put=("bypass_config_keys", '{".other/config.toml": [x]}')).field == \
+        "exec.bypass_config_keys..other/config.toml"
+    assert _refused(tmp_path, "fake-exec-file",
+                    put=("bypass_config_keys", '{"$HOME/.f/config.toml": []}')).field == \
+        "exec.bypass_config_keys.$HOME/.f/config.toml"
+    # claude's isolation flags keep it from reading any config: both empty, and that holds
+    # only while the flags are declared.
+    block = ea.load("claude", TOOLKIT).block
+    assert block["config_surfaces"] == [] and block["bypass_config_keys"] == {}
+    assert _refused(tmp_path, "claude", drop=["config_isolation"]).field == \
+        "exec.config_surfaces"
+
+
+@pytest.mark.parametrize("base", SCHEMA_2)
+def test_working_copy_strategy_is_an_object(tmp_path, base):
+    """REQ-662 BR-9: `working_copy` is `{strategy}` with REQ-659's enum, and `worktree` needs
+    the top-level `sandbox_can_reach_common_gitdir: true`."""
+    assert _refused(tmp_path, base, put=("working_copy", "worktree")).field == \
+        "exec.working_copy"
+    assert _refused(tmp_path, base, put=("working_copy", "{strategy: floppy}")).field == \
+        "exec.working_copy.strategy"
+    assert _refused(tmp_path, base, put=("working_copy", "{strategy: clone, depth: 1}")).field \
+        == "exec.working_copy.depth"
+    for strategy in ("clone", "orchestrator-git"):
+        loaded = _loads(tmp_path, base, put=("working_copy", "{strategy: %s}" % strategy))
+        assert ea.ExecAdapter(loaded, TOOLKIT).strategy == strategy
+    text = _edit(_source(base), put=("working_copy", "{strategy: worktree}"))
+    unreached = "\n".join(line for line in text.split("\n")
+                          if not line.startswith("sandbox_can_reach_common_gitdir:"))
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(_write(tmp_path, base, unreached), toolkit=TOOLKIT)
+    assert exc.value.field == "exec.working_copy.strategy"
+    assert "sandbox_can_reach_common_gitdir" in str(exc.value)
+    reached = unreached.replace("\nhook_events:", "\nsandbox_can_reach_common_gitdir: true"
+                                "\nhook_events:", 1)
+    loaded = ha.load_adapter(_write(tmp_path, base, reached), toolkit=TOOLKIT)
+    assert ea.ExecAdapter(loaded, TOOLKIT).strategy == "worktree"
+
+
+@pytest.mark.parametrize("base", SCHEMA_2)
+def test_exit_map_needs_zero_and_the_closed_vocabulary(tmp_path, base):
+    """REQ-659 BR-21, REQ-662 BR-8: `"0": ok` is required, and every class is an ExitClass."""
+    for exits, field in (('{"1": error}', "exec.exit_codes"),
+                         ('{"0": error, "1": error}', "exec.exit_codes"),
+                         ('{"0": ok, "2": crashed}', "exec.exit_codes.2"),
+                         ('{"0": ok, "x": error}', "exec.exit_codes"),
+                         ('{"0": ok, "01": error}', "exec.exit_codes"),
+                         ("[0]", "exec.exit_codes")):
+        assert _refused(tmp_path, base, put=("exit_codes", exits)).field == field, exits
+    loaded = _loads(tmp_path, base, put=("exit_codes",
+                                         '{"0": ok, "1": error, "77": denied, "124": timeout}'))
+    assert ea.ExecAdapter(loaded, TOOLKIT).exit_class(124, {"denials": []}, None) == "timeout"
+
+
+@pytest.mark.parametrize("base", ("fake-exec-flags", "fake-exec-file"))
+def test_a_fixture_of_each_render_form_loads(base):
+    """The must-not-refuse case: a full schema-2 block of each render form loads whole."""
+    adapter = ea.load(base, TOOLKIT, adapter_path=os.path.join(FIX, base + ".yml"))
+    block = adapter.block
+    assert block["exec_schema_version"] == ha.EXEC_SCHEMA_VERSION == 2
+    assert block["allow_render"] == base.rsplit("-", 1)[1]
+    assert adapter.resume_tokens("S-1").count("S-1") == 1
+    assert "{session_id}" not in adapter.resume_tokens("S-1")
+
+
+def test_output_shapes(tmp_path):
+    """REQ-662 ADR-6: a field is a key path under `json` and `{event, key}` under
+    `jsonl-stream`; a file-read final message is a placeholder the launch hands the harness."""
+    for put, field in ((("output", "{format: json, source: stdout, session_id: id}"),
+                        "exec.output.final_message"),
+                       (("output", "{format: xml, source: stdout, session_id: a, "
+                                   "final_message: b}"), "exec.output.format"),
+                       (("output", "{format: json, source: stdout, session_id: a, "
+                                   "final_message: b, extra: c}"), "exec.output.extra"),
+                       (("output", "{format: json, source: stdout, session_id: 'a b', "
+                                   "final_message: b}"), "exec.output.session_id")):
+        assert _refused(tmp_path, "claude", put=put).field == field
+    text = _source("fake-exec-file")
+    for old, new, field in (
+            ('final_message: "{last_message}"', 'final_message: "{elsewhere}"',
+             "exec.output.final_message"),
+            ('final_message: "{last_message}"', "final_message: last_message",
+             "exec.output.final_message"),
+            ("session_id: {event: thread.started, key: thread_id}", "session_id: thread_id",
+             "exec.output.session_id"),
+            ("session_id: {event: thread.started, key: thread_id}",
+             "session_id: {event: thread.started}", "exec.output.session_id.key")):
+        with pytest.raises(ha.AdapterError) as exc:
+            ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(old, new)),
+                            toolkit=TOOLKIT)
+        assert exc.value.field == field, new
+    # The engine parses only what it has a parser for, and says so.
+    stream = ea.load("fake-exec-file", TOOLKIT,
+                     adapter_path=os.path.join(FIX, "fake-exec-file.yml"))
+    with pytest.raises(ea.ExecRefused, match="jsonl-stream"):
+        stream.parse_result('{"type": "thread.started", "thread_id": "t"}\n')
+
+
+def test_probes_cache_follows_verification(tmp_path):
+    """REQ-662 BR-11: `probes` is read under `verification: probes` only, and each row is the
+    result file's `{id, ran_at, harness_version, status}`."""
+    assert _refused(tmp_path, "fake-exec-file", drop=["probes"]).field == "exec.probes"
+    assert _refused(tmp_path, "fake-exec-file", put=("probes", "[]")).field == "exec.probes"
+    assert _refused(tmp_path, "claude", add="probes: []").field == "exec.probes"
+    text = _source("fake-exec-file")
+    for old, new, field in (("      status: pass", "      status: green",
+                             "exec.probes[0].status"),
+                            ("      status: pass", "      status: pass\n      verdict: ok",
+                             "exec.probes[0].verdict")):
+        with pytest.raises(ha.AdapterError) as exc:
+            ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(old, new, 1)),
+                            toolkit=TOOLKIT)
+        assert exc.value.field == field
+
+
+def test_claude_block_is_migrated_without_a_behaviour_change(adapter):
+    """REQ-662 BR-1: the claude block reads at schema 2 and the engine sees what it saw at 1."""
+    block = adapter.block
+    assert block["exec_schema_version"] == 2
+    for key, value in (("verification", "recorded"), ("status", "verified"),
+                       ("context_delivery", "hooks"), ("allow_render", "flags"),
+                       ("deny_render", "flags"), ("matcher", "claude"),
+                       ("user_policy_file", "none"), ("prompt_delivery", "stdin"),
+                       ("prompt_variant", "with-prompt-flag")):
+        assert block[key] == value, key
+    assert "probes" not in block
+    for gone in ("resume_flag", "result_keys", "denied_result_key"):
+        assert gone not in block
+    allow, deny = adapter.tiers(BRANCH)
+    fresh = adapter.launch_argv("/bin/fake", allow, deny, extra=["--model", "m"])
+    assert fresh[:4] == ["/bin/fake", "-p", "--output-format", "json"]
+    assert "--resume" not in fresh
+    resumed = adapter.launch_argv("/bin/fake", allow, deny, resume="abc-1",
+                                  extra=["--model", "m"])
+    assert resumed[resumed.index("--resume") + 1] == "abc-1"
+    assert sorted(resumed) == sorted(fresh + ["--resume", "abc-1"])
+
+
+def test_resume_needs_a_declared_template(adapter):
+    no_resume = ea.ExecAdapter(dict(adapter.adapter, exec={
+        k: v for k, v in adapter.block.items() if k != "resume"}), TOOLKIT)
+    with pytest.raises(ea.ExecRefused, match="resume is impossible"):
+        no_resume.launch_argv("/bin/fake", [], [], resume="abc-1")
+
+
+@pytest.mark.parametrize("name", ("codex", "copilot", "cursor", "antigravity"))
+def test_unstaged_adapters_load_and_are_refused_by_name(name):
+    """REQ-662 Amendments 2026-11-17: an adapter whose stage has not run keeps its placeholder
+    block, which the loader leaves opaque, and the engine refuses it by name."""
+    loaded = ha.resolve_adapter(name, toolkit=TOOLKIT)
+    assert "exec_schema_version" not in loaded["exec"]
+    with pytest.raises(ea.ExecRefused) as exc:
+        ea.load(name, TOOLKIT)
+    assert name in str(exc.value) and "REQ-662" in str(exc.value)

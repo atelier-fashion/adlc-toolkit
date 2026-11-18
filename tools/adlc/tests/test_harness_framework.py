@@ -150,6 +150,13 @@ def test_claude_adapter_loads():
     (("binary: claude", "binary: codex"), "binary"),
     (("hook_timeout_unit: s", "hook_timeout_unit: s\nexec: 3"), "exec"),
     (("binary: claude", "binary: claude\nbinary: claude"), "binary"),
+    # Exec schema 2 (REQ-662 BR-1): a schema-1 block, a schema-1 key and a missing schema-2
+    # key each refuse the whole adapter, in every verb.
+    (("  exec_schema_version: 2", "  exec_schema_version: 1"), "exec.exec_schema_version"),
+    (("  working_copy: {strategy: worktree}", "  working_copy: worktree"), "exec.working_copy"),
+    (("  context_delivery: hooks\n", ""), "exec.context_delivery"),
+    (("  output:\n", "  result_keys: {session_id: session_id}\n  output:\n"),
+     "exec.result_keys"),
 ])
 def test_loader_rejects(tmp_path, sandbox, edit, field):
     path = variant(tmp_path, "claude", [edit])
@@ -432,8 +439,9 @@ def test_scope_vectors(tmp_path, sandbox):
     assert any(r.argv == ("git", "push", "--force") and not r.exact for r in deny)
     # exec.engine_deny joins; deny_render none needs a `fail` ask-tier-deny verdict.
     assert any(r.entry == "exec.engine_deny" and r.kind == "deny" for r in exec_rules)
-    none = load(variant(tmp_path, "claude", [(
-        "  exec_schema_version: 1", "  exec_schema_version: 1\n  deny_render: none")]))
+    # At exec schema 2 `deny_flag` is read only with `deny_render: flags`, so it goes too.
+    none = load(variant(tmp_path, "claude", [("  deny_render: flags\n", "  deny_render: none\n"),
+                                             ("  deny_flag: --disallowedTools\n", "")]))
     with pytest.raises(hr.RenderError):
         hr.render_permissions(none, perms(), "exec", {"probes": {"ask-tier-deny": {"status": "pass"}}})
     hr.render_permissions(none, perms(), "exec", {"probes": {"ask-tier-deny": {"status": "fail"}}})

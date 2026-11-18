@@ -77,20 +77,44 @@ trust:
 sandbox_can_reach_common_gitdir: true
 
 # The exec engine (REQ-659): how `adlc sprint-exec` launches this harness headless.
-# Validated by harness_adapter.py; an unknown key is a loud error. Facts here come
-# from .adlc/research/harness-probes/claude-exec-manual.md (claude 2.1.258, logged
-# out); the allow and deny tiers are unverified against a model until a logged-in run.
+# Validated by harness_adapter.py at exec schema 2 (REQ-662); an unknown key is a loud
+# error. Facts here come from .adlc/research/harness-probes/claude-exec-manual.md
+# (claude 2.1.258, logged out) and the claude.json probe rows; the allow and deny tiers
+# are unverified against a model until a logged-in run.
 exec:
-  exec_schema_version: 1
-  working_copy: worktree
+  exec_schema_version: 2
+  # REQ-662 BR-11's probe gate is for the harnesses REQ-662 adds. This block stands on
+  # REQ-659's recorded evidence (claude-exec-manual.md, the claude.json rows), so it is
+  # `recorded`, carries no `probes`, and its version is the claude.json run's.
+  harness_version: "2.1.316 (Claude Code)"
+  verification: recorded
+  status: verified
+  working_copy: {strategy: worktree}
   # What the engine does per run. Not `trust` above, which is what the harness reads:
   # both tiers go on the command line, and on a linked worktree Claude keys trust by
   # the main repo root, so a per-working-copy entry would be inert (ADR-5).
   trust_grant: none
   # Printed on stderr when a project allowlist was dropped; surfaced, never parsed.
   trust_notice: "permissions.allow"
+  # The prompt is on stdin. `prompt_flag` is the launch token that makes a launch the
+  # stdin-prompt probe's `with-prompt-flag` variant; the loader holds `prompt_variant` to
+  # whether `launch` holds those tokens.
+  prompt_delivery: stdin
+  prompt_flag: [-p]
+  prompt_variant: with-prompt-flag
   launch: [-p, --output-format, json]
-  resume_flag: --resume
+  # The whole argv after the binary on a resume, in place of `launch`. `{session_id}` is
+  # substituted as one whole token.
+  resume: [-p, --output-format, json, --resume, "{session_id}"]
+  # The flags an operator may pass with --harness-flag. Neither relaxes a permission.
+  operator_flags: [--model, --max-turns]
+  context_delivery: hooks
+  # Both tiers travel on the command line: `allow_flag` and `deny_flag`, each rule spelled
+  # by `shell_rule` or `shell_rule_exact`, and the same tiers in the settings file at
+  # `settings_keys`. No rule file is written into the working copy, and no user policy file.
+  allow_render: flags
+  deny_render: flags
+  user_policy_file: none
   allow_flag: --allowedTools
   deny_flag: --disallowedTools
   add_dir_flag: --add-dir
@@ -156,9 +180,24 @@ exec:
     - --allow-all
   # A logged-out run exits 1. An unmapped non-zero code is `error`.
   exit_codes: {"0": ok, "1": error}
-  # No exit code means "denied"; the JSON result lists the denials.
-  denied_result_key: permission_denials
-  result_keys: {session_id: session_id, is_error: is_error, num_turns: num_turns, text: result, cost: total_cost_usd}
+  # `format`: how stdout is parsed. `json` is one result object (or the last JSON object
+  # line); `jsonl-stream` is one event per line. `source`: where `final_message` is read,
+  # `stdout` or `file`. Under `json` each field below is a key path into the result
+  # object (`key` or `a.b`); under `jsonl-stream` it is `{event, key}`, the key path inside
+  # the event whose `type` is `event`. Under `source: file`, `final_message` is the launch
+  # placeholder naming the file the harness writes its last message to (`{last_message}`).
+  # `session_id` and `final_message` are required; `is_error`, `num_turns`, `cost` and
+  # `denials` are optional. No exit code means "denied": `denials` is where the result
+  # lists them.
+  output:
+    format: json
+    source: stdout
+    session_id: session_id
+    final_message: result
+    is_error: is_error
+    num_turns: num_turns
+    cost: total_cost_usd
+    denials: permission_denials
   env_passthrough: [HOME, PATH, ADLC_HOME, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK, SSH_AUTH_SOCK, GIT_SSH_COMMAND, XDG_CONFIG_HOME, TMPDIR, LANG, TERM]
   # USER reaches the macOS keychain item a stored login lives in.
   auth_env: [ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, USER]
@@ -169,6 +208,20 @@ exec:
   config_isolation: [--setting-sources, "", --settings, "{settings}", --strict-mcp-config]
   config_isolation_help: [--setting-sources, --settings, --strict-mcp-config]
   settings_keys: {allow: [permissions, allow], deny: [permissions, deny]}
+  # The isolation flags above keep Claude from reading any settings or MCP file in the
+  # working copy or the user's home, so the engine owns no config surface here and has no
+  # bypass key to scan. The loader allows both empty only with `config_isolation` set.
+  config_surfaces: []
+  bypass_config_keys: {}
+  # No probe has measured whether a settings file edited mid-run is re-read: `unknown`,
+  # read as `live`. The rules are on the command line and in a settings file in the run
+  # directory, outside every working copy.
+  rules_reload: unknown
+  # shell-timeout reads `pass` in claude.json: a 125 s sleep in one shell call completed,
+  # so a delegated adlc-read fits and ADLC_DISABLE_DELEGATE is not set.
+  shell_timeout_s: {value: 125, verified: true, delegate: supported}
+  # exec_matcher models Claude's statement matching, so a fence may route `direct`.
+  matcher: claude
   # OQ-4: a sandboxed session has not been shown to reach the common git dir.
   sandbox_refuse:
     files: [$HOME/.claude/settings.json, .claude/settings.json, .claude/settings.local.json]

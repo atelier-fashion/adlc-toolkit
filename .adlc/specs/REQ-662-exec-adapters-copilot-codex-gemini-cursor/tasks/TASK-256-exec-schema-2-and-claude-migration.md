@@ -1,7 +1,7 @@
 ---
 id: TASK-256
 title: "Exec schema 2, its loader checks, and the mechanical migration of the claude block"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17
