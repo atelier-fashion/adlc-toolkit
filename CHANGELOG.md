@@ -145,7 +145,10 @@ is cut per `RELEASING.md`.
   projects and applies to your own Codex sessions too. `--allow-unverified` launches an
   unverified adapter, from the command line only and never for `approve`. A halt-time gate
   refuses `approve` when the PR touches an engine-rendered path, and a launch from inside a
-  run is refused by process ancestry as well as by `ADLC_EXEC_RUN`. Each exec-capable adapter
+  run is refused by process ancestry as well as by `ADLC_EXEC_RUN`. To hide an untracked
+  render through a per-worktree `core.excludesFile`, the pre-flight sets
+  `extensions.worktreeConfig = true` in the project's repository when it is absent, says so,
+  and leaves it set. Each exec-capable adapter
   has its own fence census: on Codex no fence routes `direct`, and the Step 0 branch push runs
   through `fence-run`, which pushes only the branch checked out in the calling directory for
   the run's own REQ. The runner line quotes its fence id, because Codex matches no prefix rule
@@ -155,7 +158,13 @@ is cut per `RELEASING.md`.
   `gh api`) reaches your filesystem and network, as it does on Claude, where there is no
   sandbox. The approval halt is the gate. Keeping the routine commands that need no escape
   inside the sandbox is an input to a follow-up requirement. Copilot CLI, Cursor and
-  Antigravity CLI are later stages of REQ-662 and are still refused by name.
+  Antigravity CLI are later stages of REQ-662 and are still refused by name. The review of
+  2026-11-18 added: the loader refuses `trust_grant: user-config-entry` for a user config in a
+  format the trust entry is not spelled for, `sandbox_permissions` is a bypass key in both
+  Codex configs, and the refusal of a harness with no exec block says which harnesses are
+  staged. The README's Codex section now also declares that your own Codex rules and config
+  reach every exec run, that a process which detaches escapes the nested-run checks while
+  `answer` takes no token, and how the close-out carries `pipeline-state.json` on Codex.
 - **`install.sh --migrate-home` and `--back` (REQ-663).** P7b of the multi-harness plan: the
   opt-in move of the toolkit's machine state out of `~/.claude`, and its exact reverse. A
   plain install never migrates. Stage then flip, inside both homes' allocation locks, with

@@ -1516,3 +1516,70 @@ def test_exec_modules_import_only_stdlib():
                 assert (builtin or in_stdlib) and "site-packages" not in origin, (
                     name, imported, origin)
     assert set(EXEC_MODULES) <= seen and "harness_adapter" in seen
+
+
+# ---- the review of 2026-11-18 at e33b6c1: the loader, the parser and two shared predicates ----
+def test_terminal_event_is_read_by_index_under_a_stream(stream):
+    """REQ-662 BR-6, ADR-6: `output.terminal_event` is the jsonl-stream key, required there
+    and refused under any other format, and the loader's name for it says so. The parser
+    indexes it, so a stream block that reached the engine without one, built past the loader,
+    fails loudly rather than reading a stream cut between two whole lines as complete."""
+    assert ha._EXEC_OUTPUT_STREAM_ONLY == ("terminal_event",)
+    assert not hasattr(ha, "_EXEC_OUTPUT_OPTIONAL")
+    cut = '{"type": "thread.started", "thread_id": "T-1"}\n'
+    assert "no turn.completed event" in stream.parse_result(cut, "a message")["error"]
+    output = {k: v for k, v in stream.output.items() if k != "terminal_event"}
+    with pytest.raises(KeyError, match="terminal_event"):
+        _with(stream, output=output).parse_result(cut, "a message")
+
+
+#: A user config in JSON, a format no shipped adapter has: what a later stage might declare.
+JSON_CONFIG_FORMAT = {"json": True, "surfaces": ("config",), "renders_exact": False}
+
+
+def test_a_trust_entry_needs_a_user_config_it_is_spelled_for(tmp_path, monkeypatch):
+    """REQ-662 BR-5, ADR-5: `trust_grant: user-config-entry` appends a TOML
+    `[projects."<path>"]` table to `paths.config.user`, a spelling known for one config format.
+    An adapter whose user config is another format would get that table appended to it, so the
+    loader refuses it, keyed on the declared format. The shipped Codex block loads, and so does
+    Claude's (`trust_grant: none`)."""
+    assert ea.load("codex", TOOLKIT).trust_grant == "user-config-entry"
+    assert ea.load("claude", TOOLKIT).trust_grant == "none"
+    monkeypatch.setitem(ha.FORMATS, "fake-config-json", JSON_CONFIG_FORMAT)
+    text = _source("codex")
+    for old, new in (("  config: codex-config-toml\n", "  config: fake-config-json\n"),
+                     ("    user: $HOME/.codex/config.toml\n",
+                      "    user: $HOME/.codex/config.json\n")):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(_write(tmp_path, "codex", text), toolkit=TOOLKIT)
+    assert exc.value.field == "exec.trust_grant"
+    assert "fake-config-json" in str(exc.value) and "not known" in str(exc.value)
+    # The same JSON config under `trust_grant: none` writes nothing, so it loads.
+    none = text.replace("  trust_grant: user-config-entry\n", "  trust_grant: none\n")
+    assert ha.load_adapter(_write(tmp_path, "codex", none), toolkit=TOOLKIT)
+
+
+@pytest.mark.parametrize("matcher", ha.MATCHERS + ("a-matcher-a-later-stage-adds",))
+def test_has_matcher_is_the_census_predicate(adapter, matcher):
+    """REQ-662 ADR-8: the engine's `has_matcher` and the census's `routes_direct` ask one
+    question, whether anything models this harness's statement matching, so they agree on
+    every value of the loader's `MATCHERS`, and on a value a later stage adds before either
+    side is taught it."""
+    import fence_census as fc
+    probe = _with(adapter, matcher=matcher)
+    assert probe.has_matcher == fc.routes_direct(probe)
+    assert probe.has_matcher == (matcher in fc.MODELLED_MATCHERS)
+
+
+def test_no_exec_block_says_which_harnesses_are_staged():
+    """REQ-662 Amendments 2026-11-17: the refusal is REQ-662's own, not a sibling's, and says
+    what is true: one harness per stage, and which are staged, read from the adapters' data."""
+    with pytest.raises(ea.ExecRefused) as exc:
+        ea.load("copilot", TOOLKIT)
+    message = str(exc.value)
+    assert "sibling" not in message
+    assert message == ("harness copilot has no exec block yet (REQ-662 ships one harness per "
+                       "stage; codex is staged)")
+    assert ea.EXEC_ADAPTERS_REQ == "REQ-662"

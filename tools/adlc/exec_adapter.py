@@ -16,8 +16,11 @@ import exec_matcher as em
 import harness_adapter as ha
 import harness_render as hr
 
-#: Where a harness's exec block lives once it ships (BR-3).
-SIBLING_REQ = "REQ-662"
+#: The requirement that gives the non-Claude harnesses their exec blocks, one harness per
+#: stage (REQ-662 Amendments, 2026-11-17). A refusal of a harness with no block names it.
+EXEC_ADAPTERS_REQ = "REQ-662"
+#: The constant's old name. Two refusals in sprint_exec.py still read it; drop it with them.
+SIBLING_REQ = EXEC_ADAPTERS_REQ
 #: Refused at launch whatever an adapter says (BR-8).
 ENGINE_FORBIDDEN_FLAGS = ha.ENGINE_FORBIDDEN_FLAGS
 
@@ -342,9 +345,12 @@ class ExecAdapter(object):
 
     @property
     def has_matcher(self):
-        """Whether ``exec_matcher`` models this harness's rule matching (``matcher: claude``).
-        On ``matcher: none`` nothing does (REQ-662 ADR-8)."""
-        return self.block.get("matcher") != "none"
+        """Whether ``exec_matcher`` models this harness's rule matching. The census asks the
+        same question to decide whether a fence may route ``direct``, so this is its answer,
+        ``fence_census.routes_direct``, and the two cannot drift apart when a stage adds a
+        ``matcher`` value. On ``matcher: none`` nothing models it (REQ-662 ADR-8)."""
+        import fence_census as fc
+        return fc.routes_direct(self)
 
     def vet_extra(self, argv, entries, exact=False):
         """Refuse an extra allow that is a wildcard, an opener or wraps a deny (ADR-6).
@@ -671,9 +677,11 @@ class ExecAdapter(object):
 
         ``error`` is the parser's message when the output is not what the adapter declares
         (REQ-662 BR-6): no result object, a line that is not a JSON event, a stream cut short
-        (its last line cut, or no ``terminal_event``), or an empty final message. Whatever did
-        parse is still returned. A missing session id is not a parse failure: it makes resume
-        impossible (BR-7)."""
+        (its last line cut, or no ``terminal_event`` event), or an empty final message.
+        Whatever did parse is still returned. A missing session id is not a parse failure: it
+        makes resume impossible (BR-7). ``terminal_event`` is indexed, never defaulted: the
+        loader requires it under ``jsonl-stream``, and a stream block without it raises
+        ``KeyError`` here rather than reading a stream cut between two lines as complete."""
         spec = self.output
         out = {"present": False, "session_id": None, "is_error": None, "num_turns": None,
                "text": "", "cost": None, "denials": [], "error": None}
@@ -686,7 +694,7 @@ class ExecAdapter(object):
             def field(key, first=False):
                 return _at(doc, spec.get(key)) if doc is not None else None
         else:
-            events, error = _jsonl_events(text, spec.get("terminal_event"))
+            events, error = _jsonl_events(text, spec["terminal_event"])
             out["present"] = bool(events)
 
             def field(key, first=False):
@@ -785,8 +793,8 @@ def _jsonl_events(text, terminal):
     """``(events, error)``: each line of a JSONL stream as an event (a JSON object with a
     ``type``), and the parser's message when the stream is not one. A line ends at ``\\n``
     only (:func:`_lines`), and blank lines are skipped. A last line with no newline that does
-    not parse was cut; with ``terminal`` declared, a stream with no event of that type was cut
-    short. The events read before an error are kept."""
+    not parse was cut, and a stream with no event of type ``terminal`` (the adapter's
+    ``output.terminal_event``) was cut short. The events read before an error are kept."""
     if not text.strip():
         return [], "stdout is empty: the harness printed no event stream"
     lines = _lines(text)
@@ -806,7 +814,7 @@ def _jsonl_events(text, terminal):
         if not isinstance(event, dict) or not isinstance(event.get("type"), str):
             return events, "stdout line %d is not an event (a JSON object with a type)" % number
         events.append(event)
-    if terminal and not any(event["type"] == terminal for event in events):
+    if not any(event["type"] == terminal for event in events):
         return events, "the stream has no %s event: it was truncated" % terminal
     return events, None
 
@@ -852,9 +860,29 @@ def load(name, toolkit=None, adapter_path=None):
     except ha.AdapterError as exc:
         raise ExecRefused(str(exc))
     if "exec_schema_version" not in (adapter.get("exec") or {}):
-        raise ExecRefused("harness %s has no exec block yet: the sibling adapters are %s"
-                          % (name, SIBLING_REQ))
+        staged = staged_harnesses(toolkit)
+        raise ExecRefused("harness %s has no exec block yet (%s ships one harness per stage; %s)"
+                          % (name, EXEC_ADAPTERS_REQ,
+                             "%s %s staged" % (", ".join(staged),
+                                               "is" if len(staged) == 1 else "are")
+                             if staged else "none is staged yet"))
     return ExecAdapter(adapter, toolkit)
+
+
+def staged_harnesses(toolkit=None):
+    """The shipped adapters a stage of :data:`EXEC_ADAPTERS_REQ` has given an exec block, in
+    ``adlc harness detect`` order: an exec block under ``verification: probes``. A block under
+    ``verification: recorded`` stands on REQ-659's evidence, not on a stage (REQ-662 BR-1), and
+    an adapter that does not load is left out of what is only a message."""
+    out = []
+    for path in ha.shipped_adapter_paths(toolkit):
+        try:
+            block = ha.load_adapter(path, toolkit=toolkit).get("exec") or {}
+        except ha.AdapterError:
+            continue
+        if "exec_schema_version" in block and block.get("verification") == "probes":
+            out.append(os.path.basename(path)[:-len(".yml")])
+    return out
 
 
 def sandbox_setting(adapter, primary, read_json):

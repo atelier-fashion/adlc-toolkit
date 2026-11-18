@@ -245,6 +245,15 @@ Phase 1 re-measured this spec against `main` at `5025e40` (LESSON-751) and again
 
 **BR-22, AC-33: the child's environment also carries `ADLC_EXEC_RUN_TAG`.** The orchestrator sets it beside `ADLC_EXEC_RUN`, to a digest of the run directory, and the straggler sweep matches both. The REQ id alone matched every process on the machine that carried it, so two projects with the same REQ number, or two orchestrators on one id, killed each other's harness processes. Found while REQ-662's tasks ran side by side. The tag is a digest because the run directory's path stays away from the model (AC-33).
 
+**What REQ-662 stage 1 adds to this REQ's contracts.** All of it is additive. Each new key is optional and is read with a default (an absent key reads as empty), or, for `worktreeConfig`, recorded for the operator and not read back, so a run record or a ledger written by an older engine is tolerated. One exception is stated last.
+
+- **The adapter contract is at exec schema 2.** BR-3 describes the block, and its reconciliation row (`claude.exec.json`) puts it at `exec_schema_version: 1`. REQ-662 widened it to schema 2, which keeps schema 1's keys, reshapes `working_copy`, `resume` and `output`, and adds the ExecBlock's keys; the loader refuses version 1. The key list is REQ-662's architecture, ADR-1.
+- **Run-record keys** (`run.json`): `trustGrants` (each working copy's trust grant, kept until its revoke finishes), `hidden` (per working copy, what the engine hid from git and the blob oids recorded at launch, which restoring needs), `worktreeConfig` (per repository, whether the pre-flight found `extensions.worktreeConfig` or set it), `policyManifest` (the user policy folder's manifest as the pre-flight recorded it), `surfaces` (per working copy, the config-surface manifest of the last render) and `allowUnverified` (each launch made under `--allow-unverified`, with the invocation that received the flag).
+- **Ledger plan keys:** `execPathTouched` (the halt-time exec-path gate's hits, REQ-662 BR-17) and `allowUnverified` (the run record's list, carried into the plan the operator approves).
+- **Log lines** may carry a `detail` field, the payload of an event that has one beyond its argv.
+- **Events:** `fidelity_report`, `deny_unsupported`, `rule_file_rerendered`, `config_surface_violation`, `adapter_refused`, `exec_paths_hidden`, `exec_paths_restored`, `exec_path_touched` and `nested_launch_refused`.
+- **The exception: a plan with no `execPathTouched`.** A ledger plan written by an older engine carries no exec-path gate result, so the gate never ran for it. `approve` does not read it as empty: it re-halts the run with a fresh plan, and the operator approves that plan with the token the dashboard then prints.
+
 ## External Dependencies
 
 - `claude` CLI with `-p`, `--output-format json`, `--allowedTools`, `--disallowedTools`, `--resume` (all present in the installed version; see Assumptions).

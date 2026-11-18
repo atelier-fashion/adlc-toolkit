@@ -196,11 +196,12 @@ exec:
   # does), so approval cannot be pinned on this argv. --json prints the event stream that
   # carries the session id; -o names the last-message file (ADR-6).
   launch: [exec, --json, --sandbox, workspace-write, -C, "{worktree}", -o, "{last_message}"]
-  # Provisional (ADR-7): `codex exec resume` takes no --sandbox and no -C, so the engine runs it
-  # in the working copy and its sandbox comes from the rendered .codex/config.toml. No probe
-  # measures this form; TASK-266 records a real launch and resume, and if that record shows
-  # resume does not hold the sandbox or the rules, this key is removed and resume is
-  # impossible (BR-7). The trailing `-` reads the follow-up prompt from stdin.
+  # `codex exec resume` takes no --sandbox and no -C, so the engine runs it in the working copy
+  # and its sandbox comes from the rendered .codex/config.toml (ADR-7). Measured 2026-11-18
+  # (codex-exec-manual.md, rows resume-continues and resume-keeps-rules, and fact 5): the
+  # resume continued the same session with the rules in force (an allowed write left the
+  # sandbox, an un-allowed one did not, a deny refused), from the launch's working copy and
+  # from a different one. The trailing `-` reads the follow-up prompt from stdin.
   resume: [exec, resume, --json, -o, "{last_message}", "{session_id}", "-"]
   # -m/--model is in both help texts and relaxes no permission. --add-dir is not offered: it
   # widens the writable area, and `codex exec resume` does not take it.
@@ -219,7 +220,9 @@ exec:
   rule_file: .codex/rules/adlc-exec.rules
   user_policy_file: $HOME/.codex/rules/adlc-exec.rules
   # fence-vs-allowlist/runner-prefix reads pass: the runner was admitted by a prefix rule and
-  # every one of its controls was refused (REQ-682).
+  # every one of its controls was refused (REQ-682). The probe's command carries no `#`, and a
+  # bare `#` defeats the prefix allow, so what the real runs measured is the runner line with
+  # its fence id single-quoted, as the engine prints it (codex-exec-manual.md, fact 1).
   fence_runner: tools/adlc/fence-run
   # claude.yml's engine_deny, less its three glob entries (`git push origin +*` and the two
   # `git -C * push` forms): prefix_rule reads `*` as itself, so each would be no deny at all
@@ -287,13 +290,15 @@ exec:
   # Keys that relax the sandbox or the approval posture from outside the engine's files. A
   # profile layers another config over both owned keys (REQ-655 refuse_keys); writable_roots
   # widens the sandbox's writable area (REQ-655 --writable-root); network_access lets an
-  # unmatched command reach the network (REQ-655 BR-3). In the user config, sandbox_mode and
-  # approval_policy are listed as well. In the working copy they are not: the engine's own
-  # render of .codex/config.toml is the project render, which sets them (BR-3), and the
-  # surface checksum is what holds them there.
+  # unmatched command reach the network (REQ-655 BR-3); sandbox_permissions widens what the
+  # sandbox admits (`codex exec --help` at 0.166.0 gives
+  # `-c 'sandbox_permissions=["disk-full-read-access"]'` as its own example of an override). In
+  # the user config, sandbox_mode and approval_policy are listed as well. In the working copy
+  # they are not: the engine's own render of .codex/config.toml is the project render, which
+  # sets them (BR-3), and the surface checksum is what holds them there.
   bypass_config_keys:
-    "$HOME/.codex/config.toml": [sandbox_mode, approval_policy, profile, sandbox_workspace_write.writable_roots, sandbox_workspace_write.network_access]
-    ".codex/config.toml": [profile, sandbox_workspace_write.writable_roots, sandbox_workspace_write.network_access]
+    "$HOME/.codex/config.toml": [sandbox_mode, approval_policy, profile, sandbox_permissions, sandbox_workspace_write.writable_roots, sandbox_workspace_write.network_access]
+    ".codex/config.toml": [profile, sandbox_permissions, sandbox_workspace_write.writable_roots, sandbox_workspace_write.network_access]
   # No probe variant yet measures a rule file edited mid-run: unknown, read as live (BR-15).
   rules_reload: unknown
   # shell-timeout reads pass: a `sleep 125` in one shell call completed (launch l12), so a

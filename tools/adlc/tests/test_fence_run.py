@@ -690,3 +690,26 @@ def test_path_values_stay_in_the_working_copy_or_a_spec_dir(cached, wc, tmp_path
                               "--arg", "phase=1", "--arg", "attempt=1"], wc)
     assert rc == 0, err
     assert "validateAttempts" in (spec_dir / "pipeline-state.json").read_text()
+
+
+def test_patterns_the_runner_keeps_its_own_copy_of_stay_equal():
+    """fence-run runs under `python3 -I` and keeps its imports to what it needs, so it holds its
+    own copy of two patterns rather than importing them: the run's REQ id (`ADLC_EXEC_RUN`, as
+    the orchestrator validates it) and the plain absolute path a prefix rule matches unquoted
+    (as the renderer spells the runner allow). Nothing else holds the copies equal."""
+    import exec_safety as es
+    import harness_render as hr
+    for mine, theirs in ((fr._RUN_ID_RE, es.VALID_REQ), (fr.ROOT_RE, hr.RUNNER_PATH_RE)):
+        assert (mine.pattern, mine.flags) == (theirs.pattern, theirs.flags)
+
+
+def test_push_args_reads_one_key_of_the_push_kind():
+    """REQ-662 ADR-9: the values a push fence binds, read by key from the push kind it makes:
+    `same_dir` (the calling directory) and `head` (the branch checked out there). A fence that
+    makes no push binds none. On `matcher: none` the branch push is a runner fence."""
+    records = fc.census(TOOLKIT, ea.load("codex", TOOLKIT))
+    push = next(r for r in records if r.get("push") == "branch")
+    assert fr.push_args(push, "same_dir") == fr.same_dir_args(push) == ("worktree",)
+    assert fr.push_args(push, "head") == fr.head_args(push) == ("branch",)
+    plain = next(r for r in records if r["route"] == "runner" and not r.get("push"))
+    assert fr.push_args(plain, "same_dir") == fr.push_args(plain, "head") == ()

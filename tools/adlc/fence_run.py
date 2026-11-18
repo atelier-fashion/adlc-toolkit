@@ -20,7 +20,11 @@ the runner was called from. The fence runs under ``/bin/sh`` in the current dire
 ``ADLC_TOOLKIT_ROOT`` the runner's own root and ``ADLC_FENCE_TOOLKIT_ONLY=1``, after
 ``adlc-home.sh`` and ``forge.sh`` are sourced from that root (ADR-4). No caller ``GIT_*``
 variable reaches the fence, and its git calls run no fsmonitor program and no repository
-hook (``GIT_PINS``).
+hook (``GIT_PINS``). Those are two of the keys the orchestrator pins for its own git calls,
+and the only two pinned here: the orchestrator's ssh and credential pins point at files in
+its run directory and would break the operator's own push credentials. Otherwise a fence's
+git calls honour the repository's config, which a model can write. The pins are defense in
+depth, and the README's declared residual (f) says what stays open.
 
 ``show`` prints a file of the exec set with every fence replaced by its route's form, which is
 how toolkit skills and agents reach an exec model: under BUG-260's isolation flags they are
@@ -54,8 +58,14 @@ MAX_ARG_FILE = 1 << 20
 RUNNER_REL = "tools/adlc/fence-run"
 #: Config every git call of a fence, and the branch check, is pinned to, over whatever the
 #: repository's own config says: the model can write that config, and a fsmonitor program or
-#: a hook would run its code outside a harness sandbox. The orchestrator pins the same two for
-#: its own git calls (``exec_safety``).
+#: a hook would run its code outside a harness sandbox. These are two of the keys the
+#: orchestrator pins for its own git calls (``exec_safety.Toolbox.git_config_pairs``, which
+#: also pins ``core.sshCommand``, ``credential.helper``, ``core.attributesFile``,
+#: ``commit.gpgsign``, ``log.showSignature`` and ``protocol.ext.allow``). The runner pins only
+#: these two. The orchestrator's ``core.sshCommand`` and ``credential.helper`` point at files
+#: in its run directory, and here they would break the operator's own push credentials; the
+#: rest of its list is not carried over either. Every other key of the repository's config is
+#: honoured, so this is defense in depth, and the README's declared residual (f) says so.
 GIT_PINS = (("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null"))
 #: ``ADLC_EXEC_RUN``, as the orchestrator sets it: the run's REQ id (REQ-662 ADR-9).
 _RUN_ID_RE = re.compile(r"^REQ-[0-9]{3,6}$")
@@ -317,16 +327,19 @@ def find(fid, root):
     return fence, runner[0]
 
 
+def push_args(rec, key):
+    """The arguments the push kind the fence makes (REQ-662 ADR-9) binds under ``key``, else
+    none: ``same_dir``, whose value must be the directory the runner was called from, or
+    ``head``, whose value must be the branch checked out there (``fence_census.PUSH_REACH``)."""
+    return tuple(fc.PUSH_REACH.get(rec.get("push"), {}).get(key, ()))
+
+
 def same_dir_args(rec):
-    """The arguments whose value must be the directory the runner was called from: those of
-    the push kind the fence makes (REQ-662 ADR-9), else none."""
-    return tuple(fc.PUSH_REACH.get(rec.get("push"), {}).get("same_dir", ()))
+    return push_args(rec, "same_dir")
 
 
 def head_args(rec):
-    """The arguments whose value must be the branch checked out in the calling directory:
-    those of the push kind the fence makes (REQ-662 ADR-9), else none."""
-    return tuple(fc.PUSH_REACH.get(rec.get("push"), {}).get("head", ()))
+    return push_args(rec, "head")
 
 
 def checked_out_branch(cwd, environ):

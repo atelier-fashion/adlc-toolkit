@@ -128,7 +128,10 @@ def main():
             return os.path.exists(os.path.join(outside, name))
 
         # ---- the engine's trust entry, render and user policy file
-        grant = et.grant(block["trust_grant"], cfg, wt, root, os.path.join(root, "no-marker"), 10.0)
+        # The real marker, as the engine passes it: this edits the real user config, so the
+        # grant must refuse while a probe run is editing it or died before restoring it.
+        grant = et.grant(block["trust_grant"], cfg, wt, root,
+                         et.probe_marker(adlc_home.adlc_home(), HARNESS), 10.0)
         cfg_granted = sha(cfg)
         row("trust-grant", grant.written and not grant.pre_existing, "the engine's entry is in the user config")
         manifest, _changes = esf.render(wt, plan, block)

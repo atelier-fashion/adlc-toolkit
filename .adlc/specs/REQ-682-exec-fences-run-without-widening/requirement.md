@@ -4,7 +4,7 @@ title: "Skill fences run under `/sprint --exec` without widening what the model 
 status: complete
 deployable: false
 created: 2026-11-02
-updated: 2026-11-17
+updated: 2026-11-18
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["sh", "python", "yaml", "markdown"]
@@ -163,6 +163,10 @@ This spec sets the boundary and the evidence that proves it. It does not choose 
 - [ ] Can the close-out (`/wrapup --close-out`) share the pipeline's route? Or does its fence set, with lesson and id allocation, telemetry and the chore PR, need its own rules?
 
 ## Amendments
+
+- **2026-11-18, the runner line and the runner's git environment (REQ-662 stage 1).** Two changes to what this REQ shipped, both made for Codex and both in force on every harness:
+  - **The runner line single-quotes its fence id,** `fence-run run '<path>#<n>:<sha8>' --arg …`, on every harness. Measured on `codex-cli 0.166.0`: a bare `#` in the command defeats the prefix allow, so Codex matched no rule, the runner ran inside the sandbox and its push failed; with the id quoted the allow matched (`.adlc/research/harness-probes/codex-exec-manual.md`, fact 1). So the 2026-11-17 entry's "on `claude` … nothing changes" no longer holds for the prompt text: a `runner` fence's line reads differently on `claude` too. The allow still matches there: it is a prefix rule on the runner's path, and the quoted id is an argument after that path.
+  - **The runner drops the caller's `GIT_*` variables and pins two git config keys.** Before the branch check and the fence it removes every caller `GIT_*` variable but `GIT_TERMINAL_PROMPT=0`, and pins `core.fsmonitor=false` and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT` (`fence_run.GIT_PINS`). The rest of the repository's config is honoured, and a model can write it: REQ-662 declares that as its BR-19 (f).
 
 - **2026-11-17, BR-2's branch-push exception names a second mechanism (REQ-662 stage 1, architecture ADR-9).** BR-2 excepted "the exact branch push `allow_extra_exact` names", which is how `claude` admits the Step 0 push: an exact rule. A Codex prefix rule has no exact form, so an allow of `git push -u origin <branch>` would also admit `<branch> --force`, and the exec render rightly holds `git push` out. An unallowed push runs inside Codex's sandbox, with no network. With no route the model could never push its branch, and the pipeline could not open its PR (LESSON-779). The exception now admits the same push run by the fence runner, which is exact by construction:
   - the census accepts that fence as `runner` only when its push argv is exactly `git -C $ADLC_ARG_worktree push -u origin $ADLC_ARG_branch`, a second kind in `PUSH_REACH` beside the id reservation; a `--force`, a second refspec or an option before `push` fails the reach audit;

@@ -911,8 +911,9 @@ def test_exec_values_follow_the_result_file():
 def test_codex_launch_argv_snapshot():
     """AC-2, BR-2, BR-16: the launch is `codex exec --json --sandbox workspace-write -C <wt> -o
     <file>` with the prompt on stdin, the argv the stdin-prompt variant it names ran; the
-    provisional resume is ADR-7's. Neither holds a forbidden flag or `-p`, and a forbidden
-    entry or a `-c`, `-p` or `--profile` token added to either is refused."""
+    resume is ADR-7's, measured on 2026-11-18 (`codex-exec-manual.md`, rows `resume-continues`
+    and `resume-keeps-rules`, and fact 5). Neither holds a forbidden flag or `-p`, and a
+    forbidden entry or a `-c`, `-p` or `--profile` token added to either is refused."""
     adapter = exec_codex()
     values = {"worktree": EXEC_WT, "last_message": EXEC_LAST}
     fresh = adapter.launch_argv("/bin/codex", [], [], values=values)
@@ -1037,3 +1038,90 @@ def test_codex_census_golden_is_fresh_and_has_no_direct_route():
     [push] = [r for r in records if r.get("push")]
     assert push["route"] == "runner" and push["push"] == fc.BRANCH_PUSH
     assert push["id"].startswith("proceed/phase-0-setup.md#")
+
+
+LIVE_SCRIPT = os.path.join(TOOLKIT, "tools", "adlc", "tests", "e2e", "codex-exec-live.py")
+#: What the live script must call by these names; a rename that leaves it stale fails here.
+LIVE_CALLS = {
+    "adapter": ("launch_argv", "child_env", "rule_files", "parse_result", "refusal_line",
+                "can_resume"),
+    "esf": ("render", "working_copy_render", "install_policy_file", "policy_path",
+            "record_path", "verify"),
+    "et": ("grant", "revoke", "user_config_path", "probe_marker"),
+    "fr": ("runner_call",),
+    "fc": ("census", "fences", "view"),
+}
+
+
+def _live_tree():
+    import ast
+    with open(LIVE_SCRIPT, encoding="utf-8") as fh:
+        return ast.parse(fh.read(), LIVE_SCRIPT)
+
+
+def test_the_codex_live_script_calls_what_the_engine_has():
+    """REQ-662 TASK-266: `tools/adlc/tests/e2e/codex-exec-live.py` is never run by pytest (its
+    name is no test module's), so nothing ran its calls into the engine. This reads it with
+    `ast`: every attribute it takes from an engine module it imports, and every one it takes
+    from the loaded Codex adapter, must exist, so a renamed function cannot leave the script
+    stale unnoticed."""
+    import ast
+    import importlib
+    assert not os.path.basename(LIVE_SCRIPT).startswith("test_")
+    tree = _live_tree()
+    modules = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if os.path.isfile(os.path.join(TOOLKIT, "tools", "adlc", alias.name + ".py")):
+                    modules[alias.asname or alias.name] = importlib.import_module(alias.name)
+    assert {"ea", "esf", "et", "ev", "fc", "fr", "hp", "adlc_home"} <= set(modules)
+    owners = dict(modules, adapter=exec_codex())
+    used = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and \
+                node.value.id in owners:
+            used.setdefault(node.value.id, set()).add(node.attr)
+    missing = sorted("%s.%s" % (owner, attr) for owner, attrs in used.items()
+                     for attr in attrs if not hasattr(owners[owner], attr))
+    assert missing == []
+    for owner, attrs in LIVE_CALLS.items():
+        assert set(attrs) <= used.get(owner, set()), (owner, set(attrs) - used.get(owner, set()))
+
+
+def test_the_codex_live_script_grants_under_the_real_probe_marker():
+    """REQ-662 BR-5: the live script edits the real user config, so its grant must refuse while
+    a probe run is mid-recovery, as the engine's does: the marker it passes is
+    `et.probe_marker(adlc_home.adlc_home(), HARNESS)`, never a path of its own."""
+    import ast
+    grants = [node for node in ast.walk(_live_tree()) if isinstance(node, ast.Call)
+              and isinstance(node.func, ast.Attribute) and node.func.attr == "grant"
+              and isinstance(node.func.value, ast.Name) and node.func.value.id == "et"]
+    assert len(grants) == 1
+    marker = grants[0].args[4]
+    assert ast.dump(marker) == ast.dump(ast.parse(
+        "et.probe_marker(adlc_home.adlc_home(), HARNESS)", mode="eval").body)
+
+
+def test_codex_bypass_scan_refuses_sandbox_permissions(sandbox):
+    """REQ-662 BR-16: `sandbox_permissions` widens what the sandbox admits (`codex exec --help`
+    at 0.166.0 gives `-c 'sandbox_permissions=["disk-full-read-access"]'` as its own example of
+    an override), so it is a bypass key of the user config and of the working copy's config:
+    set in either, it is a hit, which refuses the run. Neither file set is the clean case."""
+    import exec_surfaces as esf
+    adapter = exec_codex()
+    for keys in adapter.block["bypass_config_keys"].values():
+        assert "sandbox_permissions" in keys
+    env = {"HOME": os.environ["HOME"]}
+    wt = sandbox / "wt"
+    (wt / ".codex").mkdir(parents=True)
+    assert esf.bypass_scan(adapter, [str(wt)], env) == []
+    line = 'sandbox_permissions = ["disk-full-read-access"]\n'
+    user = os.path.join(env["HOME"], ".codex", "config.toml")
+    os.makedirs(os.path.dirname(user))
+    with open(user, "w", encoding="utf-8") as fh:
+        fh.write(line)
+    (wt / ".codex" / "config.toml").write_text(line, encoding="utf-8")
+    hits = esf.bypass_scan(adapter, [str(wt)], env)
+    assert sorted((os.path.basename(os.path.dirname(os.path.dirname(h.path))), h.key)
+                  for h in hits) == [("home", "sandbox_permissions"), ("wt", "sandbox_permissions")]

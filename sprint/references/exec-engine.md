@@ -11,7 +11,7 @@ The model running each REQ stops at the merge gate. The program, after an operat
 
 ## Launch
 
-The program takes the REQ ids you were given, plus `--harness <name>` when the operator named one (`claude`, the default, or `codex`), and `--allow-unprotected`, `--shared-credentials` and `--allow-unverified` only when the operator passed them. Never add any of those three yourself: each one accepts a risk on the operator's behalf. `--allow-unverified` launches an adapter whose probe verdict reads unverified, and it covers only the launches of the command that carries it: an `answer` that relaunches such a REQ needs it again, on the operator's instruction, and `approve` never takes it.
+The program takes the REQ ids you were given, plus `--harness <name>` when the operator named one (`claude` by default, or another such as `codex` whose `harness/<name>.yml` has an `exec` block), and `--allow-unprotected`, `--shared-credentials` and `--allow-unverified` only when the operator passed them. Never add any of those three yourself: each one accepts a risk on the operator's behalf. `--allow-unverified` launches an adapter whose probe verdict reads unverified, and it covers only the launches of the command that carries it: an `answer` that relaunches such a REQ needs it again, on the operator's instruction, and `approve` never takes it.
 
 Run this block with your shell tool in the background, with one single-quoted argument per REQ id or flag. It stays up as the supervisor until every REQ is terminal, and its stdout is the dashboard, the only place an approve token is printed. Read that output when you report progress.
 
@@ -20,7 +20,7 @@ ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d
 python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec run '<req-or-flag>'
 ```
 
-A `refused:` line and a non-zero exit mean nothing was launched. Relay the line as printed. A refusal is the answer; do not retry around it. A harness with no `exec` block (Copilot CLI, Cursor and Antigravity CLI today) is refused naming REQ-662. A `WARNING:` line in the pre-flight, such as a `deny_unsupported` entry or an `--allow-unverified` launch, is the operator's to read: show it as printed.
+A `refused:` line and a non-zero exit mean nothing was launched. Relay the line as printed. A refusal is the answer; do not retry around it. A harness with no `exec` block is refused naming REQ-662; `adlc harness doctor` prints an `exec:` line for each installed harness that has one. A `WARNING:` line in the pre-flight, such as a `deny_unsupported` entry or an `--allow-unverified` launch, is the operator's to read: show it as printed.
 
 ## Dashboard
 

@@ -37,7 +37,6 @@ import toml_merge  # noqa: E402
 FENCE_ID = "fence.partial-source"
 #: The fixed sample tail BR-9 appends to an exact deny command.
 SAMPLE_TAIL = ("origin", "feature")
-_ENV_ASSIGN_RE = ha.ENV_ASSIGN_RE
 
 RESTRAINT_SENTENCE = ("This harness does not enforce this agent's tool list: do not create, "
                       "edit, delete or write files, and do not run commands that do, unless "
@@ -122,7 +121,7 @@ def allow_matches(spelling, exact, granularity, command, renders_exact):
         return spelling == command
     if granularity == "command-base":
         stripped = list(command)
-        while stripped and _ENV_ASSIGN_RE.match(stripped[0]):
+        while stripped and ha.ENV_ASSIGN_RE.match(stripped[0]):
             stripped.pop(0)
         return len(spelling) == 1 and bool(stripped) and stripped[0] == spelling[0]
     if granularity in ("token-prefix", "subcommand"):

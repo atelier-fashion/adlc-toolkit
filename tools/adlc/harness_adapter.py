@@ -155,11 +155,12 @@ _EXEC_KEYS = set(_EXEC_REQUIRED) | {
 _EXEC_OUTPUT_REQUIRED = ("format", "source", "final_message", "session_id")
 #: Where the parsed output holds each field. ``denials`` is the list a run's refusals land in.
 _EXEC_OUTPUT_PATHS = ("session_id", "final_message", "is_error", "num_turns", "cost", "denials")
-#: ``terminal_event`` (required under ``format: jsonl-stream``, refused under any other): the
-#: event ``type`` a complete stream carries. A stream without one was cut short, which is a
-#: parse failure (REQ-662 BR-6); without the key, a stream cut between two whole lines would
-#: parse as complete.
-_EXEC_OUTPUT_OPTIONAL = ("terminal_event",)
+#: The keys of ``format: jsonl-stream`` alone: required under it and refused under any other
+#: format, so no block carries one optionally. ``terminal_event`` is the event ``type`` a
+#: complete stream carries. A stream without one was cut short, which is a parse failure
+#: (REQ-662 BR-6); without the key, a stream cut between two whole lines would parse as
+#: complete, so the parser indexes it rather than reading a default.
+_EXEC_OUTPUT_STREAM_ONLY = ("terminal_event",)
 #: The one placeholder ``final_message`` names under ``source: file``: the engine fills it
 #: with a file in the run directory, so the harness writes no last message anywhere else.
 _LAST_MESSAGE = "{last_message}"
@@ -199,8 +200,10 @@ FORMATS = {
                              "renders_exact": False, "user_delegation": True,
                              "literal_tokens": True},
     "codex-hooks-json": {"json": True, "surfaces": ("hooks",), "renders_exact": False},
+    # `trust_entry`: the format exec_trust's per-run `[projects."<path>"]` table is spelled for
+    # (REQ-662 BR-5), so the one a `trust_grant: user-config-entry` user config may have.
     "codex-config-toml": {"json": False, "toml": True, "surfaces": ("config",),
-                          "renders_exact": False},
+                          "renders_exact": False, "trust_entry": True},
     "toml-role": {"json": False, "surfaces": ("agents",), "renders_exact": False,
                   "agent_suffix": ".toml", "agent_toml": True},
     # Named for their shape (REQ-658 ADR-5). A map of named hooks with flat handler
@@ -474,6 +477,26 @@ def _exec_working_copy(src, block, data):
                            "declare clone or orchestrator-git (REQ-662 BR-9)" % (reach,))
 
 
+def _exec_trust_grant(src, block, data):
+    """``trust_grant`` (REQ-662 BR-5). ``user-config-entry`` appends a TOML
+    ``[projects."<path>"]`` table to ``paths.config.user``, a spelling known only for a config
+    format the registry marks ``trust_entry``, so a user config in any other format is refused
+    here rather than have that table appended to it. An adapter with no ``paths.config.user``
+    has no file to write, and ``exec_trust`` refuses its grant at the launch."""
+    grant = _enum(src, "exec.trust_grant", block["trust_grant"], TRUST_MECHANISMS)
+    config = (data.get("paths") or {}).get("config") or {}
+    if grant != "user-config-entry" or "user" not in config:
+        return
+    fmt = (data.get("formats") or {}).get("config")
+    if not (FORMATS.get(fmt) or {}).get("trust_entry"):
+        known = ", ".join(sorted(n for n, f in FORMATS.items() if f.get("trust_entry")))
+        raise AdapterError(src, "exec.trust_grant", "user-config-entry appends a TOML "
+                           "[projects.\"<path>\"] table to paths.config.user, an entry spelled "
+                           "for %s; this adapter's user config is %s, for which the entry's "
+                           "spelling is not known yet (REQ-662 BR-5)"
+                           % (known, fmt or "a file with no declared format"))
+
+
 def _exec_probes(src, block, verification):
     """``probes``: a cache of the result file's rows, read only under ``verification: probes``
     and never a verdict of its own (REQ-662 BR-11)."""
@@ -591,7 +614,7 @@ def _exec_output(src, block):
         raise AdapterError(src, "exec.output", "must be a mapping {format, source, final_message, "
                            "session_id} at exec_schema_version %d" % EXEC_SCHEMA_VERSION)
     _unknown(src, "exec.output.", out, set(_EXEC_OUTPUT_REQUIRED) | set(_EXEC_OUTPUT_PATHS)
-             | set(_EXEC_OUTPUT_OPTIONAL))
+             | set(_EXEC_OUTPUT_STREAM_ONLY))
     for key in _EXEC_OUTPUT_REQUIRED:
         if key not in out:
             raise AdapterError(src, "exec.output." + key, "is required")
@@ -658,7 +681,7 @@ def _exec_block(src, block, data):
                                % EXEC_SCHEMA_VERSION)
     _exec_forms(src, block, data)
     _exec_working_copy(src, block, data)
-    _enum(src, "exec.trust_grant", block["trust_grant"], TRUST_MECHANISMS)
+    _exec_trust_grant(src, block, data)
     _need_str(src, "exec.harness_version", block["harness_version"])
     _enum(src, "exec.status", block["status"], EXEC_STATUSES)
     _exec_probes(src, block, _enum(src, "exec.verification", block["verification"],

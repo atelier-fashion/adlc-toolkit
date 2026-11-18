@@ -683,10 +683,11 @@ through the default column, so a `claude` column, present or absent, changes not
 A harness joins `/sprint --exec` by adding an `exec` block to its adapter. `harness_adapter.py`
 validates it when `exec_schema_version` is present, and `exec_adapter.py` is the engine's view
 of it. Nothing branches on a harness name: every difference between harnesses is a key here.
-Two blocks ship, `harness/claude.yml` (rules as flags) and `harness/codex.yml` (rules as
-files). An adapter whose `exec` is the placeholder `{flags: unverified}` (Copilot CLI, Cursor,
-Antigravity CLI) has no `exec_schema_version`, so the loader leaves it opaque and the engine
-refuses it by name.
+Which adapters carry a block, and the value each declares, are in `harness/*.yml`, and
+`adlc harness doctor` prints `exec: verified` or `exec: unverified (<probe ids>)` for each
+installed harness that has one. An adapter whose `exec` is the placeholder
+`{flags: unverified}` has no `exec_schema_version`, so the loader leaves it opaque and the
+engine refuses it by name, naming REQ-662, which adds one harness per stage.
 
 **Schema 2 (REQ-662 ADR-1).** `exec_schema_version` is 2. The loader refuses version 1, REQ-659's
 shape, and any other version, and refuses the whole adapter on an unknown key, a missing
@@ -699,10 +700,10 @@ never reads: `allow_flag`, `shell_rule` and `settings_keys` (and optionally
 
 | Key | Meaning |
 |---|---|
-| `harness_version`, `verification`, `status`, `probes` | the harness version the block was written against; `probes` (the four harnesses) or `recorded` (`claude`, which stands on REQ-659's recorded evidence); the cached BR-11 verdict; and, under `probes`, one `{id, ran_at, harness_version, status}` row per required probe, copied from `.adlc/research/harness-probes/<name>.json`. `status` and `probes` are caches: `exec_verify` recomputes the verdict (below) |
+| `harness_version`, `verification`, `status`, `probes` | the harness version the block was written against; `probes` (the REQ-664 result file decides) or `recorded` (a block that predates the probe gate and stands on REQ-659's recorded evidence); the cached BR-11 verdict; and, under `probes`, one `{id, ran_at, harness_version, status}` row per required probe, copied from `.adlc/research/harness-probes/<name>.json`. `status` and `probes` are caches: `exec_verify` recomputes the verdict (below) |
 | `working_copy` | `{strategy: worktree \| clone \| orchestrator-git}`. `worktree` needs the top-level `sandbox_can_reach_common_gitdir: true`, and `exec_verify` binds it to `git-write-worktree`. Only `worktree` runs today: the other two are pre-flight refusals until an adapter ships one |
-| `trust_grant` | What the **engine** does per run: `none`, `flag`, `user-config-entry`, `trusted-folders-file`. Not the top-level `trust`, which is what the harness reads. `none` (`claude`) and `user-config-entry` (`codex`, through `exec_trust.py`) run; the other two refuse at pre-flight until an adapter ships one |
-| `launch`, `resume` | argv templates after the binary, each placeholder one whole token: `{worktree}`, `{last_message}`, `{session_id}`, `{settings}`, `{branch}`. `resume` must hold `{session_id}`. A block without `resume` cannot resume, and the halt says so before approval is asked for |
+| `trust_grant` | What the **engine** does per run: `none`, `flag`, `user-config-entry`, `trusted-folders-file`. Not the top-level `trust`, which is what the harness reads. `none` and `user-config-entry` (through `exec_trust.py`) run; the other two refuse at pre-flight until an adapter ships one. `user-config-entry` appends a TOML `[projects."<path>"]` table to `paths.config.user`, so the loader refuses it when that user config's format (`formats.config`) is not one the registry marks `trust_entry`, and the grant refuses at launch when there is no user config |
+| `launch`, `resume` | argv templates after the binary, each placeholder one whole token: `{worktree}`, `{last_message}`, `{session_id}`, `{settings}`, `{branch}`. `resume` must hold `{session_id}`. A block without `resume` cannot resume, and the halt says so before approval is asked for. A block without `add_dir_flag` resumes its close-out with no second directory: the engine copies the primary's `pipeline-state.json` into the close-out working copy and carries the session's changes back, never its `status`, `exec` or `approval`, and a REQ spanning more than one repository is refused at the pre-flight |
 | `prompt_delivery`, `prompt_flag`, `prompt_variant` | `stdin`, always. `prompt_flag` is the token run that makes a launch `stdin-prompt`'s `with-prompt-flag` variant, and the loader holds `prompt_variant` to whether `launch` carries it |
 | `context_delivery` | `hooks`: the engine relies on the harness's session-start hooks. `prompt`: it relies on none, ETHOS is in the prompt, the hook file is a surface rendered absent, and BR-11 needs only `trust-then-headless`'s `allowlist-loaded` half |
 | `allow_render`, `deny_render` | how the two tiers travel: `flags` on the argv, or `file`, a rule file in the working copy (`rule_file`) and, for the deny tier, the user policy file too. `deny_render` may be `none`; `flags` and `file` need `capabilities.deny: yes` |
@@ -713,13 +714,13 @@ never reads: `allow_flag`, `shell_rule` and `settings_keys` (and optionally
 | `allow_extra`, `allow_extra_exact` | routine spellings the exec-scope render cannot give, `{branch}` substituted in both. Each is vetted like an operator's `sprint.exec.allow_extra`: no token that runs its arguments, nothing that wraps a deny, and no prefix entry that shares a command base with a deny (`git push`, `git branch`, `rm`): those go in `allow_extra_exact` (BUG-260). Both stay empty under `matcher: none`, where nothing can vet them |
 | `engine_deny` | denies that belong to this engine, never in `templates/permissions.yml`: among them the orchestrator's own verbs, `approve` included, so the model cannot clear the gate itself |
 | `forbidden_flags`, `operator_flags` | the engine-wide vocabulary plus the harness's own bypass flags, a lint backstop (`exec-no-bypass`) to the closed-world argv check; and the flag names an operator's `--harness-flag` may add |
-| `exit_codes`, `output`, `denied_stderr` | raw code to `ok`, `denied`, `timeout`, `error`, an unmapped code being `error` with the code kept. `output` is `{format: json \| jsonl-stream, source: stdout \| file, final_message, session_id}`, with `terminal_event` under `jsonl-stream`: a truncated stream, a line that is not JSON or an empty final message is `error` with the parser's message in `notes`. A run with no terminal claim is `denied` on the result's denial list or on a stderr line matching `denied_stderr`, read from the harness's own output and never from the model's text |
+| `exit_codes`, `output`, `denied_stderr` | raw code to `ok`, `denied`, `timeout`, `error`, an unmapped code being `error` with the code kept. `output` is `{format: json \| jsonl-stream, source: stdout \| file, final_message, session_id}`, plus `terminal_event`, required under `jsonl-stream` and refused under `json`: a truncated stream, a line that is not JSON or an empty final message is `error` with the parser's message in `notes`. A run with no terminal claim is `denied` on the result's denial list or on a stderr line matching `denied_stderr`, read from the harness's own output and never from the model's text |
 | `env_passthrough`, `auth_env` | the only variables a child inherits, beside the ones the engine sets (`ADLC_EXEC_RUN`, `ADLC_EXEC_RUN_TAG`, the child's forge credentials) |
 | `config_surfaces`, `bypass_config_keys`, `rules_reload` | every working-copy path the harness reads once trusted, each rendered whole or absent; the keys, per config file, that relax approval or sandboxing; and whether the harness re-reads a rule file mid-run (`startup`, `live`, or `unknown`, read as `live`) |
 | `shell_timeout_s` | `{value, verified, delegate}`. `delegate: supported` needs a verified value of at least 120 s; otherwise the engine sets `ADLC_DISABLE_DELEGATE=1` in the child |
 | `matcher` | `claude`, whose statement matching `exec_matcher` models, or `none`, on which no fence routes `direct` |
 | `config_isolation`, `config_isolation_help`, `sandbox_refuse`, `residuals`, `trust_notice` | how a `flags` harness's resumed close-out ignores working-copy config and the flag names looked for in `<binary> --help`; a setting that refuses at pre-flight; and what the two tiers do not stop, stated |
-| `fence_runner` | the toolkit-relative path of the fence runner (REQ-682), `tools/adlc/fence-run`. `tiers()` resolves it once under ToolkitRoot and spells it in the adapter's allow form (`Bash(<root>/<fence_runner>:*)` on claude, a prefix rule on codex), refusing the launch unless the path is absolute, plain (`^/[A-Za-z0-9_./-]+$`, because a quoted path does not match a prefix rule), a regular file and still under the root after `realpath`. With it set, the exec render carries no fence rule and reports `fence.partial-source` as `inexpressible` (runner), and `capabilities.fence_broad_spelling` is not required |
+| `fence_runner` | the toolkit-relative path of the fence runner (REQ-682), `tools/adlc/fence-run`. `tiers()` resolves it once under ToolkitRoot and spells it in the adapter's allow form (a `Bash(<root>/<fence_runner>:*)` flag under `allow_render: flags`, a prefix rule in the rule file under `file`), refusing the launch unless the path is absolute, plain (`^/[A-Za-z0-9_./-]+$`, because a quoted path does not match a prefix rule), a regular file and still under the root after `realpath`. With it set, the exec render carries no fence rule and reports `fence.partial-source` as `inexpressible` (runner), and `capabilities.fence_broad_spelling` is not required |
 
 **The modules REQ-662 adds.**
 
@@ -781,11 +782,15 @@ executable:
 - **Its git environment.** No caller `GIT_*` variable reaches a fence, so neither does a
   caller's `GIT_SSH_COMMAND`, and every git call it makes is pinned to `core.fsmonitor=false`
   and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT`, over the repository's own config.
-  The rest of that config is honoured, and a model can write it.
+  Those are two of the keys the orchestrator pins for its own git calls; its ssh and credential
+  pins point at its run directory and would break an operator's push credentials, so the
+  runner does not take them. The rest of that config is honoured, and a model can write it, so
+  the two pins are defense in depth (the README's declared residual (f)).
 
 **One census per adapter (REQ-662 ADR-8).** Each exec-capable adapter has its committed census,
 `harness/<name>/exec-fence-census.json`: every fence, its route, its values and its reach. On
-`matcher: claude` a fence may route `direct`; on `matcher: none` (Codex) none does. The runner
+`matcher: claude` a fence may route `direct`; on `matcher: none` none does. The engine's
+`ExecAdapter.has_matcher` is the census's `routes_direct`, so the two read one answer. The runner
 accepts a fence that is `runner` in the census of any exec-capable adapter under its own root,
 and the reach of every `runner` route is audited against the union of every such adapter's deny
 tier and `engine_deny`, so whichever harness calls, no accepted route reaches a command any

@@ -234,12 +234,13 @@ def test_codex_exec_section_states_what_the_yml_declares():
     # Trust: written into the user config per run, and revoked.
     assert "`trust_grant: %s`" % block["trust_grant"] in flat
     assert "your user config `%s`" % _user(adapter["paths"]["config"]["user"]) in flat
-    assert "removes exactly that block when the run ends" in flat
+    # Revoked when the harness exits (`sprint_exec.on_exit`), so none is held at the halt.
+    assert "removes exactly that block when the harness exits" in flat
 
     # The user policy file persists, and reaches the operator's own sessions (BR-4).
     assert "`%s`" % _user(block["user_policy_file"]) in flat
     assert "It persists across runs and projects, and it applies to your own Codex " \
-           "sessions too" in flat
+           "use too" in flat
     assert "adlc harness install --exec --harness %s" % adapter["name"] in flat
 
     # Config surfaces and their bypass keys.
@@ -249,6 +250,21 @@ def test_codex_exec_section_states_what_the_yml_declares():
         lead = ("In `%s`:" % _user(path) if path.startswith("$HOME/")
                 else "In the working copy's `%s`:" % path)
         assert _listed(section, lead) == keys, path
+    assert "`sandbox_permissions` is listed because it widens what the sandbox admits" in flat
+    assert "a multi-line array or string, a top-level inline table or a top-level dotted key " \
+           "refuses the run, with a message naming the line" in flat
+
+    # The close-out, on an adapter whose resume takes no extra directory (ADR-7), and the
+    # refusals a Codex run makes that a Claude run does not.
+    assert "add_dir_flag" not in block
+    assert "| Close-out |" in section
+    assert "never taking `status`, `exec` or `approval` from the session's copy" in flat
+    assert "A REQ that spans more than one repository is refused on Codex at the pre-flight" \
+        in flat
+    assert "sets `sprint.exec.allow_extra` in `.adlc/config.yml` is refused on Codex" in flat
+    # A change found at exit is a Rule B protocol violation, for a surface and the policy folder.
+    assert flat.count("a Rule B protocol violation that blocks the run") == 1
+    assert "blocks the run as a Rule B protocol violation" in flat
 
     # The branch push goes through the runner on Codex, and why (ADR-9).
     assert block["matcher"] == "none"
@@ -302,8 +318,18 @@ def test_declared_residuals_block_lists_a_to_f():
     assert "not by the allowlist or the sandbox." in block
     pins = [key for key, _value in fr.GIT_PINS]
     assert "the two pins, %s" % " and ".join("`%s`" % key for key in pins) in block
-    for open_key in ("`core.sshCommand`", "a credential helper", "`url.<base>.insteadOf`"):
+    assert "which are defense in depth" in block
+    for open_key in ("`core.sshCommand`", "a credential helper", "`url.<base>.insteadOf`",
+                     "`remote.origin.pushurl`", "`remote.origin.push`"):
         assert open_key in block, open_key
+    # The operator's own Codex config reaches every run, and the engine judges no rule of it.
+    assert "**Your own Codex config applies to every exec run.**" in block
+    assert "it does not judge what your rules allow" in block
+    # A process that detaches escapes ancestry, and `answer` takes no token (REQ-659's design).
+    assert "**Process ancestry does not hold against a process that detaches.**" in block
+    assert "`answer` takes no token" in block and "holds on Claude as well" in block
+    assert "XDG_STATE_HOME" not in exec_block["env_passthrough"]
+    assert "the child is not given that variable" in block
     # The runner line keeps its fence id quoted, and the runner prints it so.
     assert "A runner line must keep its fence id quoted." in block and "bare `#`" in block
     call = fr.runner_call({"id": "proceed/phase-0-setup.md#6:877a6b41"}, "/r", [])
