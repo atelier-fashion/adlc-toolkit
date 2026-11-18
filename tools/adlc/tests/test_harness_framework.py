@@ -154,7 +154,7 @@ def test_claude_adapter_loads():
     # key each refuse the whole adapter, in every verb.
     (("  exec_schema_version: 2", "  exec_schema_version: 1"), "exec.exec_schema_version"),
     (("  working_copy: {strategy: worktree}", "  working_copy: worktree"), "exec.working_copy"),
-    (("  context_delivery: hooks\n", ""), "exec.context_delivery"),
+    (("  context_delivery: prompt\n", ""), "exec.context_delivery"),
     (("  output:\n", "  result_keys: {session_id: session_id}\n  output:\n"),
      "exec.result_keys"),
 ])

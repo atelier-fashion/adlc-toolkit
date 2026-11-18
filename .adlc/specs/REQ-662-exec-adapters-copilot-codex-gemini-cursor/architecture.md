@@ -41,7 +41,7 @@ Files, by layer:
 
 Keys that only one render form needs are required only for that form: `allow_flag`, `shell_rule` and `settings_keys` when `allow_render: flags`; `rule_file` when `allow_render: file`. A key given for the wrong form is refused, so a block cannot carry dead fields.
 
-**`harness/claude.yml` migrates mechanically.** Its three reshaped keys take the new shape and it gains the new required keys with the values that describe today's behaviour (`allow_render: flags`, `context_delivery: hooks`, `matcher: claude`, `verification: recorded`). No engine behaviour changes for it, and REQ-659's, BUG-265's and REQ-682's tests re-run unchanged in what they assert.
+**`harness/claude.yml` migrates mechanically.** Its three reshaped keys take the new shape and it gains the new required keys with the values that describe today's behaviour (`allow_render: flags`, `context_delivery: prompt`, `matcher: claude`, `verification: recorded`). Claude declares `prompt` because an exec run of it loads no hook: its isolation flags leave none, and ETHOS reaches it through the prompt. No engine behaviour changes for it, and REQ-659's, BUG-265's and REQ-682's tests re-run unchanged in what they assert.
 
 **An unstaged adapter** keeps `exec: {flags: unverified}`. It has no `exec_schema_version`, so the loader leaves it opaque, as it does today, and `exec_adapter.load` refuses it by name.
 

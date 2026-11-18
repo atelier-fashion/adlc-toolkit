@@ -608,7 +608,7 @@ def test_claude_block_is_migrated_without_a_behaviour_change(adapter):
     block = adapter.block
     assert block["exec_schema_version"] == 2
     for key, value in (("verification", "recorded"), ("status", "verified"),
-                       ("context_delivery", "hooks"), ("allow_render", "flags"),
+                       ("context_delivery", "prompt"), ("allow_render", "flags"),
                        ("deny_render", "flags"), ("matcher", "claude"),
                        ("user_policy_file", "none"), ("prompt_delivery", "stdin"),
                        ("prompt_variant", "with-prompt-flag")):

@@ -108,7 +108,9 @@ exec:
   resume: [-p, --output-format, json, --resume, "{session_id}"]
   # The flags an operator may pass with --harness-flag. Neither relaxes a permission.
   operator_flags: [--model, --max-turns]
-  context_delivery: hooks
+  # An exec run loads no hook: `--setting-sources ""` and the hook-free --settings file
+  # leave none, and ETHOS reaches the model as the prompt the engine builds (REQ-659 BR-6).
+  context_delivery: prompt
   # Both tiers travel on the command line: `allow_flag` and `deny_flag`, each rule spelled
   # by `shell_rule` or `shell_rule_exact`, and the same tiers in the settings file at
   # `settings_keys`. No rule file is written into the working copy, and no user policy file.
