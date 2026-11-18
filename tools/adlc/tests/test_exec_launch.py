@@ -119,7 +119,7 @@ def test_forbidden_flag_on_the_cli(box):
 
 def test_engine_selection(box, monkeypatch):
     with pytest.raises(se.Refused, match="REQ-662"):
-        box.start(harness="codex", shared=True)
+        box.start(harness="copilot", shared=True)
     orch = box.orch(PATH="/usr/bin:/bin")
     with pytest.raises(se.Refused, match="not on PATH"):
         box.start(orch=orch, shared=True)

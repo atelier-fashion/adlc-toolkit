@@ -167,14 +167,14 @@ exec:
   verification: probes
   status: verified
   probes:
-    - {id: git-write-worktree, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: pass}
-    - {id: git-write-main, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: pass}
-    - {id: trust-then-headless, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: fail}
-    - {id: session-start-context, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: fail}
-    - {id: stdin-prompt, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: pass}
-    - {id: fence-vs-allowlist, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: fail}
-    - {id: shell-timeout, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: pass}
-    - {id: ask-tier-deny, ran_at: "2026-11-17T19:48:25Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: git-write-worktree, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: git-write-main, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: trust-then-headless, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: fail}
+    - {id: session-start-context, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: fail}
+    - {id: stdin-prompt, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: fence-vs-allowlist, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: fail}
+    - {id: shell-timeout, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: ask-tier-deny, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
   # git-write-worktree reads pass on root-is-worktree and writable-roots-repo, and agrees with
   # the top-level sandbox_can_reach_common_gitdir record, which is true (BR-9).
   working_copy: {strategy: worktree}

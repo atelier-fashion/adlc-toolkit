@@ -426,8 +426,9 @@ def test_a_callers_git_dir_cannot_move_the_push(two, pushable, tmp_path, monkeyp
 def test_branch_push_is_bound_to_the_runs_req(two, pushable, monkeypatch):
     """REQ-662 ADR-9: under an exec run (`ADLC_EXEC_RUN` names its REQ) the push takes only
     `<type>/<that id>-<rest>`, checked out here; an id that is not `REQ-` and 3 to 6 digits
-    refuses the push. Without the variable any checked-out feature branch is pushed, as
-    before (the must-not-refuse case of a plain /proceed)."""
+    refuses the push. Without the variable, or with it empty (the orchestrator reads an
+    empty one as "not in a run" too), any checked-out feature branch is pushed, as before
+    (the must-not-refuse case of a plain /proceed)."""
     root, censuses = two
     memo_census(monkeypatch)
     work, remote, _sentinel = pushable
@@ -443,7 +444,7 @@ def test_branch_push_is_bound_to_the_runs_req(two, pushable, monkeypatch):
     for branch, run in (("feat/REQ-902-other", "REQ-901"), ("feat/REQ-66-x", "REQ-662"),
                         ("feat/REQ-662-x", "REQ-66"), ("feat/REQ-6620-x", "REQ-662"),
                         ("feat/REQ-662-x", "REQ-6620"), ("feat/REQ-901", "REQ-901"),
-                        ("feat/xREQ-901-thing", "REQ-901"), ("feat/REQ-901-thing", ""),
+                        ("feat/xREQ-901-thing", "REQ-901"),
                         ("feat/REQ-901-thing", "req-901"), ("feat/REQ-901-thing", "REQ-901\n"),
                         ("feat/REQ-901-thing", "REQ-901 "), ("feat/REQ-901-thing", "REQ-1234567")):
         rc, err = push(branch, run)
@@ -455,7 +456,8 @@ def test_branch_push_is_bound_to_the_runs_req(two, pushable, monkeypatch):
     rc, err = push("feat/REQ-902-other", "REQ-901")
     assert "feat/REQ-902-other" in err and "REQ-901" in err, err
     for branch, run in (("feat/REQ-901-thing", "REQ-901"), ("fix/REQ-662-x", "REQ-662"),
-                        ("chore/REQ-123456-y", "REQ-123456"), ("feat/REQ-902-other", None)):
+                        ("chore/REQ-123456-y", "REQ-123456"), ("feat/REQ-902-other", None),
+                        ("feat/REQ-903-empty", "")):
         rc, err = push(branch, run)
         assert rc == 0, (branch, run, err)
         assert "refs/heads/" + branch in _heads(remote)

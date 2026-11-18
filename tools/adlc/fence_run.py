@@ -343,8 +343,9 @@ def run_branch_refusal(branch, environ):
     Under an exec run ``ADLC_EXEC_RUN`` names the run's REQ id, and the push takes only
     ``<type>/<that id>-<rest>``: the id followed by ``-``, so ``REQ-66`` never matches a
     ``REQ-662-`` branch. A value that is not a REQ id refuses the push. With the variable
-    unset nothing is added: a plain /proceed pushes outside any exec run."""
-    if "ADLC_EXEC_RUN" not in environ:
+    unset or empty nothing is added, as the orchestrator reads it: a plain /proceed pushes
+    outside any exec run."""
+    if not environ.get("ADLC_EXEC_RUN"):
         return None
     run_id = environ["ADLC_EXEC_RUN"]
     # fullmatch: `$` alone also matches before a trailing newline.
