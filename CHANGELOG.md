@@ -139,7 +139,7 @@ is cut per `RELEASING.md`.
   before each launch and removes exactly that block afterwards, because `codex exec`
   otherwise writes a lasting entry for the main repository by itself. `exec_surfaces.py`
   renders the working copy's `.codex/` whole before every launch and resume, checks it again
-  at exit and at the halt, and scans the user and working-copy configs for keys that relax
+  when the harness exits, where a change blocks the run, and scans the user and working-copy configs for keys that relax
   the sandbox. `adlc harness install --exec --harness codex` writes
   `~/.codex/rules/adlc-exec.rules`, the deny tier only, which persists across runs and
   projects and applies to your own Codex sessions too. `--allow-unverified` launches an

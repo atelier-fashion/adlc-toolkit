@@ -258,7 +258,7 @@ def test_codex_exec_section_states_what_the_yml_declares():
     # refusals a Codex run makes that a Claude run does not.
     assert "add_dir_flag" not in block
     assert "| Close-out |" in section
-    assert "never taking `status`, `exec` or `approval` from the session's copy" in flat
+    assert "It never takes `status`, `exec` or `approval` from the session's copy" in flat
     assert "A REQ that spans more than one repository is refused on Codex at the pre-flight" \
         in flat
     assert "sets `sprint.exec.allow_extra` in `.adlc/config.yml` is refused on Codex" in flat

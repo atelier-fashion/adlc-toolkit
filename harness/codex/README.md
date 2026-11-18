@@ -30,11 +30,11 @@ CLI under `/sprint --exec`". The surfaces it writes:
 
 | Surface | Where | How |
 |---|---|---|
-| exec rule file | `.codex/rules/adlc-exec.rules` (working copy) | rendered per run from `templates/permissions.yml`: `allow` for the routine tier and the fence runner's absolute path, `forbidden` for the deny tier and `engine_deny`. Never committed; checksummed before launch and resume, and again at exit and at the halt |
+| exec rule file | `.codex/rules/adlc-exec.rules` (working copy) | rendered per run from `templates/permissions.yml`: `allow` for the routine tier and the fence runner's absolute path, `forbidden` for the deny tier and `engine_deny`. Never committed; checksummed before launch and resume, and again when the harness exits, where a change blocks the run |
 | working-copy config | `.codex/` (working copy) | rendered whole for each launch and resume: the exec rule file and the project render of `config.toml`, and nothing else; `hooks.json` and `adlc.rules` are absent and a stray file is deleted |
 | user policy file | `$HOME/.codex/rules/adlc-exec.rules` | the deny tier and `engine_deny` as `forbidden`, never an allow; written by `adlc harness install --exec --harness codex` or a run's pre-flight, beside the operator's own rule files, which exec never edits. It applies in every project and in the operator's own sessions |
 | trust entry | `$HOME/.codex/config.toml` | one `[projects."<working copy>"]` block per run, appended before launch and removed when the harness exits (`tools/adlc/exec_trust.py`). The block is TOML, so the loader accepts `trust_grant: user-config-entry` only where `formats.config` is a format whose trust entry is known (`codex-config-toml`) |
-| close-out state | `pipeline-state.json` (close-out working copy) | `codex exec resume` takes no extra directory, so the engine copies the primary checkout's state file in before the close-out resume and carries the session's changes back after it, never its `status`, `exec` or `approval` |
+| close-out state | `pipeline-state.json` (close-out working copy) | `codex exec resume` takes no extra directory, so the engine copies the primary checkout's state file in before the close-out resume and carries the session's changes back after it as data, never its `status`, `exec` or `approval`, nor `lessons`, `harness`, `validateAttempts` or `verify` where the primary copy already holds them |
 | exec fence census | `exec-fence-census.json` (here) | every fence an exec model can meet and its route under `matcher: none`: no `direct` route, and the Step 0 branch push is a `runner` fence (REQ-662 ADR-9). `python3 tools/adlc/fence_census.py --check` holds it fresh |
 
 `exec.status` and `exec.probes` are caches of `tools/adlc/exec_verify.py`'s verdict over
