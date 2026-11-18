@@ -202,7 +202,7 @@ def test_reach_runs_against_the_union_of_deny_tiers(tmp_path, records):
     root = rs.toolkit_copy(str(tmp_path / "tk"))
     _with_engine_deny(root, "[gh, pr, view]")
     adapters = {a.name: a for a in fc.exec_adapters(root)}
-    assert sorted(adapters) == ["claude", "fake-exec-file"]
+    assert sorted(adapters) == ["claude", "codex", "fake-exec-file"]
     assert "gh pr view" in fc.union_deny_texts(list(adapters.values()), root)
     assert "gh pr view" not in fc.union_deny_texts(adapters["claude"], root)
     for name, adapter in adapters.items():
