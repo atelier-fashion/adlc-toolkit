@@ -8,9 +8,13 @@ Usage:
 ``run`` runs one census fence whose route is ``runner``. It recomputes the census from its own
 real path on every call (ADR-2), so an id whose fence changed, or whose route is ``direct``,
 ``engine`` or ``excised``, is refused, and nothing a working copy or the environment holds is
-trusted. Each value is checked against its placeholder's full-match pattern and reaches the
+trusted. The census is every exec-capable adapter's under that root (``harness/*.yml``), and a
+fence ``runner`` in any of them is accepted: each one's reach was audited against every
+adapter's deny tier, so no harness that calls reaches a command any adapter denies (REQ-662
+ADR-8). Each value is checked against its placeholder's full-match pattern and reaches the
 fence only as an ``ADLC_ARG_*`` environment variable, expanded once inside double quotes
-(ADR-3). The fence runs under ``/bin/sh`` in the current directory, with
+(ADR-3). The branch push (REQ-662 ADR-9) also holds its ``worktree`` value to the directory
+the runner was called from. The fence runs under ``/bin/sh`` in the current directory, with
 ``ADLC_TOOLKIT_ROOT`` the runner's own root and ``ADLC_FENCE_TOOLKIT_ONLY=1``, after
 ``adlc-home.sh`` and ``forge.sh`` are sourced from that root (ADR-4).
 
@@ -156,8 +160,10 @@ def show(rel, root, out=None, err=None):
 
 
 # --------------------------------------------------------------------------- run
-def parse_values(argv, placeholders, cwd):
-    """``{arg: [values]}`` from ``--arg``/``--arg-file`` pairs, every value checked."""
+def parse_values(argv, placeholders, cwd, same_dir=()):
+    """``{arg: [values]}`` from ``--arg``/``--arg-file`` pairs, every value checked.
+
+    A value of an argument in ``same_dir`` must be ``cwd`` itself, compared by real path."""
     by_arg = {ph.arg: ph for ph in placeholders}
     values = {}
     i = 0
@@ -179,6 +185,9 @@ def parse_values(argv, placeholders, cwd):
         elif ph.file:
             raise Refusal(None, "%s takes --arg-file, not --arg" % name)
         why = ph.check(value) or ph.check_scope(value, cwd)
+        if not why and name in same_dir and \
+                os.path.realpath(os.path.join(cwd, value)) != os.path.realpath(cwd):
+            why = "is not the directory the runner was called from (%s)" % cwd
         if why:
             raise Refusal(None, "value for %s %s" % (name, why))
         if name in values and not ph.multi:
@@ -238,7 +247,11 @@ def script_for(fence, values, root):
 
 
 def find(fid, root):
-    """``(fence, record)`` for ``fid``, or :class:`Refusal` naming why not."""
+    """``(fence, record)`` for ``fid``, or :class:`Refusal` naming why not.
+
+    The fence must be ``runner`` in the census of at least one exec-capable adapter under
+    ``root`` (REQ-662 ADR-8). Which harness is calling is never asked: no variable, argument or
+    working-copy file chooses a census (REQ-682 ADR-2)."""
     match = _ID_RE.match(fid or "")
     if not match:
         raise Refusal(fid, "not a fence id (<path>#<ordinal>:<sha8>)")
@@ -246,33 +259,44 @@ def find(fid, root):
     if rel not in fc.EXEC_FILES:
         raise Refusal(fid, "%s is not in the exec file set" % rel)
     try:
-        records = fc.census(root)
+        routed = [(a.name, fc.census(root, a)) for a in fc.exec_adapters(root)]
         fences = fc.fences(fc.view(root, rel), rel)
     except fc.CensusError as exc:
         raise Refusal(fid, str(exc))
-    by_id = {r["id"]: r for r in records}
-    rec = by_id.get(fid)
-    if rec is None:
+    recs = [(name, r) for name, records in routed for r in records if r["id"] == fid]
+    if not recs:
         key = "%s#%s" % (rel, match.group(2))
         now = [f.id for f in fences if f.key == key]
         if now:
             raise Refusal(fid, "the fence changed since it was shown (it is now %s): run "
                                "`fence-run show %s` again" % (now[0], rel))
         raise Refusal(fid, "unknown fence")
-    if rec["route"] != "runner":
-        raise Refusal(fid, "its route is %s, not runner%s" % (
-            rec["route"], (": " + rec["reason"]) if rec.get("reason") else ""))
+    runner = [r for _name, r in recs if r["route"] == "runner"]
+    if not runner:
+        routes = list(dict.fromkeys(r["route"] for _name, r in recs))
+        if len(routes) == 1:
+            rec = recs[0][1]
+            raise Refusal(fid, "its route is %s, not runner%s" % (
+                rec["route"], (": " + rec["reason"]) if rec.get("reason") else ""))
+        raise Refusal(fid, "its route is %s: runner on no exec-capable adapter" % ", ".join(
+            "%s on %s" % (r["route"], name) for name, r in recs))
     fence = next(f for f in fences if f.id == fid)
-    return fence, rec
+    return fence, runner[0]
+
+
+def same_dir_args(rec):
+    """The arguments whose value must be the directory the runner was called from: those of
+    the push kind the fence makes (REQ-662 ADR-9), else none."""
+    return tuple(fc.PUSH_REACH.get(rec.get("push"), {}).get("same_dir", ()))
 
 
 def run(fid, argv, root, environ=None, cwd=None, err=None):
     environ = dict(os.environ if environ is None else environ)
     cwd = cwd or os.getcwd()
     try:
-        fence, _rec = find(fid, root)
+        fence, rec = find(fid, root)
         placeholders = _placeholders_for(fence)
-        values = parse_values(argv, placeholders, cwd)
+        values = parse_values(argv, placeholders, cwd, same_dir_args(rec))
         script = script_for(fence, values, root)
     except Refusal as exc:
         return refuse(exc.subject or fid, exc.reason, err)

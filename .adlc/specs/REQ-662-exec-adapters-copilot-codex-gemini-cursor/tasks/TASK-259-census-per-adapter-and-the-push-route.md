@@ -1,7 +1,7 @@
 ---
 id: TASK-259
 title: "One fence census per adapter, a runner that accepts the union, and the branch push through the runner"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17

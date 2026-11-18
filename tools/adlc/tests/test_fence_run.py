@@ -1,7 +1,9 @@
-"""fence-run: the one admitted entry point (REQ-682 BR-3, BR-5, BR-6, BR-9, BR-11, AC-5, AC-6)."""
+"""fence-run: the one admitted entry point (REQ-682 BR-3, BR-5, BR-6, BR-9, BR-11, AC-5, AC-6),
+accepting the union of every exec-capable adapter's runner routes (REQ-662 ADR-8, ADR-9)."""
 
 import io
 import os
+import shutil
 import subprocess
 import sys
 
@@ -11,6 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 sys.path.insert(0, HERE)
 
+import exec_adapter as ea  # noqa: E402
 import exec_matcher as em  # noqa: E402
 import fence_census as fc  # noqa: E402
 import fence_run as fr  # noqa: E402
@@ -36,24 +39,43 @@ HOSTILE = ("$(touch {s})", "`touch {s}`", "x;touch {s}", "x\ntouch {s}", "--forc
            "HEAD:main", "../x", "-x")
 
 
+MATCHER_NONE = os.path.join(HERE, "fixtures", "harness", "fake-exec-file.yml")
+PUSH_KEY = "proceed/phase-0-setup.md#6"
+
+
 @pytest.fixture(scope="module")
 def records():
-    return fc.census(TOOLKIT)
+    return fc.census(TOOLKIT, ea.load("claude", TOOLKIT))
 
 
-@pytest.fixture
-def cached(monkeypatch, records):
-    """The census once per test module: every fence-run call recomputes it otherwise, which is
-    the property ``test_census_recomputed_every_call`` holds; here it only costs time."""
+def memo_census(monkeypatch):
+    """Memoize ``fc.census`` per root and adapter: every fence-run call recomputes it otherwise,
+    which is the property ``test_census_recomputed_every_call`` holds; here it only costs
+    time."""
     real = fc.census
     memo = {}
 
     def census(root, adapter=None):
-        if root not in memo:
-            memo[root] = real(root, adapter)
-        return memo[root]
+        key = (root, adapter.name if adapter is not None else None)
+        if key not in memo:
+            memo[key] = real(root, adapter)
+        return memo[key]
     monkeypatch.setattr(fc, "census", census)
+
+
+@pytest.fixture
+def cached(monkeypatch, records):
+    memo_census(monkeypatch)
     return records
+
+
+@pytest.fixture(scope="module")
+def two(tmp_path_factory):
+    """A toolkit copy with two exec-capable adapters: ``claude`` (matcher modelled) and
+    ``fake-exec-file`` (``matcher: none``), and each one's census."""
+    root = rs.toolkit_copy(str(tmp_path_factory.mktemp("two") / "tk"))
+    shutil.copy(MATCHER_NONE, os.path.join(root, "harness"))
+    return root, {a.name: fc.census(root, a) for a in fc.exec_adapters(root)}
 
 
 def _by_route(records, route):
@@ -124,17 +146,140 @@ def test_valid_run_exits_with_fence_status(cached, wc):
 
 
 def test_census_recomputed_every_call(monkeypatch, wc):
+    """Each call recomputes every exec-capable adapter's census: nothing is cached (ADR-2)."""
     calls = []
     real = fc.census
 
     def counting(root, adapter=None):
-        calls.append(root)
+        calls.append((root, adapter.name))
         return real(root, adapter)
     monkeypatch.setattr(fc, "census", counting)
     fid = next(r["id"] for r in real(TOOLKIT) if r["route"] == "excised")
     _run(fid, [], wc)
     _run(fid, [], wc)
-    assert len(calls) == 2
+    names = [a.name for a in fc.exec_adapters(TOOLKIT)]
+    assert calls == [(TOOLKIT, n) for n in names] * 2
+
+
+# ------------------------------------------------------------------------ REQ-662 ADR-8
+def test_runner_accepts_the_union_of_runner_routes(two, wc, monkeypatch):
+    """AC-24: a fence `runner` on one adapter and `direct` on another is accepted; a fence
+    `runner` on none is refused, naming its route. Nothing but the root chooses: no variable
+    or working-copy file changes the answer."""
+    root, censuses = two
+    memo_census(monkeypatch)
+    claude = {r["id"]: r for r in censuses["claude"]}
+    other = {r["id"]: r for r in censuses["fake-exec-file"]}
+    split = [i for i in claude if claude[i]["route"] == "direct" and
+             other[i]["route"] == "runner"]
+    assert any(i.startswith(PUSH_KEY + ":") for i in split), split
+    for fid in split:
+        fence, rec = fr.find(fid, root)
+        assert fence.id == fid and rec["route"] == "runner"
+    none = [i for i in claude if claude[i]["route"] in ("excised", "engine")]
+    assert none
+    for fid in none:
+        assert other[fid]["route"] == claude[fid]["route"]
+        rc, err = _run(fid, [], wc, root=root,
+                       environ=dict(os.environ, ADLC_EXEC_HARNESS="fake-exec-file"))
+        assert rc == fr.REFUSED and "its route is %s, not runner" % claude[fid]["route"] in err
+    (wc / "harness").mkdir()
+    shutil.copy(MATCHER_NONE, str(wc / "harness"))
+    push = next(i for i in split if i.startswith(PUSH_KEY + ":"))
+    rc, err = _run(push, [], wc)        # the real tree: the push is direct on its one adapter
+    assert rc == fr.REFUSED and "its route is direct, not runner" in err, err
+
+
+def test_split_routes_are_named_when_none_is_runner(monkeypatch, tmp_path):
+    """A refusal names each adapter's route when they differ and none is `runner`."""
+    root = rs.toolkit_copy(str(tmp_path / "tk"))
+    shutil.copy(MATCHER_NONE, os.path.join(root, "harness"))
+    real = fc.census
+
+    def no_runner(r, adapter=None):
+        out = [dict(rec) for rec in real(r, adapter)]
+        for rec in out:
+            if rec["route"] == "runner" and adapter.name == "fake-exec-file":
+                rec["route"] = "unrouted"
+        return out
+    monkeypatch.setattr(fc, "census", no_runner)
+    push = next(rec["id"] for rec in real(root, None) if rec["id"].startswith(PUSH_KEY + ":"))
+    with pytest.raises(fr.Refusal, match="direct on claude, unrouted on fake-exec-file"):
+        fr.find(push, root)
+
+
+# ------------------------------------------------------------------------ REQ-662 ADR-9
+def _git(*args, **kw):
+    env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_COMMITTER_NAME="t",
+               GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_EMAIL="t@example.invalid")
+    return subprocess.run(["git"] + list(args), env=env, check=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, universal_newlines=True, **kw).stdout
+
+
+@pytest.fixture
+def pushable(tmp_path):
+    """A working copy on `feat/REQ-901-thing` whose origin is a throwaway local bare repo,
+    with a decoy at every vendored partial (REQ-682 ADR-4)."""
+    remote = tmp_path / "origin.git"
+    _git("init", "-q", "--bare", str(remote))
+    work = tmp_path / "wc"
+    _git("init", "-q", "-b", "main", str(work))
+    _git("-C", str(work), "commit", "-q", "--allow-empty", "-m", "a")
+    _git("-C", str(work), "remote", "add", "origin", str(remote))
+    _git("-C", str(work), "checkout", "-q", "-b", "feat/REQ-901-thing")
+    _git("-C", str(work), "commit", "-q", "--allow-empty", "-m", "b")
+    sentinel = tmp_path / "S"
+    (work / ".adlc" / "partials").mkdir(parents=True)
+    for name in os.listdir(os.path.join(TOOLKIT, "partials")):
+        if name.endswith(".sh"):
+            (work / ".adlc" / "partials" / name).write_text("touch '%s'\n" % sentinel)
+    return work, remote, sentinel
+
+
+def _heads(remote):
+    return _git("--git-dir", str(remote), "for-each-ref", "--format=%(refname)").split()
+
+
+def test_branch_push_refuses_every_other_spelling(two, pushable, tmp_path, monkeypatch):
+    """BR-3, ADR-9: the push fence refuses every branch value but a REQ's own branch, and a
+    worktree value that is not the calling directory, each with exit 3 and one
+    `opaque_entry_refused` line, pushing nothing. A well-formed call pushes the branch to the
+    throwaway bare remote, and no decoy partial in the working copy runs."""
+    root, censuses = two
+    memo_census(monkeypatch)
+    work, remote, sentinel = pushable
+    push = next(r for r in censuses["fake-exec-file"] if r["id"].startswith(PUSH_KEY + ":"))
+    assert fr.same_dir_args(push) == ("worktree",)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", ADLC_DISABLE_DELEGATE="1")
+    sub = work / "sub"
+    sub.mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    bad = [["--arg", "worktree=%s" % work, "--arg", "branch=%s" % b]
+           for b in ("main", "+feat/x", "feat/x:main", "--force", "", "feat/REQ-901-thing\n",
+                     "HEAD:refs/heads/main", "refs/heads/main")]
+    bad += [["--arg", "worktree=%s" % w, "--arg", "branch=feat/REQ-901-thing"]
+            for w in (str(sub), str(tmp_path / "elsewhere"), str(tmp_path), "sub", ".")]
+    bad += [["--arg", "branch=feat/REQ-901-thing"],
+            ["--arg", "worktree=%s" % work, "--arg", "branch=feat/a", "--arg", "branch=feat/b"]]
+    for argv in bad:
+        rc, err = _run(push["id"], argv, work, environ=env, root=root)
+        lines = err.splitlines()
+        assert rc == fr.REFUSED, (argv, rc, err)
+        assert len(lines) == 1 and lines[0].startswith("opaque_entry_refused: "), (argv, err)
+    assert _heads(remote) == []
+    rc, err = _run(push["id"], ["--arg", "worktree=%s" % work, "--arg",
+                                "branch=feat/REQ-901-thing"], work, environ=env, root=root)
+    assert rc == 0, err
+    assert _heads(remote) == ["refs/heads/feat/REQ-901-thing"]
+    assert _git("-C", str(work), "rev-parse", "--abbrev-ref", "@{upstream}").strip() == \
+        "origin/feat/REQ-901-thing"
+    assert not sentinel.exists()
+    link = tmp_path / "link"
+    link.symlink_to(work)
+    rc, err = _run(push["id"], ["--arg", "worktree=%s" % link, "--arg",
+                                "branch=feat/REQ-901-thing"], work, environ=env, root=root)
+    assert rc == 0, err                  # the same directory by real path
 
 
 # ------------------------------------------------------------------------ BR-3, BR-5
@@ -236,7 +381,6 @@ def test_hostile_values_never_run_code(cached, wc, tmp_path):
     stubs = rs.install(str(tmp_path / "bin"), log)
     env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"], ADLC_FORGE_MOCK="1",
                ADLC_DISABLE_DELEGATE="1", ADLC_REPOS_ROOT=str(tmp_path))
-    import exec_adapter as ea
     adapter = ea.load("claude", TOOLKIT)
     policy = fc.exec_policy(TOOLKIT, adapter)
     cases = refused = 0
@@ -259,7 +403,8 @@ def test_value_reaches_the_fence_only_as_data(tmp_path):
     path = os.path.join(root, "validate", "SKILL.md")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write('\n```sh\nprintf \'%s\' "$NEW_BODY"\n```\n')
-    fid = [r for r in fc.census(root) if r["id"].startswith("validate/SKILL.md#")][-1]["id"]
+    fid = [r for r in fc.census(root, ea.load("claude", root))
+           if r["id"].startswith("validate/SKILL.md#")][-1]["id"]
     wc = tmp_path / "wc"
     wc.mkdir()
     sentinel = tmp_path / "S"
@@ -298,7 +443,8 @@ def test_delegation_off_takes_fallback(tmp_path, monkeypatch):
         fh.write("\n```sh\n" + fc.ROOT_LINE + "\nif [ -f .adlc/partials/delegate-gate.sh ]; then "
                  ". .adlc/partials/delegate-gate.sh; else . \"$ADLC_TOOLKIT_ROOT/partials/"
                  "delegate-gate.sh\"; fi\nadlc_delegate_gate_check; printf 'gate=%s\\n' \"$?\"\n```\n")
-    fid = [r for r in fc.census(root) if r["id"].startswith("validate/SKILL.md#")][-1]["id"]
+    fid = [r for r in fc.census(root, ea.load("claude", root))
+           if r["id"].startswith("validate/SKILL.md#")][-1]["id"]
     wc = tmp_path / "wc"
     wc.mkdir()
     base = {k: v for k, v in os.environ.items()
