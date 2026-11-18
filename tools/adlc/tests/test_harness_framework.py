@@ -450,6 +450,48 @@ def test_scope_vectors(tmp_path, sandbox):
     assert not os.listdir(os.environ["HOME"]) or os.listdir(os.environ["HOME"]) == [".fake-prefix"]
 
 
+def test_exec_files_render_through_the_adapters_format():
+    """REQ-662 ADR-3: the exec-scope files go through the adapter's own permissions format, with
+    no harness-name branch: the file-render fixture's `rules-json` holds both tiers in the rule
+    file and the deny tier alone in the user policy file. On its command-base granularity a deny
+    sharing a base with a routine allow has no spelling, and is reported, never written."""
+    fixture = load(os.path.join(FIX, "fake-exec-file.yml"))
+    runner = "/tk/tools/adlc/fence-run"
+    files = hr.render_exec_files(fixture, TOOLKIT, None, {"fence_runner": runner})
+    rule = json.loads(files.rule_file)["rules"]
+    policy = json.loads(files.user_policy_file)["rules"]
+    assert {r["kind"] for r in rule} == {"allow", "deny"}
+    assert {r["kind"] for r in policy} == {"deny"}
+    assert [r for r in rule if r["kind"] == "deny"] == policy
+    assert [r["spelling"] for r in rule if r["entry"] == hr.RUNNER_ENTRY] == [[runner]]
+    # `rm -rf` and `rm -f` are one command-base rule, written once.
+    spellings = [tuple(r["spelling"]) for r in policy]
+    assert len(spellings) == len(set(spellings)) and ("rm",) in spellings
+    unsupported = {f.command for f in files.findings if f.verdict == "deny-unsupported"}
+    assert {"git reset --hard", "gh pr merge"} <= unsupported
+    assert not [r for r in rule if r["kind"] == "deny" and r["spelling"] == ["git"]]
+    # Only a format whose pattern tokens are literal turns a glob deny away (LESSON-757).
+    assert [n for n, f in sorted(ha.FORMATS.items()) if f.get("literal_tokens")] == [
+        "starlark-prefix-rule"]
+
+
+def test_exec_deny_render_none_renders_no_deny(tmp_path):
+    """REQ-662 BR-4, BR-11: `exec.deny_render: none` is the adapter's word that no deny holds
+    headless, so at exec scope every deny-tier and engine_deny command is `deny-unsupported`
+    and none is rendered as a deny; the project render does not move."""
+    none = load(variant(tmp_path, "claude", [("  deny_render: flags\n", "  deny_render: none\n"),
+                                             ("  deny_flag: --disallowedTools\n", "")]))
+    failed = {"probes": {"ask-tier-deny": {"status": "fail"}}}
+    rules, findings, _x = hr.render_permissions(none, perms(), "exec", failed)
+    assert not [r for r in rules if r.kind == "deny"]
+    denied = [f for f in findings if f.verdict == "deny-unsupported"]
+    expected = hr.deny_commands(none, perms(), "exec")
+    assert len(denied) == len(expected) and all("deny_render is none" in f.detail
+                                                for f in denied)
+    assert [r.as_dict() for r in hr.render_permissions(none, perms(), "project")[0]] == \
+        [r.as_dict() for r in hr.render_permissions(claude(), perms(), "project")[0]]
+
+
 # --------------------------------------------------------------------------- BR-10 / AC-8
 def test_hooks_render(tmp_path, sandbox):
     block, findings = hr.render_hooks(claude(), ha.load_hooks(ha.hooks_path(TOOLKIT)))

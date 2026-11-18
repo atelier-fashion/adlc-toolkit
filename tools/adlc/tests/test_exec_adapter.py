@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 
 import exec_adapter as ea  # noqa: E402
 import harness_adapter as ha  # noqa: E402
+import harness_render as hr  # noqa: E402
 import toolkit_root  # noqa: E402
 
 TOOLKIT = toolkit_root.toolkit_root()
@@ -1060,6 +1061,281 @@ def test_child_env_disables_delegation_on_a_short_shell_timeout(adapter):
     assert "ADLC_DISABLE_DELEGATE" not in fixture.block["env_passthrough"]
     assert fixture.child_env(environ, "REQ-901", None, "/g", True) == {
         "HOME": "/h", "PATH": "/b", "ADLC_EXEC_RUN": "REQ-901", "ADLC_DISABLE_DELEGATE": "1"}
+
+
+# ------------------------------- the exec-scope files of a file-render block (REQ-662 ADR-3)
+PROBE_RESULTS = os.path.join(HERE, "fixtures", "probe-results")
+#: What the Codex-shaped fixture declares, and so what its result file must be recorded under.
+FILE_VERSION = "fake-exec-file 0.1.0"
+
+
+def _result(readings=None):
+    """The `prompt-pass` result file, with ``{probe/variant: status}`` readings changed."""
+    doc = json.load(open(os.path.join(PROBE_RESULTS, "prompt-pass.json"), encoding="utf-8"))
+    for key, status in (readings or {}).items():
+        probe, _, variant = key.partition("/")
+        if variant:
+            doc["probes"][probe].setdefault("sub_results", {})[variant] = {"status": status}
+        else:
+            doc["probes"][probe]["status"] = status
+    return doc
+
+
+def _codex_shaped(tmp_path, caps="", name="cx"):
+    """The file-render fixture with Codex's rule format: ``prefix_rule`` lines matched as a
+    token prefix, and the `git -C` spelling. ``caps`` is appended to ``capabilities``."""
+    text = _source("fake-exec-file")
+    for old, new in (("  permissions: rules-json\n", "  permissions: starlark-prefix-rule\n"),
+                     ("  allowlist_granularity: command-base\n",
+                      "  allowlist_granularity: token-prefix\n  git_c_spelling: [[git, -C]]\n"
+                      + caps)):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    d = tmp_path / name
+    d.mkdir()
+    path = d / "fake-exec-file.yml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _toolkit(tmp_path, routine=(), name="tk"):
+    """A ToolkitRoot holding this toolkit's templates/permissions.yml, with ``routine`` added as
+    one routine entry, and a fence runner where the adapter names it."""
+    root = tmp_path / name
+    (root / "templates").mkdir(parents=True)
+    (root / "tools" / "adlc").mkdir(parents=True)
+    (root / "tools" / "adlc" / "fence-run").write_text("#!/bin/sh\n")
+    text = open(ha.permissions_path(TOOLKIT), encoding="utf-8").read()
+    if routine:
+        entry = ("  - id: fixture.extra\n    tier: routine\n    note: a test entry\n"
+                 "    commands:\n" + "".join("      - [%s]\n" % ", ".join(c) for c in routine))
+        assert text.count("  - id: shell.pwd\n") == 1
+        text = text.replace("  - id: shell.pwd\n", entry + "  - id: shell.pwd\n")
+    (root / "templates" / "permissions.yml").write_text(text, encoding="utf-8")
+    return str(root)
+
+
+def _exec_adapter(path, toolkit=TOOLKIT):
+    return ea.ExecAdapter(ha.load_adapter(str(path), toolkit=TOOLKIT), toolkit)
+
+
+def _rules(text):
+    """``[(decision, pattern tuple)]`` of each ``prefix_rule`` line; every other line is a
+    comment or blank."""
+    out = []
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = hr._PREFIX_RULE_RE.match(line)
+        assert match, line
+        out.append((match.group(2), tuple(json.loads(match.group(1)))))
+    return out
+
+
+def _starts(form, spelling):
+    return tuple(form[:len(spelling)]) == tuple(spelling)
+
+
+def test_file_render_holds_allows_runner_and_forbidden(tmp_path):
+    """BR-3, AC-4: from templates/permissions.yml the Codex-shaped fixture's rule file holds one
+    allow per routine spelling BR-3 keeps, the fence-runner allow as the vetted absolute path,
+    and `forbidden` for every deny-tier command and every engine_deny sub-command. No entry is
+    a fence rule or an opener. The user policy file holds the deny tier and no allow, and the
+    rendered deny set is a superset of today's ask-tier set."""
+    adapter = _exec_adapter(_codex_shaped(tmp_path))
+    files = adapter.rule_files(BRANCH, result=_result())
+    rules = _rules(files.rule_file)
+    allow = [p for d, p in rules if d == "allow"]
+    forbidden = [p for d, p in rules if d == "forbidden"]
+    assert {d for d, _p in rules} == {"allow", "forbidden"}
+    perms = ha.load_permissions(ha.permissions_path(TOOLKIT))
+    deny = [tuple(c) for e in perms["entries"] if e["tier"] == "deny" for c in e["commands"]]
+    engine = [tuple(c) for c in adapter.block["engine_deny"]]
+    # The kept allows, judged here by hand: under token-prefix matching an allow wraps a deny
+    # when any form of it starts with the allow's tokens.
+    forms = [f for d in deny + engine for f in (d, ("git", "-C", ".") + d[1:],
+                                                ("NAME=1",) + d)]
+    routine = [tuple(c) for e in perms["entries"] if e["tier"] == "routine"
+               and e["id"] != "fence.partial-source" for c in e["commands"]]
+    kept = [c for c in routine + [("git", "-C")] if not any(_starts(f, c) for f in forms)]
+    runner = adapter.fence_runner()
+    assert os.path.isabs(runner) and runner.endswith("/tools/adlc/fence-run")
+    assert sorted(allow) == sorted(set(kept) | {(runner,)})
+    assert allow.count((runner,)) == 1 and len(allow) == len(set(allow))
+    assert ("git", "push") not in allow and ("git", "-C") not in allow
+    assert sorted(forbidden) == sorted(set(deny + engine))
+    for sub in ("approve", "reject", "answer", "abort"):
+        assert ("adlc", "sprint-exec", sub) in forbidden
+    # No fence rule and no opener (REQ-682 BR-7, REQ-662 BR-3).
+    for pattern in allow:
+        assert not hr.forbidden_first_token(pattern), pattern
+        assert pattern[0] not in ("if", "[", ".", "source", "sh", "bash", "eval")
+        assert not pattern[0].startswith("ADLC_TOOLKIT_ROOT=")
+    body = [line for line in files.rule_file.splitlines() if not line.startswith("#")]
+    assert not [line for line in body if "partials/" in line or "ADLC_TOOLKIT_ROOT" in line]
+    fence = [f for f in files.findings if f.entry == "fence.partial-source"]
+    assert [f.verdict for f in fence] == ["inexpressible"] and "runner" in fence[0].detail
+    # The user policy file: the deny tier only, never an allow (BR-4, LESSON-769).
+    policy = _rules(files.user_policy_file)
+    assert policy and {d for d, _p in policy} == {"forbidden"}
+    assert sorted(p for _d, p in policy) == sorted(forbidden)
+    # A superset of today's ask-tier set: the committed render's `prompt` rules.
+    project, _f, _x = hr.render_permissions(adapter.adapter, perms, "project")
+    asked = {r.spelling for r in project if r.kind == "confirm"}
+    assert asked and asked <= set(forbidden)
+    # Nothing travels as a flag on this form, and the launch carries no rule.
+    assert adapter.tiers(BRANCH, result=_result()) == ([], [])
+    assert adapter.rule_files(BRANCH, result=_result()).rule_file == files.rule_file
+
+
+def test_a_flags_block_has_no_rule_files(adapter):
+    """The must-not-fire case: both of claude's tiers are flags, so there is no file to render,
+    and its tiers read the same with and without the probe result."""
+    assert adapter.rule_files(BRANCH) is None
+    result = hr.result_for(adapter.adapter, TOOLKIT)
+    assert adapter.tiers(BRANCH, result=result) == adapter.tiers(BRANCH)
+
+
+def test_only_the_git_c_shape_is_restored(tmp_path):
+    """AC-23, BR-3: a deny-tier `git -C` form with no valid `git-c` pass omits the `git -C`
+    allow at exec scope and names the omission in the fidelity report. A `git-c` record that
+    reads pass and agrees with the result file restores that one allow; `env-prefix` and
+    `shell-opener` records that read pass restore nothing, because no REQ-664 variant
+    measures them."""
+    passing = ("    %s: {mechanism: deny, result: pass, harness_version: \"%s\", "
+               "source: probe}\n")
+    caps = "  deny_under_allow:\n" + "".join(passing % (shape, FILE_VERSION) for shape in (
+        "git-c", "env-prefix", "shell-opener"))
+    toolkit = _toolkit(tmp_path, routine=(["NAME=1", "git"], ["bash", "-lc"]))
+    adapter = _exec_adapter(_codex_shaped(tmp_path, caps), toolkit)
+
+    def render(result):
+        files = adapter.rule_files(BRANCH, result=result)
+        return [p for d, p in _rules(files.rule_file) if d == "allow"], files.findings
+
+    # The result file's wrapped-allow reads fail (prompt-pass), so the record is no pass.
+    allow, findings = render(_result())
+    assert ("git", "-C") not in allow
+    gitc = [f for f in findings if f.command == "git -C"]
+    assert gitc and all(f.verdict == "inexpressible" and "(shape git-c)" in f.detail
+                        for f in gitc)
+    report = adapter.exec_report(_result())
+    assert any("[git -C] inexpressible" in line and "shape git-c" in line
+               for line in report.report)
+    # wrapped-allow pass: only the `git -C` allow comes back.
+    passed = _result({"ask-tier-deny/wrapped-allow": "pass"})
+    allow, findings = render(passed)
+    assert ("git", "-C") in allow
+    assert ("git", "push") not in allow and ("git", "branch") not in allow
+    assert ("NAME=1", "git") not in allow and ("bash", "-lc") not in allow
+    shapes = {f.command: f.detail for f in findings if f.entry == "fixture.extra"}
+    assert "(shape env-prefix)" in shapes["NAME=1 git"]
+    assert "(shape shell-opener)" in shapes["bash -lc"]
+    for shape in ("env-prefix", "shell-opener"):
+        assert not hr.restore_ok(adapter.adapter, shape, "exec", passed)
+    assert hr.restore_ok(adapter.adapter, "git-c", "exec", passed)
+    # A pass recorded under another version is no pass at this one.
+    other = dict(passed, harness_version="fake-exec-file 0.2.0")
+    assert ("git", "-C") not in render(other)[0]
+    # Without the result file nothing is restored: the render never assumes one.
+    assert ("git", "-C") not in render(None)[0]
+
+
+def test_unspellable_deny_is_deny_unsupported(tmp_path):
+    """BR-4, AC-21: a deny the harness cannot spell is `deny_unsupported`, never an inert rule.
+    Codex's prefix_rule reads `*` only as itself, so an engine_deny glob gets no `forbidden`
+    line and is reported; a destructive move is marked so."""
+    path = _codex_shaped(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    old = "    - [adlc, sprint-exec, abort]\n"
+    path.write_text(text.replace(old, old + '    - [git, -C, "*", push, --force]\n'),
+                    encoding="utf-8")
+    adapter = _exec_adapter(path)
+    files = adapter.rule_files(BRANCH, result=_result())
+    assert not [p for _d, p in _rules(files.rule_file) if "*" in p]
+    report = adapter.exec_report(_result())
+    [item] = report.deny_unsupported
+    assert item.entry == "exec.engine_deny" and item.command == "git -C * push --force"
+    assert "`*` only as itself" in item.reason and not item.destructive
+    assert report.whole_tier is None
+    # The same entry on claude's flags spells a glob deny (BUG-269): nothing is unsupported.
+    assert ea.load("claude", TOOLKIT).exec_report().deny_unsupported == []
+
+
+def test_local_destructive_moves():
+    """BR-4's list, matched as whole tokens: a one-letter flag inside a cluster counts."""
+    for argv in (["git", "reset", "--hard"], ["git", "clean", "-f"], ["git", "clean", "-fd"],
+                 ["git", "branch", "-D"], ["rm", "-rf"], ["rm", "-f"], ["gh", "release"]):
+        assert ea.local_destructive(argv), argv
+    for argv in (["git", "push", "--force"], ["gh", "pr", "merge"], ["terraform", "apply"],
+                 ["git", "branch", "-d"], ["git", "reset", "--soft"], ["rmdir", "x"],
+                 ["adlc", "sprint-exec", "approve"], ["git", "clean", "-n"]):
+        assert not ea.local_destructive(argv), argv
+
+
+def test_exec_report_reads_the_whole_tier_under_allow_unverified(tmp_path):
+    """BR-4, AC-16: under --allow-unverified with an unverified verdict whose ask-tier-deny is
+    not pass, every deny-tier and engine_deny command is deny_unsupported. A verified verdict,
+    or one whose ask-tier-deny passes, changes nothing (the must-not-fire case)."""
+    import exec_verify as ev
+    adapter = _exec_adapter(_codex_shaped(tmp_path))
+    perms = ha.load_permissions(ha.permissions_path(TOOLKIT))
+    every = [" ".join(c) for e in perms["entries"] if e["tier"] == "deny" for c in e["commands"]]
+    every += [" ".join(c) for c in adapter.block["engine_deny"]]
+    for reading in ("fail", "unknown", "missing"):
+        verdict = ev.Verdict([ev.Problem("ask-tier-deny", "x")], {"ask-tier-deny": reading})
+        report = adapter.exec_report(_result(), verdict, allow_unverified=True)
+        assert [i.command for i in report.deny_unsupported] == every
+        assert report.whole_tier and reading in report.whole_tier
+        assert any(i.destructive for i in report.deny_unsupported)
+    unverified = ev.Verdict([ev.Problem("shell-timeout", "x")], {"ask-tier-deny": "pass"})
+    fail = ev.Verdict([ev.Problem("ask-tier-deny", "x")], {"ask-tier-deny": "fail"})
+    for verdict, flag in ((unverified, True), (fail, False), (ev.Verdict([]), True)):
+        report = adapter.exec_report(_result(), verdict, allow_unverified=flag)
+        assert report.deny_unsupported == [] and report.whole_tier is None
+
+
+def test_env_assignment_opens_no_allow(adapter, tmp_path):
+    """REQ-662 BR-3: an env-assignment first token is refused like an opener, for every
+    harness: by the loader, by the engine's extra-allow vetting and by the render."""
+    assert ha.first_token_problem("ADLC_TOOLKIT_ROOT=/x") == "is an env assignment"
+    assert ha.first_token_problem("git") is None
+    assert hr.forbidden_first_token(("FOO=1", "make"))
+    assert not hr.forbidden_first_token(("make", "FOO=1"))
+    with pytest.raises(ea.ExecRefused, match="env assignment"):
+        adapter.tiers(BRANCH, [["ADLC_TOOLKIT_ROOT=/abs/tk", "git"]])
+    text = open(os.path.join(TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
+    bad = tmp_path / "claude.yml"
+    bad.write_text(text.replace("  allow_extra_exact:\n",
+                                "  allow_extra_exact:\n    - [GIT_DIR=/tmp/x, git]\n", 1))
+    with pytest.raises(ha.AdapterError, match="env assignment"):
+        ha.load_adapter(str(bad), toolkit=TOOLKIT)
+    import exec_matcher as em
+    assert em.opener_allows({"allow": ["Bash(ADLC_TOOLKIT_ROOT=:*)"]}) == [
+        "Bash(ADLC_TOOLKIT_ROOT=:*)"]
+    toolkit = _toolkit(tmp_path, routine=(["FOO=1", "make"],))
+    perms = ha.load_permissions(ha.permissions_path(toolkit))
+    for scope in ("project", "exec"):
+        rules, findings, _x = hr.render_permissions(adapter.adapter, perms, scope)
+        assert not [r for r in rules if r.entry == "fixture.extra"]
+        assert [f.detail for f in findings if f.entry == "fixture.extra"] == [
+            "omitted: first token `FOO=1` is an env assignment"]
+
+
+def test_a_runner_path_with_a_space_is_refused_not_quoted(tmp_path):
+    """BR-3: the runner allow is the vetted absolute path, spelled the way any routine prefix
+    is; a path a prefix rule would have to quote is refused, never quoted."""
+    adapter = _exec_adapter(_codex_shaped(tmp_path)).adapter
+    for bad in ("/tool kit/tools/adlc/fence-run", "tools/adlc/fence-run",
+                "/tk/../tools/adlc/fence-run", "/tk/tools/adlc/fence-run'"):
+        with pytest.raises(hr.RenderError, match="never quoted"):
+            hr.render_exec_files(adapter, TOOLKIT, _result(), {"fence_runner": bad})
+    files = hr.render_exec_files(adapter, TOOLKIT, _result(),
+                                 {"fence_runner": "/tk/tools/adlc/fence-run"})
+    assert ("allow", ("/tk/tools/adlc/fence-run",)) in _rules(files.rule_file)
+    spaced = _toolkit(tmp_path, name="tool kit")
+    with pytest.raises(ea.ExecRefused, match="prefix rule can match"):
+        _exec_adapter(_codex_shaped(tmp_path, name="cx2"), spaced).rule_files(BRANCH)
 
 
 #: The engine's own modules. Each is followed through every tools/adlc module it imports.

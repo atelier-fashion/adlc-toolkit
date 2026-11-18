@@ -388,13 +388,13 @@ def admits(policy, cmd):
 
 def opener_allows(policy):
     """Allow rules that open every line or run their arguments: a first-token wildcard, an
-    opener (``if``, ``sh``, ``.``, ``source``, ``eval``, ``python*``, …) (BR-7)."""
+    opener (``if``, ``sh``, ``.``, ``source``, ``eval``, ``python*``, …) (BR-7), or an env
+    assignment (``NAME=…``, REQ-662 BR-3)."""
     policy = Policy.of(policy)
     bad = []
     for rule in policy.allow:
         first = rule.first_token
-        if not rule.text.strip() or first == "*" or first in ha.FORBIDDEN_FIRST_TOKENS or \
-                first.startswith(ha.FORBIDDEN_FIRST_TOKEN_PREFIXES):
+        if not rule.text.strip() or first == "*" or ha.first_token_problem(first):
             bad.append(rule.raw)
     return bad
 

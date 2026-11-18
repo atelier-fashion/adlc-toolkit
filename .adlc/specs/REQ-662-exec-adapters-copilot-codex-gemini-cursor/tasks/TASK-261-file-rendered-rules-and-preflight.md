@@ -1,7 +1,7 @@
 ---
 id: TASK-261
 title: "Rules rendered to files at exec scope, with the fidelity and deny pre-flight"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17

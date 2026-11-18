@@ -10,6 +10,7 @@ data"). Standard library only.
 import json
 import os
 import re
+from collections import namedtuple
 
 import exec_matcher as em
 import harness_adapter as ha
@@ -24,8 +25,8 @@ _SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _CLAIM_RE = re.compile(r"^Terminal state: ([a-z_-]+)\s*$")
 _EXTRA_RE = re.compile(r"^[A-Za-z0-9_./=+:@%,*-]+$")
 #: The fence runner's resolved path: one a prefix rule matches unquoted (probe row 6), so no
-#: space, quote or glob, and never a relative one (REQ-682 ADR-8).
-_RUNNER_PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
+#: space, quote or glob, and never a relative one (REQ-682 ADR-8). The renderer holds the same.
+_RUNNER_PATH_RE = hr.RUNNER_PATH_RE
 #: A file root becomes a gitignore-style pattern, so it may hold no glob, quote, space or
 #: empty, `.` or `..` segment: any of those would widen the rule (BUG-265).
 _ROOT_RE = re.compile(r"^(/[A-Za-z0-9_.-]+)+$")
@@ -47,6 +48,50 @@ ADDITIONS = ("operator", "isolation", "add_dir", "allow", "deny")
 #: Programs whose first argument names a subcommand: their command base is two tokens.
 _SUBCOMMAND_PROGRAMS = ("git", "gh", "az", "adlc", "terraform", "gcloud", "npm", "docker",
                         "kubectl")
+
+
+#: The local destructive moves REQ-662 BR-4 names. A ``deny_unsupported`` entry holding one
+#: refuses the run whatever protects the branch: a forge's protection does not reach a local
+#: working copy. A one-letter flag is matched inside a cluster too (``-fd`` holds ``-f``).
+LOCAL_DESTRUCTIVE = (("reset", "--hard"), ("clean", "-f"), ("branch", "-D"), ("rm",),
+                     ("release",))
+
+#: One deny-tier or ``engine_deny`` command the run has no deny for (REQ-662 BR-4): its entry
+#: id, its command text, why, and whether it is a local destructive move.
+DenyUnsupported = namedtuple("DenyUnsupported", "entry command reason destructive")
+
+
+def _token_is(token, want):
+    if len(want) == 2 and want[0] == "-" and want[1] != "-":
+        return len(token) > 1 and token[0] == "-" and token[1] != "-" and want[1] in token[1:]
+    return token == want
+
+
+def local_destructive(argv):
+    """Whether ``argv`` holds one of :data:`LOCAL_DESTRUCTIVE` as a run of whole tokens."""
+    argv = [str(t) for t in argv]
+    for move in LOCAL_DESTRUCTIVE:
+        for i in range(len(argv) - len(move) + 1):
+            if all(_token_is(argv[i + k], want) for k, want in enumerate(move)):
+                return True
+    return False
+
+
+class ExecReport(object):
+    """What the pre-flight reads from one exec-scope render (REQ-662 BR-3, BR-4).
+
+    ``findings`` are the render's; ``report`` is the ``allowlist-fidelity`` report the run log
+    carries; ``undeclared`` the findings ``accepted_fidelity`` does not declare at ``exec``;
+    ``deny_unsupported`` a :data:`DenyUnsupported` per command the run has no deny for; and
+    ``whole_tier`` the reason the whole deny tier is in it, or None."""
+    __slots__ = ("findings", "report", "undeclared", "deny_unsupported", "whole_tier")
+
+    def __init__(self, findings, report, undeclared, deny_unsupported, whole_tier):
+        self.findings = findings
+        self.report = report
+        self.undeclared = undeclared
+        self.deny_unsupported = deny_unsupported
+        self.whole_tier = whole_tier
 
 
 def _command_base(spelling):
@@ -302,8 +347,8 @@ class ExecAdapter(object):
                 raise ExecRefused("allow entry %r holds a token the engine will not spell: %r"
                                   % (" ".join(argv), token))
         if hr.forbidden_first_token(argv):
-            raise ExecRefused("allow entry %r starts with a token that runs its arguments"
-                              % " ".join(argv))
+            raise ExecRefused("allow entry %r starts with a token that %s"
+                              % (" ".join(argv), ha.first_token_problem(argv[0])))
         policy = em.Policy([self.spell(list(argv), exact)])
         for entry in entries:
             if entry["kind"] != "deny":
@@ -362,41 +407,115 @@ class ExecAdapter(object):
                               "a path a prefix rule can match: nothing is launched" % path)
         return path
 
-    def tiers(self, branch, config_extra=(), write_roots=(), read_roots=()):
-        """``(allow, deny)``: the argv elements of both tiers (BR-8, ADR-6).
+    def _render(self, result):
+        """The exec-scope render's entries and findings, with the probe result ``result``
+        (REQ-662 ADR-3). A render the probe forbids refuses the launch."""
+        try:
+            return hr.exec_entries(self.adapter, self.toolkit, result)
+        except hr.RenderError as exc:
+            raise ExecRefused(str(exc))
+
+    def _extras(self, branch, config_extra, entries):
+        """Every extra allow as ``(argv, exact)``, each vetted against the deny tier: the
+        adapter's ``allow_extra`` and ``allow_extra_exact``, then the project's."""
+        out = []
+        for key, exact in (("allow_extra", False), ("allow_extra_exact", True)):
+            for argv in self.block.get(key, []):
+                spelled = [t.replace("{branch}", branch) for t in argv]
+                self.vet_extra(spelled, entries, exact=exact)
+                out.append((spelled, exact))
+        for argv in config_extra:
+            self.vet_extra(list(argv), entries)
+            out.append((list(argv), False))
+        return out
+
+    def _runner(self, entries):
+        runner = self.fence_runner()
+        if runner and self.has_matcher:
+            # On matcher: none nothing can vet the runner allow further: it is admitted by the
+            # path fence_runner() vetted, and the reach audit bounds what it runs (REQ-682).
+            self.vet_extra([runner], entries)
+        return runner
+
+    def tiers(self, branch, config_extra=(), write_roots=(), read_roots=(), result=None):
+        """``(allow, deny)``: the argv elements of the tiers that travel as flags (BR-8, ADR-6).
 
         The file tools reach only ``write_roots`` (read and write) and ``read_roots`` (read):
         every repo's working copy and ToolkitRoot at a launch (BUG-265). A fence runs through
-        the fence runner, admitted by its one absolute path (REQ-682 ADR-1).
+        the fence runner, admitted by its one absolute path (REQ-682 ADR-1). ``result`` is the
+        REQ-664 result file, read from ToolkitRoot: only a valid ``deny_under_allow`` pass in
+        it restores a wrapper allow (REQ-662 ADR-3).
+
+        A tier the adapter renders to a file travels in :meth:`rule_files`' text, never as a
+        flag: on ``allow_render: file`` the allow list is empty, and the deny list is empty
+        unless ``deny_render`` is ``flags``. Every extra allow is still vetted.
         """
-        entries, _findings = hr.exec_entries(self.adapter, self.toolkit, None)
-        allow = list(self.block.get("allow_tools", []))
-        allow += self.file_rules(write_roots, read_roots)
-        runner = self.fence_runner()
-        if runner:
-            # On matcher: none nothing can vet the runner allow further: it is admitted by the
-            # path fence_runner() vetted, and the reach audit bounds what it runs (REQ-682).
-            if self.has_matcher:
-                self.vet_extra([runner], entries)
-            allow.append(self.spell([runner]))
-        deny = []
-        for entry in entries:
-            if entry["kind"] == "allow":
-                allow.append(self.spell(entry["spelling"], entry.get("exact", False)))
-            elif self.can_deny:
-                deny.append(self.spell(entry["spelling"], deny=True))
-        for argv in self.block.get("allow_extra", []):
-            spelled = [t.replace("{branch}", branch) for t in argv]
-            self.vet_extra(spelled, entries)
-            allow.append(self.spell(spelled))
-        for argv in self.block.get("allow_extra_exact", []):
-            spelled = [t.replace("{branch}", branch) for t in argv]
-            self.vet_extra(spelled, entries, exact=True)
-            allow.append(self.spell(spelled, exact=True))
-        for argv in config_extra:
-            self.vet_extra(list(argv), entries)
-            allow.append(self.spell(argv))
+        entries, _findings = self._render(result)
+        extras = self._extras(branch, config_extra, entries)
+        runner = self._runner(entries)
+        allow, deny = [], []
+        if self.block.get("allow_render") == "flags":
+            allow = list(self.block.get("allow_tools", []))
+            allow += self.file_rules(write_roots, read_roots)
+            if runner:
+                allow.append(self.spell([runner]))
+            allow += [self.spell(entry["spelling"], entry.get("exact", False))
+                      for entry in entries if entry["kind"] == "allow"]
+            allow += [self.spell(argv, exact=exact) for argv, exact in extras]
+        if self.can_deny and self.block.get("deny_render") == "flags":
+            deny = [self.spell(entry["spelling"], deny=True)
+                    for entry in entries if entry["kind"] == "deny"]
         return list(dict.fromkeys(allow)), list(dict.fromkeys(deny))
+
+    def rule_files(self, branch, config_extra=(), result=None):
+        """The text of the files this adapter's rules travel in, a
+        ``harness_render.ExecFiles`` (REQ-662 ADR-3), or None when both tiers are flags.
+        Rendered, never written: the engine writes and checksums them for the run.
+
+        The fence-runner allow is the path :meth:`fence_runner` vets, and an extra allow is
+        vetted as :meth:`tiers` vets it, so the two forms refuse the same launches."""
+        if "file" not in (self.block.get("allow_render"), self.block.get("deny_render")):
+            return None
+        entries, _findings = self._render(result)
+        extras = self._extras(branch, config_extra, entries)
+        values = {"fence_runner": self._runner(entries), "allow_extra": extras}
+        try:
+            return hr.render_exec_files(self.adapter, self.toolkit, result, values)
+        except hr.RenderError as exc:
+            raise ExecRefused(str(exc))
+
+    def exec_report(self, result=None, verdict=None, allow_unverified=False):
+        """What the pre-flight judges of the exec-scope render (REQ-662 BR-3, BR-4), an
+        :class:`ExecReport`.
+
+        The findings are compared with ``accepted_fidelity`` at ``exec``. Each deny-tier or
+        ``engine_deny`` command the render has no deny for is ``deny_unsupported``, and under
+        ``allow_unverified`` with ``verdict`` (``exec_verify.Verdict``) unverified and its
+        ``ask-tier-deny`` reading not ``pass`` every one is: no deny was measured to hold."""
+        _entries, findings = self._render(result)
+        undeclared = hr.exec_undeclared(self.adapter, findings)
+        report = hr.exec_fidelity_report(self.adapter, findings, undeclared)
+        reasons = []
+        for f in findings:
+            if f.verdict == "deny-unsupported":
+                reasons.append((f.entry, f.command, f.detail or "no deny spelling"))
+        whole = None
+        if allow_unverified and verdict is not None and not verdict.verified:
+            reading = verdict.readings.get("ask-tier-deny", "missing")
+            if reading != "pass":
+                whole = ("--allow-unverified, and ask-tier-deny reads %s, so no deny is measured "
+                         "to hold" % reading)
+                perms = ha.load_permissions(ha.permissions_path(self.toolkit))
+                reasons = [(did, " ".join(dcmd), whole)
+                           for did, dcmd, _m in hr.deny_commands(self.adapter, perms, "exec")]
+        out, seen = [], set()
+        for entry, command, reason in reasons:
+            if (entry, command) in seen:
+                continue
+            seen.add((entry, command))
+            out.append(DenyUnsupported(entry, command, reason,
+                                       local_destructive(command.split(" "))))
+        return ExecReport(findings, report, undeclared, out, whole)
 
     def launch_argv(self, binary, allow, deny, resume=None, extra=(), add_dir=None,
                     settings=None, values=None):

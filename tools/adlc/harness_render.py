@@ -37,7 +37,7 @@ import toml_merge  # noqa: E402
 FENCE_ID = "fence.partial-source"
 #: The fixed sample tail BR-9 appends to an exact deny command.
 SAMPLE_TAIL = ("origin", "feature")
-_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_ENV_ASSIGN_RE = ha.ENV_ASSIGN_RE
 
 RESTRAINT_SENTENCE = ("This harness does not enforce this agent's tool list: do not create, "
                       "edit, delete or write files, and do not run commands that do, unless "
@@ -57,6 +57,14 @@ ROUTING_MARKER = "delegate-routing:start"
 #: Recognized as input only: an upgrade must not double-append (REQ-522 ADR-6).
 ROUTING_LEGACY_MARKER = "kimi-delegation:start"
 _PREFIX_RULE_RE = re.compile(r'^prefix_rule\(pattern=(\[.*\]), decision="([a-z]+)"\)$')
+#: The fence runner's resolved path, as an exec allow spells it: absolute, and nothing a prefix
+#: rule would have to quote. A space is refused, never quoted (REQ-662 BR-3, REQ-682 ADR-8).
+RUNNER_PATH_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
+#: The entry id the fence-runner allow and an engine-vetted extra allow carry at exec scope:
+#: neither is a templates/permissions.yml entry (REQ-662 BR-3).
+RUNNER_ENTRY = "exec.fence_runner"
+EXTRA_ENTRY = "exec.allow_extra"
+ENGINE_DENY_ENTRY = "exec.engine_deny"
 
 
 class RenderError(ValueError):
@@ -214,6 +222,9 @@ def probe_record_problem(shape, record, result):
 
 def _mechanism_at(adapter, scope):
     if scope == "exec":
+        # `deny_render: none` is the adapter's word that no deny holds headless (BR-11).
+        if (adapter.get("exec") or {}).get("deny_render") == "none":
+            return "unsupported"
         return "deny" if adapter["capabilities"]["deny"] == "yes" else "unsupported"
     if scope == "printed":
         scope = "user"
@@ -302,12 +313,10 @@ def gated_scope(adapter):
 
 def forbidden_first_token(spelling):
     """Whether a spelling's first token runs its arguments, so an allow on it is a
-    wildcard allow (REQ-656 BR-2)."""
+    wildcard allow (REQ-656 BR-2), or is an env assignment (REQ-662 BR-3)."""
     if not spelling:
         return False
-    first = spelling[0]
-    return first in ha.FORBIDDEN_FIRST_TOKENS or \
-        first.startswith(ha.FORBIDDEN_FIRST_TOKEN_PREFIXES)
+    return ha.first_token_problem(spelling[0]) is not None
 
 
 def fence_remedy(adapter):
@@ -325,6 +334,18 @@ def printed_fence_remedy(adapter):
     return ("WIDENING, not applied: `%s` would pre-approve the opening of every partial-"
             "sourcing fence for %s. It is not on the paste-ready line; add it to your own "
             "line only if you accept that." % (_cmd(broad), adapter["name"]))
+
+
+def deny_commands(adapter, perms, scope):
+    """``(entry id, argv, match)`` for every deny-tier command ``perms`` holds, and at ``exec``
+    scope every ``exec.engine_deny`` entry after them (REQ-659 BR-8, REQ-662 BR-4)."""
+    out = [(e["id"], tuple(c), e["match"]) for e in perms["entries"] if e["tier"] == "deny"
+           for c in e["commands"]]
+    if scope == "exec":
+        for c in (adapter.get("exec") or {}).get("engine_deny", []) or []:
+            if isinstance(c, list) and c:
+                out.append((ENGINE_DENY_ENTRY, tuple(str(t) for t in c), "prefix"))
+    return out
 
 
 def render_permissions(adapter, perms, scope, result=None):
@@ -345,12 +366,10 @@ def render_permissions(adapter, perms, scope, result=None):
     rules = []
     routine = [e for e in perms["entries"] if e["tier"] == "routine"]
     deny_entries = [e for e in perms["entries"] if e["tier"] == "deny"]
-    deny_cmds = [(e["id"], tuple(c), e["match"]) for e in deny_entries for c in e["commands"]]
+    deny_cmds = deny_commands(adapter, perms, scope)
+    literal = ha.FORMATS.get(fmt, {}).get("literal_tokens", False)
     exec_cfg = adapter.get("exec") or {}
     if scope == "exec":
-        for k, c in enumerate(exec_cfg.get("engine_deny", []) or []):
-            if isinstance(c, list) and c:
-                deny_cmds.append(("exec.engine_deny", tuple(str(t) for t in c), "prefix"))
         if exec_cfg.get("deny_render") == "none":
             status = None
             if result:
@@ -415,7 +434,8 @@ def render_permissions(adapter, perms, scope, result=None):
             continue
         if forbidden_first_token(spelling):
             findings.append(Finding(name, e["id"], command, "inexpressible", scope,
-                                    "omitted: first token `%s` runs its arguments" % spelling[0]))
+                                    "omitted: first token `%s` %s"
+                                    % (spelling[0], ha.first_token_problem(spelling[0]))))
             continue
         if accepted(adapter, e["id"], command, scope) == "inexpressible":
             findings.append(Finding(name, e["id"], command, "inexpressible", scope,
@@ -435,12 +455,21 @@ def render_permissions(adapter, perms, scope, result=None):
     for did, dcmd, dmatch in deny_cmds:
         command = _cmd(dcmd)
         if mech == "unsupported":
-            findings.append(Finding(name, did, command, "deny-unsupported", scope,
-                                    "deny_tier_render has no %s mechanism" % scope))
+            why = "deny_tier_render has no %s mechanism" % scope
+            if scope == "exec":
+                why = ("exec.deny_render is none" if exec_cfg.get("deny_render") == "none"
+                       else "capabilities.deny is no")
+            findings.append(Finding(name, did, command, "deny-unsupported", scope, why))
             continue
         if scope == "exec":
             spelling, widened = _spell(dcmd, gran)
             exact = False
+            if literal and any("*" in tok for tok in spelling):
+                # A glob deny the format reads as a literal `*` would parse and match nothing,
+                # so it is no deny at all (LESSON-757).
+                findings.append(Finding(name, did, command, "deny-unsupported", scope,
+                                        "the %s format matches `*` only as itself" % fmt))
+                continue
         else:
             exact = dmatch == "exact" and renders_exact
             if exact:
@@ -571,9 +600,10 @@ def evaluate_rules(adapter, perms, rules, scope, result=None):
         if rule.entry == FENCE_ID and scope == "exec":
             continue
         if rule.entry != FENCE_ID and forbidden_first_token(rule.spelling):
-            failures.append("%s: rendered allow `%s` starts with `%s`, which runs its arguments "
+            failures.append("%s: rendered allow `%s` starts with `%s`, which %s "
                             "(REQ-656 BR-2)" % (adapter["name"], _cmd(rule.spelling),
-                                                rule.spelling[0]))
+                                                rule.spelling[0],
+                                                ha.first_token_problem(rule.spelling[0])))
         for did, dcmd in deny_cmds:
             for shape, form in deny_forms(dcmd):
                 if allow_matches(rule.spelling, rule.exact, gran, form, renders_exact) and \
@@ -870,12 +900,15 @@ def format_cursor_terminal(rules, extras, hooks_block):
 
 
 def _rules_header(extras):
-    """The generated-by marker, the source hash and the declared losses (REQ-655 BR-4)."""
-    out = ["# Generated by `adlc harness render --harness %s`. /template-drift reports a"
-           % extras["harness"],
-           "# hand edit as harness-config drift. This file is a convenience for the routine",
-           "# tier, and a matched `allow` runs outside the sandbox: it is not what stops a",
-           "# one-way move."]
+    """The generated-by marker, the source hash and the declared losses (REQ-655 BR-4).
+    ``extras["header"]``, when set, replaces the marker lines: the exec engine's files say
+    who writes them (REQ-662 ADR-3)."""
+    out = list(extras.get("header") or [
+        "# Generated by `adlc harness render --harness %s`. /template-drift reports a"
+        % extras["harness"],
+        "# hand edit as harness-config drift. This file is a convenience for the routine",
+        "# tier, and a matched `allow` runs outside the sandbox: it is not what stops a",
+        "# one-way move."])
     if extras["sha256"]:
         out.append("# templates/permissions.yml sha256:%s" % extras["sha256"])
     losses = []
@@ -886,7 +919,7 @@ def _rules_header(extras):
         shown = f.entry if f.entry == FENCE_ID else "%s [%s]" % (f.entry, f.command)
         losses.append("#   %s %s%s" % (f.verdict, shown, (" - " + f.detail) if f.detail else ""))
     if losses:
-        out += ["#", "# Declared losses (accepted_fidelity):"] + losses
+        out += ["#", extras.get("losses_label", "# Declared losses (accepted_fidelity):")] + losses
     return "\n".join(out) + "\n"
 
 
@@ -1349,6 +1382,145 @@ def exec_entries(adapter, toolkit=None, result=None):
     perms = ha.load_permissions(ha.permissions_path(toolkit))
     rules, findings, _extras = render_permissions(adapter, perms, "exec", result)
     return [r.as_dict() for r in rules], findings
+
+
+# --------------------------------------------------------------------------
+# The exec-scope files (REQ-662 ADR-3) and the run's fidelity (BR-3)
+# --------------------------------------------------------------------------
+class ExecFiles(object):
+    """The text of the files an exec run's rules travel in (REQ-662 ADR-3). Rendered here and
+    never written here: the engine writes them for the run.
+
+    ``rule_file`` is the working copy's ``exec.rule_file`` (``allow_render: file``), else None.
+    ``user_policy_file`` is the ``exec.user_policy_file`` beside the operator's own rules, or
+    None when the adapter declares none. ``findings`` are the exec-scope findings."""
+    __slots__ = ("rule_file", "user_policy_file", "findings")
+
+    def __init__(self, rule_file, user_policy_file, findings):
+        self.rule_file = rule_file
+        self.user_policy_file = user_policy_file
+        self.findings = findings
+
+
+#: The marker lines of the working-copy rule file, then of the user policy file.
+EXEC_RULE_HEADER = (
+    "# Rendered by the exec engine (`adlc sprint-exec`) for one headless %s run, from",
+    "# templates/permissions.yml and the adapter's exec block (REQ-662). It is never",
+    "# committed and never edited by hand. Like every allowlist it is a convenience for the",
+    "# routine tier. A `forbidden` rule is defense in depth: the gate on a one-way move is",
+    "# the engine's approval halt (Rule B).")
+#: What an exec file lists after its header: the run's fidelity findings, not a declaration.
+EXEC_LOSSES_LABEL = "# Not expressed here (the run log's allowlist-fidelity report):"
+EXEC_POLICY_HEADER = (
+    "# Rendered by the exec engine (`adlc sprint-exec`) for headless %s runs (REQ-662).",
+    "# The deny tier only: no allow is ever written at user level. It lives in your user",
+    "# config, so it applies to every project and to your own sessions too. It is the",
+    "# toolkit's own file, and the rule files beside it are yours: exec never edits them.")
+
+
+def _header(lines, harness):
+    return [line % harness if "%s" in line else line for line in lines]
+
+
+def render_exec_files(adapter, toolkit, result, values):
+    """The working-copy rule file and the user policy file of ``adapter`` as text: an
+    :class:`ExecFiles` (REQ-662 ADR-3, BR-3, BR-4).
+
+    The exec-scope render of ``templates/permissions.yml`` under ``toolkit``, with ``result``
+    (the REQ-664 result file, or None) deciding which wrapper allow a valid
+    ``deny_under_allow`` pass restores, goes through the adapter's own permissions format.
+    ``values`` is what the engine resolved for this run: ``fence_runner``, the absolute path
+    ``ExecAdapter.fence_runner`` vetted (or None), and ``allow_extra``, the ``(argv, exact)``
+    extra allows the engine vetted against the deny tier.
+
+    The rule file holds every routine allow the render keeps, the one fence-runner allow, the
+    extras, and with ``deny_render: file`` the hard deny of every deny-tier and
+    ``engine_deny`` command the harness can spell. The user policy file holds that deny tier
+    and never an allow. No allow is a fence rule or opens with a token
+    :func:`forbidden_first_token` refuses, whatever the render returned: one would be refused
+    here rather than written (BR-3)."""
+    block = adapter.get("exec") or {}
+    allow_file = block.get("allow_render") == "file"
+    policy = block.get("user_policy_file")
+    policy = policy if policy and policy != "none" else None
+    perms = ha.load_permissions(ha.permissions_path(toolkit))
+    rules, findings, extras = render_permissions(adapter, perms, "exec", result)
+    fmt = adapter["formats"].get("permissions", "rules-json")
+    renderer = FORMATS.get(fmt)
+    if not callable(renderer):
+        raise RenderError("harness %s: permissions format %s renders no rule file"
+                          % (adapter["name"], fmt))
+    allows = []
+    for rule in rules:
+        if rule.kind != "allow":
+            continue
+        if rule.entry == FENCE_ID or forbidden_first_token(rule.spelling):
+            raise RenderError("harness %s: the exec render holds the allow `%s`, a fence rule "
+                              "or an opener, which no exec file carries (REQ-662 BR-3)"
+                              % (adapter["name"], _cmd(rule.spelling)))
+        allows.append(rule)
+    runner = (values or {}).get("fence_runner")
+    if runner:
+        if not RUNNER_PATH_RE.match(runner) or "/../" in runner + "/" or \
+                "/./" in runner + "/":
+            raise RenderError("fence runner %r is not an absolute path a prefix rule matches "
+                              "unquoted, so no allow is spelled for it: a space is refused, "
+                              "never quoted (REQ-662 BR-3)" % runner)
+        allows.append(Rule(RUNNER_ENTRY, (runner,), "routine", "allow", (runner,), False))
+    for argv, exact in (values or {}).get("allow_extra", ()):
+        argv = tuple(argv)
+        if forbidden_first_token(argv):
+            raise RenderError("extra allow `%s` opens with a token no allow may have"
+                              % _cmd(argv))
+        allows.append(Rule(EXTRA_ENTRY, argv, "routine", "allow", argv, exact))
+    denies = [r for r in rules if r.kind == "deny"] if block.get("deny_render") == "file" else []
+    allows, denies = _distinct(allows), _distinct(denies)
+    rule_text = policy_text = None
+    if allow_file:
+        rule_text = renderer(allows + denies, dict(
+            extras, header=_header(EXEC_RULE_HEADER, adapter["name"]),
+            losses_label=EXEC_LOSSES_LABEL), None)
+    if policy:
+        # Only the deny tier's own losses: an allow's never reaches user scope (LESSON-769).
+        policy_text = renderer(denies, dict(
+            extras, header=_header(EXEC_POLICY_HEADER, adapter["name"]),
+            losses_label=EXEC_LOSSES_LABEL,
+            findings=[f for f in findings if f.verdict == "deny-unsupported"]), None)
+    return ExecFiles(rule_text, policy_text, findings)
+
+
+def _distinct(rules):
+    """``rules`` with each ``(spelling, exact)`` once: a command-base deny of `rm -rf` and
+    one of `rm -f` are the same rule."""
+    seen = set()
+    out = []
+    for rule in rules:
+        if (rule.spelling, rule.exact) not in seen:
+            seen.add((rule.spelling, rule.exact))
+            out.append(rule)
+    return out
+
+
+def exec_undeclared(adapter, findings):
+    """The exec-scope findings ``accepted_fidelity`` does not declare at ``exec`` (REQ-662
+    BR-3, REQ-657 BR-8): each one a loss the run's pre-flight refuses. ``exact`` is no loss,
+    and ``deny-unsupported`` is BR-4's to decide, not this comparison's."""
+    return [f for f in findings if f.verdict not in ("exact", "deny-unsupported")
+            and accepted(adapter, f.entry, f.command, "exec") != f.verdict]
+
+
+def exec_fidelity_report(adapter, findings, undeclared=()):
+    """The run's ``allowlist-fidelity`` report at ``exec`` scope (REQ-662 BR-3): a line per
+    finding, an undeclared one marked, then the count of each verdict."""
+    lines = [f.format() + (" [undeclared at exec in accepted_fidelity]" if f in undeclared
+                           else "") for f in findings]
+    counts = {}
+    for f in findings:
+        kind = f.verdict.split(":", 1)[0]
+        counts[kind] = counts.get(kind, 0) + 1
+    lines.append("%s exec: %s" % (adapter["name"], ", ".join(
+        "%s=%d" % (k, counts[k]) for k in sorted(counts))))
+    return lines
 
 
 # --------------------------------------------------------------------------

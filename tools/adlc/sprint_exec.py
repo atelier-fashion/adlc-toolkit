@@ -53,6 +53,11 @@ class Refused(Exception):
     """An operator-facing refusal: the message says why, nothing happened."""
 
 
+def _commands(items):
+    """``DenyUnsupported`` entries as the operator reads them: each command, quoted."""
+    return ", ".join("`%s`" % item.command for item in items)
+
+
 class Run(object):
     """One REQ's run directory and its orchestrator-owned record."""
 
@@ -229,6 +234,14 @@ class Batch(object):
         # invocation received --allow-unverified (REQ-662 ADR-2).
         self.verdict = None
         self.allow_unverified = False
+        # The exec-scope render the pre-flight judged (REQ-662 ADR-3): the REQ-664 result file
+        # it read from ToolkitRoot, the files' text (``harness_render.ExecFiles``; None when
+        # both tiers are flags), the allowlist-fidelity report each run's log carries, and the
+        # ``exec_adapter.DenyUnsupported`` entries each run's log names.
+        self.result = None
+        self.exec_files = None
+        self.fidelity = []
+        self.deny_unsupported = []
 
 
 class Orchestrator(object):
@@ -401,15 +414,22 @@ class Orchestrator(object):
         except eg.GateError as exc:
             raise Refused(str(exc))
         batch.flags = [str(f) for f in batch.config["harness_flags"]] + list(flags)
+        # The probe result reaches the render, so only a valid deny_under_allow pass restores
+        # a wrapper allow (REQ-662 ADR-3). Read from ToolkitRoot, never a working copy.
+        batch.result = ev.read_result(adapter, self.toolkit)
         try:
             ea.refuse_forbidden(batch.flags, adapter.forbidden)
             # A flag outside the adapter's operator_flags never reaches the harness: the final
             # argv is closed-world (REQ-662 BR-16), so it is refused here, before any launch.
             adapter.operator_tokens(batch.flags)
             adapter.check_templates()
-            adapter.tiers("feat/preflight", batch.config["allow_extra"])
+            adapter.tiers("feat/preflight", batch.config["allow_extra"], result=batch.result)
+            batch.exec_files = adapter.rule_files("feat/preflight", batch.config["allow_extra"],
+                                                  batch.result)
+            report = adapter.exec_report(batch.result, batch.verdict, batch.allow_unverified)
         except ea.ExecRefused as exc:
             raise Refused(str(exc))
+        self._judge_render(adapter, batch, report)
         hit = ea.sandbox_setting(adapter, self.primary, el.read_json)
         if hit:
             raise Refused("the harness sandbox is on in %s: a worktree has not been shown to "
@@ -444,6 +464,16 @@ class Orchestrator(object):
             batch.protection = value if value in ("protected", "unprotected") else "unknown"
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
+        if batch.deny_unsupported and batch.config["require_branch_protection"] and \
+                batch.protection != "protected":
+            # --allow-unprotected accepts a direct push; it does not also accept a one-way
+            # move the harness cannot deny (REQ-662 BR-4).
+            raise Refused("harness %s has no deny for %s, sprint.exec.require_branch_protection "
+                          "is set and %s on %s is %s, so the forge would not stop those moves "
+                          "either: nothing is launched (REQ-662 BR-4); --allow-unprotected does "
+                          "not cover a deny_unsupported entry"
+                          % (adapter.name, _commands(batch.deny_unsupported), ib, self.primary,
+                             batch.protection))
         if batch.protection != "protected":
             line = "%s on %s is %s, so a direct push from a run is not stopped by the forge " \
                    "(%s)" % (ib, self.primary, batch.protection, "Rule B")
@@ -452,6 +482,46 @@ class Orchestrator(object):
             self.say("WARNING: " + line)
         self.batch = batch
         return batch
+
+    def _judge_render(self, adapter, batch, report):
+        """REQ-662 BR-3 and BR-4 on the exec-scope render, before anything is launched.
+
+        Every ``deny_unsupported`` entry is a loud line, whatever refuses the run after it. A
+        loss ``accepted_fidelity`` does not declare at ``exec`` refuses the run; a ``recorded``
+        block (BR-1) predates the comparison and its engine behaviour is unchanged, so its
+        losses are in each run's report and refuse nothing. A local destructive
+        ``deny_unsupported`` entry refuses the run, and so does the whole deny tier under
+        --allow-unverified. The branch-protection rule waits for protection to be read.
+
+        A deny is defense in depth and never the gate (Rule B): these refusals keep a one-way
+        move the harness cannot deny from resting on nothing but the approval halt."""
+        batch.fidelity = report.report
+        batch.deny_unsupported = report.deny_unsupported
+        for item in report.deny_unsupported:
+            self.say("WARNING: deny_unsupported: harness %s has no deny for `%s` (%s): %s%s"
+                     % (adapter.name, item.command, item.entry, item.reason,
+                        "; a local destructive move" if item.destructive else ""))
+        if report.undeclared and adapter.block.get("verification") != "recorded":
+            raise Refused("harness %s: the exec-scope render loses what accepted_fidelity does "
+                          "not declare at exec: %s; declare each one or change the render, so "
+                          "nothing is launched (REQ-662 BR-3)"
+                          % (adapter.name, "; ".join(f.format() for f in report.undeclared)))
+        if report.whole_tier:
+            raise Refused("harness %s: every deny-tier entry is deny_unsupported (%s), so "
+                          "nothing is launched (REQ-662 BR-4)" % (adapter.name,
+                                                                   report.whole_tier))
+        destructive = [i for i in report.deny_unsupported if i.destructive]
+        if destructive:
+            raise Refused("harness %s has no deny for the local destructive move %s, and a "
+                          "forge's branch protection does not reach a working copy, so nothing "
+                          "is launched (REQ-662 BR-4)" % (adapter.name, _commands(destructive)))
+
+    def _log_render(self, box, batch):
+        """Each run's log carries the pre-flight's fidelity report and its deny_unsupported
+        entries (REQ-662 BR-3, BR-4)."""
+        box.log("fidelity_report", batch.fidelity, None, 0)
+        for item in batch.deny_unsupported:
+            box.log("deny_unsupported", [item.entry, item.command, item.reason], None, 0)
 
     # ---- launch ----------------------------------------------------------------------
     def prepare(self, req, batch):
@@ -520,6 +590,7 @@ class Orchestrator(object):
             raise Refused(str(exc))
         el.atomic_write(run.file("prompt.txt"), data)
         os.makedirs(run.file("gh-empty"), exist_ok=True)
+        self._log_render(box, batch)
         run.save()
         self.runs[req] = run
         self.boxes[req] = box
@@ -582,7 +653,8 @@ class Orchestrator(object):
             write_roots += [add_dir] if add_dir else []
         allow, deny = adapter.tiers(branch, run.doc["config"]["allow_extra"],
                                     write_roots=write_roots,
-                                    read_roots=[os.path.realpath(self.toolkit)])
+                                    read_roots=[os.path.realpath(self.toolkit)],
+                                    result=ev.read_result(adapter, self.toolkit))
         # Isolated like the close-out (BR-25): the tiers are the whole policy (BUG-260).
         settings = run.file("settings.json")
         el.atomic_json(settings, adapter.settings_document(allow, deny))

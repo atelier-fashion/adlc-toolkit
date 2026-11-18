@@ -78,6 +78,22 @@ FORBIDDEN_FIRST_TOKENS = FIRST_TOKEN_WILDCARDS + ("env", "xargs", "eval", "exec"
                                                   "command", "nohup", "node", ".", "source", "[")
 #: ...and the same for any token starting with one of these (``python3``).
 FORBIDDEN_FIRST_TOKEN_PREFIXES = ("python",)
+#: An env-assignment first token (``NAME=value``), refused for every harness (REQ-662 BR-3).
+#: Claude strips the prefix before matching, so there an allow on it is inert (REQ-682 row
+#: 14); a harness that matches the raw text would admit any command after the assignment.
+ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def first_token_problem(token):
+    """Why ``token`` may not open an allow, or None: it runs its arguments (REQ-656 BR-2,
+    REQ-682 BR-7), or it is an env assignment (REQ-662 BR-3)."""
+    token = str(token)
+    if token in FORBIDDEN_FIRST_TOKENS or token.startswith(FORBIDDEN_FIRST_TOKEN_PREFIXES):
+        return "runs its arguments"
+    if ENV_ASSIGN_RE.match(token):
+        return "is an env assignment"
+    return None
+
 
 #: The ExecAdapter block (REQ-659 BR-3), widened by REQ-662 (ADR-1). Version 1 was REQ-659's
 #: shape; version 2 reshapes ``working_copy``, ``resume`` and ``output`` and adds the ExecBlock
@@ -173,9 +189,11 @@ FORMATS = {
     "cursor-cli-json": {"json": True, "surfaces": ("permissions",), "renders_exact": False},
     "cursor-terminal-allowlist": {"json": True, "surfaces": ("permissions",),
                                   "renders_exact": False},
-    # Codex CLI (REQ-655). A prefix_rule has no exact form, so an exact entry widens.
+    # Codex CLI (REQ-655). A prefix_rule has no exact form, so an exact entry widens, and a
+    # pattern token is matched as itself: a `*` in it is no glob (REQ-662 BR-4).
     "starlark-prefix-rule": {"json": False, "surfaces": ("permissions",),
-                             "renders_exact": False, "user_delegation": True},
+                             "renders_exact": False, "user_delegation": True,
+                             "literal_tokens": True},
     "codex-hooks-json": {"json": True, "surfaces": ("hooks",), "renders_exact": False},
     "codex-config-toml": {"json": False, "toml": True, "surfaces": ("config",),
                           "renders_exact": False},
@@ -707,11 +725,11 @@ def _exec_block(src, block, data):
         for i, item in enumerate(_need_list(src, "exec." + key, block.get(key, []))):
             _token_list(src, "exec.%s[%d]" % (key, i), item)
             first = str(item[0])
-            if key != "engine_deny" and (first in FORBIDDEN_FIRST_TOKENS or
-                                         first.startswith(FORBIDDEN_FIRST_TOKEN_PREFIXES)):
+            why = first_token_problem(first) if key != "engine_deny" else None
+            if why:
                 raise AdapterError(src, "exec.%s[%d]" % (key, i),
-                                   "first token %r runs its arguments, so the allow would admit "
-                                   "any command (REQ-682 BR-7)" % first)
+                                   "first token %r %s, so the allow would admit any command "
+                                   "(REQ-682 BR-7, REQ-662 BR-3)" % (first, why))
     codes = _need_map(src, "exec.exit_codes", block["exit_codes"])
     for code, klass in codes.items():
         # Quoted, in canonical form: exit_class looks a code up as str(rc).

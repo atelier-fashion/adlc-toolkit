@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 import exec_adapter as ea  # noqa: E402
 import exec_verify as ev  # noqa: E402
 import harness_adapter as ha  # noqa: E402
+import harness_render as hr  # noqa: E402
 import sprint_exec as se  # noqa: E402
 import toolkit_root  # noqa: E402
 
@@ -256,8 +257,9 @@ class Sandbox(object):
 def codex_shaped_adapter(directory, exit_codes=None, denied_stderr=CODEX_REFUSAL):
     """An adapter file the engine launches today with the Codex-shaped fixture's binary,
     ``launch``, ``resume`` and ``output``: claude's block with those swapped in, written as
-    ``fake-exec-file.yml`` under ``directory``. The fixture itself waits on the file render
-    (TASK-261) and the trust grant (TASK-263); a test holds the swapped values equal to it.
+    ``fake-exec-file.yml`` under ``directory``. The fixture itself waits on its rule files being
+    written (TASK-262) and the trust grant (TASK-263); a test holds the swapped values equal to
+    it.
     ``exit_codes`` is a YAML flow map; ``denied_stderr`` a pattern, or None for none."""
     text = open(os.path.join(TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
     swaps = [
@@ -316,7 +318,8 @@ def jsonl_sandbox(tmp_path, monkeypatch, exit_codes=None, denied_stderr=CODEX_RE
     use_adapter(monkeypatch, path)
     box = Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path, **kw)
     # The launch carries claude's isolation and flag-rendered tiers after the Codex-shaped
-    # template until the file render lands (TASK-261): the fake records them as unknown.
+    # template until the engine writes the file render (TASK-262): the fake records them as
+    # unknown.
     box.write_scenario(help=ISOLATION_HELP, unknown_flags="record")
     return box
 
@@ -362,7 +365,9 @@ def probes_adapter(directory, result):
     """The Codex-shaped launch (:func:`codex_shaped_adapter`) as a ``verification: probes``
     block, as a maintainer writes one from ``result``: it declares ``result``'s version, its
     ``exec.probes`` cites each required row and its ``status`` is ``verified``. Every other
-    declaration is the Codex-shaped one, which ``prompt-pass`` is acceptable for."""
+    declaration is the Codex-shaped one, which ``prompt-pass`` is acceptable for, and its
+    ``accepted_fidelity`` declares at ``exec`` each loss the exec-scope render reports, which
+    the pre-flight refuses undeclared (REQ-662 BR-3)."""
     path = codex_shaped_adapter(directory)
     text = open(path, encoding="utf-8").read()
     block = ha.load_adapter(path, toolkit=TOOLKIT)["exec"]
@@ -377,6 +382,29 @@ def probes_adapter(directory, result):
         text = text.replace(old, new)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
+    declare_exec_losses(path, result)
+    return path
+
+
+def exec_losses(path, result, toolkit=TOOLKIT):
+    """The exec-scope findings of the adapter at ``path`` that its ``accepted_fidelity`` does
+    not declare at ``exec``, rendered with ``result`` over ``toolkit``'s template."""
+    adapter = ha.load_adapter(path, toolkit=TOOLKIT)
+    _entries, findings = hr.exec_entries(adapter, toolkit, result)
+    return hr.exec_undeclared(adapter, findings)
+
+
+def declare_exec_losses(path, result, toolkit=TOOLKIT):
+    """Declare in ``accepted_fidelity`` each exec-scope loss :func:`exec_losses` reports, one
+    ``"<entry>:<command>": {exec: <verdict>}`` line each, as a maintainer would."""
+    text = open(path, encoding="utf-8").read()
+    lines = "".join('  "%s:%s": {exec: "%s"}\n' % (f.entry, f.command, f.verdict)
+                    for f in exec_losses(path, result, toolkit))
+    assert text.count("accepted_fidelity:\n") == 1
+    text = text.replace("accepted_fidelity:\n", "accepted_fidelity:\n" + lines)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    assert not exec_losses(path, result, toolkit)
     return path
 
 

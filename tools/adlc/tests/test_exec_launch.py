@@ -1026,3 +1026,175 @@ def test_each_launch_rechecks_the_verdict(tmp_path, monkeypatch):
     assert run.status == "failed" and not orch.children
     assert not box.launches()
     assert "stdin-prompt" in json.dumps(run.read_primary_state()["notes"])
+
+
+# ---- REQ-662 BR-3 / BR-4: the fidelity and deny pre-flight -----------------------------------
+TEMPLATE = os.path.join(eh.TOOLKIT, "templates", "permissions.yml")
+
+
+def _template(box, *routine):
+    """The sandbox ToolkitRoot's templates/permissions.yml: this toolkit's, with ``routine``
+    added as one routine entry. A routine command that extends a deny-tier spelling leaves that
+    deny one the harness cannot tell apart from an allow, so it is deny_unsupported."""
+    text = open(TEMPLATE, encoding="utf-8").read()
+    if routine:
+        entry = ("  - id: fixture.extends\n    tier: routine\n    note: a test entry\n"
+                 "    commands:\n" + "".join("      - [%s]\n" % ", ".join(c) for c in routine))
+        assert text.count("  - id: shell.pwd\n") == 1
+        text = text.replace("  - id: shell.pwd\n", entry + "  - id: shell.pwd\n")
+    with open(os.path.join(box.toolkit, "templates", "permissions.yml"), "w",
+              encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def _rewritten(box, monkeypatch, tmp_path, old, new):
+    """The sandbox's adapter with ``old`` replaced by ``new``, loaded in its place."""
+    text = open(box.adapter_path, encoding="utf-8").read()
+    assert text.count(old) == 1, old
+    directory = tmp_path / ("adapter-%d" % len(list(tmp_path.glob("adapter-*"))))
+    directory.mkdir()
+    path = directory / "fake-exec-file.yml"
+    path.write_text(text.replace(old, new), encoding="utf-8")
+    return eh.use_adapter(monkeypatch, str(path), box.toolkit)
+
+
+def _said_since(box, mark):
+    return box.out.getvalue()[mark:]
+
+
+def test_undeclared_exec_loss_refuses_the_preflight(tmp_path, monkeypatch):
+    """BR-3, AC-4: the run's allowlist-fidelity findings at `exec` are compared with
+    `accepted_fidelity`. Every loss declared, the pre-flight passes (the must-not-refuse case)
+    and each run's log carries the report, where `fence.partial-source` reads `inexpressible`.
+    One loss undeclared refuses the run, and so does a `widened` verdict declared for the fence,
+    which is a loss and not the expected finding."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
+    batch = box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    assert batch.fidelity and not [ln for ln in batch.fidelity if "undeclared" in ln]
+    [fence] = [ln for ln in batch.fidelity if "fence.partial-source" in ln]
+    assert " inexpressible — runner: " in fence
+    assert batch.exec_files is None    # both tiers are flags on this adapter
+    line = '  "git.write:git push": {exec: "inexpressible"}\n'
+    _rewritten(box, monkeypatch, tmp_path, line, "")
+    with pytest.raises(se.Refused, match=r"accepted_fidelity does not declare at exec: "
+                                         r".*git\.write \[git push\] inexpressible"):
+        box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    _rewritten(box, monkeypatch, tmp_path, "fence.partial-source: {project: inexpressible, "
+               "exec: inexpressible}", 'fence.partial-source: {project: inexpressible, exec: '
+               '"widened:if [ -f .adlc/partials/"}')
+    with pytest.raises(se.Refused, match=r"accepted_fidelity.*fence\.partial-source"):
+        box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    assert not box.launches()
+    eh.use_adapter(monkeypatch, box.adapter_path, box.toolkit)
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    [row] = [r for r in box.log(run) if r["kind"] == "fidelity_report"]
+    assert row["argv"] == batch.fidelity
+    assert not [r for r in box.log(run) if r["kind"] == "deny_unsupported"]
+    assert "deny_unsupported" not in box.out.getvalue()
+
+
+def test_deny_unsupported_preflight(tmp_path, monkeypatch):
+    """BR-4, AC-14, AC-16: a deny-tier entry the harness cannot spell is `deny_unsupported`:
+    a loud pre-flight line always, and in each run's log. One that is a local destructive move
+    (`reset --hard`, `clean -f`, `branch -D`, `rm`, `release`) refuses the run. A
+    non-destructive one refuses only when `require_branch_protection` is set and the branch is
+    not `protected`, --allow-unprotected or not; with protection, or with the setting off, the
+    run goes on."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
+    for routine, command in ((["git", "reset", "--hard", "HEAD"], "git reset --hard"),
+                             (["git", "clean", "-f", "build"], "git clean -f"),
+                             (["git", "branch", "-D", "old"], "git branch -D"),
+                             (["rm", "-rf", "build"], "rm -rf"),
+                             (["gh", "release", "list"], "gh release")):
+        _template(box, routine)
+        mark = len(box.out.getvalue())
+        with pytest.raises(se.Refused, match="local destructive move `%s`" % command):
+            box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+        said = _said_since(box, mark)
+        assert said.count("WARNING: deny_unsupported:") == 1, said
+        assert ("WARNING: deny_unsupported: harness fake-exec-file has no deny for `%s` (" %
+                command) in said and "a local destructive move" in said
+    # A non-destructive entry: `terraform apply` is not on BR-4's list of local destructive
+    # moves, so branch protection decides.
+    _template(box, ["terraform", "apply", "-help"])
+    unprotected = {"ADLC_FORGE_MOCK_SCENARIO": "protection-no-pr"}
+    for allow_unprotected in (False, True):
+        with pytest.raises(se.Refused, match="require_branch_protection is set.*unprotected.*"
+                                             "does not cover a deny_unsupported entry"):
+            box.orch(**unprotected).preflight(box.reqs, harness=box.harness, shared=True,
+                                              allow_unprotected=allow_unprotected)
+    config = box.repo / ".adlc" / "config.yml"
+    base = config.read_text()
+    config.write_text(base + "    require_branch_protection: false\n")
+    batch = box.orch(**unprotected).preflight(box.reqs, harness=box.harness, shared=True)
+    assert [(i.entry, i.command, i.destructive) for i in batch.deny_unsupported] == [
+        ("terraform", "terraform apply", False)]
+    config.write_text(base)
+    assert not box.launches()
+    mark = len(box.out.getvalue())
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    said = _said_since(box, mark)
+    assert ("WARNING: deny_unsupported: harness fake-exec-file has no deny for `terraform apply` "
+            "(terraform): its prefix spelling `terraform apply` would also match routine "
+            "`terraform apply -help`\n") in said
+    rows = [r["argv"] for r in box.log(run) if r["kind"] == "deny_unsupported"]
+    assert [row[:2] for row in rows] == [["terraform", "terraform apply"]]
+    assert box.launches()
+
+
+def test_allow_unverified_treats_the_deny_tier_as_unsupported(tmp_path, monkeypatch):
+    """BR-4, AC-16: under --allow-unverified with `ask-tier-deny` not `pass`, every deny-tier and
+    engine_deny entry is listed as `deny_unsupported` and the run is refused. With
+    `ask-tier-deny` passing, an adapter unverified for another reason launches under the flag
+    with no deny_unsupported entry (the must-not-fire case)."""
+    import harness_adapter as ha
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
+    perms = ha.load_permissions(TEMPLATE)
+    every = [" ".join(c) for e in perms["entries"] if e["tier"] == "deny" for c in e["commands"]]
+    loaded = ha.load_adapter(box.adapter_path, toolkit=eh.TOOLKIT)
+    every += [" ".join(c) for c in loaded["exec"]["engine_deny"]]
+    for reading in ("fail", "unknown"):
+        box.write_result(eh.with_reading(box.result, "ask-tier-deny", reading))
+        with pytest.raises(se.Refused, match="unverified.*ask-tier-deny"):
+            box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+        mark = len(box.out.getvalue())
+        with pytest.raises(se.Refused, match="every deny-tier entry is deny_unsupported "
+                                             r"\(--allow-unverified, and ask-tier-deny reads %s"
+                                             % reading):
+            box.orch().preflight(box.reqs, harness=box.harness, shared=True,
+                                 allow_unverified=True)
+        said = _said_since(box, mark)
+        assert said.count("WARNING: deny_unsupported:") == len(set(every))
+        for command in every:
+            assert "has no deny for `%s` (" % command in said, command
+    box.write_result(eh.with_reading(box.result, "fence-vs-allowlist/runner-prefix", "fail"))
+    mark = len(box.out.getvalue())
+    batch = box.orch().preflight(box.reqs, harness=box.harness, shared=True,
+                                 allow_unverified=True)
+    assert not batch.verdict.verified and batch.deny_unsupported == []
+    assert "deny_unsupported" not in _said_since(box, mark)
+    assert not box.launches()
+
+
+def test_unspellable_engine_deny_is_deny_unsupported(tmp_path, monkeypatch):
+    """AC-21, BR-4: an `engine_deny` entry the harness cannot spell apart from a routine allow
+    raises `deny_unsupported`, a loud line and a row in the run's log, never a silent allow.
+    It is not a local destructive move and the branch is protected, so the run goes on."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
+    old = "    - [adlc, sprint-exec, run]\n"
+    _rewritten(box, monkeypatch, tmp_path, old, old + "    - [gcloud, run]\n")
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    assert ("WARNING: deny_unsupported: harness fake-exec-file has no deny for `gcloud run` "
+            "(exec.engine_deny): its prefix spelling `gcloud run` would also match routine "
+            "`gcloud run services list`\n") in box.out.getvalue()
+    rows = [r["argv"] for r in box.log(run) if r["kind"] == "deny_unsupported"]
+    assert [row[:2] for row in rows] == [["exec.engine_deny", "gcloud run"]]
+    # Neither tier carries it: the routine allow it would shadow is the only `gcloud run`.
+    argv = box.launches()[0]["argv"]
+    assert [tok for tok in argv if "gcloud run" in tok] == ["Bash(gcloud run services list:*)"]
