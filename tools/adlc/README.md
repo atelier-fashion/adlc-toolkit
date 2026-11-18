@@ -744,10 +744,10 @@ never reads: `allow_flag`, `shell_rule` and `settings_keys` (and optionally
 - **`exec_surfaces.py` (BR-4, BR-15, BR-16, ADR-4).** Everything the engine writes for a run
   outside its run directory. Each `config_surfaces` entry is rendered whole or absent, and a
   stray file in a directory surface is deleted. Every path component is `lstat`ed: a
-  symlink, a hardlink or a non-regular file refuses. One sha256 manifest is checked four
-  times: before launch and before resume, where a mismatch is repaired and logged
-  `rule_file_rerendered`, and at exit and at the halt, where it is a
-  `config_surface_violation`. It runs the `bypass_config_keys` scan (TOML through
+  symlink, a hardlink or a non-regular file refuses. One sha256 manifest is checked before
+  launch and before resume, where a mismatch is repaired and logged
+  `rule_file_rerendered`, and when the harness exits, where it is a
+  `config_surface_violation` that blocks the run. It runs the `bypass_config_keys` scan (TOML through
   `toml_merge.scan`; a file it cannot read refuses), and writes the user policy file whole
   and atomically under a lock, checking its folder against the engine's record at launch and
   resume. The halt-time exec-path gate is `exec_gates.check_exec_path`: a PR touching a
