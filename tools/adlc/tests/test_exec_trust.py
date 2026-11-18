@@ -297,6 +297,59 @@ def test_a_symlinked_lock_is_refused(env, tmp_path):
     assert os.path.islink(env.lock) and elsewhere.is_dir()
 
 
+# --------------------------------------------------------------------------- AC-22: install --exec
+def _home_files():
+    out = []
+    for root, _dirs, files in os.walk(os.environ["HOME"]):
+        out += [os.path.join(root, name) for name in files]
+    return sorted(out)
+
+
+def test_install_exec_writes_the_policy_file(tmp_path, monkeypatch, capsys):
+    """REQ-662 BR-4, AC-22: `adlc harness install --exec --harness <name>` writes the adapter's
+    user policy file under the sandbox HOME whole and atomically (a longer stale copy leaves no
+    tail, and the file is replaced, not edited), its text the deny tier the engine renders, and
+    records the folder; the operator's own file beside it is untouched, and a second run leaves
+    the same bytes in the same file. An adapter that declares no policy file has nothing to
+    install and exits 0, writing nothing."""
+    import exec_adapter as ea
+    import exec_surfaces as esf
+    import exec_verify as ev
+    import harness_cli
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    adapter = ea.load("codex", TOOLKIT)
+    want = adapter.rule_files("feat/x", (), ev.read_result(adapter, TOOLKIT)).user_policy_file
+    assert want and "decision" in want
+    path = esf.policy_path(adapter.adapter, os.environ)
+    assert path.startswith(os.environ["HOME"] + os.sep)
+    folder = os.path.dirname(path)
+    put(os.path.join(folder, "default.rules"), "# the operator's own rules\n")
+    put(path, want + "# a longer, stale copy\n" * 20)
+    stale = os.stat(path).st_ino
+    command = ["install", "--exec", "--harness", "codex"]
+    assert harness_cli.main(command) == 0
+    assert "written %s" % path in capsys.readouterr().out
+    assert read(path) == want and os.stat(path).st_ino != stale
+    assert sorted(os.listdir(folder)) == ["adlc-exec.rules", "default.rules"]
+    assert read(os.path.join(folder, "default.rules")) == "# the operator's own rules\n"
+    record = esf.read_record(adapter.adapter, os.environ)
+    assert record["path"] == path and record["sha256"] == esf.sha256_text(want)
+    assert record["record"].startswith(str(tmp_path / "state") + os.sep)
+    assert esf.policy_problems(record) == []
+    # A second run: nothing to rewrite.
+    inode = os.stat(path).st_ino
+    assert harness_cli.main(command) == 0
+    assert "unchanged %s" % path in capsys.readouterr().out
+    assert os.stat(path).st_ino == inode and read(path) == want
+    # `user_policy_file: none`: nothing to install, and nothing written.
+    before = _home_files()
+    assert harness_cli.main(["install", "--exec", "--harness", "claude"]) == 0
+    assert "claude: nothing to install" in capsys.readouterr().out
+    assert _home_files() == before
+    assert harness_cli.main(["install", "--exec", "--all"]) == 2
+    assert "--exec names one harness" in capsys.readouterr().err
+
+
 # --------------------------------------------------------------------------- BR-5: the probe's marker
 def test_recovery_marker_refuses_and_its_absence_does_not(env, adapter):
     put(env.marker, "{}\n")

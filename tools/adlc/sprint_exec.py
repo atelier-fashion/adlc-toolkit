@@ -38,6 +38,7 @@ import exec_ledger as el  # noqa: E402
 import exec_prompt as ep  # noqa: E402
 import exec_safety as es  # noqa: E402
 import exec_surfaces as esf  # noqa: E402
+import exec_trust as et  # noqa: E402
 import exec_verify as ev  # noqa: E402
 import toolkit_root  # noqa: E402
 
@@ -307,7 +308,8 @@ class Orchestrator(object):
         self.worker = None
         self.sup_dir = None
         # --allow-unverified reaches this invocation from its own command line alone, never
-        # from config, state or the environment, and only `run` passes it (REQ-662 BR-18).
+        # from config, state or the environment. Set by `run`, it covers that invocation's own
+        # pre-flight and starts; an `answer` carries its own in its request (REQ-662 BR-18).
         self.allow_unverified = False
         self.invocation = el.invocation()
         # The latest verdict per adapter name, recomputed at each gate (REQ-662 ADR-2).
@@ -427,15 +429,25 @@ class Orchestrator(object):
         if reach != "true":
             raise Refused("working_copy worktree needs sandbox_can_reach_common_gitdir: true, "
                           "and harness/%s.yml says %s" % (adapter.name, reach))
-        if adapter.trust_grant != "none":
+        if adapter.trust_grant not in ("none", et.USER_CONFIG_ENTRY):
             raise Refused("exec.trust_grant %s has no engine arm yet: %s"
                           % (adapter.trust_grant, ea.SIBLING_REQ))
+        if adapter.trust_grant not in et.NO_FILE:
+            # REQ-662 BR-5, before any working copy is made: while REQ-664's recovery marker
+            # exists a probe is editing the same user config, or died editing it, and a trust
+            # file the grant could not edit refuses here. Writes nothing.
+            config, marker = self._trust_file(adapter)
+            try:
+                et.preflight(adapter.trust_grant, config, marker)
+            except et.TrustRefused as exc:
+                raise Refused("harness %s: %s" % (adapter.name, exc))
         batch.binary = shutil.which(adapter.binary, path=self.environ.get("PATH", ""))
         if not batch.binary:
             raise Refused("%s is not on PATH" % adapter.binary)
         # REQ-662 BR-11: recomputed from ToolkitRoot's result file, the adapter and the
         # binary's version. --allow-unverified lets the batch on; every check below still runs.
-        batch.verdict = self._gate(adapter, batch.binary, "launch")
+        batch.verdict = self._gate(adapter, batch.binary, "launch",
+                                   allow_unverified=self.allow_unverified)
         batch.allow_unverified = self.allow_unverified
         if batch.verdict.notes:
             # A `recorded` block is not gated on the binary's version (BR-1): a difference is
@@ -710,16 +722,122 @@ class Orchestrator(object):
         if res.returncode != 0:
             raise Refused("worktree add failed in %s: %s" % (repo, res.stderr.strip()))
 
-    def grant_trust(self, run):
-        """Per run, per working copy. `none` records the moment and writes nothing (ADR-5)."""
-        run.exec["trustGrantedAt"] = el.now()
-        run.exec["trustRevokedAt"] = None
-        self.box(run).log("trust_granted", [run.exec["trustMechanism"]], run.wc, 0)
+    def _trust_file(self, adapter):
+        """``(trust file, REQ-664 marker)`` of a mechanism that writes the user config: the
+        adapter's ``paths.config.user`` and ``$ADLC_HOME`` expanded with the run's environment,
+        the one the harness is handed (REQ-662 BR-5, LESSON-777)."""
+        try:
+            config = et.user_config_path(adapter.adapter, self.environ)
+            home = esf.user_path("$ADLC_HOME", self.environ)
+        except (et.TrustRefused, esf.SurfaceRefused) as exc:
+            raise Refused("harness %s: %s" % (adapter.name, exc))
+        return config, et.probe_marker(home, adapter.name)
 
-    def revoke_trust(self, run):
-        if run.exec.get("trustGrantedAt") and not run.exec.get("trustRevokedAt"):
+    def grant_trust(self, run, wc=None):
+        """Per run, per working copy: ``wc``, by default the run's own, and the close-out's
+        separately; only the run's own sets ``exec.trustGrantedAt`` (REQ-662 BR-5, ADR-5).
+        `none` records the moment and writes nothing. A mechanism that writes the user config
+        appends one block for the resolved working copy through ``exec_trust``, under its lock.
+        The grant is kept in the run record under ``trustGrants``, outside ``exec``, which state
+        copies, and is recorded first as the grant built from the path alone, so a supervisor
+        that dies inside the write leaves a record revoke can act on. A refusal is
+        :class:`Refused`, and nothing was written."""
+        own = wc is None
+        wc = run.wc if own else wc
+        mechanism = run.exec["trustMechanism"]
+        box = self.box(run)
+        if mechanism in et.NO_FILE:
+            if own:
+                run.exec["trustGrantedAt"] = el.now()
+                run.exec["trustRevokedAt"] = None
+            box.log("trust_granted", [mechanism], wc, 0)
+            return
+        adapter = self.adapter(run)
+        config, marker = self._trust_file(adapter)
+        # Every working copy is made as <repo>/.worktrees/<name>, the root its path must resolve
+        # under.
+        root = os.path.dirname(wc)
+        grants = run.doc.setdefault("trustGrants", {})
+        before = grants.get(wc), run.exec.get("trustGrantedAt"), run.exec.get("trustRevokedAt")
+        try:
+            pending = et.Grant(mechanism, config, et.check_path(wc, root), marker=marker)
+            grants[wc] = pending.to_doc()
+            if own:
+                run.exec.update({"trustGrantedAt": pending.granted_at, "trustRevokedAt": None})
+            run.save()
+            grant = et.grant(mechanism, config, wc, root, marker)
+        except et.TrustRefused as exc:
+            if before[0] is None:
+                grants.pop(wc, None)
+            else:
+                grants[wc] = before[0]
+            if own:
+                run.exec.update({"trustGrantedAt": before[1], "trustRevokedAt": before[2]})
+            run.save()
+            raise Refused("harness %s: the trust grant for %s is refused: %s"
+                          % (adapter.name, wc, exc))
+        grants[wc] = grant.to_doc()
+        if own:
+            run.exec["trustGrantedAt"] = grant.granted_at
+            run.exec["trustRevokedAt"] = None
+        run.save()
+        box.log("trust_granted", [mechanism], wc, 0,
+                detail={"mechanism": mechanism, "config": config, "path": grant.path,
+                        "pre_existing": grant.pre_existing, "adopted": grant.adopted,
+                        "created": grant.created})
+
+    def _revoke_grants(self, run, only=None):
+        """Each trust grant the run record holds (``only``: that working copy's alone), revoked
+        through ``exec_trust`` and dropped from the record. Each is logged ``trust_revoked``
+        with what revoke found, and a warning also goes to the run's notes. A grant whose
+        revoke could not finish (the lock, a symlink) stays recorded for the next revoke, and is
+        said. Returns the working copies still held."""
+        grants = run.doc.get("trustGrants") or {}
+        targets = [w for w in ([only] if only else list(grants)) if w in grants]
+        for wc in targets:
+            doc = grants[wc]
+            try:
+                grant = et.Grant.from_doc(doc)
+            except et.TrustRefused as exc:
+                del grants[wc]
+                run.doc.setdefault("notes", []).append(
+                    "the trust grant record for %s does not read back (%s), so it is dropped: "
+                    "check %s by hand" % (wc, exc, doc.get("config") if isinstance(doc, dict)
+                                          else "the user config"))
+                continue
+            try:
+                revoked = et.revoke(grant)
+            except et.TrustRefused as exc:
+                run.doc.setdefault("notes", []).append(
+                    "the trust revoke for %s did not finish, and the grant stays recorded for "
+                    "the next one: %s" % (wc, exc))
+                self.say("WARNING: %s trust revoke for %s did not finish: %s" % (run.req, wc, exc))
+                continue
+            del grants[wc]
+            self.box(run).log("trust_revoked", [grant.mechanism], wc, 0,
+                              detail={"status": revoked.status, "warning": revoked.warning,
+                                      "path": grant.path, "config": grant.config})
+            if revoked.warning:
+                run.doc.setdefault("notes", []).append("trust revoke for %s: %s"
+                                                       % (wc, revoked.warning))
+        if targets:
+            run.save()
+        return [w for w in ([only] if only else grants) if w in grants]
+
+    def revoke_trust(self, run, wc=None):
+        """``wc``'s grant alone (the close-out's), or every grant the run holds and then
+        ``exec.trustRevokedAt``, set whatever revoke found once no grant is held (REQ-662
+        BR-5). Safe to call again. `none` writes nothing and records the moment."""
+        mechanism = run.exec["trustMechanism"]
+        held = self._revoke_grants(run, wc)
+        if wc is not None:
+            if mechanism in et.NO_FILE:
+                self.box(run).log("trust_revoked", [mechanism], wc, 0)
+            return
+        if not held and run.exec.get("trustGrantedAt") and not run.exec.get("trustRevokedAt"):
             run.exec["trustRevokedAt"] = el.now()
-            self.box(run).log("trust_revoked", [run.exec["trustMechanism"]], run.wc, 0)
+            if mechanism in et.NO_FILE:
+                self.box(run).log("trust_revoked", [mechanism], run.wc, 0)
 
     # ---- REQ-662 ADR-4: config surfaces, rule files and the user policy folder -------------
     @staticmethod
@@ -957,32 +1075,42 @@ class Orchestrator(object):
                                     start_new_session=True)
 
     # ---- REQ-662 BR-11: the verdict at every launch, at the close-out and at approve ---------
-    def _gate(self, adapter, binary, where, run=None):
+    def _gate(self, adapter, binary, where, run=None, allow_unverified=False, invocation=None):
         """The adapter's verdict now (``exec_verify.verdict``). Unverified is refused, naming
-        each problem, unless this invocation received --allow-unverified and ``where`` is a
-        launch; then the launch goes on with one loud line, and the run record keeps the
-        invocation, which the halt copies into the ledger. ``approve`` never honours it."""
+        each problem, unless ``allow_unverified`` and ``where`` is a launch; then the launch
+        goes on with one loud line, and the run record keeps ``invocation`` (by default this
+        one), which the halt copies into the ledger. ``approve`` never honours it.
+
+        ``allow_unverified`` is what the invocation making this launch received: `run`'s flag
+        for its own pre-flight and starts, an `answer`'s for its relaunch, and nothing for the
+        close-out or a relaunch an `approve` drains (REQ-662 BR-18). A flag this supervisor's
+        `run` received never reaches a launch another invocation asks for."""
         verdict = ev.recompute(adapter, self.toolkit, binary, self.environ)
         self.verdicts[adapter.name] = verdict
         if verdict.verified:
             return verdict
-        if where == "approve" or not self.allow_unverified:
+        if where == "approve" or not allow_unverified:
+            hint = {"approve": "--allow-unverified covers launches only, never approve",
+                    "relaunch": "`adlc sprint-exec answer <REQ> <text> --allow-unverified` "
+                                "relaunches it anyway",
+                    "close-out": "--allow-unverified does not reach the close-out"}.get(
+                where, "`adlc sprint-exec run --allow-unverified` launches it anyway")
             raise Refused("harness %s is unverified, so the %s is refused (REQ-662 BR-11): %s; %s"
-                          % (adapter.name, where, verdict.summary(),
-                             "--allow-unverified covers launches only, never approve"
-                             if where == "approve" else
-                             "`adlc sprint-exec run --allow-unverified` launches it anyway"))
+                          % (adapter.name, where, verdict.summary(), hint))
         if run is not None:
             self.say("WARNING: --allow-unverified: %s %s on harness %s, which is UNVERIFIED: %s"
                      % (run.req, where, adapter.name, ", ".join(verdict.subjects)))
             run.doc.setdefault("allowUnverified", []).append(
-                el.allow_unverified_entry(self.invocation, where, verdict.subjects))
+                el.allow_unverified_entry(invocation or self.invocation, where,
+                                          verdict.subjects))
             run.save()
         return verdict
 
     def spawn(self, run):
         try:
-            self._gate(self.adapter(run), run.doc["binary"], "launch", run)
+            # A pending start is the `run` invocation's own launch: its flag, and no other.
+            self._gate(self.adapter(run), run.doc["binary"], "launch", run,
+                       self.allow_unverified)
         except Refused as exc:
             # The verdict changed after the pre-flight: this REQ starts nothing.
             self._terminal(run, "failed", "setup-error", {}, note=str(exc))
@@ -997,8 +1125,15 @@ class Orchestrator(object):
             self.say("%s refused before launch: %s" % (run.req, exc))
             self._terminal(run, "failed", "setup-error", {}, note=str(exc))
             return
-        self.grant_trust(run)
-        self._launch_first(run, "prompt.txt")
+        try:
+            self.grant_trust(run)
+            self._launch_first(run, "prompt.txt")
+        except (Refused, ea.ExecRefused) as exc:
+            # The worktrees exist and trust may be granted: a grant the trust module refuses
+            # (it wrote nothing) or an argv the closed-world check refuses ends this REQ, its
+            # trust revoked (`_terminal`), and the supervisor goes on (REQ-662 BR-5, BR-16).
+            self.say("%s refused at launch: %s" % (run.req, exc))
+            self._terminal(run, "failed", "setup-error", {}, note=str(exc))
 
     def _launch_first(self, run, prompt_name):
         launch = run.doc["launches"] + 1
@@ -1050,9 +1185,11 @@ class Orchestrator(object):
             self.on_exit(run, rc)
         for run in self.all_runs():
             if run.req not in self.children and run.status in ("running", "stalled") \
-                    and run.exec.get("pid") and run not in self.pending \
-                    and not pid_alive(run.exec["pid"]):
-                self.on_exit(run, None)         # a harness that outlived its supervisor
+                    and run not in self.pending and not pid_alive(run.exec.get("pid")):
+                # A harness that outlived its supervisor, or a run whose supervisor died
+                # before its harness's pid was recorded: swept, and its trust revoked, by
+                # `on_exit` (REQ-662 BR-5).
+                self.on_exit(run, None)
         self.start_pending()
 
     def _stall_check(self, run):
@@ -1074,9 +1211,11 @@ class Orchestrator(object):
             run.save()
 
     def reap(self, run, pid):
-        """After the leader exits: kill its group and sweep stragglers (ADR-2)."""
+        """After the leader exits: kill its group and sweep stragglers (ADR-2). With no pid
+        recorded only the run's own stragglers are swept."""
         try:
-            os.killpg(pid, signal.SIGTERM)
+            if pid:
+                os.killpg(pid, signal.SIGTERM)
         except OSError:
             pass
         deadline = time.time() + 2
@@ -1098,7 +1237,8 @@ class Orchestrator(object):
             time.sleep(0.2)
             left = stragglers(run.req, run_tag(run.path))
         try:
-            os.killpg(pid, signal.SIGKILL)
+            if pid:
+                os.killpg(pid, signal.SIGKILL)
         except OSError:
             pass
         if left:
@@ -1140,6 +1280,11 @@ class Orchestrator(object):
     def on_exit(self, run, rc):
         """The harness is gone. Nothing it wrote is read before the reap (BR-10)."""
         left = self.reap(run, run.exec["pid"])
+        if run.doc.get("trustGrants"):
+            # The harness is gone: its grant in the user config goes now, at every exit, the
+            # halt's included, so no trust entry outlives the launch it was made for. A
+            # mechanism that writes no file holds none (REQ-662 BR-5).
+            self.revoke_trust(run)
         stem = run.exec["logPath"]
         adapter = self.adapter(run)
         result = self._read_result(run, stem)
@@ -1185,12 +1330,17 @@ class Orchestrator(object):
             self._block(run, state, "stragglers survived the sweep: %s" % left)
         elif hits:
             self._block(run, state, "%s: %s" % (PROTOCOL, "; ".join(hits)))
-        elif klass == "denied":
-            # Before the halt: a run the harness ended on a refusal is blocked, whatever the
-            # model wrote to state, never a completed phase (REQ-662 BR-8).
+        elif adapter.exit_denied(rc):
+            # Before the halt: the harness itself exited with a code its exit_codes map to
+            # denied, so the run is blocked whatever the model wrote to state, never a completed
+            # phase (REQ-662 BR-8).
             self._block(run, state, self._denied_reason(result, adapter.refusal_line(stderr)))
         elif state.get("status") == "awaiting_approval":
+            # A denial the run recovered from, with no exit code saying denied, halts as
+            # before REQ-662 (BR-1).
             self._halt(run, state, result)
+        elif klass == "denied":
+            self._block(run, state, self._denied_reason(result, adapter.refusal_line(stderr)))
         elif state.get("status") == "blocked" or (claim == "blocked" and state.get("blockers")):
             self._terminal(run, "blocked", self._halt_token(state), state)
         else:
@@ -1591,17 +1741,24 @@ class Orchestrator(object):
             self.say("%s rejected: %s" % (req, reason))
             self._release_holds()
 
-    def answer(self, req, text, caller_pid=None, caller_env=None):
-        """A fresh process in the same working copy, carrying the reply (BR-14)."""
+    def answer(self, req, text, caller_pid=None, caller_env=None, allow_unverified=False,
+               invocation=None):
+        """A fresh process in the same working copy, carrying the reply (BR-14).
+        ``allow_unverified`` and ``invocation`` are the answering invocation's own flag and
+        identity, for this one relaunch (REQ-662 BR-18)."""
         with self.lock:
             run = self._run(req)
             self.caller_guard(run, caller_env, caller_pid)
             if run.status != "blocked":
                 raise Refused("%s is %s, not blocked" % (req, run.status))
-            self._relaunch(run, text)
+            self._relaunch(run, text, allow_unverified, invocation)
 
-    def _relaunch(self, run, text):
-        self._gate(self.adapter(run), run.doc["binary"], "relaunch", run)
+    def _relaunch(self, run, text, allow_unverified=False, invocation=None):
+        """A fresh launch in the run's working copy. ``allow_unverified`` is the flag of the
+        invocation that asked for it, an `answer`'s; a relaunch an `approve` drains passes
+        none (REQ-662 BR-18)."""
+        self._gate(self.adapter(run), run.doc["binary"], "relaunch", run, allow_unverified,
+                   invocation)
         branch = run.doc["branch"]
         try:
             data = ep.pipeline_prompt(self.toolkit, self.primary, run.req, branch, self.primary,
@@ -1616,7 +1773,14 @@ class Orchestrator(object):
         el.atomic_write(run.file(name), data)
         self.prepare_surfaces(run, self._working_copies(run), branch, "launch")
         self.grant_trust(run)
-        self._launch_first(run, name)
+        try:
+            self._launch_first(run, name)
+        except (Refused, ea.ExecRefused) as exc:
+            # Trust is granted: an argv the closed-world check refuses ends the run, its trust
+            # revoked (`_terminal`), and the caller is told (REQ-662 BR-5, BR-16).
+            self.say("%s refused at relaunch: %s" % (run.req, exc))
+            self._terminal(run, "failed", "setup-error", {}, note=str(exc))
+            raise Refused(str(exc))
 
     def abort(self, req, by="", caller_pid=None, caller_env=None):
         """The only way a running or stalled harness is killed (BR-20)."""
@@ -2038,7 +2202,11 @@ class Orchestrator(object):
         except Refused as exc:
             self._close_out_failed(run, "failed", str(exc))
             return
-        box.log("trust_granted", [run.exec["trustMechanism"]], path, 0)
+        try:
+            self.grant_trust(run, path)
+        except Refused as exc:
+            self._close_out_failed(run, "failed", str(exc))
+            return
         try:
             deploy = (plan.get("deployPlan") or {}).get("command", "")
             data = ep.closeout_prompt(self.toolkit, run.req, branch, path,
@@ -2061,7 +2229,7 @@ class Orchestrator(object):
         rc = proc.wait()
         self.reap(run, proc.pid)
         self.verify_surfaces(run, [path], "exit")
-        box.log("trust_revoked", [run.exec["trustMechanism"]], path, 0)
+        self.revoke_trust(run, path)
         result = self._read_result(run, "close-out.json")
         lines = (result["text"] or "").strip().split("\n")
         claim = ea.terminal_claim(result["text"])
@@ -2110,9 +2278,12 @@ class Orchestrator(object):
             self._close_out_failed(run, "failed", "the close-out wrote no terminal record")
 
     def cleanup(self, run):
-        """Every working copy, touched or not, and the close-out's (BR-13). What the engine
-        rendered and hid in each is restored first, and a removal that takes a working copy's
+        """Every working copy, touched or not, and the close-out's (BR-13). A trust grant still
+        recorded for any of them, a close-out that stopped early or a supervisor that died
+        between a grant and its revoke, is revoked first (REQ-662 BR-5). What the engine
+        rendered and hid in each is restored next, and a removal that takes a working copy's
         own config with it is the engine's own gitdir change (REQ-662 BR-17)."""
+        self._revoke_grants(run)
         box = self.box(run)
         self.restore_surfaces(run)
         for spec in run.doc["repos"].values():
@@ -2230,7 +2401,8 @@ class Orchestrator(object):
             self.reject(request["req"], request.get("reason", ""), request.get("decidedBy", ""),
                         request.get("channel", "shell"), pid, env)
         elif op == "answer":
-            self.answer(request["req"], request.get("text", ""), pid, env)
+            allow, invocation = self._op_allowance(request, pid)
+            self.answer(request["req"], request.get("text", ""), pid, env, allow, invocation)
         elif op == "abort":
             self.abort(request["req"], request.get("decidedBy", ""), pid, env)
         elif op == "reissue":
@@ -2244,6 +2416,21 @@ class Orchestrator(object):
         else:
             raise Refused("unknown op %r" % op)
         return {"ok": True}
+
+    @staticmethod
+    def _op_allowance(request, pid):
+        """``(allow_unverified, invocation)`` an op carries: the --allow-unverified its own
+        invocation received, and that invocation as the ledger records it, with the caller's
+        pid as the kernel reported it. Never this supervisor's own flag (REQ-662 BR-18)."""
+        if request.get("allowUnverified") is not True:
+            return False, None
+        inv = request.get("invocation")
+        if not isinstance(inv, dict) or not isinstance(inv.get("id"), str) or not inv["id"] \
+                or not isinstance(inv.get("startedAt"), str):
+            raise Refused("bad request: --allow-unverified without the invocation that received "
+                          "it")
+        return True, {"id": inv["id"], "pid": pid or inv.get("pid"),
+                      "startedAt": inv["startedAt"]}
 
     def kick(self):
         """One worker at a time: merges are serialized, approvals stay responsive."""
@@ -2451,6 +2638,10 @@ def _parser():
             cmd.add_argument("--gate-token", default="")
         if name in ("reject", "answer"):
             cmd.add_argument("text", nargs="?", default="")
+        if name == "answer":
+            cmd.add_argument("--allow-unverified", action="store_true",
+                             help="relaunch an adapter BR-11 reads unverified, for this answer's "
+                                  "relaunch only (REQ-662)")
     return parser
 
 
@@ -2515,6 +2706,9 @@ def _client(orch, args):
         request["reason"] = args.text
     elif args.verb == "answer":
         request["text"] = args.text
+        if args.allow_unverified:
+            # For this answer's relaunch alone, and the ledger names this invocation (BR-18).
+            request.update({"allowUnverified": True, "invocation": orch.invocation})
     env = orch.environ
     pid = os.getpid()
     orch.caller_guard(run, env, pid)

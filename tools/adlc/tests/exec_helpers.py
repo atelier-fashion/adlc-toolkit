@@ -440,12 +440,14 @@ FILE_POLICY_DIR = ".fake-exec-file/rules"
 FILE_POLICY = ".fake-exec-file/rules/adlc-exec.rules"
 
 
-def file_adapter(directory, result, rules_reload="unknown", context_delivery="prompt"):
+def file_adapter(directory, result, rules_reload="unknown", context_delivery="prompt",
+                 trust_grant="none"):
     """The Codex-shaped fixture (``fake-exec-file.yml``, the ``file`` render form) made
     launchable on today's engine, as a ``verification: probes`` block over ``result``: its
     rules in a working-copy rule file and the deny tier in a user policy file, a working-copy
-    config and hook file inside its one directory surface, and the trust grant and working copy
-    the engine has an arm for (``none``, ``worktree``) until TASK-263. Every exec-scope loss is
+    config and hook file inside its one directory surface, the ``worktree`` working copy, and
+    ``trust_grant`` (``none``, or the fixture's own ``user-config-entry``, which writes the
+    user config ``$HOME/`` + :data:`FILE_USER_CONFIG`; REQ-662 BR-5). Every exec-scope loss is
     declared, as a maintainer would."""
     text = open(CODEX_SHAPED_FIXTURE, encoding="utf-8").read()
     block = ha.load_adapter(CODEX_SHAPED_FIXTURE, toolkit=TOOLKIT)["exec"]
@@ -475,7 +477,7 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
          "capabilities:\n"),
         (old_cache, "  probes:\n" + cache),
         ("  working_copy: {strategy: clone}\n  trust_grant: user-config-entry\n",
-         "  working_copy: {strategy: worktree}\n  trust_grant: none\n"),
+         "  working_copy: {strategy: worktree}\n  trust_grant: %s\n" % trust_grant),
         ("  operator_flags: [--model]\n",
          "  operator_flags: [--model]\n  add_dir_flag: --add-dir\n"),
         ("  context_delivery: prompt\n", "  context_delivery: %s\n" % context_delivery),
@@ -492,21 +494,55 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
     return path
 
 
-def file_sandbox(tmp_path, monkeypatch, result="prompt-pass", rules_reload="unknown", **kw):
+def file_sandbox(tmp_path, monkeypatch, result="prompt-pass", rules_reload="unknown",
+                 trust_grant="none", **kw):
     """A Sandbox whose harness is :func:`file_adapter` on a sandbox ToolkitRoot holding its
     result file, with the jsonl fake installed as ``fake-exec-file``. The launch carries the
     Codex-shaped template and nothing else; the close-out's ``--add-dir`` is recorded by the
     fake as an option it does not know. ``box.home`` is the run's HOME, where the user config
-    and the user policy folder live."""
+    and the user policy folder live; ``trust_grant`` is the adapter's (:func:`file_adapter`)."""
     doc = probe_result(result) if isinstance(result, str) else result
     toolkit = toolkit_copy(tmp_path / "toolkit")
-    path = file_adapter(tmp_path / "adapter", doc, rules_reload=rules_reload)
+    path = file_adapter(tmp_path / "adapter", doc, rules_reload=rules_reload,
+                        trust_grant=trust_grant)
     use_adapter(monkeypatch, path, toolkit)
     box = Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path, toolkit=toolkit, **kw)
     box.write_scenario(unknown_flags="record")
     box.result = doc
     box.write_result(doc)
     return box
+
+
+#: An operator's user config for the trust grant (REQ-662 BR-5): their own keys, another
+#: project's trust entry and a hook-review table, none of which a grant or a revoke may change.
+USER_CONFIG = ('# the operator\'s own config\n'
+               'model = "fake-mid-1"\n'
+               '\n'
+               '[tui]\n'
+               'theme = "dark"   # a trailing comment\n'
+               '\n'
+               '[projects."/srv/other"]\n'
+               'trust_level = "trusted"\n'
+               '\n'
+               '[hooks.state."/srv/other/.fake-exec-file/hooks.json:session_start:0"]\n'
+               'trusted_hash = "sha256:%s"\n' % ("0" * 64))
+
+
+def trust_sandbox(tmp_path, monkeypatch, **kw):
+    """A :func:`file_sandbox` whose adapter declares ``trust_grant: user-config-entry``, with
+    :data:`USER_CONFIG` as the user config the adapter names, under the sandbox HOME
+    (``box.user_config``): the file the harness reads, never the operator's (LESSON-777)."""
+    box = file_sandbox(tmp_path, monkeypatch, trust_grant="user-config-entry", **kw)
+    box.user_config = str(box.home / FILE_USER_CONFIG)
+    os.makedirs(os.path.dirname(box.user_config), exist_ok=True)
+    with open(box.user_config, "w", encoding="utf-8") as fh:
+        fh.write(USER_CONFIG)
+    return box
+
+
+def read_text(path):
+    with open(str(path), encoding="utf-8") as fh:
+        return fh.read()
 
 
 def fresh_files(box, branch="feat/REQ-901-thing"):

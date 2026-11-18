@@ -11,11 +11,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
 
+import exec_adapter as ea  # noqa: E402
 import exec_gates as eg  # noqa: E402
 import exec_helpers as eh  # noqa: E402
 import exec_ledger as el  # noqa: E402
 import exec_prompt as ep  # noqa: E402
 import exec_safety as es  # noqa: E402
+import exec_trust as et  # noqa: E402
 import sprint_exec as se  # noqa: E402
 
 REQ = "REQ-901"
@@ -267,6 +269,38 @@ def test_answer(box):
     assert len(argv) == 2 and "--resume" not in json.loads(argv[1])
     assert "the second option" in open(run.file("prompt.2.txt")).read()
     assert run.exec["promptPath"] == "prompt.2.txt"
+
+
+def test_an_argv_refused_at_relaunch_ends_the_run(tmp_path, monkeypatch):
+    """REQ-662 BR-16, BR-5: a relaunch whose argv the closed-world check refuses after its trust
+    is granted ends the run failed (setup-error) with the refusal in its notes and its trust
+    revoked, and the answer is refused with it. Nothing is launched. On claude (`none`) the
+    revoke is recorded; on a `user-config-entry` adapter the user config is byte-identical."""
+    for name in ("claude", "trust"):
+        (tmp_path / name).mkdir()
+        if name == "claude":
+            box = eh.Sandbox(tmp_path / name)
+        else:
+            box = eh.trust_sandbox(tmp_path / name, monkeypatch)
+        box.req(status="blocked", claim="blocked", add=["src"],
+                blockers=[{"reason": "reflector-questions", "question": "which?"}],
+                after_answer={"status": "awaiting_approval", "claim": "awaiting_approval"})
+        orch = box.go(shared=True)
+        run = orch.runs[REQ]
+        assert run.status == "blocked", name
+        run.doc["flags"] = ["--not-an-operator-flag"]
+        with pytest.raises(se.Refused, match="--not-an-operator-flag is not in harness"):
+            orch.answer(REQ, "the second option")
+        assert run.status == "failed" and not orch.children, name
+        assert len((box.home / "argv-REQ-901.json").read_text().splitlines()) == 1
+        assert "operator_flags" in json.dumps(run.read_primary_state()["notes"])
+        assert run.exec["trustRevokedAt"], name
+        if name == "trust":
+            assert run.doc["trustGrants"] == {}
+            assert len(eh.events(box, run, "trust_granted")) == 2
+            assert [e["status"] for e in eh.events(box, run, "trust_revoked")] == [
+                et.REVOKED] * 2
+            assert eh.read_text(box.user_config) == eh.USER_CONFIG
 
 
 def test_doctored_state(box, tmp_path):
@@ -623,6 +657,54 @@ def test_close_out_scopes_file_tools(tmp_path):
     for bare in ("Read", "Write", "Edit", "Glob", "Grep"):
         assert bare not in allow
 
+
+def test_close_out_gets_its_own_trust_grant(tmp_path, monkeypatch):
+    """REQ-662 BR-5, AC-5: after a successful run the close-out's working copy is granted before
+    its launch and revoked after, apart from the run's own grant, which went at the halt. Once
+    merged the user config is byte-identical and `exec.trustGrantedAt` and `trustRevokedAt` are
+    set. A close-out that stops between its grant and its revoke is cleaned by cleanup."""
+    a = tmp_path / "a"
+    a.mkdir()
+    box = eh.trust_sandbox(a, monkeypatch)
+    config = box.user_config
+    box.req(add=["src"], saw=[config], closeout={"saw": [config], "add": [".adlc"]})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    assert run.status == "awaiting_approval" and eh.read_text(config) == eh.USER_CONFIG
+    assert box.approve(orch) == "approved"
+    assert run.status == "merged" and run.read_primary_state()["closeOut"]["status"] == "ok"
+    paths = [os.path.realpath(p) for p in (run.wc, run.doc["closeOutWorkingCopy"])]
+    saw = [json.loads(ln)["saw"][config]
+           for ln in (box.home / "saw-REQ-901.jsonl").read_text().splitlines()]
+    assert saw == [eh.USER_CONFIG + et.trust_block(p) for p in paths]
+    assert [e["path"] for e in eh.events(box, run, "trust_granted")] == paths
+    assert [(e["path"], e["status"]) for e in eh.events(box, run, "trust_revoked")] == [
+        (p, et.REVOKED) for p in paths]
+    assert run.exec["trustGrantedAt"] and run.exec["trustRevokedAt"]
+    assert run.doc["trustGrants"] == {} and eh.read_text(config) == eh.USER_CONFIG
+
+    b = tmp_path / "b"
+    b.mkdir()
+    box = eh.trust_sandbox(b, monkeypatch)
+    box.req(add=["src"])
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    argv = orch._argv
+
+    def refused_at_resume(*args, **kw):
+        if kw.get("resume"):
+            raise ea.ExecRefused("closed world: the resume argv is refused")
+        return argv(*args, **kw)
+
+    monkeypatch.setattr(orch, "_argv", refused_at_resume)
+    assert box.approve(orch) == "approved"
+    assert run.status == "merged"
+    assert "the resume argv is refused" in run.read_primary_state()["closeOut"]["reason"]
+    close = os.path.realpath(run.doc["closeOutWorkingCopy"])
+    assert [(e["path"], e["status"]) for e in eh.events(box, run, "trust_revoked")][-1] == (
+        close, et.REVOKED)
+    assert run.doc["trustGrants"] == {} and eh.read_text(box.user_config) == eh.USER_CONFIG
+
 DEPLOY = ("sprint:\n  exec:\n    child_gh_token: CHILD_GH\n    deploy:\n      target: prod\n"
           "      command: \"touch %s\"\n")
 
@@ -964,6 +1046,50 @@ def test_allow_unverified_is_per_invocation(tmp_path, monkeypatch):
     box.write_scenario(version=later.adapter(later.runs[REQ]).block["harness_version"])
     assert box.approve(later) == "approved"
     assert later.runs[REQ].status == "merged"
+
+
+def test_allow_unverified_on_answer_is_the_answering_invocations(tmp_path, monkeypatch):
+    """REQ-662 BR-18, AC-15, AC-21: the live supervisor that `run --allow-unverified` started
+    does not lend its flag to a later `answer` it serves: without the flag the relaunch is
+    refused naming the unverified adapter, and nothing is launched; `answer --allow-unverified`
+    relaunches, for that relaunch alone, and the ledger names the answering invocation beside
+    the launching one."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
+    box.req(status="blocked", claim="blocked",
+            blockers=[{"reason": "reflector-questions", "question": "which?"}],
+            after_answer={"status": "awaiting_approval", "claim": "awaiting_approval",
+                          "files": {"src/two.txt": "two\n"}})
+    box.write_scenario(version=UPGRADED)
+    live = box.go(shared=True, allow_unverified=True)
+    run = live.runs[REQ]
+    assert run.status == "blocked" and live.allow_unverified is True
+
+    def served(_run, request):
+        # What the live supervisor's socket answers: its own dispatch (`serve_once`).
+        try:
+            return live.dispatch(request, None)
+        except se.Refused as exc:
+            return {"ok": False, "error": str(exc)}
+
+    monkeypatch.setattr(se, "client_call", served)
+    answering = box.orch()
+    plain = se._parser().parse_args(["answer", REQ, "the second option"])
+    with pytest.raises(se.Refused, match="harness fake-exec-file is unverified, so the "
+                                         "relaunch is refused.*installed-version"):
+        se._client(answering, plain)
+    assert run.status == "blocked" and not live.children and len(box.launches()) == 1
+    assert [e["launch"] for e in run.doc["allowUnverified"]] == ["launch"]
+    flagged = se._parser().parse_args(["answer", REQ, "the second option",
+                                       "--allow-unverified"])
+    assert se._client(answering, flagged) == 0
+    box.wait(live)
+    assert run.status == "awaiting_approval" and len(box.launches()) == 2
+    entries = run.ledger().read()["plan"]["allowUnverified"]
+    assert [(e["launch"], e["invocation"]["id"]) for e in entries] == [
+        ("launch", live.invocation["id"]), ("relaunch", answering.invocation["id"])]
+    assert entries[1]["invocation"]["pid"] == os.getpid()
+    assert ("the relaunch by invocation %s" % answering.invocation["id"]) in \
+        "\n".join(se.render_row(run))
 
 
 def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path, monkeypatch):

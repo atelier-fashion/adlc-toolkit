@@ -79,15 +79,23 @@ class TrustRefused(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def user_config_path(adapter):
-    """The adapter's user config file (``paths.config.user``), ``$HOME`` expanded."""
+def user_config_path(adapter, environ=None):
+    """The adapter's user config file (``paths.config.user``), ``$HOME`` expanded: from
+    ``environ`` when given (the run's environment, the one the harness is handed, so the file
+    written is the file the harness reads; LESSON-777), else from this process's."""
     import harness_adapter as ha
     spec = ((adapter.get("paths") or {}).get("config") or {})
     user = spec.get("user")
     if not isinstance(user, str) or not user:
         raise TrustRefused("harness/%s.yml declares no paths.config.user, so trust_grant %s "
                            "has no file to write" % (adapter.get("name"), USER_CONFIG_ENTRY))
-    return ha.expand_user_path(user)
+    if environ is None:
+        return ha.expand_user_path(user)
+    import exec_surfaces as esf
+    try:
+        return esf.user_path(user, environ)
+    except esf.SurfaceRefused as exc:
+        raise TrustRefused(str(exc))
 
 
 def probe_marker(adlc_home, harness):

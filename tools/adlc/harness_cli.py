@@ -14,7 +14,8 @@ the other (LESSON-397).
 * ``install``  writes a harness's user-level surfaces only (BR-3); ``--all``
   iterates the harnesses ``adlc harness detect`` reports present,
   ``--only-if-detected`` writes nothing without the binary, and ``--writable-root``
-  unions one path into a user config's owned array (REQ-655).
+  unions one path into a user config's owned array (REQ-655). ``--exec`` writes the
+  harness's exec user policy file instead, whole and atomically (REQ-662 BR-4).
 * ``doctor``   runs ``harness:<name>`` and ``render-currency:<name>`` (BR-15), and for an
   installed harness with an exec block prints ``exec: verified`` or ``exec: unverified
   (<ids>)``, recomputed (REQ-662 BR-14).
@@ -267,9 +268,54 @@ def _install_one(adapter, toolkit, dry_run, out):
     return written, notes
 
 
+def _install_exec(args, toolkit, out, err):
+    """``install --exec --harness <name>``: the exec block's ``user_policy_file``, the deny
+    tier the engine renders for it, written whole and atomically under the policy folder's lock
+    and the folder recorded for the engine's launch checks (``exec_surfaces``, REQ-662 BR-4).
+    A second run leaves the file as it is. An adapter that declares none has nothing to
+    install."""
+    import exec_adapter as ea
+    import exec_surfaces as esf
+    import exec_verify as ev
+    if args.all or not args.harness or args.writable_root or args.only_if_detected:
+        err.write("adlc harness install: --exec names one harness (--harness <name>) and takes "
+                  "no --all, --writable-root or --only-if-detected\n")
+        return 2
+    try:
+        adapter = ea.load(args.harness, toolkit, args.adapter_path)
+        files = adapter.rule_files("feat/install", (), ev.read_result(adapter, toolkit))
+        path = esf.policy_path(adapter.adapter, os.environ)
+    except (ea.ExecRefused, esf.SurfaceRefused) as exc:
+        err.write("adlc harness install: %s\n" % exc)
+        return 2
+    text = files.user_policy_file if files is not None else None
+    if path is None or text is None:
+        out.write("%s: nothing to install — its exec block declares no user policy file\n"
+                  % adapter.name)
+        return 0
+    if esf.found(os.path.dirname(path), os.path.basename(path)) == esf.sha256_text(text):
+        verb = "unchanged"
+    elif args.dry_run:
+        out.write("%s: dry-run: would write %s\n" % (adapter.name, path))
+        return 0
+    else:
+        verb = "written"
+    if not args.dry_run:
+        try:
+            esf.install_policy_file(adapter.adapter, os.environ, text)
+        except (esf.SurfaceRefused, OSError) as exc:
+            err.write("adlc harness install: %s\n" % exc)
+            return 2
+    out.write("%s: %s %s — the exec deny tier, beside your own rules; every exec run "
+              "checks this folder against what was recorded now\n" % (adapter.name, verb, path))
+    return 0
+
+
 def cmd_install(args, out=sys.stdout, err=sys.stderr):
     import harness_doctor
     toolkit = ha.toolkit_dir()
+    if getattr(args, "exec_policy", False):
+        return _install_exec(args, toolkit, out, err)
     if args.all and args.adapter_path:
         err.write("adlc harness install: --all does not take --adapter-path\n")
         return 2
@@ -417,6 +463,8 @@ def build_parser():
                    help="write nothing when `adlc harness detect` does not find the binary")
     i.add_argument("--writable-root", metavar="PATH",
                    help="add this absolute path to the user config's owned array")
+    i.add_argument("--exec", dest="exec_policy", action="store_true",
+                   help="write the harness's exec user policy file (REQ-662 BR-4)")
     d = sub.add_parser("doctor", help="harness:<name> and render-currency:<name>")
     d.add_argument("--harness")
     d.add_argument("--adapter-path")
