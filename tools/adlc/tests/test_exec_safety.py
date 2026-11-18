@@ -216,3 +216,77 @@ def test_partial_is_sourced_from_the_install(repo):
     res = box.forge("adlc_forge_branch_protection", ["main"], str(work))
     assert res.stdout.strip() == "protected", res.stderr
     assert "PLANTED" not in res.stdout + res.stderr
+
+
+# ---- REQ-662 review fix 7: the engine's own gitdir writes are not tampering ------------------
+def _engine_writes(box, work, tmp_path):
+    """What a file-rendering batch writes into the common gitdir: the extension in the main
+    config, and a working copy whose ``config.worktree`` names an excludes file under the
+    engine's state root. Returns ``(working copy, excludes file)``."""
+    import exec_ledger as el
+    git(work, "config", "--local", "extensions.worktreeConfig", "true")
+    wt = tmp_path / "wt"
+    git(work, "worktree", "add", "-q", "-b", "fx", str(wt))
+    excludes = os.path.join(el.exec_root(box.environ), "0" * 32, "excludes-000000000000")
+    git(wt, "config", "--worktree", "core.excludesFile", excludes)
+    return wt, excludes
+
+
+def test_the_gitdir_digest_ignores_the_engines_own_writes(repo, tmp_path):
+    """A second supervisor's box on the same repository: the extension the pre-flight sets,
+    a working copy's core.excludesFile under the engine's state root, the empty
+    config.worktree a restore leaves, and the removal of such a working copy each leave its
+    checksum unchanged, so its run is not blocked. Without a state root the digest is
+    today's, which counts every byte."""
+    import exec_ledger as el
+    box, work, _ = repo
+    common = str(work / ".git")
+    state = el.exec_root(box.environ)
+    before = es.gitdir_digest(common, state)
+    assert before == es.gitdir_digest(common)       # nothing to ignore yet: the same digest
+    wt, excludes = _engine_writes(box, work, tmp_path)
+    assert es.gitdir_digest(common, state) == before
+    assert es.gitdir_digest(common) != before       # the default keeps today's digest
+    box.verify_gitdir(str(work))
+    assert box.tree_digest(common) == before
+    git(wt, "config", "--worktree", "--unset", "core.excludesFile")
+    assert es.gitdir_digest(common, state) == before
+    box.verify_gitdir(str(work))
+    git(wt, "config", "--worktree", "core.excludesFile", excludes)
+    git(work, "worktree", "remove", "--force", str(wt))
+    assert es.gitdir_digest(common, state) == before
+    box.verify_gitdir(str(work))
+    again = es.Toolbox.load(box.run_dir, TOOLKIT, box.environ)
+    again.verify_gitdir(str(work))
+
+
+@pytest.mark.parametrize("change", ["excludes-elsewhere", "excludes-dotdot", "second-key",
+                                    "comment", "hooks-path", "other-extension"])
+def test_the_gitdir_digest_still_sees_what_the_engine_does_not_write(repo, tmp_path, change):
+    """Anything but the engine's own writes still changes the digest: core.excludesFile
+    pointing outside the state root, a second key in config.worktree, core.hooksPath in the
+    main config, and any other extensions.* key."""
+    import exec_ledger as el
+    box, work, _ = repo
+    common = str(work / ".git")
+    state = el.exec_root(box.environ)
+    wt, excludes = _engine_writes(box, work, tmp_path)
+    before = es.gitdir_digest(common, state)
+    config_wt = os.path.join(common, "worktrees", os.path.basename(str(wt)), "config.worktree")
+    if change == "excludes-elsewhere":
+        git(wt, "config", "--worktree", "core.excludesFile", str(tmp_path / "elsewhere"))
+    elif change == "excludes-dotdot":
+        git(wt, "config", "--worktree", "core.excludesFile",
+            os.path.join(state, "..", "..", "elsewhere"))
+    elif change == "second-key":
+        git(wt, "config", "--worktree", "core.hooksPath", str(tmp_path / "hooks"))
+    elif change == "comment":
+        with open(config_wt, "a", encoding="utf-8") as fh:
+            fh.write("# planted\n")
+    elif change == "hooks-path":
+        git(work, "config", "--local", "core.hooksPath", str(tmp_path / "hooks"))
+    else:
+        git(work, "config", "--local", "extensions.preciousObjects", "true")
+    assert es.gitdir_digest(common, state) != before
+    with pytest.raises(es.RuleBViolation, match="common gitdir checksum mismatch"):
+        box.verify_gitdir(str(work))

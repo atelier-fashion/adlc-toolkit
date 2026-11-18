@@ -265,11 +265,20 @@ def test_bypass_config_keys_refuse(tmp_path, monkeypatch):
     assert esf.bypass_scan(adapter, [str(wc)], env) == [
         esf.Hit(str(local), "sandbox_mode", '"danger-full-access"')]
     local.write_text(plan[eh.FILE_CONFIG])
-    for bad in ("[[profiles]]\nx = 1\n", 'approval_policy = "never"', '"approval_policy" = "x"\n',
-                '[profiles.p]\napproval_policy = "never"\n', "approval_policy =\n"):
+    for bad in ("[[profiles]]\nx = 1\n", "approval_policy =\n",
+                'approval_policy = """never"""\n'):
         user.write_text(bad)
         with pytest.raises(esf.SurfaceRefused, match="cannot be read with certainty"):
             esf.bypass_scan(adapter, [str(wc)], env)
+    # A quoted key and a file with no final newline are read, and are hits; a key inside a
+    # table belongs to that table, which no watched key names (review fix 5).
+    for text, hit in (('approval_policy = "never"', '"never"'), ('"approval_policy" = "x"\n',
+                                                                 '"x"')):
+        user.write_text(text)
+        assert esf.bypass_scan(adapter, [str(wc)], env) == [
+            esf.Hit(str(user), "approval_policy", hit)]
+    user.write_text('[profiles.p]\napproval_policy = "never"\n')
+    assert esf.bypass_scan(adapter, [str(wc)], env) == []
     user.write_text(clean_user)
     os.unlink(str(local))
     os.symlink(str(user), str(local))
@@ -322,9 +331,10 @@ def test_bypass_config_keys_refuse(tmp_path, monkeypatch):
     run = orch.runs["REQ-901"]
     assert run.status == "awaiting_approval" and len(box.launches()) == 1
     assert not eh.events(box, run, "adapter_refused")
+    # A key after a table header belongs to that table, which no watched key names: clean
+    # (review fix 5); the same key at the top level refuses the resume.
     buser.write_text(clean_user + '\nsandbox_mode = "danger-full-access"\n')
-    with pytest.raises(esf.SurfaceRefused, match="cannot be read"):
-        esf.bypass_scan(adapter, [], {"HOME": str(box.home)})    # a top-level key after a table
+    assert esf.bypass_scan(adapter, [], {"HOME": str(box.home)}) == []
     buser.write_text('sandbox_mode = "danger-full-access"\n' + clean_user)
     assert box.approve(orch) == "approved"
     close = run.read_primary_state()["closeOut"]
@@ -480,3 +490,403 @@ def test_rules_reload_unknown_is_handled_as_live():
     assert "may have taken effect mid-run" in unknown
     assert "could not take effect" in esf.violation_text(change, {"rules_reload": "startup"},
                                                          "halt")
+
+
+# ---- review fix 1: the policy file's lock is the shared mkdir lock (LESSON-014) ---------------
+def _policy_env(tmp_path):
+    home, state = tmp_path / "home", tmp_path / "state"
+    env = {"HOME": str(home), "XDG_STATE_HOME": str(state)}
+    data = {"name": "fake-exec-file", "exec": {"user_policy_file": "$HOME/" + eh.FILE_POLICY}}
+    return home, env, data
+
+
+def test_the_policy_lock_refuses_a_symlink_and_keeps_the_body_exception(tmp_path):
+    """A symlink at the policy lock's path refuses at once, naming it, and the pre-flight
+    writes nothing; a body's exception survives a release that cannot remove the lock; the
+    lock makes its own state directory. The trust file's lock is the same lock."""
+    import exec_trust as et
+    home, env, data = _policy_env(tmp_path)
+    record_file = esf.record_path(data, env)
+    lock = record_file + ".lock.d"
+    os.makedirs(os.path.dirname(lock))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    os.symlink(str(elsewhere), lock)
+    with pytest.raises(esf.SurfaceRefused, match=r"%s is a symlink" % re.escape(lock)) as caught:
+        with esf.file_lock(record_file, timeout=0.2):
+            pass
+    assert caught.value.path == lock
+    with pytest.raises(esf.SurfaceRefused, match="symlink"):
+        esf.ensure_policy_file(data, env, "policy\n")
+    assert not (home / eh.FILE_POLICY).exists() and not os.listdir(str(elsewhere))
+    os.unlink(lock)
+    with pytest.raises(ValueError, match="the body's own"):
+        with esf.file_lock(record_file):
+            open(os.path.join(lock, "left"), "w").close()
+            raise ValueError("the body's own")
+    os.unlink(os.path.join(lock, "left"))
+    os.rmdir(lock)
+    fresh = str(tmp_path / "fresh-state" / "policy" / "x.json")
+    with esf.file_lock(fresh, timeout=0.2) as held:
+        assert held == fresh + ".lock.d" and os.path.isdir(held)
+    trust = str(tmp_path / "trust.toml")
+    with pytest.raises(ValueError, match="the body's own"):
+        with et.lock(trust):
+            open(os.path.join(trust + et.LOCK_SUFFIX, "left"), "w").close()
+            raise ValueError("the body's own")
+
+
+def test_the_policy_lock_waits_on_the_monotonic_clock(tmp_path, monkeypatch):
+    """A wall clock that jumps a day per reading does not end the wait early."""
+    import threading
+    import time
+    _home, env, data = _policy_env(tmp_path)
+    record_file = esf.record_path(data, env)
+    os.makedirs(record_file + ".lock.d")
+    real = time.time
+    jumps = []
+
+    def jumping():
+        jumps.append(1)
+        return real() + 86400.0 * len(jumps)
+
+    monkeypatch.setattr(time, "time", jumping)
+    releaser = threading.Timer(0.3, os.rmdir, (record_file + ".lock.d",))
+    releaser.start()
+    try:
+        with esf.file_lock(record_file, timeout=10.0):
+            pass
+    finally:
+        releaser.join()
+
+
+# ---- review fix 2: one fold, with the gate's Unicode normalisation -----------------------------
+NFC = "café"            # é, one code point
+NFD = "café"           # e and a combining acute accent
+
+
+class _HideBox(object):
+    """A Toolbox stand-in for :func:`exec_surfaces.hide`: ``ls-files`` answers from ``index``
+    (``{path: tag}``), the repository's ``core.excludesFile`` is ``inherited``, and every call
+    is appended to ``events``."""
+
+    class Res(object):
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    def __init__(self, index, events, inherited):
+        self.index, self.events, self.inherited = index, events, inherited
+
+    def git(self, repo, args, cwd=None):
+        if args[0] == "ls-files":
+            self.events.append(("read", "ls-files"))
+            return self.Res(0, "".join("%s 100644 %s 0\t%s\0" % (tag, "1" * 40, rel)
+                                       for rel, tag in sorted(self.index.items())))
+        if args[:2] == ["config", "--local"]:
+            self.events.append(("read", "config --local"))
+            return self.Res(0, self.inherited + "\n")
+        if "--get" in args:
+            self.events.append(("read", " ".join(args)))
+            return self.Res(1)
+        self.events.append(("write", " ".join(args[:3])))
+        return self.Res(0)
+
+
+def test_nfc_and_nfd_spellings_fold_equal(tmp_path):
+    """One fold: NFD, case-folded, NFD again, posixpath-normalised. An NFC and an NFD
+    spelling of one name compare equal in the manifest (a surface the render names is not
+    also made absent), in the hiding (a tracked path is not taken for an untracked render)
+    and in the gate, which uses the same fold."""
+    import exec_gates as eg
+    nfc, nfd = ".fake-exec-file/%s.toml" % NFC, ".fake-exec-file/%s.toml" % NFD
+    assert nfc != nfd and esf.fold(nfc) == esf.fold(nfd)
+    assert esf.fold(".Fake-Exec-File//X.toml") == esf.fold(".fake-exec-file/x.toml")
+    assert esf.fold("/Abs/" + NFC) == esf.fold("/abs/" + NFD)
+    assert esf._inside(nfd, ".fake-exec-file") and esf._inside(".FAKE-EXEC-FILE/%s.toml/x"
+                                                               % NFD, nfc)
+    # The manifest: the surface is the file the render writes, in either spelling.
+    manifest = esf.manifest_of({nfd: "x\n"}, {"config_surfaces": [nfc]})
+    assert manifest == {"files": {nfd: _sha("x\n")}, "absent": [], "directories": []}
+    # The hiding: the index spells it NFC, the manifest NFD; it is tracked, not untracked.
+    events = []
+    inherited = tmp_path / "inherited-excludes"
+    inherited.write_text("*.orig\n")
+    record = esf.hide(_HideBox({nfc: "H"}, events, str(inherited)), "/repo", "/wc", manifest,
+                      {}, str(tmp_path / "excludes"), {"HOME": str(tmp_path)})
+    assert record["untracked"] == [] and "excludesFile" not in record
+    assert record["skipWorktree"] == [nfc]
+    # The gate: the same fold, and no second one.
+    assert not hasattr(eg, "_fold")
+    assert eg.exec_path_hits([["A", nfd]], [nfc]) == [["A", nfd]]
+    assert eg.gate_lines([nfd], [], [nfc]) == [
+        "changes the gate: touches a config surface: %s" % nfd]
+
+
+# ---- review fix 6: hide's run record is saved before any git write ----------------------------
+def test_hide_checkpoints_the_record_before_each_git_write(tmp_path):
+    """``hide(checkpoint=...)`` is called once the record holds ``launchBlobs``,
+    ``skipWorktree`` and ``excludesFile``, and before each git write: the skip-worktree marks
+    and the working copy's ``core.excludesFile``. A supervisor that dies after any write has
+    a saved record that names it. Without a checkpoint nothing changes (the default)."""
+    tracked, untracked = eh.FILE_CONFIG, eh.FILE_RULE
+    manifest = {"files": {tracked: "a" * 64, untracked: "b" * 64}, "absent": [],
+                "directories": []}
+    inherited = tmp_path / "inherited-excludes"
+    inherited.write_text("*.orig\n")
+    excludes = str(tmp_path / "excludes")
+    events = []
+    seen = []
+
+    def checkpoint(record):
+        events.append(("checkpoint", None))
+        seen.append(json.loads(json.dumps(record)))
+
+    record = esf.hide(_HideBox({tracked: "H"}, events, str(inherited)), "/repo", "/wc",
+                      manifest, {}, excludes, {"HOME": str(tmp_path)}, checkpoint=checkpoint)
+    order = [e for e in events if e[0] != "read"]
+    assert order == [("checkpoint", None), ("write", "update-index --skip-worktree --"),
+                     ("checkpoint", None), ("write", "config --worktree core.excludesFile")]
+    want = {"launchBlobs": {tracked: {"mode": "100644", "oid": "1" * 40}},
+            "skipWorktree": [tracked], "untracked": [untracked], "excludesFile": excludes}
+    assert record == want and seen == [want, want]
+    # The default is a no-op checkpoint: the same record, the same writes.
+    events[:] = []
+    again = esf.hide(_HideBox({tracked: "H"}, events, str(inherited)), "/repo", "/wc",
+                     manifest, {}, excludes, {"HOME": str(tmp_path)})
+    assert again == want and [e for e in events if e[0] == "write"] == [
+        ("write", "update-index --skip-worktree --"),
+        ("write", "config --worktree core.excludesFile")]
+
+
+# ---- review fix 3: writes walk with directory descriptors -------------------------------------
+def test_guarded_write_does_not_follow_a_directory_swapped_after_the_check(tmp_path,
+                                                                         monkeypatch):
+    """The last directory is swapped for a symlink to a directory outside the root after the
+    check passed, just before the write opens anything inside it: the write refuses, and
+    nothing lands outside the root. The same swap at the walk's last step before a removal
+    deletes nothing outside."""
+    rel = ".fake-exec-file/rules/adlc-exec.rules"
+    root = tmp_path / "wc"
+    (root / ".fake-exec-file" / "rules").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "adlc-exec.rules").write_text("theirs\n")
+    last = str(root / ".fake-exec-file" / "rules")
+    real_open = os.open
+    swapped = []
+
+    def swap():
+        if not swapped:
+            swapped.append(1)
+            os.rename(last, last + ".moved")
+            os.symlink(str(outside), last)
+
+    def opening(path, flags, mode=0o777, *, dir_fd=None):
+        # The step that opens the last directory, or anything inside it, whatever form the
+        # write takes: by name under a descriptor, or by an absolute path.
+        name = os.fspath(path)
+        if (dir_fd is not None and name == "rules") or name.startswith(last + os.sep):
+            swap()
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", opening)
+    with pytest.raises(esf.SurfaceRefused, match=r"\.fake-exec-file/rules in .*"):
+        esf.guarded_write(str(root), rel, "ours\n")
+    monkeypatch.undo()
+    assert swapped and sorted(os.listdir(str(outside))) == ["adlc-exec.rules"]
+    assert (outside / "adlc-exec.rules").read_text() == "theirs\n"
+    assert os.listdir(last + ".moved") == []
+    # A removal: the walk's last step meets the swapped directory and refuses.
+    os.unlink(last)
+    os.rename(last + ".moved", last)
+    real_step = esf._step
+
+    def stepping(parent, part, create):
+        if part == "rules":
+            os.rename(last, last + ".moved")
+            os.symlink(str(outside), last)
+        return real_step(parent, part, create)
+
+    monkeypatch.setattr(esf, "_step", stepping)
+    with pytest.raises(esf.SurfaceRefused, match="is a symlink or not a real directory"):
+        esf.guarded_remove(str(root), rel)
+    assert (outside / "adlc-exec.rules").read_text() == "theirs\n"
+
+
+def test_guarded_write_sets_the_mode_on_its_descriptor(tmp_path):
+    """A restored blob's mode is set on the file the write opened, never by path, and the
+    write returns the sha256 of what it wrote."""
+    root = tmp_path / "wc"
+    root.mkdir()
+    assert esf.guarded_write(str(root), "bin/run.sh", b"#!/bin/sh\n", mode=0o755) == \
+        _sha("#!/bin/sh\n")
+    assert stat.S_IMODE(os.lstat(str(root / "bin" / "run.sh")).st_mode) == 0o755
+    esf.guarded_write(str(root), "bin/run.sh", "x\n")
+    assert stat.S_IMODE(os.lstat(str(root / "bin" / "run.sh")).st_mode) == esf.FILE_MODE
+    assert sorted(os.listdir(str(root / "bin"))) == ["run.sh"]
+
+
+def test_a_platform_without_dir_fd_refuses_loudly(tmp_path, monkeypatch):
+    """Where ``os`` cannot walk by descriptor the write and the removal refuse, naming what
+    is missing, and never fall back to the path form."""
+    root = tmp_path / "wc"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "b").write_text("keep\n")
+    assert esf._DIR_FD_MISSING == []
+    monkeypatch.setattr(esf, "_DIR_FD_MISSING", ["open", "rename"])
+    for call in (lambda: esf.guarded_write(str(root), "a/c", "x\n"),
+                 lambda: esf.guarded_remove(str(root), "a/b")):
+        with pytest.raises(esf.SurfaceRefused, match="no descriptor-relative open, rename"):
+            call()
+    assert sorted(os.listdir(str(root / "a"))) == ["b"]
+
+
+def test_read_config_does_not_follow_a_link_swapped_after_the_check(tmp_path, monkeypatch):
+    """A working-copy config swapped for a symlink between its ``lstat`` and its open is
+    refused, not read; a FIFO there is refused without blocking."""
+    path = str(tmp_path / "config.toml")
+    with open(path, "w") as fh:
+        fh.write('sandbox_mode = "workspace-write"\n')
+    elsewhere = str(tmp_path / "elsewhere.toml")
+    with open(elsewhere, "w") as fh:
+        fh.write('model = "x"\n')
+    real_lstat = os.lstat
+    swapped = []
+
+    def lstat(p, *a, **kw):
+        st = real_lstat(p, *a, **kw)
+        if os.fspath(p) == path and not swapped:
+            swapped.append(1)
+            os.unlink(path)
+            os.symlink(elsewhere, path)
+        return st
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    with pytest.raises(esf.SurfaceRefused, match="changed while it was read|is a symlink"):
+        esf._read_config(path, False)
+    monkeypatch.undo()
+    assert swapped
+    os.unlink(path)
+    os.mkfifo(path)
+    with pytest.raises(esf.SurfaceRefused, match="not a regular file"):
+        esf._read_config(path, False)
+    with pytest.raises(esf.SurfaceRefused, match="not a regular file"):
+        esf._read_config(path, True)
+
+
+# ---- review fix 4: a policy change during a run is marked on the record -----------------------
+def test_a_policy_change_during_a_run_is_marked_until_install(tmp_path, monkeypatch):
+    """The operator's own file may change between runs: the next pre-flight records it. A
+    change a run's strict check finds is marked on the record, naming the files, and every
+    pre-flight refuses while it is marked, the file put back or not, naming them and the
+    command to run; ``install_policy_file`` re-records the folder and clears the mark."""
+    home, env, data = _policy_env(tmp_path)
+    folder = home / eh.FILE_POLICY_DIR
+    folder.mkdir(parents=True)
+    operator = folder / "default.rules"
+    operator.write_text("# mine\n")
+    record = esf.install_policy_file(data, env, "policy\n")
+    assert "violated" not in record
+    operator.write_text("# mine, edited between runs\n")
+    record = esf.ensure_policy_file(data, env, "policy\n")
+    assert record["files"]["default.rules"] == _sha("# mine, edited between runs\n")
+    operator.write_text("# changed during a run\n")
+    problems = esf.check_policy(record)
+    assert [c.path for c in problems] == [str(operator)]
+    marked = esf.mark_policy_violation(data, env, problems)
+    assert marked["violated"] == [str(operator)]
+    assert esf.read_record(data, env)["violated"] == [str(operator)]
+    assert esf.mark_policy_violation(data, env, [str(operator)])["violated"] == [str(operator)]
+    operator.write_text("# mine, edited between runs\n")
+    for _ in range(2):
+        with pytest.raises(esf.SurfaceRefused) as caught:
+            esf.ensure_policy_file(data, env, "policy\n")
+        text = str(caught.value)
+        assert str(operator) in text and "during an exec run" in text
+        assert "inspect" in text and \
+            "`adlc harness install --exec --harness fake-exec-file`" in text
+    lock_dir = os.path.dirname(esf.record_path(data, env))
+    assert not [n for n in os.listdir(lock_dir) if not n.endswith(".json")]
+    record = esf.install_policy_file(data, env, "policy\n")
+    assert "violated" not in record and "violated" not in esf.read_record(data, env)
+    assert esf.ensure_policy_file(data, env, "policy\n")["sha256"] == _sha("policy\n")
+    # A record that went missing is marked all the same.
+    os.unlink(esf.record_path(data, env))
+    esf.mark_policy_violation(data, env, [str(operator)])
+    with pytest.raises(esf.SurfaceRefused, match="during an exec run"):
+        esf.ensure_policy_file(data, env, "policy\n")
+    # Through the engine: the pre-flight refuses while the record is marked.
+    box = eh.file_sandbox(tmp_path / "engine", monkeypatch)
+    (box.home / eh.FILE_POLICY_DIR).mkdir(parents=True)
+    (box.home / eh.FILE_POLICY_DIR / "default.rules").write_text("# mine\n")
+    box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    adapter = ea.load(box.harness, box.toolkit)
+    esf.mark_policy_violation(adapter, box.environ,
+                              [str(box.home / eh.FILE_POLICY_DIR / "default.rules")])
+    with pytest.raises(se.Refused, match="during an exec run"):
+        box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    esf.install_policy_file(adapter, box.environ, eh.fresh_files(box).user_policy_file)
+    box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+
+
+# ---- review fix 5: the bypass scan on the shipped Codex block ---------------------------------
+CODEX_USER = ".codex/config.toml"
+WRITABLE = "sandbox_workspace_write.writable_roots"
+NETWORK = "sandbox_workspace_write.network_access"
+
+
+@pytest.mark.parametrize("text, want", [
+    ('[sandbox_workspace_write]\nwritable_roots = ["/elsewhere"]\n',
+     [(WRITABLE, '["/elsewhere"]')]),
+    ('sandbox_workspace_write = { writable_roots = ["/elsewhere"] }\n',
+     "top-level inline table at line 1"),
+    ('sandbox_workspace_write.writable_roots = ["/elsewhere"]\n', "dotted key at line 1"),
+    ('["sandbox_workspace_write"]\nwritable_roots = ["/elsewhere"]\n',
+     [(WRITABLE, '["/elsewhere"]')]),
+    ('"sandbox_mode" = "danger-full-access"\n', [("sandbox_mode", '"danger-full-access"')]),
+    ("[sandbox_workspace_write]\n'network_access' = true\n", [(NETWORK, "true")]),
+    ("[sandbox_workspace_write]\nnetwork_access = true\n", [(NETWORK, "true")]),
+    ('profile = "x"\n', [("profile", '"x"')]),
+    ('[sandbox_workspace_write]\nwritable_roots = [\n  "/elsewhere",\n]\n',
+     "multi-line array at line 2"),
+    ('approval_policy = "never"', [("approval_policy", '"never"')]),
+    # The must-not-refuse cases.
+    ("[sandbox_workspace_write]\nexclude_slash_tmp = true\n", []),
+    ('[profiles.fast]\napproval_policy = "never"\nsandbox_mode = "danger-full-access"\n', []),
+    ('model = "x"', []),
+    ('sandbox_mode = "workspace-write"\napproval_policy = "on-request"\n', []),
+])
+def test_bypass_scan_on_the_shipped_codex_block(tmp_path, text, want):
+    """BR-16 on the shipped Codex block: each spelling of a watched key is a hit or a refusal,
+    never a silent clean scan. A refusal names the construct and its line and says what to
+    do: the engine reads the file with a strict line reader, so put that value on one line.
+    A profile table nobody selects, an unrelated key in the sandbox table and a file with no
+    final newline are clean (the must-not-refuse cases)."""
+    codex = ea.load("codex", TOOLKIT)
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    path = home / CODEX_USER
+    path.write_text(text)
+    if isinstance(want, str):
+        with pytest.raises(esf.SurfaceRefused) as caught:
+            esf.bypass_scan(codex, [], {"HOME": str(home)})
+        message = str(caught.value)
+        assert str(path) in message and want in message
+        assert "cannot be read with certainty" in message and "(REQ-662 BR-16)" in message
+        assert "strict line reader" in message and "on one line" in message
+        return
+    hits = esf.bypass_scan(codex, [], {"HOME": str(home)})
+    assert [(h.key, h.value) for h in hits] == want
+    assert all(h.path == str(path) for h in hits)
+
+
+def test_the_json_scan_refuses_with_the_same_text(tmp_path):
+    """The TOML and JSON readers refuse through one helper, so the refusal reads the same."""
+    flags = ha.load_adapter(os.path.join(FIX, "fake-exec-flags.yml"), toolkit=TOOLKIT)
+    home = tmp_path / "home"
+    (home / ".fake-exec-flags").mkdir(parents=True)
+    (home / ".fake-exec-flags" / "config.json").write_text('{"a": 1, "a": 2}\n')
+    with pytest.raises(esf.SurfaceRefused) as caught:
+        esf.bypass_scan(flags, [], {"HOME": str(home)})
+    assert str(caught.value) == esf.unreadable_text(
+        str(home / ".fake-exec-flags" / "config.json"), "duplicate key 'a'", esf.JSON_ADVICE)

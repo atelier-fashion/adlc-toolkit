@@ -297,6 +297,40 @@ def test_surface_change_is_on_the_changes_the_gate_list(repo):
         "changes the gate: touches .adlc/partials/forge.sh"]
 
 
+def test_a_probe_result_change_is_on_the_changes_the_gate_list(repo):
+    """REQ-662 BR-11, AC-17: the exec verdict is read from the probe results under the
+    toolkit root, so a PR that edits one changes the gate for every later run and is named on
+    the 'changes the gate' list; a PR touching `.adlc/research/` anywhere else is not."""
+    import exec_verify as ev
+    probes = "/".join(ev.RESULT_DIR) + "/"
+    assert probes in eg.CHANGES_GATE_DIRS
+    result = probes + "codex.json"
+    oid = repo.plumb("probe-result", files={result: "{}\n"})
+    _oid, changed, _hits = repo.gate(repo.push("probe-result", oid))
+    assert [p for _s, p in changed] == [result]
+    assert eg.gate_lines([p for _s, p in changed], [], BLOCK["config_surfaces"]) == [
+        "changes the gate: touches %s" % result]
+    elsewhere = repo.plumb("research-elsewhere", files={
+        ".adlc/research/notes.md": "notes\n", ".adlc/research/harness-probes-old/x.json": "{}\n",
+        "docs/.adlc/research/harness-probes/codex.json": "{}\n"})
+    _oid, changed, _hits = repo.gate(repo.push("research-elsewhere", elsewhere))
+    assert len(changed) == 3
+    assert eg.gate_lines([p for _s, p in changed], [], BLOCK["config_surfaces"]) == []
+
+
+def test_the_gate_folds_as_the_surfaces_do():
+    """One fold (``exec_surfaces.fold``) for the gate, the manifest and the hiding: an NFC
+    target and an NFD diff path, a case variant and a doubled slash each touch the target."""
+    import exec_surfaces as esf
+    assert not hasattr(eg, "_fold")
+    nfc, nfd = ".codex/prompts/café.md", ".codex/prompts/café.md"
+    assert eg.exec_path_hits([["A", nfd], ["A", nfc.upper()]], [nfc]) == [
+        ["A", nfd], ["A", nfc.upper()]]
+    assert eg._touches(esf.fold(".codex//prompts/x.md"), [esf.fold(".codex/prompts")])
+    assert eg.gate_lines([nfd], [], [nfc]) == [
+        "changes the gate: touches a config surface: %s" % nfd]
+
+
 # -- the hiding the gate backs, through the engine (BR-17) ---------------------------------
 def _config(root, *args):
     """``git config`` in ``root``, or None when the key is unset."""

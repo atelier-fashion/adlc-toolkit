@@ -86,3 +86,88 @@ def test_tokens():
     assert len(token) == 32
     assert el.token_digest(token) != el.token_digest(token, "changes the gate: x")
     assert token not in el.token_digest(token)
+
+
+# ---- the one mkdir lock (REQ-662 review fix 1; LESSON-014) ------------------------------------
+class _Refused(Exception):
+    """A caller's refusal type: the lock raises whatever it is handed."""
+
+
+def test_mkdir_lock_refuses_a_symlink_before_taking_it(tmp_path):
+    """A symlink where the lock goes is refused at once, naming it, and nothing it points to
+    is touched; a lock still held after the timeout is refused, naming it; a lock whose
+    directory is missing is refused, naming the directory. Each raises the caller's type."""
+    lock = str(tmp_path / "file.lock.d")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    os.symlink(str(elsewhere), lock)
+    with pytest.raises(_Refused, match=r"%s is a symlink" % re.escape(lock)):
+        with el.mkdir_lock(lock, 5.0, _Refused):
+            pass
+    assert os.path.islink(lock) and elsewhere.is_dir() and not os.listdir(str(elsewhere))
+    os.unlink(lock)
+    os.mkdir(lock)
+    with pytest.raises(_Refused, match=re.escape(lock)):
+        with el.mkdir_lock(lock, 0.1, _Refused):
+            pass
+    os.rmdir(lock)
+    missing = str(tmp_path / "gone" / "file.lock.d")
+    with pytest.raises(_Refused, match=r"%s does not exist" % re.escape(str(tmp_path / "gone"))):
+        with el.mkdir_lock(missing, 0.1, _Refused):
+            pass
+    with el.mkdir_lock(lock, 0.1, _Refused) as held:
+        assert held == lock and os.path.isdir(lock)
+    assert not os.path.lexists(lock), "released"
+
+
+def test_mkdir_lock_release_never_masks_the_body(tmp_path):
+    """A body's exception survives a release that cannot remove the lock (something was left
+    in it), and a symlink swapped in while the lock was held is left as it is, never
+    followed: the next taker refuses it."""
+    lock = str(tmp_path / "file.lock.d")
+    with pytest.raises(ValueError, match="the body's own"):
+        with el.mkdir_lock(lock, 1.0, _Refused):
+            open(os.path.join(lock, "left"), "w").close()
+            raise ValueError("the body's own")
+    os.unlink(os.path.join(lock, "left"))
+    os.rmdir(lock)
+    target = tmp_path / "target"
+    target.mkdir()
+    with pytest.raises(KeyError):
+        with el.mkdir_lock(lock, 1.0, _Refused):
+            os.rmdir(lock)
+            os.symlink(str(target), lock)
+            raise KeyError("swapped")
+    assert os.path.islink(lock) and target.is_dir()
+    with el.mkdir_lock(str(tmp_path / "other.lock.d"), 1.0, _Refused):
+        os.rmdir(str(tmp_path / "other.lock.d"))
+        os.symlink(str(target), str(tmp_path / "other.lock.d"))
+    assert os.path.islink(str(tmp_path / "other.lock.d")) and target.is_dir()
+    with pytest.raises(_Refused, match="symlink"):
+        with el.mkdir_lock(lock, 1.0, _Refused):
+            pass
+
+
+def test_mkdir_lock_waits_on_the_monotonic_clock(tmp_path, monkeypatch):
+    """The deadline is monotonic: a wall clock that jumps a day per reading does not end the
+    wait for a lock that is released a moment later."""
+    import threading
+    import time
+    lock = str(tmp_path / "file.lock.d")
+    os.mkdir(lock)
+    real = time.time
+    jumps = []
+
+    def jumping():
+        jumps.append(1)
+        return real() + 86400.0 * len(jumps)
+
+    monkeypatch.setattr(time, "time", jumping)
+    releaser = threading.Timer(0.3, os.rmdir, (lock,))
+    releaser.start()
+    try:
+        with el.mkdir_lock(lock, 10.0, _Refused):
+            assert os.path.isdir(lock)
+    finally:
+        releaser.join()
+    assert not os.path.lexists(lock)

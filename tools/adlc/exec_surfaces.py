@@ -22,9 +22,11 @@ expected manifest is the orchestrator's, kept in the run directory: nothing a ha
 write decides a check here (LESSON-718), and the engine runs nothing it reads.
 
 Every write ``lstat``s every component: a symlink, a hardlink or a non-regular file is
-refused, and the resolved path must be under the root it was written for. Nothing here
-follows a link or opens anything but a regular file. Paths are compared case-folded, as a
-case-insensitive filesystem resolves them.
+refused, and the resolved path must be under the root it was written for. The write itself
+then walks with directory descriptors, each component opened ``O_NOFOLLOW`` relative to the
+one above it, so a component swapped for a link after the check is refused, not followed.
+Nothing here follows a link or opens anything but a regular file. Paths are compared by
+:func:`fold`, as a case- and normalization-insensitive filesystem resolves them.
 
 ``bypass_config_keys`` are read from the user config and the working-copy config before a
 launch and before a resume. TOML is read with ``toml_merge.scan``, the reader the renderer
@@ -44,11 +46,12 @@ import contextlib
 import hashlib
 import json
 import os
+import posixpath
 import re
+import secrets
 import stat
 import subprocess
-import tempfile
-import time
+import unicodedata
 from collections import OrderedDict, namedtuple
 
 import exec_ledger as el
@@ -100,8 +103,14 @@ def _parts(rel):
 
 
 def fold(path):
-    """``path`` as a case-insensitive filesystem compares it."""
-    return os.path.normpath(str(path)).casefold()
+    """``path`` as a case-insensitive filesystem compares it (LESSON-718): in one Unicode
+    normal form (NFD, since macOS resolves an NFC and an NFD spelling to one file),
+    case-folded, NFD again (folding can compose), and with ``posixpath.normpath``'s segments,
+    so ``a//b`` and ``a/./b`` are ``a/b``. A relative repository path and an absolute one fold
+    alike, and nothing is resolved on disk. The one fold the manifest, the hiding and the
+    PR-diff gate (``exec_gates``) compare with."""
+    text = unicodedata.normalize("NFD", unicodedata.normalize("NFD", str(path)).casefold())
+    return posixpath.normpath(text) if text else text
 
 
 def within(root, path):
@@ -252,77 +261,216 @@ def check(root, rel, kind="file"):
                 _refuse(root, parts, i, "is not a directory but a %s"
                         % ("file" if stat.S_ISREG(st.st_mode) else "FIFO, socket or device"))
             continue
-        if stat.S_ISDIR(st.st_mode):
-            _refuse(root, parts, i, "is a directory, not a file")
-        if not stat.S_ISREG(st.st_mode):
-            _refuse(root, parts, i, "is not a regular file but a FIFO, socket or device")
-        if st.st_nlink > 1:
-            _refuse(root, parts, i, "is a hardlink (%d links)" % st.st_nlink)
+        problem = _file_problem(st)
+        if problem:
+            _refuse(root, parts, i, problem)
     if not within(root, os.path.join(root, *parts)):
         raise SurfaceRefused("%s resolves outside %s, so the engine neither writes nor reads "
                              "it (REQ-662 BR-15)" % (rel, root), rel)
 
 
-def guarded_write(root, rel, text):
-    """Write ``text`` to ``rel`` under ``root`` whole and atomically: every component checked
-    first (:func:`check`), each missing directory made and checked again, then a temp file in
-    the same directory renamed over the target. Returns the sha256 of what was written."""
-    data = text.encode("utf-8") if isinstance(text, str) else bytes(text)
-    parts = _parts(rel)
-    check(root, rel, "file")
-    parent = root
-    for i, part in enumerate(parts[:-1]):
-        parent = os.path.join(parent, part)
+def _file_problem(st):
+    """Why the entry ``st`` (an ``lstat``) is not one regular file with one link, or None."""
+    if stat.S_ISLNK(st.st_mode):
+        return "is a symlink"
+    if stat.S_ISDIR(st.st_mode):
+        return "is a directory, not a file"
+    if not stat.S_ISREG(st.st_mode):
+        return "is not a regular file but a FIFO, socket or device"
+    if st.st_nlink > 1:
+        return "is a hardlink (%d links)" % st.st_nlink
+    return None
+
+
+# ---- the descriptor walk (REQ-662 review fix 3) ------------------------------------------------
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+#: A component below the root: a real directory, never through a link, never blocking.
+_DIR_FLAGS = os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW | os.O_NONBLOCK
+#: The root itself, which may be the operator's link (a policy folder in their dotfiles).
+_ROOT_FLAGS = os.O_RDONLY | _O_DIRECTORY | os.O_NONBLOCK
+#: The calls the walk makes relative to a directory descriptor.
+_DIR_FD_CALLS = ("open", "mkdir", "rename", "unlink", "rmdir", "stat")
+
+
+def _dir_fd_missing():
+    """What this platform's ``os`` lacks for a descriptor walk; read once, at import."""
+    missing = [name for name in _DIR_FD_CALLS if getattr(os, name) not in os.supports_dir_fd]
+    if os.stat not in os.supports_follow_symlinks:
+        missing.append("stat(follow_symlinks=False)")
+    if os.listdir not in os.supports_fd:
+        missing.append("listdir(fd)")
+    if not (_O_NOFOLLOW and _O_DIRECTORY):
+        missing.append("O_NOFOLLOW and O_DIRECTORY")
+    return missing
+
+
+_DIR_FD_MISSING = _dir_fd_missing()
+
+
+def _need_dir_fd():
+    """Refuse, loudly, on a platform whose ``os`` cannot walk by directory descriptor: the
+    path form would follow a component swapped for a link after the check."""
+    if _DIR_FD_MISSING:
+        raise SurfaceRefused("this platform's os module has no descriptor-relative %s, so the "
+                             "engine cannot write a working copy or a policy folder without "
+                             "following a link swapped in after its check; refusing (REQ-662 "
+                             "BR-15)" % ", ".join(_DIR_FD_MISSING))
+
+
+def _why(exc):
+    return os.strerror(exc.errno) if getattr(exc, "errno", None) else exc.__class__.__name__
+
+
+def _step(parent, part, create):
+    """One component of a descriptor walk: ``part`` in the directory ``parent``, opened as a
+    real directory and never through a link (``O_NOFOLLOW``), made first (mode 0755,
+    relative to ``parent``) when ``create`` and it is missing. Returns its descriptor, or None
+    when it is missing and ``create`` is false. A link, a file, a FIFO or anything else there
+    raises :class:`OSError`, which the walk turns into a refusal naming the component."""
+    if create:
         try:
-            os.mkdir(parent, 0o755)
+            os.mkdir(part, 0o755, dir_fd=parent)
         except FileExistsError:
             pass
-        st = os.lstat(parent)
-        if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-            _refuse(root, parts, i, "is not a real directory")
-    fd, tmp = tempfile.mkstemp(dir=parent, prefix=".adlc-exec-")
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fchmod(fh.fileno(), FILE_MODE)
-        os.replace(tmp, os.path.join(parent, parts[-1]))
-    except BaseException:
-        if os.path.lexists(tmp):
-            os.unlink(tmp)
-        raise
+        fd = os.open(part, _DIR_FLAGS, dir_fd=parent)
+    except FileNotFoundError:
+        if create:
+            raise
+        return None
+    if not stat.S_ISDIR(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise NotADirectoryError(part)
+    return fd
+
+
+def _walk(root, parts, create):
+    """A descriptor for the directory ``parts`` names under ``root``: the root opened (it may
+    be a link), then each component by :func:`_step`, relative to the descriptor above it, so
+    nothing below the root is reached by path. None when a component is missing and
+    ``create`` is false. A component that is a link or not a real directory refuses, naming
+    it. The caller closes the descriptor."""
+    _need_dir_fd()
+    try:
+        fd = os.open(root, _ROOT_FLAGS)
+    except OSError as exc:
+        if isinstance(exc, FileNotFoundError) and not create:
+            return None
+        raise SurfaceRefused("%s cannot be opened as a directory (%s), so nothing is written "
+                             "under it (REQ-662 BR-15)" % (root, _why(exc)), root)
+    try:
+        for i, part in enumerate(parts):
+            try:
+                nxt = _step(fd, part, create)
+            except OSError as exc:
+                _refuse(root, parts, i, "is a symlink or not a real directory (%s)" % _why(exc))
+            if nxt is None:
+                return None
+            os.close(fd)
+            fd = nxt
+        out, fd = fd, None
+        return out
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _same(a, b):
+    return (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
+
+
+def guarded_write(root, rel, text, mode=FILE_MODE):
+    """Write ``text`` to ``rel`` under ``root`` whole and atomically, with ``mode``.
+
+    Every component is checked first (:func:`check`). The write then walks from the root by
+    directory descriptor (:func:`_walk`), making each missing directory relative to the one
+    above it, so a component swapped for a link after the check refuses instead of being
+    followed. A temp file is made in the last directory (``O_EXCL | O_NOFOLLOW``), written,
+    given ``mode`` on its own descriptor, and renamed over the target relative to that
+    directory; the target, when present, must be one regular file with one link, and after
+    the rename the name must hold the file written, with one link. Returns the sha256 of
+    what was written."""
+    data = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+    parts = _parts(rel)
+    last = len(parts) - 1
     check(root, rel, "file")
-    return hashlib.sha256(data).hexdigest()
+    parent = _walk(root, parts[:-1], create=True)
+    try:
+        tmp = ".adlc-exec-%s" % secrets.token_hex(8)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW, 0o600,
+                     dir_fd=parent)
+        try:
+            written = os.fstat(fd)
+            try:
+                view = memoryview(data)
+                while view:
+                    view = view[os.write(fd, view):]
+                os.fchmod(fd, mode)
+                try:
+                    there = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    there = None
+                problem = there is not None and _file_problem(there)
+                if problem:
+                    _refuse(root, parts, last, problem)
+                os.rename(tmp, parts[-1], src_dir_fd=parent, dst_dir_fd=parent)
+            except BaseException:
+                try:
+                    if _same(os.stat(tmp, dir_fd=parent, follow_symlinks=False), written):
+                        os.unlink(tmp, dir_fd=parent)
+                except OSError:
+                    pass
+                raise
+            now = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+            if not _same(now, written) or os.fstat(fd).st_nlink != 1:
+                _refuse(root, parts, last, "changed as it was written")
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent)
+    check(root, rel, "file")
+    return sha256_text(data)
 
 
-def _remove_tree(path):
-    """Delete the real directory ``path`` and everything under it, never through a link."""
-    with os.scandir(path) as it:
-        entries = list(it)
-    for entry in entries:
-        if entry.is_dir(follow_symlinks=False):
-            _remove_tree(entry.path)
-        else:
-            os.unlink(entry.path)
-    os.rmdir(path)
+def _remove_at(parent, name, st):
+    """Delete ``name`` in the directory ``parent``, ``st`` its ``lstat``: a real directory
+    with everything under it, each walked by descriptor (``O_NOFOLLOW``, and it must still be
+    the directory ``st`` describes), anything else unlinked, never followed or opened."""
+    if not stat.S_ISDIR(st.st_mode):
+        os.unlink(name, dir_fd=parent)
+        return
+    fd = os.open(name, _DIR_FLAGS, dir_fd=parent)
+    try:
+        if not _same(os.fstat(fd), st):
+            raise SurfaceRefused("%s changed while it was removed, so nothing under it is "
+                                 "(REQ-662 BR-15)" % name, name)
+        for child in sorted(os.listdir(fd)):
+            _remove_at(fd, child, os.stat(child, dir_fd=fd, follow_symlinks=False))
+    finally:
+        os.close(fd)
+    os.rmdir(name, dir_fd=parent)
 
 
 def guarded_remove(root, rel):
     """Make ``rel`` under ``root`` absent: a link, a FIFO or a file is unlinked (never
     followed or opened), a real directory deleted with what is under it. A component above it
-    that is a link or not a directory is refused. Returns whether anything was there."""
+    that is a link or not a directory is refused, at the check and again as the removal walks
+    to it by descriptor (:func:`_walk`). Returns whether anything was there."""
     parts = _parts(rel)
     if len(parts) > 1:
         check(root, "/".join(parts[:-1]), "dir")
-    path = os.path.join(root, *parts)
-    try:
-        st = os.lstat(path)
-    except FileNotFoundError:
+    parent = _walk(root, parts[:-1], create=False)
+    if parent is None:
         return False
-    if stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode):
-        _remove_tree(path)
-    else:
-        os.unlink(path)
+    try:
+        try:
+            st = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        _remove_at(parent, parts[-1], st)
+    finally:
+        os.close(parent)
     return True
 
 
@@ -627,7 +775,8 @@ def _ignore_line(rel):
     return "/" + "".join("\\" + c if c in "\\*?[ " else c for c in rel)
 
 
-def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=None):
+def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=None,
+         checkpoint=None):
     """Keep what :func:`render` wrote or removed in ``wc``, a working copy of ``repo``, out of
     git's view for the run. ``record`` is the run record's entry for ``wc`` (``{}`` the first
     time), updated in place and returned:
@@ -643,10 +792,16 @@ def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=N
       the excludes file that setting replaces (:func:`inherited_excludes`).
 
     ``gitdir_write(write)`` runs ``write``, the one call here that changes a file the common
-    gitdir checksum covers (REQ-659 BR-23 b). This is best effort: ``git add --sparse`` and
-    ``git update-index --no-skip-worktree`` defeat it, a declared residual (BR-19), and the
-    halt-time PR-diff gate is the control."""
+    gitdir checksum covers (REQ-659 BR-23 b). ``checkpoint(record)`` is called once
+    ``record`` holds ``launchBlobs``, ``skipWorktree``, ``untracked`` and ``excludesFile``,
+    and before each git write (the skip-worktree marks, the working copy's
+    ``core.excludesFile``), so the caller can save the run record first: a supervisor that
+    dies after a write leaves a record that names it, and :func:`restore` undoes what it
+    names and finds done. By default it does nothing. This is best effort: ``git add
+    --sparse`` and ``git update-index --no-skip-worktree`` defeat it, a declared residual
+    (BR-19), and the halt-time PR-diff gate is the control."""
     gitdir_write = gitdir_write or (lambda write: write())
+    checkpoint = checkpoint or (lambda record: None)
     paths, prefixes = rendered_paths(manifest)
     for rel in paths + prefixes:
         _parts(rel)
@@ -660,14 +815,16 @@ def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=N
         if rel not in blobs:
             blobs[rel] = {"mode": entry.mode, "oid": entry.oid} if first else None
     mark = sorted(rel for rel, entry in index.items() if entry.tag != "S")
-    if mark:
-        _git(box, repo, ["update-index", "--skip-worktree", "--"] + mark,
-             "marking skip-worktree", cwd=wc)
     record["skipWorktree"] = sorted(set(record.get("skipWorktree") or []) | set(index))
     tracked = {fold(rel) for rel in index}
     record["untracked"] = sorted(r for r in manifest.get("files", {}) if fold(r) not in tracked)
     if record["untracked"]:
         record["excludesFile"] = excludes
+    if mark:
+        checkpoint(record)
+        _git(box, repo, ["update-index", "--skip-worktree", "--"] + mark,
+             "marking skip-worktree", cwd=wc)
+    if record["untracked"]:
         text = ("# Written by the ADLC exec engine for one run (REQ-662 BR-17): the excludes "
                 "file this setting replaces, then the paths the engine renders untracked.\n"
                 + inherited_excludes(box, repo, environ).rstrip("\n") + "\n"
@@ -676,6 +833,7 @@ def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=N
         res = _git(box, repo, ["config", "--worktree", "--get", "core.excludesFile"],
                    "reading core.excludesFile", cwd=wc, ok=(0, 1))
         if res.returncode != 0 or res.stdout.strip() != excludes:
+            checkpoint(record)
             gitdir_write(lambda: _git(
                 box, repo, ["config", "--worktree", "core.excludesFile", excludes],
                 "`git config --worktree core.excludesFile` (%s)" % WORKTREE_CONFIG, cwd=wc))
@@ -685,7 +843,7 @@ def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=N
 def _write_blob(box, repo, wc, rel, entry, staging):
     """The blob ``entry`` names, written to ``rel`` under ``wc`` byte for byte: read with
     ``git unpack-file`` in ``staging``, outside the working copy, then written by
-    :func:`guarded_write` with its index mode."""
+    :func:`guarded_write` with its index mode, set on the descriptor written, never by path."""
     if entry["mode"] not in _RESTORABLE:
         raise SurfaceRefused("its launch entry has mode %s, which the engine does not write"
                              % entry["mode"], rel)
@@ -699,8 +857,7 @@ def _write_blob(box, repo, wc, rel, entry, staging):
     finally:
         if os.path.lexists(tmp):
             os.unlink(tmp)
-    guarded_write(wc, rel, data)
-    os.chmod(os.path.join(wc, *_parts(rel)), _RESTORABLE[entry["mode"]])
+    guarded_write(wc, rel, data, _RESTORABLE[entry["mode"]])
 
 
 def restore(box, repo, wc, record, staging, gitdir_write=None):
@@ -770,12 +927,15 @@ def _owned_values(data, rel):
 
 def _read_config(path, user):
     """The text of the config at ``path``, or None when it is absent. A working-copy config is
-    read only as one regular file with one link; a user config may be the operator's link,
-    and must resolve to a regular file."""
+    read only as one regular file with one link, opened ``O_NOFOLLOW``; a user config may be
+    the operator's link, and must resolve to a regular file. Either is opened ``O_NONBLOCK``
+    and checked, on the descriptor, to be the file the check saw, as :func:`_sha_open` does:
+    one swapped in between is refused, never read, and a FIFO never blocks the read."""
     try:
         st = os.lstat(path)
     except (FileNotFoundError, NotADirectoryError):
         return None
+    flags = os.O_RDONLY | os.O_NONBLOCK
     if user:
         try:
             st = os.stat(path)
@@ -785,13 +945,35 @@ def _read_config(path, user):
         raise SurfaceRefused("%s is a %s, which the engine does not read as a config"
                              % (path, "symlink" if stat.S_ISLNK(st.st_mode) else "hardlink"),
                              path)
+    else:
+        flags |= _O_NOFOLLOW
     if not stat.S_ISREG(st.st_mode):
         raise SurfaceRefused("%s is not a regular file, so it cannot be read as a config"
                              % path, path)
     try:
-        with open(path, encoding="utf-8", newline="") as fh:
-            return fh.read()
-    except (OSError, UnicodeDecodeError) as exc:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise SurfaceRefused("%s is a symlink or changed while it was read (%s), so it is not "
+                             "read as a config" % (path, _why(exc)), path)
+    try:
+        now = os.fstat(fd)
+        if not stat.S_ISREG(now.st_mode) or not _same(now, st) or \
+                (not user and now.st_nlink > 1):
+            raise SurfaceRefused("%s changed while it was read, so it is not read as a config"
+                                 % path, path)
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except OSError as exc:
+        raise SurfaceRefused("%s cannot be read: %s" % (path, exc.__class__.__name__), path)
+    finally:
+        os.close(fd)
+    try:
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError as exc:
         raise SurfaceRefused("%s cannot be read: %s" % (path, exc.__class__.__name__), path)
 
 
@@ -817,14 +999,46 @@ def _toml_lookup(scan, key):
     return None
 
 
+#: What an operator can do about a JSON config the scan refuses.
+JSON_ADVICE = "the engine reads this file as strict JSON, each key once"
+_TOML_READER = ("the engine reads this file with a strict line reader, which takes each value "
+                "on one line, as a plain `key = value` at the top level or under its [table] "
+                "header")
+
+
+def unreadable_text(path, what, advice):
+    """The refusal of a config the bypass scan cannot read with certainty (BR-16), for every
+    reader: ``what`` names the construct (and its line), ``advice`` what the operator can do."""
+    return ("%s cannot be read with certainty: %s, so whether it relaxes approval or "
+            "sandboxing is unknown (REQ-662 BR-16); %s, then run again" % (path, what, advice))
+
+
+def _toml_advice(construct):
+    if construct == "top-level inline table":
+        return _TOML_READER + ": write that table as a [table] header with each key on a line " \
+                              "of its own"
+    if construct == "dotted key":
+        return _TOML_READER + ": write that key under its [table] header"
+    if construct in ("multi-line array", "multi-line string", "unterminated string"):
+        return _TOML_READER + ": put that value on one line"
+    return _TOML_READER + ": write that line in that form"
+
+
 def _toml_hits(path, text, keys, owned):
-    undotted = tuple(k for k in keys if "." not in k)
+    """The :class:`Hit` s of ``keys`` in a TOML config. The file is scanned with no owned
+    keys: an undotted key is read at the top level, and a dotted one in the table its name
+    names, so a key inside any other table (a ``[profiles.<name>]`` table nobody selects,
+    ``--profile`` being forbidden) is that table's, and no hit. A file with no final newline
+    reads as if it had one, as ``exec_trust`` reads it. What ``toml_merge.scan`` cannot
+    classify (a top-level inline table or dotted key, a multi-line array or string) refuses,
+    naming the construct and its line and saying how to write it instead."""
+    if text and not text.endswith("\n"):
+        text += "\n"
     try:
-        scan = toml_merge.scan(text, owned_keys=undotted)
+        scan = toml_merge.scan(text)
     except toml_merge.TomlConstructError as exc:
-        raise SurfaceRefused("%s cannot be read with certainty (%s), so whether it relaxes "
-                             "approval or sandboxing is unknown (REQ-662 BR-16)" % (path, exc),
-                             path)
+        what = exc.construct + (" at line %d" % exc.line if exc.line else "")
+        raise SurfaceRefused(unreadable_text(path, what, _toml_advice(exc.construct)), path)
     hits = []
     for key in keys:
         raw = _toml_lookup(scan, key)
@@ -844,9 +1058,7 @@ def _json_hits(path, text, keys, owned):
     try:
         doc = json.loads(text, object_pairs_hook=_json_pairs)
     except ValueError as exc:
-        raise SurfaceRefused("%s cannot be read with certainty (%s), so whether it relaxes "
-                             "approval or sandboxing is unknown (REQ-662 BR-16)" % (path, exc),
-                             path)
+        raise SurfaceRefused(unreadable_text(path, str(exc), JSON_ADVICE), path)
     if not isinstance(doc, dict):
         raise SurfaceRefused("%s is not a JSON object, so it cannot be scanned (REQ-662 BR-16)"
                              % path, path)
@@ -923,26 +1135,15 @@ def record_path(adapter, environ):
 
 @contextlib.contextmanager
 def file_lock(path, timeout=LOCK_TIMEOUT_S):
-    """A lock directory at ``path + ".lock.d"`` (``mkdir``, the allocator's pattern), held for
-    the block. A lock still held after ``timeout`` seconds refuses, naming it."""
+    """A lock directory at ``path + ".lock.d"``, held for the block: ``exec_ledger.mkdir_lock``,
+    the allocator's pattern, in a state directory this makes when it is missing. A symlink
+    there refuses at once, a lock still held after ``timeout`` seconds (monotonic) refuses,
+    each naming it, and the release never masks an exception the block raised."""
     lock = path + ".lock.d"
     os.makedirs(os.path.dirname(lock), mode=0o700, exist_ok=True)
-    end = time.time() + timeout
-    while True:
-        try:
-            os.mkdir(lock, 0o700)
-            break
-        except FileExistsError:
-            if time.time() > end:
-                raise SurfaceRefused("the lock %s is still held after %ds: another writer of "
-                                     "the policy file is running, or one died holding it; "
-                                     "remove it once no exec run is live" % (lock, timeout),
-                                     lock)
-            time.sleep(0.02)
-    try:
-        yield lock
-    finally:
-        os.rmdir(lock)
+    with el.mkdir_lock(lock, timeout, lambda message: SurfaceRefused(message, lock),
+                       holder="another writer of the policy file is running") as held:
+        yield held
 
 
 def _folder_entries(folder):
@@ -1010,9 +1211,49 @@ def policy_refusal(data, problems, where):
                data.get("name")))
 
 
+def violation_refusal(data, files):
+    """The pre-flight's refusal while the policy folder's record is marked (BR-4)."""
+    return ("harness %s: %s changed during an exec run, and the engine marked the user policy "
+            "folder's record, so every pre-flight is refused until you have looked (REQ-662 "
+            "BR-4): inspect %s, then run `adlc harness install --exec --harness %s` to write "
+            "the toolkit's file and record the folder again"
+            % (data.get("name"), ", ".join(files), "it" if len(files) == 1 else "them",
+               data.get("name")))
+
+
+def mark_policy_violation(adapter, environ, problems):
+    """Mark the engine's record of the user policy folder violated, naming the files: a run's
+    strict check (at exit, at the halt, before a launch or a resume) found ``problems``, each a
+    :class:`Change` or a path. The ``violated`` list is written atomically under the lock, a
+    record that went missing written anew to carry it, and it stays until ``adlc harness
+    install --exec`` records the folder again (:func:`install_policy_file`). Meanwhile every
+    pre-flight refuses (:func:`ensure_policy_file`): the operator's files may change between
+    runs, but one that changed during a run was not necessarily the operator's doing. Returns
+    the record; None when the adapter has no policy file, and the record unchanged when
+    ``problems`` is empty."""
+    data = _data(adapter)
+    path = policy_path(data, environ)
+    if path is None:
+        return None
+    names = sorted({str(getattr(p, "path", p)) for p in problems})
+    if not names:
+        return read_record(data, environ)
+    record_file = record_path(data, environ)
+    with file_lock(record_file):
+        record = el.read_json(record_file)
+        if not isinstance(record, dict):
+            record = {"harness": data["name"], "path": path, "folder": os.path.dirname(path),
+                      "sha256": None, "files": {}, "record": record_file, "recordedAt": None}
+        record["violated"] = sorted(set(record.get("violated") or []) | set(names))
+        record["violatedAt"] = el.now()
+        el.atomic_json(record_file, record)
+    return record
+
+
 def _write_policy(data, path, text, record_file):
     """The toolkit's file written whole and atomically when it is not already ``text``, then
-    the folder's manifest recorded. Called under :func:`file_lock`."""
+    the folder's manifest recorded, anew: a ``violated`` mark on the last record is gone.
+    Called under :func:`file_lock`."""
     folder = os.path.dirname(path)
     os.makedirs(folder, exist_ok=True)
     name = os.path.basename(path)
@@ -1033,9 +1274,11 @@ def read_record(adapter, environ):
 
 
 def ensure_policy_file(adapter, environ, text):
-    """The pre-flight's write of the user policy file (BR-4), under the lock: the folder is
-    first checked against the engine's last record of it (a missing or drifted toolkit file,
-    or a stray, refuses, naming it), then the file is written whole and atomically when the
+    """The pre-flight's write of the user policy file (BR-4), under the lock: a record a run
+    marked violated (:func:`mark_policy_violation`) refuses, naming the files and the command
+    that clears it; then the folder is checked against the engine's last record of it (a
+    missing or drifted toolkit file, or a stray, refuses, naming it; an operator file that
+    changed between runs is theirs), then the file is written whole and atomically when the
     render changed, and the folder recorded again. Returns the record, which the run keeps
     and checks before each launch and resume; None when the adapter has no policy file."""
     data = _data(adapter)
@@ -1044,6 +1287,10 @@ def ensure_policy_file(adapter, environ, text):
         return None
     record_file = record_path(data, environ)
     with file_lock(record_file):
+        raw = el.read_json(record_file)
+        if isinstance(raw, dict) and raw.get("violated"):
+            raise SurfaceRefused(violation_refusal(data, [str(f) for f in raw["violated"]]),
+                                 path)
         last = read_record(data, environ)
         if last is not None and last.get("path") == path:
             problems = policy_problems(last, strict=False)
@@ -1055,8 +1302,9 @@ def ensure_policy_file(adapter, environ, text):
 def install_policy_file(adapter, environ, text):
     """The write ``adlc harness install --exec`` makes, the operator's explicit one: the
     toolkit's file written whole and atomically under the lock, whatever it held, and the
-    folder recorded as it now stands, the operator's own files included. A second run is a
-    no-op on the file. ``text`` is the adapter's ``harness_render.ExecFiles.user_policy_file``
+    folder recorded as it now stands, the operator's own files included, which clears a
+    ``violated`` mark a run left (:func:`mark_policy_violation`). A second run is a no-op on
+    the file. ``text`` is the adapter's ``harness_render.ExecFiles.user_policy_file``
     (``ExecAdapter.rule_files``)."""
     data = _data(adapter)
     path = policy_path(data, environ)

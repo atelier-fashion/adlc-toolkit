@@ -14,13 +14,17 @@ import re
 import shlex
 import shutil
 import tempfile
-import unicodedata
 
 import exec_safety as es
+import exec_surfaces as esf
 import harness_yaml
 import lane_check
 
-CHANGES_GATE_DIRS = (".adlc/partials/", ".adlc/tools/", ".adlc/workflows/")
+#: What the gate itself is read from, so a PR that edits one changes the gate. The probe
+#: results are where the exec verdict is read (``exec_verify.RESULT_DIR``; REQ-662 BR-11,
+#: AC-17).
+CHANGES_GATE_DIRS = (".adlc/partials/", ".adlc/tools/", ".adlc/workflows/",
+                     ".adlc/research/harness-probes/")
 #: The plan key the halt-time exec-path gate writes (REQ-662 BR-17).
 EXEC_PATH_KEY = "execPathTouched"
 _TOP_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):")
@@ -232,7 +236,7 @@ def gate_lines(paths, surface_hits, config_surfaces=()):
         lines.append("changes the gate: modifies the deploy surface: %s"
                      % ", ".join(sorted(surface_hits)))
     folded = _folded([_target(s, "config surface") for s in config_surfaces])
-    surfaces = sorted({p for p in paths if _touches(_fold(p), folded)})
+    surfaces = sorted({p for p in paths if _touches(esf.fold(p), folded)})
     if surfaces:
         lines.append("changes the gate: touches a config surface: %s" % ", ".join(surfaces))
     return lines
@@ -241,14 +245,10 @@ def gate_lines(paths, surface_hits, config_surfaces=()):
 # --------------------------------------------------------------------------
 # The exec-path PR-diff gate (REQ-662 BR-17)
 # --------------------------------------------------------------------------
-def _fold(path):
-    """``path`` as a case-insensitive filesystem compares it (LESSON-718): case-folded, and
-    in one Unicode normal form, since macOS resolves both spellings to the same file."""
-    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", path).casefold())
-
-
 def _folded(targets):
-    return [_fold(t) for t in targets]
+    """Each target as ``exec_surfaces.fold`` compares it (LESSON-718): the one fold the
+    manifest and the hiding use, so the gate and they never disagree about a spelling."""
+    return [esf.fold(t) for t in targets]
 
 
 def _touches(path, folded_targets):
@@ -307,7 +307,7 @@ def exec_path_hits(changed, targets):
     and an add, so a rename into a target is an ``A`` hit and one out of it a ``D`` hit.
     """
     folded = _folded([_target(t, "exec path") for t in targets])
-    return [[status, path] for status, path in changed if _touches(_fold(path), folded)]
+    return [[status, path] for status, path in changed if _touches(esf.fold(path), folded)]
 
 
 def exec_path_touched(box, repo, ib, oid, targets, changed=None):

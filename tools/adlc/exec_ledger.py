@@ -10,6 +10,7 @@ once and only its digest is kept, in the supervisor's memory (ADR-4).
 Standard library only.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -19,6 +20,8 @@ import time
 
 LEDGER = "approval.json"
 RUN_RECORD = "run.json"
+#: How often a taker looks at a held ``mkdir`` lock again.
+LOCK_POLL_S = 0.02
 
 
 def now():
@@ -62,6 +65,48 @@ def atomic_write(path, data):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+@contextlib.contextmanager
+def mkdir_lock(path, timeout, refused, holder="another adlc run is writing the file",
+               poll=LOCK_POLL_S):
+    """The ``mkdir`` lock directory at ``path``, held for the block: the id allocator's
+    pattern, and the one implementation every exec lock uses (LESSON-014).
+
+    The directory that holds ``path`` must exist. A symlink at ``path`` is refused before
+    each attempt to take the lock, and a lock still held after ``timeout`` seconds, measured
+    on the monotonic clock, is refused naming it (``holder`` says who is likely to hold it).
+    Every refusal raises ``refused(message)``: the caller's exception type, or any callable
+    that builds one.
+
+    The release removes the directory only while it is still not a symlink, and it never
+    raises: a lock it cannot remove (something was left in it, a symlink was swapped in)
+    stays where it is, and the next taker refuses it by name. So the exception the body
+    raised is always the one that propagates."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if os.path.islink(path):
+            raise refused("%s is a symlink: refusing (TOCTOU risk, LESSON-014). Inspect it by "
+                          "hand" % path)
+        try:
+            os.mkdir(path, 0o700)
+            break
+        except FileExistsError:
+            pass
+        except FileNotFoundError:
+            raise refused("cannot take %s: %s does not exist" % (path, os.path.dirname(path)))
+        if time.monotonic() >= deadline:
+            raise refused("could not take %s in %ss: %s, or one died holding the lock; remove "
+                          "the directory once no exec run is live" % (path, timeout, holder))
+        time.sleep(poll)
+    try:
+        yield path
+    finally:
+        try:
+            if not os.path.islink(path):
+                os.rmdir(path)
+        except OSError:
+            pass
 
 
 def atomic_json(path, doc):

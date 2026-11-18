@@ -23,8 +23,9 @@ the run ends, on success, on failure and on the crash path::
   a block a killed run left behind is found by the next grant (``adopted``) and by a
   revoke built from the path alone.
 * **The lock.** One ``mkdir`` directory beside the trust file, refused when it is a
-  symlink, as the id allocator's is (LESSON-014). Every write to the trust file, and the
-  user policy file write (BR-4), takes it.
+  symlink, as the id allocator's is (LESSON-014). Every write to the trust file takes it.
+  It is ``exec_ledger.mkdir_lock``, the implementation the user policy file's lock (BR-4)
+  shares.
 * **The probe.** While REQ-664's recovery marker exists for the harness, a probe run is
   editing, or died editing, the same file and restores it whole: the grant refuses,
   naming the marker.
@@ -40,7 +41,6 @@ Standard library only.
 
 import os
 import stat
-import time
 
 import exec_ledger as el
 import toml_merge as tm
@@ -173,50 +173,32 @@ def trust_block(path):
 
 
 class TrustLock(object):
-    """``with lock(trust_file):`` — the ``mkdir`` lock beside ``trust_file``.
+    """``with lock(trust_file):`` — the ``mkdir`` lock beside ``trust_file``, which is
+    ``exec_ledger.mkdir_lock``, the one lock implementation the engine has.
 
     The directory that holds ``trust_file`` must exist. A symlink where the lock goes is
     refused, before taking it and before releasing it (LESSON-014). A lock not taken in
     ``timeout`` seconds is refused, naming the directory: an adlc run is editing the file,
-    or one died holding it.
+    or one died holding it. The release never masks an exception the body raised.
     """
 
     def __init__(self, trust_file, timeout=LOCK_TIMEOUT_S):
         self.path = trust_file + LOCK_SUFFIX
         self.timeout = timeout
         self.held = False
-
-    def _refuse_symlink(self):
-        if os.path.islink(self.path):
-            raise TrustRefused("%s is a symlink: refusing (TOCTOU risk, LESSON-014). Inspect "
-                               "it by hand" % self.path)
+        self._lock = None
 
     def __enter__(self):
-        deadline = time.monotonic() + self.timeout
-        while True:
-            self._refuse_symlink()
-            try:
-                os.mkdir(self.path, 0o700)
-                self.held = True
-                return self
-            except FileExistsError:
-                pass
-            except FileNotFoundError:
-                raise TrustRefused("cannot take %s: %s does not exist"
-                                   % (self.path, os.path.dirname(self.path)))
-            if time.monotonic() >= deadline:
-                raise TrustRefused("could not take %s in %ss: another adlc run is editing "
-                                   "the file, or one died holding the lock; remove the "
-                                   "directory once no run is" % (self.path, self.timeout))
-            time.sleep(LOCK_POLL_S)
+        lock = el.mkdir_lock(self.path, self.timeout, TrustRefused,
+                             holder="another adlc run is editing the file", poll=LOCK_POLL_S)
+        lock.__enter__()
+        self._lock, self.held = lock, True
+        return self
 
     def __exit__(self, *exc):
-        if self.held and not os.path.islink(self.path):
-            try:
-                os.rmdir(self.path)
-            except OSError:
-                pass
-        self.held = False
+        lock, self._lock, self.held = self._lock, None, False
+        if lock is not None:
+            lock.__exit__(*exc)
         return False
 
 
