@@ -617,8 +617,8 @@ Then run `/init --harness codex` (`/adlc:init --harness codex` on the plugin ins
 | `/sprint` workflow engine | unavailable |
 | Transcript schema | undocumented; `~/.codex/sessions/**/rollout-*.jsonl` is located, not parsed (REQ-660) |
 | Explicit skill invocation | `$name`; the catalog lists each skill as `adlc:<name>` |
-| Headless deny status | `ask-tier-deny` read `unknown` at `codex-cli 0.166.0`: the model refused the control command without calling it, so the probe says nothing about `forbidden`. Unverified |
-| Fences, not commands | `fence.partial-source` is omitted, and an unmatched partial-sourcing fence runs in the sandbox with no rule (`fence-vs-allowlist` `routine-only` passed) |
+| Headless deny status | `ask-tier-deny` reads `pass` at `codex-cli 0.166.0` (2026-11-17): a `forbidden` rule refused its command with an allow on a shorter prefix loaded (`deny-under-allow`), and Codex logged the refusal on stderr. Under a `git -C` allow a deny on the plain spelling did not hold (`wrapped-allow` `fail`), so no `git -C` allow is rendered. The committed file's `prompt` decision is not what the probe measured |
+| Fences, not commands | `fence.partial-source` is omitted. `fence-vs-allowlist` reads `fail` on `routine-only`, `broad-first-token` and `broad-sh` at `codex-cli 0.166.0`: in none did the fence's sentinel appear. Its `runner-prefix` variant reads `pass`, and that is how the exec engine runs a fence (REQ-682) |
 | `git -C` | no rule of any decision; every `git -C <path> <sub>` is unmatched (see the shared-base and unmatched rows) |
 | Hook review | no ETHOS reaches a session until a person reviews the hooks, per checkout, and again when a hook changes (see above). Codex has no load-time `!` line, so an unreviewed session has no ETHOS unless a rendered agent's read line supplies it |
 | ETHOS after compaction | not re-injected: `PostCompact` has no context channel, and a manual compaction fires no `SessionStart` (recorded); automatic compaction is unmeasured |

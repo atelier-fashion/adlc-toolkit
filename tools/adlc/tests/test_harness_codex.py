@@ -5,6 +5,7 @@ and projects are throwaway git repos. No case runs a real ``codex``: the binary 
 PATH, where one is needed, is a stub. The real-tool evidence is in the spec.
 """
 
+import copy
 import json
 import os
 import re
@@ -15,6 +16,9 @@ import sys
 import pytest
 
 import agents_render
+import exec_adapter as ea
+import exec_verify as ev
+import fence_census as fc
 import harness_adapter as ha
 import harness_doctor
 import harness_render as hr
@@ -253,8 +257,9 @@ def test_rules_render(sandbox):
         assert 'prefix_rule(pattern=%s, decision="allow")' % pattern not in lines
     assert not [line for line in lines if '"git", "-C"' in line]
     assert 'decision="forbidden"' not in text
-    broad = " ".join(adapter()["capabilities"]["fence_broad_spelling"])
-    assert broad not in text
+    # REQ-662: the retired broad opener is no longer declared, and nothing renders it.
+    assert "fence_broad_spelling" not in adapter()["capabilities"]
+    assert '["if", "[", "-f", ".adlc/partials/"]' not in text
     for opener in ("if", "sh", "bash", "bash -lc"):
         assert 'pattern=%s,' % json.dumps(opener.split()) not in text
     for entry in perms()["entries"]:
@@ -282,9 +287,11 @@ def test_no_allow_for_a_deny_tier_command():
 
 
 def _pass_record(tmp_path):
+    """The committed render's mechanism (`confirm`) with a pass and the by-hand result: the
+    record a project-scope restore needs. The shipped record is the exec engine's (`deny`)."""
     return variant(tmp_path, [(
-        "prefix: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, "
-        "source: probe, by_hand: strictest-wins}",
+        "prefix: {mechanism: deny, result: pass, harness_version: codex-cli 0.166.0, "
+        "source: probe}",
         "prefix: {mechanism: confirm, result: pass, harness_version: codex-cli 0.166.0, "
         "source: probe, by_hand: strictest-wins}")])
 
@@ -773,3 +780,260 @@ def test_config_files_stay_out_of_templates():
     for name in os.listdir(rendered):
         text = open(os.path.join(rendered, name), encoding="utf-8").read()
         assert "danger-full-access" not in text and 'approval_policy = "never"' not in text
+
+
+# --------------------------------------------------------------------------- REQ-662: exec
+#: What `codex --version` printed on the machine the result file was recorded on. Passed to
+#: the verdict as the installed version: no test runs a real `codex`.
+CODEX_VERSION = "codex-cli 0.166.0"
+EXEC_WT = "/abs/repo/.worktrees/REQ-901"
+EXEC_LAST = "/run/0123abcd/stdout.last-message.txt"
+EXEC_BRANCH = "feat/REQ-901-sample"
+
+
+def exec_codex(path=None):
+    """The Codex adapter as the exec engine reads it: loaded through ``exec_adapter.load``."""
+    if path is None:
+        return ea.load("codex", TOOLKIT)
+    return ea.ExecAdapter(ha.load_adapter(path, toolkit=TOOLKIT), TOOLKIT)
+
+
+def with_exec(adapter, **keys):
+    """``adapter`` reading an exec block with these keys replaced."""
+    return ea.ExecAdapter(dict(adapter.adapter, exec=dict(adapter.block, **keys)), TOOLKIT)
+
+
+def reading(changes):
+    """The committed codex.json with ``{probe: status}`` or ``{probe/variant: status}`` changed,
+    in memory: a fixture result that differs from the record in exactly those readings."""
+    doc = copy.deepcopy(result())
+    for key, status in changes.items():
+        probe, _, sub = key.partition("/")
+        if sub:
+            doc["probes"][probe]["sub_results"][sub]["status"] = status
+        else:
+            doc["probes"][probe]["status"] = status
+    return doc
+
+
+def prefix_rules(text):
+    """``[(decision, pattern)]`` of each ``prefix_rule`` line; every other line is a comment or
+    blank."""
+    out = []
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = hr._PREFIX_RULE_RE.match(line)
+        assert match, line
+        out.append((match.group(2), tuple(json.loads(match.group(1)))))
+    return out
+
+
+def test_codex_declares_prompt_delivery_and_is_verified():
+    """AC-25, AC-11, BR-11: the block loads at exec schema 2, declares context_delivery:
+    prompt, and the verdict over the committed codex.json reads verified. The same block
+    declaring hooks reads unverified naming trust-then-headless and session-start-context;
+    with allowlist-loaded failing, the prompt block reads unverified too. The yml's status and
+    probes are caches the verdict checks, never the verdict."""
+    adapter = exec_codex()
+    block = adapter.block
+    assert block["exec_schema_version"] == ha.EXEC_SCHEMA_VERSION == 2
+    assert block["context_delivery"] == "prompt" and block["verification"] == "probes"
+    assert block["harness_version"] == result()["harness_version"] == CODEX_VERSION
+    verdict = ev.verdict(adapter, result(), CODEX_VERSION)
+    assert verdict.verified, verdict.summary()
+    assert verdict.doctor_line() == "exec: verified"
+    # The readings the verdict stands on: hooks-loaded fails, which prompt does not need.
+    assert verdict.readings["trust-then-headless"] == "fail"
+    assert verdict.readings["trust-then-headless/hooks-loaded"] == "fail"
+    assert verdict.readings["trust-then-headless/allowlist-loaded"] == "pass"
+    assert result()["probes"]["session-start-context"]["status"] == "fail"
+    hooks = ev.verdict(with_exec(adapter, context_delivery="hooks"), result(), CODEX_VERSION)
+    assert hooks.subjects == ["trust-then-headless", "session-start-context"], hooks.summary()
+    assert hooks.doctor_line() == "exec: unverified (trust-then-headless, session-start-context)"
+    broken = ev.verdict(adapter, reading({"trust-then-headless/allowlist-loaded": "fail"}),
+                        CODEX_VERSION)
+    assert broken.subjects == ["trust-then-headless"] and "allowlist-loaded" in broken.summary()
+    # exec.probes cites every required probe as the result file records it.
+    cited = {row["id"]: row for row in block["probes"]}
+    assert set(ev.required(block)) <= set(cited)
+    for probe, row in cited.items():
+        record = result()["probes"][probe]
+        assert (row["status"], row["ran_at"], row["harness_version"]) == (
+            record["status"], record["ran_at"], result()["harness_version"]), probe
+    # A stale cache, another installed version, no binary and a result recorded under another
+    # version each read unverified.
+    stale = ev.verdict(with_exec(adapter, status="unverified"), result(), CODEX_VERSION)
+    assert stale.subjects == ["status"]
+    for installed in ("codex-cli 0.167.0", None):
+        assert ev.verdict(adapter, result(), installed).subjects == ["installed-version"]
+    other = dict(result(), harness_version="codex-cli 0.165.0")
+    assert set(ev.verdict(adapter, other, CODEX_VERSION).subjects) == set(ev.required(block))
+    assert not ev.verdict(adapter, None, CODEX_VERSION).verified
+
+
+def test_exec_values_follow_the_result_file():
+    """Every exec value that a probe decides reads what codex.json records (guess nothing):
+    the delegation timeout, the refusal line, the output events and the stdin variant."""
+    adapter = exec_codex()
+    block = adapter.block
+    probes = result()["probes"]
+    assert probes["shell-timeout"]["status"] == "pass"
+    assert block["shell_timeout_s"] == {"value": 125, "verified": "true",
+                                        "delegate": "supported"}
+    assert "sleep 125" in probes["shell-timeout"]["evidence"]["stdout_tail"]
+    # The refusal line is the harness's stderr for the `forbidden` command, and the model's
+    # stream of that launch does not hold it (LESSON-847).
+    denied = probes["ask-tier-deny"]["sub_results"]["deny-under-allow"]["evidence"]
+    line = adapter.refusal_line(denied["stderr_tail"])
+    assert line and "rejected: policy forbids commands starting with" in line
+    assert adapter.refusal_line(denied["stdout_tail"]) is None
+    # A whole captured stream parses through the declared output: its session id is the
+    # thread.started event's, and it ends with the terminal event.
+    launch = probes["stdin-prompt"]["sub_results"][block["prompt_variant"]]["evidence"]
+    stdout = launch["stdout_tail"]
+    assert len(stdout.encode("utf-8")) == launch["stdout_bytes"], "the capture is cut"
+    parsed = adapter.parse_result(stdout, last_message="the last message")
+    thread = json.loads(stdout.splitlines()[0])
+    assert thread["type"] == "thread.started"
+    assert parsed["error"] is None and parsed["session_id"] == thread["thread_id"]
+    assert block["output"]["final_message"] == "{last_message}"
+    assert block["output"]["terminal_event"] == "turn.completed"
+    # Nothing the probe cannot vouch for is declared: no extra allow (matcher: none), no
+    # isolation flags, no second writable directory and no CODEX_HOME override.
+    for key in ("allow_extra", "allow_extra_exact", "add_dir_flag", "config_isolation",
+                "auth_env"):
+        assert key not in block, key
+    assert block["matcher"] == "none" and block["rules_reload"] == "unknown"
+    assert "CODEX_HOME" not in block["env_passthrough"]
+
+
+def test_codex_launch_argv_snapshot():
+    """AC-2, BR-2, BR-16: the launch is `codex exec --json --sandbox workspace-write -C <wt> -o
+    <file>` with the prompt on stdin, the argv the stdin-prompt variant it names ran; the
+    provisional resume is ADR-7's. Neither holds a forbidden flag or `-p`, and a forbidden
+    entry or a `-c`, `-p` or `--profile` token added to either is refused."""
+    adapter = exec_codex()
+    values = {"worktree": EXEC_WT, "last_message": EXEC_LAST}
+    fresh = adapter.launch_argv("/bin/codex", [], [], values=values)
+    assert fresh == ["/bin/codex", "exec", "--json", "--sandbox", "workspace-write", "-C",
+                     EXEC_WT, "-o", EXEC_LAST]
+    resumed = adapter.launch_argv("/bin/codex", [], [], resume="T-1", values=values)
+    assert resumed == ["/bin/codex", "exec", "resume", "--json", "-o", EXEC_LAST, "T-1", "-"]
+    with_model = adapter.launch_argv("/bin/codex", [], [], extra=["--model", "m"],
+                                     values=values)
+    assert with_model == fresh + ["--model", "m"]
+    # The template is the argv the declared variant measured, path for path.
+    variants = result()["probes"]["stdin-prompt"]["sub_results"]
+    assert variants[adapter.block["prompt_variant"]]["status"] == "pass"
+    measured = variants[adapter.block["prompt_variant"]]["evidence"]["command"]
+    assert measured == ["codex"] + ea.substitute(adapter.template("launch"), {
+        "worktree": measured[6], "last_message": measured[8]})
+    # The other variant is this launch plus prompt_flag (its paths differ: another launch).
+    flagged = variants["with-prompt-flag"]["evidence"]["command"]
+
+    def shape(argv):
+        return [tok for i, tok in enumerate(argv) if i not in (6, 8)]
+    assert shape(flagged) == shape(measured) + adapter.block["prompt_flag"]
+    for argv in (fresh, resumed):
+        assert "-p" not in argv and ea.forbidden_in(argv, adapter.forbidden) is None
+    for entry in adapter.block["forbidden_flags"]:
+        assert "=" not in entry, entry
+        with pytest.raises(ea.ExecRefused):
+            adapter.launch_argv("/bin/codex", [], [], extra=entry.split(), values=values)
+    pairs = {"operator": [], "isolation": False, "add_dir": None, "allow": [], "deny": []}
+    for argv, template, vals in ((fresh, "launch", values),
+                                 (resumed, "resume", dict(values, session_id="T-1"))):
+        assert adapter.closed_world(argv, template, pairs, vals) == argv
+        for token in (["-c", "sandbox_mode=danger-full-access"], ["-p", "x"],
+                      ["--profile", "x"], ["--add-dir", "/tmp"]):
+            with pytest.raises(ea.ExecRefused, match="closed world"):
+                adapter.closed_world(argv + token, template, pairs, vals)
+    with pytest.raises(ea.ExecRefused, match="operator_flags"):
+        adapter.launch_argv("/bin/codex", [], [], extra=["--add-dir", "/tmp"], values=values)
+
+
+def test_codex_exec_rule_files():
+    """BR-3, BR-4, AC-4: the working-copy rule file holds the fence-runner allow once, a
+    `forbidden` rule for every deny-tier and engine_deny entry, and no `git push`, `git branch`
+    or `git -C` allow; the user policy file holds the same denies and no allow. Every loss the
+    exec render reports is declared at `exec`, so the pre-flight's fidelity check passes, and
+    no deny is deny_unsupported."""
+    adapter = exec_codex()
+    files = adapter.rule_files(EXEC_BRANCH, result=result())
+    rules = prefix_rules(files.rule_file)
+    assert {d for d, _p in rules} == {"allow", "forbidden"}
+    allow = [p for d, p in rules if d == "allow"]
+    forbidden = [p for d, p in rules if d == "forbidden"]
+    runner = adapter.fence_runner()
+    assert allow.count((runner,)) == 1 and runner.endswith("/tools/adlc/fence-run")
+    for base in OMITTED:
+        assert not [p for p in allow if p[:2] == tuple(base.split())], base
+    deny = [tuple(c) for e in perms()["entries"] if e["tier"] == "deny" for c in e["commands"]]
+    assert not [c for c in deny if any("*" in tok for tok in c)]
+    engine = [tuple(c) for c in adapter.block["engine_deny"]]
+    assert sorted(forbidden) == sorted(set(deny + engine))
+    policy = prefix_rules(files.user_policy_file)
+    assert {d for d, _p in policy} == {"forbidden"}
+    assert sorted(p for _d, p in policy) == sorted(forbidden)
+    assert adapter.tiers(EXEC_BRANCH, result=result()) == ([], [])
+    verdict = ev.verdict(adapter, result(), CODEX_VERSION)
+    report = adapter.exec_report(result(), verdict)
+    assert report.undeclared == [] and report.deny_unsupported == []
+    assert report.whole_tier is None
+    losses = {(f.entry, f.command): f.verdict for f in report.findings if f.verdict != "exact"}
+    for (entry, command), verdict_text in losses.items():
+        assert hr.accepted(adapter.adapter, entry, command, "exec") == verdict_text
+    assert losses[(hr.FENCE_ID, "if [ -f .adlc/partials/")] == "inexpressible"
+    # Remove one exec verdict and the pre-flight's comparison names it.
+    loaded = copy.deepcopy(adapter.adapter)
+    del loaded["accepted_fidelity"]["git.write:git push"]["exec"]
+    undeclared = ea.ExecAdapter(loaded, TOOLKIT).exec_report(result(), verdict).undeclared
+    assert [(f.entry, f.command) for f in undeclared] == [("git.write", "git push")]
+
+
+def test_strategy_agrees_with_the_gitdir_record_and_the_probe(tmp_path):
+    """AC-9, BR-9: `worktree` agrees with the top-level sandbox_can_reach_common_gitdir record
+    and with git-write-worktree in codex.json on every variant. A record that disagrees
+    refuses the adapter at load naming both keys; a result where the probe disagrees reads
+    unverified naming the probe and the record, with the declared value and the verdict."""
+    adapter = exec_codex()
+    assert adapter.strategy == "worktree"
+    assert adapter.adapter["sandbox_can_reach_common_gitdir"] == "true"
+    probe = result()["probes"]["git-write-worktree"]
+    assert probe["status"] == "pass"
+    assert {k: v["status"] for k, v in probe["sub_results"].items()} == {
+        "root-is-worktree": "pass", "writable-roots-repo": "pass"}
+    for record in ("false", "unverified"):
+        path = variant(tmp_path, [("sandbox_can_reach_common_gitdir: true\n",
+                                   "sandbox_can_reach_common_gitdir: %s\n" % record)])
+        with pytest.raises(ha.AdapterError) as exc:
+            ha.load_adapter(path, toolkit=TOOLKIT)
+        assert exc.value.field == "exec.working_copy.strategy"
+        assert "sandbox_can_reach_common_gitdir" in str(exc.value) and record in str(exc.value)
+    failed = ev.verdict(adapter, reading({"git-write-worktree": "fail"}), CODEX_VERSION)
+    assert {"git-write-worktree", "sandbox_can_reach_common_gitdir"} <= set(failed.subjects)
+    details = {p.subject: p.detail for p in failed.problems}
+    assert "worktree" in failed.summary() and "fail" in details["git-write-worktree"]
+    assert "declares true" in details["sandbox_can_reach_common_gitdir"]
+    one = ev.verdict(adapter, reading({"git-write-worktree/writable-roots-repo": "fail"}),
+                     CODEX_VERSION)
+    assert one.subjects == ["git-write-worktree"] and "writable-roots-repo" in one.summary()
+
+
+def test_codex_census_golden_is_fresh_and_has_no_direct_route():
+    """AC-24, BR-3, ADR-8, ADR-9: Codex is exec-capable, its block loads with fence_runner and
+    without capabilities.fence_broad_spelling, and its committed census is a fresh one with no
+    `direct` route and none unrouted. The Step 0 branch push is the one push the runner makes."""
+    adapter = exec_codex()
+    assert adapter.block["fence_runner"] == "tools/adlc/fence-run"
+    assert "fence_broad_spelling" not in adapter.adapter["capabilities"]
+    assert "codex" in [a.name for a in fc.exec_adapters(TOOLKIT)]
+    records = fc.census(TOOLKIT, adapter)
+    with open(os.path.join(TOOLKIT, fc.golden_path("codex")), encoding="utf-8") as fh:
+        assert fh.read() == fc.dumps(fc.golden_doc(records)), "run fence_census.py --write"
+    assert [r["id"] for r in records if r["route"] == "direct"] == []
+    assert fc.unrouted(records) == []
+    [push] = [r for r in records if r.get("push")]
+    assert push["route"] == "runner" and push["push"] == fc.BRANCH_PUSH
+    assert push["id"].startswith("proceed/phase-0-setup.md#")

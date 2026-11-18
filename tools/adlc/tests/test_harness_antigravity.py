@@ -178,8 +178,9 @@ def test_no_harness_name_in_code():
 
 
 def test_other_adapters_are_not_edited():
+    # harness/codex.yml left this list when REQ-662 stage 1 gave it its exec block.
     out = subprocess.run(["git", "-C", TOOLKIT, "diff", "--name-only", "origin/main", "--",
-                          "harness/copilot.yml", "harness/cursor.yml", "harness/codex.yml"],
+                          "harness/copilot.yml", "harness/cursor.yml"],
                          capture_output=True, text=True)
     if out.returncode:
         pytest.skip("no origin/main here")
@@ -220,7 +221,9 @@ def test_hook_fields_are_refused_when_malformed(tmp_path, old, new, words):
 def test_schema_4_fields_are_refused_under_schema_3(tmp_path, addition, field):
     """On Codex's adapter, schema 3, so the field itself is what gets refused."""
     src = open(os.path.join(TOOLKIT, "harness", "codex.yml"), encoding="utf-8").read()
-    assert src.rstrip().splitlines()[-1].startswith("  fence_broad_spelling")
+    # The addition lands in `capabilities`, the file's last top-level map.
+    top = [line for line in src.splitlines() if line[:1].isalpha()]
+    assert top[-1] == "capabilities:"
     path = tmp_path / "codex.yml"
     path.write_text(src + addition, encoding="utf-8")
     with pytest.raises(ha.AdapterError, match=r"%s.*schema_version 4" % field):

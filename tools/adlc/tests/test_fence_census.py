@@ -208,10 +208,12 @@ def test_check_fails_when_any_adapter_golden_is_stale(tmp_path):
     out = check()
     assert out.returncode == 1 and "%s is stale" % fake in out.stderr, out.stderr
     fc.write_goldens(root)
-    orphan = os.path.join(root, "harness", "codex", fc.GOLDEN_NAME)
+    # copilot's stage has not run (REQ-662 Amendments), so it is not exec-capable.
+    orphan = os.path.join(root, "harness", "copilot", fc.GOLDEN_NAME)
+    os.makedirs(os.path.dirname(orphan), exist_ok=True)
     shutil.copy(os.path.join(root, fake), orphan)
     assert fc.stale_goldens(root) == ["%s names no exec-capable adapter" %
-                                      fc.golden_path("codex")]
+                                      fc.golden_path("copilot")]
     assert check().returncode == 1
 
 

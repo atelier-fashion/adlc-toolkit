@@ -47,8 +47,11 @@ def test_exec_block_validates(adapter, tmp_path):
 
 
 def test_no_exec_block_names_the_sibling_req():
+    """An adapter whose stage has not run (REQ-662 Amendments) is refused naming REQ-662; codex
+    has its block since stage 1."""
     with pytest.raises(ea.ExecRefused, match="REQ-662"):
-        ea.load("codex", TOOLKIT)
+        ea.load("copilot", TOOLKIT)
+    assert ea.load("codex", TOOLKIT).name == "codex"
     with pytest.raises(ea.ExecRefused, match="no adapter ships"):
         ea.load("gemini", TOOLKIT)
 
@@ -316,14 +319,16 @@ def test_fence_runner_outside_the_root_refuses_the_launch(adapter, tmp_path):
 
 # ---------------------------------------------------------------- exec schema 2 (REQ-662)
 FIX = os.path.join(HERE, "fixtures", "harness")
-#: The three schema-2 blocks: the migrated claude block and one fixture of each render form.
-#: A check proven on one of them has only proven that one's branches (LESSON-756).
-SCHEMA_2 = ("claude", "fake-exec-flags", "fake-exec-file")
+#: The schema-2 blocks: the two shipped ones (the migrated claude block and codex's, REQ-662
+#: stage 1) and one fixture of each render form. A check proven on one of them has only
+#: proven that one's branches (LESSON-756).
+SHIPPED_2 = ("claude", "codex")
+SCHEMA_2 = SHIPPED_2 + ("fake-exec-flags", "fake-exec-file")
 
 
 def _source(base):
-    if base == "claude":
-        return open(os.path.join(TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
+    if base in SHIPPED_2:
+        return open(os.path.join(TOOLKIT, "harness", base + ".yml"), encoding="utf-8").read()
     return open(os.path.join(FIX, base + ".yml"), encoding="utf-8").read()
 
 
@@ -883,7 +888,7 @@ def test_resume_needs_a_declared_template(adapter):
         no_resume.launch_argv("/bin/fake", [], [], resume="abc-1")
 
 
-@pytest.mark.parametrize("name", ("codex", "copilot", "cursor", "antigravity"))
+@pytest.mark.parametrize("name", ("copilot", "cursor", "antigravity"))
 def test_unstaged_adapters_load_and_are_refused_by_name(name):
     """REQ-662 Amendments 2026-11-17: an adapter whose stage has not run keeps its placeholder
     block, which the loader leaves opaque, and the engine refuses it by name."""
@@ -905,8 +910,8 @@ DENY = ["Bash(git push --force:*)"]
 
 
 def _schema2(base):
-    if base == "claude":
-        return ea.load("claude", TOOLKIT)
+    if base in SHIPPED_2:
+        return ea.load(base, TOOLKIT)
     return ea.load(base, TOOLKIT, adapter_path=os.path.join(FIX, base + ".yml"))
 
 
@@ -928,8 +933,8 @@ def _launch(adapter, resume=None, extra=(), add_dir=None, allow=ALLOW, values=No
 
 def test_launch_argv_snapshot():
     """AC-2: the launch and resume argv of each staged block, token for token. Claude's is
-    REQ-659's argv; the file-render fixture is the Codex shape ADR-6 measured, with no `-p`
-    and its prompt on stdin."""
+    REQ-659's argv; Codex's is the argv ADR-6 measured, with no `-p` and its prompt on stdin,
+    and the file-render fixture is the same shape."""
     claude = _schema2("claude")
     isolation = ["--setting-sources", "", "--settings", SETTINGS, "--strict-mcp-config"]
     tiers = ["--allowedTools"] + ALLOW + ["--disallowedTools"] + DENY
@@ -947,6 +952,16 @@ def test_launch_argv_snapshot():
                        "--model", "m"]
     for argv in (fresh, resumed):
         assert "-p" not in argv and ea.forbidden_in(argv, codex_shaped.forbidden) is None
+    codex = ea.load("codex", TOOLKIT)
+    fresh = _launch(codex)[0]
+    assert fresh == ["/bin/fake", "exec", "--json", "--sandbox", "workspace-write", "-C", WT,
+                     "-o", LAST]
+    resumed = _launch(codex, resume="T-1", extra=["--model", "m"])[0]
+    assert resumed == ["/bin/fake", "exec", "resume", "--json", "-o", LAST, "T-1", "-",
+                       "--model", "m"]
+    for argv in (fresh, resumed):
+        assert "-p" not in argv and ea.forbidden_in(argv, codex.forbidden) is None
+        assert ea.forbidden_in(argv, claude.forbidden) is None
     flags = _schema2("fake-exec-flags")
     assert _launch(flags, extra=["--model=m"])[0] == (
         ["/bin/fake", "-s", "--output-format", "json", "--no-ask-user", "-C", WT, "--model=m",

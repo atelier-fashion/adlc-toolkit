@@ -1,11 +1,11 @@
 ---
 id: TASK-265
 title: "The Codex exec block, its refreshed facts, and its census golden"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 dependencies: [TASK-259, TASK-264]
 ---
 
@@ -23,15 +23,15 @@ Write `harness/codex.yml`'s exec block as architecture ADR-11 states it, bring t
 
 ## Acceptance Criteria
 
-- [ ] `harness/codex.yml` loads at exec schema 2 and `exec_verify.verdict` over the committed `codex.json` reads `verified`.
-- [ ] The same block with `context_delivery: hooks` reads `unverified`, naming `trust-then-headless` and `session-start-context`.
-- [ ] The rendered launch argv is `codex exec --json --sandbox workspace-write -C <wt> -o <file>`, snapshot-tested, and holds no forbidden flag.
-- [ ] The exec rule file holds the fence-runner allow, a `forbidden` decision for every deny-tier entry, and no `git push`, `git branch` or `git -C` allow.
-- [ ] Every fidelity finding at `exec` scope is declared in `accepted_fidelity`, so the pre-flight passes.
-- [ ] The declared strategy agrees with `sandbox_can_reach_common_gitdir` and with `git-write-worktree` in `codex.json`; a fixture where they disagree refuses the adapter naming both.
-- [ ] The committed `harness/codex/exec-fence-census.json` equals a fresh census, holds no `direct` route and no `unrouted` one.
-- [ ] `bash tools/lint-skills/check.sh` is clean, including `harness-loss-table`, `render-parity` and `allowlist-fidelity`.
-- [ ] `harness/copilot.yml`, `harness/cursor.yml` and `harness/antigravity.yml` are unchanged and still refused by name.
+- [x] `harness/codex.yml` loads at exec schema 2 and `exec_verify.verdict` over the committed `codex.json` reads `verified`.
+- [x] The same block with `context_delivery: hooks` reads `unverified`, naming `trust-then-headless` and `session-start-context`.
+- [x] The rendered launch argv is `codex exec --json --sandbox workspace-write -C <wt> -o <file>`, snapshot-tested, and holds no forbidden flag.
+- [x] The exec rule file holds the fence-runner allow, a `forbidden` decision for every deny-tier entry, and no `git push`, `git branch` or `git -C` allow.
+- [x] Every fidelity finding at `exec` scope is declared in `accepted_fidelity`, so the pre-flight passes.
+- [x] The declared strategy agrees with `sandbox_can_reach_common_gitdir` and with `git-write-worktree` in `codex.json`; a fixture where they disagree refuses the adapter naming both.
+- [x] The committed `harness/codex/exec-fence-census.json` equals a fresh census, holds no `direct` route and no `unrouted` one.
+- [x] `bash tools/lint-skills/check.sh` is clean, including `harness-loss-table`, `render-parity` and `allowlist-fidelity`.
+- [x] `harness/copilot.yml`, `harness/cursor.yml` and `harness/antigravity.yml` are unchanged and still refused by name.
 
 ## Verification
 

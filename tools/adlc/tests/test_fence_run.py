@@ -78,6 +78,19 @@ def two(tmp_path_factory):
     return root, {a.name: fc.census(root, a) for a in fc.exec_adapters(root)}
 
 
+@pytest.fixture(scope="module")
+def claude_only(tmp_path_factory):
+    """A toolkit copy whose one exec-capable adapter is ``claude``. In the real tree codex is
+    exec-capable too (REQ-662 stage 1), routes every fence claude runs `direct` through the
+    runner, and the runner accepts the union (ADR-8), so no real-tree fence reads `direct`
+    to fence-run. Here one does."""
+    root = rs.toolkit_copy(str(tmp_path_factory.mktemp("claude-only") / "tk"))
+    os.remove(os.path.join(root, "harness", "codex.yml"))
+    os.remove(os.path.join(root, fc.golden_path("codex")))
+    assert [a.name for a in fc.exec_adapters(root)] == ["claude"]
+    return root
+
+
 def _by_route(records, route):
     return [r for r in records if r["route"] == route]
 
@@ -111,19 +124,21 @@ def wc(tmp_path):
 
 
 # ------------------------------------------------------------------------ refusals (BR-9)
-def test_refusal_is_one_loud_line_exit_3(cached, wc, tmp_path):
+def test_refusal_is_one_loud_line_exit_3(cached, wc, tmp_path, claude_only):
     sentinel = tmp_path / "S"
     direct = _by_route(cached, "direct")[0]["id"]
     engine = _by_route(cached, "engine")[0]["id"]
     excised = _by_route(cached, "excised")[0]["id"]
     runner = _by_route(cached, "runner")[0]["id"]
     stale = runner.rsplit(":", 1)[0] + ":00000000"
-    for fid, why in ((direct, "route is direct"), (engine, "route is engine"),
-                     (excised, "route is excised"), (stale, "changed since it was shown"),
-                     ("validate/SKILL.md#99:00000000", "unknown fence"),
-                     ("README.md#1:00000000", "not in the exec file set"),
-                     ("x; touch %s" % sentinel, "not a fence id")):
-        rc, err = _run(fid, [], wc)
+    for fid, why, root in ((direct, "route is direct", claude_only),
+                           (engine, "route is engine", TOOLKIT),
+                           (excised, "route is excised", TOOLKIT),
+                           (stale, "changed since it was shown", TOOLKIT),
+                           ("validate/SKILL.md#99:00000000", "unknown fence", TOOLKIT),
+                           ("README.md#1:00000000", "not in the exec file set", TOOLKIT),
+                           ("x; touch %s" % sentinel, "not a fence id", TOOLKIT)):
+        rc, err = _run(fid, [], wc, root=root)
         assert rc == fr.REFUSED, (fid, rc)
         lines = err.splitlines()
         assert len(lines) == 1 and lines[0].startswith("opaque_entry_refused: "), err
@@ -162,7 +177,7 @@ def test_census_recomputed_every_call(monkeypatch, wc):
 
 
 # ------------------------------------------------------------------------ REQ-662 ADR-8
-def test_runner_accepts_the_union_of_runner_routes(two, wc, monkeypatch):
+def test_runner_accepts_the_union_of_runner_routes(two, wc, monkeypatch, claude_only):
     """AC-24: a fence `runner` on one adapter and `direct` on another is accepted; a fence
     `runner` on none is refused, naming its route. Nothing but the root chooses: no variable
     or working-copy file changes the answer."""
@@ -186,8 +201,16 @@ def test_runner_accepts_the_union_of_runner_routes(two, wc, monkeypatch):
     (wc / "harness").mkdir()
     shutil.copy(MATCHER_NONE, str(wc / "harness"))
     push = next(i for i in split if i.startswith(PUSH_KEY + ":"))
-    rc, err = _run(push, [], wc)        # the real tree: the push is direct on its one adapter
+    # A root where the push is direct on its one adapter: the working copy's harness/ does not
+    # make it runnable.
+    rc, err = _run(push, [], wc, root=claude_only)
     assert rc == fr.REFUSED and "its route is direct, not runner" in err, err
+    # The real tree: codex routes the push through the runner (ADR-9), so it is accepted there
+    # and goes on to its values.
+    _fence, rec = fr.find(push, TOOLKIT)
+    assert rec["route"] == "runner" and rec["push"] == fc.BRANCH_PUSH
+    rc, err = _run(push, [], wc)
+    assert rc == fr.REFUSED and "no value for worktree" in err, err
 
 
 def test_split_routes_are_named_when_none_is_runner(monkeypatch, tmp_path):
@@ -199,12 +222,13 @@ def test_split_routes_are_named_when_none_is_runner(monkeypatch, tmp_path):
     def no_runner(r, adapter=None):
         out = [dict(rec) for rec in real(r, adapter)]
         for rec in out:
-            if rec["route"] == "runner" and adapter.name == "fake-exec-file":
+            if rec["route"] == "runner":
                 rec["route"] = "unrouted"
         return out
     monkeypatch.setattr(fc, "census", no_runner)
     push = next(rec["id"] for rec in real(root, None) if rec["id"].startswith(PUSH_KEY + ":"))
-    with pytest.raises(fr.Refusal, match="direct on claude, unrouted on fake-exec-file"):
+    with pytest.raises(fr.Refusal, match="direct on claude, unrouted on codex, unrouted on "
+                                         "fake-exec-file"):
         fr.find(push, root)
 
 
@@ -615,7 +639,7 @@ def test_delegation_off_takes_fallback(tmp_path, monkeypatch):
 
 
 # ------------------------------------------------------------------------ show
-def test_show_refuses_outside_the_set_and_rewrites_fences(cached, capsys):
+def test_show_refuses_outside_the_set_and_rewrites_fences(cached, capsys, claude_only):
     err = io.StringIO()
     assert fr.show("README.md", TOOLKIT, err=err) == fr.REFUSED
     assert err.getvalue().startswith("opaque_entry_refused: show README.md:")
@@ -627,8 +651,14 @@ def test_show_refuses_outside_the_set_and_rewrites_fences(cached, capsys):
     assert "\n" + fr.runner_path(TOOLKIT) + " run " in out          # unquoted absolute root
     assert "if [ -f .adlc/partials/" not in out
     assert not [ln for ln in out.split("\n") if ln.startswith("!")]
-    assert fr.show("proceed/phases-lite.md", TOOLKIT) == 0
+    # A fence direct on every exec-capable adapter is shown as written ...
+    assert fr.show("proceed/phases-lite.md", claude_only) == 0
     assert "     ls -t .adlc/knowledge/lessons\n" in capsys.readouterr().out
+    # ... and one runner on any of them as its runner line: show prints the union (ADR-8).
+    assert fr.show("proceed/phases-lite.md", TOOLKIT) == 0
+    out = capsys.readouterr().out
+    assert "     ls -t .adlc/knowledge/lessons\n" not in out
+    assert "%s run proceed/phases-lite.md#" % fr.runner_path(TOOLKIT) in out
 
 
 def test_root_outside_the_charset_refuses_to_start(monkeypatch):
