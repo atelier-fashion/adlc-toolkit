@@ -259,6 +259,9 @@ def test_branch_push_runs_what_the_audit_read(tmp_path, monkeypatch):
     stubs = rs.install(str(tmp_path / "bin"), log)
     env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"])
     err = io.StringIO()
+    # `git` is a stub here, so the runner's read of the checked-out branch is given its
+    # answer: this test is about the calls the fence's own script makes.
+    monkeypatch.setattr(fr, "checked_out_branch", lambda cwd, environ: "feat/REQ-901-x")
     rc = fr.run(rec["id"], ["--arg", "worktree=%s" % wc, "--arg", "branch=feat/REQ-901-x"],
                 root, environ=env, cwd=str(wc), err=err)
     assert rc == 0, err.getvalue()

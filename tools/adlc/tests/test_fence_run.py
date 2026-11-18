@@ -250,6 +250,8 @@ def test_branch_push_refuses_every_other_spelling(two, pushable, tmp_path, monke
     work, remote, sentinel = pushable
     push = next(r for r in censuses["fake-exec-file"] if r["id"].startswith(PUSH_KEY + ":"))
     assert fr.same_dir_args(push) == ("worktree",)
+    assert fr.head_args(push) == ("branch",)
+    _git("-C", str(work), "branch", "feat/REQ-901-other")   # exists, but is not checked out
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(GIT_CONFIG_NOSYSTEM="1", ADLC_DISABLE_DELEGATE="1")
     sub = work / "sub"
@@ -257,7 +259,9 @@ def test_branch_push_refuses_every_other_spelling(two, pushable, tmp_path, monke
     (tmp_path / "elsewhere").mkdir()
     bad = [["--arg", "worktree=%s" % work, "--arg", "branch=%s" % b]
            for b in ("main", "+feat/x", "feat/x:main", "--force", "", "feat/REQ-901-thing\n",
-                     "HEAD:refs/heads/main", "refs/heads/main")]
+                     "HEAD:refs/heads/main", "refs/heads/main",
+                     # A well-formed branch that is not the one checked out here.
+                     "feat/REQ-901-other", "feat/REQ-901-thing-2")]
     bad += [["--arg", "worktree=%s" % w, "--arg", "branch=feat/REQ-901-thing"]
             for w in (str(sub), str(tmp_path / "elsewhere"), str(tmp_path), "sub", ".")]
     bad += [["--arg", "branch=feat/REQ-901-thing"],

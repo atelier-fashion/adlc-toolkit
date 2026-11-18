@@ -13,7 +13,8 @@ fence ``runner`` in any of them is accepted: each one's reach was audited agains
 adapter's deny tier, so no harness that calls reaches a command any adapter denies (REQ-662
 ADR-8). Each value is checked against its placeholder's full-match pattern and reaches the
 fence only as an ``ADLC_ARG_*`` environment variable, expanded once inside double quotes
-(ADR-3). The branch push (REQ-662 ADR-9) also holds its ``worktree`` value to the directory
+(ADR-3). The branch push (REQ-662 ADR-9) pushes only the branch checked out in the calling
+directory, and also holds its ``worktree`` value to the directory
 the runner was called from. The fence runs under ``/bin/sh`` in the current directory, with
 ``ADLC_TOOLKIT_ROOT`` the runner's own root and ``ADLC_FENCE_TOOLKIT_ONLY=1``, after
 ``adlc-home.sh`` and ``forge.sh`` are sourced from that root (ADR-4).
@@ -290,6 +291,25 @@ def same_dir_args(rec):
     return tuple(fc.PUSH_REACH.get(rec.get("push"), {}).get("same_dir", ()))
 
 
+def head_args(rec):
+    """The arguments whose value must be the branch checked out in the calling directory:
+    those of the push kind the fence makes (REQ-662 ADR-9), else none."""
+    return tuple(fc.PUSH_REACH.get(rec.get("push"), {}).get("head", ()))
+
+
+def checked_out_branch(cwd, environ):
+    """The branch ``cwd`` has checked out, or ``""`` on a detached HEAD or outside a
+    repository. No ``GIT_*`` variable of the caller reaches this read."""
+    env = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
+    try:
+        proc = subprocess.run(["git", "-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"],
+                              env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              universal_newlines=True)
+    except OSError:
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
 def run(fid, argv, root, environ=None, cwd=None, err=None):
     environ = dict(os.environ if environ is None else environ)
     cwd = cwd or os.getcwd()
@@ -297,6 +317,11 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
         fence, rec = find(fid, root)
         placeholders = _placeholders_for(fence)
         values = parse_values(argv, placeholders, cwd, same_dir_args(rec))
+        for name in head_args(rec):
+            head = checked_out_branch(cwd, environ)
+            if values.get(name) != [head]:
+                raise Refusal(None, "value for %s is not the branch checked out here (%s)"
+                                    % (name, head or "no branch"))
         script = script_for(fence, values, root)
     except Refusal as exc:
         return refuse(exc.subject or fid, exc.reason, err)

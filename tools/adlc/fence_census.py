@@ -911,7 +911,11 @@ PUSH_REACH = {
     BRANCH_PUSH: {"argv": ("git", "-C", '"${ADLC_ARG_worktree}"', "push", "-u", "origin",
                            '"${ADLC_ARG_branch}"'),
                   "spelling": "git -C $ADLC_ARG_worktree push -u origin $ADLC_ARG_branch",
-                  "same_dir": ("worktree",)},
+                  "same_dir": ("worktree",),
+                  # The runner pushes only the branch checked out in that directory, so on a
+                  # harness whose exact rule names the run's own branch the union adds no
+                  # other branch to what a model can push.
+                  "head": ("branch",)},
 }
 
 

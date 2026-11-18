@@ -159,6 +159,7 @@ REQ-682 BR-2 already excepts two pushes from the deny tier: the id-reservation p
 - The fence is audited as a second `PUSH_REACH` kind. It is accepted only when its push argv is exactly `git -C $ADLC_ARG_worktree push -u origin $ADLC_ARG_branch`.
 - The `branch` placeholder's pattern is `^(feat|fix|chore)/[A-Za-z0-9][A-Za-z0-9._-]*$`. It cannot spell the integration branch, a refspec, a `+` prefix or an option.
 - The `worktree` value must be the directory the runner was called from.
+- The `branch` value must be the branch checked out in that directory. The runner accepts the union of `runner` routes (ADR-8), so this fence is also runnable on Claude; holding it to the checked-out branch keeps what a model can push there to what Claude's exact rule already allows, the run's own branch.
 - On `matcher: claude` the fence stays `direct`, so Claude's behaviour does not change.
 - The prompt for a `matcher: none` adapter carries one added sentence at that fence: a plain `git push` is refused on this harness, and the model re-runs this line whenever it needs to push.
 
