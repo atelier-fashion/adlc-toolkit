@@ -1,7 +1,7 @@
 ---
 id: BUG-286
 title: "`shell-timeout` passes on a sentinel written without the sleep, and fails on a command that never ran"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-17
 updated: 2026-11-17
@@ -84,3 +84,11 @@ Not fixed here:
 Regression tests: off for this project (no `.adlc/config.yml`).
 
 Failing-first tests were still written. The three new tests fail against `main`'s `harness_probe.py` and pass with the fix.
+
+## Deployment
+
+Merged as `e8595ce` ([#293](https://github.com/atelier-fashion/adlc-toolkit/pull/293)) on 2026-11-17. Nothing to deploy, since this is toolkit code. A codex run of `shell-timeout` on the merged commit records the row under the new rule.
+
+## Lessons
+
+- LESSON-883: a check that something waited needs two stamps from the same command, and a fake that skips the wait must move the clock.
