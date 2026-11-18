@@ -178,14 +178,14 @@ exec:
   # git-write-worktree reads pass on root-is-worktree and writable-roots-repo, and agrees with
   # the top-level sandbox_can_reach_common_gitdir record, which is true (BR-9).
   working_copy: {strategy: worktree}
-  # What the engine does per run, not `trust` above, which is interactive use and hooks. An
-  # exec rule file loads with no trust entry: a `.codex/rules/adlc-exec.rules` allow let its
-  # command write outside the working copy from a linked worktree and from the main checkout,
-  # with no `[projects]` table in the user config, and the same launches without the rule file
-  # did not write (with and without a trust entry): measured 2026-11-18, to be recorded in
-  # `.adlc/research/harness-probes/codex-exec-manual.md` (TASK-266). So the engine edits no
-  # user config for Codex. Which path Codex keys a worktree's trust at stays unmeasured.
-  trust_grant: none
+  # What the engine does per run, not `trust` above, which is interactive use and hooks.
+  # `codex exec` writes `[projects."<main repo root>"] trust_level = "trusted"` into the user
+  # config by itself on a fresh launch when no entry covers the directory, and leaves it. With
+  # the engine's own entry for the working copy in place first, Codex writes nothing, and the
+  # engine's revoke restores the file byte for byte. So the grant is what keeps a run from
+  # leaving trust behind; the rule file and the project config load either way. Measured
+  # 2026-11-18: `.adlc/research/harness-probes/codex-exec-manual.md`.
+  trust_grant: user-config-entry
   # The prompt is on stdin with no positional. `prompt_flag` is the token that makes a launch
   # stdin-prompt's with-prompt-flag variant (a trailing `-`); this launch is the
   # without-prompt-flag variant, the argv that variant ran (launch l15r3), and it reads pass.

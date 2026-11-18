@@ -649,7 +649,8 @@ def test_show_refuses_outside_the_set_and_rewrites_fences(cached, capsys, claude
     out = capsys.readouterr().out
     for rec in cached:
         if rec["id"].startswith("validate/SKILL.md#") and rec["route"] == "runner":
-            assert "%s run %s" % (fr.runner_path(TOOLKIT), rec["id"]) in out
+            # The id is quoted: Codex matches no prefix rule against a bare `#`.
+            assert "%s run '%s'" % (fr.runner_path(TOOLKIT), rec["id"]) in out
     assert "\n" + fr.runner_path(TOOLKIT) + " run " in out          # unquoted absolute root
     assert "if [ -f .adlc/partials/" not in out
     assert not [ln for ln in out.split("\n") if ln.startswith("!")]
@@ -660,7 +661,7 @@ def test_show_refuses_outside_the_set_and_rewrites_fences(cached, capsys, claude
     assert fr.show("proceed/phases-lite.md", TOOLKIT) == 0
     out = capsys.readouterr().out
     assert "     ls -t .adlc/knowledge/lessons\n" not in out
-    assert "%s run proceed/phases-lite.md#" % fr.runner_path(TOOLKIT) in out
+    assert "%s run 'proceed/phases-lite.md#" % fr.runner_path(TOOLKIT) in out
 
 
 def test_root_outside_the_charset_refuses_to_start(monkeypatch):

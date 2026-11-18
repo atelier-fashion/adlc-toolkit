@@ -209,7 +209,8 @@ def test_ethos_from_primary_wins(tmp_path):
 
 
 # --------------------------------------------------------------------------- REQ-682
-RUNNER_CALL = re.compile(r"^\s*%s run (\S+)( |$)" % re.escape(
+# The id is single-quoted in a runner line: Codex matches no prefix rule against a bare `#`.
+RUNNER_CALL = re.compile(r"^\s*%s run '([^' ]+)'( |$)" % re.escape(
     os.path.join(TOOLKIT, "tools", "adlc", "fence-run")))
 
 
@@ -217,7 +218,8 @@ def test_delivered_fences_are_all_routed():
     """BR-1: the delivered prompts hold no fence that sources a partial. Every runner fence
     is a fence-run call naming a census runner id, every other fence is a direct one as
     written, and the census re-reads the prompt with no unrouted fence."""
-    records = {r["id"]: r for r in fc.census(TOOLKIT, ea.load("claude", TOOLKIT))}
+    claude = ea.load("claude", TOOLKIT)
+    records = {r["id"]: r for r in fc.census(TOOLKIT, claude)}
     direct = {r["id"] for r in records.values() if r["route"] == "direct"}
     direct_bodies = set()
     for rel in fc.EXEC_FILES:
@@ -225,7 +227,8 @@ def test_delivered_fences_are_all_routed():
             if fence.id in direct:
                 direct_bodies.add(fence.code)
     calls = 0
-    for text in (pipeline().decode("utf-8"), closeout().decode("utf-8")):
+    for text in (pipeline(adapter=claude).decode("utf-8"),
+                 closeout(adapter=claude).decode("utf-8")):
         assert "if [ -f .adlc/partials/" not in text
         assert ". .adlc/partials/" not in text
         for fence in fc.fences(text):
@@ -272,14 +275,19 @@ def test_notes_send_skills_and_agents_through_the_runner():
 
 
 # --------------------------------------------------------------------------- REQ-662
-def test_claude_prompt_is_unchanged_by_its_adapter():
-    """ADR-9: on `claude` the push fence stays `direct`, with no note, and passing the run's
-    adapter changes no byte of either prompt."""
-    claude = ea.load("claude", TOOLKIT)
-    text = pipeline(adapter=claude)
-    assert text == pipeline()
-    assert closeout(adapter=claude) == closeout()
-    decoded = text.decode("utf-8")
+def test_claude_prompt_is_unchanged_by_its_adapter(install):
+    """ADR-9: on `claude` the push fence stays `direct`, with no note. Where `claude` is the one
+    exec-capable adapter, passing the run's adapter changes no byte of either prompt. In the
+    real tree codex is exec-capable too, so the no-adapter merge routes through the runner
+    (ADR-8) and the engine always passes the run's adapter."""
+    root = str(install)
+    for name in ("harness/codex.yml", fc.golden_path("codex")):
+        os.remove(os.path.join(root, name))
+    assert [a.name for a in fc.exec_adapters(root)] == ["claude"]
+    only = ea.load("claude", root)
+    assert pipeline(root, adapter=only) == pipeline(root)
+    assert closeout(root, adapter=only) == closeout(root)
+    decoded = pipeline(adapter=ea.load("claude", TOOLKIT)).decode("utf-8")
     assert ep.RUNNER_PUSH_NOTE not in decoded
     assert "\n   %s\n" % PUSH_FENCE in decoded
 
@@ -295,10 +303,10 @@ def test_matcher_none_prompt_routes_the_push_through_the_runner(install):
     records = {r["id"]: r for r in fc.census(root, adapter)}
     push = next(r for r in records.values() if r["id"].startswith("proceed/phase-0-setup.md#6:"))
     runner = os.path.join(root, "tools", "adlc", "fence-run")
-    call = "   %s run %s --arg worktree='<worktree>' --arg branch='<branch-name>'" % (
+    call = "   %s run '%s' --arg worktree='<worktree>' --arg branch='<branch-name>'" % (
         runner, push["id"])
     assert "%s\n   ```\n   %s\n" % (call, ep.RUNNER_PUSH_NOTE) in text
-    pattern = re.compile(r"^\s*%s run (\S+)( |$)" % re.escape(runner))
+    pattern = re.compile(r"^\s*%s run '([^' ]+)'( |$)" % re.escape(runner))
     calls = 0
     for fence in fc.fences(text):
         lines = [ln for ln in fence.code.split("\n") if ln.strip()]

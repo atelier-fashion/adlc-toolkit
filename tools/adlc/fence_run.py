@@ -95,8 +95,13 @@ _STUB_NOTE = ("Replace each `'<…>'` with its value as one single-quoted litera
 
 
 def runner_call(rec, root, placeholders):
-    """The runner call that stands for a ``runner`` fence, with a stub per value."""
-    parts = [runner_path(root), "run", rec["id"]]
+    """The runner call that stands for a ``runner`` fence, with a stub per value.
+
+    The id is single-quoted. It holds a ``#``, and Codex does not match a prefix rule against
+    a command with a bare one: the runner then runs inside the sandbox, where its push cannot
+    reach the remote (measured on codex-cli 0.166.0, 2026-11-18; the quoted id matches, with
+    quoted or bare values after it). An id holds no quote, so the quoting is exact."""
+    parts = [runner_path(root), "run", "'%s'" % rec["id"]]
     for ph in placeholders:
         if ph.file:
             parts.append("--arg-file %s='<a file holding %s>'" % (ph.arg, ph.key))
