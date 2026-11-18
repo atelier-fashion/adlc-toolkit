@@ -379,6 +379,11 @@ class Orchestrator(object):
         # binary's version. --allow-unverified lets the batch on; every check below still runs.
         batch.verdict = self._gate(adapter, batch.binary, "launch")
         batch.allow_unverified = self.allow_unverified
+        if batch.verdict.notes:
+            # A `recorded` block is not gated on the binary's version (BR-1): a difference is
+            # said once here, where the operator watches the launch, and refuses nothing.
+            self.say("NOTE: harness %s: %s; verification: recorded, so the launch goes on"
+                     % (adapter.name, "; ".join(batch.verdict.notes)))
         # Every launch reads only the engine's settings file. Without the flags that do
         # that, the operator's and the project's own allowlists would widen the tiers.
         help_out = subprocess.run([batch.binary, "--help"], stdout=subprocess.PIPE,

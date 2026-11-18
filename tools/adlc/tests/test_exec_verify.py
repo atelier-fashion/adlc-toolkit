@@ -315,15 +315,20 @@ def test_hand_set_status_verified_without_a_result_file():
     assert verdict.status == "unverified" and verdict.subjects == ["result-file"]
 
 
-def test_recorded_skips_the_probe_set_and_still_compares_the_version():
+def test_recorded_skips_the_probe_set_and_notes_a_version_difference():
+    """BR-1: the BR-11 gate is on the probed harnesses. A `recorded` block reads verified
+    under a newer binary, and says which version it was recorded for."""
     claude = ha.load_adapter(os.path.join(TOOLKIT, "harness", "claude.yml"), toolkit=TOOLKIT)
     block = claude["exec"]
     assert block["verification"] == "recorded"
     declared = block["harness_version"]
     assert ev.verdict(claude, None, declared).verified
     assert ev.verdict(claude, {"harness_version": "x", "probes": {}}, declared).verified
+    assert ev.verdict(claude, None, declared).notes == ()
     other = ev.verdict(claude, None, "0.0.0 (Claude Code)")
-    assert other.status == "unverified" and other.subjects == ["installed-version"]
+    assert other.verified and other.subjects == []
+    assert other.notes == ("recorded for %s, installed reports '0.0.0 (Claude Code)'" % declared,)
+    assert other.doctor_line() == "exec: verified (%s)" % other.notes[0]
     assert ev.verdict(claude, None, "0.0.0 (Claude Code)").readings == {}
 
 
@@ -375,13 +380,14 @@ def test_doctor_prints_the_recomputed_verdict(tmp_path, monkeypatch):
                  set_reading(copy.deepcopy(res), "fence-vs-allowlist/runner-prefix", "fail"))
     assert harness_doctor.exec_line(adapter, str(toolkit)) == \
         "exec: unverified (fence-vs-allowlist)"
-    # A recorded block shows the version comparison alone.
+    # A recorded block is not gated on the version; a difference is shown.
     claude = ha.load_adapter(os.path.join(TOOLKIT, "harness", "claude.yml"), toolkit=TOOLKIT)
     version_binary(bindir, "claude", claude["exec"]["harness_version"])
     assert harness_doctor.exec_line(claude, str(toolkit)) == "exec: verified"
     version_binary(bindir, "claude", "9.9.9 (Claude Code)")
-    assert harness_doctor.exec_line(claude, str(toolkit)) == \
-        "exec: unverified (installed-version)"
+    assert harness_doctor.exec_line(claude, str(toolkit)) == (
+        "exec: verified (recorded for %s, installed reports '9.9.9 (Claude Code)')"
+        % claude["exec"]["harness_version"])
     # No exec block: no line.
     plain = ha.load_adapter(os.path.join(ADAPTERS, "fake.yml"), toolkit=TOOLKIT)
     assert harness_doctor.exec_line(plain, str(toolkit)) is None

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -13,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 
 import exec_adapter as ea  # noqa: E402
+import exec_verify as ev  # noqa: E402
 import harness_adapter as ha  # noqa: E402
 import sprint_exec as se  # noqa: E402
 import toolkit_root  # noqa: E402
@@ -26,6 +28,10 @@ CODEX_SHAPED_FIXTURE = os.path.join(HERE, "fixtures", "harness", "fake-exec-file
 CODEX_REFUSAL = "rejected: policy forbids commands starting with"
 #: The help text a launch on claude's isolation flags needs (BUG-260).
 ISOLATION_HELP = "--setting-sources <s>\n--settings <f>\n--strict-mcp-config\n"
+#: Synthetic REQ-664 result files (REQ-662 TASK-260).
+PROBE_RESULTS = os.path.join(HERE, "fixtures", "probe-results")
+#: The version the `verification: probes` sandbox's adapter declares and its result records.
+PROBED_VERSION = "fake-exec-file 0.1.0"
 LESSON = """---
 id: LESSON-9001
 title: "A lesson"
@@ -81,10 +87,14 @@ class Sandbox(object):
     ``--harness <harness>`` unless a test passes another."""
 
     def __init__(self, tmp_path, reqs=("REQ-901",), config="", deployable="false", lane="full",
-                 component="adlc/x", mock_scenario=None, harness="claude", adapter_path=None):
+                 component="adlc/x", mock_scenario=None, harness="claude", adapter_path=None,
+                 toolkit=None):
         self.tmp = tmp_path
         self.harness = harness
         self.adapter_path = adapter_path
+        # The ToolkitRoot the engine runs from: this toolkit, or a copy (`toolkit_copy`) that a
+        # test may write a probe result file into.
+        self.toolkit = toolkit or TOOLKIT
         adapter = ha.resolve_adapter(harness, adapter_path, TOOLKIT)
         self.binary = adapter["binary"]
         block = adapter.get("exec") or {}
@@ -163,7 +173,7 @@ class Sandbox(object):
 
     def orch(self, **kw):
         environ = dict(self.environ, **kw)
-        return se.Orchestrator(str(self.repo), environ, self.out, TOOLKIT)
+        return se.Orchestrator(str(self.repo), environ, self.out, self.toolkit)
 
     def start(self, reqs=None, orch=None, **opts):
         orch = orch or self.orch()
@@ -229,6 +239,18 @@ class Sandbox(object):
     def scenario_file(self, value):
         (self.store / "scenario").write_text(value)
 
+    def write_result(self, doc):
+        """Replace this harness's REQ-664 result file under the sandbox ToolkitRoot, where the
+        engine reads it (REQ-662 BR-11). Never under this toolkit itself."""
+        assert os.path.realpath(self.toolkit) != os.path.realpath(TOOLKIT), \
+            "write_result needs a sandbox ToolkitRoot (probes_sandbox)"
+        path = ev.result_path(ha.resolve_adapter(self.harness, self.adapter_path, TOOLKIT),
+                              self.toolkit)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=1)
+        return path
+
 
 # ---- the Codex-shaped launch on today's engine (REQ-662 ADR-10) -------------------------------
 def codex_shaped_adapter(directory, exit_codes=None, denied_stderr=CODEX_REFUSAL):
@@ -272,10 +294,11 @@ def codex_shaped_adapter(directory, exit_codes=None, denied_stderr=CODEX_REFUSAL
     return path
 
 
-def use_adapter(monkeypatch, path):
+def use_adapter(monkeypatch, path, toolkit=None):
     """``exec_adapter.load`` answering with the adapter at ``path`` for its own name, read
-    through the loader, so the engine meets a block the loader accepts."""
-    loaded = ea.ExecAdapter(ha.load_adapter(path, toolkit=TOOLKIT), TOOLKIT)
+    through the loader, so the engine meets a block the loader accepts. ``toolkit`` is the
+    ToolkitRoot it resolves its fence runner under (this toolkit by default)."""
+    loaded = ea.ExecAdapter(ha.load_adapter(path, toolkit=TOOLKIT), toolkit or TOOLKIT)
     real = ea.load
 
     def load(name, toolkit=None, adapter_path=None):
@@ -297,3 +320,80 @@ def jsonl_sandbox(tmp_path, monkeypatch, exit_codes=None, denied_stderr=CODEX_RE
     box.write_scenario(help=ISOLATION_HELP, unknown_flags="record")
     return box
 
+
+# ---- a `verification: probes` adapter on a sandbox ToolkitRoot (REQ-662 TASK-260) -------------
+def toolkit_copy(dest):
+    """A sandbox ToolkitRoot: every file git tracks or would track here, copied to ``dest``
+    with its mode, so a test can place a probe result file where the engine reads it without
+    writing into this toolkit."""
+    out = subprocess.run(["git", "-C", TOOLKIT, "ls-files", "-z", "--cached", "--others",
+                          "--exclude-standard"], stdout=subprocess.PIPE, check=True).stdout
+    for rel in sorted(set(out.decode("utf-8").split("\0")) - {""}):
+        src = os.path.join(TOOLKIT, rel)
+        if not os.path.lexists(src) or os.path.isdir(src):
+            continue
+        target = os.path.join(str(dest), rel)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(src, target, follow_symlinks=False)
+    return str(dest)
+
+
+def probe_result(name="prompt-pass", version=PROBED_VERSION):
+    """A synthetic result file from ``fixtures/probe-results``, recorded under ``version``."""
+    with open(os.path.join(PROBE_RESULTS, name + ".json"), encoding="utf-8") as fh:
+        doc = json.load(fh)
+    doc["harness_version"] = version
+    return doc
+
+
+def with_reading(doc, key, status):
+    """A copy of result ``doc`` where ``probe`` or ``probe/variant`` reads ``status``."""
+    doc = json.loads(json.dumps(doc))
+    probe, _, variant = key.partition("/")
+    row = doc["probes"][probe]
+    if variant:
+        row.setdefault("sub_results", {})[variant] = {"status": status}
+    else:
+        row["status"] = status
+    return doc
+
+
+def probes_adapter(directory, result):
+    """The Codex-shaped launch (:func:`codex_shaped_adapter`) as a ``verification: probes``
+    block, as a maintainer writes one from ``result``: it declares ``result``'s version, its
+    ``exec.probes`` cites each required row and its ``status`` is ``verified``. Every other
+    declaration is the Codex-shaped one, which ``prompt-pass`` is acceptable for."""
+    path = codex_shaped_adapter(directory)
+    text = open(path, encoding="utf-8").read()
+    block = ha.load_adapter(path, toolkit=TOOLKIT)["exec"]
+    cache = "".join(
+        '    - id: %s\n      ran_at: "%s"\n      harness_version: "%s"\n      status: %s\n'
+        % (probe, result["probes"][probe]["ran_at"], result["harness_version"],
+           result["probes"][probe]["status"]) for probe in ev.required(block))
+    for old, new in (("  verification: recorded\n", "  verification: probes\n  probes:\n" + cache),
+                     ('  harness_version: "%s"\n' % block["harness_version"],
+                      '  harness_version: "%s"\n' % result["harness_version"])):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return path
+
+
+def probes_sandbox(tmp_path, monkeypatch, result="prompt-pass", **kw):
+    """A Sandbox whose adapter is ``verification: probes`` (:func:`probes_adapter`, the jsonl
+    fake installed as ``fake-exec-file``) and whose ToolkitRoot is a copy of this toolkit
+    (``box.toolkit``) holding the result file at ``.adlc/research/harness-probes/
+    fake-exec-file.json``. As built, the adapter is verified. To make it unverified, have the
+    fake report another version (``box.write_scenario(version=...)``) or replace the file
+    (``box.write_result(with_reading(box.result, key, status))``). ``result`` is a fixture
+    name or a result dict; ``kw`` goes to :class:`Sandbox`."""
+    doc = probe_result(result) if isinstance(result, str) else result
+    toolkit = toolkit_copy(tmp_path / "toolkit")
+    path = probes_adapter(tmp_path / "adapter", doc)
+    use_adapter(monkeypatch, path, toolkit)
+    box = Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path, toolkit=toolkit, **kw)
+    box.write_scenario(help=ISOLATION_HELP, unknown_flags="record")
+    box.result = doc
+    box.write_result(doc)
+    return box

@@ -69,12 +69,14 @@ class Verdict(object):
     version mismatch or declaration that disagrees with its verdict. ``readings`` is what
     was read from the result file, ``{probe: status}`` and ``{probe/variant: status}``, for
     a consumer that needs a reading rather than the acceptance (the deny pre-flight reads
-    ``ask-tier-deny``'s); it is empty for a ``recorded`` block or a missing file."""
+    ``ask-tier-deny``'s); it is empty for a ``recorded`` block or a missing file. ``notes``
+    are facts worth showing that do not change the status."""
 
-    def __init__(self, problems, readings=None):
+    def __init__(self, problems, readings=None, notes=()):
         self.problems = tuple(problems)
         self.status = UNVERIFIED if self.problems else VERIFIED
         self.readings = dict(readings or {})
+        self.notes = tuple(notes)
 
     @property
     def verified(self):
@@ -91,7 +93,7 @@ class Verdict(object):
     def doctor_line(self):
         """BR-14's line: ``exec: verified`` or ``exec: unverified (<ids>)``."""
         if self.verified:
-            return "exec: verified"
+            return "exec: verified" + (" (%s)" % "; ".join(self.notes) if self.notes else "")
         return "exec: unverified (%s)" % ", ".join(self.subjects)
 
     def __repr__(self):
@@ -165,22 +167,27 @@ def verdict(adapter, result, installed_version):
     block = data.get("exec") or {}
     if "exec_schema_version" not in block:
         return Verdict([Problem("exec", "harness %s has no exec block" % data.get("name"))])
-    problems = []
+    problems, notes = [], []
     declared = block.get("harness_version")
+    recorded = block.get("verification") == "recorded"
     if installed_version != declared:
-        problems.append(Problem("installed-version", "the installed binary reports %s, and "
-                                "exec.harness_version declares %r" % (
-                                    "nothing (not installed)" if installed_version is None
-                                    else repr(installed_version), declared)))
+        found = ("nothing (not installed)" if installed_version is None
+                 else repr(installed_version))
+        if recorded:
+            # BR-1 puts the BR-11 gate, version equality included, on the probed harnesses.
+            # A `recorded` block stands on evidence recorded once, and no probe can be run
+            # again to move it, so a newer binary is shown and does not refuse the run.
+            notes.append("recorded for %s, installed reports %s" % (declared, found))
+        else:
+            problems.append(Problem("installed-version", "the installed binary reports %s, "
+                                    "and exec.harness_version declares %r" % (found, declared)))
     readings = {}
-    if block.get("verification") != "recorded":
-        # `recorded` (BR-1) stands on its own recorded evidence: the probe set is skipped,
-        # and the version above is still compared.
+    if not recorded:
         problems += _probe_set(data, block, result, readings)
     if not problems and block.get("status") != VERIFIED:
         problems.append(Problem("status", "exec.status declares %r, and the recomputed verdict "
                                 "is verified: the cache is stale" % block.get("status")))
-    return Verdict(problems, readings)
+    return Verdict(problems, readings, notes)
 
 
 def _probe_set(data, block, result, readings):

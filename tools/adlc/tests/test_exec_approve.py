@@ -848,10 +848,12 @@ def test_es_kv():
 UPGRADED = "0.0.0 (an upgraded binary)"
 
 
-def test_allow_unverified_is_per_invocation(box):
+def test_allow_unverified_is_per_invocation(tmp_path, monkeypatch):
     """REQ-662 AC-21: --allow-unverified covers the launches of the invocation that received
     it. The ledger names that invocation; approve re-checks and refuses before the forge sees a
-    merge, in that invocation and in a later one; a later launch is refused."""
+    merge, in that invocation and in a later one; a later launch is refused. The adapter is a
+    `verification: probes` block; the fake reports a version other than the one it declares."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
     box.write_scenario(version=UPGRADED)
     first = box.go(shared=True, allow_unverified=True)
     run = first.runs[REQ]
@@ -870,29 +872,30 @@ def test_allow_unverified_is_per_invocation(box):
     later = box.orch()
     later.resume()
     assert later.allow_unverified is False and later.invocation["id"] != first.invocation["id"]
-    with pytest.raises(se.Refused, match="approve is refused"):
+    with pytest.raises(se.Refused, match="approve is refused.*installed-version"):
         box.approve(later, drain=False)
     assert merged_count(box) == 0 and not box.calls("pr_merge")
-    with pytest.raises(se.Refused, match="launch is refused"):
-        box.orch().preflight([REQ], harness="claude", shared=True)
+    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+        box.orch().preflight([REQ], harness=box.harness, shared=True)
     # The verdict was the only thing in the way: with the declared version back, it merges.
     box.write_scenario(version=later.adapter(later.runs[REQ]).block["harness_version"])
     assert box.approve(later) == "approved"
     assert later.runs[REQ].status == "merged"
 
 
-def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path):
-    """REQ-662 AC-17: the binary's version is compared at the launch, before a relaunch and at
-    the close-out (the session resume); without --allow-unverified each is refused."""
+def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path, monkeypatch):
+    """REQ-662 AC-17: on a `verification: probes` block the binary's version is compared at the
+    launch, before a relaunch and at the close-out (the session resume); without
+    --allow-unverified each is refused."""
     for name in ("launch", "relaunch", "close-out"):
         (tmp_path / name).mkdir()
-    box = eh.Sandbox(tmp_path / "launch")
+    box = eh.probes_sandbox(tmp_path / "launch", monkeypatch)
     box.write_scenario(version=UPGRADED)
     with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
         box.start(shared=True)
-    assert not (box.home / ("argv-%s.json" % REQ)).exists()
+    assert not box.launches()
 
-    box = eh.Sandbox(tmp_path / "relaunch")
+    box = eh.probes_sandbox(tmp_path / "relaunch", monkeypatch)
     box.req(status="blocked", claim="blocked",
             blockers=[{"reason": "reflector-questions", "question": "which?"}],
             after_answer={"status": "awaiting_approval", "claim": "awaiting_approval"})
@@ -902,10 +905,9 @@ def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path):
     box.write_scenario(version=UPGRADED)
     with pytest.raises(se.Refused, match="relaunch is refused.*installed-version"):
         orch.answer(REQ, "the second option")
-    assert run.status == "blocked" and not orch.children
-    assert len(open(str(box.home / ("argv-%s.json" % REQ))).read().splitlines()) == 1
+    assert run.status == "blocked" and not orch.children and len(box.launches()) == 1
 
-    box = eh.Sandbox(tmp_path / "close-out")
+    box = eh.probes_sandbox(tmp_path / "close-out", monkeypatch)
     orch = box.go(shared=True)
     run = orch.runs[REQ]
     box.approve(orch, drain=False)
@@ -916,5 +918,4 @@ def test_version_mismatch_refused_at_launch_relaunch_and_close_out(tmp_path):
     assert "close-out is refused" in closing["reason"] and "installed-version" in \
         closing["reason"]
     assert run.status == "merged" and merged_count(box) == 1
-    argv = open(str(box.home / ("argv-%s.json" % REQ))).read().splitlines()
-    assert len(argv) == 1 and "--resume" not in json.loads(argv[0])
+    assert [launch["opts"]["resume"] for launch in box.launches()] == [False]

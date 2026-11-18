@@ -908,30 +908,33 @@ def test_jsonl_fake_event_shape_equals_the_probe_double(tmp_path):
 UPGRADED = "0.0.0 (an upgraded binary)"
 
 
-def test_allow_unverified_is_cli_only(tmp_path):
+def test_allow_unverified_is_cli_only(tmp_path, monkeypatch):
     """REQ-662 AC-15: the flag reaches the engine from `run`'s command line alone. Config,
     state and the environment do nothing; on the command line it lets every launch on with a
-    loud line, and a forbidden flag, a failed pre-flight and the approval gate still stand."""
-    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
-    box.write_scenario(version=UPGRADED)
+    loud line, and a forbidden flag, a failed pre-flight and the approval gate still stand.
+    The adapter is a `verification: probes` block whose result file, under the sandbox
+    ToolkitRoot, reads `fail` for fence-vs-allowlist's runner-prefix variant."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
+    assert box.orch().preflight(box.reqs, harness=box.harness, shared=True).verdict.verified
+    box.write_result(eh.with_reading(box.result, "fence-vs-allowlist/runner-prefix", "fail"))
     orch = box.orch(ADLC_ALLOW_UNVERIFIED="1", ALLOW_UNVERIFIED="1",
                     ADLC_SPRINT_EXEC_ALLOW_UNVERIFIED="1")
-    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+    with pytest.raises(se.Refused, match="launch is refused.*fence-vs-allowlist"):
         box.start(orch=orch, shared=True)
     config = box.repo / ".adlc" / "config.yml"
     base = config.read_text()
     config.write_text(base + "    allow_unverified: true\n    allow-unverified: true\n")
-    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+    with pytest.raises(se.Refused, match="launch is refused.*fence-vs-allowlist"):
         box.start(shared=True)
     config.write_text(base)
     states = [box.repo / box.spec_dirs[req] / "pipeline-state.json" for req in box.reqs]
     for path in states:
         path.write_text(json.dumps({"allowUnverified": True, "allow_unverified": True}))
-    with pytest.raises(se.Refused, match="launch is refused.*installed-version"):
+    with pytest.raises(se.Refused, match="launch is refused.*fence-vs-allowlist"):
         box.start(shared=True)
     for path in states:
         path.unlink()
-    assert not (box.home / "argv-REQ-901.json").exists()
+    assert not box.launches()
     parser = se._parser()
     assert parser.parse_args(["run", "REQ-901", "--allow-unverified"]).allow_unverified is True
     assert parser.parse_args(["run", "REQ-901"]).allow_unverified is False
@@ -946,20 +949,44 @@ def test_allow_unverified_is_cli_only(tmp_path):
     with pytest.raises(se.Refused, match="config-isolation flags"):
         box.start(shared=True, allow_unverified=True)
     box.write_scenario(help=eh.ISOLATION_HELP)
-    assert not (box.home / "argv-REQ-901.json").exists()
+    assert not box.launches()
     orch = box.go(shared=True, allow_unverified=True)
     text = box.out.getvalue()
     for req in box.reqs:
-        assert ("WARNING: --allow-unverified: %s launch on harness claude, which is UNVERIFIED: "
-                "installed-version\n" % req) in text
+        assert ("WARNING: --allow-unverified: %s launch on harness fake-exec-file, which is "
+                "UNVERIFIED: fence-vs-allowlist\n" % req) in text
         run = orch.runs[req]
         # The approval gate stands: the run halts there and nothing merges.
         assert run.status == "awaiting_approval"
         [entry] = run.ledger().read()["plan"]["allowUnverified"]
         assert entry["invocation"] == orch.invocation and entry["launch"] == "launch"
+        assert entry["unverified"] == ["fence-vs-allowlist"]
     assert text.count("WARNING: --allow-unverified:") == 2
     orch.drain()
     assert not box.calls("pr_merge")
+
+
+def test_recorded_block_launches_under_another_version_and_says_so(box):
+    """BR-1: the BR-11 gate, version equality included, is on the probed harnesses. Claude's
+    `recorded` block launches under a binary reporting another version, with no
+    --allow-unverified, and the pre-flight prints the difference once."""
+    import harness_adapter as ha
+    declared = ha.load_adapter(os.path.join(eh.TOOLKIT, "harness", "claude.yml"),
+                               toolkit=eh.TOOLKIT)["exec"]["harness_version"]
+    box.write_scenario(version=UPGRADED)
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    text = box.out.getvalue()
+    line = ("NOTE: harness claude: recorded for %s, installed reports '%s'; verification: "
+            "recorded, so the launch goes on\n" % (declared, UPGRADED))
+    assert text.count(line) == 1 and text.count("NOTE: harness") == 1, text
+    assert "--allow-unverified" not in text
+    assert orch.verdicts["claude"].verified and orch.verdicts["claude"].notes
+    assert "allowUnverified" not in run.doc
+    assert run.ledger().read()["plan"]["allowUnverified"] == []
+    assert box.approve(orch) == "approved"
+    assert run.status == "merged" and run.read_primary_state()["closeOut"]["status"] == "ok"
 
 
 def test_hand_set_status_without_a_result_file_refuses_launch(tmp_path, monkeypatch):
@@ -986,14 +1013,16 @@ def test_hand_set_status_without_a_result_file_refuses_launch(tmp_path, monkeypa
     assert not box.launches()
 
 
-def test_each_launch_rechecks_the_verdict(box):
-    """A verdict that changes between the pre-flight and the spawn starts nothing."""
+def test_each_launch_rechecks_the_verdict(tmp_path, monkeypatch):
+    """A verdict that changes between the pre-flight and the spawn starts nothing: the result
+    file is read again at every launch."""
+    box = eh.probes_sandbox(tmp_path, monkeypatch)
     orch = box.orch()
-    batch = orch.preflight(box.reqs, harness="claude", shared=True)
+    batch = orch.preflight(box.reqs, harness=box.harness, shared=True)
     assert batch.verdict.verified and batch.allow_unverified is False
-    box.write_scenario(version=UPGRADED)
+    box.write_result(eh.with_reading(box.result, "stdin-prompt/without-prompt-flag", "fail"))
     orch.launch_batch(box.reqs, batch)
     run = orch.runs["REQ-901"]
     assert run.status == "failed" and not orch.children
-    assert not (box.home / "argv-REQ-901.json").exists()
-    assert "installed-version" in json.dumps(run.read_primary_state()["notes"])
+    assert not box.launches()
+    assert "stdin-prompt" in json.dumps(run.read_primary_state()["notes"])
