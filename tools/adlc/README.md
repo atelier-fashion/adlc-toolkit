@@ -735,7 +735,7 @@ never reads: `allow_flag`, `shell_rule` and `settings_keys` (and optionally
   skips the gate.
 - **`exec_trust.py` (BR-5, ADR-5).** For `user-config-entry`: one commented block,
   `[projects."<working copy>"] trust_level = "trusted"`, appended to the adapter's
-  `paths.config.user` before a launch and removed byte for byte when the run ends. The path
+  `paths.config.user` before a launch and removed byte for byte when the harness exits. The path
   must be absolute and under the run's working-copy root, or nothing is written. An entry
   already there is `pre_existing` and survives; a block already gone is a warning. Writes are
   serialized by a `mkdir` lock beside the file, a grant refuses while REQ-664's probe
