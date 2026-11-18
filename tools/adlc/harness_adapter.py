@@ -155,12 +155,16 @@ _EXEC_KEYS = set(_EXEC_REQUIRED) | {
 _EXEC_OUTPUT_REQUIRED = ("format", "source", "final_message", "session_id")
 #: Where the parsed output holds each field. ``denials`` is the list a run's refusals land in.
 _EXEC_OUTPUT_PATHS = ("session_id", "final_message", "is_error", "num_turns", "cost", "denials")
-#: ``terminal_event`` (``format: jsonl-stream`` only): the event ``type`` a complete stream
-#: carries. A stream without one was cut short, which is a parse failure (REQ-662 BR-6).
+#: ``terminal_event`` (required under ``format: jsonl-stream``, refused under any other): the
+#: event ``type`` a complete stream carries. A stream without one was cut short, which is a
+#: parse failure (REQ-662 BR-6); without the key, a stream cut between two whole lines would
+#: parse as complete.
 _EXEC_OUTPUT_OPTIONAL = ("terminal_event",)
+#: The one placeholder ``final_message`` names under ``source: file``: the engine fills it
+#: with a file in the run directory, so the harness writes no last message anywhere else.
+_LAST_MESSAGE = "{last_message}"
 _EVENT_TYPE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 _KEY_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
-_PLACEHOLDER_RE = re.compile(r"^\{[a-z_]+\}$")
 _FLAG_NAME_RE = re.compile(r"^--?[A-Za-z0-9][A-Za-z0-9-]*$")
 _USER_PATH_PREFIXES = ("$HOME/", "$ADLC_HOME/")
 #: A toolkit-relative path, as ``exec.fence_runner`` names the fence runner (REQ-682 ADR-8).
@@ -577,11 +581,11 @@ def _exec_output(src, block):
     """``output`` (REQ-662 ADR-6). ``format`` is how stdout is parsed; ``source`` is where the
     final message is read. Under ``format: json`` a field is a key path into the result object
     (``key`` or ``a.b``); under ``jsonl-stream`` it is ``{event, key}``, a key path inside the
-    event whose ``type`` is ``event``, and the optional ``terminal_event`` names the event a
-    complete stream carries. Under ``source: file``, ``final_message`` is the
-    placeholder that names the file the harness writes its last message to, and it must be a
-    whole token of ``launch`` (and of ``resume``), or the engine would read a file the harness
-    was never told to write."""
+    event whose ``type`` is ``event``, and the required ``terminal_event`` names the event a
+    complete stream carries. Under ``source: file``, ``final_message`` is exactly
+    ``{last_message}``, the placeholder that names the file the harness writes its last
+    message to, and it must be a whole token of ``launch`` (and of ``resume``), or the engine
+    would read a file the harness was never told to write."""
     out = block["output"]
     if not isinstance(out, dict):
         raise AdapterError(src, "exec.output", "must be a mapping {format, source, final_message, "
@@ -601,15 +605,20 @@ def _exec_output(src, block):
         if not _EVENT_TYPE_RE.match(event):
             raise AdapterError(src, "exec.output.terminal_event", "%r is not an event type"
                                % (event,))
+    elif fmt == "jsonl-stream":
+        raise AdapterError(src, "exec.output.terminal_event", "is required under format: "
+                           "jsonl-stream: without it, a stream cut between two whole lines "
+                           "parses as complete")
     for key in _EXEC_OUTPUT_PATHS:
         if key not in out:
             continue
         field, value = "exec.output." + key, out[key]
         if key == "final_message" and source == "file":
-            if not isinstance(value, str) or not _PLACEHOLDER_RE.match(value):
-                raise AdapterError(src, field, "under source: file, names the placeholder of "
-                                   "the file the harness writes its last message to, such as "
-                                   "{last_message}")
+            if value != _LAST_MESSAGE:
+                raise AdapterError(src, field, "under source: file, must be exactly %s, the "
+                                   "placeholder the engine fills with the file the harness "
+                                   "writes its last message to; it is %r" % (_LAST_MESSAGE,
+                                                                             value))
             for argv in ("launch", "resume"):
                 if argv in block and value not in block[argv]:
                     raise AdapterError(src, field, "%s is not a whole token of exec.%s"

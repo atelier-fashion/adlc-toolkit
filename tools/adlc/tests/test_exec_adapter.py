@@ -593,8 +593,29 @@ def test_output_shapes(tmp_path):
             ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(
                 "terminal_event: turn.completed", bad)), toolkit=TOOLKIT)
         assert exc.value.field == "exec.output.terminal_event", bad
-    assert ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(
-        "    terminal_event: turn.completed\n", "")), toolkit=TOOLKIT)
+
+
+def test_a_stream_and_a_last_message_file_are_pinned(tmp_path):
+    """REQ-662 ADR-6, BR-6: under `format: jsonl-stream` a stream with no `terminal_event`
+    could parse as complete when it was cut short, so the key is required; under
+    `source: file` the engine reads its last message from `{last_message}` and no other
+    placeholder, even one that is a whole token of the launch. The fixture as shipped loads
+    (the must-not-refuse case)."""
+    text = _source("fake-exec-file")
+    assert ha.load_adapter(_write(tmp_path, "fake-exec-file", text), toolkit=TOOLKIT)
+    with pytest.raises(ha.AdapterError, match="required under format: jsonl-stream") as exc:
+        ha.load_adapter(_write(tmp_path, "fake-exec-file", text.replace(
+            "    terminal_event: turn.completed\n", "")), toolkit=TOOLKIT)
+    assert exc.value.field == "exec.output.terminal_event"
+    # `{worktree}` is a whole token of the launch, and with no resume it is of every template.
+    no_resume = _edit(text, drop=["resume"])
+    assert ha.load_adapter(_write(tmp_path, "fake-exec-file", no_resume), toolkit=TOOLKIT)
+    for other in ("{worktree}", "{settings}", "{branch}"):
+        with pytest.raises(ha.AdapterError, match=r"\{last_message\}") as exc:
+            ha.load_adapter(_write(tmp_path, "fake-exec-file", no_resume.replace(
+                'final_message: "{last_message}"', 'final_message: "%s"' % other)),
+                toolkit=TOOLKIT)
+        assert exc.value.field == "exec.output.final_message", other
 
 
 # --------------------------------------- output parsed by declared format (REQ-662 ADR-6, BR-6)
@@ -680,6 +701,37 @@ def test_jsonl_fields_take_the_first_session_and_the_last_message(stream):
         text.replace("Terminal state: blocked", "").replace("early", ""))["error"]
 
 
+#: Line breaks to str.splitlines() that a JSON writer may leave raw inside a string.
+RAW_BREAKS = ("\u0085", " ", " ")
+
+
+@pytest.mark.parametrize("brk", RAW_BREAKS, ids=("NEL", "LS", "PS"))
+def test_a_stream_line_ends_at_a_newline_only(stream, brk):
+    """REQ-662 BR-6: a stream line ends at `\\n` alone, with one trailing `\\r` stripped. A
+    U+0085, U+2028 or U+2029 left raw in the model's message keeps its event whole, so a
+    denial recorded after it is still read; and the cut-last-line check counts lines the same
+    way."""
+    adapter = ea.ExecAdapter(dict(stream.adapter, exec=dict(stream.block, output={
+        "format": "jsonl-stream", "source": "stdout", "terminal_event": "turn.completed",
+        "session_id": {"event": "thread.started", "key": "thread_id"},
+        "final_message": {"event": "item.completed", "key": "item.text"},
+        "denials": {"event": "turn.completed", "key": "denials"}})), TOOLKIT)
+    message = "before" + brk + "after"
+    events = ({"type": "thread.started", "thread_id": "first-1"},
+              {"type": "item.completed", "item": {"type": "agent_message", "text": message}},
+              {"type": "turn.completed", "denials": [{"command": "git push --force"}]})
+    lines = [json.dumps(e, ensure_ascii=False) for e in events]
+    assert brk in lines[1]
+    for eol in ("\n", "\r\n"):
+        out = adapter.parse_result(eol.join(lines) + eol)
+        assert out["error"] is None, (eol, out["error"])
+        assert out["text"] == message and out["session_id"] == "first-1"
+        assert out["denials"] == [{"command": "git push --force"}]
+        assert adapter.exit_class(0, out, None) == "denied"
+    cut = adapter.parse_result("\n".join(lines[:2] + ['{"type": "turn.compl']))
+    assert "line 3 is not JSON and ends with no newline" in cut["error"], cut["error"]
+
+
 def test_json_parser_is_unchanged_and_fails_closed(adapter):
     """Claude's `json` parser reads what it read before (REQ-662 BR-1); stdout with no result
     object and an empty `result` are parse failures under it too (BR-6)."""
@@ -695,6 +747,11 @@ def test_json_parser_is_unchanged_and_fails_closed(adapter):
     empty = adapter.parse_result(json.dumps(dict(doc, result="")))
     assert "final message is empty" in empty["error"] and empty["session_id"]
     assert adapter.exit_class(0, empty, None) == "error"
+    # The last-line fallback cuts at `\n` only: a raw U+2028 in the result keeps it one line.
+    for brk in RAW_BREAKS:
+        raw = dict(doc, result="Terminal state: blocked" + brk + "x")
+        noisy = adapter.parse_result("noise\n" + json.dumps(raw, ensure_ascii=False) + "\r\n")
+        assert noisy["error"] is None and noisy["text"] == raw["result"], repr(brk)
 
 
 def test_output_fixtures_are_marked_synthetic():
@@ -746,6 +803,19 @@ def test_exit_codes_keep_the_closed_vocabulary(adapter):
     for rc, klass in ((0, "error"), (53, "denied"), (124, "timeout"), (99, "error")):
         assert mapped.exit_class(rc, broken, "awaiting_approval") == klass, rc
     assert set(ha.EXIT_CLASSES) == {"ok", "denied", "timeout", "error"}
+
+
+def test_exit_denied_reads_the_declared_map_only(adapter):
+    """`exit_denied(rc)` is true exactly when `exit_codes` maps the raw code to `denied`: no
+    code, an undeclared code and a code mapped to another class are each false."""
+    mapped = ea.ExecAdapter(dict(adapter.adapter, exec=dict(
+        adapter.block, exit_codes={"0": "ok", "1": "error", "53": "denied", "124": "timeout"})),
+        TOOLKIT)
+    assert mapped.exit_denied(53) is True
+    for rc in (None, 0, 1, 124, 99, -9):
+        assert mapped.exit_denied(rc) is False, rc
+    assert all(adapter.exit_denied(int(code)) is (klass == "denied")
+               for code, klass in adapter.block["exit_codes"].items())
 
 
 def test_matcher_none_refuses_every_extra_allow(tmp_path):
@@ -1042,6 +1112,24 @@ def test_operator_flags_filter_harness_flags(adapter):
         adapter.launch_argv("/bin/fake", [], [], extra=["--yolo"])
     with pytest.raises(ea.ExecRefused, match="operator_flags .none."):
         _with(adapter, operator_flags=[]).operator_tokens(["--model", "m"])
+
+
+def test_an_operator_flag_owes_its_value(adapter):
+    """ADR-7: an operator flag takes its value as the next token or after `=`. One that ends
+    the operator's tokens would read the engine's next token (`--setting-sources`) as its
+    value, and a value that begins with `-` would read as a flag, so each refuses the launch;
+    a flag with its value launches (the must-not-refuse case)."""
+    for bad, word in ((["--model"], "still owed"),
+                      (["--max-turns", "3", "--model"], "still owed"),
+                      (["--model", "--max-turns", "3"], "begins with `-`"),
+                      (["--model", "-x"], "begins with `-`"),
+                      (["--model=-x"], "begins with `-`")):
+        with pytest.raises(ea.ExecRefused, match=word):
+            adapter.operator_tokens(bad)
+        with pytest.raises(ea.ExecRefused, match=word):
+            adapter.launch_argv("/bin/fake", [], [], extra=bad)
+    for ok in (["--model", "m"], ["--model=m"], ["--model", "m", "--max-turns", "3"]):
+        assert adapter.operator_tokens(ok) == ok
 
 
 def test_child_env_disables_delegation_on_a_short_shell_timeout(adapter):

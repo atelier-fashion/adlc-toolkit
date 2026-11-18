@@ -14,10 +14,13 @@ adapter's deny tier, so no harness that calls reaches a command any adapter deni
 ADR-8). Each value is checked against its placeholder's full-match pattern and reaches the
 fence only as an ``ADLC_ARG_*`` environment variable, expanded once inside double quotes
 (ADR-3). The branch push (REQ-662 ADR-9) pushes only the branch checked out in the calling
-directory, and also holds its ``worktree`` value to the directory
+directory, under an exec run only one of that run's REQ (``ADLC_EXEC_RUN``), and also holds
+its ``worktree`` value to the directory
 the runner was called from. The fence runs under ``/bin/sh`` in the current directory, with
 ``ADLC_TOOLKIT_ROOT`` the runner's own root and ``ADLC_FENCE_TOOLKIT_ONLY=1``, after
-``adlc-home.sh`` and ``forge.sh`` are sourced from that root (ADR-4).
+``adlc-home.sh`` and ``forge.sh`` are sourced from that root (ADR-4). No caller ``GIT_*``
+variable reaches the fence, and its git calls run no fsmonitor program and no repository
+hook (``GIT_PINS``).
 
 ``show`` prints a file of the exec set with every fence replaced by its route's form, which is
 how toolkit skills and agents reach an exec model: under BUG-260's isolation flags they are
@@ -49,6 +52,13 @@ _ID_RE = re.compile(r"^([A-Za-z0-9_./-]+)#([0-9]{1,4}):([0-9a-f]{8})$")
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 MAX_ARG_FILE = 1 << 20
 RUNNER_REL = "tools/adlc/fence-run"
+#: Config every git call of a fence, and the branch check, is pinned to, over whatever the
+#: repository's own config says: the model can write that config, and a fsmonitor program or
+#: a hook would run its code outside a harness sandbox. The orchestrator pins the same two for
+#: its own git calls (``exec_safety``).
+GIT_PINS = (("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null"))
+#: ``ADLC_EXEC_RUN``, as the orchestrator sets it: the run's REQ id (REQ-662 ADR-9).
+_RUN_ID_RE = re.compile(r"^REQ-[0-9]{3,6}$")
 
 
 class Refusal(Exception):
@@ -224,10 +234,27 @@ def read_arg_file(path, cwd):
         raise Refusal(None, "--arg-file %r is not UTF-8 text" % path[:120])
 
 
+def git_env(environ):
+    """``environ`` with every caller ``GIT_*`` variable dropped and :data:`GIT_PINS` set
+    through ``GIT_CONFIG_COUNT``, which outranks every config file. A caller's ``GIT_DIR`` or
+    ``GIT_WORK_TREE`` would point the branch check and the push at different repositories,
+    and its ``GIT_CONFIG_*`` or ``GIT_SSH_COMMAND`` would run its own program. A caller's
+    ``GIT_TERMINAL_PROMPT=0`` stays: it only makes git fail sooner."""
+    env = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
+    if environ.get("GIT_TERMINAL_PROMPT") == "0":
+        env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_CONFIG_COUNT"] = str(len(GIT_PINS))
+    for i, (key, value) in enumerate(GIT_PINS):
+        env["GIT_CONFIG_KEY_%d" % i] = key
+        env["GIT_CONFIG_VALUE_%d" % i] = value
+    return env
+
+
 def child_env(environ, placeholders, values, root):
     """The fence's environment: the inherited one, with every caller ``ADLC_ARG_*`` and the
-    toolkit-only flag dropped, then the bound values, the root, and the flag, set last."""
-    env = {k: v for k, v in environ.items()
+    toolkit-only flag dropped and its git state replaced (:func:`git_env`), then the bound
+    values, the root, and the flag, set last."""
+    env = {k: v for k, v in git_env(environ).items()
            if not k.startswith("ADLC_ARG_") and k != "ADLC_FENCE_TOOLKIT_ONLY"}
     for ph in placeholders:
         vals = values.get(ph.arg, [])
@@ -299,15 +326,36 @@ def head_args(rec):
 
 def checked_out_branch(cwd, environ):
     """The branch ``cwd`` has checked out, or ``""`` on a detached HEAD or outside a
-    repository. No ``GIT_*`` variable of the caller reaches this read."""
-    env = {k: v for k, v in environ.items() if not k.startswith("GIT_")}
+    repository. It reads under the fence's own git environment (:func:`git_env`), so no
+    ``GIT_*`` variable of the caller reaches it and the push sees the same repository."""
     try:
         proc = subprocess.run(["git", "-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"],
-                              env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              universal_newlines=True)
+                              env=git_env(environ), stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, universal_newlines=True)
     except OSError:
         return ""
     return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def run_branch_refusal(branch, environ):
+    """Why ``branch`` is not the exec run's own branch, or None (REQ-662 ADR-9).
+
+    Under an exec run ``ADLC_EXEC_RUN`` names the run's REQ id, and the push takes only
+    ``<type>/<that id>-<rest>``: the id followed by ``-``, so ``REQ-66`` never matches a
+    ``REQ-662-`` branch. A value that is not a REQ id refuses the push. With the variable
+    unset nothing is added: a plain /proceed pushes outside any exec run."""
+    if "ADLC_EXEC_RUN" not in environ:
+        return None
+    run_id = environ["ADLC_EXEC_RUN"]
+    # fullmatch: `$` alone also matches before a trailing newline.
+    if not _RUN_ID_RE.fullmatch(run_id):
+        return ("ADLC_EXEC_RUN is %r, which is not a REQ id (REQ- and 3 to 6 digits), so no "
+                "branch is this run's" % run_id[:40])
+    _type, _sep, rest = branch.partition("/")
+    if not rest.startswith(run_id + "-"):
+        return ("value for branch, %s, is not this run's branch: ADLC_EXEC_RUN names %s, so "
+                "the push takes only <type>/%s-<rest>" % (branch, run_id, run_id))
+    return None
 
 
 def run(fid, argv, root, environ=None, cwd=None, err=None):
@@ -322,6 +370,9 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
             if values.get(name) != [head]:
                 raise Refusal(None, "value for %s is not the branch checked out here (%s)"
                                     % (name, head or "no branch"))
+            why = run_branch_refusal(head, environ)
+            if why:
+                raise Refusal(None, why)
         script = script_for(fence, values, root)
     except Refusal as exc:
         return refuse(exc.subject or fid, exc.reason, err)

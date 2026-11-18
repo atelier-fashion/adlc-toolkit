@@ -157,6 +157,41 @@ def test_a_pass_under_another_version_names_each_probe():
     assert all("0.9.0" in p.detail and "1.0.0" in p.detail for p in verdict.problems)
 
 
+@pytest.mark.parametrize("installed, declared, recorded", [
+    # Equal on every side, and none of them a version: the case equality alone let through.
+    ("unknown", "unknown", "unknown"),
+    ("", "", ""),
+    ("unknown", "unknown", "fake-exec-flags 1.0.0"),
+    ("fake-exec-flags 1.0.0", "fake-exec-flags 1.0.0", "unknown"),
+    ("fake-exec-flags 1.0.0", "fake-exec-flags 1.0.0", ""),
+    ("unknown", "fake-exec-flags 1.0.0", "fake-exec-flags 1.0.0"),
+    ("fake-exec-flags 1.0.0", "", "fake-exec-flags 1.0.0"),
+], ids=("all-unknown", "all-empty", "installed-and-declared-unknown", "result-unknown",
+        "result-empty", "installed-unknown", "declared-empty"))
+def test_an_unread_version_matches_nothing(installed, declared, recorded):
+    """BR-11: under `verification: probes`, `unknown` or an empty string on either side of the
+    installed, declared or result version comparison is a mismatch, and its problem line says
+    the version could not be read. Real versions on every side still verify (the
+    must-not-refuse case), and a `recorded` block stays ungated."""
+    res = result("hooks-pass")
+    real = res["harness_version"]
+    res["harness_version"] = recorded
+    adapter = cite(fixture("fake-exec-flags", harness_version=declared), res)
+    verdict = ev.verdict(adapter, res, installed)
+    assert verdict.status == "unverified", verdict
+    unread = [p for p in verdict.problems if "could not be read" in p.detail]
+    assert unread, verdict
+    if installed in ("", "unknown") or declared in ("", "unknown"):
+        assert "installed-version" in [p.subject for p in unread], verdict
+    if recorded in ("", "unknown") or declared in ("", "unknown"):
+        assert set(ev.required(adapter["exec"])) <= {p.subject for p in unread}, verdict
+    good = result("hooks-pass")
+    assert ev.verdict(cite(fixture("fake-exec-flags", harness_version=real), good), good,
+                      real).verified
+    claude = ha.load_adapter(os.path.join(TOOLKIT, "harness", "claude.yml"), toolkit=TOOLKIT)
+    assert ev.verdict(claude, None, "unknown").verified
+
+
 @pytest.mark.parametrize("name,edits,block,top", [
     # git-write-worktree: fail with a clone (and a reach record that agrees with it).
     ("fake-exec-file", [("git-write-worktree", "fail"),

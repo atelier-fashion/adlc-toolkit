@@ -286,6 +286,157 @@ def test_branch_push_refuses_every_other_spelling(two, pushable, tmp_path, monke
     assert rc == 0, err                  # the same directory by real path
 
 
+def _push_env():
+    """The caller's environment for a push test: no caller git state, no run binding."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.pop("ADLC_EXEC_RUN", None)
+    env.update(GIT_CONFIG_NOSYSTEM="1", ADLC_DISABLE_DELEGATE="1")
+    return env
+
+
+def _push_fence(censuses):
+    return next(r for r in censuses["fake-exec-file"] if r["id"].startswith(PUSH_KEY + ":"))
+
+
+def _pins(env):
+    return {env["GIT_CONFIG_KEY_%d" % i]: env["GIT_CONFIG_VALUE_%d" % i]
+            for i in range(int(env["GIT_CONFIG_COUNT"]))}
+
+
+def test_the_fence_git_environment_is_the_runners():
+    """REQ-662 ADR-9: no caller `GIT_*` variable reaches the fence or the branch check, so both
+    see the one repository the runner was called in, and the fence's git calls are pinned to
+    run no fsmonitor program and no repository hook, whatever the repository's config says.
+    `GIT_TERMINAL_PROMPT=0` only makes git fail sooner, so that one value stays."""
+    hostile = dict(os.environ, GIT_DIR="/evil/.git", GIT_WORK_TREE="/evil",
+                   GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.fsmonitor",
+                   GIT_CONFIG_VALUE_0="/evil/fsmonitor", GIT_CONFIG_GLOBAL="/evil/gitconfig",
+                   GIT_CONFIG_PARAMETERS="'core.hooksPath'='/evil'", GIT_EXEC_PATH="/evil",
+                   GIT_SSH_COMMAND="/evil/ssh", GIT_TERMINAL_PROMPT="1")
+    want = {"core.fsmonitor": "false", "core.hooksPath": "/dev/null"}
+    for env in (fr.child_env(hostile, [], {}, TOOLKIT), fr.git_env(hostile)):
+        assert sorted(k for k in env if k.startswith("GIT_")) == [
+            "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_VALUE_1"], env
+        assert _pins(env) == want
+        assert env["HOME"] == os.environ["HOME"]
+    prompt = fr.child_env(dict(hostile, GIT_TERMINAL_PROMPT="0"), [], {}, TOOLKIT)
+    assert prompt["GIT_TERMINAL_PROMPT"] == "0" and _pins(prompt) == want
+
+
+def _arm(work, tmp_path):
+    """Set ``work``'s own config to run a fsmonitor program and its own pre-push hook, each
+    writing a sentinel: what a model that can write the repository's config could plant."""
+    fsmonitor, hook = tmp_path / "fsmonitor-ran", tmp_path / "pre-push-ran"
+    program = tmp_path / "fsmonitor.sh"
+    program.write_text("#!/bin/sh\ntouch '%s'\nexit 1\n" % fsmonitor)
+    program.chmod(0o755)
+    pre_push = work / ".git" / "hooks" / "pre-push"
+    pre_push.parent.mkdir(exist_ok=True)
+    pre_push.write_text("#!/bin/sh\ntouch '%s'\nexit 0\n" % hook)
+    pre_push.chmod(0o755)
+    (work / "tracked.txt").write_text("x\n")
+    _git("-C", str(work), "add", "tracked.txt")
+    _git("-C", str(work), "commit", "-q", "-m", "c")
+    with open(str(work / ".git" / "config"), "a") as fh:
+        fh.write("[core]\n\tfsmonitor = %s\n" % program)
+    return fsmonitor, hook
+
+
+def test_no_repository_hook_or_fsmonitor_runs_in_a_fence(two, pushable, tmp_path,
+                                                         monkeypatch):
+    """REQ-662 ADR-9: a fence that reads git status and the branch push each run with the
+    repository's fsmonitor program and pre-push hook pinned off, and the push still lands
+    (the must-not-refuse case). The controls show both traps fire under the caller's own
+    environment, so their absence is the pin's doing."""
+    root, censuses = two
+    memo_census(monkeypatch)
+    work, remote, _sentinel = pushable
+    fsmonitor, hook = _arm(work, tmp_path)
+    env = _push_env()
+    # Controls: under the caller's environment git runs both.
+    subprocess.run(["git", "-C", str(work), "status", "--short"], env=env, check=True,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    control = tmp_path / "control.git"
+    _git("init", "-q", "--bare", str(control))
+    subprocess.run(["git", "-C", str(work), "push", "-q", str(control), "HEAD"], env=env,
+                   check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert fsmonitor.exists() and hook.exists()
+    fsmonitor.unlink()
+    hook.unlink()
+    status = next(r for r in censuses["claude"] if r["id"].startswith("review/SKILL.md#1:"))
+    assert status["route"] == "runner" and "git status" in fr.find(status["id"], root)[0].code
+    rc, err = _run(status["id"], [], work, environ=env, root=root)
+    assert rc == 0, err
+    assert fr.checked_out_branch(str(work), env) == "feat/REQ-901-thing"
+    rc, err = _run(_push_fence(censuses)["id"], ["--arg", "worktree=%s" % work, "--arg",
+                                                 "branch=feat/REQ-901-thing"], work,
+                   environ=env, root=root)
+    assert rc == 0, err
+    assert _heads(remote) == ["refs/heads/feat/REQ-901-thing"]
+    assert not fsmonitor.exists() and not hook.exists()
+
+
+def test_a_callers_git_dir_cannot_move_the_push(two, pushable, tmp_path, monkeypatch):
+    """REQ-662 ADR-9: the branch check reads the calling directory's repository, and so does
+    the push: a caller's `GIT_DIR` naming another repository, on the same branch with its own
+    origin, reaches neither."""
+    root, censuses = two
+    memo_census(monkeypatch)
+    work, remote, _sentinel = pushable
+    other_remote = tmp_path / "other-origin.git"
+    _git("init", "-q", "--bare", str(other_remote))
+    other = tmp_path / "other"
+    _git("init", "-q", "-b", "feat/REQ-901-thing", str(other))
+    _git("-C", str(other), "commit", "-q", "--allow-empty", "-m", "elsewhere")
+    _git("-C", str(other), "remote", "add", "origin", str(other_remote))
+    env = dict(_push_env(), GIT_DIR=str(other / ".git"))
+    rc, err = _run(_push_fence(censuses)["id"], ["--arg", "worktree=%s" % work, "--arg",
+                                                 "branch=feat/REQ-901-thing"], work,
+                   environ=env, root=root)
+    assert rc == 0, err
+    assert _heads(other_remote) == []
+    assert _heads(remote) == ["refs/heads/feat/REQ-901-thing"]
+
+
+def test_branch_push_is_bound_to_the_runs_req(two, pushable, monkeypatch):
+    """REQ-662 ADR-9: under an exec run (`ADLC_EXEC_RUN` names its REQ) the push takes only
+    `<type>/<that id>-<rest>`, checked out here; an id that is not `REQ-` and 3 to 6 digits
+    refuses the push. Without the variable any checked-out feature branch is pushed, as
+    before (the must-not-refuse case of a plain /proceed)."""
+    root, censuses = two
+    memo_census(monkeypatch)
+    work, remote, _sentinel = pushable
+    fid = _push_fence(censuses)["id"]
+    base = _push_env()
+
+    def push(branch, run):
+        _git("-C", str(work), "checkout", "-q", "-B", branch)
+        env = dict(base) if run is None else dict(base, ADLC_EXEC_RUN=run)
+        return _run(fid, ["--arg", "worktree=%s" % work, "--arg", "branch=%s" % branch], work,
+                    environ=env, root=root)
+
+    for branch, run in (("feat/REQ-902-other", "REQ-901"), ("feat/REQ-66-x", "REQ-662"),
+                        ("feat/REQ-662-x", "REQ-66"), ("feat/REQ-6620-x", "REQ-662"),
+                        ("feat/REQ-662-x", "REQ-6620"), ("feat/REQ-901", "REQ-901"),
+                        ("feat/xREQ-901-thing", "REQ-901"), ("feat/REQ-901-thing", ""),
+                        ("feat/REQ-901-thing", "req-901"), ("feat/REQ-901-thing", "REQ-901\n"),
+                        ("feat/REQ-901-thing", "REQ-901 "), ("feat/REQ-901-thing", "REQ-1234567")):
+        rc, err = push(branch, run)
+        lines = err.splitlines()
+        assert rc == fr.REFUSED, (branch, run, err)
+        assert len(lines) == 1 and lines[0].startswith("opaque_entry_refused: "), (branch, err)
+        assert "ADLC_EXEC_RUN" in err, err
+    assert _heads(remote) == []
+    rc, err = push("feat/REQ-902-other", "REQ-901")
+    assert "feat/REQ-902-other" in err and "REQ-901" in err, err
+    for branch, run in (("feat/REQ-901-thing", "REQ-901"), ("fix/REQ-662-x", "REQ-662"),
+                        ("chore/REQ-123456-y", "REQ-123456"), ("feat/REQ-902-other", None)):
+        rc, err = push(branch, run)
+        assert rc == 0, (branch, run, err)
+        assert "refs/heads/" + branch in _heads(remote)
+
+
 # ------------------------------------------------------------------------ BR-3, BR-5
 def test_run_reads_only_toolkit_text(cached, wc, tmp_path):
     """A working copy's vendored partials and forge_config.py never run under the runner."""

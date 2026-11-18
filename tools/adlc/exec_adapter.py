@@ -260,27 +260,45 @@ class ExecAdapter(object):
     def operator_tokens(self, tokens):
         """The operator's --harness-flag tokens, each flag one ``exec.operator_flags`` names and
         each other token the value of the flag before it (REQ-662 ADR-7). Anything else refuses
-        the launch: forbidding one flag at a time never converges (LESSON-663)."""
+        the launch: forbidding one flag at a time never converges (LESSON-663).
+
+        A flag takes its value as the next token or after ``=``. A flag whose value is still
+        owed when the tokens end, or a value that begins with ``-``, refuses: the engine's own
+        tokens follow the operator's, so the harness would read one of them, or a flag, as that
+        value."""
         declared = list(self.block.get("operator_flags") or [])
         out = []
-        takes_value = False
+        owed = None
         for token in tokens:
             token = str(token)
             if _CONTROL_RE.search(token):
                 raise ExecRefused("--harness-flag %r holds a control character, so nothing is "
                                   "launched" % token)
-            if token.startswith("-"):
-                if token.split("=", 1)[0] not in declared:
+            if owed is not None:
+                if token.startswith("-"):
+                    raise ExecRefused("--harness-flag %s takes a value, and %r begins with `-`, "
+                                      "so it would read as a flag: nothing is launched"
+                                      % (owed, token))
+                owed = None
+            elif token.startswith("-"):
+                name, eq, value = token.partition("=")
+                if name not in declared:
                     raise ExecRefused("--harness-flag %s is not in harness %s's operator_flags "
                                       "(%s), so nothing is launched (REQ-662 BR-16)"
                                       % (token, self.name, ", ".join(declared) or "none"))
-                takes_value = "=" not in token
-            elif takes_value:
-                takes_value = False
+                if eq and value.startswith("-"):
+                    raise ExecRefused("--harness-flag %s takes a value, and %r begins with `-`, "
+                                      "so it would read as a flag: nothing is launched"
+                                      % (name, value))
+                owed = None if eq else name
             else:
                 raise ExecRefused("--harness-flag %r is neither an operator flag nor the value of "
                                   "the one before it, so nothing is launched" % token)
             out.append(token)
+        if owed is not None:
+            raise ExecRefused("--harness-flag %s ends the operator's flags with its value still "
+                              "owed, so the harness would read the engine's next token as that "
+                              "value: nothing is launched" % owed)
         return out
 
     @property
@@ -728,6 +746,24 @@ class ExecAdapter(object):
             return "error"
         return klass
 
+    def exit_denied(self, rc):
+        """Whether ``exit_codes`` maps the raw exit code ``rc`` to ``denied``: False for no
+        code (``None``) and for a code the adapter does not declare."""
+        if rc is None:
+            return False
+        return (self.block.get("exit_codes") or {}).get(str(rc)) == "denied"
+
+
+def _lines(text):
+    """``text`` cut at each ``\\n`` and nowhere else, one trailing ``\\r`` stripped from each
+    line; a final ``\\n`` ends the last line and starts no empty one. ``str.splitlines`` also
+    cuts at U+0085, U+2028 and U+2029, which a JSON writer may leave raw inside a string, so
+    one of them in the model's message would cut an event in two (REQ-662 BR-6)."""
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return [line[:-1] if line.endswith("\r") else line for line in lines]
+
 
 def _json_result(text):
     """The one JSON result object in ``text``, or the last line that is one, or None."""
@@ -735,7 +771,7 @@ def _json_result(text):
         parsed = json.loads(text)
         return parsed if isinstance(parsed, dict) else None
     except ValueError:
-        for line in reversed(text.splitlines()):
+        for line in reversed(_lines(text)):
             try:
                 parsed = json.loads(line)
             except ValueError:
@@ -747,14 +783,14 @@ def _json_result(text):
 
 def _jsonl_events(text, terminal):
     """``(events, error)``: each line of a JSONL stream as an event (a JSON object with a
-    ``type``), and the parser's message when the stream is not one. Blank lines are skipped.
-    A last line with no newline that does not parse was cut; with ``terminal`` declared, a
-    stream with no event of that type was cut short. The events read before an error are
-    kept."""
+    ``type``), and the parser's message when the stream is not one. A line ends at ``\\n``
+    only (:func:`_lines`), and blank lines are skipped. A last line with no newline that does
+    not parse was cut; with ``terminal`` declared, a stream with no event of that type was cut
+    short. The events read before an error are kept."""
     if not text.strip():
         return [], "stdout is empty: the harness printed no event stream"
-    lines = text.splitlines()
-    whole = text.endswith(("\n", "\r"))
+    lines = _lines(text)
+    whole = text.endswith("\n")
     events = []
     for number, line in enumerate(lines, 1):
         if not line.strip():

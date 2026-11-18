@@ -13,7 +13,9 @@ The result file is read from ``<ToolkitRoot>/.adlc/research/harness-probes/<name
 and nowhere else. ToolkitRoot is the install the orchestrator runs from, never a run's
 working copy, so nothing a run can edit reaches the gate, and a result file edited in a
 working copy is never read (LESSON-718). A missing or unreadable file reads ``unverified``.
-``unknown`` and ``n/a`` decide nothing: both read as not ``pass`` and not ``fail``.
+``unknown`` and ``n/a`` decide nothing: both read as not ``pass`` and not ``fail``. A
+version that reads ``unknown`` or is empty matches nothing, the installed, declared and
+recorded ones alike, so two of them are never equal enough to verify.
 
 No code here names a harness: every difference is an adapter field. Standard library only.
 """
@@ -158,6 +160,13 @@ def _shown(status):
     return "is not in the result file" if status == "missing" else "reads %s" % status
 
 
+def _unread(version):
+    """True for a version that names no release: not a string, empty, or ``unknown`` (what
+    REQ-654's lookup returns when it reads nothing). Two of them are equal and prove nothing,
+    so under ``verification: probes`` one on either side of a comparison is a mismatch."""
+    return not isinstance(version, str) or version.strip().lower() in ("", "unknown")
+
+
 # ---- the verdict --------------------------------------------------------------------------
 def verdict(adapter, result, installed_version):
     """BR-11 for ``adapter`` (the loaded dict or an ``ExecAdapter``), over ``result`` (the
@@ -170,9 +179,13 @@ def verdict(adapter, result, installed_version):
     problems, notes = [], []
     declared = block.get("harness_version")
     recorded = block.get("verification") == "recorded"
-    if installed_version != declared:
-        found = ("nothing (not installed)" if installed_version is None
-                 else repr(installed_version))
+    found = "nothing (not installed)" if installed_version is None else repr(installed_version)
+    if not recorded and (_unread(declared) or (installed_version is not None
+                                               and _unread(installed_version))):
+        problems.append(Problem("installed-version", "the version could not be read: the "
+                                "installed binary reports %s, and exec.harness_version declares "
+                                "%r, and an unread version matches nothing" % (found, declared)))
+    elif installed_version != declared:
         if recorded:
             # BR-1 puts the BR-11 gate, version equality included, on the probed harnesses.
             # A `recorded` block stands on evidence recorded once, and no probe can be run
@@ -196,6 +209,12 @@ def _probe_set(data, block, result, readings):
                         "evidence" % "/".join(RESULT_DIR + (data["name"] + ".json",)))]
     declared = block["harness_version"]
     recorded = result.get("harness_version")
+    if _unread(recorded) or _unread(declared):
+        # Equal unread versions would pass the comparison below and prove nothing.
+        return [Problem(probe, "the version could not be read: the result file records "
+                        "harness_version %r, and exec.harness_version declares %r, so no probe "
+                        "in the file is evidence" % (recorded, declared))
+                for probe in required(block)]
     if recorded != declared:
         # A result recorded under another version is no evidence for this one, so each
         # required probe is named and nothing in the file is read further.
