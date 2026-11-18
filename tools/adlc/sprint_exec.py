@@ -36,6 +36,7 @@ import exec_gates as eg  # noqa: E402
 import exec_ledger as el  # noqa: E402
 import exec_prompt as ep  # noqa: E402
 import exec_safety as es  # noqa: E402
+import exec_surfaces as esf  # noqa: E402
 import exec_verify as ev  # noqa: E402
 import toolkit_root  # noqa: E402
 
@@ -242,6 +243,9 @@ class Batch(object):
         self.exec_files = None
         self.fidelity = []
         self.deny_unsupported = []
+        # The user policy folder's manifest, as the pre-flight wrote and recorded it (REQ-662
+        # BR-4); None when the adapter declares no user policy file.
+        self.policy = None
 
 
 class Orchestrator(object):
@@ -398,11 +402,13 @@ class Orchestrator(object):
             self.say("NOTE: harness %s: %s; verification: recorded, so the launch goes on"
                      % (adapter.name, "; ".join(batch.verdict.notes)))
         # Every launch reads only the engine's settings file. Without the flags that do
-        # that, the operator's and the project's own allowlists would widen the tiers.
+        # that, the operator's and the project's own allowlists would widen the tiers. An
+        # adapter with no isolation flags is isolated by its config surfaces instead, which the
+        # engine renders whole before every launch and resume (REQ-662 ADR-4).
         help_out = subprocess.run([batch.binary, "--help"], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, universal_newlines=True,
                                   env=self.environ).stdout
-        if not adapter.isolation_available(help_out):
+        if adapter.block.get("config_isolation") and not adapter.isolation_available(help_out):
             raise Refused("%s --help does not list the config-isolation flags %s, so a launch "
                           "would read settings files the engine does not control (BUG-260)"
                           % (adapter.binary, " ".join(adapter.block.get(
@@ -430,6 +436,9 @@ class Orchestrator(object):
         except ea.ExecRefused as exc:
             raise Refused(str(exc))
         self._judge_render(adapter, batch, report)
+        # The user config is scanned here too, before anything is prepared; each working copy's
+        # is scanned at its launch, once it exists (REQ-662 BR-16).
+        self._bypass_check(adapter, [], "launch")
         hit = ea.sandbox_setting(adapter, self.primary, el.read_json)
         if hit:
             raise Refused("the harness sandbox is on in %s: a worktree has not been shown to "
@@ -480,6 +489,15 @@ class Orchestrator(object):
             if batch.config["require_branch_protection"] and not allow_unprotected:
                 raise Refused(line + "; pass --allow-unprotected to accept that for this run")
             self.say("WARNING: " + line)
+        # Last, once nothing else refuses: the toolkit's user policy file, written whole and
+        # atomically under the lock and its folder recorded, or the run refused when the folder
+        # is not what the engine last recorded (REQ-662 BR-4).
+        if batch.exec_files is not None and batch.exec_files.user_policy_file is not None:
+            try:
+                batch.policy = esf.ensure_policy_file(adapter, self.environ,
+                                                      batch.exec_files.user_policy_file)
+            except esf.SurfaceRefused as exc:
+                raise Refused(str(exc))
         self.batch = batch
         return batch
 
@@ -581,6 +599,10 @@ class Orchestrator(object):
                         "trustMechanism": batch.adapter.trust_grant, "trustGrantedAt": None,
                         "trustRevokedAt": None, "exitCode": None, "exitClass": None,
                         "abortedBy": None, "abortedAt": None}}
+        if batch.policy is not None:
+            # What this run checks the user policy folder against, before each launch and
+            # resume and at exit and the halt (REQ-662 BR-4). Absent: no policy file.
+            doc["policyManifest"] = batch.policy
         run = Run(run_dir, doc)
         try:
             data = ep.pipeline_prompt(self.toolkit, self.primary, req, branch, self.primary,
@@ -638,6 +660,105 @@ class Orchestrator(object):
         if run.exec.get("trustGrantedAt") and not run.exec.get("trustRevokedAt"):
             run.exec["trustRevokedAt"] = el.now()
             self.box(run).log("trust_revoked", [run.exec["trustMechanism"]], run.wc, 0)
+
+    # ---- REQ-662 ADR-4: config surfaces, rule files and the user policy folder -------------
+    @staticmethod
+    def _working_copies(run):
+        """Every repo's working copy of the run: each is a root the harness is handed."""
+        return [spec["workingCopy"] for spec in run.doc["repos"].values()]
+
+    def _bypass_check(self, adapter, roots, where, run=None):
+        """BR-16: a ``bypass_config_keys`` key set to anything but the toolkit's own value, in
+        the user config or the config of a working copy in ``roots``, refuses the launch or
+        the resume, and so does a config that cannot be read with certainty. With a ``run``,
+        its log names the refusal as ``adapter_refused``."""
+        try:
+            hits = esf.bypass_scan(adapter, roots, self.environ)
+        except esf.SurfaceRefused as exc:
+            reason, rows = str(exc), [{"path": exc.path, "key": None, "value": None}]
+        else:
+            if not hits:
+                return
+            reason = "; ".join(esf.hit_text(adapter.adapter, hit) for hit in hits)
+            rows = [hit._asdict() for hit in hits]
+        if run is not None:
+            self.box(run).log("adapter_refused", [adapter.name, rows[0]["path"] or ""], None,
+                              None, detail={"harness": adapter.name, "reason": reason,
+                                            "where": where, "hits": rows})
+        raise Refused(reason)
+
+    def prepare_surfaces(self, run, wcs, branch, where):
+        """Before a launch (``where`` ``launch``) or a resume (``resume``), in this order: the
+        user policy folder against the run's record, where any change refuses (BR-4); the
+        bypass scan (BR-16); then each working copy in ``wcs`` brought to the exec render,
+        whole, with the rule file rendered for ``branch``. Its manifest goes into the run
+        record, and each path the render wrote or removed is logged ``rule_file_rerendered``,
+        ``checksum_matched`` false where it was not already the render (BR-4, BR-15). A
+        refusal is :class:`Refused`, and nothing is launched. An adapter with no surface, no
+        rule file and no policy file writes and logs nothing (BR-1)."""
+        adapter = self.adapter(run)
+        record = run.doc.get("policyManifest")
+        if record:
+            try:
+                problems = esf.check_policy(record)
+            except esf.SurfaceRefused as exc:
+                raise Refused(str(exc))
+            if problems:
+                raise Refused(esf.policy_refusal(adapter.adapter, problems, where))
+        self._bypass_check(adapter, wcs, where, run)
+        if not (adapter.block.get("config_surfaces") or adapter.block.get("rule_file")):
+            return
+        try:
+            files = adapter.rule_files(branch, run.doc["config"]["allow_extra"],
+                                       ev.read_result(adapter, self.toolkit))
+            plan = esf.working_copy_render(adapter, files, self.toolkit)
+        except (ea.ExecRefused, esf.SurfaceRefused) as exc:
+            raise Refused(str(exc))
+        box = self.box(run)
+        manifests = run.doc.setdefault("surfaces", {})
+        for wc in wcs:
+            try:
+                manifest, changes = esf.render(wc, plan, adapter.block)
+            except (esf.SurfaceRefused, OSError) as exc:
+                raise Refused("harness %s: the %s is refused: %s" % (adapter.name, where, exc))
+            manifests[wc] = manifest
+            for change in changes:
+                box.log("rule_file_rerendered", [adapter.name, change.path], wc, None,
+                        detail={"harness": adapter.name, "path": change.path,
+                                "checksum_matched": change.found == change.expected,
+                                "expected": change.expected, "found": change.found,
+                                "where": where})
+        run.save()
+
+    def verify_surfaces(self, run, wcs, where):
+        """At exit (``where`` ``exit``) and at the halt (``halt``): each working copy in ``wcs``
+        against the manifest its last render recorded, and the user policy folder against the
+        run's record. Each change is a ``config_surface_violation``: logged, and recorded as a
+        Rule B protocol violation, which the halt reports (BR-15; REQ-659 owns what one does).
+        Nothing is repaired here: the next launch or resume re-renders. Returns the changes."""
+        adapter = self.adapter(run)
+        block = adapter.block
+        found = []
+        try:
+            for wc in wcs:
+                manifest = (run.doc.get("surfaces") or {}).get(wc)
+                if manifest:
+                    found += [(wc, change) for change in esf.verify(wc, manifest)]
+            record = run.doc.get("policyManifest")
+            if record:
+                found += [(None, change) for change in esf.check_policy(record)]
+        except (esf.SurfaceRefused, OSError) as exc:
+            run.violation("config_surface_violation at %s: the surfaces could not be verified: "
+                          "%s" % (where, exc))
+        for wc, change in found:
+            self.box(run).log("config_surface_violation", [adapter.name, change.path], wc, None,
+                              detail={"harness": adapter.name, "path": change.path,
+                                      "expected": change.expected, "found": change.found,
+                                      "where": where,
+                                      "rules_reload": block.get("rules_reload"),
+                                      "effective_mid_run": esf.reload_effective(block)})
+            run.violation(esf.violation_text(change, block, where))
+        return found
 
     def _argv(self, run, log_name, resume=None, wc=None, branch=None, write_roots=None,
               add_dir=None, operator=None):
@@ -723,6 +844,12 @@ class Orchestrator(object):
         for rid, spec in run.doc["repos"].items():
             self._make_worktree(box, spec["path"], spec["workingCopy"], run.doc["branch"],
                                 run.doc["integrationBranches"][rid])
+        try:
+            self.prepare_surfaces(run, self._working_copies(run), run.doc["branch"], "launch")
+        except Refused as exc:
+            self.say("%s refused before launch: %s" % (run.req, exc))
+            self._terminal(run, "failed", "setup-error", {}, note=str(exc))
+            return
         self.grant_trust(run)
         self._launch_first(run, "prompt.txt")
 
@@ -881,6 +1008,7 @@ class Orchestrator(object):
         if notice:
             run.doc.setdefault("notes", []).append("harness said: %s" % notice)
         self.box(run).log("exec_exit", [str(rc), klass, str(claim)], run.wc, rc)
+        self.verify_surfaces(run, self._working_copies(run), "exit")
         state = run.read_wc_state()
         self._model_values(run, state)
         if result["error"]:
@@ -1066,6 +1194,7 @@ class Orchestrator(object):
                 "allowUnverified": list(run.doc.get("allowUnverified") or [])}
 
     def _halt(self, run, state, result):
+        self.verify_surfaces(run, self._working_copies(run), "halt")
         try:
             plan = self.compute_plan(run, state)
         except eg.Mismatch as exc:
@@ -1249,6 +1378,7 @@ class Orchestrator(object):
             raise Refused(str(exc))
         name = "prompt.%d.txt" % (run.doc["launches"] + 1)
         el.atomic_write(run.file(name), data)
+        self.prepare_surfaces(run, self._working_copies(run), branch, "launch")
         self.grant_trust(run)
         self._launch_first(run, name)
 
@@ -1645,7 +1775,7 @@ class Orchestrator(object):
         help_out = subprocess.run([run.doc["binary"], "--help"], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, universal_newlines=True,
                                   env=self._child_env(run)).stdout
-        if not adapter.isolation_available(help_out):
+        if adapter.block.get("config_isolation") and not adapter.isolation_available(help_out):
             self._close_out_failed(run, "failed", "harness config isolation unavailable")
             return
         ib = run.doc["integrationBranch"]
@@ -1659,6 +1789,13 @@ class Orchestrator(object):
             self._close_out_failed(run, "failed", "close-out worktree: %s" % res.stderr.strip())
             return
         run.doc["closeOutWorkingCopy"] = path
+        # The close-out working copy gets its own render and checks, for the resume's branch
+        # (REQ-662 BR-4, BR-7, BR-15, BR-16).
+        try:
+            self.prepare_surfaces(run, [path], branch, "resume")
+        except Refused as exc:
+            self._close_out_failed(run, "failed", str(exc))
+            return
         box.log("trust_granted", [run.exec["trustMechanism"]], path, 0)
         try:
             deploy = (plan.get("deployPlan") or {}).get("command", "")
@@ -1681,6 +1818,7 @@ class Orchestrator(object):
         self._write_status(run)
         rc = proc.wait()
         self.reap(run, proc.pid)
+        self.verify_surfaces(run, [path], "exit")
         box.log("trust_revoked", [run.exec["trustMechanism"]], path, 0)
         result = self._read_result(run, "close-out.json")
         lines = (result["text"] or "").strip().split("\n")

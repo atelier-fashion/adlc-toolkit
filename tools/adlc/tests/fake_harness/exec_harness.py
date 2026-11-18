@@ -34,6 +34,14 @@ as a ``command_execution`` item), and for the jsonl profile ``refused`` (command
 refuses: its rejection line on stderr and no item), ``stream`` (``no-terminal``: no
 ``turn.completed``; ``cut``: the last line cut short with no newline; ``not-json``: plain
 text) and ``no_last_message`` (no ``-o`` file).
+
+The config-surface keys (REQ-662 BR-15, both profiles): ``saw`` (paths, relative to the working
+copy or absolute, whose content this launch records as it finds them on starting, in
+``$HOME/saw-<REQ>.jsonl``, one line per launch, the close-out's included), ``surface_writes``
+(path to text, written whole after the last state write: a model editing a config surface, a
+rule file, a hook file or the user policy folder mid-run, after its commit) and ``add`` (the
+paths the commit stages, in place of ``git add -A``: a model that stages only its own files).
+Under ``closeout`` the same ``saw`` and ``add`` keys apply to the resumed session.
 """
 
 import json
@@ -145,6 +153,28 @@ def run_commands(spec, wt):
                                "exit_code": res.returncode})
 
 
+def record_saw(paths, wt):
+    """What each of ``paths`` holds as this launch starts: its text, or None when absent."""
+    seen = {}
+    for path in paths:
+        full = path if os.path.isabs(path) else os.path.join(wt, path)
+        try:
+            with open(full, encoding="utf-8") as fh:
+                seen[path] = fh.read()
+        except OSError:
+            seen[path] = None
+    with open(os.path.join(HOME, "saw-%s.jsonl" % REQ), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"cwd": wt, "saw": seen}) + "\n")
+
+
+def write_surfaces(spec, wt):
+    for path, body in spec.get("surface_writes", {}).items():
+        full = path if os.path.isabs(path) else os.path.join(wt, path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as fh:
+            fh.write(body)
+
+
 def state_path(wt, spec_dir):
     return os.path.join(wt, spec_dir, "pipeline-state.json")
 
@@ -167,6 +197,8 @@ def first_launch(top, spec, prompt):
             repos[rid] = {"touched": touched}
         state["mergeOrder"] = [top["repoId"]] + [r for r, t in spec["siblings"].items() if t]
     write_state(wt, spec_dir, state)
+    if spec.get("saw"):
+        record_saw(spec["saw"], wt)
     if spec.get("dump_env"):
         with open(os.path.join(HOME, "env-%s.json" % REQ), "w", encoding="utf-8") as fh:
             json.dump(dict(os.environ), fh)
@@ -195,7 +227,7 @@ def first_launch(top, spec, prompt):
         os.makedirs(os.path.dirname(os.path.join(wt, path)) or wt, exist_ok=True)
         with open(os.path.join(wt, path), "w", encoding="utf-8") as fh:
             fh.write(body)
-    sh("git", "add", "-A")
+    sh("git", "add", *(spec.get("add") or ["-A"]))
     sh("git", "commit", "-qm", "feat: %s [%s]" % (REQ, REQ))
     sh("git", "push", "-q", "-u", "origin", branch)
     if spec.get("push_direct"):
@@ -244,6 +276,7 @@ def first_launch(top, spec, prompt):
     if spec.get("state_extra"):
         state.update(spec["state_extra"])
     write_state(wt, spec_dir, state)
+    write_surfaces(spec, wt)
     for path, body in spec.get("plant_late", {}).items():
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(body)
@@ -264,6 +297,8 @@ def close_out(top, spec, argv, prompt):
         fh.write(prompt)
     wt = os.getcwd()
     spec_dir = top["specDirs"][REQ]
+    if close.get("saw"):
+        record_saw(close["saw"], wt)
     planted = os.path.join(wt, ".claude", "settings.json")
     if os.path.exists(planted):
         with open(os.path.join(HOME, "closeout-saw-settings"), "w", encoding="utf-8"):
@@ -281,7 +316,7 @@ def close_out(top, spec, argv, prompt):
         with open(os.path.join(wt, path), "w", encoding="utf-8") as fh:
             fh.write(body)
     branch = sh("git", "branch", "--show-current")
-    sh("git", "add", "-A")
+    sh("git", "add", *(close.get("add") or ["-A"]))
     sh("git", "commit", "-qm", "chore(%s): close-out" % REQ)
     sh("git", "push", "-q", "-u", "origin", branch)
     created = forge(top, "pr_create", "--base", top["ib"], "--head", branch, "--title", "close-out",

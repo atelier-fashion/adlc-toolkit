@@ -1,7 +1,7 @@
 ---
 id: TASK-262
 title: "Config surfaces: guarded writes, manifests, the four checks, the bypass scan and the user policy folder"
-status: draft
+status: complete
 parent: REQ-662
 repo: adlc-toolkit
 created: 2026-11-17

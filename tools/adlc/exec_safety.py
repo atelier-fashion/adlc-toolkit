@@ -389,11 +389,15 @@ class Toolbox(object):
         raise RuleBViolation(message)
 
     # -- running things ---------------------------------------------------------
-    def log(self, kind, argv, cwd, rc, env=None):
+    def log(self, kind, argv, cwd, rc, env=None, detail=None):
+        """One action-log line. ``detail`` is an event's payload, for the events that carry one
+        beyond an argv (REQ-662's ``rule_file_rerendered`` and ``config_surface_violation``)."""
         record = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "kind": kind,
                   "argv": list(argv), "cwd": cwd, "rc": rc}
         if env is not None:
             record["env"] = {k: v for k, v in env.items() if k.startswith("GIT_CONFIG")}
+        if detail is not None:
+            record["detail"] = detail
         with open(self.log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, sort_keys=True) + "\n")
 

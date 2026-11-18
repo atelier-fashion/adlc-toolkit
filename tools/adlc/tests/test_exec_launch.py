@@ -1,5 +1,6 @@
 """Pre-flight, launch, supervision and the halt (REQ-659)."""
 
+import hashlib
 import json
 import os
 import stat
@@ -1198,3 +1199,184 @@ def test_unspellable_engine_deny_is_deny_unsupported(tmp_path, monkeypatch):
     # Neither tier carries it: the routine allow it would shadow is the only `gcloud run`.
     argv = box.launches()[0]["argv"]
     assert [tok for tok in argv if "gcloud run" in tok] == ["Bash(gcloud run services list:*)"]
+
+
+# ---- REQ-662 BR-4, BR-15, AC-25: rule files and config surfaces at launch, exit, halt, resume ---
+def _flip(text):
+    """``text`` with one byte changed."""
+    i = len(text) // 2
+    return text[:i] + ("x" if text[i] != "x" else "y") + text[i + 1:]
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _saw(box, req="REQ-901"):
+    """What each launch of ``req`` found at the paths its scenario's ``saw`` names."""
+    path = box.home / ("saw-%s.jsonl" % req)
+    return [json.loads(ln)["saw"] for ln in path.read_text().splitlines()] if path.exists() else []
+
+
+def _rows(box, run, kind, path=None):
+    return [e for e in eh.events(box, run, kind) if path is None or e["path"] == path]
+
+
+def test_mutated_rule_file_is_rerendered(tmp_path, monkeypatch):
+    """BR-4, AC-4: a rendered rule file one byte off is caught by its whole-file checksum at
+    the next launch and at the next resume. Each logs `rule_file_rerendered` with
+    `checksum_matched: false`, and the harness starts on a file byte-equal to a fresh render.
+    A launch over an untouched render logs `checksum_matched: true`, and the untouched run
+    reports no config_surface_violation at exit, at the halt or at the close-out (the
+    must-not-fire case)."""
+    box = eh.file_sandbox(tmp_path, monkeypatch)
+    fresh = eh.fresh_files(box).rule_file
+    close_fresh = eh.fresh_files(box, "chore/REQ-901-close-out").rule_file
+    # The project tracks the rule file one byte off: the first launch's working copy starts
+    # from it, and so does the close-out's after the merge, because the run stages only `src`.
+    tracked = _flip(fresh)
+    eh.commit_on_main(box, {eh.FILE_RULE: tracked})
+    box.req(status="blocked", claim="blocked", add=["src"], saw=[eh.FILE_RULE],
+            blockers=[{"reason": "reflector-questions", "question": "which?"}],
+            closeout={"saw": [eh.FILE_RULE], "add": [".adlc"]})
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "blocked"
+    rule = os.path.join(run.wc, eh.FILE_RULE)
+    want = {"harness": "fake-exec-file", "path": eh.FILE_RULE, "checksum_matched": False,
+            "expected": _sha(fresh), "found": _sha(tracked), "where": "launch"}
+    assert _rows(box, run, "rule_file_rerendered", eh.FILE_RULE) == [want]
+    assert open(rule, encoding="utf-8").read() == fresh
+    assert _saw(box)[0][eh.FILE_RULE] == fresh
+    # The test changes one byte of the rendered file; the next launch catches it.
+    edited = _flip(fresh)
+    with open(rule, "w", encoding="utf-8") as fh:
+        fh.write(edited)
+    box.req(files={"src/two.txt": "two\n"})
+    orch.answer("REQ-901", "go on")
+    box.wait(orch)
+    assert run.status == "blocked"
+    rows = _rows(box, run, "rule_file_rerendered", eh.FILE_RULE)
+    assert rows[1] == dict(want, found=_sha(edited))
+    assert open(rule, encoding="utf-8").read() == fresh and _saw(box)[1][eh.FILE_RULE] == fresh
+    # Untouched since: the checksum matches.
+    box.req(status="awaiting_approval", claim="awaiting_approval", blockers=None,
+            files={"src/three.txt": "three\n"})
+    orch.answer("REQ-901", "go on")
+    box.wait(orch)
+    assert run.status == "awaiting_approval"
+    rows = _rows(box, run, "rule_file_rerendered", eh.FILE_RULE)
+    assert rows[2] == dict(want, checksum_matched=True, found=_sha(fresh))
+    # The resume: the close-out working copy holds the tracked file, one byte off.
+    assert box.approve(orch) == "approved"
+    assert run.read_primary_state()["closeOut"]["status"] == "ok"
+    resumed = [r for r in _rows(box, run, "rule_file_rerendered", eh.FILE_RULE)
+               if r["where"] == "resume"]
+    assert resumed == [dict(want, where="resume", expected=_sha(close_fresh))]
+    assert _saw(box)[-1][eh.FILE_RULE] == close_fresh
+    assert box.launches()[-1]["opts"]["resume"] is True
+    assert not eh.events(box, run, "config_surface_violation")
+    assert "config_surface_violation" not in json.dumps(se.violations_of(run))
+
+
+def test_surface_edited_mid_run_is_a_violation_at_exit_and_halt(tmp_path, monkeypatch):
+    """BR-15, AC-18: a fake that widens the rule file and drops a stray rules file into the
+    directory surface mid-run is a `config_surface_violation` at exit; the next launch repairs
+    both (`rule_file_rerendered`, false); the same edit in the next run is a violation at exit
+    and again at the halt, which the halt row reports as a Rule B protocol violation.
+    `rules_reload: unknown` reads as `live`. A file the fake did not touch is not reported."""
+    box = eh.file_sandbox(tmp_path, monkeypatch)
+    fresh = eh.fresh_files(box).rule_file
+    widened = fresh + 'prefix_rule(pattern=["git", "push"], decision="allow")\n'
+    stray = ".fake-exec-file/rules/zz-extra.rules"
+    edit = {eh.FILE_RULE: widened, stray: 'prefix_rule(pattern=["rm"], decision="allow")\n'}
+    box.req(status="blocked", claim="blocked", add=["src"], surface_writes=edit,
+            blockers=[{"reason": "reflector-questions", "question": "which?"}])
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "blocked"
+    seen = eh.events(box, run, "config_surface_violation")
+    assert [(v["path"], v["where"], v["expected"], v["found"]) for v in seen] == [
+        (eh.FILE_RULE, "exit", _sha(fresh), _sha(widened)),
+        (stray, "exit", None, _sha(edit[stray]))]
+    assert all(v["rules_reload"] == "unknown" and v["effective_mid_run"] for v in seen)
+    violations = se.violations_of(run)
+    assert len(violations) == 2 and all(
+        v.startswith("config_surface_violation at exit: ") and "may have taken effect mid-run"
+        in v for v in violations)
+    # The next launch repairs both before the harness starts; that run makes the same edit
+    # and halts, so it is a violation at exit and again at the halt.
+    box.req(status="awaiting_approval", claim="awaiting_approval", blockers=None,
+            files={"src/two.txt": "two\n"}, saw=[eh.FILE_RULE, stray])
+    orch.answer("REQ-901", "go on")
+    box.wait(orch)
+    assert run.status == "awaiting_approval"
+    repaired = [(r["path"], r["checksum_matched"], r["found"])
+                for r in _rows(box, run, "rule_file_rerendered") if r["path"] in edit]
+    assert repaired[-2:] == [(eh.FILE_RULE, False, _sha(widened)),
+                             (stray, False, _sha(edit[stray]))]
+    assert _saw(box)[-1] == {eh.FILE_RULE: fresh, stray: None}
+    late = eh.events(box, run, "config_surface_violation")[2:]
+    assert [(v["path"], v["where"]) for v in late] == [
+        (eh.FILE_RULE, "exit"), (stray, "exit"), (eh.FILE_RULE, "halt"), (stray, "halt")]
+    halt_row = box.out.getvalue()[box.out.getvalue().rindex("| REQ-901 |"):]
+    assert ("Rule B protocol violation: config_surface_violation at halt: %s: expected sha256 "
+            "%s, found sha256 %s" % (eh.FILE_RULE, _sha(fresh)[:12], _sha(widened)[:12])
+            in halt_row)
+    assert eh.FILE_CONFIG not in json.dumps(eh.events(box, run, "config_surface_violation"))
+
+
+def test_prompt_delivery_renders_the_hook_file_absent(tmp_path, monkeypatch):
+    """AC-25, BR-15: under `context_delivery: prompt` the harness's hook file is a surface
+    rendered absent. A project that commits one has it removed from the working copy before the
+    launch, so the harness starts with no hook file, and the run that leaves it alone reports
+    nothing (the must-not-fire case). A hook file the fake writes mid-run is a
+    `config_surface_violation` at exit. The prompt begins with ETHOS, and no engine write
+    touches the hook-review table in the user config."""
+    box = eh.file_sandbox(tmp_path, monkeypatch, reqs=("REQ-901", "REQ-902"))
+    hooks = '{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "x"}]}]}}\n'
+    eh.commit_on_main(box, {eh.FILE_HOOKS: hooks})
+    user = box.home / eh.FILE_USER_CONFIG
+    user.parent.mkdir(parents=True)
+    review = ('model = "fake-mid-1"\n\n[hooks.state."/elsewhere/.fake-exec-file/hooks.json:x"]\n'
+              'trusted_hash = "sha256:abc"\n')
+    user.write_text(review, encoding="utf-8")
+    for req in ("REQ-901", "REQ-902"):
+        box.req(req, add=["src"], saw=[eh.FILE_HOOKS])
+    box.req("REQ-902", surface_writes={eh.FILE_HOOKS: hooks})
+    orch = box.go(shared=True)
+    for req in ("REQ-901", "REQ-902"):
+        run = orch.runs[req]
+        assert run.status == "awaiting_approval"
+        assert _saw(box, req) == [{eh.FILE_HOOKS: None}]
+        [row] = _rows(box, run, "rule_file_rerendered", eh.FILE_HOOKS)
+        assert row == {"harness": "fake-exec-file", "path": eh.FILE_HOOKS,
+                       "checksum_matched": False, "expected": None, "found": _sha(hooks),
+                       "where": "launch"}
+        prompt = open(run.file(run.exec["promptPath"]), encoding="utf-8").read()
+        assert prompt.startswith(ep.ethos_text(box.toolkit, str(box.repo)).rstrip("\n"))
+    quiet = orch.runs["REQ-901"]
+    assert not eh.events(box, quiet, "config_surface_violation")
+    assert not os.path.lexists(os.path.join(quiet.wc, eh.FILE_HOOKS))
+    loud = orch.runs["REQ-902"]
+    assert [(v["path"], v["where"], v["expected"], v["found"])
+            for v in eh.events(box, loud, "config_surface_violation")] == [
+        (eh.FILE_HOOKS, "exit", None, _sha(hooks)), (eh.FILE_HOOKS, "halt", None, _sha(hooks))]
+    assert user.read_text(encoding="utf-8") == review
+
+
+def test_a_flags_adapter_writes_no_surface(box):
+    """BR-1: claude renders both tiers as flags and declares no config surface, no rule file
+    and no user policy file, so the engine writes nothing into its working copy or its user
+    folder, keeps no surface manifest and logs none of REQ-662 ADR-4's events."""
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "awaiting_approval"
+    assert "surfaces" not in run.doc and "policyManifest" not in run.doc
+    kinds = {r["kind"] for r in box.log(run)}
+    assert not kinds & {"rule_file_rerendered", "config_surface_violation", "adapter_refused"}
+    tracked = set(eh.git(run.wc, "ls-files").splitlines())
+    untracked = eh.git(run.wc, "status", "--porcelain", "--ignored", "--untracked-files=all")
+    assert {ln[3:] for ln in untracked.splitlines()} <= {
+        ".adlc/specs/REQ-901-thing/pipeline-state.json"}, untracked
+    assert "src/REQ-901.txt" in tracked

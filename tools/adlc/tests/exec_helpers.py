@@ -257,9 +257,9 @@ class Sandbox(object):
 def codex_shaped_adapter(directory, exit_codes=None, denied_stderr=CODEX_REFUSAL):
     """An adapter file the engine launches today with the Codex-shaped fixture's binary,
     ``launch``, ``resume`` and ``output``: claude's block with those swapped in, written as
-    ``fake-exec-file.yml`` under ``directory``. The fixture itself waits on its rule files being
-    written (TASK-262) and the trust grant (TASK-263); a test holds the swapped values equal to
-    it.
+    ``fake-exec-file.yml`` under ``directory``. The fixture itself waits on the trust grant
+    (TASK-263); a test holds the swapped values equal to it. :func:`file_sandbox` launches the
+    fixture's file render form.
     ``exit_codes`` is a YAML flow map; ``denied_stderr`` a pattern, or None for none."""
     text = open(os.path.join(TOOLKIT, "harness", "claude.yml"), encoding="utf-8").read()
     swaps = [
@@ -318,8 +318,7 @@ def jsonl_sandbox(tmp_path, monkeypatch, exit_codes=None, denied_stderr=CODEX_RE
     use_adapter(monkeypatch, path)
     box = Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path, **kw)
     # The launch carries claude's isolation and flag-rendered tiers after the Codex-shaped
-    # template until the engine writes the file render (TASK-262): the fake records them as
-    # unknown.
+    # template, and the fake records them as unknown; `file_sandbox` is the file render form.
     box.write_scenario(help=ISOLATION_HELP, unknown_flags="record")
     return box
 
@@ -425,3 +424,111 @@ def probes_sandbox(tmp_path, monkeypatch, result="prompt-pass", **kw):
     box.result = doc
     box.write_result(doc)
     return box
+
+
+# ---- a file-rendered adapter the engine launches today (REQ-662 TASK-262) ---------------------
+#: The working-copy paths of the file-rendered sandbox's adapter (:func:`file_adapter`), all
+#: inside its one directory surface.
+FILE_SURFACE = ".fake-exec-file/"
+FILE_RULE = ".fake-exec-file/rules/adlc-exec.rules"
+FILE_PROJECT_RULES = ".fake-exec-file/rules/default.rules"
+FILE_HOOKS = ".fake-exec-file/hooks.json"
+FILE_CONFIG = ".fake-exec-file/config.toml"
+#: The same adapter's user-level paths, under the sandbox HOME.
+FILE_USER_CONFIG = ".fake-exec-file/config.toml"
+FILE_POLICY_DIR = ".fake-exec-file/rules"
+FILE_POLICY = ".fake-exec-file/rules/adlc-exec.rules"
+
+
+def file_adapter(directory, result, rules_reload="unknown", context_delivery="prompt"):
+    """The Codex-shaped fixture (``fake-exec-file.yml``, the ``file`` render form) made
+    launchable on today's engine, as a ``verification: probes`` block over ``result``: its
+    rules in a working-copy rule file and the deny tier in a user policy file, a working-copy
+    config and hook file inside its one directory surface, and the trust grant and working copy
+    the engine has an arm for (``none``, ``worktree``) until TASK-263. Every exec-scope loss is
+    declared, as a maintainer would."""
+    text = open(CODEX_SHAPED_FIXTURE, encoding="utf-8").read()
+    block = ha.load_adapter(CODEX_SHAPED_FIXTURE, toolkit=TOOLKIT)["exec"]
+    cache = "".join(
+        '    - id: %s\n      ran_at: "%s"\n      harness_version: "%s"\n      status: %s\n'
+        % (probe, result["probes"][probe]["ran_at"], result["harness_version"],
+           result["probes"][probe]["status"]) for probe in ev.required(
+            dict(block, context_delivery=context_delivery)))
+    old_cache = text[text.index("  probes:\n"):text.index("  working_copy:")]
+    swaps = [
+        ('\n  harness_version: "fake-exec-file 0.1.0"\n',
+         '\n  harness_version: "%s"\n' % result["harness_version"]),
+        ("schema_version: 1\n", "schema_version: 3\n"),
+        ("    project: .fake-exec-file/rules/default.rules\n    mode: rendered\n",
+         "    project: %s\n    mode: rendered\n"
+         "  hooks:\n    project: %s\n    mode: rendered\n"
+         "  config:\n    project: %s\n    user: $HOME/%s\n    mode: rendered\n"
+         "    write_mode: merge\n    owned_keys: [sandbox_mode, approval_policy]\n"
+         "    values:\n      sandbox_mode: workspace-write\n      approval_policy: on-request\n"
+         % (FILE_PROJECT_RULES, FILE_HOOKS, FILE_CONFIG, FILE_USER_CONFIG)),
+        ("  permissions: rules-json\n", "  permissions: starlark-prefix-rule\n"
+         "  hooks: codex-hooks-json\n  config: codex-config-toml\n"),
+        ("  allowlist_granularity: command-base\n",
+         "  allowlist_granularity: token-prefix\n  git_c_spelling: [[git, -C]]\n"),
+        ("capabilities:\n", "sandbox_can_reach_common_gitdir: true\naccepted_fidelity:\n"
+         "  fence.partial-source: {project: inexpressible, exec: inexpressible}\n"
+         "capabilities:\n"),
+        (old_cache, "  probes:\n" + cache),
+        ("  working_copy: {strategy: clone}\n  trust_grant: user-config-entry\n",
+         "  working_copy: {strategy: worktree}\n  trust_grant: none\n"),
+        ("  operator_flags: [--model]\n",
+         "  operator_flags: [--model]\n  add_dir_flag: --add-dir\n"),
+        ("  context_delivery: prompt\n", "  context_delivery: %s\n" % context_delivery),
+        ("  rules_reload: unknown\n", "  rules_reload: %s\n" % rules_reload),
+    ]
+    for old, new in swaps:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    os.makedirs(str(directory), exist_ok=True)
+    path = os.path.join(str(directory), "fake-exec-file.yml")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    declare_exec_losses(path, result)
+    return path
+
+
+def file_sandbox(tmp_path, monkeypatch, result="prompt-pass", rules_reload="unknown", **kw):
+    """A Sandbox whose harness is :func:`file_adapter` on a sandbox ToolkitRoot holding its
+    result file, with the jsonl fake installed as ``fake-exec-file``. The launch carries the
+    Codex-shaped template and nothing else; the close-out's ``--add-dir`` is recorded by the
+    fake as an option it does not know. ``box.home`` is the run's HOME, where the user config
+    and the user policy folder live."""
+    doc = probe_result(result) if isinstance(result, str) else result
+    toolkit = toolkit_copy(tmp_path / "toolkit")
+    path = file_adapter(tmp_path / "adapter", doc, rules_reload=rules_reload)
+    use_adapter(monkeypatch, path, toolkit)
+    box = Sandbox(tmp_path, harness="fake-exec-file", adapter_path=path, toolkit=toolkit, **kw)
+    box.write_scenario(unknown_flags="record")
+    box.result = doc
+    box.write_result(doc)
+    return box
+
+
+def fresh_files(box, branch="feat/REQ-901-thing"):
+    """The adapter's rule-file and policy-file text for ``branch``, rendered as the engine
+    renders them for a run (``harness_render.ExecFiles``)."""
+    adapter = ea.load(box.harness, box.toolkit)
+    return adapter.rule_files(branch, (), ev.read_result(adapter, box.toolkit))
+
+
+def commit_on_main(box, files):
+    """Commit ``files`` (path to text) to the sandbox repo's main and push it, as a project
+    that tracks those paths would have them."""
+    env = dict(os.environ, HOME=str(box.home))
+    for rel, body in files.items():
+        full = box.repo / rel
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(body, encoding="utf-8")
+    for args in (["add", "-A"], ["commit", "-qm", "track"], ["push", "-q", "origin", "main"]):
+        subprocess.check_call(["git", "-C", str(box.repo)] + args, env=env,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def events(box, run, kind):
+    """The run log's ``kind`` events' ``detail`` payloads, in order."""
+    return [r["detail"] for r in box.log(run) if r["kind"] == kind]
