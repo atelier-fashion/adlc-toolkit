@@ -48,10 +48,10 @@ Each on an operator's instruction naming the REQ. `reject` records the reason an
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
-python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec reject '<REQ-id>' --channel skill '<reason>'
+python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec reject --channel skill '<REQ-id>' '<reason>'
 ```
 
-`answer` and `abort` take the same shape: `sprint-exec answer '<REQ-id>' --channel skill '<reply>'`, `sprint-exec abort '<REQ-id>' --channel skill`.
+`answer` and `abort` take the same shape: `sprint-exec answer --channel skill '<REQ-id>' '<reply>'`, `sprint-exec abort --channel skill '<REQ-id>'`. Keep `--channel` before the REQ id: after it, the reason or reply is not read as one.
 
 ## When the supervisor is gone
 

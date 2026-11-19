@@ -94,6 +94,14 @@ def test_stateful_flow_and_pin(forge):
     refused = run(store, "pr_merge", "101", "--squash", "--match-head-commit", first)
     assert refused.returncode == 1 and "error_class=merge-blocked-by-policy" in refused.stdout
     head = run(store, "pr_view", "101", "--fields", "headRefOid").stdout.strip().split("=")[1]
+    # A draft does not merge, pinned to the right head or not, as on GitHub (BUG-287). The
+    # mock used to merge one, which hid a pipeline that never flipped its PR to ready.
+    draft = run(store, "pr_merge", "101", "--squash", "--delete-branch", "--match-head-commit",
+                head)
+    assert draft.returncode == 1 and "error_class=merge-blocked-by-policy" in draft.stdout
+    assert "still a draft" in draft.stdout
+    assert "state=OPEN" in run(store, "pr_view", "101", "--fields", "state").stdout
+    assert run(store, "pr_ready", "101").returncode == 0
     done = run(store, "pr_merge", "101", "--squash", "--delete-branch", "--match-head-commit", head)
     assert done.returncode == 0 and "state=MERGED" in done.stdout
     assert "branch_deleted=1" in done.stdout

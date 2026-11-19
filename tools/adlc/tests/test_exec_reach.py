@@ -152,8 +152,13 @@ def test_real_tree_reach_matches_golden(records, adapter, tmp_path, monkeypatch)
         env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"],
                    ADLC_FORGE_MOCK="1", ADLC_DISABLE_DELEGATE="1", ADLC_REPOS_ROOT=str(tmp_path))
         err = io.StringIO()
+        # `git` is a stub here, so the runner's own sandbox check (BUG-287), which asks git
+        # where the repository's git directory is, is switched off: this test audits the
+        # calls each fence's script makes.
+        monkeypatch.setattr(fr, "sandboxed", lambda cwd, environ: None)
         fr.run(rec["id"], _sample_argv(rec, wc), TOOLKIT, environ=env, cwd=str(wc), err=err)
         assert "opaque_entry_refused" not in err.getvalue(), (rec["id"], err.getvalue())
+        assert "fence_run_bad_value" not in err.getvalue(), (rec["id"], err.getvalue())
         ran += 1
         calls = rs.calls(log)
         for call in calls:
@@ -262,6 +267,7 @@ def test_branch_push_runs_what_the_audit_read(tmp_path, monkeypatch):
     # `git` is a stub here, so the runner's read of the checked-out branch is given its
     # answer: this test is about the calls the fence's own script makes.
     monkeypatch.setattr(fr, "checked_out_branch", lambda cwd, environ: "feat/REQ-901-x")
+    monkeypatch.setattr(fr, "sandboxed", lambda cwd, environ: None)
     rc = fr.run(rec["id"], ["--arg", "worktree=%s" % wc, "--arg", "branch=feat/REQ-901-x"],
                 root, environ=env, cwd=str(wc), err=err)
     assert rc == 0, err.getvalue()

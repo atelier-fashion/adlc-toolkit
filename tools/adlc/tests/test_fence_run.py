@@ -209,8 +209,9 @@ def test_runner_accepts_the_union_of_runner_routes(two, wc, monkeypatch, claude_
     # and goes on to its values.
     _fence, rec = fr.find(push, TOOLKIT)
     assert rec["route"] == "runner" and rec["push"] == fc.BRANCH_PUSH
+    # A missing value is the caller's to supply, not a refusal (BUG-287).
     rc, err = _run(push, [], wc)
-    assert rc == fr.REFUSED and "no value for worktree" in err, err
+    assert rc == fr.BAD_VALUE and "no value for worktree" in err, err
 
 
 def test_split_routes_are_named_when_none_is_runner(monkeypatch, tmp_path):
@@ -293,8 +294,16 @@ def test_branch_push_refuses_every_other_spelling(two, pushable, tmp_path, monke
     for argv in bad:
         rc, err = _run(push["id"], argv, work, environ=env, root=root)
         lines = err.splitlines()
-        assert rc == fr.REFUSED, (argv, rc, err)
-        assert len(lines) == 1 and lines[0].startswith("opaque_entry_refused: "), (argv, err)
+        # Nothing runs either way. A value of the wrong shape, or a worktree that is not the
+        # directory the runner was called from, is exit 65, which the caller corrects
+        # (BUG-287); a well-formed branch that is not the one checked out here is what the
+        # runner will not push, and stays a refusal.
+        assert rc in (fr.REFUSED, fr.BAD_VALUE), (argv, rc, err)
+        prefix = "opaque_entry_refused: " if rc == fr.REFUSED else "fence_run_bad_value: "
+        assert len(lines) == 1 and lines[0].startswith(prefix), (argv, err)
+        other_branch = any(a in ("branch=feat/REQ-901-other", "branch=feat/REQ-901-thing-2")
+                           for a in argv)
+        assert (rc == fr.REFUSED) == other_branch, (argv, rc, err)
     assert _heads(remote) == []
     rc, err = _run(push["id"], ["--arg", "worktree=%s" % work, "--arg",
                                 "branch=feat/REQ-901-thing"], work, environ=env, root=root)
@@ -571,7 +580,9 @@ def test_hostile_values_never_run_code(cached, wc, tmp_path):
                 value = raw.replace("{s}", sentinel)
                 rc, err = _run(rec["id"], _sample_argv(rec, wc, value, arg), wc, environ=env)
                 cases += 1
-                refused += rc == fr.REFUSED and "opaque_entry_refused" in err
+                # A hostile value fails its pattern, which is exit 65 since BUG-287: still
+                # nothing run, as the sentinel below shows.
+                refused += rc == fr.BAD_VALUE and "fence_run_bad_value" in err
     assert cases > 50 and refused > 0
     assert not os.path.exists(sentinel)
     for call in rs.calls(log):
@@ -681,7 +692,7 @@ def test_path_values_stay_in_the_working_copy_or_a_spec_dir(cached, wc, tmp_path
                                                  / "settings.json")):
         rc, err = _run(r2["id"], ["--arg", "state=%s" % bad, "--arg", "phase=1",
                                   "--arg", "attempt=1"], wc)
-        assert rc == fr.REFUSED and "outside the working directory" in err, (bad, err)
+        assert rc == fr.BAD_VALUE and "outside the working directory" in err, (bad, err)
     assert outside.read_text() == "{}\n"
     spec_dir = tmp_path / "primary" / ".adlc" / "specs" / "REQ-901-a-thing"
     spec_dir.mkdir(parents=True)
@@ -713,3 +724,140 @@ def test_push_args_reads_one_key_of_the_push_kind():
     assert fr.push_args(push, "head") == fr.head_args(push) == ("branch",)
     plain = next(r for r in records if r["route"] == "runner" and not r.get("push"))
     assert fr.push_args(plain, "same_dir") == fr.push_args(plain, "head") == ()
+
+
+# --------------------------------------------------------------------------- BUG-287
+# The first real pipeline run: a fence call chained after a command with no allow ran inside
+# Codex's sandbox, and a value of the wrong shape ended three launches as a refusal.
+
+@pytest.fixture
+def linked(tmp_path):
+    """A linked worktree on `feat/REQ-901-thing`, as the engine makes one: its git directory
+    is the main checkout's, outside the working copy. The origin is a local bare repo."""
+    remote = tmp_path / "origin.git"
+    _git("init", "-q", "--bare", str(remote))
+    main = tmp_path / "main"
+    _git("init", "-q", "-b", "main", str(main))
+    _git("-C", str(main), "commit", "-q", "--allow-empty", "-m", "a")
+    _git("-C", str(main), "remote", "add", "origin", str(remote))
+    work = main / ".worktrees" / "REQ-901"
+    _git("-C", str(main), "worktree", "add", "-q", "-b", "feat/REQ-901-thing", str(work))
+    _git("-C", str(work), "commit", "-q", "--allow-empty", "-m", "b")
+    return main, work, remote
+
+
+def test_bug287_no_sandbox_no_refusal(linked, tmp_path):
+    """The benign path: where the git directory is writable, inside the working copy, or
+    absent, the check says nothing and the call goes on."""
+    main, work, _remote = linked
+    env = _push_env()
+    assert fr.sandboxed(str(work), env) is None       # a linked worktree, writable
+    assert fr.sandboxed(str(main), env) is None       # the git directory is inside cwd
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert fr.sandboxed(str(plain), env) is None      # no repository at all
+
+
+def test_bug287_an_unwritable_git_dir_outside_the_working_copy_is_named(linked, monkeypatch):
+    main, work, _remote = linked
+    common = os.path.realpath(str(main / ".git"))
+    real = os.access
+    asked = []
+
+    def access(path, mode, **kw):
+        asked.append((os.path.realpath(path), mode))
+        if os.path.realpath(path) == common and mode == os.W_OK:
+            return False
+        return real(path, mode, **kw)
+
+    monkeypatch.setattr(os, "access", access)
+    why = fr.sandboxed(str(work), _push_env())
+    assert why and "inside the harness's sandbox" in why and "command of its own" in why
+    assert (common, os.W_OK) in asked
+    # The main checkout holds its own git directory: the same denial is never consulted.
+    del asked[:]
+    assert fr.sandboxed(str(main), _push_env()) is None and not asked
+
+
+def test_bug287_a_sandboxed_call_runs_nothing_and_says_how_to_rerun(two, linked, monkeypatch):
+    """Exit 69 and one `fence_run_sandboxed:` line, never `opaque_entry_refused:`: the prompt
+    tells a session to stop on a refusal and to rerun this."""
+    root, censuses = two
+    memo_census(monkeypatch)
+    _main, work, remote = linked
+    argv = ["--arg", "worktree=%s" % work, "--arg", "branch=feat/REQ-901-thing"]
+    monkeypatch.setattr(fr, "sandboxed", lambda cwd, environ: "it is sandboxed")
+    rc, err = _run(_push_fence(censuses)["id"], argv, work, environ=_push_env(), root=root)
+    assert rc == fr.SANDBOXED == 69, err
+    lines = err.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("fence_run_sandboxed: " + PUSH_KEY), err
+    assert "opaque_entry_refused" not in err
+    assert _heads(remote) == []
+    # A value of the wrong shape is reported first: there is nothing to rerun until it is right.
+    rc, err = _run(_push_fence(censuses)["id"], ["--arg", "worktree=%s" % work], work,
+                   environ=_push_env(), root=root)
+    assert rc == fr.BAD_VALUE and err.startswith("fence_run_bad_value: "), err
+    monkeypatch.undo()
+    memo_census(monkeypatch)
+    rc, err = _run(_push_fence(censuses)["id"], argv, work, environ=_push_env(), root=root)
+    assert rc == 0, err
+    assert _heads(remote) == ["refs/heads/feat/REQ-901-thing"]
+
+
+def _sandbox_exec_works():
+    if sys.platform != "darwin" or not os.path.exists("/usr/bin/sandbox-exec"):
+        return False
+    try:
+        return subprocess.run(["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)",
+                               "/usr/bin/true"], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=20).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@pytest.mark.skipif(not _sandbox_exec_works(), reason="needs macOS sandbox-exec")
+def test_bug287_a_real_sandbox_is_detected_through_the_cli(two, linked):
+    """The real thing, not a stand-in: `fence-run` run under a macOS sandbox that denies
+    writes to the main checkout's git directory, which is what Codex's `workspace-write`
+    does to a line it runs sandboxed. Exit 69, nothing pushed; the same line outside the
+    sandbox pushes."""
+    root, censuses = two
+    main, work, remote = linked
+    runner = os.path.join(root, "tools", "adlc", "fence-run")
+    call = [runner, "run", _push_fence(censuses)["id"], "--arg", "worktree=%s" % work,
+            "--arg", "branch=feat/REQ-901-thing"]
+    profile = '(version 1)(allow default)(deny file-write* (subpath "%s"))' \
+        % os.path.realpath(str(main / ".git"))
+    env = _push_env()
+    boxed = subprocess.run(["/usr/bin/sandbox-exec", "-p", profile] + call, cwd=str(work),
+                           env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True)
+    assert boxed.returncode == fr.SANDBOXED, (boxed.returncode, boxed.stderr)
+    assert boxed.stderr.startswith("fence_run_sandboxed: "), boxed.stderr
+    assert _heads(remote) == []
+    free = subprocess.run(call, cwd=str(work), env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, universal_newlines=True)
+    assert free.returncode == 0, free.stderr
+    assert _heads(remote) == ["refs/heads/feat/REQ-901-thing"]
+
+
+def test_bug287_a_wrong_shaped_value_is_not_a_refusal(cached, wc):
+    """Exit 65, one line naming the value, and the corrected call runs: a relative path where
+    the fence takes an absolute one ended a real run at Step 0."""
+    r1 = next(r for r in cached if r["id"].startswith("proceed/phases-telemetry.md#2:"))
+    state = os.path.join(str(wc), ".adlc", "specs", "REQ-901-a", "pipeline-state.json")
+    os.makedirs(os.path.dirname(state), exist_ok=True)
+    with open(state, "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    relative = os.path.relpath(state, str(wc))
+    rc, err = _run(r1["id"], ["--arg", "state=%s" % relative, "--arg", "phase=1",
+                              "--arg", "attempt=1"], wc)
+    assert rc == fr.BAD_VALUE == 65, err
+    lines = err.splitlines()
+    assert len(lines) == 1 and lines[0].startswith("fence_run_bad_value: " + r1["id"]), err
+    assert "value for state" in err and "correct that value and run the line again" in err
+    with open(state, encoding="utf-8") as fh:
+        assert fh.read() == "{}\n"                  # nothing ran
+    # What the runner will not run at all is still a refusal.
+    rc, err = _run("proceed/SKILL.md#999:deadbeef", [], wc)
+    assert rc == fr.REFUSED and err.startswith("opaque_entry_refused: "), err

@@ -241,6 +241,17 @@ Phase 1 re-measured this spec against `main` at `5025e40` (LESSON-751) and again
 | BR-14 "`adlc_lesson_check`" on `assumptions/*.md` | The check refuses a basename that is not `LESSON-<digits>-<slug>.md` | It runs on added lessons; an added assumption is gated by path and mode | `partials/lesson-check.md` |
 | AC-11 `bash tools/lint-skills/check.sh` | The lint is run by `sh` here | `sh tools/lint-skills/check.sh` | `.adlc/context/conventions.md` |
 
+## Amendment (2026-11-19, BUG-287)
+
+**What the first real pipeline run changed.** Six launches of one lite REQ on `codex-cli 0.166.0` against the mock forge (`.adlc/research/harness-probes/codex-exec-manual.md`).
+
+- **BR-6, BR-14: the prompt carries four more facts.** The forge repository of the primary repo (`owner/name`, from the origin the pre-flight already parsed); the primary path's `pipeline-state.json` as the value of a fence's `<state>`, beside the working copy's file the session writes itself; that an `--arg-file` lives inside the working copy and a fence call is a command of its own; and that timestamps come from `date`.
+- **BR-7, BR-13: the engine flips a PR to ready before it merges it.** BR-7 leaves "PR ready" to the session, and Phase 6's fence now does it. The close-out's chore PR has no fence of its own, and a session can leave either a draft, which a forge refuses to merge. So `adlc_forge_pr_ready` runs before each of the engine's two merges. It is not a one-way move, and its result is logged and not read.
+- **BR-22: the child's environment also carries `ADLC_RUN_OUTCOMES_LOG` and the `ADLC_FORGE_MOCK_*` settings,** on both adapters, so a session's telemetry fences write the log the engine writes, and a real harness can be run against the stateful mock.
+- **Operator verbs.** `reject` and `answer` take `--channel` before the REQ id; the reference wrote it after, which argparse does not read.
+
+Still open: no verb drops a `blocked` run, and REQ-659's own logged-in `claude` run is still owed.
+
 ## Amendment (2026-11-18)
 
 **BR-22, AC-33: the child's environment also carries `ADLC_EXEC_RUN_TAG`.** The orchestrator sets it beside `ADLC_EXEC_RUN`, to a digest of the run directory, and the straggler sweep matches both. The REQ id alone matched every process on the machine that carried it, so two projects with the same REQ number, or two orchestrators on one id, killed each other's harness processes. Found while REQ-662's tasks ran side by side. The tag is a digest because the run directory's path stays away from the model (AC-33).

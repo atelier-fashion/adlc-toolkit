@@ -282,7 +282,7 @@ exec:
   # CODEX_HOME is not passed: the trust grant and the policy file are written under
   # $HOME/.codex, so a run must read that config. A stored login lives under $HOME/.codex, which
   # HOME reaches, and no record shows exec reading an auth variable, so auth_env is absent.
-  env_passthrough: [HOME, PATH, ADLC_HOME, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK, SSH_AUTH_SOCK, GIT_SSH_COMMAND, XDG_CONFIG_HOME, TMPDIR, LANG, TERM]
+  env_passthrough: [HOME, PATH, ADLC_HOME, ADLC_RUN_OUTCOMES_LOG, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK, ADLC_FORGE_MOCK_STORE, ADLC_FORGE_MOCK_SCENARIO, ADLC_FORGE_MOCK_PROVIDER, SSH_AUTH_SOCK, GIT_SSH_COMMAND, XDG_CONFIG_HOME, TMPDIR, LANG, TERM]
   # Codex reads .codex/: a rule file there loads with no trust entry (measured 2026-11-18,
   # above), and the hooks file and the config once the folder is trusted (REQ-655). The engine
   # renders it whole or absent (ADR-4).

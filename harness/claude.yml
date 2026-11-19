@@ -200,7 +200,7 @@ exec:
     num_turns: num_turns
     cost: total_cost_usd
     denials: permission_denials
-  env_passthrough: [HOME, PATH, ADLC_HOME, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK, SSH_AUTH_SOCK, GIT_SSH_COMMAND, XDG_CONFIG_HOME, TMPDIR, LANG, TERM]
+  env_passthrough: [HOME, PATH, ADLC_HOME, ADLC_RUN_OUTCOMES_LOG, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK, ADLC_FORGE_MOCK_STORE, ADLC_FORGE_MOCK_SCENARIO, ADLC_FORGE_MOCK_PROVIDER, SSH_AUTH_SOCK, GIT_SSH_COMMAND, XDG_CONFIG_HOME, TMPDIR, LANG, TERM]
   # USER reaches the macOS keychain item a stored login lives in.
   auth_env: [ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, USER]
   # BR-25: the resumed close-out reads no working-copy settings, hooks or MCP servers.

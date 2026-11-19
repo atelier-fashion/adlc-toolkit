@@ -367,3 +367,42 @@ def test_adapter_contract_names_every_schema_2_key():
                  "adlc harness install --exec --harness <name>", "--allow-unverified",
                  "`harness/<name>/exec-fence-census.json`", "GIT_CONFIG_COUNT"):
         assert word in section, word
+
+
+# --------------------------------------------------------------------------- BUG-287
+def _documented_verb_lines():
+    """Every `sprint-exec <verb> …` line the exec reference shows a model, as argv."""
+    import shlex
+    text = read("sprint", "references", "exec-engine.md")
+    found = []
+    for match in re.finditer(r"sprint-exec ((?:approve|reject|answer|abort)\b[^`\n]*)", text):
+        found.append(shlex.split(match.group(1)))
+    return found
+
+
+def test_bug287_the_reference_s_operator_lines_parse():
+    """`reject '<REQ-id>' --channel skill '<reason>'` was the documented line, and argparse
+    does not read a positional that follows an option after the first positional: the reason
+    came back as `unrecognized arguments`. Every line the reference shows must parse, with its
+    reason or reply read as one."""
+    import sprint_exec as se
+    lines = _documented_verb_lines()
+    verbs = {argv[0] for argv in lines}
+    assert {"approve", "reject", "answer", "abort"} <= verbs, verbs
+    parser = se._parser()
+    for argv in lines:
+        args = parser.parse_args(argv)          # SystemExit(2) is the failure this guards
+        assert args.req == "<REQ-id>", argv
+        assert args.channel == "skill", argv
+        if argv[0] in ("reject", "answer"):
+            assert args.text in ("<reason>", "<reply>"), argv
+
+
+def test_bug287_the_old_line_is_the_one_that_fails():
+    """The contrast: the shape the reference used to show still does not parse, which is why
+    the reference says to keep `--channel` first."""
+    import pytest
+    import sprint_exec as se
+    with pytest.raises(SystemExit):
+        se._parser().parse_args(["reject", "REQ-901", "--channel", "skill", "not this sprint"])
+    assert "Keep `--channel` before the REQ id" in read("sprint", "references", "exec-engine.md")

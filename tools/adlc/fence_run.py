@@ -33,6 +33,10 @@ not loaded (ADR-5).
 Exit codes: a fence's own status is passed through. 3 is the runner's refusal, and every
 refusal is exactly one stderr line, ``opaque_entry_refused: <id>: <reason>``, with nothing run
 (BR-9). No refusal prints the fence's environment: it holds the run's scoped credential.
+Two more statuses also mean nothing ran, and are the caller's to put right, not refusals
+(BUG-287): 65 with one ``fence_run_bad_value:`` line for a value that failed its check, and 69
+with one ``fence_run_sandboxed:`` line for a call that finds itself inside a harness sandbox
+(:func:`sandboxed`).
 
 Standard library only.
 """
@@ -99,7 +103,7 @@ def runner_path(root):
 
 # --------------------------------------------------------------------------- show
 _STUB_NOTE = ("Replace each `'<…>'` with its value as one single-quoted literal, every `'` "
-              "in it written `'\\''`, or pass a file with `--arg-file NAME=PATH` (for a value "
+              "in it written `'\\''`, or pass a file inside your working copy with `--arg-file NAME=PATH` (for a value "
               "that holds a quote or a newline). The runner checks each value and binds it as "
               "data.")
 
@@ -377,13 +381,66 @@ def run_branch_refusal(branch, environ):
     return None
 
 
+#: Exit status of a call that found itself inside a harness sandbox (:func:`sandboxed`). It is
+#: not a refusal: nothing ran, and the same line run as a command of its own will. This and
+#: :data:`BAD_VALUE` sit above the statuses a fence's own commands return (`gh` uses 1, 2 and
+#: 4), and the stderr line is what names the case.
+SANDBOXED = 69
+#: Exit status of a call whose ``--arg`` or ``--arg-file`` value failed its check
+#: (:func:`parse_values`). Not a refusal either: nothing ran, and a corrected value is checked
+#: the same way.
+BAD_VALUE = 65
+
+
+def sandboxed(cwd, environ):
+    """Why this call cannot do a fence's work, or None.
+
+    A fence pushes, fetches, calls the forge and writes the primary repo path's state file,
+    all outside the working copy. On a harness whose sandbox contains every command no allow
+    matches (Codex), the runner's allow covers a call made as a command of its own; chained
+    after a command with no allow (``printf … > f && fence-run run …``), the whole line runs
+    inside the sandbox, and each fence then fails in its own way: a lane check that cannot
+    fetch reads as a check error and escalates the REQ. So the runner asks one thing first:
+    can it write the repository's git directory, which a linked worktree keeps outside the
+    working copy? ``os.access`` sees a sandbox's denial. A git directory inside the working
+    copy, or no repository at all, says nothing, and the call goes on."""
+    try:
+        res = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=cwd,
+                             env=git_env(environ), stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, universal_newlines=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = res.stdout.strip()
+    if res.returncode != 0 or not out:
+        return None
+    common = os.path.realpath(os.path.join(cwd, out))
+    here = os.path.realpath(cwd)
+    if common == here or common.startswith(here + os.sep) or not os.path.isdir(common):
+        return None
+    if os.access(common, os.W_OK):
+        return None
+    return ("this call cannot write the repository's git directory, so it is running inside "
+            "the harness's sandbox, as a call chained after another command does. Nothing "
+            "ran. Run this fence-run line again as a command of its own.")
+
+
 def run(fid, argv, root, environ=None, cwd=None, err=None):
     environ = dict(os.environ if environ is None else environ)
     cwd = cwd or os.getcwd()
     try:
         fence, rec = find(fid, root)
         placeholders = _placeholders_for(fence)
-        values = parse_values(argv, placeholders, cwd, same_dir_args(rec))
+        try:
+            values = parse_values(argv, placeholders, cwd, same_dir_args(rec))
+        except Refusal as exc:
+            # A value of the wrong shape is the caller's to correct, not an entry the runner
+            # refuses: a relative path where the fence takes an absolute one ended a real run
+            # at Step 0, because a refusal is where the pipeline stops. Nothing has run, and
+            # the same checks meet the corrected value.
+            (err or sys.stderr).write(
+                "fence_run_bad_value: %s: %s. Nothing ran: correct that value and run the "
+                "line again.\n" % (fid, exc.reason))
+            return BAD_VALUE
         for name in head_args(rec):
             head = checked_out_branch(cwd, environ)
             if values.get(name) != [head]:
@@ -397,6 +454,10 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
         return refuse(exc.subject or fid, exc.reason, err)
     except fc.Unroutable as exc:
         return refuse(fid, str(exc), err)
+    why = sandboxed(cwd, environ)
+    if why:
+        (err or sys.stderr).write("fence_run_sandboxed: %s: %s\n" % (fid, why))
+        return SANDBOXED
     env = child_env(environ, placeholders, values, root)
     proc = subprocess.run(["/bin/sh", "-c", script], cwd=cwd, env=env)
     return proc.returncode

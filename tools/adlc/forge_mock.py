@@ -355,6 +355,10 @@ def op_pr_merge(argv):
                     "mock: head branch was modified; review and try the merge again")
     if pr.get("state") != "OPEN":
         return _err("merge-blocked-by-policy", "mock: PR is %s" % pr.get("state"))
+    if pr.get("isDraft"):
+        # As GitHub does ("Pull Request is still a draft"). The mock used to merge one, which
+        # is how a pipeline that never flipped its PR to ready passed every test (BUG-287).
+        return _err("merge-blocked-by-policy", "mock: Pull Request is still a draft")
     oid, why = _squash(pr)
     if oid is None:
         return _err("merge-blocked-by-policy", "mock: %s" % why)

@@ -778,7 +778,15 @@ executable:
   bare `#`, so a bare id ran the runner inside the sandbox (measured on codex-cli 0.166.0,
   2026-11-18).
 - Exit codes: a fence's own status is passed through; **3** is the runner's refusal, always one
-  stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run.
+  stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run. Two more statuses mean
+  nothing ran and the caller can put it right (BUG-287). **65**, with one
+  `fence_run_bad_value:` line, is a value of the wrong shape: a relative path where the fence
+  takes an absolute one, an `--arg-file` outside the working copy, a name the fence does not
+  take. **69**, with one `fence_run_sandboxed:` line, is a call that cannot write the
+  repository's git directory, which on Codex means it was chained after a command with no
+  allow and the whole line ran inside the sandbox: run it again as a command of its own. The
+  check is skipped where the git directory is inside the working copy. Both numbers sit above
+  what a fence's own commands return, and the stderr line is what names the case.
 - **Its git environment.** No caller `GIT_*` variable reaches a fence, so neither does a
   caller's `GIT_SSH_COMMAND`, and every git call it makes is pinned to `core.fsmonitor=false`
   and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT`, over the repository's own config.

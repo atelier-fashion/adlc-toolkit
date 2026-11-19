@@ -371,3 +371,74 @@ def test_unrouted_fence_refuses_the_build_on_a_matcher_none_adapter(install):
     assert exc.value.fence_id.startswith("proceed/phase-4-implementation.md#%d:" % (base + 1))
     assert exc.value.statement.startswith("scp ")
     assert str(exc.value).startswith("exec_prompt_refused: ")
+
+
+# --------------------------------------------------------------------------- BUG-287
+# What the first real pipeline run showed the prompt left unsaid.
+
+STATE = "/abs/repo/.adlc/specs/REQ-901-thing/pipeline-state.json"
+
+
+def _bug287(forge_repo="acme/widgets", state=STATE, answer=None):
+    return ep.pipeline_prompt(TOOLKIT, TOOLKIT, REQ, BRANCH, "/abs/repo", WT, answer=answer,
+                              forge_repo=forge_repo, state=state).decode("utf-8")
+
+
+def test_bug287_prompt_names_the_forge_repository():
+    """Run 1 ended at Step 0: the draft-PR fence takes `<owner/repo>` and nothing named it."""
+    text = _bug287()
+    assert "The forge repository of this run's primary repo is `acme/widgets`." in text
+    assert "wherever a fence or the text asks for `<owner/repo>`" in text
+    # A relaunch carries it too: an answered run opens its PR-facing fences again.
+    assert "primary repo is `acme/widgets`" in _bug287(answer="carry on")
+
+
+@pytest.mark.parametrize("slug", [None, "", "widgets", "acme/wid gets", "acme/widgets/extra",
+                                  "acme/`rm -rf`", "a" * 101 + "/b"])
+def test_bug287_a_slug_the_runner_would_refuse_is_left_out(slug):
+    """Only an `owner/name` the fence runner accepts is printed; with none the bytes are as
+    before, and the session resolves the repository itself."""
+    text = _bug287(forge_repo=slug)
+    assert "The forge repository of this run" not in text
+
+
+def test_bug287_prompt_says_which_state_file_a_fence_takes():
+    """Run 1: two fences wrote the working copy's file and a third looked for the primary's."""
+    text = _bug287()
+    assert "Wherever a fence takes `<state>`, pass `%s`" % STATE in text
+    assert "Your own reads and writes of `pipeline-state.json` use the copy inside your " \
+           "working copy" in text
+    assert "Wherever a fence takes `<state>`" not in _bug287(state=None)
+
+
+def test_bug287_prompt_says_how_to_call_the_runner():
+    """Runs 2 to 4: a body file under /tmp, calls chained into the sandbox, a relative path."""
+    text = pipeline().decode("utf-8")
+    assert "the runner reads only a file inside your working copy" in text
+    assert "Run each such call as a command of its own, never chained after another command" \
+        in text
+    assert "Exit 69 with a `fence_run_sandboxed:` line" in text
+    assert "if it answers the same way a second time, report the line and stop" in text
+    assert "Exit 65 with a `fence_run_bad_value:` line" in text
+    assert "Only exit 3 with an `opaque_entry_refused:` line is a refusal" in text
+    # The same constraint sits beside every stub the runner prints.
+    assert "pass a file inside your working copy with `--arg-file NAME=PATH`" in text
+    # The numbers the prompt prints are the runner's, and none is one `gh` returns.
+    assert (fr.REFUSED, fr.BAD_VALUE, fr.SANDBOXED) == (3, 65, 69)
+
+
+def test_bug287_prompt_tells_the_session_to_read_the_clock():
+    """Run 5: every timestamp was `T00:00:00Z`, and the merged line reported 79,318 s."""
+    for text in (pipeline().decode("utf-8"), _bug287()):
+        assert "You have no clock." in text
+        assert "`date -u +%Y-%m-%dT%H:%M:%SZ`" in text
+
+
+@pytest.mark.parametrize("slug", ["acme/wrapup-bot", "acme/pr-ready-bot"])
+def test_bug287_a_slug_the_prompt_scan_refuses_is_left_out_not_fatal(slug):
+    """Found in review: the scan matches substrings, so a repository whose name holds a
+    refused token would have refused the whole launch. The note is dropped instead."""
+    assert ep.scan(ep._FORGE_REPO_NOTE.replace("{forge_repo}", slug))
+    text = _bug287(forge_repo=slug)            # builds: no PromptRefused
+    assert "The forge repository of this run" not in text
+    assert "Wherever a fence takes `<state>`" in text

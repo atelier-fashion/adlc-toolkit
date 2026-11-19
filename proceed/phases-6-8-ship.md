@@ -45,9 +45,9 @@ forced-lite REQ in a solo run, is legitimate halt #4).
    tmp=$(mktemp "${TMPDIR:-/tmp}/prbody.XXXXXX"); trap 'rm -f "$tmp"' EXIT
    fp=$(adlc_forge_pr_view "$prNumber" --json body -q .body 2>/dev/null | sed -n "/^${tick}adlc-footprint/,/^${tick}/{ /^${tick}/d; p; }")
    { printf '%s\n' "$NEW_BODY"; [ -n "$fp" ] && printf '\n%sadlc-footprint\n%s\n%s\n' "$tick" "$fp" "$tick"; } > "$tmp"
-   adlc_forge_pr_edit "$prNumber" --body-file "$tmp" --title "$FINAL_TITLE"
+   adlc_forge_pr_edit "$prNumber" --body-file "$tmp" --title "$FINAL_TITLE" && adlc_forge_pr_ready "$prNumber"
    ```
-   `$NEW_BODY` is the template below; `$FINAL_TITLE` drops the `[WIP]` prefix. In cross-repo mode, ready the primary repo's PR **last** so its body can link to all sibling PRs.
+   `$NEW_BODY` is the template below; `$FINAL_TITLE` drops the `[WIP]` prefix. The fence's last line flips the PR to ready once the edit has succeeded (`&&`, so a failed edit is still the fence's status), which is a no-op on a PR that already is ready: under `/sprint --exec` the fence runner runs this fence and nothing else can call the forge, so without that line the PR reached the merge gate as a draft, which a forge refuses to merge (BUG-287). In cross-repo mode, ready the primary repo's PR **last** so its body can link to all sibling PRs.
    - **Title (per repo)**: Short description referencing the REQ, tagged with the repo id when cross-repo (e.g., `feat(api): new endpoint [REQ-023]`).
    - **Body (per repo)**:
      ```

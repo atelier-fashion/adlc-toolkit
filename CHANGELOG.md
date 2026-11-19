@@ -657,6 +657,28 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`/sprint --exec` gets a real session to the merge gate, and to a merge a forge accepts
+  (BUG-287).** The first whole pipeline run on a real harness (`codex-cli 0.166.0`, six
+  launches of one lite REQ against the mock forge) ended before the gate four times and then
+  merged two draft PRs. Now:
+  - the prompt names the forge repository of the primary repo, which copy of
+    `pipeline-state.json` a fence's `<state>` is, and where an `--arg-file` may live, and it
+    tells the session to read the time from `date`;
+  - `fence-run` answers a value of the wrong shape with exit 65 and `fence_run_bad_value:`,
+    which the session corrects, where it used to refuse and end the run;
+  - `fence-run` answers exit 69 and `fence_run_sandboxed:` when it cannot write the
+    repository's git directory. On Codex a call chained after a command with no allow runs
+    inside the sandbox, where a lane check that cannot fetch read as a check error and
+    escalated the REQ;
+  - Phase 6's fence flips the PR to ready, and the engine flips each PR to ready just before
+    it merges it. Under `--exec` nothing else could, and a forge refuses to merge a draft;
+  - `sprint/references/exec-engine.md` writes `reject` and `answer` with `--channel` before
+    the REQ id. As written they failed to parse;
+  - `ADLC_RUN_OUTCOMES_LOG` and the `ADLC_FORGE_MOCK_*` settings reach the session, on both
+    exec adapters.
+
+  Not changed: no operator verb drops a `blocked` run, the lane check errors on a
+  single-branch clone, and no real forge has been run against.
 - **`shell-timeout` measures the sleep (BUG-286).** The probe row passed on a sentinel
   alone, which a model that dropped the sleep also writes, and it read `fail` for a command
   that never ran or that the harness refused. The ask now stamps a start marker before the
