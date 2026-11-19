@@ -124,6 +124,47 @@ is cut per `RELEASING.md`.
   calls meet (`--allowedTools` in an untrusted workspace, deny over allow, a fence against the
   allow set, a resume that continues a conversation) is unverified. The workflow and legacy
   engines are unchanged.
+- **The `/sprint` exec engine on Codex CLI (REQ-662, stage 1).** `adlc sprint-exec run
+  --harness codex` launches one headless `codex exec --json --sandbox workspace-write -C
+  <worktree> -o <file>` per REQ, prompt on stdin, under REQ-659's approval protocol. The
+  adapter is the `exec:` block of `harness/codex.yml`, `verified` at `codex-cli 0.166.0` on
+  the probe result run at `2026-11-17T23:49:29Z`, with the real launches and resumes of
+  2026-11-18 recorded in `.adlc/research/harness-probes/codex-exec-manual.md`. The exec block
+  is now schema 2: every difference between harnesses is a key of it (rules as flags or as
+  files, one JSON result or a JSONL stream, a resume template), and `harness/claude.yml`'s
+  block is migrated with no change in behaviour. Three modules are new. `exec_verify.py`
+  recomputes each adapter's probe verdict from the result file in the toolkit install at
+  launch, resume, close-out and `approve`, and `adlc harness doctor` prints it.
+  `exec_trust.py` writes a `[projects."<working copy>"]` entry into `~/.codex/config.toml`
+  before each launch and removes exactly that block afterwards, because `codex exec`
+  otherwise writes a lasting entry for the main repository by itself. `exec_surfaces.py`
+  renders the working copy's `.codex/` whole before every launch and resume, checks it again
+  when the harness exits, where a change blocks the run, and scans the user and working-copy configs for keys that relax
+  the sandbox. `adlc harness install --exec --harness codex` writes
+  `~/.codex/rules/adlc-exec.rules`, the deny tier only, which persists across runs and
+  projects and applies to your own Codex sessions too. `--allow-unverified` launches an
+  unverified adapter, from the command line only and never for `approve`. A halt-time gate
+  refuses `approve` when the PR touches an engine-rendered path, and a launch from inside a
+  run is refused by process ancestry as well as by `ADLC_EXEC_RUN`. To hide an untracked
+  render through a per-worktree `core.excludesFile`, the pre-flight sets
+  `extensions.worktreeConfig = true` in the project's repository when it is absent, says so,
+  and leaves it set. Each exec-capable adapter
+  has its own fence census: on Codex no fence routes `direct`, and the Step 0 branch push runs
+  through `fence-run`, which pushes only the branch checked out in the calling directory for
+  the run's own REQ. The runner line quotes its fence id, because Codex matches no prefix rule
+  against a command with a bare `#`. Two lints are new: `exec-no-bypass` and
+  `exit-class-vocabulary`. **Declared residual:** on Codex an allowed command runs outside the
+  sandbox, so an exec-scope routine allow that executes its arguments (`npx`, `npm run`,
+  `gh api`) reaches your filesystem and network, as it does on Claude, where there is no
+  sandbox. The approval halt is the gate. Keeping the routine commands that need no escape
+  inside the sandbox is an input to a follow-up requirement. Copilot CLI, Cursor and
+  Antigravity CLI are later stages of REQ-662 and are still refused by name. The review of
+  2026-11-18 added: the loader refuses `trust_grant: user-config-entry` for a user config in a
+  format the trust entry is not spelled for, `sandbox_permissions` is a bypass key in both
+  Codex configs, and the refusal of a harness with no exec block says which harnesses are
+  staged. The README's Codex section now also declares that your own Codex rules and config
+  reach every exec run, that a process which detaches escapes the nested-run checks while
+  `answer` takes no token, and how the close-out carries `pipeline-state.json` on Codex.
 - **`install.sh --migrate-home` and `--back` (REQ-663).** P7b of the multi-harness plan: the
   opt-in move of the toolkit's machine state out of `~/.claude`, and its exact reverse. A
   plain install never migrates. Stage then flip, inside both homes' allocation locks, with

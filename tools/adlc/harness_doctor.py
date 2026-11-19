@@ -20,6 +20,10 @@ Results are ``(status, detail, remediation)`` with status ``PASS`` / ``FAIL`` /
 ``SKIP``; ``checks.py`` turns them into its ``Result``. Every FAIL carries a
 remediation that, run verbatim, fixes it (REQ-519 BR-5, LESSON-572). An absent
 binary SKIPs, never FAILs (REQ-654 BR-9). Read-only and pure standard library.
+
+:func:`exec_line` is ``adlc harness doctor``'s ``exec: verified`` / ``exec: unverified
+(<ids>)`` for an installed harness with an exec block (REQ-662 BR-14): the engine's own
+``exec_verify.verdict``, never the yml ``status``, and report-only.
 """
 
 import os
@@ -207,6 +211,32 @@ def deny_under_allow_status(adapter, result):
         problem = hr.probe_record_problem(shape, rec, result)
         out.append((shape, "unverified", problem) if problem else (shape, "pass", ""))
     return out
+
+
+def installed_version(adapter):
+    """The installed binary's version, as ``adlc harness detect`` reports it for a detect
+    name and from a PATH lookup of ``binary`` for a fixture adapter, or ``None`` when the
+    binary is absent. Mirrors :func:`binary_present`."""
+    import harness
+    if adapter["name"] in ha.detect_table():
+        found = harness.probe(adapter["name"])
+        return found.version if found.state == "present" else None
+    path = shutil.which(adapter["binary"])
+    return harness._version(path) if path else None
+
+
+def exec_line(adapter, toolkit):
+    """``exec: verified`` or ``exec: unverified (<ids>)`` (REQ-662 BR-14), recomputed by
+    ``exec_verify.verdict`` over ToolkitRoot's result file and the installed version. A
+    ``status: verified`` the verdict contradicts reads ``unverified``. ``None`` when the
+    adapter has no exec block or its binary is absent."""
+    import exec_verify as ev
+    if "exec_schema_version" not in (adapter.get("exec") or {}):
+        return None
+    version = installed_version(adapter)
+    if version is None:
+        return None
+    return ev.verdict(adapter, ev.read_result(adapter, toolkit), version).doctor_line()
 
 
 def _deny_under_allow_detail(adapter, toolkit):

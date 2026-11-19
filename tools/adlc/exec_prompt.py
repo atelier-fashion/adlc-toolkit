@@ -410,24 +410,49 @@ def _runner(toolkit):
     return os.path.join(os.path.realpath(toolkit), "tools", "adlc", "fence-run")
 
 
-def route_fences(toolkit, parts):
+#: REQ-662 ADR-9: where the Step 0 branch push takes the runner route (a harness whose rules
+#: have no exact form), this one sentence follows that fence's runner line. It is placed by
+#: :func:`rewrite`, so it lands exactly once or the build stops.
+RUNNER_PUSH_NOTE = ("A plain `git push` is refused on this harness, so the fence runner makes "
+                    "this one push: re-run this line, with the same values, whenever you need "
+                    "to push this branch.")
+
+
+def _push_note(text, rel, view, rec, root):
+    """``text`` with :data:`RUNNER_PUSH_NOTE` under the runner line of the branch-push fence
+    ``rec``, anchored on that line and its closing fence, matched exactly once."""
+    import fence_census as fc
+    import fence_run as fr
+    fence = next((f for f in fc.fences(view, rel) if f.id == rec["id"]), None)
+    if fence is None:
+        raise PromptBuildError("%s: the branch push fence %s is not in the view"
+                               % (rel, rec["id"]))
+    call = fr.runner_call(rec, root, fr._placeholders_for(fence))
+    old = "%s%s\n%s```\n" % (fence.indent, call, fence.indent)
+    return rewrite(text, rel, ((old, old + fence.indent + RUNNER_PUSH_NOTE + "\n"),))
+
+
+def route_fences(toolkit, parts, adapter=None):
     """``parts`` (``(rel, view)`` pairs) with every fence in its route's form (REQ-682).
 
-    The census is computed once, from the toolkit, over the same views. A fence with no
-    route raises :class:`ExecPromptRefused`, naming it and the first statement no allow
-    admits, before any byte reaches a model (BR-8).
+    The census is ``adapter``'s, computed once, from the toolkit, over the same views
+    (REQ-662 ADR-8). With no adapter it is the merge over every exec-capable adapter, which
+    routes a fence ``runner`` wherever any adapter does. A fence with no route raises
+    :class:`ExecPromptRefused`, naming it and the first statement no allow admits, before any
+    byte reaches a model (BR-8). With an adapter, a branch-push fence routed ``runner`` gains
+    :data:`RUNNER_PUSH_NOTE` (REQ-662 ADR-9).
     """
     import fence_census as fc
     import fence_run as fr
     try:
-        records = fc.census(toolkit)
+        records = fc.census(toolkit, adapter)
     except fc.CensusError as exc:
         raise PromptBuildError(str(exc))
     root = os.path.realpath(toolkit)
     out = []
     for rel, text in parts:
         try:
-            out.append(fr.rewrite_text(text, rel, records, root))
+            routed = fr.rewrite_text(text, rel, records, root)
         except fc.CensusError as exc:
             bad = [r for r in records if r["route"] == "unrouted" and
                    r["id"].startswith(rel + "#")]
@@ -436,6 +461,12 @@ def route_fences(toolkit, parts):
             refused = bad[0].get("refused") or []
             raise ExecPromptRefused(bad[0]["id"], refused[0] if refused else None,
                                     bad[0]["reason"])
+        if adapter is not None:
+            for rec in records:
+                if rec["route"] == "runner" and rec.get("push") == fc.BRANCH_PUSH and \
+                        rec["id"].startswith(rel + "#"):
+                    routed = _push_note(routed, rel, text, rec, root)
+        out.append(routed)
     return out
 
 
@@ -472,11 +503,15 @@ def _finish(text, kind, extra_tokens=()):
     return text.encode("utf-8")
 
 
-def pipeline_prompt(toolkit, primary, req, branch, repo_path, worktree, answer=None):
-    """The exact bytes of a first launch, or of an ``answer`` relaunch (BR-6, BR-14)."""
+def pipeline_prompt(toolkit, primary, req, branch, repo_path, worktree, answer=None,
+                    adapter=None):
+    """The exact bytes of a first launch, or of an ``answer`` relaunch (BR-6, BR-14).
+
+    ``adapter`` is the run's ``ExecAdapter``: its census routes the fences (REQ-662 ADR-8).
+    Without one the fences take the merge over every exec-capable adapter."""
     views = [("proceed/SKILL.md", _proceed_body(toolkit))]
     views += [(rel, _companion(toolkit, rel)) for rel in PIPELINE_SOURCES]
-    routed = route_fences(toolkit, views)
+    routed = route_fences(toolkit, views, adapter)
     parts = [ethos_text(toolkit, primary), routed[0]]
     for (rel, _view), text in zip(views[1:], routed[1:]):
         parts.append("<!-- %s -->\n%s" % (rel, text))
@@ -553,15 +588,32 @@ def closeout_view(toolkit):
     return re.sub(r"\n#* ?### Step [2678]\b", "\n", body)
 
 
-def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command=""):
-    """The resumed close-out's bytes, built by section (BR-14)."""
-    body = route_fences(toolkit, [("wrapup/SKILL.md", closeout_view(toolkit))])[0]
+#: The note a close-out prompt opens with on a harness that cannot add the primary repo's spec
+#: directory (REQ-662 ADR-7): the state file the session writes in its place. The first line
+#: names the file, alone, so it reads as one path.
+STATE_FILE_NOTE = (
+    "STATE FILE (mandatory): %s\n\nOn this harness the session cannot write outside its "
+    "working copy. Wherever the instructions below name the primary repo path's "
+    "`pipeline-state.json`, read and write the STATE FILE above instead: the orchestrator "
+    "copied it there from the primary repo path and carries your changes back when the session "
+    "ends. Never commit it.\n\n")
+
+
+def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command="", adapter=None,
+                    state_file=None):
+    """The resumed close-out's bytes, built by section (BR-14). ``adapter`` as for
+    :func:`pipeline_prompt`. ``state_file`` is the close-out working copy's copy of the primary
+    repo path's ``pipeline-state.json``, on a harness with no second writable directory: the
+    prompt then opens with :data:`STATE_FILE_NOTE`. Without it the bytes are as before."""
+    body = route_fences(toolkit, [("wrapup/SKILL.md", closeout_view(toolkit))], adapter)[0]
     head = ("WORKTREE PATH (mandatory): %s\n\nYou are resuming this REQ's own session. Run "
             "the close-out mode below for %s (the argument carries `--close-out`), in that "
             "worktree, on branch `%s`, which the orchestrator created from the integration "
             "branch. It is unattended: no operator is present. You never merge. A fence shown "
             "as a `%s run <id>` call runs only that way, as earlier in this session.\n\n"
             % (worktree, req, branch, _runner(toolkit)))
+    if state_file:
+        head = STATE_FILE_NOTE % state_file + head
     tail = "\n--- RUN EVIDENCE ---\n%s\n--- END RUN EVIDENCE ---\n" % evidence
     tokens = (deploy_command,) if deploy_command else ()
     return _finish(head + body + tail, "close-out", tokens)

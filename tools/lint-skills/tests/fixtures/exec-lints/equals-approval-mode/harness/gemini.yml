@@ -1,0 +1,15 @@
+# exec-lints fixture (REQ-662 TASK-257): an =-spelled violation, --approval-mode=yolo
+# Only the exec keys the lints read; the loader's schema is not under test here.
+name: gemini
+exec:
+  exec_schema_version: 2
+  launch: [--output-format, json, --approval-mode=yolo]
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+    - --approval-mode yolo
+  exit_codes: {"0": ok, "1": error}

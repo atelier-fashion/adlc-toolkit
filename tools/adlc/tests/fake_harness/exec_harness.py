@@ -1,20 +1,107 @@
 #!/usr/bin/env python3
-"""A headless harness the exec engine can launch (REQ-659 BR-18).
+"""A headless harness the exec engine can launch (REQ-659 BR-18, REQ-662 ADR-10).
 
 Stands in for the adapter's binary on PATH. It reads `$HOME/.exec-scenario.json`, because
 the engine hands a child only the adapter's variables, and acts out a run: commit, push,
-open a PR, write `pipeline-state.json`, print a JSON result. Each scenario key changes one
-behaviour, so a fixture states what a misbehaving model does and nothing else.
+open a PR, write `pipeline-state.json`, print the harness's output. Each scenario key changes
+one behaviour, so a fixture states what a misbehaving model does and nothing else.
+
+Its profile is chosen by the name it is installed under, which the wrapper passes in
+``EXEC_FAKE_AS`` (``${0##*/}``; ``claude`` when unset):
+
+* ``claude``: ``-p --output-format json``, one JSON result object on stdout, ``--resume <id>``.
+* ``jsonl`` (installed as ``codex``, or as the Codex-shaped fixture's ``fake-exec-file``):
+  ``exec [--json] --sandbox <mode> -C <dir> -o <file> [-]`` and
+  ``exec resume [--json] -o <file> <session id> [-]``. Under ``--json`` it prints JSONL events
+  (``thread.started``, an ``item.completed`` per command it ran, ``turn.completed``) in the
+  shape the probe double prints for codex (``fake_harness_impl.emit``; a test holds the two
+  equal); without ``--json`` the final message is plain text on stdout and the session id goes
+  to stderr, as the real CLI does (LESSON-869). The last message goes to the ``-o`` file. An
+  option it does not know is a usage error, exit 2, unless the scenario's ``unknown_flags`` is
+  ``record``: then it and everything after it are recorded and ignored.
+
+``--version`` prints the scenario's ``version``, or, without one, the ``exec.harness_version``
+of ``harness/<installed name>.yml`` under the scenario's toolkit: the adapter's declared version,
+so the engine's version check (REQ-662 BR-11) passes unless a test sets another.
+
+Both profiles read the whole prompt from stdin, and fail loudly (exit 86 and
+``$HOME/exec-fake-forbidden-<REQ>.txt``) when the argv holds any spelling in the scenario's
+``forbidden`` list, matched token by token as a CLI parses it.
+
+Scenario keys per REQ, besides REQ-659's: ``stderr`` (text written to stderr at exit),
+``commands`` (shell commands run in the working copy mid-run; the jsonl profile reports each
+as a ``command_execution`` item), and for the jsonl profile ``refused`` (commands the harness
+refuses: its rejection line on stderr and no item), ``stream`` (``no-terminal``: no
+``turn.completed``; ``cut``: the last line cut short with no newline; ``not-json``: plain
+text) and ``no_last_message`` (no ``-o`` file).
+
+The config-surface keys (REQ-662 BR-15, both profiles): ``saw`` (paths, relative to the working
+copy or absolute, whose content this launch records as it finds them on starting, in
+``$HOME/saw-<REQ>.jsonl``, one line per launch, the close-out's included), ``surface_writes``
+(path to text, written whole after the last state write: a model editing a config surface, a
+rule file, a hook file or the user policy folder mid-run, after its commit) and ``add`` (the
+paths the commit stages, in place of ``git add -A``: a model that stages only its own files).
+Under ``closeout`` the same ``saw``, ``add`` and ``surface_writes`` keys apply to the resumed
+session, ``surface_writes`` after its state write.
+
+The nested-launch key (REQ-662 BR-18, both profiles): ``nested`` (argv lists, each run after
+``sprint-exec`` through the engine's own entry point under the scenario's toolkit, from the
+working copy, with ``ADLC_EXEC_RUN`` and its tag scrubbed from the environment: a model starting
+a nested run, resume or dispatch). Each attempt's argv, pid, exit code and output go to
+``$HOME/nested-<REQ>.jsonl``; the launch then carries on to the gate. Under ``closeout`` the
+resumed session runs its own ``nested`` the same way.
+
+Under ``closeout``, ``stream`` and ``no_last_message`` shape the resumed session's output as
+they shape a launch's (REQ-662 BR-6).
+
+The trust key (REQ-662 BR-5, the jsonl profile): ``trust_itself`` (the user config, relative to
+``$HOME`` or absolute). As ``codex exec`` does (``codex-exec-manual.md``, fact 2), a launch that no
+``[projects."<p>"] trust_level = "trusted"`` entry covers, neither for its working directory (or
+a directory above it) nor for the main repository's root, appends one for the main
+repository's root to that file and leaves it there. A resume adds nothing.
+
+Two timing keys: ``wait_for`` (a path the launch waits for, mid-run, before its commit, up to two
+minutes: a run kept at work until a test lets it go) and ``late_commands`` (shell commands run
+in the working copy after the last state write, as ``surface_writes`` is: a model that puts a
+file back after its commit).
+
+A resume (REQ-662 BR-7, both profiles) must carry the session id this fake last printed for the
+REQ (each is kept in ``$HOME/sessions-<REQ>.txt``): any other fails loudly, as a forbidden flag
+does (exit 87 and ``$HOME/exec-fake-session-<REQ>.txt``). The close-out writes its terminal
+record where its prompt says: the file a ``STATE FILE (mandatory):`` line names, on a harness
+that cannot add the primary repo's spec directory (REQ-662 ADR-7), else the primary repo path's
+``pipeline-state.json``. Under ``closeout``, ``state_extra`` is merged into the record it writes
+(a model setting ``status``, ``approval`` or ``exec`` there), and ``state_text`` is written in
+place of the record.
 """
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 
 HOME = os.environ["HOME"]
 REQ = os.environ.get("ADLC_EXEC_RUN", "")
+#: The profile each installed name speaks.
+PROFILES = {"claude": "claude", "codex": "jsonl", "fake-exec-file": "jsonl"}
+#: What this launch is: the profile, its parsed options, the commands it ran.
+RUN = {"profile": "claude", "opts": {}, "records": []}
+#: codex-cli 0.166.0's line for a command a `forbidden` rule rejects (BUG-282), as the probe
+#: double prints it.
+REJECTED = ("ERROR codex_core::tools::router: error=exec_command failed: CreateProcess "
+            "{ message: \"Rejected(\\\"`/bin/zsh -lc '%s'` rejected: policy forbids commands "
+            "starting with `%s`\\\")\" }\n")
+#: The jsonl profile's options that take a value, by the key its parse records each under;
+#: ``--json`` is its one boolean. ``exec resume`` takes no ``--sandbox`` and no ``-C``
+#: (REQ-662 ADR-7).
+JSONL_VALUE = {"--sandbox": "sandbox", "-C": "cd", "-o": "last", "--model": "model",
+               "-m": "model"}
+JSONL_RESUME_REFUSES = ("--sandbox", "-C")
+#: The close-out prompt's line naming the state file it writes in place of the primary's
+#: (``exec_prompt.STATE_FILE_NOTE``), read as a model reads it.
+STATE_FILE_RE = re.compile(r"^STATE FILE \(mandatory\): (.+)$", re.M)
 
 
 def scenario():
@@ -39,14 +126,175 @@ def forge(top, *args):
               env=env)
 
 
+def issued(sid):
+    """Keep ``sid``, a session id this launch printed, for a later resume to be checked by."""
+    with open(os.path.join(HOME, "sessions-%s.txt" % REQ), "a", encoding="utf-8") as fh:
+        fh.write(sid + "\n")
+
+
+def check_session(session):
+    """A resume must carry the session id this fake last printed for the REQ (REQ-662 BR-7)."""
+    try:
+        with open(os.path.join(HOME, "sessions-%s.txt" % REQ), encoding="utf-8") as fh:
+            last = fh.read().splitlines()[-1:]
+    except OSError:
+        last = []
+    if [session] == last:
+        return
+    with open(os.path.join(HOME, "exec-fake-session-%s.txt" % REQ), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"resumed": session, "issued": last}) + "\n")
+    sys.stderr.write("EXEC FAKE: resumed with session %r, but the last one printed is %r\n"
+                     % (session, last))
+    raise SystemExit(87)
+
+
 def result(text, spec, sid="session-%s" % REQ):
-    doc = {"type": "result", "session_id": spec.get("sid", sid), "is_error": False, "num_turns": 7,
-           "result": text, "total_cost_usd": 0, "permission_denials": spec.get("denials", [])}
-    if spec.get("no_session"):
-        doc.pop("session_id")
-    if spec.get("is_error"):
-        doc["is_error"] = True
-    print(json.dumps(doc))
+    """The harness's output for this launch, in its profile's format, then any scripted
+    stderr."""
+    if RUN["profile"] == "jsonl":
+        jsonl_result(text, spec, spec.get("sid", sid))
+    else:
+        doc = {"type": "result", "session_id": spec.get("sid", sid), "is_error": False,
+               "num_turns": 7, "result": text, "total_cost_usd": 0,
+               "permission_denials": spec.get("denials", [])}
+        if spec.get("no_session"):
+            doc.pop("session_id")
+        else:
+            issued(doc["session_id"])
+        if spec.get("is_error"):
+            doc["is_error"] = True
+        print(json.dumps(doc))
+    if spec.get("stderr"):
+        sys.stderr.write(spec["stderr"])
+    sys.stdout.flush()
+
+
+def jsonl_result(text, spec, sid):
+    """codex exec's output: JSONL events on stdout under --json, plain text without it, and
+    the last message in the -o file."""
+    opts = RUN["opts"]
+    for command in spec.get("refused", []):
+        sys.stderr.write(REJECTED % (command, command))
+    if not opts.get("json"):
+        print(text)
+        sys.stderr.write("session id: %s\n" % sid)
+        issued(sid)
+        for rec in RUN["records"]:
+            sys.stderr.write("exec\n%s in %s\n%s\n" % (rec["command"], os.getcwd(),
+                                                       rec["output"]))
+    elif spec.get("stream") == "not-json":
+        sys.stdout.write("Reading prompt from stdin...\n%s\n" % text)
+    else:
+        events = [] if spec.get("no_session") else [{"type": "thread.started",
+                                                      "thread_id": sid}]
+        if events:
+            issued(sid)
+        for rec in RUN["records"]:
+            events.append({"type": "item.completed", "item": {
+                "type": "command_execution", "command": rec["command"],
+                "aggregated_output": rec["output"]}})
+        if spec.get("stream") != "no-terminal":
+            events.append({"type": "turn.completed"})
+        lines = [json.dumps(event) for event in events]
+        if spec.get("stream") == "cut" and lines:
+            sys.stdout.write("".join(line + "\n" for line in lines[:-1]))
+            sys.stdout.write(lines[-1][:len(lines[-1]) // 2])
+        else:
+            sys.stdout.write("".join(line + "\n" for line in lines))
+    if opts.get("last") and not spec.get("no_last_message"):
+        with open(opts["last"], "w", encoding="utf-8") as fh:
+            fh.write(text + "\n" if text else "")
+
+
+def run_commands(spec, wt, key="commands"):
+    """Each scripted command, run in the working copy as the model would."""
+    for command in spec.get(key, []):
+        res = subprocess.run(["sh", "-c", command], cwd=wt, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, universal_newlines=True)
+        RUN["records"].append({"command": command, "output": res.stdout,
+                               "exit_code": res.returncode})
+
+
+#: A ``[projects."<path>"]`` table that trusts its path, as the trust entry is spelled.
+TRUSTED_RE = re.compile(r'^\[projects\."([^"\n]*)"\]\n(?:[^\[\n][^\n]*\n)*?'
+                        r'trust_level\s*=\s*"trusted"', re.M)
+
+
+def trust_itself(spec, wt):
+    """``codex exec``'s own trust write (``codex-exec-manual.md``, fact 2): with no entry for
+    the working directory, a directory above it or the main repository's root, append one for
+    the main repository's root to the user config ``trust_itself`` names, and leave it."""
+    path = spec.get("trust_itself")
+    if not path or RUN["profile"] != "jsonl":
+        return
+    path = path if os.path.isabs(path) else os.path.join(HOME, path)
+    common = sh("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=wt)
+    root = os.path.realpath(os.path.dirname(common))
+    here = os.path.realpath(wt)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+    for trusted in TRUSTED_RE.findall(text):
+        if trusted in (here, root) or here.startswith(trusted.rstrip("/") + "/"):
+            return
+    sep = "" if not text else ("\n" if text.endswith("\n") else "\n\n")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write('%s[projects."%s"]\ntrust_level = "trusted"\n' % (sep, root))
+
+
+def wait_for(spec):
+    """Mid-run, until the file ``wait_for`` names exists: two minutes at most."""
+    path = spec.get("wait_for")
+    end = time.time() + 120
+    while path and not os.path.exists(path) and time.time() < end:
+        time.sleep(0.05)
+
+
+def nested_launches(top, spec, wt):
+    """Each ``nested`` argv, run through the engine's own entry point from the working copy,
+    with the run's variables scrubbed: what a model that starts a nested run would do. A launch
+    the engine lets through is killed after a minute and recorded as ``timeout``."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ADLC_EXEC_RUN")}
+    entry = os.path.join(top["toolkit"], "tools", "adlc", "adlc.py")
+    for args in spec.get("nested", []):
+        proc = subprocess.Popen([sys.executable, entry, "sprint-exec"] + list(args), cwd=wt,
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                universal_newlines=True)
+        try:
+            out, err = proc.communicate(timeout=60)
+            rc = proc.returncode
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, err = proc.communicate()
+            rc = "timeout"
+        with open(os.path.join(HOME, "nested-%s.jsonl" % REQ), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"argv": list(args), "pid": proc.pid, "harness_pid": os.getpid(),
+                                 "rc": rc, "stdout": out, "stderr": err}) + "\n")
+
+
+def record_saw(paths, wt):
+    """What each of ``paths`` holds as this launch starts: its text, or None when absent."""
+    seen = {}
+    for path in paths:
+        full = path if os.path.isabs(path) else os.path.join(wt, path)
+        try:
+            with open(full, encoding="utf-8") as fh:
+                seen[path] = fh.read()
+        except OSError:
+            seen[path] = None
+    with open(os.path.join(HOME, "saw-%s.jsonl" % REQ), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"cwd": wt, "saw": seen}) + "\n")
+
+
+def write_surfaces(spec, wt):
+    for path, body in spec.get("surface_writes", {}).items():
+        full = path if os.path.isabs(path) else os.path.join(wt, path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as fh:
+            fh.write(body)
 
 
 def state_path(wt, spec_dir):
@@ -71,6 +319,9 @@ def first_launch(top, spec, prompt):
             repos[rid] = {"touched": touched}
         state["mergeOrder"] = [top["repoId"]] + [r for r, t in spec["siblings"].items() if t]
     write_state(wt, spec_dir, state)
+    if spec.get("saw"):
+        record_saw(spec["saw"], wt)
+    trust_itself(spec, wt)
     if spec.get("dump_env"):
         with open(os.path.join(HOME, "env-%s.json" % REQ), "w", encoding="utf-8") as fh:
             json.dump(dict(os.environ), fh)
@@ -84,12 +335,15 @@ def first_launch(top, spec, prompt):
                 fh.write(body)
             if spec.get("plant_exec"):
                 os.chmod(full, 0o755)
+    run_commands(spec, wt)
+    nested_launches(top, spec, wt)
     if spec.get("exit_early") is not None:
         sys.stdout.write(spec.get("stdout", ""))
         result(spec.get("text", ""), spec)
         raise SystemExit(spec["exit_early"])
     if spec.get("sleep_first"):
         time.sleep(spec["sleep_first"])
+    wait_for(spec)
     if spec.get("double_fork"):
         subprocess.Popen([sys.executable, "-c",
                           "import os,sys,time\nif os.fork(): os._exit(0)\nos.setsid()\n"
@@ -98,7 +352,7 @@ def first_launch(top, spec, prompt):
         os.makedirs(os.path.dirname(os.path.join(wt, path)) or wt, exist_ok=True)
         with open(os.path.join(wt, path), "w", encoding="utf-8") as fh:
             fh.write(body)
-    sh("git", "add", "-A")
+    sh("git", "add", *(spec.get("add") or ["-A"]))
     sh("git", "commit", "-qm", "feat: %s [%s]" % (REQ, REQ))
     sh("git", "push", "-q", "-u", "origin", branch)
     if spec.get("push_direct"):
@@ -147,6 +401,8 @@ def first_launch(top, spec, prompt):
     if spec.get("state_extra"):
         state.update(spec["state_extra"])
     write_state(wt, spec_dir, state)
+    write_surfaces(spec, wt)
+    run_commands(spec, wt, "late_commands")
     for path, body in spec.get("plant_late", {}).items():
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(body)
@@ -167,6 +423,9 @@ def close_out(top, spec, argv, prompt):
         fh.write(prompt)
     wt = os.getcwd()
     spec_dir = top["specDirs"][REQ]
+    if close.get("saw"):
+        record_saw(close["saw"], wt)
+    nested_launches(top, close, wt)
     planted = os.path.join(wt, ".claude", "settings.json")
     if os.path.exists(planted):
         with open(os.path.join(HOME, "closeout-saw-settings"), "w", encoding="utf-8"):
@@ -184,37 +443,151 @@ def close_out(top, spec, argv, prompt):
         with open(os.path.join(wt, path), "w", encoding="utf-8") as fh:
             fh.write(body)
     branch = sh("git", "branch", "--show-current")
-    sh("git", "add", "-A")
+    sh("git", "add", *(close.get("add") or ["-A"]))
     sh("git", "commit", "-qm", "chore(%s): close-out" % REQ)
     sh("git", "push", "-q", "-u", "origin", branch)
     created = forge(top, "pr_create", "--base", top["ib"], "--head", branch, "--title", "close-out",
                     "--body", "b")
     url = [ln for ln in created.splitlines() if ln.startswith("url=")][0][4:]
-    primary_state = os.path.join(top["primary"], spec_dir, "pipeline-state.json")
-    with open(primary_state, encoding="utf-8") as fh:
-        doc = json.load(fh)
-    doc.update({"completed": True, "currentPhase": 8,
-                "completedPhases": sorted(set(doc.get("completedPhases", []) + [8])),
-                "closeOut": {"status": "ok", "at": "now"}})
-    doc.setdefault("phaseHistory", []).append({"phase": 8, "name": "Wrapup"})
-    with open(primary_state, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, indent=1)
-    result("Terminal state: closed-out\nChore PR: %s" % url, spec)
+    named = STATE_FILE_RE.search(prompt)
+    target = named.group(1) if named else os.path.join(top["primary"], spec_dir,
+                                                       "pipeline-state.json")
+    with open(os.path.join(HOME, "closeout-state-%s.txt" % REQ), "w", encoding="utf-8") as fh:
+        fh.write(target)
+    if "state_text" in close:
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(close["state_text"])
+    else:
+        with open(target, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc.update({"completed": True, "currentPhase": 8,
+                    "completedPhases": sorted(set(doc.get("completedPhases", []) + [8])),
+                    "closeOut": {"status": "ok", "at": "now"}})
+        doc.setdefault("phaseHistory", []).append({"phase": 8, "name": "Wrapup"})
+        doc.update(close.get("state_extra", {}))
+        with open(target, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=1)
+    write_surfaces(close, wt)
+    shaped = dict(spec, **{k: close[k] for k in ("stream", "no_last_message") if k in close})
+    result("Terminal state: closed-out\nChore PR: %s" % url, shaped)
     raise SystemExit(0)
 
 
+def forbidden_in(argv, forbidden):
+    """The first forbidden spelling in ``argv``, token by token: ``--flag=value`` is split
+    first, and a two-word entry matches two adjacent tokens. The fake's own reading, written
+    here: it imports nothing from the engine it stands in for."""
+    tokens = []
+    for tok in argv:
+        if tok.startswith("-") and "=" in tok:
+            tokens += tok.split("=", 1)
+        else:
+            tokens.append(tok)
+    for bad in forbidden:
+        parts = bad.split()
+        for i in range(len(tokens) - len(parts) + 1):
+            if tokens[i:i + len(parts)] == parts:
+                return bad
+    return None
+
+
+def usage(message):
+    sys.stderr.write("error: %s\n" % message)
+    raise SystemExit(2)
+
+
+def parse_jsonl(argv, top):
+    """codex exec's grammar: ``exec [--json] [--sandbox m] [-C d] [-o f] [-m x] [-]`` and
+    ``exec resume [--json] [-o f] <session id> [-]``."""
+    if not argv or argv[0] != "exec":
+        usage("the fake codex only knows `exec`")
+    args = argv[1:]
+    opts = {"resume": False, "json": False, "positional": [], "unknown": []}
+    if args and args[0] == "resume":
+        opts["resume"] = True
+        args = args[1:]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in JSONL_VALUE:
+            if opts["resume"] and a in JSONL_RESUME_REFUSES:
+                usage("unexpected argument '%s' found: `exec resume` takes no %s" % (a, a))
+            if i + 1 >= len(args):
+                usage("option '%s' argument missing" % a)
+            opts[JSONL_VALUE[a]] = args[i + 1]
+            i += 2
+        elif a == "--json":
+            opts["json"] = True
+            i += 1
+        elif a.startswith("-") and a != "-":
+            if top.get("unknown_flags") != "record":
+                usage("unexpected argument '%s' found" % a)
+            opts["unknown"] = args[i:]
+            break
+        else:
+            opts["positional"].append(a)
+            i += 1
+    if opts["resume"]:
+        if not opts["positional"]:
+            usage("`exec resume` needs a session id")
+        opts["session"] = opts["positional"][0]
+    prompt_args = opts["positional"][1 if opts["resume"] else 0:]
+    if prompt_args not in ([], ["-"]):
+        usage("a prompt argument %r: this fake reads its prompt from stdin" % prompt_args)
+    return opts
+
+
+def declared_version(top, installed):
+    """``exec.harness_version`` of the adapter this fake is installed as, from the toolkit."""
+    sys.path.insert(0, os.path.join(top["toolkit"], "tools", "adlc"))
+    import harness_yaml
+    doc = harness_yaml.load_file(os.path.join(top["toolkit"], "harness", installed + ".yml"))
+    return doc["exec"]["harness_version"]
+
+
 def main():
+    installed = os.environ.pop("EXEC_FAKE_AS", "") or "claude"
+    if installed not in PROFILES:
+        sys.stderr.write("exec fake: no profile for the name %r\n" % installed)
+        return 70
+    RUN["profile"] = PROFILES[installed]
     argv = sys.argv[1:]
     top = scenario()
-    if "--help" in argv:
-        spec = top.get("help", "--setting-sources <s>\n--settings <f>\n--strict-mcp-config\n")
-        print(spec)
+    if argv == ["--version"]:
+        print(top.get("version") or declared_version(top, installed))
         return 0
+    if "--help" in argv:
+        default = ("--setting-sources <s>\n--settings <f>\n--strict-mcp-config\n"
+                   if RUN["profile"] == "claude" else
+                   "Usage: codex exec [OPTIONS] [PROMPT]\n  --json\n  --sandbox <MODE>\n"
+                   "  -C, --cd <DIR>\n  -o, --output-last-message <FILE>\n")
+        print(top.get("help", default))
+        return 0
+    bad = forbidden_in(argv, top.get("forbidden", []))
+    if bad:
+        with open(os.path.join(HOME, "exec-fake-forbidden-%s.txt" % REQ), "a",
+                  encoding="utf-8") as fh:
+            fh.write(json.dumps({"flag": bad, "argv": argv}) + "\n")
+        sys.stderr.write("EXEC FAKE: launched with the forbidden flag %s: %s\n"
+                         % (bad, json.dumps(argv)))
+        return 86
+    if RUN["profile"] == "jsonl":
+        RUN["opts"] = parse_jsonl(argv, top)
+        if RUN["opts"].get("cd"):
+            os.chdir(RUN["opts"]["cd"])
     prompt = sys.stdin.read()
     spec = top["reqs"].get(REQ, {})
     with open(os.path.join(HOME, "argv-%s.json" % REQ), "a", encoding="utf-8") as fh:
         fh.write(json.dumps(argv) + "\n")
-    if "--resume" in argv:
+    if RUN["profile"] == "jsonl":
+        with open(os.path.join(HOME, "launch-%s.json" % REQ), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"installed_as": installed, "argv": argv, "opts": RUN["opts"],
+                                 "cwd": os.getcwd(), "prompt_lines": len(prompt.splitlines()),
+                                 "env": dict(os.environ)}) + "\n")
+    resume = RUN["opts"]["resume"] if RUN["profile"] == "jsonl" else "--resume" in argv
+    if resume:
+        check_session(RUN["opts"]["session"] if RUN["profile"] == "jsonl" else
+                      argv[argv.index("--resume") + 1])
         close_out(top, spec, argv, prompt)
     if "OPERATOR ANSWER" in prompt and spec.get("after_answer"):
         spec = dict(spec, **spec["after_answer"])

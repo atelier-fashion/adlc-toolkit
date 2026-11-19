@@ -1,0 +1,15 @@
+# exec-lints fixture (REQ-662 TASK-257): the launch template holds --dangerously-skip-permissions
+# Only the exec keys the lints read; the loader's schema is not under test here.
+name: claude
+exec:
+  exec_schema_version: 2
+  launch: [--dangerously-skip-permissions, -p, --output-format, json]
+  resume: [-p, --output-format, json, --resume, "{session_id}"]
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+  exit_codes: {"0": ok, "1": error}

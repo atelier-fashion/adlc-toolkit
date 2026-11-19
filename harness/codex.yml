@@ -1,8 +1,9 @@
-# harness/codex.yml — the Codex CLI adapter (REQ-655). Data, not code: every key is
-# validated by tools/adlc/harness_adapter.py and an unknown key is a loud error. Its
-# goldens live in harness/codex/rendered/. Facts are from codex-cli 0.166.0 as run on
-# 2026-10-31: the REQ-664 result in .adlc/research/harness-probes/codex.json and the
-# gate and hook records in the REQ-655 spec's Assumptions.
+# harness/codex.yml — the Codex CLI adapter (REQ-655), with its exec block (REQ-662). Data,
+# not code: every key is validated by tools/adlc/harness_adapter.py and an unknown key is a
+# loud error. Its goldens live in harness/codex/rendered/ and its exec fence census in
+# harness/codex/exec-fence-census.json. Facts are from codex-cli 0.166.0: the REQ-664 result
+# in .adlc/research/harness-probes/codex.json, run on 2026-11-17; the gate and hook records in
+# the REQ-655 spec's Assumptions, made on 2026-10-31; and `codex exec --help`.
 name: codex
 schema_version: 3
 binary: codex
@@ -80,23 +81,28 @@ deny_tier_render:
   project: confirm
 
 accepted_fidelity:
-  # An unmatched fence runs in the sandbox (REQ-664 routine-only pass), and a rule would
-  # need the whole script as one token, which differs per partial: omitted, not widened.
-  fence.partial-source: {project: inexpressible, exec: "widened:if [ -f .adlc/partials/"}
+  # A rule would need the whole script as one token, which differs per partial: omitted at
+  # project scope, not widened. No fence rule matched on the result file either: the
+  # fence-vs-allowlist variants routine-only, broad-first-token and broad-sh read fail. Under
+  # --exec every fence runs through exec.fence_runner and no fence rule is rendered (REQ-682).
+  fence.partial-source: {project: inexpressible, exec: inexpressible}
   default_mode: {project: inexpressible}
-  # Omitted unconditionally and never restored (BR-3): a token prefix is position-
-  # sensitive, so it cannot name --force, +refspec or -D at any other position.
-  "git.read:git branch": {project: inexpressible}
-  "git.write:git push": {project: inexpressible}
-  # One entry per git.* routine entry the bare `git -C` prefix would have doubled.
-  "git.read:git -C": {project: inexpressible}
-  "git.config.identity:git -C": {project: inexpressible}
-  "git.write:git -C": {project: inexpressible}
-  # prefix_rule has no exact form, so an exact routine entry takes trailing arguments.
-  "git.config.identity:git config user.email": {project: "widened:git config user.email"}
-  "git.config.identity:git config user.name": {project: "widened:git config user.name"}
-  "npm.ci:npm ci": {project: "widened:npm ci"}
-  "shell.pwd:pwd": {project: "widened:pwd"}
+  # Omitted unconditionally and never restored (BR-3), at both scopes: a token prefix is
+  # position-sensitive, so it cannot name --force, +refspec or -D at any other position. At
+  # exec the branch push runs through the fence runner instead (REQ-662 ADR-9).
+  "git.read:git branch": {project: inexpressible, exec: inexpressible}
+  "git.write:git push": {project: inexpressible, exec: inexpressible}
+  # One entry per git.* routine entry the bare `git -C` prefix would have doubled. At exec
+  # wrapped-allow reads fail, so no git-c record restores it.
+  "git.read:git -C": {project: inexpressible, exec: inexpressible}
+  "git.config.identity:git -C": {project: inexpressible, exec: inexpressible}
+  "git.write:git -C": {project: inexpressible, exec: inexpressible}
+  # prefix_rule has no exact form, so an exact routine entry takes trailing arguments, in the
+  # exec rule file as in the committed one.
+  "git.config.identity:git config user.email": {project: "widened:git config user.email", exec: "widened:git config user.email"}
+  "git.config.identity:git config user.name": {project: "widened:git config user.name", exec: "widened:git config user.name"}
+  "npm.ci:npm ci": {project: "widened:npm ci", exec: "widened:npm ci"}
+  "shell.pwd:pwd": {project: "widened:pwd", exec: "widened:pwd"}
   # Deny-tier rules match plain argv. Inside shell control flow, a substitution, an
   # env-assignment prefix or `bash -lc '<script>'` the command is unmatched, and what
   # stops it is the sandbox, only while network_access is off.
@@ -147,8 +153,160 @@ fidelity_notes:
   - "codex: trust the project first (the user config's projects table), or .codex/ is ignored."
   - "codex: then review the hooks with /hooks in the TUI. An unreviewed hook does not run, `codex exec` skips it silently, and a new checkout path or a changed hook needs the review again."
 
+# The exec engine (REQ-659, REQ-662): how `adlc sprint-exec` launches Codex headless. Every
+# value is read from codex.json (the REQ-664 result for codex-cli 0.166.0) or from
+# `codex exec --help` and `codex exec resume --help` at that version; what neither shows is
+# `unknown`. Validated by harness_adapter.py at exec schema 2.
 exec:
-  flags: unverified
+  exec_schema_version: 2
+  harness_version: codex-cli 0.166.0
+  # BR-11: `status` and `probes` are caches of exec_verify.verdict over codex.json, never the
+  # verdict. Each row is the result file's status and ran_at for that probe, exactly.
+  # session-start-context is not required under context_delivery: prompt; it is cited because
+  # its fail is why this block declares prompt.
+  verification: probes
+  status: verified
+  probes:
+    - {id: git-write-worktree, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: git-write-main, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: trust-then-headless, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: fail}
+    - {id: session-start-context, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: fail}
+    - {id: stdin-prompt, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: fence-vs-allowlist, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: fail}
+    - {id: shell-timeout, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+    - {id: ask-tier-deny, ran_at: "2026-11-17T23:49:29Z", harness_version: codex-cli 0.166.0, status: pass}
+  # git-write-worktree reads pass on root-is-worktree and writable-roots-repo, and agrees with
+  # the top-level sandbox_can_reach_common_gitdir record, which is true (BR-9).
+  working_copy: {strategy: worktree}
+  # What the engine does per run, not `trust` above, which is interactive use and hooks.
+  # `codex exec` writes `[projects."<main repo root>"] trust_level = "trusted"` into the user
+  # config by itself on a fresh launch when no entry covers the directory, and leaves it. With
+  # the engine's own entry for the working copy in place first, Codex writes nothing, and the
+  # engine's revoke restores the file byte for byte. So the grant is what keeps a run from
+  # leaving trust behind; the rule file and the project config load either way. Measured
+  # 2026-11-18: `.adlc/research/harness-probes/codex-exec-manual.md`.
+  trust_grant: user-config-entry
+  # The prompt is on stdin with no positional. `prompt_flag` is the token that makes a launch
+  # stdin-prompt's with-prompt-flag variant (a trailing `-`); this launch is the
+  # without-prompt-flag variant, the argv that variant ran (launch l15r3), and it reads pass.
+  prompt_delivery: stdin
+  prompt_flag: ["-"]
+  prompt_variant: without-prompt-flag
+  # --sandbox pins the sandbox. `codex exec` has no approval flag (only the top-level `codex`
+  # does), so approval cannot be pinned on this argv. --json prints the event stream that
+  # carries the session id; -o names the last-message file (ADR-6).
+  launch: [exec, --json, --sandbox, workspace-write, -C, "{worktree}", -o, "{last_message}"]
+  # `codex exec resume` takes no --sandbox and no -C, so the engine runs it in the working copy
+  # and its sandbox comes from the rendered .codex/config.toml (ADR-7). Measured 2026-11-18
+  # (codex-exec-manual.md, rows resume-continues and resume-keeps-rules, and fact 5): the
+  # resume continued the same session with the rules in force (an allowed write left the
+  # sandbox, an un-allowed one did not, a deny refused), from the launch's working copy and
+  # from a different one. The trailing `-` reads the follow-up prompt from stdin.
+  resume: [exec, resume, --json, -o, "{last_message}", "{session_id}", "-"]
+  # -m/--model is in both help texts and relaxes no permission. --add-dir is not offered: it
+  # widens the writable area, and `codex exec resume` does not take it.
+  operator_flags: [--model]
+  # hooks-loaded and session-start-context read fail: Codex runs a project hook only after a
+  # person reviews it, and `codex exec` has no review step (REQ-655). ETHOS reaches the model in
+  # the prompt the engine builds (REQ-659 BR-6), and .codex/hooks.json is rendered absent.
+  context_delivery: prompt
+  # Both tiers are rule files. ask-tier-deny/deny-under-allow reads pass: a `forbidden`
+  # prefix_rule refused its command with an allow for a sibling loaded. The working-copy file
+  # holds the routine allows, the fence-runner allow and every deny as `forbidden`; the user
+  # policy file holds the deny tier only, beside the operator's own rules (ADR-3). The probe's
+  # rules loaded from a file of another name in .codex/rules/ (adlc-probe.rules).
+  allow_render: file
+  deny_render: file
+  rule_file: .codex/rules/adlc-exec.rules
+  user_policy_file: $HOME/.codex/rules/adlc-exec.rules
+  # fence-vs-allowlist/runner-prefix reads pass: the runner was admitted by a prefix rule and
+  # every one of its controls was refused (REQ-682). The probe's command carries no `#`, and a
+  # bare `#` defeats the prefix allow, so what the real runs measured is the runner line with
+  # its fence id single-quoted, as the engine prints it (codex-exec-manual.md, fact 1).
+  fence_runner: tools/adlc/fence-run
+  # claude.yml's engine_deny, less its three glob entries (`git push origin +*` and the two
+  # `git -C * push` forms): prefix_rule reads `*` as itself, so each would be no deny at all
+  # (LESSON-757, LESSON-868). No allow matches `git push` or `git -C` here.
+  engine_deny:
+    - [az, repos, pr]
+    - [git, push, --force-with-lease]
+    - [git, worktree, remove]
+    - [git, worktree, prune]
+    - [rm, -r]
+    - [rm, -fr]
+    - [adlc, sprint-exec, approve]
+    - [adlc, sprint-exec, reject]
+    - [adlc, sprint-exec, answer]
+    - [adlc, sprint-exec, abort]
+    - [adlc, sprint-exec, reissue]
+    - [adlc, sprint-exec, resume]
+    - [adlc, sprint-exec, run]
+  # The engine-wide vocabulary, then Codex's own from `codex exec --help` and `codex --help` at
+  # 0.166.0 (ADR-7). --full-auto is not in 0.166.0's help; it stays listed for a binary that
+  # takes it. `-p` is not here: it is claude's print flag (AC-2), and the closed-world argv check
+  # refuses any `-p` this template does not hold. Each entry is separate tokens, never `=`.
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+    - --dangerously-bypass-approvals-and-sandbox
+    - --dangerously-bypass-hook-trust
+    - --approve-for-me
+    - --full-auto
+    - danger-full-access
+    - --ask-for-approval never
+    - --ignore-rules
+    - --ignore-user-config
+    - -c
+    - --config
+    - --profile
+    - --enable
+    - --disable
+  # Every recorded launch in codex.json exited 0. "1" reads error, as any unmapped non-zero
+  # code does.
+  exit_codes: {"0": ok, "1": error}
+  # One event per line on stdout (--json). thread.started carries thread_id, and turn.completed
+  # ends every complete stream in the captures; the last message is the -o file.
+  output:
+    format: jsonl-stream
+    source: file
+    final_message: "{last_message}"
+    session_id: {event: thread.started, key: thread_id}
+    terminal_event: turn.completed
+  # The harness's own refusal line for a `forbidden` rule, on stderr (deny-under-allow, launch
+  # l06). Read from the harness's stderr only, never from the model's text (LESSON-847).
+  denied_stderr: "rejected: policy forbids commands starting with"
+  # CODEX_HOME is not passed: the trust grant and the policy file are written under
+  # $HOME/.codex, so a run must read that config. A stored login lives under $HOME/.codex, which
+  # HOME reaches, and no record shows exec reading an auth variable, so auth_env is absent.
+  env_passthrough: [HOME, PATH, ADLC_HOME, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK, SSH_AUTH_SOCK, GIT_SSH_COMMAND, XDG_CONFIG_HOME, TMPDIR, LANG, TERM]
+  # Codex reads .codex/: a rule file there loads with no trust entry (measured 2026-11-18,
+  # above), and the hooks file and the config once the folder is trusted (REQ-655). The engine
+  # renders it whole or absent (ADR-4).
+  config_surfaces: [.codex/]
+  # Keys that relax the sandbox or the approval posture from outside the engine's files. A
+  # profile layers another config over both owned keys (REQ-655 refuse_keys); writable_roots
+  # widens the sandbox's writable area (REQ-655 --writable-root); network_access lets an
+  # unmatched command reach the network (REQ-655 BR-3); sandbox_permissions widens what the
+  # sandbox admits (`codex exec --help` at 0.166.0 gives
+  # `-c 'sandbox_permissions=["disk-full-read-access"]'` as its own example of an override). In
+  # the user config, sandbox_mode and approval_policy are listed as well. In the working copy
+  # they are not: the engine's own render of .codex/config.toml is the project render, which
+  # sets them (BR-3), and the surface checksum is what holds them there.
+  bypass_config_keys:
+    "$HOME/.codex/config.toml": [sandbox_mode, approval_policy, profile, sandbox_permissions, sandbox_workspace_write.writable_roots, sandbox_workspace_write.network_access]
+    ".codex/config.toml": [profile, sandbox_permissions, sandbox_workspace_write.writable_roots, sandbox_workspace_write.network_access]
+  # No probe variant yet measures a rule file edited mid-run: unknown, read as live (BR-15).
+  rules_reload: unknown
+  # shell-timeout reads pass: a `sleep 125` in one shell call completed (launch l12), so a
+  # delegated adlc-read fits and ADLC_DISABLE_DELEGATE is not set.
+  shell_timeout_s: {value: 125, verified: true, delegate: supported}
+  # No measurement pins Codex's statement matching, so no fence routes `direct`, and
+  # allow_extra and allow_extra_exact stay empty (ADR-8).
+  matcher: none
 
 capabilities:
   deny: "yes"
@@ -165,12 +323,15 @@ capabilities:
   unmatched_shapes: [env-prefix, shell-opener]
   unmatched_default: sandbox
   deny_under_allow:
-    # by_hand is BR-10's cases (3) and (2). The probe rows read unknown, so these stay
-    # unverified, and never_restore holds whatever they read.
-    prefix: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe, by_hand: strictest-wins}
-    git-c: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe, by_hand: strictest-wins}
+    # What codex.json measures, with a `forbidden` rule (mechanism deny): deny-under-allow
+    # reads pass, and wrapped-allow reads fail (the `git -C` push ran under a deny on the plain
+    # spelling). The schema spells a failed probe `unverified`. The committed render's deny is
+    # `prompt` (mechanism confirm), which these records do not match, so they restore nothing
+    # there. At exec the prefix pass keeps the `git worktree` allow beside engine_deny's
+    # `forbidden` `git worktree remove` and `prune`, the measured shape. The allows the
+    # committed render omits stay omitted at exec: each is in never_restore.
+    prefix: {mechanism: deny, result: pass, harness_version: codex-cli 0.166.0, source: probe}
+    git-c: {mechanism: deny, result: unverified, harness_version: codex-cli 0.166.0, source: probe}
+    # No REQ-664 variant measures these two shapes.
     env-prefix: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe}
     shell-opener: {mechanism: confirm, result: unverified, harness_version: codex-cli 0.166.0, source: probe}
-  # Declared because the loader requires it: an unmatched fence runs in the sandbox, and
-  # the broad variants REQ-664 passed are bare openers that are never rendered.
-  fence_broad_spelling: [if, "[", -f, .adlc/partials/]

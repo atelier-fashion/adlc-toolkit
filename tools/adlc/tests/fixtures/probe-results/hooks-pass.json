@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-17",
+  "fixture": "REQ-662 TASK-260: every BR-11 probe acceptable for fake-exec-flags.yml (context_delivery hooks, deny_render flags, worktree, delegate unsupported). Synthetic.",
+  "harness": "fake-exec-flags",
+  "harness_version": "fake-exec-flags 1.0.0",
+  "probes": {
+    "ask-tier-deny": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass",
+      "sub_results": {
+        "allow-only": {
+          "status": "pass"
+        },
+        "baseline": {
+          "status": "fail"
+        },
+        "deny-under-allow": {
+          "status": "pass"
+        },
+        "lone-deny": {
+          "status": "n/a"
+        },
+        "wrapped-allow": {
+          "status": "pass"
+        }
+      }
+    },
+    "fence-vs-allowlist": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "fail",
+      "sub_results": {
+        "routine-only": {
+          "status": "fail"
+        },
+        "runner-positive": {
+          "status": "pass"
+        },
+        "runner-prefix": {
+          "status": "pass"
+        }
+      }
+    },
+    "git-write-main": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass"
+    },
+    "git-write-worktree": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass",
+      "sub_results": {
+        "root-is-worktree": {
+          "status": "pass"
+        },
+        "writable-roots-repo": {
+          "status": "pass"
+        }
+      }
+    },
+    "session-start-context": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass"
+    },
+    "shell-timeout": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass"
+    },
+    "skill-activation": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "reason": "not-applicable: a probe outside BR-11's set",
+      "status": "n/a"
+    },
+    "stdin-prompt": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass",
+      "sub_results": {
+        "with-prompt-flag": {
+          "status": "fail"
+        },
+        "without-prompt-flag": {
+          "status": "pass"
+        }
+      }
+    },
+    "trust-then-headless": {
+      "ran_at": "2026-11-17T00:00:00Z",
+      "status": "pass",
+      "sub_results": {
+        "allowlist-loaded": {
+          "status": "pass"
+        },
+        "hooks-loaded": {
+          "status": "pass"
+        }
+      }
+    }
+  },
+  "ran_at": "2026-11-17T00:00:00Z",
+  "schema": 1
+}

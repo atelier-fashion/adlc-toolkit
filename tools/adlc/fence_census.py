@@ -18,8 +18,10 @@ every machine and changes when the fence does.
 - ``excised`` — the id is in :data:`EXCISED`, or the body names a BR-24 token or a deny-tier
   spelling. The model is told, in one line, that the fence does not run under ``--exec``.
 - ``engine`` — the id is in :data:`ENGINE`: the orchestrator did the work before launch.
-- ``direct`` — ``exec_matcher`` admits every statement over the ExecPolicy, as written, or
-  with the exec notes' ``git -C <worktree>`` dropped and sample values in its placeholders.
+- ``direct`` — the adapter's ``matcher`` is one ``exec_matcher`` models, and it admits every
+  statement over the ExecPolicy, as written, or with the exec notes' ``git -C <worktree>``
+  dropped and sample values in its placeholders. On ``matcher: none`` no fence is ``direct``
+  (REQ-662 BR-3, ADR-8): nothing pins how that harness matches a statement.
 - ``runner`` — :func:`transform` accepts the body (every placeholder and free variable is in
   the closed tables, and in a position where its value stays data) and the static reach
   audit finds nothing (:func:`reach`). The model runs it as ``fence-run run <id>``.
@@ -27,6 +29,15 @@ every machine and changes when the fence does.
 Anything else is **unrouted**, and an exec prompt holding it is refused (BR-8). The census is
 computed from toolkit text alone, so ``fence-run`` recomputes it on every call and trusts no
 manifest, cache or environment variable (ADR-2, BR-5).
+
+**One census per adapter** (REQ-662 ADR-8). :func:`census` routes for one exec-capable
+adapter, and each has its golden, ``harness/<name>/exec-fence-census.json``. The reach audit
+reads the **union** of every exec-capable adapter's deny tier and ``engine_deny``, so a fence
+is ``runner`` on one adapter only when it would be on every adapter that does not run it
+``direct``. ``fence-run`` accepts a fence that is ``runner`` in any of them: whichever harness
+calls, no route it accepts reaches a command any adapter denies. The adapters are found from
+``harness/*.yml`` under the root, never from an environment variable, argument or working
+copy (REQ-682 ADR-2).
 
 **Values** (ADR-3): a placeholder ``<name>`` or a free shell variable ``$name`` reaches the
 fence only as an environment variable ``ADLC_ARG_<name>``, expanded once inside double quotes.
@@ -137,6 +148,9 @@ _REL_OR_ABS = r"/?[A-Za-z0-9_.,@+-][A-Za-z0-9_.,@+/-]{0,1000}"
 _BRANCH = r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,200}"
 _COMPONENT = r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,200}"
 _LINE = r"[^\x00-\x1f\x7f]{1,240}"
+#: A REQ's own branch (REQ-662 ADR-9): it cannot spell the integration branch, a refspec, a
+#: ``+`` prefix or an option, because the branch push binds it on a harness with no exact rule.
+_FEATURE_BRANCH = r"(?:feat|fix|chore)/[A-Za-z0-9][A-Za-z0-9._-]*"
 
 
 #: Where a path value may point. A fence writes some of these (a state file) and reads the
@@ -160,7 +174,9 @@ class Placeholder(object):
     def __init__(self, key, arg, pattern, multi=False, file=False, path=False, scope=None):
         self.key = key
         self.arg = arg
-        self.pattern = re.compile("^(?:%s)$" % pattern, re.S)
+        # ``$`` also matches before a final newline: an ``--arg`` value is held to the whole
+        # pattern with ``\Z``. A file's value keeps ``$``, as a file the model writes ends in one.
+        self.pattern = re.compile("^(?:%s)%s" % (pattern, "$" if file else r"\Z"), re.S)
         self.multi = multi
         self.file = file
         self.path = path
@@ -210,8 +226,8 @@ PLACEHOLDERS = dict([
     _ph("requirement.md", "spec", _REL_OR_ABS, path=True, scope="spec"),
     _ph("integrationBranch", "integrationBranch", _BRANCH, path=True),
     _ph("integration-branch", "integrationBranch", _BRANCH, path=True),
-    _ph("branch-name", "branch", r"(?:feat|fix|chore)/[A-Za-z0-9_.-]{1,200}", path=True),
-    _ph("branch", "branch", r"(?:feat|fix|chore)/[A-Za-z0-9_.-]{1,200}", path=True),
+    _ph("branch-name", "branch", _FEATURE_BRANCH, path=True),
+    _ph("branch", "branch", _FEATURE_BRANCH, path=True),
     _ph("component", "component", _COMPONENT, multi=True, path=True),
     _ph("TASK-xxx", "task", r"TASK-[0-9]{3,6}"),
     _ph("mode", "mode", r"(?:--fresh|--reuse)?"),
@@ -444,12 +460,49 @@ def coverage_problems(root, texts):
     return problems
 
 
-# --------------------------------------------------------------------------- the policy
-def exec_policy(root, adapter=None):
-    """The ExecPolicy the census judges ``direct`` against: the adapter's tiers for
-    :data:`SAMPLE_BRANCH`, with no project extras. The same at build time and in fence-run."""
+# --------------------------------------------------------------------------- the adapters
+#: Why a fence is not run as written on a harness whose matching nothing models.
+NO_MATCHER = "no measurement pins this harness's statement matching (matcher: none)"
+
+
+def routes_direct(adapter):
+    """Whether ``adapter``'s statement matching is modelled, so a fence may be ``direct``: the
+    adapter's own ``has_matcher``, which reads the loader's ``MODELLED_MATCHERS`` (REQ-662
+    BR-3, ADR-8)."""
+    return adapter.has_matcher
+
+
+def exec_adapters(root):
+    """Every exec-capable adapter under ``root``, sorted by name (REQ-662 ADR-8).
+
+    Read from ``<root>/harness/*.yml`` and nothing else: no environment variable, argument or
+    working-copy file chooses one (REQ-682 ADR-2). An adapter is exec-capable when its exec
+    block carries ``exec_schema_version``. One that will not load refuses the census, since
+    nothing could then say what it denies. Raises :class:`CensusError`."""
     import exec_adapter as ea
-    adapter = adapter or ea.load("claude", root)
+    hdir = os.path.join(root, "harness")
+    try:
+        names = sorted(n for n in os.listdir(hdir) if n.endswith(".yml"))
+    except OSError as exc:
+        raise CensusError("harness/: unreadable: %s" % exc)
+    out = []
+    for name in names:
+        try:
+            adapter = ha.load_adapter(os.path.join(hdir, name), toolkit=root)
+        except ha.AdapterError as exc:
+            raise CensusError("harness/%s does not load, so its deny tier is unknown: %s"
+                              % (name, exc))
+        if "exec_schema_version" in (adapter.get("exec") or {}):
+            out.append(ea.ExecAdapter(adapter, root))
+    if not out:
+        raise CensusError("no adapter under %s/harness has an exec block" % root)
+    return out
+
+
+# --------------------------------------------------------------------------- the policy
+def exec_policy(root, adapter):
+    """The ExecPolicy the census judges ``direct`` against: ``adapter``'s tiers for
+    :data:`SAMPLE_BRANCH`, with no project extras. The same at build time and in fence-run."""
     allow, deny = adapter.tiers(SAMPLE_BRANCH)
     return {"allow": allow, "deny": deny}
 
@@ -819,15 +872,61 @@ def script_reach(root, rel, deny_texts):
     return sorted(externals), problems
 
 
-#: Every toolkit file fence-run reads besides the exec set: the orchestrator's install
-#: manifest covers them (``exec_safety.install_files``), so a change mid-run is caught.
-RUNNER_READS = ("harness/claude.yml", "templates/permissions.yml", "tools/adlc/fence-run") + \
-    tuple(sorted(set(rel for rels in TOOLKIT_EXECUTABLES.values() for rel in rels)))
+def runner_reads(root):
+    """Every toolkit file fence-run reads besides the exec set: every adapter it may load to
+    find the exec-capable ones (REQ-662 ADR-8), the template, itself, and the executables its
+    fences run. The orchestrator's install manifest covers them (``exec_safety.install_files``),
+    so a change mid-run is caught."""
+    try:
+        names = sorted(n for n in os.listdir(os.path.join(root, "harness")) if n.endswith(".yml"))
+    except OSError:
+        names = []
+    return tuple("harness/" + n for n in names) + \
+        ("templates/permissions.yml", "tools/adlc/fence-run") + \
+        tuple(sorted(set(rel for rels in TOOLKIT_EXECUTABLES.values() for rel in rels)))
 
 
-#: The one function whose push is reach, not a deny (amended BR-2): the id-reservation push,
-#: a non-force push of a new ref under refs/adlc/ids/ that moves no branch (ADR-7).
-PUSH_REACH = {"adlc_reserve_id": "git push origin <oid>:refs/adlc/ids/<kind>/<n>"}
+#: :func:`runner_reads` of the toolkit this module belongs to.
+RUNNER_READS = runner_reads(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.realpath(__file__)))))
+
+
+#: The pushes a runner fence may make, by kind: REQ-682 BR-2's two exceptions to the deny tier
+#: (as amended 2026-11-09 and 2026-11-17). Any other push fails the audit.
+#:
+#: - ``id-reservation``: the one function whose push is reach, a non-force push of a new ref
+#:   under refs/adlc/ids/ that moves no branch (REQ-682 ADR-7).
+#: - ``branch``: the Step 0 branch push, made by the fence body itself and only in exactly this
+#:   argv (REQ-662 ADR-9). It takes the runner route on a harness whose rules have no exact
+#:   form; on ``claude`` the fence stays ``direct``. ``same_dir`` names the values the runner
+#:   holds to the directory it was called from, and the ``branch`` value's pattern cannot spell
+#:   the integration branch, a refspec, a ``+`` prefix or an option.
+ID_RESERVATION = "id-reservation"
+BRANCH_PUSH = "branch"
+PUSH_REACH = {
+    ID_RESERVATION: {"function": "adlc_reserve_id",
+                     "spelling": "git push origin <oid>:refs/adlc/ids/<kind>/<n>"},
+    BRANCH_PUSH: {"argv": ("git", "-C", '"${ADLC_ARG_worktree}"', "push", "-u", "origin",
+                           '"${ADLC_ARG_branch}"'),
+                  "spelling": "git -C $ADLC_ARG_worktree push -u origin $ADLC_ARG_branch",
+                  "same_dir": ("worktree",),
+                  # The runner pushes only the branch checked out in that directory, so on a
+                  # harness whose exact rule names the run's own branch the union adds no
+                  # other branch to what a model can push.
+                  "head": ("branch",)},
+}
+
+
+def push_kind(words, func):
+    """The :data:`PUSH_REACH` kind of one ``git push`` command (its words as the body holds
+    them, wrappers dropped), run by function ``func`` (``None``: the fence body), or ``None``
+    when it is neither."""
+    for kind, spec in PUSH_REACH.items():
+        if "function" in spec and func == spec["function"]:
+            return kind
+        if "argv" in spec and func is None and tuple(words) == spec["argv"]:
+            return kind
+    return None
 #: A function that runs the argv its caller spells: the audit reads the caller's line instead.
 DISPATCHERS = {"_adlc_forge_run": "runs the argv its caller spells after `--`"}
 #: Spellings that refuse under ADLC_FENCE_TOOLKIT_ONLY=1, with the guard text that refuses
@@ -1186,13 +1285,20 @@ def _external_shape(words):
     return head
 
 
-def _deny_texts(adapter, root):
+def _adapter_list(adapters):
+    return list(adapters) if isinstance(adapters, (list, tuple)) else [adapters]
+
+
+def union_deny_texts(adapters, root):
+    """The deny-tier spellings the reach audit looks for: the **union** over ``adapters`` (one
+    ExecAdapter or several) of each one's deny tier and ``engine_deny`` (REQ-662 ADR-8)."""
     texts = []
-    for spelling in em.deny_tier_spellings(adapter.adapter, root):
-        text = " ".join(spelling)
-        if text.startswith("adlc_forge_pr_merge"):
-            text = "adlc_forge_pr_merge"
-        texts.append(text)
+    for adapter in _adapter_list(adapters):
+        for spelling in em.deny_tier_spellings(adapter.adapter, root):
+            text = " ".join(spelling)
+            if text.startswith("adlc_forge_pr_merge"):
+                text = "adlc_forge_pr_merge"
+            texts.append(text)
     return list(dict.fromkeys(texts))
 
 
@@ -1260,15 +1366,18 @@ def _deny_hits_in(words, temp_vars, deny_texts):
     return hits
 
 
-def reach(code, index, adapter, root):
+def reach(code, index, adapters, root, denies=None):
     """The static reach of a runner body (ADR-7): ``(externals, problems, functions)``.
 
     ``externals`` is the sorted set of external command shapes the body and every function it
     reaches can run; ``problems`` names each deny-tier spelling, code-from-data construct or
     unknown command, with the function and ``file:line``; ``functions`` is the closure. The
     audit reads what runs, command by command, never the text a command prints. Recording
-    stubs prove the paths a run takes; this proves the branches (TASK-247)."""
-    deny_texts = _deny_texts(adapter, root)
+    stubs prove the paths a run takes; this proves the branches (TASK-247).
+
+    The deny tier is the union over ``adapters`` (:func:`union_deny_texts`), or ``denies``
+    when the caller has computed it."""
+    deny_texts = denies if denies is not None else union_deny_texts(adapters, root)
     externals = set()
     problems = []
     seen = set()
@@ -1351,9 +1460,11 @@ def reach(code, index, adapter, root):
             return
         if cmd in EXTERNAL:
             shape = _external_shape(words)
-            if shape == "git push" and func not in PUSH_REACH:
-                problems.append("%s: pushes: a runner fence never pushes a branch (BR-2): %s"
-                                % (label, _command_text(words)[:100]))
+            if shape == "git push" and push_kind(words, func) is None:
+                problems.append("%s: pushes: a runner fence pushes only an id reservation, or "
+                                "the branch as exactly `%s` (BR-2): %s"
+                                % (label, PUSH_REACH[BRANCH_PUSH]["spelling"],
+                                   _command_text(words)[:100]))
             if cmd not in _NOISE:
                 externals.add(shape)
             return
@@ -1386,12 +1497,23 @@ _RESERVATION_DST = re.compile(r"^refs/adlc/ids/(?:req|bug|lesson|assume|task)/[0
 _OID = re.compile(r"^[0-9a-f]{7,64}$")
 
 
+def _branch_push(argv):
+    """Whether a recorded argv is the :data:`BRANCH_PUSH` kind as it runs: exactly
+    ``git -C <absolute path> push -u origin <branch>``, the branch matching its pattern."""
+    args = list(argv)
+    return (len(args) == 7 and args[:2] == ["git", "-C"] and args[2].startswith("/")
+            and args[3:6] == ["push", "-u", "origin"]
+            and PLACEHOLDERS["branch"].check(args[6]) is None)
+
+
 def push_problems(argvs):
-    """Why each recorded ``git push`` is not the id-reservation push, the one push BR-2 (as
-    amended) lets a runner fence make: non-force, ``<oid>:refs/adlc/ids/<kind>/<n>``, and
-    moving no branch. Empty when every push is that one (ADR-7)."""
+    """Why each recorded ``git push`` is neither push BR-2 (as amended) lets a runner fence
+    make: the id reservation (non-force, ``<oid>:refs/adlc/ids/<kind>/<n>``, moving no branch,
+    ADR-7) or the exact branch push (REQ-662 ADR-9). Empty when every push is one of them."""
     problems = []
     for argv in argvs:
+        if _branch_push(argv):
+            continue
         args = list(argv)
         if args and args[0] == "git":
             args = args[1:]
@@ -1421,7 +1543,17 @@ def push_problems(argvs):
 _BR24 = tuple(t for t in ep.EMPTY_ALLOWLIST + ep.CLOSEOUT_EMPTY if t)
 
 
-def _route(fence, policy, index, adapter, root):
+def _refused(policy, code):
+    """``[statement, why]`` for the first statement not run as written, for BR-8's message."""
+    if policy is not None:
+        return list(em.explain(policy, code) or ())
+    found = em.statements(code)
+    return [found[0].text, NO_MATCHER] if found else []
+
+
+def _route(fence, policy, index, root, denies):
+    """One fence's record. ``policy`` is ``None`` on an adapter whose matching nothing models,
+    and then no fence is ``direct``; ``denies`` is the union deny tier the reach audit reads."""
     rec = {"id": fence.id, "route": None, "reason": "", "placeholders": [], "sources": [],
            "reach": [], "functions": []}
     key = fence.key
@@ -1438,22 +1570,22 @@ def _route(fence, policy, index, adapter, root):
         rec["route"] = "excised"
         rec["reason"] = "it names a one-way move the orchestrator keeps"
         return rec
-    if em.admits(policy, code) or _direct_with_samples(code, policy):
+    if policy is not None and (em.admits(policy, code) or _direct_with_samples(code, policy)):
         rec["route"] = "direct"
         return rec
     try:
         found, sources = plan(code)
     except Unroutable as exc:
         rec["route"], rec["reason"] = "unrouted", str(exc)
-        rec["refused"] = list(em.explain(policy, code) or ())
+        rec["refused"] = _refused(policy, code)
         return rec
     sample = {ph.arg: ["x"] for ph in found}
-    externals, problems, funcs = reach(transform(code, sample, root="/abs/tk"), index, adapter,
-                                       root)
+    body = transform(code, sample, root="/abs/tk")
+    externals, problems, funcs = reach(body, index, (), root, denies)
     if problems:
         rec["route"] = "unrouted"
         rec["reason"] = "reach: " + "; ".join(problems[:3])
-        rec["refused"] = list(em.explain(policy, code) or ())
+        rec["refused"] = _refused(policy, code)
         rec["problems"] = problems
         return rec
     rec["route"] = "runner"
@@ -1461,6 +1593,9 @@ def _route(fence, policy, index, adapter, root):
     rec["sources"] = sources
     rec["reach"] = externals
     rec["functions"] = funcs
+    kinds = [push_kind(_unwrap(words) or [], None) for words in simple_commands(body)]
+    if BRANCH_PUSH in kinds:
+        rec["push"] = BRANCH_PUSH
     return rec
 
 
@@ -1479,16 +1614,42 @@ def _direct_with_samples(code, policy):
 
 
 def census(root, adapter=None):
-    """Every fence of every exec file, routed: a list of records sorted by id."""
-    import exec_adapter as ea
-    adapter = adapter or ea.load("claude", root)
-    policy = exec_policy(root, adapter)
+    """Every fence of every exec file, routed for ``adapter``, in file and fence order.
+
+    ``adapter`` is an exec-capable ``ExecAdapter``. The reach audit reads the union of its deny
+    tier and every exec-capable adapter's under ``root`` (REQ-662 ADR-8). With no adapter, the
+    result is :func:`merge` over every exec-capable adapter under ``root``: what ``fence-run``
+    accepts and ``show`` prints, whichever harness calls. There is no harness default."""
+    if adapter is None:
+        return merge([_census_one(root, a) for a in exec_adapters(root)])
+    return _census_one(root, adapter)
+
+
+def _census_one(root, adapter):
+    policy = exec_policy(root, adapter) if routes_direct(adapter) else None
+    denies = union_deny_texts(exec_adapters(root) + [adapter], root)
     index = function_index(root)
     records = []
     for rel in EXEC_FILES:
         for fence in fences(view(root, rel), rel):
-            records.append(_route(fence, policy, index, adapter, root))
+            records.append(_route(fence, policy, index, root, denies))
     return records
+
+
+def merge(censuses):
+    """One record per fence from several adapters' censuses (REQ-662 ADR-8): the first
+    ``runner`` record when any adapter routes the fence ``runner``, because ``fence-run`` accepts
+    it whichever harness calls; else the first ``direct`` one; else the first adapter's. Only
+    ``direct`` differs between adapters, since the reach audit reads one union deny tier."""
+    if not censuses:
+        raise CensusError("no census to merge")
+    by_id = [dict((r["id"], r) for r in records) for records in censuses]
+    out = []
+    for rec in censuses[0]:
+        recs = [b[rec["id"]] for b in by_id if rec["id"] in b]
+        out.append(next((r for r in recs if r["route"] == "runner"), None) or
+                   next((r for r in recs if r["route"] == "direct"), None) or rec)
+    return out
 
 
 def unrouted(records):
@@ -1497,7 +1658,7 @@ def unrouted(records):
 
 def golden_doc(records):
     """The committed golden: every id with its route, placeholders and reach."""
-    keep = ("id", "route", "reason", "placeholders", "sources", "reach")
+    keep = ("id", "route", "reason", "placeholders", "sources", "reach", "push")
     return {"comment": "REQ-682 exec fence census. Regenerate with "
                        "`python3 tools/adlc/fence_census.py --write`; a diff here is a fence "
                        "whose route, values or reach changed.",
@@ -1505,43 +1666,95 @@ def golden_doc(records):
                        for r in records]}
 
 
-GOLDEN = os.path.join("harness", "claude", "exec-fence-census.json")
+#: Each adapter's golden sits beside its renders, never under ``rendered/``, which
+#: ``render-parity`` walks.
+GOLDEN_NAME = "exec-fence-census.json"
+
+
+def golden_path(name):
+    """The toolkit-relative golden of the adapter named ``name``."""
+    return os.path.join("harness", name, GOLDEN_NAME)
 
 
 def dumps(doc):
     return json.dumps(doc, indent=2, sort_keys=False) + "\n"
 
 
+def goldens(root):
+    """``[(adapter, rel, text, unrouted records)]`` for every exec-capable adapter."""
+    out = []
+    for adapter in exec_adapters(root):
+        records = census(root, adapter)
+        out.append((adapter, golden_path(adapter.name), dumps(golden_doc(records)),
+                    unrouted(records)))
+    return out
+
+
+def stale_goldens(root, fresh=None):
+    """Each golden under ``root`` that is not its adapter's fresh census, with why: missing,
+    stale, or naming no exec-capable adapter. Empty when every golden is fresh."""
+    fresh = goldens(root) if fresh is None else fresh
+    problems = []
+    for _adapter, rel, text, _bad in fresh:
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8") as fh:
+                current = fh.read()
+        except OSError:
+            problems.append("%s is missing" % rel)
+            continue
+        if current != text:
+            problems.append("%s is stale" % rel)
+    names = set(a.name for a, _rel, _text, _bad in fresh)
+    hdir = os.path.join(root, "harness")
+    for name in sorted(os.listdir(hdir)):
+        if os.path.isfile(os.path.join(hdir, name, GOLDEN_NAME)) and name not in names:
+            problems.append("%s names no exec-capable adapter" % golden_path(name))
+    return problems
+
+
+def write_goldens(root, fresh=None):
+    """Write every exec-capable adapter's golden; returns the paths written."""
+    fresh = goldens(root) if fresh is None else fresh
+    for _adapter, rel, text, _bad in fresh:
+        path = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    return [rel for _a, rel, _t, _b in fresh]
+
+
 def main(argv=None):
     import argparse
     parser = argparse.ArgumentParser(prog="fence_census.py", description=__doc__.split("\n")[0])
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--write", action="store_true", help="rewrite the committed golden")
-    group.add_argument("--check", action="store_true", help="fail when the golden is stale")
+    group.add_argument("--write", action="store_true",
+                       help="rewrite every exec-capable adapter's committed golden")
+    group.add_argument("--check", action="store_true",
+                       help="fail when any adapter's golden is missing or stale")
     args = parser.parse_args(argv)
     root = tkr.toolkit_root()
-    records = census(root)
-    bad = unrouted(records)
-    for rec in bad:
-        sys.stderr.write("unrouted: %s: %s\n" % (rec["id"], rec["reason"]))
-    text = dumps(golden_doc(records))
-    path = os.path.join(root, GOLDEN)
+    try:
+        fresh = goldens(root)
+    except CensusError as exc:
+        sys.stderr.write("fence_census: %s\n" % exc)
+        return 1
+    bad = False
+    for adapter, _rel, _text, records in fresh:
+        for rec in records:
+            sys.stderr.write("unrouted: %s: %s: %s\n" % (adapter.name, rec["id"], rec["reason"]))
+            bad = True
     if args.write:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(text)
+        write_goldens(root, fresh)
         return 1 if bad else 0
     if args.check:
-        try:
-            with open(path, encoding="utf-8") as fh:
-                current = fh.read()
-        except OSError:
-            current = ""
-        if current != text:
-            sys.stderr.write("fence_census: %s is stale; run fence_census.py --write\n" % GOLDEN)
-            return 1
-        return 1 if bad else 0
-    for rec in records:
-        sys.stdout.write("%-9s %s %s\n" % (rec["route"], rec["id"], rec["reason"]))
+        problems = stale_goldens(root, fresh)
+        for problem in problems:
+            sys.stderr.write("fence_census: %s; run fence_census.py --write\n" % problem)
+        return 1 if bad or problems else 0
+    for adapter in exec_adapters(root):
+        for rec in census(root, adapter):
+            sys.stdout.write("%-9s %-8s %s %s\n" % (rec["route"], adapter.name, rec["id"],
+                                                     rec["reason"]))
     return 1 if bad else 0
 
 

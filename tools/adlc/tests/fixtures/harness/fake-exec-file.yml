@@ -1,0 +1,108 @@
+# Test-only adapter (REQ-662 TASK-256): a full exec schema 2 block of the `file` render
+# form, with the rules in a working-copy rule file and the deny tier also in a user
+# policy file, output on a JSONL stream and the last message in a file. Its name is not
+# one `adlc harness detect` knows, so it loads only through an explicit path. Tests
+# rewrite single keys of a copy (the basename must stay fake-exec-file.yml). Every value
+# is synthetic.
+name: fake-exec-file
+schema_version: 1
+binary: fake-exec-file
+paths:
+  permissions:
+    project: .fake-exec-file/rules/default.rules
+    mode: rendered
+formats:
+  permissions: rules-json
+tool_map:
+  Read: read_file
+  Grep: grep
+  Glob: glob
+  Bash: shell
+tier_map:
+  opus: fake-large-1
+  sonnet: fake-mid-1
+  haiku: unverified
+deny_tier_render:
+  project: confirm
+trust:
+  mechanism: user-config-entry
+  detail: "[projects.\"<path>\"] trust_level in $HOME/.fake-exec-file/config.toml"
+hook_events:
+  session-start: unsupported
+  session-compact: unsupported
+  subagent-start: unsupported
+hook_timeout_unit: s
+hook_payload:
+  session_id: unsupported
+  cwd: unsupported
+  transcript_path: unsupported
+capabilities:
+  deny: "yes"
+  subagent_start_hook: "no"
+  compact_rehook: "no"
+  agent_tool_restriction: none
+  allowlist_granularity: command-base
+  committable_allowlist: "yes"
+exec:
+  exec_schema_version: 2
+  harness_version: "fake-exec-file 0.1.0"
+  verification: probes
+  status: verified
+  probes:
+    - id: stdin-prompt
+      ran_at: "2026-11-17T00:00:00Z"
+      harness_version: "fake-exec-file 0.1.0"
+      status: pass
+  working_copy: {strategy: clone}
+  # `none`: this fixture declares no paths.config.user for `user-config-entry` to write, which
+  # the loader refuses (REQ-662 BR-5). `exec_helpers.file_adapter` adds that config and sets
+  # the grant a test asks for.
+  trust_grant: none
+  prompt_delivery: stdin
+  # A trailing `-` would read the prompt from stdin by name; this launch leaves it out.
+  prompt_flag: ["-"]
+  prompt_variant: without-prompt-flag
+  launch: [exec, --json, --sandbox, workspace-write, -C, "{worktree}", -o, "{last_message}"]
+  resume: [exec, resume, --json, -o, "{last_message}", "{session_id}", "-"]
+  operator_flags: [--model]
+  context_delivery: prompt
+  allow_render: file
+  deny_render: file
+  rule_file: .fake-exec-file/rules/adlc-exec.rules
+  user_policy_file: $HOME/.fake-exec-file/rules/adlc-exec.rules
+  fence_runner: tools/adlc/fence-run
+  engine_deny:
+    - [adlc, sprint-exec, approve]
+    - [adlc, sprint-exec, reject]
+    - [adlc, sprint-exec, answer]
+    - [adlc, sprint-exec, abort]
+  forbidden_flags:
+    - --dangerously-skip-permissions
+    - --allow-dangerously-skip-permissions
+    - --permission-mode bypassPermissions
+    - --yolo
+    - --force
+    - --allow-all
+    - --full-auto
+    - --ask-for-approval never
+    - -c
+    - --config
+  exit_codes: {"0": ok, "1": error}
+  output:
+    format: jsonl-stream
+    source: file
+    final_message: "{last_message}"
+    session_id: {event: thread.started, key: thread_id}
+    # Optional, and read under format: jsonl-stream only: the event type a complete stream
+    # carries. A stream with none of it was cut short, which is a parse failure, as is a
+    # last line cut with no newline (REQ-662 BR-6). Without it only a cut line is caught.
+    terminal_event: turn.completed
+  env_passthrough: [HOME, PATH]
+  auth_env: [FAKE_EXEC_FILE_API_KEY]
+  config_surfaces: [.fake-exec-file/]
+  bypass_config_keys:
+    "$HOME/.fake-exec-file/config.toml": [approval_policy, sandbox_mode]
+    ".fake-exec-file/config.toml": [approval_policy, sandbox_mode]
+  rules_reload: unknown
+  shell_timeout_s: {value: 125, verified: true, delegate: supported}
+  matcher: none

@@ -14,8 +14,11 @@ the other (LESSON-397).
 * ``install``  writes a harness's user-level surfaces only (BR-3); ``--all``
   iterates the harnesses ``adlc harness detect`` reports present,
   ``--only-if-detected`` writes nothing without the binary, and ``--writable-root``
-  unions one path into a user config's owned array (REQ-655).
-* ``doctor``   runs ``harness:<name>`` and ``render-currency:<name>`` (BR-15).
+  unions one path into a user config's owned array (REQ-655). ``--exec`` writes the
+  harness's exec user policy file instead, whole and atomically (REQ-662 BR-4).
+* ``doctor``   runs ``harness:<name>`` and ``render-currency:<name>`` (BR-15), and for an
+  installed harness with an exec block prints ``exec: verified`` or ``exec: unverified
+  (<ids>)``, recomputed (REQ-662 BR-14).
 * ``drift``    classifies the project's rendered files with template posture for
   ``/template-drift`` (ADR-11); read-only. ``--opted-in`` adds each shipped adapter
   the project has the main file of.
@@ -122,7 +125,15 @@ def _writable_root_remedy(adapter, result, root, out):
               % (adapter["name"], path, hr.writable_root_stanza(adapter, path)))
 
 
-def cmd_render(args, out=sys.stdout, err=sys.stderr):
+def _streams(out, err):
+    """``out`` and ``err``, each ``sys.stdout`` or ``sys.stderr`` as it is now when not given:
+    read at the call, never bound at import, so a caller that redirects the streams after
+    this module was first imported (a test's ``capsys``) reads what the command wrote."""
+    return (sys.stdout if out is None else out), (sys.stderr if err is None else err)
+
+
+def cmd_render(args, out=None, err=None):
+    out, err = _streams(out, err)
     toolkit = ha.toolkit_dir()
     if args.check or args.write_goldens:
         if args.adapter_path:
@@ -265,9 +276,55 @@ def _install_one(adapter, toolkit, dry_run, out):
     return written, notes
 
 
-def cmd_install(args, out=sys.stdout, err=sys.stderr):
+def _install_exec(args, toolkit, out, err):
+    """``install --exec --harness <name>``: the exec block's ``user_policy_file``, the deny
+    tier the engine renders for it, written whole and atomically under the policy folder's lock
+    and the folder recorded for the engine's launch checks (``exec_surfaces``, REQ-662 BR-4).
+    A second run leaves the file as it is. An adapter that declares none has nothing to
+    install."""
+    import exec_adapter as ea
+    import exec_surfaces as esf
+    import exec_verify as ev
+    if args.all or not args.harness or args.writable_root or args.only_if_detected:
+        err.write("adlc harness install: --exec names one harness (--harness <name>) and takes "
+                  "no --all, --writable-root or --only-if-detected\n")
+        return 2
+    try:
+        adapter = ea.load(args.harness, toolkit, args.adapter_path)
+        files = adapter.rule_files("feat/install", (), ev.read_result(adapter, toolkit))
+        path = esf.policy_path(adapter.adapter, os.environ)
+    except (ea.ExecRefused, esf.SurfaceRefused) as exc:
+        err.write("adlc harness install: %s\n" % exc)
+        return 2
+    text = files.user_policy_file if files is not None else None
+    if path is None or text is None:
+        out.write("%s: nothing to install — its exec block declares no user policy file\n"
+                  % adapter.name)
+        return 0
+    if esf.found(os.path.dirname(path), os.path.basename(path)) == esf.sha256_text(text):
+        verb = "unchanged"
+    elif args.dry_run:
+        out.write("%s: dry-run: would write %s\n" % (adapter.name, path))
+        return 0
+    else:
+        verb = "written"
+    if not args.dry_run:
+        try:
+            esf.install_policy_file(adapter.adapter, os.environ, text)
+        except (esf.SurfaceRefused, OSError) as exc:
+            err.write("adlc harness install: %s\n" % exc)
+            return 2
+    out.write("%s: %s %s — the exec deny tier, beside your own rules; every exec run "
+              "checks this folder against what was recorded now\n" % (adapter.name, verb, path))
+    return 0
+
+
+def cmd_install(args, out=None, err=None):
+    out, err = _streams(out, err)
     import harness_doctor
     toolkit = ha.toolkit_dir()
+    if getattr(args, "exec_policy", False):
+        return _install_exec(args, toolkit, out, err)
     if args.all and args.adapter_path:
         err.write("adlc harness install: --all does not take --adapter-path\n")
         return 2
@@ -313,7 +370,8 @@ def cmd_install(args, out=sys.stdout, err=sys.stderr):
     return rc
 
 
-def cmd_doctor(args, out=sys.stdout, err=sys.stderr):
+def cmd_doctor(args, out=None, err=None):
+    out, err = _streams(out, err)
     import harness_doctor
     toolkit = ha.toolkit_dir()
     if args.adapter_path:
@@ -352,6 +410,10 @@ def cmd_doctor(args, out=sys.stdout, err=sys.stderr):
             out.write("    [%s] row %s — %s\n" % (rstatus, row_id, rdetail))
             if rremedy:
                 out.write("        -> fix: %s\n" % rremedy)
+        # Report-only: the engine refuses an unverified launch; doctor says why.
+        line = harness_doctor.exec_line(adapter, toolkit)
+        if line:
+            out.write("    %s\n" % line)
     return 1 if fails else 0
 
 
@@ -363,7 +425,8 @@ def _drift_adapters(args, root, toolkit):
     return hr.opted_in_adapters(first, root, toolkit) if args.opted_in else [first]
 
 
-def cmd_drift(args, out=sys.stdout, err=sys.stderr):
+def cmd_drift(args, out=None, err=None):
+    out, err = _streams(out, err)
     toolkit = ha.toolkit_dir()
     root = project_root()
     try:
@@ -411,6 +474,8 @@ def build_parser():
                    help="write nothing when `adlc harness detect` does not find the binary")
     i.add_argument("--writable-root", metavar="PATH",
                    help="add this absolute path to the user config's owned array")
+    i.add_argument("--exec", dest="exec_policy", action="store_true",
+                   help="write the harness's exec user policy file (REQ-662 BR-4)")
     d = sub.add_parser("doctor", help="harness:<name> and render-currency:<name>")
     d.add_argument("--harness")
     d.add_argument("--adapter-path")

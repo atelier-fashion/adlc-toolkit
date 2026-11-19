@@ -138,3 +138,56 @@ def test_docs_carry_surfaces():
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         for needle in needles:
             assert needle in text, (rel, needle)
+
+
+#: The exec docs REQ-662 stage 1 writes or extends (BR-14), each with what it must carry.
+EXEC_DOCS = {
+    "README.md": ("### Codex CLI under `/sprint --exec`", "<!-- exec-residuals: codex -->",
+                  "`codex` (`--harness codex`)"),
+    "harness/codex/README.md": ("## The exec block (REQ-662)", ".codex/rules/adlc-exec.rules",
+                                "$HOME/.codex/rules/adlc-exec.rules"),
+    "tools/adlc/README.md": ("## The exec adapter contract (REQ-659, REQ-662)",
+                             "exec_verify.py", "exec_trust.py", "exec_surfaces.py",
+                             "adlc harness install --exec"),
+    ".adlc/context/architecture.md": ("Adapters are data in the engine too (REQ-662)",
+                                      "exec_verify.py", "exec_surfaces.py",
+                                      "The census is per adapter (REQ-662 ADR-8)"),
+    "sprint/references/exec-engine.md": ("`--allow-unverified`", "`codex`"),
+    "sprint/SKILL.md": ("`--allow-unverified`", "`--harness codex`"),
+    "CHANGELOG.md": ("The `/sprint` exec engine on Codex CLI (REQ-662, stage 1)",
+                     "**Declared residual:** on Codex an allowed command runs outside the"),
+}
+
+
+def test_exec_docs_carry_the_codex_stage():
+    """REQ-662 BR-14: every doc the stage names carries the new exec surface."""
+    for rel, needles in EXEC_DOCS.items():
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        for needle in needles:
+            assert needle in text, (rel, needle)
+
+
+def test_codex_exec_section_sits_outside_the_loss_block():
+    """REQ-662 BR-14: the Codex exec section is its own section, after the interactive one's
+    `harness-loss` block, so that block's table and residuals keep describing a session and
+    the `harness-loss-table` lint stays clean on the tree."""
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    _lineno, block = check._loss_blocks(readme)["codex"]
+    text = "\n".join(block)
+    assert "exec-residuals" not in text and "### Codex CLI under" not in text
+    assert readme.index("<!-- /harness-loss: codex -->") < readme.index(
+        "### Codex CLI under `/sprint --exec`")
+    assert check.check_harness_loss_tables(REPO_ROOT) == []
+
+
+def test_exec_docs_do_not_call_the_allowlist_a_gate():
+    """REQ-662 BR-19, Rule B: the exec docs describe the allowlist as a convenience for the
+    routine tier, never as what stops a deny-tier command."""
+    import re
+    bad = re.compile(r"(allowlist|deny_tier_render|allowlist-fidelity)[^.\n]{0,60}"
+                     r"\b(prevents|blocks|stops|guarantees)\b", re.I)
+    for rel in tuple(EXEC_DOCS) + (
+            ".adlc/specs/REQ-662-exec-adapters-copilot-codex-gemini-cursor/requirement.md",
+            ".adlc/specs/REQ-662-exec-adapters-copilot-codex-gemini-cursor/architecture.md"):
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert not bad.search(text), (rel, bad.search(text).group(0))

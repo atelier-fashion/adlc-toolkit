@@ -10,6 +10,7 @@ once and only its digest is kept, in the supervisor's memory (ADR-4).
 Standard library only.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -19,6 +20,12 @@ import time
 
 LEDGER = "approval.json"
 RUN_RECORD = "run.json"
+#: How often a taker looks at a held ``mkdir`` lock again.
+LOCK_POLL_S = 0.02
+#: The most a state file the model writes may hold before the engine parses it: a working
+#: copy's ``pipeline-state.json`` and the close-out's copy of it. A real one is a few
+#: kilobytes, so this is two orders above that; a larger one is refused unread.
+STATE_FILE_MAX_BYTES = 512 * 1024
 
 
 def now():
@@ -64,17 +71,69 @@ def atomic_write(path, data):
         raise
 
 
+@contextlib.contextmanager
+def mkdir_lock(path, timeout, refused, holder="another adlc run is writing the file",
+               poll=LOCK_POLL_S):
+    """The ``mkdir`` lock directory at ``path``, held for the block: the id allocator's
+    pattern, and the one implementation every exec lock uses (LESSON-014).
+
+    The directory that holds ``path`` must exist. A symlink at ``path`` is refused before
+    each attempt to take the lock, and a lock still held after ``timeout`` seconds, measured
+    on the monotonic clock, is refused naming it (``holder`` says who is likely to hold it).
+    Every refusal raises ``refused(message)``: the caller's exception type, or any callable
+    that builds one.
+
+    The release removes the directory only while it is still not a symlink, and it never
+    raises: a lock it cannot remove (something was left in it, a symlink was swapped in)
+    stays where it is, and the next taker refuses it by name. So the exception the body
+    raised is always the one that propagates."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if os.path.islink(path):
+            raise refused("%s is a symlink: refusing (TOCTOU risk, LESSON-014). Inspect it by "
+                          "hand" % path)
+        try:
+            os.mkdir(path, 0o700)
+            break
+        except FileExistsError:
+            pass
+        except FileNotFoundError:
+            raise refused("cannot take %s: %s does not exist" % (path, os.path.dirname(path)))
+        if time.monotonic() >= deadline:
+            raise refused("could not take %s in %ss: %s, or one died holding the lock; remove "
+                          "the directory once no exec run is live" % (path, timeout, holder))
+        time.sleep(poll)
+    try:
+        yield path
+    finally:
+        try:
+            if not os.path.islink(path):
+                os.rmdir(path)
+        except OSError:
+            pass
+
+
 def atomic_json(path, doc):
     data = (json.dumps(doc, indent=1, sort_keys=True) + "\n").encode("utf-8")
     atomic_write(path, data)
     return hashlib.sha256(data).hexdigest()
 
 
-def read_json(path, default=None):
+def read_json(path, default=None, max_bytes=None):
+    """``path`` parsed as JSON, or ``default`` when it cannot be read or parsed: a parse error,
+    and a document nested too deep for the parser (its ``RecursionError``), which a model can
+    write into a file the engine reads. With ``max_bytes``, a file larger than that is not
+    parsed at all and reads as ``default``."""
     try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
+        with open(path, "rb") as fh:
+            data = fh.read() if max_bytes is None else fh.read(max_bytes + 1)
+    except OSError:
+        return default
+    if max_bytes is not None and len(data) > max_bytes:
+        return default
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (ValueError, RecursionError):
         return default
 
 
@@ -173,6 +232,20 @@ class Ledger(object):
 
 def mint_token():
     return secrets.token_hex(16)
+
+
+def invocation():
+    """This process's identity in the audit trail: a random id, its pid and when it started.
+    Minted once per orchestrator, so the ledger names the one invocation that received
+    ``--allow-unverified`` (REQ-662 BR-18)."""
+    return {"id": secrets.token_hex(8), "pid": os.getpid(), "startedAt": now()}
+
+
+def allow_unverified_entry(inv, where, subjects):
+    """One launch made under ``--allow-unverified``: the invocation that received the flag,
+    what was launched (``launch``, ``relaunch``, ``close-out``), when, and what was unverified.
+    The run record keeps each; the halt copies them into the ledger's plan."""
+    return {"invocation": dict(inv), "launch": where, "at": now(), "unverified": list(subjects)}
 
 
 def token_digest(token, binding=""):

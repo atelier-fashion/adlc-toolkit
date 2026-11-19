@@ -72,13 +72,35 @@ JSON
 adlc() { python3 "$ROOT/tools/adlc/adlc.py" "$@"; }
 
 cd "$REPO" || exit 1
-adlc sprint-exec run --harness codex --shared-credentials REQ-901 > "$SBX/refused.out" 2>&1
+# copilot: an adapter with no exec block yet. Codex has one since REQ-662 stage 1, and with a
+# real `codex` on PATH this line would launch it. So the sandbox's own bin, ahead of PATH,
+# holds a stub named for the adapter's binary that fails loudly if anything runs it: when a
+# later stage gives copilot a block, this case refuses for that reason, not by launching
+# whatever `copilot` the machine has.
+UNSTAGED=copilot
+UNSTAGED_BIN=$(sed -n 's/^binary: *//p' "$ROOT/harness/$UNSTAGED.yml")
+case "$UNSTAGED_BIN" in
+  '' | */*) fail "harness/$UNSTAGED.yml names no plain binary ('$UNSTAGED_BIN')" ;;
+esac
+printf '#!/bin/sh\necho "exec-engine.test.sh: the %s stub ran: an adapter launched" >&2\n: > "%s"\nexit 97\n' \
+  "$UNSTAGED_BIN" "$SBX/unstaged-ran" > "$SBX/bin/$UNSTAGED_BIN"
+chmod +x "$SBX/bin/$UNSTAGED_BIN"
+adlc sprint-exec run --harness "$UNSTAGED" --shared-credentials REQ-901 > "$SBX/refused.out" 2>&1
 check "a harness with no exec block is refused" "2" "$?"
-contains "the refusal names the sibling REQ" "REQ-662" "$(cat "$SBX/refused.out")"
+contains "the refusal names REQ-662" "REQ-662" "$(cat "$SBX/refused.out")"
+if [ -e "$SBX/unstaged-ran" ]; then
+  fail "the $UNSTAGED_BIN stub ran: the case launched a harness"
+else
+  pass "no $UNSTAGED_BIN binary was run"
+fi
 
 adlc sprint-exec run REQ-901 --shared-credentials --harness-flag=--yolo > "$SBX/refused.out" 2>&1
 check "a forbidden flag is refused" "2" "$?"
 contains "the refusal names Rule B" "Rule B" "$(cat "$SBX/refused.out")"
+
+out=$(ADLC_EXEC_RUN=REQ-901 adlc sprint-exec run REQ-901 --shared-credentials 2>&1); rc=$?
+check "a run from inside a run is refused" "2" "$rc"
+contains "it names Rule B" "Rule B protocol violation: nested_launch_refused" "$out"
 
 adlc sprint-exec run REQ-901 --shared-credentials > "$SBX/sup.out" 2>&1 &
 SUP_PID=$!

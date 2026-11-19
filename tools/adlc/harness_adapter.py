@@ -78,9 +78,27 @@ FORBIDDEN_FIRST_TOKENS = FIRST_TOKEN_WILDCARDS + ("env", "xargs", "eval", "exec"
                                                   "command", "nohup", "node", ".", "source", "[")
 #: ...and the same for any token starting with one of these (``python3``).
 FORBIDDEN_FIRST_TOKEN_PREFIXES = ("python",)
+#: An env-assignment first token (``NAME=value``), refused for every harness (REQ-662 BR-3).
+#: Claude strips the prefix before matching, so there an allow on it is inert (REQ-682 row
+#: 14); a harness that matches the raw text would admit any command after the assignment.
+ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-#: The ExecAdapter block (REQ-659 BR-3).
-EXEC_SCHEMA_VERSION = 1
+
+def first_token_problem(token):
+    """Why ``token`` may not open an allow, or None: it runs its arguments (REQ-656 BR-2,
+    REQ-682 BR-7), or it is an env assignment (REQ-662 BR-3)."""
+    token = str(token)
+    if token in FORBIDDEN_FIRST_TOKENS or token.startswith(FORBIDDEN_FIRST_TOKEN_PREFIXES):
+        return "runs its arguments"
+    if ENV_ASSIGN_RE.match(token):
+        return "is an env assignment"
+    return None
+
+
+#: The ExecAdapter block (REQ-659 BR-3), widened by REQ-662 (ADR-1). Version 1 was REQ-659's
+#: shape; version 2 reshapes ``working_copy``, ``resume`` and ``output`` and adds the ExecBlock
+#: keys. The loader reads version 2 only: a version-1 block is refused, never half-read.
+EXEC_SCHEMA_VERSION = 2
 EXEC_WORKING_COPIES = ("worktree", "clone", "orchestrator-git")
 EXIT_CLASSES = ("ok", "denied", "timeout", "error")
 #: The engine-wide vocabulary every adapter carries (BR-8); REQ-662 adds each
@@ -89,17 +107,72 @@ ENGINE_FORBIDDEN_FLAGS = ("--dangerously-skip-permissions",
                           "--allow-dangerously-skip-permissions",
                           "--permission-mode bypassPermissions", "--yolo", "--force",
                           "--allow-all")
-_EXEC_REQUIRED = ("working_copy", "trust_grant", "launch", "allow_flag", "shell_rule",
-                  "forbidden_flags", "exit_codes", "result_keys", "env_passthrough")
+#: How a block's ``status`` is earned (REQ-662 BR-11): from the probe result file, or, for a
+#: block that predates the probe gate, from its own recorded evidence (BR-1).
+EXEC_VERIFICATIONS = ("probes", "recorded")
+EXEC_STATUSES = ("verified", "unverified")
+#: A REQ-664 ProbeResult status, as ``exec.probes`` copies it.
+PROBE_STATUSES = ("pass", "fail", "unknown", "n/a")
+PROMPT_DELIVERIES = ("stdin",)
+#: The ``stdin-prompt`` probe's variants (REQ-664). Which one a launch implements is read from
+#: the adapter's own ``prompt_flag`` tokens: present in ``launch`` or absent.
+PROMPT_VARIANTS = ("with-prompt-flag", "without-prompt-flag")
+CONTEXT_DELIVERIES = ("hooks", "prompt")
+ALLOW_RENDERS = ("flags", "file")
+EXEC_DENY_RENDERS = ("flags", "file", "none")
+RULES_RELOADS = ("startup", "live", "unknown")
+TIMEOUT_DELEGATES = ("supported", "unsupported")
+#: The shortest verified shell timeout a delegated ``adlc-read`` fits in (REQ-662 BR-10).
+DELEGATE_MIN_TIMEOUT_S = 120
+#: ``claude``: ``exec_matcher`` models the harness's statement matching; ``none``: nothing does.
+MATCHERS = ("claude", "none")
+#: The ``exec.matcher`` values ``exec_matcher`` models: only on these can a fence be judged
+#: ``direct`` and an extra allow be vetted. Any other value, ``none`` included, is modelled by
+#: nothing (REQ-662 BR-3, ADR-8). ``ExecAdapter.has_matcher`` reads it, and the census asks
+#: that property, so neither module imports the other for it.
+MODELLED_MATCHERS = ("claude",)
+OUTPUT_FORMATS = ("json", "jsonl-stream")
+OUTPUT_SOURCES = ("stdout", "file")
+_EXEC_REQUIRED = ("working_copy", "trust_grant", "launch", "forbidden_flags", "exit_codes",
+                  "output", "env_passthrough", "engine_deny", "fence_runner",
+                  "harness_version", "verification", "status", "prompt_delivery",
+                  "prompt_flag", "prompt_variant", "context_delivery", "allow_render",
+                  "deny_render", "user_policy_file", "config_surfaces", "rules_reload",
+                  "bypass_config_keys", "shell_timeout_s", "matcher")
+#: Keys one render form reads (REQ-662 ADR-1), as ``((axis, value), required, optional)``. On
+#: that form the required keys must be present and the optional ones may be; on any other form
+#: every one of them is refused, so a block carries no field the engine would never read.
+_EXEC_FORM_KEYS = (
+    (("allow_render", "flags"), ("allow_flag", "shell_rule", "settings_keys"),
+     ("shell_rule_exact",)),
+    (("allow_render", "file"), ("rule_file",), ()),
+    (("deny_render", "flags"), ("deny_flag",), ()),
+)
 #: Claude's file tools. A bare name in an allow list admits the tool on every path (BUG-265).
 EXEC_FILE_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep")
 
 _EXEC_KEYS = set(_EXEC_REQUIRED) | {
-    "exec_schema_version", "trust_notice", "resume_flag", "deny_flag", "add_dir_flag",
-    "shell_rule_exact", "allow_tools", "allow_extra", "allow_extra_exact", "engine_deny",
-    "deny_render", "denied_result_key", "auth_env", "config_isolation",
-    "config_isolation_help", "settings_keys", "sandbox_refuse", "residuals", "file_rules",
-    "fence_runner"}
+    "exec_schema_version", "trust_notice", "resume", "add_dir_flag", "allow_tools",
+    "allow_extra", "allow_extra_exact", "auth_env", "config_isolation",
+    "config_isolation_help", "sandbox_refuse", "residuals", "file_rules", "probes",
+    "operator_flags", "denied_stderr"} | {
+    key for _form, required, optional in _EXEC_FORM_KEYS for key in required + optional}
+_EXEC_OUTPUT_REQUIRED = ("format", "source", "final_message", "session_id")
+#: Where the parsed output holds each field. ``denials`` is the list a run's refusals land in.
+_EXEC_OUTPUT_PATHS = ("session_id", "final_message", "is_error", "num_turns", "cost", "denials")
+#: The keys of ``format: jsonl-stream`` alone: required under it and refused under any other
+#: format, so no block carries one optionally. ``terminal_event`` is the event ``type`` a
+#: complete stream carries. A stream without one was cut short, which is a parse failure
+#: (REQ-662 BR-6); without the key, a stream cut between two whole lines would parse as
+#: complete, so the parser indexes it rather than reading a default.
+_EXEC_OUTPUT_STREAM_ONLY = ("terminal_event",)
+#: The one placeholder ``final_message`` names under ``source: file``: the engine fills it
+#: with a file in the run directory, so the harness writes no last message anywhere else.
+_LAST_MESSAGE = "{last_message}"
+_EVENT_TYPE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+_KEY_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+_FLAG_NAME_RE = re.compile(r"^--?[A-Za-z0-9][A-Za-z0-9-]*$")
+_USER_PATH_PREFIXES = ("$HOME/", "$ADLC_HOME/")
 #: A toolkit-relative path, as ``exec.fence_runner`` names the fence runner (REQ-682 ADR-8).
 _TOOLKIT_REL_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
 
@@ -126,12 +199,16 @@ FORMATS = {
     "cursor-cli-json": {"json": True, "surfaces": ("permissions",), "renders_exact": False},
     "cursor-terminal-allowlist": {"json": True, "surfaces": ("permissions",),
                                   "renders_exact": False},
-    # Codex CLI (REQ-655). A prefix_rule has no exact form, so an exact entry widens.
+    # Codex CLI (REQ-655). A prefix_rule has no exact form, so an exact entry widens, and a
+    # pattern token is matched as itself: a `*` in it is no glob (REQ-662 BR-4).
     "starlark-prefix-rule": {"json": False, "surfaces": ("permissions",),
-                             "renders_exact": False, "user_delegation": True},
+                             "renders_exact": False, "user_delegation": True,
+                             "literal_tokens": True},
     "codex-hooks-json": {"json": True, "surfaces": ("hooks",), "renders_exact": False},
+    # `trust_entry`: the format exec_trust's per-run `[projects."<path>"]` table is spelled for
+    # (REQ-662 BR-5), so the one a `trust_grant: user-config-entry` user config may have.
     "codex-config-toml": {"json": False, "toml": True, "surfaces": ("config",),
-                          "renders_exact": False},
+                          "renders_exact": False, "trust_entry": True},
     "toml-role": {"json": False, "surfaces": ("agents",), "renders_exact": False,
                   "agent_suffix": ".toml", "agent_toml": True},
     # Named for their shape (REQ-658 ADR-5). A map of named hooks with flat handler
@@ -357,35 +434,314 @@ def _hook_output_envelope(src, data):
             raise AdapterError(src, field, "is not JSON around %%s: %s" % exc)
 
 
-def _exec_block(src, block):
-    """The ExecAdapter block (REQ-659 BR-3): closed keys, each with its shape.
+def _holds_tokens(argv, tokens):
+    """Whether ``tokens`` is a contiguous run of ``argv``."""
+    n = len(tokens)
+    return any(list(argv[i:i + n]) == list(tokens) for i in range(len(argv) - n + 1))
+
+
+def _user_path(path):
+    return path.startswith(_USER_PATH_PREFIXES) and ".." not in path.split("/")
+
+
+def _exec_forms(src, block, data):
+    """The render forms (REQ-662 ADR-1): the keys each form reads, and the deny capability a
+    rendered deny needs."""
+    _enum(src, "exec.allow_render", block["allow_render"], ALLOW_RENDERS)
+    _enum(src, "exec.deny_render", block["deny_render"], EXEC_DENY_RENDERS)
+    for (axis, value), required, optional in _EXEC_FORM_KEYS:
+        for key in required + optional:
+            if block[axis] == value:
+                if key in required and key not in block:
+                    raise AdapterError(src, "exec." + key, "is required with %s: %s"
+                                       % (axis, value))
+            elif key in block:
+                raise AdapterError(src, "exec." + key, "is read only with %s: %s, and this "
+                                   "block declares %s: %s (REQ-662 ADR-1)"
+                                   % (axis, value, axis, block[axis]))
+    caps = data.get("capabilities")
+    if block["deny_render"] != "none" and not (isinstance(caps, dict)
+                                               and caps.get("deny") == "yes"):
+        raise AdapterError(src, "exec.deny_render", "%s needs capabilities.deny: yes; a harness "
+                           "that cannot deny declares none" % block["deny_render"])
+
+
+def _exec_working_copy(src, block, data):
+    """``working_copy: {strategy}`` (REQ-662 BR-9). ``worktree`` needs the top-level record
+    that the sandbox reaches the common git dir; the probe that backs it is ``exec_verify``'s."""
+    wc = block["working_copy"]
+    if not isinstance(wc, dict):
+        raise AdapterError(src, "exec.working_copy", "must be a mapping {strategy: ...} at "
+                           "exec_schema_version %d" % EXEC_SCHEMA_VERSION)
+    _unknown(src, "exec.working_copy.", wc, {"strategy"})
+    strategy = _enum(src, "exec.working_copy.strategy", wc.get("strategy"), EXEC_WORKING_COPIES)
+    reach = data.get("sandbox_can_reach_common_gitdir")
+    if strategy == "worktree" and reach != "true":
+        raise AdapterError(src, "exec.working_copy.strategy", "worktree needs the top-level "
+                           "sandbox_can_reach_common_gitdir: true (this adapter says %r); "
+                           "declare clone or orchestrator-git (REQ-662 BR-9)" % (reach,))
+
+
+def _exec_trust_grant(src, block, data):
+    """``trust_grant`` (REQ-662 BR-5). ``user-config-entry`` appends a TOML
+    ``[projects."<path>"]`` table to ``paths.config.user``, so an adapter that declares no user
+    config has no file to write and is refused here, when it loads, not first at a pre-flight.
+    The entry's spelling is known only for a config format the registry marks
+    ``trust_entry``, so a user config in any other format is refused here too rather than have
+    that table appended to it. The format looked up is ``formats.config``, the one an adapter
+    declares for its config surface: this assumes the user config has the project config's
+    format."""
+    grant = _enum(src, "exec.trust_grant", block["trust_grant"], TRUST_MECHANISMS)
+    if grant != "user-config-entry":
+        return
+    config = (data.get("paths") or {}).get("config") or {}
+    if not isinstance(config.get("user"), str) or not config.get("user"):
+        raise AdapterError(src, "exec.trust_grant", "user-config-entry writes the user config "
+                           "paths.config.user, and this adapter declares none; declare it, or "
+                           "trust_grant: none (REQ-662 BR-5)")
+    fmt = (data.get("formats") or {}).get("config")
+    if not (FORMATS.get(fmt) or {}).get("trust_entry"):
+        known = ", ".join(sorted(n for n, f in FORMATS.items() if f.get("trust_entry")))
+        raise AdapterError(src, "exec.trust_grant", "user-config-entry appends a TOML "
+                           "[projects.\"<path>\"] table to paths.config.user, an entry spelled "
+                           "for %s; this adapter's user config is %s, for which the entry's "
+                           "spelling is not known yet (REQ-662 BR-5)"
+                           % (known, fmt or "a file with no declared format"))
+
+
+def _exec_probes(src, block, verification):
+    """``probes``: a cache of the result file's rows, read only under ``verification: probes``
+    and never a verdict of its own (REQ-662 BR-11)."""
+    if verification == "recorded":
+        if "probes" in block:
+            raise AdapterError(src, "exec.probes", "is read only with verification: probes; a "
+                               "recorded block stands on its recorded evidence (REQ-662 BR-1)")
+        return
+    if "probes" not in block:
+        raise AdapterError(src, "exec.probes", "is required with verification: probes")
+    records = _need_list(src, "exec.probes", block["probes"])
+    if not records:
+        raise AdapterError(src, "exec.probes", "must not be empty with verification: probes")
+    seen = set()
+    for i, rec in enumerate(records):
+        field = "exec.probes[%d]" % i
+        _need_map(src, field, rec)
+        _unknown(src, field + ".", rec, {"id", "ran_at", "harness_version", "status"})
+        for key in ("id", "ran_at", "harness_version"):
+            _need_str(src, "%s.%s" % (field, key), rec.get(key))
+        _enum(src, field + ".status", rec.get("status"), PROBE_STATUSES)
+        if rec["id"] in seen:
+            raise AdapterError(src, field + ".id", "%r is listed twice" % rec["id"])
+        seen.add(rec["id"])
+
+
+def _exec_prompt(src, block):
+    """``prompt_variant`` names the ``stdin-prompt`` variant the launch implements, and the
+    adapter's own ``prompt_flag`` tokens decide which one that is: ``with-prompt-flag`` when
+    ``launch`` holds them as a contiguous run, ``without-prompt-flag`` when it does not."""
+    _enum(src, "exec.prompt_delivery", block["prompt_delivery"], PROMPT_DELIVERIES)
+    flag = _need_list(src, "exec.prompt_flag", block["prompt_flag"])
+    if not flag:
+        raise AdapterError(src, "exec.prompt_flag", "must not be empty")
+    for k, tok in enumerate(flag):
+        _need_str(src, "exec.prompt_flag[%d]" % k, tok)
+    variant = _enum(src, "exec.prompt_variant", block["prompt_variant"], PROMPT_VARIANTS)
+    held = _holds_tokens(block["launch"], flag)
+    if held != (variant == "with-prompt-flag"):
+        raise AdapterError(src, "exec.prompt_variant", "%s disagrees with exec.launch, which %s "
+                           "the prompt_flag tokens %s: the gate would read a stdin-prompt "
+                           "variant the launch does not implement"
+                           % (variant, "holds" if held else "lacks", json.dumps(flag)))
+
+
+def _exec_surfaces(src, block):
+    """``config_surfaces`` and ``bypass_config_keys`` (REQ-662 BR-15, BR-16). Either may be
+    empty only where ``config_isolation`` keeps the harness from reading config at all."""
+    isolated = bool(block.get("config_isolation"))
+    surfaces = []
+    for i, item in enumerate(_need_list(src, "exec.config_surfaces", block["config_surfaces"])):
+        path = _project_path(src, "exec.config_surfaces[%d]" % i, item).rstrip("/")
+        if path in surfaces:
+            raise AdapterError(src, "exec.config_surfaces[%d]" % i, "%r is listed twice" % item)
+        surfaces.append(path)
+    if not surfaces and not isolated:
+        raise AdapterError(src, "exec.config_surfaces", "must name every working-copy file or "
+                           "directory the harness reads once the folder is trusted; it may be "
+                           "empty only where config_isolation keeps the harness from reading "
+                           "them")
+    keys = _need_map(src, "exec.bypass_config_keys", block["bypass_config_keys"])
+    for path, names in keys.items():
+        field = "exec.bypass_config_keys." + path
+        if not _user_path(path):
+            _project_path(src, field, path)
+            if not any(path == s or path.startswith(s + "/") for s in surfaces):
+                raise AdapterError(src, field, "is neither a user path ($HOME/, $ADLC_HOME/) nor "
+                                   "one of exec.config_surfaces or a file inside one")
+        items = _need_list(src, field, names)
+        if not items:
+            raise AdapterError(src, field, "must not be empty")
+        for k, name in enumerate(items):
+            _need_str(src, "%s[%d]" % (field, k), name)
+    if not keys and not isolated:
+        raise AdapterError(src, "exec.bypass_config_keys", "must name, per config surface, the "
+                           "keys that relax approval or sandboxing; it may be empty only where "
+                           "config_isolation keeps the harness from reading its config")
+
+
+def _exec_shell_timeout(src, spec):
+    """``shell_timeout_s: {value, verified, delegate}`` (REQ-662 BR-10). ``supported`` means a
+    verified value of at least ``DELEGATE_MIN_TIMEOUT_S``; ``verified`` is ``true`` or
+    ``false`` as written, the way this loader reads every boolean."""
+    field = "exec.shell_timeout_s"
+    _need_map(src, field, spec)
+    _unknown(src, field + ".", spec, {"value", "verified", "delegate"})
+    for key in ("value", "verified", "delegate"):
+        if key not in spec:
+            raise AdapterError(src, "%s.%s" % (field, key), "is required")
+    value = spec["value"]
+    if value != "unknown" and not (isinstance(value, int) and value > 0):
+        raise AdapterError(src, field + ".value", "%r is not a whole number of seconds or "
+                           "unknown" % (value,))
+    verified = _enum(src, field + ".verified", spec["verified"], ("true", "false"))
+    if verified == "true" and value == "unknown":
+        raise AdapterError(src, field + ".verified", "true needs a measured value")
+    delegate = _enum(src, field + ".delegate", spec["delegate"], TIMEOUT_DELEGATES)
+    if delegate == "supported" and not (verified == "true"
+                                        and value >= DELEGATE_MIN_TIMEOUT_S):
+        raise AdapterError(src, field + ".delegate", "supported needs a verified value of at "
+                           "least %d s; declare unsupported" % DELEGATE_MIN_TIMEOUT_S)
+
+
+def _exec_output(src, block):
+    """``output`` (REQ-662 ADR-6). ``format`` is how stdout is parsed; ``source`` is where the
+    final message is read. Under ``format: json`` a field is a key path into the result object
+    (``key`` or ``a.b``); under ``jsonl-stream`` it is ``{event, key}``, a key path inside the
+    event whose ``type`` is ``event``, and the required ``terminal_event`` names the event a
+    complete stream carries. Under ``source: file``, ``final_message`` is exactly
+    ``{last_message}``, the placeholder that names the file the harness writes its last
+    message to, and it must be a whole token of ``launch`` (and of ``resume``), or the engine
+    would read a file the harness was never told to write."""
+    out = block["output"]
+    if not isinstance(out, dict):
+        raise AdapterError(src, "exec.output", "must be a mapping {format, source, final_message, "
+                           "session_id} at exec_schema_version %d" % EXEC_SCHEMA_VERSION)
+    _unknown(src, "exec.output.", out, set(_EXEC_OUTPUT_REQUIRED) | set(_EXEC_OUTPUT_PATHS)
+             | set(_EXEC_OUTPUT_STREAM_ONLY))
+    for key in _EXEC_OUTPUT_REQUIRED:
+        if key not in out:
+            raise AdapterError(src, "exec.output." + key, "is required")
+    fmt = _enum(src, "exec.output.format", out["format"], OUTPUT_FORMATS)
+    source = _enum(src, "exec.output.source", out["source"], OUTPUT_SOURCES)
+    if "terminal_event" in out:
+        if fmt != "jsonl-stream":
+            raise AdapterError(src, "exec.output.terminal_event", "is read under format: "
+                               "jsonl-stream only: a json result has no events")
+        event = _need_str(src, "exec.output.terminal_event", out["terminal_event"])
+        if not _EVENT_TYPE_RE.match(event):
+            raise AdapterError(src, "exec.output.terminal_event", "%r is not an event type"
+                               % (event,))
+    elif fmt == "jsonl-stream":
+        raise AdapterError(src, "exec.output.terminal_event", "is required under format: "
+                           "jsonl-stream: without it, a stream cut between two whole lines "
+                           "parses as complete")
+    for key in _EXEC_OUTPUT_PATHS:
+        if key not in out:
+            continue
+        field, value = "exec.output." + key, out[key]
+        if key == "final_message" and source == "file":
+            if value != _LAST_MESSAGE:
+                raise AdapterError(src, field, "under source: file, must be exactly %s, the "
+                                   "placeholder the engine fills with the file the harness "
+                                   "writes its last message to; it is %r" % (_LAST_MESSAGE,
+                                                                             value))
+            for argv in ("launch", "resume"):
+                if argv in block and value not in block[argv]:
+                    raise AdapterError(src, field, "%s is not a whole token of exec.%s"
+                                       % (value, argv))
+        elif fmt == "json":
+            if not isinstance(value, str) or not _KEY_PATH_RE.match(value):
+                raise AdapterError(src, field, "must be a key path into the JSON result "
+                                   "(`key` or `a.b`)")
+        else:
+            if not isinstance(value, dict):
+                raise AdapterError(src, field, "must be {event, key} under format: "
+                                   "jsonl-stream")
+            _unknown(src, field + ".", value, {"event", "key"})
+            _need_str(src, field + ".event", value.get("event"))
+            if not isinstance(value.get("key"), str) or not _KEY_PATH_RE.match(value["key"]):
+                raise AdapterError(src, field + ".key", "must be a key path into the event "
+                                   "(`key` or `a.b`)")
+
+
+def _exec_block(src, block, data):
+    """The ExecAdapter block at exec schema 2 (REQ-659 BR-3, REQ-662 ADR-1): closed keys,
+    each with its shape, and the keys one render form reads only on that form.
 
     A block without ``exec_schema_version`` stays the opaque map REQ-657 allowed.
     """
-    if block["exec_schema_version"] != EXEC_SCHEMA_VERSION:
+    version = block["exec_schema_version"]
+    if version != EXEC_SCHEMA_VERSION:
         raise AdapterError(src, "exec.exec_schema_version", "%r is not a version this loader "
-                           "knows (%d)" % (block["exec_schema_version"], EXEC_SCHEMA_VERSION))
+                           "knows (%d)%s" % (version, EXEC_SCHEMA_VERSION,
+                                             "; version 1 is REQ-659's shape, which REQ-662 "
+                                             "widened: migrate the block" if version == 1
+                                             else ""))
     _unknown(src, "exec.", block, _EXEC_KEYS)
     for key in _EXEC_REQUIRED:
         if key not in block:
-            raise AdapterError(src, "exec." + key, "is required when exec_schema_version is set")
-    wc = block["working_copy"]
-    if isinstance(wc, dict):
-        _unknown(src, "exec.working_copy.", wc, {"strategy"})
-        wc = wc.get("strategy")
-    _enum(src, "exec.working_copy", wc, EXEC_WORKING_COPIES)
-    _enum(src, "exec.trust_grant", block["trust_grant"], TRUST_MECHANISMS)
-    for key in ("resume_flag", "allow_flag", "deny_flag", "add_dir_flag", "shell_rule",
-                "shell_rule_exact", "trust_notice", "denied_result_key"):
+            raise AdapterError(src, "exec." + key, "is required at exec_schema_version %d"
+                               % EXEC_SCHEMA_VERSION)
+    _exec_forms(src, block, data)
+    _exec_working_copy(src, block, data)
+    _exec_trust_grant(src, block, data)
+    _need_str(src, "exec.harness_version", block["harness_version"])
+    _enum(src, "exec.status", block["status"], EXEC_STATUSES)
+    _exec_probes(src, block, _enum(src, "exec.verification", block["verification"],
+                                   EXEC_VERIFICATIONS))
+    for key in ("allow_flag", "deny_flag", "add_dir_flag", "shell_rule", "shell_rule_exact",
+                "trust_notice"):
         if key in block:
             _need_str(src, "exec." + key, block[key])
-    for key in ("launch", "allow_tools", "forbidden_flags", "env_passthrough", "auth_env",
-                "config_isolation", "config_isolation_help", "residuals"):
+    for key in ("launch", "resume", "allow_tools", "forbidden_flags", "env_passthrough",
+                "auth_env", "config_isolation", "config_isolation_help", "residuals",
+                "operator_flags"):
         if key in block:
             for i, item in enumerate(_need_list(src, "exec." + key, block[key])):
                 if key == "config_isolation" and item == "":
                     continue   # an empty value is an argument: `--setting-sources ""` (BUG-260)
                 _need_str(src, "exec.%s[%d]" % (key, i), item)
+    if "resume" in block and "{session_id}" not in block["resume"]:
+        raise AdapterError(src, "exec.resume", "must hold {session_id} as a whole token: a "
+                           "resume that names no session resumes nothing")
+    for i, flag in enumerate(block.get("operator_flags", [])):
+        if not _FLAG_NAME_RE.match(flag):
+            raise AdapterError(src, "exec.operator_flags[%d]" % i, "%r is not a flag name "
+                               "(`--name` or `-n`)" % flag)
+    _exec_prompt(src, block)
+    _enum(src, "exec.context_delivery", block["context_delivery"], CONTEXT_DELIVERIES)
+    _enum(src, "exec.rules_reload", block["rules_reload"], RULES_RELOADS)
+    _enum(src, "exec.matcher", block["matcher"], MATCHERS)
+    if "rule_file" in block:
+        _project_path(src, "exec.rule_file", block["rule_file"])
+    policy = _need_str(src, "exec.user_policy_file", block["user_policy_file"])
+    if policy != "none":
+        if not _user_path(policy):
+            raise AdapterError(src, "exec.user_policy_file", "%r must be none or a path under "
+                               "$HOME/ or $ADLC_HOME/ without '..'" % policy)
+        if block["deny_render"] != "file":
+            raise AdapterError(src, "exec.user_policy_file", "is written only with deny_render: "
+                               "file (this block declares %s); declare none"
+                               % block["deny_render"])
+    _exec_surfaces(src, block)
+    _exec_shell_timeout(src, block["shell_timeout_s"])
+    if "denied_stderr" in block:
+        pattern = _need_str(src, "exec.denied_stderr", block["denied_stderr"])
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise AdapterError(src, "exec.denied_stderr", "is not a regular expression: %s"
+                               % exc)
+    _exec_output(src, block)
     for i, item in enumerate(block.get("allow_tools", [])):
         if item in EXEC_FILE_TOOLS:
             raise AdapterError(src, "exec.allow_tools[%d]" % i,
@@ -413,23 +769,30 @@ def _exec_block(src, block):
         for i, item in enumerate(_need_list(src, "exec." + key, block.get(key, []))):
             _token_list(src, "exec.%s[%d]" % (key, i), item)
             first = str(item[0])
-            if key != "engine_deny" and (first in FORBIDDEN_FIRST_TOKENS or
-                                         first.startswith(FORBIDDEN_FIRST_TOKEN_PREFIXES)):
+            why = first_token_problem(first) if key != "engine_deny" else None
+            if why:
                 raise AdapterError(src, "exec.%s[%d]" % (key, i),
-                                   "first token %r runs its arguments, so the allow would admit "
-                                   "any command (REQ-682 BR-7)" % first)
-    for code, klass in _need_map(src, "exec.exit_codes", block["exit_codes"]).items():
-        if not str(code).lstrip("-").isdigit():
+                                   "first token %r %s, so the allow would admit any command "
+                                   "(REQ-682 BR-7, REQ-662 BR-3)" % (first, why))
+    codes = _need_map(src, "exec.exit_codes", block["exit_codes"])
+    for code, klass in codes.items():
+        # Quoted, in canonical form: exit_class looks a code up as str(rc).
+        if not isinstance(code, str) or not code.lstrip("-").isdigit() or \
+                str(int(code)) != code:
             raise AdapterError(src, "exec.exit_codes", "%r is not an exit code" % (code,))
-        _enum(src, "exec.exit_codes." + str(code), klass, EXIT_CLASSES)
-    _unknown(src, "exec.result_keys.", _need_map(src, "exec.result_keys", block["result_keys"]),
-             {"session_id", "is_error", "num_turns", "text", "cost"})
+        _enum(src, "exec.exit_codes." + code, klass, EXIT_CLASSES)
+    if codes.get("0") != "ok":
+        raise AdapterError(src, "exec.exit_codes", "must map \"0\" to ok (REQ-659 BR-21), and "
+                           "maps it to %r" % (codes.get("0"),))
     if "settings_keys" in block:
         _unknown(src, "exec.settings_keys.", _need_map(src, "exec.settings_keys",
                                                        block["settings_keys"]), {"allow", "deny"})
     if "sandbox_refuse" in block:
         _unknown(src, "exec.sandbox_refuse.", _need_map(src, "exec.sandbox_refuse",
                                                         block["sandbox_refuse"]), {"files", "key"})
+    if not block["forbidden_flags"]:
+        raise AdapterError(src, "exec.forbidden_flags", "must not be empty: it carries the "
+                           "engine-wide vocabulary (REQ-659 BR-8)")
     missing = [f for f in ENGINE_FORBIDDEN_FLAGS if f not in block["forbidden_flags"]]
     if missing:
         raise AdapterError(src, "exec.forbidden_flags", "must carry the engine-wide vocabulary; "
@@ -659,7 +1022,7 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
             raise AdapterError(src, "exec", "must be a mapping or absent (its keys are "
                                "REQ-659's and REQ-662's)")
         if "exec_schema_version" in data["exec"]:
-            _exec_block(src, data["exec"])
+            _exec_block(src, data["exec"], data)
 
     trust = _need_map(src, "trust", data["trust"])
     _unknown(src, "trust.", trust, {"mechanism", "detail"})

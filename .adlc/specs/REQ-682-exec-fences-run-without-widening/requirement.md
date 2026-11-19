@@ -4,7 +4,7 @@ title: "Skill fences run under `/sprint --exec` without widening what the model 
 status: complete
 deployable: false
 created: 2026-11-02
-updated: 2026-11-09
+updated: 2026-11-18
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["sh", "python", "yaml", "markdown"]
@@ -85,7 +85,7 @@ This spec sets the boundary and the evidence that proves it. It does not choose 
   The declared residuals in `harness/claude.yml` and `tools/lint-skills/README.md` get no longer. Those are entries the tier held before this REQ whose arguments run code no prefix rule sees: `awk`, `sed`, `find -exec`, `npx`, `npm run`, and the REQ's own test runner, which runs code the model wrote. REQ-657 BR-18 declares them, and Rule B is why they are tolerable. They are outside BR-2, because no route can make a code-running allow safe, and removing them is not this REQ's work. (Amended 2026-11-09 after `/architect`: as first written, BR-2 made every one of them an OpaqueEntry with unbounded reach, which no route could satisfy.)
 
   "Deny tier" covers at least: the PR merge, a force-push, deploy, branch or worktree removal, the seven orchestrator sub-commands (LESSON-781), and any push other than two kinds:
-  - the exact branch push `allow_extra_exact` names;
+  - the exact branch push, by either of two mechanisms: the exact rule `allow_extra_exact` names, or, on a harness whose rules have no exact form, the same push run by the fence runner with the worktree and the branch bound as checked values (amended 2026-11-17, REQ-662 architecture ADR-9);
   - the id-reservation push `git push origin <oid>:refs/adlc/ids/<kind>/<n>` that id allocation makes. That push is a non-force push of a new ref under `refs/adlc/ids/`, and it moves no branch (amended 2026-11-09, so the close-out can allocate lesson ids under exec).
 
   (informed by BUG-260, LESSON-796, REQ-657)
@@ -161,6 +161,19 @@ This spec sets the boundary and the evidence that proves it. It does not choose 
 - [ ] Which route, or which mix of routes: toolkit entry points, engine-run fence work, or a narrow allow with a proven boundary? This is `/architect`'s call against BR-2 to BR-6. Engine-run work fits fences whose inputs are known before launch, such as Phase-0 setup and id recheck. It cannot cover fences that take model output mid-run, such as `adlc_forge_pr_create` with a body or `adlc_lessons select` with components.
 - [ ] Should the census reach skills that a REQ's own tasks invoke, beyond the pipeline's own skills? Or is that the REQ's `sprint.exec.allow_extra` to name, as REQ-659 says for `python3` and test runners?
 - [ ] Can the close-out (`/wrapup --close-out`) share the pipeline's route? Or does its fence set, with lesson and id allocation, telemetry and the chore PR, need its own rules?
+
+## Amendments
+
+- **2026-11-18, the runner line and the runner's git environment (REQ-662 stage 1).** Two changes to what this REQ shipped, both made for Codex and both in force on every harness:
+  - **The runner line single-quotes its fence id,** `fence-run run '<path>#<n>:<sha8>' --arg …`, on every harness. Measured on `codex-cli 0.166.0`: a bare `#` in the command defeats the prefix allow, so Codex matched no rule, the runner ran inside the sandbox and its push failed; with the id quoted the allow matched (`.adlc/research/harness-probes/codex-exec-manual.md`, fact 1). So the 2026-11-17 entry's "on `claude` … nothing changes" no longer holds for the prompt text: a `runner` fence's line reads differently on `claude` too. The allow still matches there: it is a prefix rule on the runner's path, and the quoted id is an argument after that path.
+  - **The runner drops the caller's `GIT_*` variables and pins two git config keys.** Before the branch check and the fence it removes every caller `GIT_*` variable but `GIT_TERMINAL_PROMPT=0`, and pins `core.fsmonitor=false` and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT` (`fence_run.GIT_PINS`). The rest of the repository's config is honoured, and a model can write it: REQ-662 declares that as its BR-19 (f).
+
+- **2026-11-17, BR-2's branch-push exception names a second mechanism (REQ-662 stage 1, architecture ADR-9).** BR-2 excepted "the exact branch push `allow_extra_exact` names", which is how `claude` admits the Step 0 push: an exact rule. A Codex prefix rule has no exact form, so an allow of `git push -u origin <branch>` would also admit `<branch> --force`, and the exec render rightly holds `git push` out. An unallowed push runs inside Codex's sandbox, with no network. With no route the model could never push its branch, and the pipeline could not open its PR (LESSON-779). The exception now admits the same push run by the fence runner, which is exact by construction:
+  - the census accepts that fence as `runner` only when its push argv is exactly `git -C $ADLC_ARG_worktree push -u origin $ADLC_ARG_branch`, a second kind in `PUSH_REACH` beside the id reservation; a `--force`, a second refspec or an option before `push` fails the reach audit;
+  - the `branch` value must match `^(feat|fix|chore)/[A-Za-z0-9][A-Za-z0-9._-]*$`, so it cannot spell the integration branch, a refspec, a `+` prefix or an option;
+  - the `worktree` value must be the directory the runner was called from, compared by real path.
+
+  On `claude` the fence stays `direct` and nothing changes. Every other push is still deny tier, and a partial function may still push only the id reservation. The fence runner accepts a fence that is `runner` in any exec-capable adapter's census, and the reach audit reads the union of every such adapter's deny tier and `engine_deny` (REQ-662 ADR-8), so this route reaches nothing any adapter denies.
 
 ## Out of Scope
 

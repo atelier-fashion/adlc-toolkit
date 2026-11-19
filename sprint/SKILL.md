@@ -47,12 +47,12 @@ Before proceeding, verify:
 
 - **`workflow`** — the deterministic `adlc-sprint` Dynamic Workflows script, which restores each REQ's internal fan-out (explore trio, Phase-5 review panel) *while* keeping cross-REQ concurrency.
 - **`legacy`** — the background `pipeline-runner` engine documented in Steps 1–6 below. Always available; the hard fallback.
-- **`exec`** — a program, not a model (REQ-659). It launches one headless harness per REQ, stops each at the merge gate, and performs every one-way move itself after an operator approves. Selected only by an explicit `--exec`: never the default, and never a fallback for the other two.
+- **`exec`** — a program, not a model (REQ-659). It launches one headless harness per REQ (Claude Code by default, or another harness whose adapter has an `exec` block, chosen with `--harness <name>`, such as `--harness codex`), stops each at the merge gate, and performs every one-way move itself after an operator approves. Selected only by an explicit `--exec`: never the default, and never a fallback for the other two.
 
 **Decide which engine to run:**
 
 1. **Detect Dynamic Workflows availability**: the engine is *available* only if the `Workflow` tool is invocable in this session. Dynamic Workflows is research-preview and plan-gated, so it can be absent (headless/cron runs, non-qualifying plans). If you cannot invoke the `Workflow` tool, treat it as unavailable.
-2. **Read the `--workflow` and `--exec` flags** from the argument, with `--exec`'s own `--harness <name>`, `--allow-unprotected` and `--shared-credentials`. Strip the flag tokens from the argument list before any REQ-ID parsing downstream, so none is mistaken for a REQ id.
+2. **Read the `--workflow` and `--exec` flags** from the argument, with `--exec`'s own `--harness <name>` (`claude` by default; `adlc harness doctor` prints an `exec:` line for each installed harness that has an exec block), `--allow-unprotected`, `--shared-credentials` and `--allow-unverified`. Strip the flag tokens from the argument list before any REQ-ID parsing downstream, so none is mistaken for a REQ id.
 3. **Select the engine**: choose `exec` when `--exec` was passed, or when the first word is one of its operator verbs. Otherwise choose `workflow` only when *available* **AND** (`--workflow` was passed **OR** the workflow engine has graduated to the default). Otherwise choose `legacy` — with no behavior change from today's `/sprint`.
 
 If the user passed `--workflow` but the `Workflow` tool is unavailable, say so explicitly and fall back to `legacy` rather than failing.

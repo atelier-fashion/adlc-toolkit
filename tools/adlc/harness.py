@@ -94,17 +94,19 @@ def _toolkit_root() -> Optional[str]:
         return None
 
 
-def _version(exe: str) -> str:
+def _version(exe: str, env: Optional[dict] = None) -> str:
     """The first output line of ``exe --version``, or ``unknown``.
 
     The child gets its own session, so a timeout kills everything it started
     (a wrapper script's ``sleep`` included), and stdin is closed, so a binary
     that asks a question gets end-of-file instead of waiting for an answer.
+    ``env`` is the child's environment, this process's when ``None``: the exec
+    engine passes its own, as it does for ``--help`` (REQ-662 BR-11).
     """
     try:
         proc = subprocess.Popen([exe, "--version"], stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                start_new_session=True)
+                                start_new_session=True, env=env)
     except OSError:
         return "unknown"
     try:

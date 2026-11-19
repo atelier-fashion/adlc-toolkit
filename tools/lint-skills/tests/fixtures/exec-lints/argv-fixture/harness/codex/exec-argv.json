@@ -1,0 +1,24 @@
+{
+  "launch": [
+    "codex",
+    "exec",
+    "--json",
+    "--sandbox",
+    "workspace-write",
+    "-C",
+    "/tmp/wt",
+    "-o",
+    "/tmp/last"
+  ],
+  "resume": [
+    "codex",
+    "exec",
+    "resume",
+    "--json",
+    "-o",
+    "/tmp/last",
+    "sess-1",
+    "-",
+    "--force"
+  ]
+}

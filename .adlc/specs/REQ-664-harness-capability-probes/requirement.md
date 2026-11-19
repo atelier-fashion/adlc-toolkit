@@ -4,7 +4,7 @@ title: "Harness capability probes: scripted, repeatable §6 experiments with a m
 status: complete
 deployable: false
 created: 2026-10-27
-updated: 2026-11-17
+updated: 2026-11-18
 component: "adlc/install"
 domain: "adlc"
 stack: ["python", "sh", "markdown", "json"]
@@ -208,6 +208,8 @@ _Permissions: not applicable — single-user machine tooling; the only authority
 - [ ] OQ-6: Where does `codex`'s `allow_required_path` live? It must be outside the sandbox's writable roots, which include the temp root, so it is not under `run_dir`; creating it is a write outside BR-4's closed list of user-level writes, so either BR-4 and BR-2 gain it (probe-created, listed by `--dry-run`, removed by cleanup) or `codex` declares none and relies on the `baseline` controls alone. Architecture decides.
 - [x] ~~`shell-timeout` on Gemini needs `run_shell_command(sleep)` in `tools.allowed`, and on Codex a `["sleep"]` prefix rule; if a harness refuses to allow `sleep` at all, should the probe fall back to a longer-running allowed command (a `git` loop)?~~ Resolved (2026-10-27, at validation): no fallback; the probe records `unknown` / `precondition-unmet`, already in BR-5's vocabulary, and a harness that cannot allow `sleep` is itself a §6.6 finding.
 - [x] ~~Does `--only` on a harness whose binary version changed warrant a warning line as well as the `not-run-this-version` entries?~~ Resolved (2026-10-27, at validation): yes; the `result_written` event already carries the drop count and both versions, and that line is echoed to stderr.
+- [ ] **Opened 2026-11-18 (REQ-662 stage 1): a `runner-prefix` variant whose runner argument holds a `#` is owed.** The variant's command carries no `#`, and on `codex-cli 0.166.0` it read `pass`. The engine's real runs then found that a bare `#` in the command defeats the prefix allow: Codex matched no rule against the runner line, so the runner ran inside the sandbox and its push failed (`.adlc/research/harness-probes/codex-exec-manual.md`, fact 1). So the variant did not catch the bare-id failure. A variant whose positive launch passes the runner a `<path>#<n>:<sha8>` argument, bare and quoted, would.
+- [ ] **Opened 2026-11-18: the result file's scrub leaves the per-user temp directory in place.** `harness_probe.scrub` redacts credentials, email addresses and account ids and rewrites `$HOME` to `~`, and nothing else, so a path under the per-user temp directory (`/var/folders/…` on macOS) is written to the result file as it was. `codex.json` holds such paths.
 
 
 ## Amendments

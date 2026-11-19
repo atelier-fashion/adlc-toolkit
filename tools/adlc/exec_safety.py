@@ -14,10 +14,14 @@ Standard library only.
 import hashlib
 import json
 import os
+import posixpath
 import re
 import shutil
+import stat
 import subprocess
 import time
+
+import exec_ledger as el
 
 VALID_REQ = re.compile(r"^REQ-[0-9]{3,6}$")
 VALID_REPO_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -123,14 +127,139 @@ def strip_branch_sections(text):
     return "\n".join(out)
 
 
-def gitdir_digest(common):
-    """The launch-time checksum set of a common gitdir (BR-23 b)."""
+#: A section header exactly as git writes one: no space inside the brackets, which git refuses
+#: in a header with no subsection, and nothing but whitespace after them.
+_EXTENSIONS_HEADER = re.compile(r"^\[extensions\]\s*$", re.I)
+_WORKTREE_CONFIG_KEY = re.compile(r"^\s*worktreeconfig\s*(?:=(.*))?$", re.I)
+_CORE_HEADER = re.compile(r"^\[core\]\s*$", re.I)
+_EXCLUDES_KEY = re.compile(r"^\s*excludesfile\s*=\s*(.*?)\s*$", re.I)
+_ESCAPES = {"n": "\n", "t": "\t", "b": "\b", "\\": "\\", '"': '"'}
+#: The values git reads as boolean true, compared case-insensitively.
+_GIT_TRUE = ("true", "yes", "on", "1")
+
+
+def _engine_extension_line(line):
+    """Whether ``line`` sets ``worktreeConfig`` to a value git reads as boolean true, in a
+    spelling :func:`_config_value` reads: the key bare (which git reads as true), or a true
+    value with no comment, no continuation, no unknown escape and no unterminated quote."""
+    match = _WORKTREE_CONFIG_KEY.match(line)
+    if not match:
+        return False
+    if match.group(1) is None:
+        return True
+    value = _config_value(match.group(1).strip())
+    return value is not None and value.lower() in _GIT_TRUE
+
+
+def strip_engine_extension(text):
+    """A main git config without the one key the exec engine writes there,
+    ``extensions.worktreeConfig`` set true, and without an ``[extensions]`` section that key
+    alone held (REQ-662 BR-17). Only the spellings git itself reads as that setting are left
+    out: the header exactly ``[extensions]`` (any case, trailing whitespace only) and a value
+    git reads as boolean true (:func:`_engine_extension_line`). Every other line is kept, every
+    other ``extensions.*`` key among them, and so is anything git refuses or reads otherwise (a
+    spaced header, the key on its header's line, a continued value, ``false``, an unterminated
+    quote), so a change to one changes the checksum."""
+    sections = [[None, []]]
+    for line in text.split("\n"):
+        if line.strip().startswith("["):
+            sections.append([line, []])
+        else:
+            sections[-1][1].append(line)
+    out = []
+    for header, body in sections:
+        if header is not None and _EXTENSIONS_HEADER.match(header):
+            body = [line for line in body if not _engine_extension_line(line)]
+            if not any(line.strip() for line in body):
+                continue
+        if header is not None:
+            out.append(header)
+        out.extend(body)
+    return "\n".join(out)
+
+
+def _config_value(raw):
+    """A git config value as git reads it (quotes and escapes), or None for one the engine
+    never writes: a comment after it, a continuation, an unknown escape."""
+    out, quoted, i = [], False, 0
+    while i < len(raw):
+        ch = raw[i]
+        if ch == "\\":
+            if raw[i + 1:i + 2] not in _ESCAPES:
+                return None
+            out.append(_ESCAPES[raw[i + 1]])
+            i += 2
+            continue
+        if ch == '"':
+            quoted = not quoted
+        elif not quoted and ch in ";#":
+            return None
+        else:
+            out.append(ch)
+        i += 1
+    return None if quoted else "".join(out)
+
+
+def _under(path, root):
+    if not os.path.isabs(path) or not os.path.isabs(root):
+        return False
+    base = posixpath.normpath(root).rstrip("/") + "/"
+    return posixpath.normpath(path).startswith(base)
+
+
+def engine_worktree_config(path, state_root):
+    """Whether a working copy's ``config.worktree`` at ``path`` holds only what the exec engine
+    writes there (REQ-662 BR-17): the one ``core.excludesFile`` setting, naming a file under
+    ``state_root``, the engine's own excludes file; or nothing (an empty file, or a bare
+    ``[core]`` header, which is what unsetting it leaves). A regular file only, never
+    followed; a comment, a second key, a header spelled any way git does not write it (a
+    space inside the brackets) or any other section is not the engine's."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    core, keys = False, 0
+    for line in text.split("\n"):
+        if not line.strip():
+            continue
+        if line.strip().startswith("["):
+            if not _CORE_HEADER.match(line):
+                return False
+            core = True
+            continue
+        match = _EXCLUDES_KEY.match(line)
+        if not core or not match or keys:
+            return False
+        value = _config_value(match.group(1))
+        if value is None or not _under(value, state_root):
+            return False
+        keys += 1
+    return True
+
+
+def gitdir_digest(common, state_root=None):
+    """The launch-time checksum set of a common gitdir (BR-23 b).
+
+    ``state_root`` is the exec engine's state root (``exec_ledger.exec_root`` of the run's
+    environment). Given it, the set leaves out exactly what the engine itself writes into a
+    common gitdir for a file-rendering batch, so another supervisor's run on the same
+    repository is not blocked by it (REQ-662 BR-17): the ``extensions.worktreeConfig`` key in
+    the main config (:func:`strip_engine_extension`), and a working copy's
+    ``config.worktree`` that holds only the engine's ``core.excludesFile`` or nothing
+    (:func:`engine_worktree_config`), so removing such a working copy changes nothing either.
+    Everything else in those files counts. Without it, the set is REQ-659's, every byte
+    counted."""
     items = {}
     config = os.path.join(common, "config")
     if os.path.isfile(config):
         with open(config, encoding="utf-8", errors="replace") as fh:
-            items["config"] = hashlib.sha256(strip_branch_sections(fh.read())
-                                             .encode("utf-8")).hexdigest()
+            text = strip_branch_sections(fh.read())
+        if state_root is not None:
+            text = strip_engine_extension(text)
+        items["config"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
     for rel in ("config.worktree", os.path.join("info", "attributes")):
         path = os.path.join(common, rel)
         items[rel] = sha256_file(path) if os.path.isfile(path) else None
@@ -149,6 +278,8 @@ def gitdir_digest(common):
         for name in sorted(os.listdir(worktrees)):
             path = os.path.join(worktrees, name, "config.worktree")
             if os.path.isfile(path):
+                if state_root is not None and engine_worktree_config(path, state_root):
+                    continue
                 items[os.path.join("worktrees", name, "config.worktree")] = sha256_file(path)
     return items
 
@@ -281,8 +412,15 @@ class Toolbox(object):
     def register_tree(self, repo):
         """Record the checksum set of the common gitdir a repo's working copies share."""
         common = self.common_dir(repo)
-        self.trees[repo] = {"common": common, "digest": gitdir_digest(common)}
+        self.trees[repo] = {"common": common, "digest": self.tree_digest(common)}
         self.save()
+
+    def tree_digest(self, common):
+        """:func:`gitdir_digest` of ``common`` as this box checks it: without what the exec
+        engine itself writes there, its state root read from this run's environment, so
+        another supervisor's batch on the same repository does not trip this run's checksum
+        (REQ-662 BR-17)."""
+        return gitdir_digest(common, el.exec_root(self.environ))
 
     def common_dir(self, repo):
         res = subprocess.run([self.tools["git"], "-C", repo, "rev-parse",
@@ -372,12 +510,12 @@ class Toolbox(object):
         tree = self.trees.get(repo)
         if tree is None:
             return True
-        return gitdir_digest(tree["common"]) == tree["digest"]
+        return self.tree_digest(tree["common"]) == tree["digest"]
 
     def verify_gitdir(self, repo):
         if not self.check_gitdir(repo):
             tree = self.trees[repo]
-            now = gitdir_digest(tree["common"])
+            now = self.tree_digest(tree["common"])
             changed = sorted(k for k in set(now) | set(tree["digest"])
                              if now.get(k) != tree["digest"].get(k))
             self.violate("common gitdir checksum mismatch in %s: %s" % (repo, ", ".join(changed)))
@@ -389,11 +527,15 @@ class Toolbox(object):
         raise RuleBViolation(message)
 
     # -- running things ---------------------------------------------------------
-    def log(self, kind, argv, cwd, rc, env=None):
+    def log(self, kind, argv, cwd, rc, env=None, detail=None):
+        """One action-log line. ``detail`` is an event's payload, for the events that carry one
+        beyond an argv (REQ-662's ``rule_file_rerendered`` and ``config_surface_violation``)."""
         record = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "kind": kind,
                   "argv": list(argv), "cwd": cwd, "rc": rc}
         if env is not None:
             record["env"] = {k: v for k, v in env.items() if k.startswith("GIT_CONFIG")}
+        if detail is not None:
+            record["detail"] = detail
         with open(self.log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, sort_keys=True) + "\n")
 

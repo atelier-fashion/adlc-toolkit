@@ -10,10 +10,16 @@ The **dynamic** check runs every runner fence through ``fence-run`` with recordi
 proves the paths it reaches, not every branch: that residual is the static check's. It runs
 in the throwaway ``HOME`` the conftest gives every test, with no network, because every
 forge and git call stops at a stub.
+
+Both read the **union** of every exec-capable adapter's deny tier and ``engine_deny``, so a
+route ``fence-run`` accepts reaches nothing any adapter denies (REQ-662 ADR-8). The pushes a
+runner fence may make are the two kinds BR-2 excepts: the id reservation, and the exact branch
+push of REQ-662 ADR-9.
 """
 
 import io
 import os
+import shutil
 import sys
 
 import pytest
@@ -32,6 +38,8 @@ from test_fence_run import _sample_argv  # noqa: E402
 
 TOOLKIT = toolkit_root.toolkit_root()
 FIX = os.path.join(HERE, "fixtures", "exec-fence", "partials")
+MATCHER_NONE = os.path.join(HERE, "fixtures", "harness", "fake-exec-file.yml")
+PUSH_KEY = "proceed/phase-0-setup.md#6"
 
 
 @pytest.fixture(scope="module")
@@ -40,8 +48,20 @@ def adapter():
 
 
 @pytest.fixture(scope="module")
-def records():
-    return fc.census(TOOLKIT)
+def records(adapter):
+    return fc.census(TOOLKIT, adapter)
+
+
+def _memo(monkeypatch):
+    memo = {}
+    real = fc.census
+
+    def census(root, a=None):
+        key = (root, a.name if a is not None else None)
+        if key not in memo:
+            memo[key] = real(root, a)
+        return memo[key]
+    monkeypatch.setattr(fc, "census", census)
 
 
 def _fixture_line(name):
@@ -86,7 +106,7 @@ def test_fixture_deny_call_fails_audit(tmp_path, fixture, rel, func, deny):
     the function and the file:line, and its fences stop being runner."""
     root = rs.toolkit_copy(str(tmp_path / "tk"))
     _inject(root, rel, func, _fixture_line(fixture))
-    bad = fc.unrouted(fc.census(root))
+    bad = fc.unrouted(fc.census(root, ea.load("claude", root)))
     assert bad, "the injected %s was not found" % deny
     hits = [r for r in bad if deny in " ".join(r.get("problems", []))]
     assert hits, [r["reason"] for r in bad]
@@ -101,7 +121,7 @@ def test_unindexed_function_starts_refused(tmp_path):
         extra = fh.read()
     with open(os.path.join(root, "validate", "SKILL.md"), "a", encoding="utf-8") as fh:
         fh.write("\n" + extra)
-    bad = fc.unrouted(fc.census(root))
+    bad = fc.unrouted(fc.census(root, ea.load("claude", root)))
     assert [r["id"].split("#")[0] for r in bad] == ["validate/SKILL.md"], bad
     assert "adlc_forge_pr_land" in bad[0]["reason"]
     assert "neither the function index nor EXTERNAL" in bad[0]["reason"]
@@ -119,13 +139,7 @@ def test_real_tree_reach_matches_golden(records, adapter, tmp_path, monkeypatch)
     """Benign path, dynamic: every runner fence runs under stubs with sample values; each
     recorded command is in its fence's static reach, none is a deny, and every push is the id
     reservation. At least one case runs per runner fence."""
-    memo = {}
-    real = fc.census
-    def census(root, a=None):
-        if root not in memo:
-            memo[root] = real(root, a)
-        return memo[root]
-    monkeypatch.setattr(fc, "census", census)
+    _memo(monkeypatch)
     policy = fc.exec_policy(TOOLKIT, adapter)
     wc = tmp_path / "wc"
     (wc / ".adlc" / "specs").mkdir(parents=True)
@@ -167,7 +181,105 @@ def test_id_reservation_push_is_reach_of_the_allocation_fences(records):
         assert rec["route"] == "runner" and "git push" in rec["reach"], rec
 
 
+def _with_engine_deny(root, entry):
+    """Ship the matcher-none fixture adapter under ``root`` with one more ``engine_deny``."""
+    with open(MATCHER_NONE, encoding="utf-8") as fh:
+        text = fh.read()
+    assert text.count("  engine_deny:\n") == 1
+    text = text.replace("  engine_deny:\n", "  engine_deny:\n    - %s\n" % entry)
+    with open(os.path.join(root, "harness", "fake-exec-file.yml"), "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def test_reach_runs_against_the_union_of_deny_tiers(tmp_path, records):
+    """BR-19, ADR-8: an `engine_deny` entry of one exec-capable adapter is a deny for every
+    adapter's runner routes. Shipping a second adapter that denies `gh pr view` unroutes the
+    fences that reach it on `claude` too, so fence-run, which accepts the union of runner
+    routes, never runs a command any adapter denies."""
+    reaching = sorted(r["id"] for r in records if r["route"] == "runner" and
+                      "gh pr view" in r["reach"])
+    assert reaching, "no runner fence reaches `gh pr view`: pick another command"
+    root = rs.toolkit_copy(str(tmp_path / "tk"))
+    _with_engine_deny(root, "[gh, pr, view]")
+    adapters = {a.name: a for a in fc.exec_adapters(root)}
+    assert sorted(adapters) == ["claude", "codex", "fake-exec-file"]
+    assert "gh pr view" in fc.union_deny_texts(list(adapters.values()), root)
+    assert "gh pr view" not in fc.union_deny_texts(adapters["claude"], root)
+    for name, adapter in adapters.items():
+        bad = fc.unrouted(fc.census(root, adapter))
+        hit = sorted(r["id"] for r in bad if "gh pr view" in " ".join(r.get("problems", [])))
+        assert hit == reaching, (name, hit)
+    merged = {r["id"]: r for r in fc.census(root)}
+    assert all(merged[i]["route"] == "unrouted" for i in reaching)
+    wc = tmp_path / "wc"
+    wc.mkdir()
+    err = io.StringIO()
+    assert fr.run(reaching[0], [], root, cwd=str(wc), err=err) == fr.REFUSED
+    assert "not runner" in err.getvalue(), err.getvalue()
+
+
+@pytest.mark.parametrize("body,ok", [
+    ("git -C <worktree> push -u origin <branch-name>", True),
+    ("git -C <worktree> push --force -u origin <branch-name>", False),
+    ("git -C <worktree> push -u --force origin <branch-name>", False),
+    ("git -C <worktree> push -u origin <branch-name> <branch-name>", False),
+    ("git -C <worktree> push -u origin <branch-name>:main", False),
+    ("git -c push.default=current -C <worktree> push -u origin <branch-name>", False),
+    ("git -C <worktree> -c x=y push -u origin <branch-name>", False),
+    ("git -C <worktree> push origin <branch-name>", False),
+    ("git -C <worktree> push -u upstream <branch-name>", False),
+    ("git push -u origin <branch-name>", False),
+    ("git -C <primary worktree> push -u origin <branch-name>", False),
+    ("git -C <worktree> push -u origin <integration-branch>", False),
+])
+def test_branch_push_audit_accepts_only_the_exact_argv(adapter, body, ok):
+    """ADR-9: a fence's push is the branch-push kind only as exactly `git -C $ADLC_ARG_worktree
+    push -u origin $ADLC_ARG_branch`; a `--force`, a second refspec and an option before
+    `push` each fail the audit, as does any other spelling."""
+    found, _sources = fc.plan(body)
+    code = fc.transform(body, {ph.arg: ["x"] for ph in found}, root="/abs/tk")
+    _ext, problems, _funcs = fc.reach(code, fc.function_index(TOOLKIT), adapter, TOOLKIT)
+    assert (problems == []) is ok, problems
+    if not ok:
+        assert any("push" in p for p in problems), problems
+
+
+def test_branch_push_runs_what_the_audit_read(tmp_path, monkeypatch):
+    """The dynamic half for the branch push: under stubs, the one recorded call is in the
+    fence's static reach and is the branch-push kind, with `-C` the calling directory."""
+    root = rs.toolkit_copy(str(tmp_path / "tk"))
+    shutil.copy(MATCHER_NONE, os.path.join(root, "harness"))
+    other = next(a for a in fc.exec_adapters(root) if not fc.routes_direct(a))
+    rec = next(r for r in fc.census(root, other) if r["id"].startswith(PUSH_KEY + ":"))
+    assert rec["route"] == "runner" and rec["push"] == fc.BRANCH_PUSH
+    _memo(monkeypatch)
+    wc = tmp_path / "wc"
+    wc.mkdir()
+    log = str(tmp_path / "calls.jsonl")
+    stubs = rs.install(str(tmp_path / "bin"), log)
+    env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"])
+    err = io.StringIO()
+    # `git` is a stub here, so the runner's read of the checked-out branch is given its
+    # answer: this test is about the calls the fence's own script makes.
+    monkeypatch.setattr(fr, "checked_out_branch", lambda cwd, environ: "feat/REQ-901-x")
+    rc = fr.run(rec["id"], ["--arg", "worktree=%s" % wc, "--arg", "branch=feat/REQ-901-x"],
+                root, environ=env, cwd=str(wc), err=err)
+    assert rc == 0, err.getvalue()
+    calls = [[c["cmd"]] + c["argv"] for c in rs.calls(log)]
+    assert calls == [["git", "-C", str(wc), "push", "-u", "origin", "feat/REQ-901-x"]]
+    assert fc._external_shape(calls[0]) in rec["reach"]
+    assert fc.push_problems(calls) == []
+
+
 @pytest.mark.parametrize("argv,ok", [
+    (["git", "-C", "/wc", "push", "-u", "origin", "feat/REQ-901-thing"], True),
+    (["git", "-C", "/wc", "push", "-u", "origin", "main"], False),
+    (["git", "-C", "/wc", "push", "-u", "--force", "origin", "feat/x"], False),
+    (["git", "-C", "/wc", "push", "-u", "origin", "feat/x", "feat/y"], False),
+    (["git", "-C", "/wc", "push", "-u", "origin", "+feat/x"], False),
+    (["git", "-C", "/wc", "push", "-u", "origin", "feat/x:main"], False),
+    (["git", "-c", "a=b", "-C", "/wc", "push", "-u", "origin", "feat/x"], False),
+    (["git", "-C", "wc", "push", "-u", "origin", "feat/x"], False),
     (["git", "-C", "/wc", "push", "origin", "0123abcd:refs/adlc/ids/lesson/901"], True),
     (["git", "push", "origin", "deadbeef:refs/adlc/ids/assume/031"], True),
     (["git", "push", "origin", "HEAD:refs/heads/main"], False),

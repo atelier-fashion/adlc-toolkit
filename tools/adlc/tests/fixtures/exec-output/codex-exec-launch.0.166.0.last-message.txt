@@ -1,0 +1,1 @@
+I couldn’t complete the requested sequence: the first command succeeded, the second and third failed with permission errors, and the fourth was rejected by policy. I did not retry any command.

@@ -4,7 +4,7 @@ title: "/sprint exec engine — a shell orchestrator that runs one headless harn
 status: in-progress
 deployable: false
 created: 2026-10-27
-updated: 2026-11-01
+updated: 2026-11-18
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["sh", "python", "markdown", "claude-skills", "json"]
@@ -240,6 +240,27 @@ Phase 1 re-measured this spec against `main` at `5025e40` (LESSON-751) and again
 | BR-4's `clone` and `orchestrator-git` | No shipped adapter declares either, and each needs prompt and commit machinery no test could reach | The loader accepts both; the engine refuses them at pre-flight naming REQ-662, which ships the first adapter that needs one. BR-5's non-`none` trust arms are the same | `harness/*.yml` |
 | BR-14 "`adlc_lesson_check`" on `assumptions/*.md` | The check refuses a basename that is not `LESSON-<digits>-<slug>.md` | It runs on added lessons; an added assumption is gated by path and mode | `partials/lesson-check.md` |
 | AC-11 `bash tools/lint-skills/check.sh` | The lint is run by `sh` here | `sh tools/lint-skills/check.sh` | `.adlc/context/conventions.md` |
+
+## Amendment (2026-11-18)
+
+**BR-22, AC-33: the child's environment also carries `ADLC_EXEC_RUN_TAG`.** The orchestrator sets it beside `ADLC_EXEC_RUN`, to a digest of the run directory, and the straggler sweep matches both. The REQ id alone matched every process on the machine that carried it, so two projects with the same REQ number, or two orchestrators on one id, killed each other's harness processes. Found while REQ-662's tasks ran side by side. The tag is a digest because the run directory's path stays away from the model (AC-33).
+
+**What REQ-662 stage 1 adds to this REQ's contracts.** All of it is additive. Each new key is optional and is read with a default (an absent key reads as empty), or, for `worktreeConfig`, recorded for the operator and not read back, so a run record or a ledger written by an older engine is tolerated. One exception is stated last.
+
+- **The adapter contract is at exec schema 2.** BR-3 describes the block, and its reconciliation row (`claude.exec.json`) puts it at `exec_schema_version: 1`. REQ-662 widened it to schema 2, which keeps schema 1's keys, reshapes `working_copy`, `resume` and `output`, and adds the ExecBlock's keys; the loader refuses version 1. The key list is REQ-662's architecture, ADR-1.
+- **Run-record keys** (`run.json`): `trustGrants` (each working copy's trust grant, kept until its revoke finishes), `hidden` (per working copy, what the engine hid from git and the blob oids recorded at launch, which restoring needs), `worktreeConfig` (per repository, whether the pre-flight found `extensions.worktreeConfig` or set it), `policyManifest` (the user policy folder's manifest as the pre-flight recorded it), `surfaces` (per working copy, the config-surface manifest of the last render) and `allowUnverified` (each launch made under `--allow-unverified`, with the invocation that received the flag).
+- **Ledger plan keys:** `execPathTouched` (the halt-time exec-path gate's hits, REQ-662 BR-17) and `allowUnverified` (the run record's list, carried into the plan the operator approves).
+- **Log lines** may carry a `detail` field, the payload of an event that has one beyond its argv.
+- **Events:** `fidelity_report`, `deny_unsupported`, `rule_file_rerendered`, `config_surface_violation`, `adapter_refused`, `exec_paths_hidden`, `exec_paths_restored`, `exec_path_touched` and `nested_launch_refused`.
+- **More run-record and state keys, from the review of 2026-11-18:** `exec.pidStart` and `exec.closeOutPidStart` (each recorded process's start time, read with the pid), `exec.closeOutLive` (true while the close-out session runs; absent, an older record, reads as "the run is `merging`"), and `trustBaseline` (run record only: how the user config stood before the grant).
+- **More events:** `trust_file_changed`, `close_out_state_carried`, `trust_revoked` with `detail.sweep` when the sweep removed it, and `nested_launch_refused` with `detail.verified: false` when the caller's ancestry could not be read.
+- **A live process (BR-10, BR-18, BR-20).** A recorded pid is the recorded process only while it is alive and its start time equals the recorded one; a record with no start time falls back to the run's status. `approve`, `abort`, the caller guard and the nested-launch refusal all read it that way, so a reused process id is neither refused nor signalled. A caller whose ancestry cannot be read is refused while any exec process is live.
+- **The close-out's state file (BR-14, BR-17).** On an adapter with no `add_dir_flag` the resumed session cannot write the primary path's `pipeline-state.json`. The engine copies it into the close-out working copy, the session edits the copy, and the engine carries the changes back as data: never `status`, `exec` or `approval`, and of the keys the primary path owns only `lessonsWritten`. On an adapter with the flag nothing changes.
+- **The common-gitdir checksum (BR-23).** It leaves out exactly what a file-rendering run's engine writes there: the `extensions.worktreeConfig` key set true in the main config, and a working copy's `config.worktree` that holds only `core.excludesFile` under the engine's state root, or nothing. This applies to every adapter's runs, because a run that renders no files can share a repository with one that does; before, the second supervisor's writes blocked the first's run as tampering. Anything else in those files still counts.
+- **A violation at exit.** A config-surface or policy-folder change found when the harness exits is a Rule B protocol violation like the exit checks' own, and blocks the run. Found when the close-out session exits, it fails the close-out and the chore PR is not merged; the REQ's merge stands.
+- **A model-written state file is bounded (BR-17).** One over 512 KiB, or nested too deep to parse, is not read.
+- **The merge re-reads the adapter's verdict (BR-11)** and halts the run again when it changed since approval.
+- **The exception: a plan with no `execPathTouched`.** A ledger plan written by an older engine carries no exec-path gate result, so the gate never ran for it. `approve` does not read it as empty: it re-halts the run with a fresh plan, and the operator approves that plan with the token the dashboard then prints.
 
 ## External Dependencies
 
