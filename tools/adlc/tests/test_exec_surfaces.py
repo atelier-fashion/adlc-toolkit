@@ -429,7 +429,7 @@ def test_user_policy_file_is_whole_file_and_atomic(tmp_path, monkeypatch):
     """AC-22, BR-4: the policy file is written whole (a longer file it replaces leaves no
     tail) and atomically: concurrent writers leave one intact file, the record of the last
     one to write it, and no temp file or lock behind. A file the fake harness writes into the
-    policy folder mid-run is a config_surface_violation at exit and at the halt, and is caught
+    policy folder mid-run is a config_surface_violation when the harness exits, and is caught
     by the folder's manifest at the next launch, which it refuses."""
     home, state = tmp_path / "home", tmp_path / "state"
     env = {"HOME": str(home), "XDG_STATE_HOME": str(state)}
@@ -829,6 +829,55 @@ def test_a_policy_change_during_a_run_is_marked_until_install(tmp_path, monkeypa
     box.orch().preflight(box.reqs, harness=box.harness, shared=True)
 
 
+def test_install_lets_a_run_blocked_for_a_policy_change_go_on(tmp_path, monkeypatch):
+    """REQ-662 BR-4, the whole loop. An operator file in the policy folder changed during a run:
+    at the exit the run is blocked and the engine's record marked, so a new pre-flight refuses.
+    The operator looks and runs `adlc harness install --exec`, which records the folder anew.
+    The blocked run's own copy of the record is the older one: a relaunch takes the newer,
+    unmarked record as its copy and checks the folder strictly against that, so a folder that
+    changed again since is refused, naming the ways out, and marks nothing (only the exit
+    marks), while a folder as recorded relaunches (the must-not-refuse case), and a new
+    pre-flight passes."""
+    box = eh.file_sandbox(tmp_path, monkeypatch)
+    folder = box.home / eh.FILE_POLICY_DIR
+    folder.mkdir(parents=True)
+    operator = folder / "default.rules"
+    operator.write_text("# mine\n")
+    box.req(status="blocked", claim="blocked", add=["src"],
+            surface_writes={str(operator): "# changed during the run\n"},
+            blockers=[{"reason": "reflector-questions", "question": "which?"}])
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    adapter = ea.load(box.harness, box.toolkit)
+    assert run.status == "blocked" and se.PROTOCOL in json.dumps(
+        run.read_primary_state()["blockers"])
+    assert esf.read_record(adapter, box.environ)["violated"] == [str(operator)]
+    with pytest.raises(se.Refused, match="during an exec run"):
+        box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+    box.req(status="awaiting_approval", claim="awaiting_approval", blockers=None,
+            files={"src/two.txt": "two\n"}, surface_writes={})
+    text = eh.fresh_files(box).user_policy_file
+    esf.install_policy_file(adapter, box.environ, text)
+    # Changed again after the re-record: refused, naming the ways out, and nothing marked.
+    operator.write_text("# changed once more\n")
+    with pytest.raises(se.Refused) as caught:
+        orch.answer("REQ-901", "go on")
+    message = str(caught.value)
+    assert "the launch is refused" in message and str(operator) in message
+    assert "`adlc harness install --exec --harness fake-exec-file`" in message
+    assert "`adlc sprint-exec answer REQ-901`" in message
+    assert "violated" not in esf.read_record(adapter, box.environ)
+    assert run.status == "blocked" and len(box.launches()) == 1
+    record = esf.install_policy_file(adapter, box.environ, text)
+    orch.answer("REQ-901", "go on")
+    box.wait(orch)
+    assert run.status == "awaiting_approval" and len(box.launches()) == 2
+    assert run.doc["policyManifest"] == record
+    assert len(eh.events(box, run, "config_surface_violation")) == 1
+    assert "violated" not in esf.read_record(adapter, box.environ)
+    box.orch().preflight(box.reqs, harness=box.harness, shared=True)
+
+
 # ---- review fix 5: the bypass scan on the shipped Codex block ---------------------------------
 CODEX_USER = ".codex/config.toml"
 WRITABLE = "sandbox_workspace_write.writable_roots"
@@ -858,26 +907,36 @@ NETWORK = "sandbox_workspace_write.network_access"
 ])
 def test_bypass_scan_on_the_shipped_codex_block(tmp_path, text, want):
     """BR-16 on the shipped Codex block: each spelling of a watched key is a hit or a refusal,
-    never a silent clean scan. A refusal names the construct and its line and says what to
-    do: the engine reads the file with a strict line reader, so put that value on one line.
-    A profile table nobody selects, an unrelated key in the sandbox table and a file with no
-    final newline are clean (the must-not-refuse cases)."""
+    never a silent clean scan, in the user config and in a working copy's config alike, where
+    the keys watched are the ones the block lists for that file. A refusal names the file, the
+    construct and its line and says what to do: the engine reads the file with a strict line
+    reader, so put that value on one line. A profile table nobody selects, an unrelated key in
+    the sandbox table and a file with no final newline are clean (the must-not-refuse
+    cases)."""
     codex = ea.load("codex", TOOLKIT)
     home = tmp_path / "home"
     (home / ".codex").mkdir(parents=True)
-    path = home / CODEX_USER
-    path.write_text(text)
-    if isinstance(want, str):
-        with pytest.raises(esf.SurfaceRefused) as caught:
-            esf.bypass_scan(codex, [], {"HOME": str(home)})
-        message = str(caught.value)
-        assert str(path) in message and want in message
-        assert "cannot be read with certainty" in message and "(REQ-662 BR-16)" in message
-        assert "strict line reader" in message and "on one line" in message
-        return
-    hits = esf.bypass_scan(codex, [], {"HOME": str(home)})
-    assert [(h.key, h.value) for h in hits] == want
-    assert all(h.path == str(path) for h in hits)
+    wc = tmp_path / "wc"
+    (wc / ".codex").mkdir(parents=True)
+    watched = codex.block["bypass_config_keys"]
+    assert set(watched) == {"$HOME/" + CODEX_USER, CODEX_USER}
+    for path, roots, keys in ((home / CODEX_USER, [], watched["$HOME/" + CODEX_USER]),
+                              (wc / CODEX_USER, [str(wc)], watched[CODEX_USER])):
+        for other in (home / CODEX_USER, wc / CODEX_USER):
+            if other.exists():
+                other.unlink()
+        path.write_text(text)
+        if isinstance(want, str):
+            with pytest.raises(esf.SurfaceRefused) as caught:
+                esf.bypass_scan(codex, roots, {"HOME": str(home)})
+            message = str(caught.value)
+            assert str(path) in message and want in message
+            assert "cannot be read with certainty" in message and "(REQ-662 BR-16)" in message
+            assert "strict line reader" in message and "on one line" in message
+            continue
+        hits = esf.bypass_scan(codex, roots, {"HOME": str(home)})
+        assert [(h.key, h.value) for h in hits] == [(k, v) for k, v in want if k in keys], path
+        assert all(h.path == str(path) for h in hits)
 
 
 def test_the_json_scan_refuses_with_the_same_text(tmp_path):

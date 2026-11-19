@@ -290,3 +290,91 @@ def test_the_gitdir_digest_still_sees_what_the_engine_does_not_write(repo, tmp_p
     assert es.gitdir_digest(common, state) != before
     with pytest.raises(es.RuleBViolation, match="common gitdir checksum mismatch"):
         box.verify_gitdir(str(work))
+
+
+# ---- confirmation pass: what git itself rejects, or what is not the engine's, still counts ----
+#: What `git config --local extensions.worktreeConfig true` writes, the one form left out.
+ENGINE_EXTENSION = "[extensions]\n\tworktreeConfig = true\n"
+
+
+def _main_config(work, text):
+    """The main config with the engine's extension block swapped for ``text``."""
+    path = os.path.join(str(work), ".git", "config")
+    with open(path, encoding="utf-8") as fh:
+        body = fh.read()
+    assert body.count(ENGINE_EXTENSION) == 1
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(body.replace(ENGINE_EXTENSION, text))
+
+
+@pytest.mark.parametrize("change", [
+    "worktree-symlink", "state-sibling", "trailing-comment", "unknown-escape",
+    "unterminated-quote", "relative-path", "two-excludes", "core-then-section", "spaced-core",
+    "key-on-header", "continuation", "worktree-config-false", "spaced-header",
+    "spaced-header-right", "unterminated-extension", "extension-comment"])
+def test_the_gitdir_digest_counts_every_spelling_the_engine_does_not_write(repo, tmp_path,
+                                                                          change):
+    """Each of these is a spelling the engine never writes: some git refuses outright (a spaced
+    section header, an unterminated quote, an unknown escape), so a model could break every git
+    call on the repository; others turn the engine's hiding off (`worktreeConfig = false`) or
+    name an excludes file that is not the engine's. Each still changes the digest."""
+    import exec_ledger as el
+    box, work, _ = repo
+    common = str(work / ".git")
+    state = el.exec_root(box.environ)
+    wt, excludes = _engine_writes(box, work, tmp_path)
+    before = es.gitdir_digest(common, state)
+    config_wt = os.path.join(common, "worktrees", os.path.basename(str(wt)), "config.worktree")
+    worktree = {
+        "trailing-comment": "[core]\n\texcludesFile = %s # mine\n" % excludes,
+        "unknown-escape": "[core]\n\texcludesFile = %s\\q\n" % excludes,
+        "unterminated-quote": '[core]\n\texcludesFile = "%s\n' % excludes,
+        "relative-path": "[core]\n\texcludesFile = adlc/exec/excludes\n",
+        "two-excludes": "[core]\n\texcludesFile = %s\n\texcludesFile = %s\n" % (excludes,
+                                                                                excludes),
+        "core-then-section": "[core]\n\texcludesFile = %s\n[user]\n\tname = x\n" % excludes,
+        "spaced-core": "[ core ]\n\texcludesFile = %s\n" % excludes,
+        "state-sibling": "[core]\n\texcludesFile = %s-evil/excludes\n" % state,
+    }
+    main = {
+        "key-on-header": "[extensions] worktreeConfig = true\n",
+        "continuation": "[extensions]\n\tworktreeConfig = tr\\\nue\n",
+        "worktree-config-false": "[extensions]\n\tworktreeConfig = false\n",
+        "spaced-header": "[ extensions ]\n\tworktreeConfig = true\n",
+        "spaced-header-right": "[extensions ]\n\tworktreeConfig = true\n",
+        "unterminated-extension": '[extensions]\n\tworktreeConfig = "true\n',
+        "extension-comment": "[extensions]\n\tworktreeConfig = true # mine\n",
+    }
+    if change == "worktree-symlink":
+        # The engine's own bytes, but through a link the engine never writes.
+        target = tmp_path / "elsewhere.worktree"
+        with open(config_wt, encoding="utf-8") as fh:
+            target.write_text(fh.read())
+        os.unlink(config_wt)
+        os.symlink(str(target), config_wt)
+    elif change in worktree:
+        with open(config_wt, "w", encoding="utf-8") as fh:
+            fh.write(worktree[change])
+    else:
+        _main_config(work, main[change])
+    assert es.gitdir_digest(common, state) != before, change
+    with pytest.raises(es.RuleBViolation, match="common gitdir checksum mismatch"):
+        box.verify_gitdir(str(work))
+
+
+@pytest.mark.parametrize("value", ["", " = yes", " = on", " = 1", ' = "true"', " = TRUE",
+                                   "=true", " = true  "])
+def test_the_gitdir_digest_leaves_out_any_true_spelling_of_the_extension(repo, tmp_path,
+                                                                          value):
+    """The must-not-fire half: `worktreeConfig` with a value git reads as boolean true, in any
+    of its spellings (a bare key is true), under an `[extensions]` header in any case, is the
+    engine's setting, and leaves the digest as it was without it."""
+    import exec_ledger as el
+    box, work, _ = repo
+    common = str(work / ".git")
+    state = el.exec_root(box.environ)
+    _engine_writes(box, work, tmp_path)
+    before = es.gitdir_digest(common, state)
+    _main_config(work, "[Extensions]\n\tWorktreeConfig%s\n" % value)
+    assert es.gitdir_digest(common, state) == before
+    assert es.gitdir_digest(common) != before

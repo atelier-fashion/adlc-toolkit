@@ -126,6 +126,11 @@ TIMEOUT_DELEGATES = ("supported", "unsupported")
 DELEGATE_MIN_TIMEOUT_S = 120
 #: ``claude``: ``exec_matcher`` models the harness's statement matching; ``none``: nothing does.
 MATCHERS = ("claude", "none")
+#: The ``exec.matcher`` values ``exec_matcher`` models: only on these can a fence be judged
+#: ``direct`` and an extra allow be vetted. Any other value, ``none`` included, is modelled by
+#: nothing (REQ-662 BR-3, ADR-8). ``ExecAdapter.has_matcher`` reads it, and the census asks
+#: that property, so neither module imports the other for it.
+MODELLED_MATCHERS = ("claude",)
 OUTPUT_FORMATS = ("json", "jsonl-stream")
 OUTPUT_SOURCES = ("stdout", "file")
 _EXEC_REQUIRED = ("working_copy", "trust_grant", "launch", "forbidden_flags", "exit_codes",
@@ -479,14 +484,21 @@ def _exec_working_copy(src, block, data):
 
 def _exec_trust_grant(src, block, data):
     """``trust_grant`` (REQ-662 BR-5). ``user-config-entry`` appends a TOML
-    ``[projects."<path>"]`` table to ``paths.config.user``, a spelling known only for a config
-    format the registry marks ``trust_entry``, so a user config in any other format is refused
-    here rather than have that table appended to it. An adapter with no ``paths.config.user``
-    has no file to write, and ``exec_trust`` refuses its grant at the launch."""
+    ``[projects."<path>"]`` table to ``paths.config.user``, so an adapter that declares no user
+    config has no file to write and is refused here, when it loads, not first at a pre-flight.
+    The entry's spelling is known only for a config format the registry marks
+    ``trust_entry``, so a user config in any other format is refused here too rather than have
+    that table appended to it. The format looked up is ``formats.config``, the one an adapter
+    declares for its config surface: this assumes the user config has the project config's
+    format."""
     grant = _enum(src, "exec.trust_grant", block["trust_grant"], TRUST_MECHANISMS)
-    config = (data.get("paths") or {}).get("config") or {}
-    if grant != "user-config-entry" or "user" not in config:
+    if grant != "user-config-entry":
         return
+    config = (data.get("paths") or {}).get("config") or {}
+    if not isinstance(config.get("user"), str) or not config.get("user"):
+        raise AdapterError(src, "exec.trust_grant", "user-config-entry writes the user config "
+                           "paths.config.user, and this adapter declares none; declare it, or "
+                           "trust_grant: none (REQ-662 BR-5)")
     fmt = (data.get("formats") or {}).get("config")
     if not (FORMATS.get(fmt) or {}).get("trust_entry"):
         known = ", ".join(sorted(n for n, f in FORMATS.items() if f.get("trust_entry")))

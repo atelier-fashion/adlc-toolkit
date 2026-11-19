@@ -1561,16 +1561,36 @@ def test_a_trust_entry_needs_a_user_config_it_is_spelled_for(tmp_path, monkeypat
     assert ha.load_adapter(_write(tmp_path, "codex", none), toolkit=TOOLKIT)
 
 
+def test_a_trust_entry_with_no_user_config_is_refused_at_load(tmp_path):
+    """REQ-662 BR-5: `trust_grant: user-config-entry` writes `paths.config.user`, so a block that
+    declares it with no user config is refused when it loads, naming the field, not first at a
+    pre-flight. The same adapter under `trust_grant: none` loads."""
+    text = _source("codex")
+    old = "    user: $HOME/.codex/config.toml\n"
+    assert text.count(old) == 1
+    bare = text.replace(old, "")
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(_write(tmp_path, "codex", bare), toolkit=TOOLKIT)
+    assert exc.value.field == "exec.trust_grant"
+    assert "paths.config.user" in str(exc.value)
+    none = bare.replace("  trust_grant: user-config-entry\n", "  trust_grant: none\n")
+    assert ha.load_adapter(_write(tmp_path, "codex", none), toolkit=TOOLKIT)
+
+
 @pytest.mark.parametrize("matcher", ha.MATCHERS + ("a-matcher-a-later-stage-adds",))
 def test_has_matcher_is_the_census_predicate(adapter, matcher):
     """REQ-662 ADR-8: the engine's `has_matcher` and the census's `routes_direct` ask one
     question, whether anything models this harness's statement matching, so they agree on
     every value of the loader's `MATCHERS`, and on a value a later stage adds before either
-    side is taught it."""
+    side is taught it. The modelled list is the loader's data, and the census asks the
+    adapter, so the import goes one way: the engine's adapter never imports the census."""
     import fence_census as fc
     probe = _with(adapter, matcher=matcher)
     assert probe.has_matcher == fc.routes_direct(probe)
-    assert probe.has_matcher == (matcher in fc.MODELLED_MATCHERS)
+    assert probe.has_matcher == (matcher in ha.MODELLED_MATCHERS)
+    assert set(ha.MODELLED_MATCHERS) <= set(ha.MATCHERS)
+    with open(os.path.join(HERE, "..", "exec_adapter.py"), encoding="utf-8") as fh:
+        assert "fence_census" not in fh.read()
 
 
 def test_no_exec_block_says_which_harnesses_are_staged():

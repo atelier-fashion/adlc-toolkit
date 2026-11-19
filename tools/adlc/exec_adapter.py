@@ -351,12 +351,11 @@ class ExecAdapter(object):
 
     @property
     def has_matcher(self):
-        """Whether ``exec_matcher`` models this harness's rule matching. The census asks the
-        same question to decide whether a fence may route ``direct``, so this is its answer,
-        ``fence_census.routes_direct``, and the two cannot drift apart when a stage adds a
+        """Whether ``exec_matcher`` models this harness's rule matching: its ``matcher`` is one
+        of the loader's ``MODELLED_MATCHERS``. The census asks this property to decide whether a
+        fence may route ``direct``, so the two cannot drift apart when a stage adds a
         ``matcher`` value. On ``matcher: none`` nothing models it (REQ-662 ADR-8)."""
-        import fence_census as fc
-        return fc.routes_direct(self)
+        return self.block.get("matcher") in ha.MODELLED_MATCHERS
 
     def vet_extra(self, argv, entries, exact=False):
         """Refuse an extra allow that is a wildcard, an opener or wraps a deny (ADR-6).

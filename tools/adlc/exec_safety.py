@@ -127,19 +127,39 @@ def strip_branch_sections(text):
     return "\n".join(out)
 
 
-_EXTENSIONS_HEADER = re.compile(r"^\s*\[\s*extensions\s*\]\s*$", re.I)
-_WORKTREE_CONFIG_KEY = re.compile(r"^\s*worktreeconfig\s*(=.*)?$", re.I)
-_CORE_HEADER = re.compile(r"^\s*\[\s*core\s*\]\s*$", re.I)
+#: A section header exactly as git writes one: no space inside the brackets, which git refuses
+#: in a header with no subsection, and nothing but whitespace after them.
+_EXTENSIONS_HEADER = re.compile(r"^\[extensions\]\s*$", re.I)
+_WORKTREE_CONFIG_KEY = re.compile(r"^\s*worktreeconfig\s*(?:=(.*))?$", re.I)
+_CORE_HEADER = re.compile(r"^\[core\]\s*$", re.I)
 _EXCLUDES_KEY = re.compile(r"^\s*excludesfile\s*=\s*(.*?)\s*$", re.I)
 _ESCAPES = {"n": "\n", "t": "\t", "b": "\b", "\\": "\\", '"': '"'}
+#: The values git reads as boolean true, compared case-insensitively.
+_GIT_TRUE = ("true", "yes", "on", "1")
+
+
+def _engine_extension_line(line):
+    """Whether ``line`` sets ``worktreeConfig`` to a value git reads as boolean true, in a
+    spelling :func:`_config_value` reads: the key bare (which git reads as true), or a true
+    value with no comment, no continuation, no unknown escape and no unterminated quote."""
+    match = _WORKTREE_CONFIG_KEY.match(line)
+    if not match:
+        return False
+    if match.group(1) is None:
+        return True
+    value = _config_value(match.group(1).strip())
+    return value is not None and value.lower() in _GIT_TRUE
 
 
 def strip_engine_extension(text):
     """A main git config without the one key the exec engine writes there,
-    ``extensions.worktreeConfig`` (any value, one line), and without an ``[extensions]``
-    section that key alone held (REQ-662 BR-17). Every other line is kept, every other
-    ``extensions.*`` key among them, and so is a spelling git itself never writes (the key on
-    its header's line, a continued value)."""
+    ``extensions.worktreeConfig`` set true, and without an ``[extensions]`` section that key
+    alone held (REQ-662 BR-17). Only the spellings git itself reads as that setting are left
+    out: the header exactly ``[extensions]`` (any case, trailing whitespace only) and a value
+    git reads as boolean true (:func:`_engine_extension_line`). Every other line is kept, every
+    other ``extensions.*`` key among them, and so is anything git refuses or reads otherwise (a
+    spaced header, the key on its header's line, a continued value, ``false``, an unterminated
+    quote), so a change to one changes the checksum."""
     sections = [[None, []]]
     for line in text.split("\n"):
         if line.strip().startswith("["):
@@ -149,8 +169,7 @@ def strip_engine_extension(text):
     out = []
     for header, body in sections:
         if header is not None and _EXTENSIONS_HEADER.match(header):
-            body = [line for line in body if not (_WORKTREE_CONFIG_KEY.match(line) and
-                                                  not line.rstrip().endswith("\\"))]
+            body = [line for line in body if not _engine_extension_line(line)]
             if not any(line.strip() for line in body):
                 continue
         if header is not None:
@@ -193,7 +212,8 @@ def engine_worktree_config(path, state_root):
     writes there (REQ-662 BR-17): the one ``core.excludesFile`` setting, naming a file under
     ``state_root``, the engine's own excludes file; or nothing (an empty file, or a bare
     ``[core]`` header, which is what unsetting it leaves). A regular file only, never
-    followed; a comment, a second key or any other section is not the engine's."""
+    followed; a comment, a second key, a header spelled any way git does not write it (a
+    space inside the brackets) or any other section is not the engine's."""
     try:
         if not stat.S_ISREG(os.lstat(path).st_mode):
             return False

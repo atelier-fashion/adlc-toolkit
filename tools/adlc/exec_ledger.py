@@ -22,6 +22,10 @@ LEDGER = "approval.json"
 RUN_RECORD = "run.json"
 #: How often a taker looks at a held ``mkdir`` lock again.
 LOCK_POLL_S = 0.02
+#: The most a state file the model writes may hold before the engine parses it: a working
+#: copy's ``pipeline-state.json`` and the close-out's copy of it. A real one is a few
+#: kilobytes, so this is two orders above that; a larger one is refused unread.
+STATE_FILE_MAX_BYTES = 512 * 1024
 
 
 def now():
@@ -115,11 +119,21 @@ def atomic_json(path, doc):
     return hashlib.sha256(data).hexdigest()
 
 
-def read_json(path, default=None):
+def read_json(path, default=None, max_bytes=None):
+    """``path`` parsed as JSON, or ``default`` when it cannot be read or parsed: a parse error,
+    and a document nested too deep for the parser (its ``RecursionError``), which a model can
+    write into a file the engine reads. With ``max_bytes``, a file larger than that is not
+    parsed at all and reads as ``default``."""
     try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
+        with open(path, "rb") as fh:
+            data = fh.read() if max_bytes is None else fh.read(max_bytes + 1)
+    except OSError:
+        return default
+    if max_bytes is not None and len(data) > max_bytes:
+        return default
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (ValueError, RecursionError):
         return default
 
 

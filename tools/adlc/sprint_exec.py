@@ -16,6 +16,7 @@ Standard library only (LESSON-395).
 
 import argparse
 import calendar
+import errno
 import hashlib
 import json
 import os
@@ -50,6 +51,10 @@ PRIMARY_OWNED = ("lessons", "harness", "validateAttempts", "verify", "lessonsWri
 #: Keys a close-out's carried state file never sets in the primary path's: the engine writes
 #: them (REQ-662 ADR-7).
 CLOSE_OUT_ENGINE_OWNED = ("status", "exec", "approval")
+#: The :data:`PRIMARY_OWNED` keys the primary path's copy keeps over a close-out's carried one:
+#: all but ``lessonsWritten``, which the close-out itself produces, so its copy's value is
+#: taken (REQ-648, REQ-662 ADR-7).
+CLOSE_OUT_KEEPS = tuple(key for key in PRIMARY_OWNED if key != "lessonsWritten")
 STATES = ("running", "awaiting_approval", "approved", "merging", "merged", "blocked", "failed",
           "rejected", "stalled")
 PROTOCOL = "Rule B protocol violation"
@@ -150,7 +155,9 @@ class Run(object):
         return os.path.join(self.primary_path, self.doc["specDir"], "pipeline-state.json")
 
     def read_wc_state(self):
-        doc = el.read_json(self.wc_state_path(), {})
+        """The working copy's state, the model's: one over ``STATE_FILE_MAX_BYTES``, nested too
+        deep to parse, or not one JSON object reads as none."""
+        doc = el.read_json(self.wc_state_path(), {}, max_bytes=el.STATE_FILE_MAX_BYTES)
         return doc if isinstance(doc, dict) else {}
 
     def read_primary_state(self):
@@ -228,6 +235,21 @@ def process_start(pid):
     return text if res.returncode == 0 and text else None
 
 
+def same_process(pid, started):
+    """Whether the recorded pid ``pid`` is still the process the engine recorded: alive, and,
+    when the record holds its start time ``started`` (``pidStart``, ``closeOutPidStart``), a
+    process that started then. A record with no start time, an older engine's, reads alive
+    alone, and so does a start time ``ps`` cannot read now: a pid that cannot be told apart
+    from the recorded process counts as it. A pid the OS has given another process since is
+    not it (REQ-662 BR-18)."""
+    if not pid_alive(pid):
+        return False
+    if not started:
+        return True
+    now = process_start(pid)
+    return now is None or now == started
+
+
 def parent_of(pid):
     """``pid``'s parent, 0 for a process with none, or None when ``ps`` cannot say."""
     try:
@@ -261,9 +283,9 @@ def live_harness_pids(doc):
     ``exec.closeOutPid`` while its close-out is in progress (``exec.closeOutLive``; on a record
     without the key, an older engine's, while the run is ``merging``), and either only while
     a process holds it that started when the engine's did (``pidStart``,
-    ``closeOutPidStart``). A record with no start time falls back to the status alone, and so
-    does a start time ``ps`` cannot read now: a pid that cannot be told apart from the
-    harness's counts as the harness's."""
+    ``closeOutPidStart``, :func:`same_process`). A record with no start time falls back to the
+    status alone, and so does a start time ``ps`` cannot read now: a pid that cannot be told
+    apart from the harness's counts as the harness's."""
     record = doc.get("exec") if isinstance(doc.get("exec"), dict) else {}
     keys = []
     if doc.get("status") in HARNESS_LIVE:
@@ -272,38 +294,79 @@ def live_harness_pids(doc):
         else doc.get("status") == "merging"
     if closing is True:
         keys.append(("closeOutPid", "closeOutPidStart"))
-    out = []
-    for key, start_key in keys:
-        pid = record.get(key)
-        if not pid_alive(pid):
-            continue
-        started = record.get(start_key)
-        if started:
-            now = process_start(pid)
-            if now is not None and now != started:
-                continue                    # the OS gave the pid to another process
-        out.append(int(pid))
-    return out
+    return [int(record[key]) for key, start_key in keys
+            if same_process(record.get(key), record.get(start_key))]
+
+
+def recorded_harness_pids(doc):
+    """The harness pids a run record holds that are still the processes it recorded
+    (:func:`same_process`), whatever the run's status: ``exec.pid`` and ``exec.closeOutPid``.
+    What ``approve``'s still-alive check and the caller guard read; ``abort`` asks
+    :func:`same_process` of each before it signals one (REQ-662 BR-18)."""
+    record = doc.get("exec") if isinstance(doc.get("exec"), dict) else {}
+    return [int(record[key]) for key, start_key in (("pid", "pidStart"),
+                                                     ("closeOutPid", "closeOutPidStart"))
+            if same_process(record.get(key), record.get(start_key))]
+
+
+#: The longest path an ``AF_UNIX`` address holds, its terminating NUL included: ``sun_path`` is
+#: 108 bytes on Linux and 104 on macOS and the BSDs (the smaller where the platform is unknown).
+SUN_PATH_MAX = 108 if sys.platform.startswith("linux") else 104
+#: Held around every change of this process's working directory: binding the supervisor's
+#: socket by its short relative name, and a connect to one whose absolute path is longer than
+#: :data:`SUN_PATH_MAX`, so two threads never interleave a change and its restore.
+CWD_LOCK = threading.Lock()
+
+
+def unix_connect(sup, timeout):
+    """A socket connected to the supervisor socket ``s`` in the directory ``sup``: by its
+    absolute path when that fits in ``sun_path`` (:data:`SUN_PATH_MAX`), which leaves this
+    process's working directory alone; else by the relative name from ``sup``, the working
+    directory changed under :data:`CWD_LOCK` and changed back. Raises ``OSError``."""
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        conn.settimeout(timeout)
+        path = os.path.join(sup, "s")
+        if len(os.fsencode(path)) < SUN_PATH_MAX:
+            conn.connect(path)
+        else:
+            with CWD_LOCK:
+                try:
+                    here = os.getcwd()
+                except OSError as exc:
+                    # This process's directory, not the socket: no errno that reads as gone.
+                    raise OSError(None, "the working directory is gone: %s" % exc)
+                os.chdir(sup)
+                try:
+                    conn.connect("s")
+                finally:
+                    os.chdir(here)
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+#: The connect errors that say no supervisor listens: a socket nothing has open (refused) and
+#: no socket at all. Any other (a full backlog, a timeout) cannot tell.
+_SUPERVISOR_GONE = (errno.ECONNREFUSED, errno.ENOENT)
 
 
 def supervisor_live(run):
-    """Whether a supervisor listens on the run's socket: a connect, with nothing sent, so a busy
-    supervisor is not waited on."""
+    """Whether a supervisor listens on the run's socket, by a connect with nothing sent, so a
+    busy supervisor is not waited on: True when it is accepted; False with no supervisor
+    directory, or when the connect is refused or finds no socket; None, cannot tell, when it
+    fails any other way (a full backlog, a timeout, a permission error). On macOS a full
+    listen backlog is refused too, so there it reads as False."""
     sup = run.doc.get("supervisorDir")
     if not sup or not os.path.isdir(sup):
         return False
-    here = os.getcwd()
-    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        os.chdir(sup)
-        conn.settimeout(2)
-        conn.connect("s")
-        return True
-    except OSError:
-        return False
-    finally:
-        conn.close()
-        os.chdir(here)
+        conn = unix_connect(sup, 2)
+    except OSError as exc:
+        return False if exc.errno in _SUPERVISOR_GONE else None
+    conn.close()
+    return True
 
 
 #: Every block an engine trust grant appends (``exec_trust.trust_block``): taken out of a user
@@ -809,7 +872,8 @@ class Orchestrator(object):
                         "abortedBy": None, "abortedAt": None}}
         if batch.policy is not None:
             # What this run checks the user policy folder against, before each launch and
-            # resume and at exit and the halt (REQ-662 BR-4). Absent: no policy file.
+            # resume and when each harness exits (REQ-662 BR-4); a newer, unmarked record of the
+            # engine's replaces it there (`_policy_record`). Absent: no policy file.
             doc["policyManifest"] = batch.policy
         if batch.worktree_config:
             # Per repo id, whether the pre-flight found extensions.worktreeConfig or set it
@@ -1062,12 +1126,17 @@ class Orchestrator(object):
         (:data:`SWEPT`) and no live supervisor holds it, revoked: a revoke that failed, or a
         supervisor that died before its revoke, leaves one that nothing in the run retries. Each
         is logged ``trust_revoked`` with ``sweep`` in that run's own log, and said on the
-        dashboard. A run at work (running, stalled, at the gate, merging) is never touched. A
-        grant whose revoke cannot finish stays recorded for the next sweep."""
+        dashboard. A run at work (running, stalled, at the gate, merging) is never touched, nor
+        one whose supervisor answers or cannot be told to be gone (:func:`supervisor_live`).
+        Nor is a grant for a ``(config, working copy)`` pair that such a run records too: a
+        new run of a REQ reuses the working copy path, and its grant adopts the block an ended
+        run of it left, so revoking the ended run's record would take out the block the live
+        run relies on. A grant whose revoke cannot finish stays recorded for the next sweep."""
         configs = set(c for c in configs if c)
         if not configs:
             return
         mine = {run.path: run for run in self.all_runs()}
+        runs = []
         for path in el.run_dirs(self.environ):
             run = mine.get(path)
             if run is None:
@@ -1076,11 +1145,24 @@ class Orchestrator(object):
                 except Refused:
                     continue
             grants = run.doc.get("trustGrants")
-            if run.doc.get("status") not in SWEPT or not isinstance(grants, dict):
+            if isinstance(grants, dict) and grants:
+                runs.append(run)
+        sweepable, in_use = [], set()
+        for run in runs:
+            if run.doc.get("status") in SWEPT and (run.path in mine
+                                                   or supervisor_live(run) is False):
+                sweepable.append(run)
                 continue
+            for wc, doc in run.doc["trustGrants"].items():
+                if isinstance(doc, dict):
+                    in_use.update((doc.get("config"), p) for p in (wc, doc.get("path")) if p)
+        for run in sweepable:
+            grants = run.doc["trustGrants"]
             held = sorted(wc for wc, doc in grants.items()
-                          if isinstance(doc, dict) and doc.get("config") in configs)
-            if not held or (path not in mine and supervisor_live(run)):
+                          if isinstance(doc, dict) and doc.get("config") in configs
+                          and not {(doc["config"], wc), (doc["config"], doc.get("path"))}
+                          & in_use)
+            if not held:
                 continue
             box = es.Toolbox(run.path, self.toolkit, self.environ)
             for wc in held:
@@ -1120,6 +1202,21 @@ class Orchestrator(object):
                                             "where": where, "hits": rows})
         raise Refused(reason)
 
+    def _policy_record(self, run, adapter, record):
+        """What ``run`` checks the user policy folder against now (REQ-662 BR-4): the engine's
+        record when it is unmarked, describes the same file, differs from the run's copy
+        ``record`` and was recorded no earlier, and so since that copy (the record only ever
+        moves forward), in which case it replaces the run's copy and the run record is saved;
+        else the run's copy."""
+        shared = esf.read_record(adapter, self.environ)
+        if shared is None or shared.get("violated") or shared == record \
+                or shared.get("path") != record.get("path") \
+                or (shared.get("recordedAt") or "") < (record.get("recordedAt") or ""):
+            return record
+        run.doc["policyManifest"] = shared
+        run.save()
+        return shared
+
     def prepare_surfaces(self, run, wcs, branch, where):
         """Before a launch (``where`` ``launch``) or a resume (``resume``), in this order: the
         user policy folder against the run's record, where any change refuses (BR-4); the
@@ -1128,19 +1225,26 @@ class Orchestrator(object):
         record, and each path the render wrote or removed is logged ``rule_file_rerendered``,
         ``checksum_matched`` false where it was not already the render (BR-4, BR-15). A
         refusal is :class:`Refused`, and nothing is launched. An adapter with no surface, no
-        rule file and no policy file writes and logs nothing (BR-1)."""
+        rule file and no policy file writes and logs nothing (BR-1).
+
+        The run's record of the policy folder is its own copy of the engine's, taken at its
+        pre-flight. When the engine's record is unmarked and was recorded since (the operator
+        looked and ran `adlc harness install --exec`, or a later pre-flight recorded the folder
+        as it then stood), the run takes it as its copy, and the folder is checked strictly
+        against that. A refusal here marks nothing: only the check at a harness's exit does
+        (:meth:`verify_surfaces`)."""
         adapter = self.adapter(run)
         record = run.doc.get("policyManifest")
         if record:
+            record = self._policy_record(run, adapter, record)
             try:
                 problems = esf.check_policy(record)
-                if problems:
-                    # Until the operator has looked, every pre-flight refuses (REQ-662 BR-4).
-                    esf.mark_policy_violation(adapter, self.environ, problems)
             except esf.SurfaceRefused as exc:
                 raise Refused(str(exc))
             if problems:
-                raise Refused(esf.policy_refusal(adapter.adapter, problems, where))
+                raise Refused(esf.policy_refusal(
+                    adapter.adapter, problems, where,
+                    run.req if run.status == "blocked" else None))
         self._bypass_check(adapter, wcs, where, run)
         if not esf.renders_files(adapter.block):
             return
@@ -1168,13 +1272,15 @@ class Orchestrator(object):
         run.save()
 
     def verify_surfaces(self, run, wcs, where):
-        """Once a harness has exited (``where`` ``exit``): each working copy in ``wcs`` against
-        the manifest its last render recorded, and the user policy folder against the run's
-        record, whose change also marks the engine's record of the folder (REQ-662 BR-4). Each
-        change is a ``config_surface_violation``: logged, and recorded as a Rule B protocol
-        violation (BR-15), and so are surfaces that cannot be verified at all. Nothing is
-        repaired here: the next launch or resume re-renders. Returns each violation's text,
-        which a launch's exit takes into its protocol hits, so the run is blocked."""
+        """Once a harness has exited (``where`` ``exit``), the one check of the surfaces after a
+        launch or the close-out: each working copy in ``wcs`` against the manifest its last
+        render recorded, and the user policy folder against the run's record, whose change also
+        marks the engine's record of the folder, the one place that mark is made (REQ-662
+        BR-4). Each change is a ``config_surface_violation``: logged, and recorded as a Rule B
+        protocol violation (BR-15), and so are surfaces that cannot be verified at all. Nothing
+        is repaired here: the next launch or resume re-renders. Returns each violation's text,
+        which a launch's exit takes into its protocol hits, so the run is blocked, and which
+        fails a close-out before its state is carried back and its chore PR gated."""
         adapter = self.adapter(run)
         block = adapter.block
         found = []
@@ -1799,8 +1905,6 @@ class Orchestrator(object):
                 "allowUnverified": list(run.doc.get("allowUnverified") or [])}
 
     def _halt(self, run, state, result):
-        # The surfaces were verified at this exit, which blocks the run on a change; the halt
-        # does not read them twice (REQ-662 BR-15).
         try:
             plan = self.compute_plan(run, state)
         except eg.Mismatch as exc:
@@ -1880,10 +1984,12 @@ class Orchestrator(object):
 
     # ---- the operator's decisions ----------------------------------------------------
     def caller_guard(self, run, caller_env, caller_pid):
-        """Refuse anything from inside a run. A refusal is recorded (BR-10)."""
+        """Refuse anything from inside a run: a caller with ``ADLC_EXEC_RUN`` set, or one that
+        descends from a recorded harness pid that is still the process recorded
+        (:func:`recorded_harness_pids`), so a pid the OS has given another process since is not
+        read as the harness. A refusal is recorded (BR-10)."""
         marker = (caller_env or {}).get("ADLC_EXEC_RUN")
-        pids = {run.exec.get("pid"), run.exec.get("closeOutPid")} - {None}
-        live = {p for p in pids if pid_alive(p)}
+        live = set(recorded_harness_pids(run.doc))
         inside = marker or (live & set(ancestry(caller_pid)[0]) if caller_pid else None)
         if inside:
             message = "a decision attempted from inside a run (%s)" % (inside,)
@@ -1984,7 +2090,9 @@ class Orchestrator(object):
             self.caller_guard(run, caller_env, caller_pid)
             if run.status != "awaiting_approval":
                 raise Refused("%s is %s, not awaiting_approval" % (req, run.status))
-            live = [p for p in (run.exec.get("pid"), run.exec.get("closeOutPid")) if pid_alive(p)]
+            # A recorded pid the OS has given another process since is not the harness
+            # (REQ-662 BR-18).
+            live = recorded_harness_pids(run.doc)
             if live or req in self.children:
                 run.violation("approval attempted while the process is alive")
                 raise Refused("%s: the harness process is still alive, %s" % (PROTOCOL, live))
@@ -2098,13 +2206,17 @@ class Orchestrator(object):
             raise Refused(why)
 
     def abort(self, req, by="", caller_pid=None, caller_env=None):
-        """The only way a running or stalled harness is killed (BR-20)."""
+        """The only way a running or stalled harness is killed (BR-20). A recorded pid is
+        signalled only while it is still the process recorded (:func:`same_process`): one the
+        OS has given another process since is never signalled, and reads as no live process
+        (REQ-662 BR-18)."""
         with self.lock:
             run = self._run(req)
             self.caller_guard(run, caller_env, caller_pid)
             pid = run.exec.get("pid")
             close = run.exec.get("closeOutPid")
-            if not pid_alive(pid) and pid_alive(close):
+            alive = same_process(pid, run.exec.get("pidStart"))
+            if not alive and same_process(close, run.exec.get("closeOutPidStart")):
                 # The merge stands: the worker records closeOut failed and cleans up.
                 try:
                     os.killpg(int(close), signal.SIGTERM)
@@ -2112,7 +2224,7 @@ class Orchestrator(object):
                     pass
                 self.say("%s close-out aborted by %s" % (req, by))
                 return
-            if not pid_alive(pid):
+            if not alive:
                 raise Refused("%s has no live process; its last status is %s"
                               % (req, run.status))
             try:
@@ -2503,17 +2615,28 @@ class Orchestrator(object):
     def _carry_close_out(self, run, path):
         """The close-out's copy of the state, read back as data once the session has exited and
         merged into the primary path's as :meth:`_carry` merges a working copy's, never taking
-        ``status``, ``exec`` or ``approval`` from it (REQ-662 ADR-7). The model wrote it: a link,
-        a special file or anything but one JSON object is no record, which the close-out's
-        terminal-record check then fails."""
+        ``status``, ``exec`` or ``approval`` from it (REQ-662 ADR-7), and of the run-outcome keys
+        the primary path's copy keeps, taking only ``lessonsWritten``, which the close-out
+        itself produces (:data:`CLOSE_OUT_KEEPS`). The model wrote it: a link, a special file,
+        one over ``exec_ledger.STATE_FILE_MAX_BYTES``, one nested too deep to parse or anything
+        but one JSON object is no record, which the close-out's terminal-record check then
+        fails."""
         rel = self._close_out_state_rel(run)
+        full = os.path.join(path, rel)
+        cap = el.STATE_FILE_MAX_BYTES
+        why = "it is missing or is not one JSON object"
         try:
             esf.check(path, rel, "file")
-            doc = el.read_json(os.path.join(path, rel))
+            size = os.lstat(full).st_size if os.path.lexists(full) else 0
+            if size > cap:
+                doc, why = None, ("it is %d bytes, over the %d bytes a state file may hold, so it "
+                                  "is not read" % (size, cap))
+            else:
+                doc = el.read_json(full, max_bytes=cap)
         except esf.SurfaceRefused as exc:
             doc, why = None, str(exc)
-        else:
-            why = "it is missing or is not one JSON object"
+        except OSError as exc:
+            doc, why = None, "it cannot be read: %s" % exc
         box = self.box(run)
         if not isinstance(doc, dict):
             box.log("close_out_state_carried", [rel], path, 1, detail={"record": False,
@@ -2522,7 +2645,7 @@ class Orchestrator(object):
         merged = run.read_primary_state()
         taken, ignored = [], []
         for key, value in doc.items():
-            if key in CLOSE_OUT_ENGINE_OWNED or (key in PRIMARY_OWNED and key in merged):
+            if key in CLOSE_OUT_ENGINE_OWNED or (key in CLOSE_OUT_KEEPS and key in merged):
                 if merged.get(key) != value:
                     ignored.append(key)
                 continue
@@ -2630,8 +2753,14 @@ class Orchestrator(object):
         self.reap(run, proc.pid)
         run.exec["closeOutLive"] = False
         run.save()
-        self.verify_surfaces(run, [path], "exit")
+        surface_hits = self.verify_surfaces(run, [path], "exit")
         self.revoke_trust(run, path)
+        if surface_hits:
+            # A surface or the policy folder changed while the close-out ran: a Rule B violation,
+            # so nothing it wrote is carried back and its chore PR is not gated or merged. The
+            # REQ's merge stands (REQ-662 BR-15).
+            self._close_out_failed(run, "failed", "%s: %s" % (PROTOCOL, "; ".join(surface_hits)))
+            return
         if carried is not None:
             self._carry_close_out(run, path)
         result = self._read_result(run, "close-out.json")
@@ -2750,10 +2879,20 @@ class Orchestrator(object):
             self.say("%s re-halted: rebase conflicts on %s" % (run.req, ", ".join(files)))
             return
         # The working copy is on the rebased tree now, so what it was at launch is gone: the
-        # relaunch's hiding records the rebased blobs, or a later restore would write the
-        # pre-rebase content over them (REQ-662 BR-17).
+        # rebased index's blobs are recorded in its place and saved before the push and the
+        # relaunch, so a restore after any failure from here, or after the supervisor dies,
+        # writes the rebased content, never the pre-rebase blob over it (REQ-662 BR-17).
         hidden = (run.doc.get("hidden") or {}).get(run.wc)
-        if isinstance(hidden, dict) and hidden.pop("launchBlobs", None) is not None:
+        if isinstance(hidden, dict) and "launchBlobs" in hidden:
+            manifest = (run.doc.get("surfaces") or {}).get(run.wc) or {}
+            try:
+                hidden["launchBlobs"] = esf.index_blobs(box, repo, run.wc, manifest)
+            except (esf.SurfaceRefused, OSError) as exc:
+                hidden.pop("launchBlobs")
+                run.save()
+                self.say("manual resume needed for %s (rebased, and its index could not be "
+                         "read: %s)" % (run.req, exc))
+                return
             run.save()
         branch = run.doc["branch"]
         push = box.git(repo, ["push", "--force-with-lease=%s:%s" % (branch, old), "origin",
@@ -2768,10 +2907,13 @@ class Orchestrator(object):
 
     # ---- the supervisor --------------------------------------------------------------
     def bind(self):
+        """The supervisor's socket, bound by its short relative name in its own directory,
+        which stays this process's working directory (under :data:`CWD_LOCK`)."""
         self.sup_dir = self.sup_dir or el.create_run_dir(self.environ)
-        os.chdir(self.sup_dir)
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind("s")
+        with CWD_LOCK:
+            os.chdir(self.sup_dir)
+            server.bind("s")
         server.listen(8)
         return server
 
@@ -3000,16 +3142,10 @@ def client_call(run, request):
     sup = run.doc.get("supervisorDir")
     if not sup or not os.path.isdir(sup):
         return None
-    here = os.getcwd()
     try:
-        os.chdir(sup)
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.settimeout(30)
-        conn.connect("s")
+        conn = unix_connect(sup, 30)
     except OSError:
         return None
-    finally:
-        os.chdir(here)
     with conn:
         conn.sendall((json.dumps(request) + "\n").encode("utf-8"))
         data = b""

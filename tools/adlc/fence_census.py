@@ -461,17 +461,15 @@ def coverage_problems(root, texts):
 
 
 # --------------------------------------------------------------------------- the adapters
-#: The ``exec.matcher`` values ``exec_matcher`` models (``harness_adapter.MATCHERS``): only on
-#: these can a fence be judged ``direct``. Any other value, ``none`` included, routes nothing
-#: ``direct`` (REQ-662 BR-3, ADR-8).
-MODELLED_MATCHERS = ("claude",)
 #: Why a fence is not run as written on a harness whose matching nothing models.
 NO_MATCHER = "no measurement pins this harness's statement matching (matcher: none)"
 
 
 def routes_direct(adapter):
-    """Whether ``adapter``'s statement matching is modelled, so a fence may be ``direct``."""
-    return adapter.block.get("matcher") in MODELLED_MATCHERS
+    """Whether ``adapter``'s statement matching is modelled, so a fence may be ``direct``: the
+    adapter's own ``has_matcher``, which reads the loader's ``MODELLED_MATCHERS`` (REQ-662
+    BR-3, ADR-8)."""
+    return adapter.has_matcher
 
 
 def exec_adapters(root):

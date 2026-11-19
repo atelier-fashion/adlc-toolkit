@@ -15,11 +15,12 @@ Two places:
   beside the operator's rules. It is written whole and atomically, under a lock, and the
   folder is checked against a manifest the engine recorded when it wrote the file.
 
-Four checks use one manifest. Before a launch and before a resume a working-copy mismatch is
+Three checks use one manifest. Before a launch and before a resume a working-copy mismatch is
 repaired by the render and reported (``rule_file_rerendered``), and a policy-folder mismatch
-refuses the run. At exit and at the halt any mismatch is a ``config_surface_violation``. The
-expected manifest is the orchestrator's, kept in the run directory: nothing a harness can
-write decides a check here (LESSON-718), and the engine runs nothing it reads.
+refuses the run. Once the harness exits, the one check after it ran, any mismatch is a
+``config_surface_violation``. The expected manifest is the orchestrator's, kept in the run
+directory: nothing a harness can write decides a check here (LESSON-718), and the engine runs
+nothing it reads.
 
 Every write ``lstat``s every component: a symlink, a hardlink or a non-regular file is
 refused, and the resolved path must be under the root it was written for. The write itself
@@ -646,7 +647,8 @@ def change_text(change):
 
 
 def violation_text(change, block, where):
-    """A ``config_surface_violation`` as the halt and the run log state it (BR-15)."""
+    """A ``config_surface_violation`` as the blocked run, or the failed close-out, and the run
+    log state it (BR-15)."""
     reach = ("rules_reload is %s, so the edit may have taken effect mid-run"
              % block.get("rules_reload", "unknown") if reload_effective(block) else
              "rules_reload is startup, so the edit could not take effect before the next "
@@ -838,6 +840,17 @@ def hide(box, repo, wc, manifest, record, excludes, environ=None, gitdir_write=N
                 box, repo, ["config", "--worktree", "core.excludesFile", excludes],
                 "`git config --worktree core.excludesFile` (%s)" % WORKTREE_CONFIG, cwd=wc))
     return record
+
+
+def index_blobs(box, repo, wc, manifest):
+    """Each tracked path the render covers in ``wc`` (``manifest``'s files and absent paths, and
+    anything under a directory surface), with the index mode and blob oid it has now: what
+    :func:`hide` records as ``launchBlobs`` the first time, and what an engine rebase records
+    again once the working copy is on the rebased tree, so a restore writes the rebased
+    content back, never the pre-rebase blob over it (BR-17)."""
+    paths, prefixes = rendered_paths(manifest)
+    return {rel: {"mode": entry.mode, "oid": entry.oid}
+            for rel, entry in sorted(_index(box, repo, wc, paths + prefixes).items())}
 
 
 def _write_blob(box, repo, wc, rel, entry, staging):
@@ -1180,10 +1193,10 @@ def check_policy(record, strict=True):
 
 def policy_problems(record, strict=True):
     """Every :class:`Change` between the policy folder and ``record``: the toolkit's file
-    missing or drifted, and a stray file. ``strict`` (at a launch, a resume, the exit and the
-    halt) also counts an operator file that changed or went since the record; the pre-flight
-    of a new batch reads ``strict=False``, because between runs the operator's own files are
-    the operator's, and exec never judges or edits them."""
+    missing or drifted, and a stray file. ``strict`` (before a launch and a resume, and when
+    the harness exits) also counts an operator file that changed or went since the record; the
+    pre-flight of a new batch reads ``strict=False``, because between runs the operator's own
+    files are the operator's, and exec never judges or edits them."""
     folder = record["folder"]
     own = os.path.basename(record["path"])
     now = _folder_entries(folder)
@@ -1203,12 +1216,21 @@ def policy_problems(record, strict=True):
     return out
 
 
-def policy_refusal(data, problems, where):
-    return ("harness %s: the user policy folder is not what the engine recorded, so the %s is "
-            "refused (REQ-662 BR-4): %s; if you changed it yourself, run `adlc harness install "
-            "--exec --harness %s` to write the toolkit's file and record the folder again"
-            % (data.get("name"), where, "; ".join(change_text(c) for c in problems),
-               data.get("name")))
+def policy_refusal(data, problems, where, blocked=None):
+    """The refusal of a policy folder that is not what the engine recorded (BR-4): at a
+    pre-flight, and at a run's own launch or resume. ``blocked`` names a blocked run whose
+    relaunch is refused: the text then says how it goes on once the files are inspected."""
+    name = data.get("name")
+    head = ("harness %s: the user policy folder is not what the engine recorded, so the %s is "
+            "refused (REQ-662 BR-4): %s; " % (name, where,
+                                                "; ".join(change_text(c) for c in problems)))
+    if blocked is None:
+        return head + ("if you changed it yourself, run `adlc harness install --exec --harness "
+                       "%s` to write the toolkit's file and record the folder again" % name)
+    return head + ("inspect the files named here, then run `adlc harness install --exec "
+                   "--harness %s`, which writes the toolkit's file and records the folder "
+                   "again, and `adlc sprint-exec answer %s` relaunches the run against that "
+                   "record" % (name, blocked))
 
 
 def violation_refusal(data, files):
@@ -1223,8 +1245,9 @@ def violation_refusal(data, files):
 
 def mark_policy_violation(adapter, environ, problems):
     """Mark the engine's record of the user policy folder violated, naming the files: a run's
-    strict check (at exit, at the halt, before a launch or a resume) found ``problems``, each a
-    :class:`Change` or a path. The ``violated`` list is written atomically under the lock, a
+    strict check when its harness exited found ``problems``, each a :class:`Change` or a path.
+    Only that check marks; one before a launch or a resume refuses that run and marks nothing.
+    The ``violated`` list is written atomically under the lock, a
     record that went missing written anew to carry it, and it stays until ``adlc harness
     install --exec`` records the folder again (:func:`install_policy_file`). Meanwhile every
     pre-flight refuses (:func:`ensure_policy_file`): the operator's files may change between

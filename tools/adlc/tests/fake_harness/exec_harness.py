@@ -41,7 +41,8 @@ copy or absolute, whose content this launch records as it finds them on starting
 (path to text, written whole after the last state write: a model editing a config surface, a
 rule file, a hook file or the user policy folder mid-run, after its commit) and ``add`` (the
 paths the commit stages, in place of ``git add -A``: a model that stages only its own files).
-Under ``closeout`` the same ``saw`` and ``add`` keys apply to the resumed session.
+Under ``closeout`` the same ``saw``, ``add`` and ``surface_writes`` keys apply to the resumed
+session, ``surface_writes`` after its state write.
 
 The nested-launch key (REQ-662 BR-18, both profiles): ``nested`` (argv lists, each run after
 ``sprint-exec`` through the engine's own entry point under the scenario's toolkit, from the
@@ -466,6 +467,7 @@ def close_out(top, spec, argv, prompt):
         doc.update(close.get("state_extra", {}))
         with open(target, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, indent=1)
+    write_surfaces(close, wt)
     shaped = dict(spec, **{k: close[k] for k in ("stream", "no_last_message") if k in close})
     result("Terminal state: closed-out\nChore PR: %s" % url, shaped)
     raise SystemExit(0)

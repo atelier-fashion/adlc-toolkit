@@ -57,7 +57,6 @@ PROBE_MARKER = "%s.marker.json"
 #: The lock directory, beside the trust file.
 LOCK_SUFFIX = ".adlc-trust.lock.d"
 LOCK_TIMEOUT_S = 10.0
-LOCK_POLL_S = 0.05
 
 #: The one line that tells this module's block from an operator's own entry.
 BLOCK_COMMENT = "# adlc exec trust (REQ-662) — removed when the run ends\n"
@@ -190,7 +189,7 @@ class TrustLock(object):
 
     def __enter__(self):
         lock = el.mkdir_lock(self.path, self.timeout, TrustRefused,
-                             holder="another adlc run is editing the file", poll=LOCK_POLL_S)
+                             holder="another adlc run is editing the file")
         lock.__enter__()
         self._lock, self.held = lock, True
         return self

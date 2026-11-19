@@ -285,6 +285,8 @@ def test_a_held_lock_refuses_and_writes_nothing(env):
     finally:
         os.rmdir(env.lock)
     assert grant(env).written, "once released, the grant goes on"
+    # The trust file's lock is the engine's one mkdir lock, with its one poll interval.
+    assert not hasattr(et, "LOCK_POLL_S")
 
 
 def test_a_symlinked_lock_is_refused(env, tmp_path):

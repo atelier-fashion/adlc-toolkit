@@ -54,7 +54,10 @@ exec:
       harness_version: "fake-exec-file 0.1.0"
       status: pass
   working_copy: {strategy: clone}
-  trust_grant: user-config-entry
+  # `none`: this fixture declares no paths.config.user for `user-config-entry` to write, which
+  # the loader refuses (REQ-662 BR-5). `exec_helpers.file_adapter` adds that config and sets
+  # the grant a test asks for.
+  trust_grant: none
   prompt_delivery: stdin
   # A trailing `-` would read the prompt from stdin by name; this launch leaves it out.
   prompt_flag: ["-"]

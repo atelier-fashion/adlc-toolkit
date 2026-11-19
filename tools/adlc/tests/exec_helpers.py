@@ -557,10 +557,10 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
     launchable on today's engine, as a ``verification: probes`` block over ``result``: its
     rules in a working-copy rule file and the deny tier in a user policy file, a working-copy
     config and hook file inside its one directory surface, the ``worktree`` working copy, and
-    ``trust_grant`` (``none``, or the fixture's own ``user-config-entry``, which writes the
-    user config ``$HOME/`` + :data:`FILE_USER_CONFIG`; REQ-662 BR-5). Like Codex it declares no
-    ``add_dir_flag``, so its close-out writes its state through the close-out working copy
-    (REQ-662 ADR-7). Every exec-scope loss is declared, as a maintainer would."""
+    ``trust_grant`` (``none``, the fixture's own, or ``user-config-entry``, which writes the
+    user config ``$HOME/`` + :data:`FILE_USER_CONFIG` this adds; REQ-662 BR-5). Like Codex it
+    declares no ``add_dir_flag``, so its close-out writes its state through the close-out
+    working copy (REQ-662 ADR-7). Every exec-scope loss is declared, as a maintainer would."""
     text = open(CODEX_SHAPED_FIXTURE, encoding="utf-8").read()
     block = ha.load_adapter(CODEX_SHAPED_FIXTURE, toolkit=TOOLKIT)["exec"]
     cache = "".join(
@@ -588,8 +588,8 @@ def file_adapter(directory, result, rules_reload="unknown", context_delivery="pr
          "  fence.partial-source: {project: inexpressible, exec: inexpressible}\n"
          "capabilities:\n"),
         (old_cache, "  probes:\n" + cache),
-        ("  working_copy: {strategy: clone}\n  trust_grant: user-config-entry\n",
-         "  working_copy: {strategy: worktree}\n  trust_grant: %s\n" % trust_grant),
+        ("  working_copy: {strategy: clone}\n", "  working_copy: {strategy: worktree}\n"),
+        ("  trust_grant: none\n", "  trust_grant: %s\n" % trust_grant),
         ("  context_delivery: prompt\n", "  context_delivery: %s\n" % context_delivery),
         ("  rules_reload: unknown\n", "  rules_reload: %s\n" % rules_reload),
     ]

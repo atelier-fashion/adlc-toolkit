@@ -37,6 +37,29 @@ def contains(argv, part):
     return any(argv[i:i + len(part)] == part for i in range(len(argv) - len(part) + 1))
 
 
+def _protocol_fake(box, adapter):
+    """Script the fake for the per-adapter protocol, from the adapter's data, and return its
+    ``exec.rule_file`` (None when it declares none). The sandbox holds a user config exactly
+    when the block's grant writes one; the fake then trusts the repository itself, as `codex
+    exec` does, unless an entry covers its launch, and records the rule file it starts with."""
+    assert bool(box.user_config) == (adapter.trust_grant not in et.NO_FILE)
+    rule = adapter.block.get("rule_file")
+    script = {"saw": [rule]} if rule else {}
+    if box.user_config:
+        script["trust_itself"] = box.user_config
+    box.req(**script)
+    return rule
+
+
+def _seen_rule_files(box, rule):
+    """The rule-file text the fake found at each launch, the close-out's included."""
+    path = box.home / ("saw-%s.jsonl" % REQ)
+    if not rule or not path.exists():
+        return []
+    seen = [json.loads(line)["saw"].get(rule) for line in path.read_text().splitlines()]
+    return [text for text in seen if text]
+
+
 @pytest.mark.parametrize("harness", eh.EXEC_ADAPTERS)
 def test_approval_protocol_per_adapter(tmp_path, harness):
     """REQ-659's approval protocol against each exec-capable adapter as shipped, read with its
@@ -45,14 +68,19 @@ def test_approval_protocol_per_adapter(tmp_path, harness):
     merge through the forge mock, the close-out's resume from the resume template with the
     session id the launch printed, done; and the reject path, which merges nothing and leaves
     the working copy. Trust is granted and revoked on both paths, and the operator's user
-    config and user policy folder end as they began."""
+    config and user policy folder end as they began. Where the block's grant writes the user
+    config, the fake writes its own trust entry there as `codex exec` does at a launch no entry
+    covers, so the user config ending byte-identical shows the grant covered the launch. Where
+    the block declares a rule file, the fake records the rendered one it started with."""
     (tmp_path / "approve").mkdir()
     box = eh.adapter_sandbox(tmp_path / "approve", harness)
     adapter = box.adapter()
+    rule = _protocol_fake(box, adapter)
     before = box.user_files()
     orch = box.go(shared=True)
     run = orch.runs[REQ]
     assert run.status == "awaiting_approval" and run.exec["exitClass"] == "ok"
+    assert bool(_seen_rule_files(box, rule)) == bool(rule)
     [launch] = box.argvs()
     assert launch[:len(adapter.template("launch"))] == ea.substitute(adapter.template("launch"), {
         "worktree": run.wc, "last_message": run.last_message("stdout.json"),
@@ -113,9 +141,11 @@ def test_approval_protocol_per_adapter(tmp_path, harness):
 
     (tmp_path / "reject").mkdir()
     box = eh.adapter_sandbox(tmp_path / "reject", harness)
+    rule = _protocol_fake(box, box.adapter())
     before = box.user_files()
     orch = box.go(shared=True)
     run = orch.runs[REQ]
+    assert bool(_seen_rule_files(box, rule)) == bool(rule)
     orch.reject(REQ, "not this sprint", decided_by="operator", channel="skill", caller_pid=7)
     assert run.status == "rejected"
     assert run.ledger().read()["decision"]["reason"] == "not this sprint"
@@ -375,7 +405,8 @@ def test_approval_guards(box):
         orch.approve(REQ, token, decided_by="op", caller_env={"ADLC_EXEC_RUN": REQ})
     assert run.ledger().read()["decision"] is None
     assert "inside a run" in "\n".join(se.render_row(run, se.violations_of(run)))
-    run.exec["pid"] = os.getpid()
+    # The recorded harness, still alive: this process, started when the record says.
+    run.exec.update({"pid": os.getpid(), "pidStart": se.process_start(os.getpid())})
     with pytest.raises(se.Refused, match="Rule B"):
         orch.approve(REQ, token, decided_by="op", caller_pid=os.getpid())
     with pytest.raises(se.Refused, match="still alive"):
@@ -388,6 +419,51 @@ def test_approval_guards(box):
     assert orch.approve(REQ, token, decided_by="op") == "approved"
     with pytest.raises(se.Refused, match="not awaiting_approval"):
         orch.approve(REQ, token, decided_by="op")
+
+
+#: A start time no live process has: a recorded pid the OS has since given another process.
+NOT_ITS_START = "Thu Jan  1 00:00:00 1970"
+
+
+def test_a_pid_the_os_gave_another_process_is_not_the_harness(box):
+    """REQ-662 BR-18: a recorded harness pid is the harness only while the process holding it
+    started when the engine recorded (`pidStart`, `closeOutPidStart`), whatever the run's
+    status. A pid the OS has since given an unrelated live process refuses nothing at
+    `approve`, fails no caller guard for a caller that descends from it, and `abort` never
+    signals it. A harness that really is still alive is still refused at `approve` and at the
+    caller guard, and `abort` still kills it."""
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    token, _ = box.tokens(REQ)
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+    harness = subprocess.Popen(sleeper, start_new_session=True)
+    other = subprocess.Popen(sleeper, start_new_session=True)
+    try:
+        started = eh.until(lambda: se.process_start(harness.pid), what="the harness to start")
+        eh.until(lambda: se.process_start(other.pid), what="the other process to start")
+        run.exec.update({"pid": harness.pid, "pidStart": started})
+        with pytest.raises(se.Refused, match="still alive"):
+            orch.approve(REQ, token, decided_by="op")
+        with pytest.raises(se.Refused, match="Rule B"):
+            orch.approve(REQ, token, decided_by="op", caller_pid=harness.pid)
+        run.exec.update({"pid": other.pid, "pidStart": NOT_ITS_START, "closeOutPid": other.pid,
+                         "closeOutPidStart": NOT_ITS_START})
+        with pytest.raises(se.Refused, match="no live process"):
+            orch.abort(REQ, by="operator")
+        assert other.poll() is None and run.status == "awaiting_approval"
+        assert orch.approve(REQ, token, decided_by="op", caller_pid=other.pid) == "approved"
+        assert other.poll() is None
+        run.exec.update({"pid": harness.pid, "pidStart": started, "closeOutPid": None,
+                         "closeOutPidStart": None})
+        orch.abort(REQ, by="operator")
+        eh.until(lambda: harness.poll() is not None, timeout=10, what="the harness to be killed")
+        assert run.status == "failed" and run.exec["abortedBy"] == "operator"
+        assert other.poll() is None
+    finally:
+        for proc in (harness, other):
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
 
 
 def test_token_is_spent_and_never_on_disk(box):
@@ -825,21 +901,34 @@ def test_close_out_resumes_with_the_same_rules(tmp_path, harness):
 HOSTILE = {"status": "approved", "exec": {"exitClass": "denied", "pid": 1},
            "approval": {"decision": "rejected", "decidedBy": "the model", "action": "deploy"},
            "notes": ["from the close-out"]}
+#: The run-outcome keys the primary path's copy holds before the close-out (REQ-648), written
+#: there by `emit-run-outcome.sh record-*`, and what a close-out's copy sets them to.
+PRIMARY_KEPT = {"harness": {"version": "5.4.0", "sha": "c013262"},
+                "validateAttempts": {"phase1": 2}, "verify": {"findings": [], "loops": 1},
+                "lessons": {"acknowledged": {"ids": ["LESSON-012"]}}, "lessonsWritten": []}
+CLOSE_OUT_SETS = {"harness": {"version": "9.9.9", "sha": "0000000"},
+                  "validateAttempts": {"phase1": 9}, "verify": {"findings": [], "loops": 9},
+                  "lessons": {"acknowledged": {"ids": ["LESSON-999"]}},
+                  "lessonsWritten": ["LESSON-9001"]}
 
 
 def test_a_carried_close_out_state_is_data(tmp_path):
     """REQ-662 ADR-7: on the shipped Codex block, which declares no add_dir_flag, the close-out's
     copy of the state is model-written data. A copy that also sets `status`, `exec` and
     `approval` changes none of them in the primary path's state, and its other keys are
-    carried. A copy that is not one JSON object, is gone, does not parse, or is a link or a
-    special file is no record: nothing is carried, the linked file's content included, and the
-    close-out ends failed with the merge standing. A chore PR that commits the copy is out of
-    bounds and needs review, never merged."""
+    carried. Of the run-outcome keys the primary path's copy already holds, `lessonsWritten`,
+    which the close-out itself produces, is taken from the close-out's copy, and `lessons`,
+    `harness`, `validateAttempts` and `verify` are kept. A copy that is not one JSON object, is
+    gone, does not parse, nests too deep for the parser, is over the state-file size cap, or is a
+    link or a special file is no record: nothing is carried, the linked file's content included,
+    and the close-out ends failed with the merge standing. A chore PR that commits the copy is
+    out of bounds and needs review, never merged."""
     (tmp_path / "hostile").mkdir()
     box = eh.adapter_sandbox(tmp_path / "hostile", "codex")
-    box.req(closeout={"state_extra": HOSTILE})
+    box.req(closeout={"state_extra": dict(HOSTILE, **CLOSE_OUT_SETS)})
     orch = box.go(shared=True)
     run = orch.runs[REQ]
+    run.write_primary_state(dict(run.read_primary_state(), **PRIMARY_KEPT))
     assert box.approve(orch) == "approved" and run.status == "merged"
     state = run.read_primary_state()
     assert state["status"] == "merged" and state["exec"] == run.public_exec()
@@ -848,9 +937,14 @@ def test_a_carried_close_out_state_is_data(tmp_path):
     assert state["approval"]["decidedBy"] == "operator" and state["approval"]["action"] == "merge"
     assert state["closeOut"]["status"] == "ok" and state["completed"] is True
     assert state["notes"] == ["from the close-out"]
+    assert state["lessonsWritten"] == ["LESSON-9001"]
+    for key in ("lessons", "harness", "validateAttempts", "verify"):
+        assert state[key] == PRIMARY_KEPT[key], key
     [carried] = eh.events(box, run, "close_out_state_carried")
-    assert carried["record"] is True and carried["ignored"] == ["approval", "exec", "status"]
-    assert {"closeOut", "completed", "notes"} <= set(carried["taken"])
+    assert carried["record"] is True
+    assert carried["ignored"] == ["approval", "exec", "harness", "lessons", "status",
+                                  "validateAttempts", "verify"]
+    assert {"closeOut", "completed", "notes", "lessonsWritten"} <= set(carried["taken"])
     assert merged_count(box) == 2
 
     (tmp_path / "list").mkdir()
@@ -873,6 +967,10 @@ def test_a_carried_close_out_state_is_data(tmp_path):
     for name, make, why in (
             ("gone", lambda f: None, "not one JSON object"),
             ("cut", lambda f: f.write_text('{"closeOut": {"status": "o'), "not one JSON object"),
+            # Nested past the parser's recursion limit: a `RecursionError`, read as unreadable.
+            ("deep", lambda f: f.write_text("[" * 100000 + "]" * 100000), "not one JSON object"),
+            ("large", lambda f: f.write_text(json.dumps(
+                {"closeOut": {"status": "ok"}, "pad": "x" * 600000})), "over the"),
             ("link", lambda f: f.symlink_to(secret), "is a symlink"),
             ("hardlink", lambda f: os.link(str(secret), str(f)), "is a hardlink"),
             ("fifo", lambda f: os.mkfifo(str(f)), "not a regular file"),
@@ -897,6 +995,23 @@ def test_a_carried_close_out_state_is_data(tmp_path):
     assert state["closeOut"]["status"] == "needs-review"
     assert "A %s" % rel in state["closeOut"]["reason"]
     assert merged_count(box) == 1
+
+
+def test_a_close_out_state_nested_too_deep_fails_only_the_close_out(tmp_path):
+    """A close-out copy of the state nested past the JSON parser's recursion limit is no
+    record, as one that does not parse is: the close-out ends failed, the merge stands and the
+    run ends merged, never stuck in `merging` with the merge worker gone."""
+    box = eh.adapter_sandbox(tmp_path, "codex")
+    box.req(closeout={"state_text": "[" * 100000 + "]" * 100000})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    assert box.approve(orch) == "approved" and run.status == "merged"
+    state = run.read_primary_state()
+    assert state["status"] == "merged" and state["repos"]["widgets"]["merged"]
+    assert state["closeOut"]["status"] == "failed"
+    assert state["closeOut"]["reason"] == "the close-out wrote no terminal record"
+    [carried] = eh.events(box, run, "close_out_state_carried")
+    assert carried["record"] is False
 
 
 def test_a_refused_close_out_argv_revokes_its_trust(tmp_path, monkeypatch):
@@ -1223,10 +1338,7 @@ def test_abort_of_a_close_out(tmp_path, monkeypatch):
     box.write_scenario()
     worker = se.threading.Thread(target=lambda: box.approve(orch))
     worker.start()
-    for _ in range(600):
-        if se.pid_alive(run.exec.get("closeOutPid")):
-            break
-        se.time.sleep(0.05)
+    eh.until(lambda: se.pid_alive(run.exec.get("closeOutPid")), what="the close-out to start")
     orch.abort(REQ, by="operator")
     worker.join(30)
     assert not worker.is_alive()
@@ -1582,3 +1694,102 @@ def test_a_nested_launch_from_the_close_out_is_refused(tmp_path, harness):
         assert detail["execPid"] == run.exec["closeOutPid"] and detail["pid"] == attempt["pid"]
     assert el.find_run(str(box.repo), "REQ-903", box.environ) is None
     assert not (box.repo / ".worktrees" / "REQ-903").exists()
+
+
+# ---- confirmation pass, 2026-11-18: the close-out's exit check, its state copy, the rebase -----
+def test_a_surface_changed_during_the_close_out_fails_it(tmp_path, monkeypatch):
+    """REQ-662 BR-15: a config surface the close-out session edits (here its rule file, after
+    its commit) is a `config_surface_violation` at its exit, recorded as a Rule B violation, and
+    it fails the close-out with that text before the state is carried back and before the chore
+    gate, so the chore PR is not merged. The REQ's own merge stands, and the close-out's trust
+    grant is revoked."""
+    box = eh.trust_sandbox(tmp_path, monkeypatch)
+    box.req(add=["src"], closeout={"add": [".adlc"],
+                                   "surface_writes": {eh.FILE_RULE: "# tampered\n"}})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    assert box.approve(orch) == "approved" and run.status == "merged"
+    state = run.read_primary_state()
+    assert state["repos"]["widgets"]["merged"] and state["closeOut"]["status"] == "failed"
+    reason = state["closeOut"]["reason"]
+    assert reason.startswith(se.PROTOCOL) and "config_surface_violation at exit" in reason
+    assert eh.FILE_RULE in reason
+    assert merged_count(box) == 1
+    assert not eh.events(box, run, "close_out_state_carried")
+    close = run.doc["closeOutWorkingCopy"]
+    assert [e["path"] for e in eh.events(box, run, "config_surface_violation")] == [eh.FILE_RULE]
+    assert any(eh.FILE_RULE in v for v in se.violations_of(run))
+    assert (os.path.realpath(close), et.REVOKED) in [
+        (e["path"], e["status"]) for e in eh.events(box, run, "trust_revoked")]
+    assert run.doc["trustGrants"] == {} and eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+@pytest.mark.parametrize("link", ["symlink", "hardlink"])
+def test_a_link_at_the_close_out_state_path_fails_the_close_out(tmp_path, monkeypatch, link):
+    """REQ-662 ADR-7, BR-5: on a harness that cannot add the primary repo's spec directory, the
+    engine copies the state into the close-out working copy through the guarded write. A link
+    already at that path (put there between the close-out's render and the copy) refuses the
+    copy: the close-out fails before any session starts, its trust grant is revoked, the linked
+    file is untouched and the merge stands."""
+    box = eh.trust_sandbox(tmp_path, monkeypatch)
+    box.req(add=["src"], closeout={"add": [".adlc"]})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    target = tmp_path / "elsewhere.json"
+    target.write_text('{"kept": true}\n')
+    prepare = orch.prepare_surfaces
+
+    def then_link(run_, wcs, branch, where):
+        prepare(run_, wcs, branch, where)
+        if where == "resume":
+            spot = os.path.join(wcs[0], box.spec_dirs[REQ], "pipeline-state.json")
+            os.makedirs(os.path.dirname(spot), exist_ok=True)
+            (os.symlink if link == "symlink" else os.link)(str(target), spot)
+
+    monkeypatch.setattr(orch, "prepare_surfaces", then_link)
+    assert box.approve(orch) == "approved" and run.status == "merged"
+    state = run.read_primary_state()
+    assert state["repos"]["widgets"]["merged"] and state["closeOut"]["status"] == "failed"
+    assert "the close-out's state file" in state["closeOut"]["reason"]
+    assert "is a %s" % link in state["closeOut"]["reason"]
+    assert merged_count(box) == 1 and len(box.argvs()) == 1
+    assert target.read_text() == '{"kept": true}\n'
+    close = os.path.realpath(run.doc["closeOutWorkingCopy"])
+    assert (close, et.REVOKED) in [(e["path"], e["status"])
+                                   for e in eh.events(box, run, "trust_revoked")]
+    assert run.doc["trustGrants"] == {} and eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+def test_a_failure_after_the_engine_rebase_restores_the_rebased_content(tmp_path, monkeypatch):
+    """REQ-662 BR-17: once the unblock pass has rebased a held REQ's working copy, the run
+    record holds the rebased index's blob for each tracked rendered path, saved before the
+    push and the relaunch. So a failure between the rebase and the relaunch's own hiding (here
+    the hiding refused after the relaunch's render wrote the working copy) leaves a working
+    copy whose rendered paths restore to the rebased content, with `git status` clean."""
+    box = _held(tmp_path, monkeypatch, {"src/b.txt": "902\n"})
+    orch = box.go(shared=True)
+    held = orch.runs["REQ-902"]
+    assert held.status == "blocked"
+    upstream = 'model = "upstream"\n'
+    _upstream(box, {eh.FILE_CONFIG: upstream})
+    hide = orch._hide
+
+    def refused(run, wc, manifest, where):
+        if run.req == "REQ-902":
+            raise se.Refused("injected: the relaunch's hiding failed")
+        return hide(run, wc, manifest, where)
+
+    monkeypatch.setattr(orch, "_hide", refused)
+    box.approve(orch, REQ)
+    assert orch.runs[REQ].status == "merged"
+    assert "manual resume needed for REQ-902 (injected" in box.out.getvalue()
+    assert held.status == "blocked" and held.doc["launches"] == 1
+    assert eh.git(held.wc, "show", "HEAD:" + eh.FILE_CONFIG) == upstream
+    rendered = os.path.join(held.wc, eh.FILE_CONFIG)
+    assert eh.read_text(rendered) != upstream          # the relaunch's render, not hidden
+    blobs = se.Run.load(held.path).doc["hidden"][held.wc]["launchBlobs"]
+    assert blobs[eh.FILE_CONFIG] == {"mode": "100644", "oid": eh.git(
+        box.bare, "rev-parse", "main:" + eh.FILE_CONFIG).strip()}
+    orch.restore_surfaces(held)
+    assert eh.read_text(rendered) == upstream
+    assert eh.git(held.wc, "status", "--porcelain", "--untracked-files=all") == ""
