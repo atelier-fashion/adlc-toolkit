@@ -1,7 +1,7 @@
 ---
 id: BUG-287
 title: "The first real `/sprint --exec` pipeline run ends before the gate four times, and reaches the merge with both PRs still drafts"
-status: open
+status: resolved
 severity: high
 created: 2026-11-19
 updated: 2026-11-19
@@ -179,6 +179,12 @@ Not fixed here:
 - **`read_arg_file` resolves a path and then opens it** (found in review, older than this
   bug), which leaves a window to swap a directory for a symlink.
 - **The engine's flip to ready stays** when the pinned merge that follows is refused.
+
+## Deployment
+
+Merged as `15b5cbc` (PR #300) on 2026-11-19. The toolkit has no deploy target: the fix is live
+for a symlink install when its clone pulls `main`, and for a plugin install at the next
+release.
 
 ## Regression Test
 
