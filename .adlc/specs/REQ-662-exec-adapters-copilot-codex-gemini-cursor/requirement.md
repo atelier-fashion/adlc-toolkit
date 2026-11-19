@@ -258,6 +258,9 @@ residuals (BR-19); REQ-659's structural halt is the gate.
 ## Amendments
 
 - **2026-11-18, stage 1 (Codex) delivered.** Pull request #296 carries it. The spec stays `in-progress`: the Antigravity, Cursor and Copilot stages are still owed, each as its own `/proceed` run.
+  - **Merged** as `81af28f`. Lessons LESSON-887 to LESSON-890 and ASSUME-033 record what the stage learned.
+  - **Owed by every later stage:** a recorded real run with the engine's own argv, environment and rendered files, and a rerunnable script for it, beside the probe result (ASSUME-033).
+  - **Deferred to their own requirements:** keeping in the sandbox the routine commands that need no escape, and hardening the fence runner's git environment; a token for `answer`; a tolerant reader for the user config. Also left: splitting `sprint_exec.py` before stage 2, a gitdir violation raised inside `spawn`'s own git calls, and a dispatch with no peer process id.
 
 - **2026-11-18, what the review of stage 1 at `e33b6c1` changed.** Where a rule's text above differs from an entry here, the entry governs.
   - **BR-11, AC-15, External Dependencies.** The hook point in the REQ-657 loader for the exec sub-schema validator does not exist and is not owed. The loader validates the exec block itself: one validator, one caller, and a registration point would be indirection with no second user in this stage. AC-15's clause is met by the loader tests that refuse a malformed exec block.
