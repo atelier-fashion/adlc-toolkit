@@ -1,7 +1,7 @@
 ---
 id: REQ-662
 title: "Exec adapters for Copilot CLI, Codex, Gemini CLI and Cursor, accepted only on passing REQ-664 probes"
-status: approved
+status: in-progress
 deployable: false
 created: 2026-10-27
 updated: 2026-11-18
@@ -256,6 +256,8 @@ residuals (BR-19); REQ-659's structural halt is the gate.
 - [x] **Answered for Codex (2026-11-18): allowed by a prefix rule, outside the sandbox.** The design routes the Step 0 branch push through the runner (architecture ADR-9), and a push needs the network. The real runs show a runner inside the sandbox cannot push: while the runner line carried a bare fence id, Codex matched no rule, the runner ran sandboxed, and its push failed with `remote unpack failed: unable to create temporary object directory`; with the id quoted the allow matched and the branch reached the origin (`codex-exec-manual.md`, fact 1 and row `push-through-runner`). So the runner is allowed, its reach is bounded by ADR-7's audit alone, and that is declared as BR-19 (f). The allocation fence's own sandboxed control run was not made; the push decides the question. **Partly answered (2026-11-17):** `runner-prefix` reads `pass` on Codex with the runner allowed by a prefix rule: the runner was admitted and all twelve controls were refused. The sandboxed control run of the allocation fence is not done. On Codex, should the runner be allowed by a prefix rule, which REQ-655 records runs it outside the `workspace-write` sandbox, or left unmatched so it runs inside the sandbox? Inside, the network-using fences (`gh`, `git push` of id refs) may fail. Outside, ADR-7's audit is the only bound (BR-19 f). The `runner-prefix` variant and a sandboxed control run of the close-out's allocation fence decide it.
 
 ## Amendments
+
+- **2026-11-18, stage 1 (Codex) delivered.** Pull request #296 carries it. The spec stays `in-progress`: the Antigravity, Cursor and Copilot stages are still owed, each as its own `/proceed` run.
 
 - **2026-11-18, what the review of stage 1 at `e33b6c1` changed.** Where a rule's text above differs from an entry here, the entry governs.
   - **BR-11, AC-15, External Dependencies.** The hook point in the REQ-657 loader for the exec sub-schema validator does not exist and is not owed. The loader validates the exec block itself: one validator, one caller, and a registration point would be indirection with no second user in this stage. AC-15's clause is met by the loader tests that refuse a malformed exec block.
