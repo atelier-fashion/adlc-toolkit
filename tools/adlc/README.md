@@ -790,7 +790,7 @@ executable:
 **One census per adapter (REQ-662 ADR-8).** Each exec-capable adapter has its committed census,
 `harness/<name>/exec-fence-census.json`: every fence, its route, its values and its reach. On
 `matcher: claude` a fence may route `direct`; on `matcher: none` none does. The engine's
-`ExecAdapter.has_matcher` is the census's `routes_direct`, so the two read one answer. The runner
+The census's `routes_direct` is `ExecAdapter.has_matcher`, which reads the modelled-matcher list in `harness_adapter`, so the two read one answer. The runner
 accepts a fence that is `runner` in the census of any exec-capable adapter under its own root,
 and the reach of every `runner` route is audited against the union of every such adapter's deny
 tier and `engine_deny`, so whichever harness calls, no accepted route reaches a command any
