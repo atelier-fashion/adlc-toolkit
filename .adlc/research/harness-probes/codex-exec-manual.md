@@ -103,11 +103,58 @@ checkout's committed rules do not widen it.
 at 0.166.0 lists an `--ask-for-approval` option, so approval rests on the rendered config
 and the bypass scan, as the block declares.
 
+## The first full pipeline runs (2026-11-19, BUG-287)
+
+`adlc sprint-exec run --harness codex REQ-900`, six launches of one lite REQ (a copy button in
+`space/`), each from a clean state. The project was a throwaway clone of this toolkit outside
+the temp roots, with a local bare `origin`, the stateful mock forge
+(`ADLC_FORGE_MOCK_STORE`), a throwaway `ADLC_HOME` and `XDG_STATE_HOME`, and the operator's
+real `HOME`, where the Codex login lives. The engine built every prompt, render and trust
+entry itself. Launch 1 ran the engine as merged at `63ef276`; each later one ran it with the
+fixes the launches before it called for.
+
+| Launch | Ended | Time | Why |
+|---|---|---|---|
+| 1 | `failed`, Step 0 | 38 s | The draft-PR fence takes `--arg repo='<owner/repo>'`, and the prompt named no forge repository. The session passed the repo id, the runner refused it, and a refusal ends the run |
+| 2 | `blocked`, Phase 6 | 5 min | Implemented, tested and reviewed. The session wrote the PR body under `/tmp` and passed it as `--arg-file`; the runner reads only a file inside the working copy |
+| 3 | `failed`, Phase 6 | 6 min | The session chained `fence-run` after commands with no allow, so those lines ran sandboxed: the lane check could not write `FETCH_HEAD`, read `check-error` and escalated the lite REQ to the full lane, and the forge call could not take its lock |
+| 4 | `failed`, Step 0 | 1 min | A relative path where the lessons fence takes an absolute one: refused, so the run ended |
+| 5 | `awaiting_approval`, then `merged` | 4 min to the gate, 14 in all with the wait for `approve` | After `approve` the engine merged PR 101, resumed the session for the close-out, merged chore PR 102 and cleaned up. Both PRs were still drafts, which the mock forge merges and GitHub does not |
+| 6 | `blocked`, then `awaiting_approval`, then `rejected` | 5 min | With every fix in. PR 101 was ready at Phase 6 and the state's timestamps were real. The session stopped at Phase 7 because `gh` cannot reach a mock forge; `answer` relaunched it and it reached the gate in under a minute; `reject` ended it |
+
+What launch 5 and 6 measured of the engine itself, on a real harness for the first time: the
+pre-flight, one trust entry granted and revoked around each launch (the user config's checksum
+was the same after every launch), the render and its removal, the working copy's state merged
+into the primary path's, the approval ledger and token, the pinned merge, the close-out through
+`codex exec resume` in a second working copy with its state file carried back, the chore PR's
+merge, cleanup, `answer` and `reject`, and one run-outcome line per terminal.
+
+**8. A line leaves the sandbox only when every command on it has an allow.** `git add … &&
+git commit … && fence-run run …` ran outside the sandbox: each part matches a rule. `printf … >
+f && fence-run run …` ran inside it, runner included, because `printf` matches none. The
+session chained that way in four of six launches. The runner now checks that it can write the
+repository's git directory before it runs a fence, and answers with one `fence_run_sandboxed:`
+line when it cannot (exit 4 in these launches, 69 since); the session reran the call on its own each time
+(launches 5 and 6).
+
+**9. The session has no clock.** Before the prompt told it to run `date`, every timestamp it
+wrote was `…T00:00:00Z`, and the `merged` line of launch 5 reported 79,318 s for fourteen
+minutes. In launch 6 the timestamps were real.
+
+Costs, as Codex reported them: launch 5 used 2.1 M input tokens to the gate and 6.6 M in the
+resumed close-out, nearly all of it cached.
+
 ## What these do not show
 
 - Whether Codex re-reads a rule file edited during a session (`rules_reload: unknown`).
-- A full pipeline run under the engine. These are single turns; the approval protocol is
-  tested against the block through the test harness.
+- A run against a real forge. Every launch above used the mock forge and a local origin, so
+  no draft PR met GitHub's merge, no credential reached a forge, and Phase 7 had no CI to read:
+  `gh pr diff` and `gh pr checks` are direct `gh` calls, and the session either worked from the
+  local diff (launch 5) or stopped (launch 6).
+- A close-out with every fix in. Launch 5's close-out ran before the engine flipped a PR to
+  ready, and launch 6 was rejected at the gate.
+- Whether a session chains fence calls on a harness with no sandbox. There the chained call
+  simply works.
 - A push to a remote over the network. The origin is a local bare repository outside the
   sandbox's writable area, so the row shows the runner left the sandbox, not that a
   credential reached a forge.

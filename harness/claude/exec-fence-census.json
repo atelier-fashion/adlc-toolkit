@@ -266,7 +266,7 @@
       ]
     },
     {
-      "id": "proceed/phases-6-8-ship.md#1:65d2bbbb",
+      "id": "proceed/phases-6-8-ship.md#1:b05df002",
       "route": "runner",
       "placeholders": [
         "FINAL_TITLE",
@@ -284,6 +284,7 @@
         "find",
         "gh",
         "gh pr edit",
+        "gh pr ready",
         "gh pr view",
         "git",
         "git remote",

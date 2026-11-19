@@ -44,6 +44,17 @@ import exec_verify as ev  # noqa: E402
 import toolkit_root  # noqa: E402
 
 MAX_CONCURRENT = 5
+
+
+def _forge_repo(origin):
+    """``owner/name`` of the primary repo's origin, for the prompt, or None when it has no
+    owner (a bare path with one component)."""
+    origin = origin or {}
+    if origin.get("owner") and origin.get("name"):
+        return "%s/%s" % (origin["owner"], origin["name"])
+    return None
+
+
 MOCK_HOST = "mock.forge"
 TERMINAL = ("merged", "rejected", "failed")
 #: Keys the primary-path copy keeps over a working copy's (REQ-647, REQ-648).
@@ -882,7 +893,9 @@ class Orchestrator(object):
         run = Run(run_dir, doc)
         try:
             data = ep.pipeline_prompt(self.toolkit, self.primary, req, branch, self.primary,
-                                      repos[rid]["workingCopy"], adapter=batch.adapter)
+                                      repos[rid]["workingCopy"], adapter=batch.adapter,
+                                      forge_repo=_forge_repo(batch.origin),
+                                      state=run.primary_state_path())
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
             self._prompt_refused(req, exc)
             raise Refused(str(exc))
@@ -2186,7 +2199,9 @@ class Orchestrator(object):
                                       run.wc, answer=text if text is not None else
                                       "The REQ this run was held behind has merged, and this "
                                       "branch has been rebased. Continue.",
-                                      adapter=self.adapter(run))
+                                      adapter=self.adapter(run),
+                                      forge_repo=_forge_repo(run.doc.get("origin")),
+                                      state=run.primary_state_path())
         except (ep.PromptBuildError, ep.PromptRefused) as exc:
             self._prompt_refused(run.req, exc)
             raise Refused(str(exc))
@@ -2509,6 +2524,7 @@ class Orchestrator(object):
     def _merge_pinned(self, run, rid, pr):
         box = self.box(run)
         repo = run.doc["repos"][rid]["path"]
+        self._ready(box, pr["url"], repo)
         res = box.forge("adlc_forge_pr_merge", [pr["url"], "--squash", "--delete-branch",
                                                 "--match-head-commit", pr["headRefOid"]], repo)
         out = es.kv(res.stdout)
@@ -2538,6 +2554,18 @@ class Orchestrator(object):
                 repo, res.returncode)
         self._note_merged(run, rid)
         return "merged"
+
+    @staticmethod
+    def _ready(box, url, repo):
+        """Flip a PR to ready just before the engine merges it (BUG-287).
+
+        A forge refuses to merge a draft. Phase 6's fence flips the REQ's PR, but the
+        close-out's chore PR is opened by a session with no fence of its own for it, and a
+        session can leave either one a draft. The flip is not a one-way move and is a no-op on
+        a ready PR; its result is logged and never read, because the merge that follows is
+        what says whether the PR could be merged."""
+        res = box.forge("adlc_forge_pr_ready", [url], repo)
+        box.log("pr_ready", [url, str(res.returncode)], repo, res.returncode)
 
     def _note_merged(self, run, rid):
         state = run.read_primary_state()
@@ -2802,6 +2830,7 @@ class Orchestrator(object):
         if wrong:
             self._close_out_failed(run, "needs-review", "; ".join(wrong)[:300])
             return
+        self._ready(box, url, repo)
         res = box.forge("adlc_forge_pr_merge", [url, "--squash", "--delete-branch",
                                                 "--match-head-commit", oid], repo)
         box.log("one_way_move", ["close-out merge", url, str(res.returncode)], repo, res.returncode)

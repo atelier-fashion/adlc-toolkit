@@ -101,6 +101,14 @@ def test_approval_protocol_per_adapter(tmp_path, harness):
     assert not os.path.exists(os.path.join(str(box.repo), ".worktrees", "REQ-901-close-out"))
     merges = box.calls("pr_merge")
     assert len(merges) == 2
+    # BUG-287: the test harness opens both PRs as drafts, as a session does, and a forge
+    # refuses to merge a draft. The engine flips each to ready just before its merge.
+    ops = [(r["op"], r["argv"][0]) for r in box.calls() if r["op"] in ("pr_ready", "pr_merge")]
+    for i, (op, ref) in enumerate(ops):
+        if op == "pr_merge":
+            assert i > 0 and ops[i - 1] == ("pr_ready", ref), ops
+    assert [r["argv"][0] for r in box.log(run) if r["kind"] == "pr_ready"] \
+        == [m["argv"][0] for m in merges]
     assert merges[0]["argv"][1:3] == ["--squash", "--delete-branch"]
     assert "--match-head-commit" in merges[0]["argv"] and "--match-head-commit" in merges[1]["argv"]
     log = box.log(run)
@@ -1793,3 +1801,66 @@ def test_a_failure_after_the_engine_rebase_restores_the_rebased_content(tmp_path
     orch.restore_surfaces(held)
     assert eh.read_text(rendered) == upstream
     assert eh.git(held.wc, "status", "--porcelain", "--untracked-files=all") == ""
+
+
+# --------------------------------------------------------------------------- BUG-287
+def test_bug287_the_mock_refuses_to_merge_a_draft(box):
+    """The contrast behind the engine's flip to ready: a draft PR does not merge, on the mock
+    as on GitHub, and the same PR merges once it is ready. Before BUG-287 the mock merged a
+    draft, so no test saw that nothing under `--exec` could call `adlc_forge_pr_ready`."""
+    mock = os.path.join(box.toolkit, "tools", "adlc", "forge_mock.py")
+    env = dict(os.environ, ADLC_FORGE_MOCK="1", ADLC_FORGE_MOCK_STORE=str(box.store),
+               HOME=str(box.home))
+
+    def forge(*argv):
+        res = subprocess.run([sys.executable, mock] + list(argv), cwd=str(box.repo), env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             universal_newlines=True)
+        return res.returncode, res.stdout
+
+    def git(*args):
+        # The sandbox HOME carries the identity a commit needs.
+        subprocess.run(["git", "-C", str(box.repo)] + list(args), env=env, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+    git("checkout", "-q", "-b", "feat/REQ-901-thing")
+    with open(os.path.join(str(box.repo), "README.md"), "a") as fh:
+        fh.write("line four\n")
+    git("commit", "-qam", "change")
+    git("push", "-q", "origin", "feat/REQ-901-thing")
+    rc, out = forge("pr_create", "--draft", "--base", "main", "--head", "feat/REQ-901-thing",
+                    "--title", "t", "--body", "b")
+    assert rc == 0, out
+    number = dict(ln.split("=", 1) for ln in out.splitlines() if "=" in ln)["number"]
+    rc, out = forge("pr_merge", number, "--squash")
+    assert rc != 0 and "error_class=merge-blocked-by-policy" in out and "still a draft" in out
+    rc, out = forge("pr_ready", number)
+    assert rc == 0, out
+    rc, out = forge("pr_merge", number, "--squash")
+    assert rc == 0 and "state=MERGED" in out, out
+
+
+def test_bug287_the_launch_and_the_relaunch_name_the_forge_repo_and_the_state_file(box):
+    """Run 1 of the first real pipeline run ended at Step 0: the session had no forge
+    repository to pass, and had been told nothing about which state file a fence takes. The
+    engine knows both, and both prompts it builds now say them: the launch's, and the one an
+    `answer` relaunches with."""
+    box.req(status="blocked", claim="blocked",
+            blockers=[{"reason": "reflector-questions", "question": "which?"}],
+            after_answer={"status": "awaiting_approval", "claim": "awaiting_approval",
+                          "sid": "session-two", "blockers": None, "files": {"z.txt": "z\n"}})
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    orch.answer(REQ, "the second option")
+    box.wait(orch)
+    assert run.status == "awaiting_approval"
+    state = os.path.join(os.path.realpath(str(box.repo)), ".adlc", "specs", "REQ-901-thing",
+                         "pipeline-state.json")
+    assert run.primary_state_path() == state
+    for name in ("prompt.txt", "prompt.2.txt"):
+        text = open(run.file(name), encoding="utf-8").read()
+        # The sandbox's origin is <tmp>/acme/widgets.git, which the mock forge knows by
+        # the same owner and name.
+        assert "primary repo is `acme/widgets`." in text, name
+        assert "Wherever a fence takes `<state>`, pass `%s`" % state in text, name
+        assert "You have no clock." in text, name

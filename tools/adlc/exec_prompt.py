@@ -311,7 +311,7 @@ Every companion file the text names is inlined in this prompt, so do not look fo
 `git -C` is not on your allowlist: where the text writes `git -C <worktree> <command>`, run `<command>` from your working copy.
 Toolkit skills and agents are not loaded in this session. Wherever the text says to invoke `/<skill>`, or to follow a skill, reference or agent file, run `{runner} show <skill>/SKILL.md` (or `agents/<name>.md`, or the `references/` file the skill names) and follow what it prints. A file it refuses is not part of this run.
 Dispatch no toolkit agent by name: none is loaded, and a name the Agent tool does not list runs a generic agent without the checklist. Run each agent's checklist inline from `{runner} show agents/<name>.md`, as the dispatch paragraph's inline arm says: an inline review reports findings only, applies no fixes, and runs no test runner, build tool, package manager or interpreter.
-A fence shown as a `{runner} run <id>` call runs only that way. Replace each `'<…>'` stub with its value as one single-quoted literal, every `'` in it written `'\\''`, or pass a file with `--arg-file NAME=PATH`. Never source a partial yourself: no allow admits `.` or `source`. Exit 3 with an `opaque_entry_refused:` line is the runner refusing, so report the line and stop as the gate protocol says.
+A fence shown as a `{runner} run <id>` call runs only that way. Replace each `'<…>'` stub with its value as one single-quoted literal, every `'` in it written `'\\''`, or pass a file with `--arg-file NAME=PATH`: the runner reads only a file inside your working copy, so write it there, and delete it afterwards without committing it. Run each such call as a command of its own, never chained after another command: a chained call can run inside the harness's sandbox, where it cannot push, fetch or write `<state>`. Exit 69 with a `fence_run_sandboxed:` line is that case and not a refusal: nothing ran, so run the same line again on its own; if it answers the same way a second time, report the line and stop. Exit 65 with a `fence_run_bad_value:` line means a value you passed has the wrong shape, such as a relative path where the fence takes an absolute one, or an `--arg-file` outside your working copy: nothing ran, so correct the value the line names and run the call again. Only exit 3 with an `opaque_entry_refused:` line is a refusal; the line the runner prints names the case, never the number alone. Never source a partial yourself: no allow admits `.` or `source`. Exit 3 with an `opaque_entry_refused:` line is the runner refusing, so report the line and stop as the gate protocol says.
 """
 
 
@@ -385,7 +385,27 @@ def _companion(toolkit, rel):
     return text
 
 
-def unattended_block(toolkit, req, branch, repo_path, worktree):
+#: What the fence runner accepts for a forge repository (`owner/name`); a slug outside it is
+#: left out of the prompt, and the model resolves the repository itself, as before.
+_FORGE_REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
+#: Two values the pipeline text leaves to the reader and only the orchestrator knows for sure
+#: under exec: the forge repository of the primary repo, which the session cannot look up (a
+#: local or mock origin has none to read), and which copy of `pipeline-state.json` a fence's
+#: `<state>` names.
+_FORGE_REPO_NOTE = ("The forge repository of this run's primary repo is `{forge_repo}`. Pass it "
+                    "wherever a fence or the text asks for `<owner/repo>`; do not derive it from "
+                    "the remote URL.\n")
+_CLOCK_NOTE = ("You have no clock. Wherever the text asks for a timestamp, run "
+               "`date -u +%Y-%m-%dT%H:%M:%SZ` and write what it prints; never write a time from "
+               "memory.\n")
+_STATE_NOTE = ("Wherever a fence takes `<state>`, pass `{state}`: the parent repository's copy of "
+               "`pipeline-state.json`, which the fence runner writes for you and which is the one "
+               "path outside your working copy this run names. Your own reads and writes of "
+               "`pipeline-state.json` use the copy inside your working copy; the orchestrator "
+               "merges the two when the session ends.\n")
+
+
+def unattended_block(toolkit, req, branch, repo_path, worktree, forge_repo=None, state=None):
     rel = "sprint/SKILL.md"
     text = _read(toolkit, rel)
     match = re.search(r"^```\nWORKTREE PATH \(mandatory\): <absolute-path>\n\n(.*?)^```$", text,
@@ -402,6 +422,16 @@ def unattended_block(toolkit, req, branch, repo_path, worktree):
     head = "WORKTREE PATH (mandatory): %s\n\n" % worktree
     notes = _EXEC_NOTES.replace("{req}", req).replace("{branch}", branch).replace(
         "{runner}", _runner(toolkit))
+    notes += _CLOCK_NOTE
+    # A value the runtime scan would refuse (a repository named `wrapup-bot` holds `/wrapup`)
+    # is left out like a slug of the wrong shape: the note is a help, and a launch it refuses
+    # is worse than a session that resolves the value itself.
+    if forge_repo and _FORGE_REPO.match(forge_repo):
+        note = _FORGE_REPO_NOTE.replace("{forge_repo}", forge_repo)
+        notes += "" if scan(note) else note
+    if state:
+        note = _STATE_NOTE.replace("{state}", state)
+        notes += "" if scan(note) else note
     return head + block + notes
 
 
@@ -504,7 +534,7 @@ def _finish(text, kind, extra_tokens=()):
 
 
 def pipeline_prompt(toolkit, primary, req, branch, repo_path, worktree, answer=None,
-                    adapter=None):
+                    adapter=None, forge_repo=None, state=None):
     """The exact bytes of a first launch, or of an ``answer`` relaunch (BR-6, BR-14).
 
     ``adapter`` is the run's ``ExecAdapter``: its census routes the fences (REQ-662 ADR-8).
@@ -515,7 +545,7 @@ def pipeline_prompt(toolkit, primary, req, branch, repo_path, worktree, answer=N
     parts = [ethos_text(toolkit, primary), routed[0]]
     for (rel, _view), text in zip(views[1:], routed[1:]):
         parts.append("<!-- %s -->\n%s" % (rel, text))
-    parts.append(unattended_block(toolkit, req, branch, repo_path, worktree))
+    parts.append(unattended_block(toolkit, req, branch, repo_path, worktree, forge_repo, state))
     if answer is not None:
         parts.append("This is a relaunch of a run that ended `blocked`. Read "
                      "`pipeline-state.json` and resume from its `currentPhase`. The operator's "

@@ -1603,3 +1603,22 @@ def test_no_exec_block_says_which_harnesses_are_staged():
     assert message == ("harness copilot has no exec block yet (REQ-662 ships one harness per "
                        "stage; codex is staged)")
     assert ea.EXEC_ADAPTERS_REQ == "REQ-662"
+
+
+# --------------------------------------------------------------------------- BUG-287
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_bug287_child_env_carries_the_outcomes_log_and_the_mock_store(harness):
+    """The first real run: the session's telemetry fences wrote the operator's default log
+    while the engine wrote the one it was given, and the session's forge calls answered from
+    fixtures while the engine read the stateful store."""
+    block = ea.load(harness, TOOLKIT)
+    environ = {"HOME": "/h", "PATH": "/b", "ADLC_RUN_OUTCOMES_LOG": "/logs/out.log",
+               "ADLC_FORGE_MOCK": "1", "ADLC_FORGE_MOCK_STORE": "/store",
+               "ADLC_FORGE_MOCK_SCENARIO": "protection-ok", "ADLC_FORGE_MOCK_PROVIDER": "github",
+               "ADLC_FORGE_MOCK_UNLISTED": "x", "XDG_STATE_HOME": "/state"}
+    env = block.child_env(environ, "REQ-901", "scoped", "/run/gh", False)
+    for name in ("ADLC_RUN_OUTCOMES_LOG", "ADLC_FORGE_MOCK", "ADLC_FORGE_MOCK_STORE",
+                 "ADLC_FORGE_MOCK_SCENARIO", "ADLC_FORGE_MOCK_PROVIDER"):
+        assert env[name] == environ[name], name
+    # The list stays closed: a name it does not hold is still dropped (REQ-659 BR-22).
+    assert "ADLC_FORGE_MOCK_UNLISTED" not in env and "XDG_STATE_HOME" not in env

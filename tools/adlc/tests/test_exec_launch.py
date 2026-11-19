@@ -253,8 +253,14 @@ def test_child_env_and_denied(box):
     assert env["GH_TOKEN"] == "scoped-token"
     assert env["ADLC_EXEC_RUN"] == "REQ-901"
     assert env["GH_CONFIG_DIR"] == run.file("gh-empty") and os.listdir(env["GH_CONFIG_DIR"]) == []
-    for name in ("GITHUB_TOKEN", "ADLC_FORGE_MOCK_STORE", "XDG_STATE_HOME", "CHILD_GH"):
+    for name in ("GITHUB_TOKEN", "XDG_STATE_HOME", "CHILD_GH"):
         assert name not in env
+    # BUG-287: the mock forge's store and the outcomes log are the operator's settings for
+    # the run, and the session's fences must read the ones the engine reads. Without the
+    # store a real session's forge calls answered from fixtures while the engine read the
+    # store; without the log its telemetry went to the operator's default file.
+    assert env["ADLC_FORGE_MOCK_STORE"] == str(box.store)
+    assert env["ADLC_RUN_OUTCOMES_LOG"] == box.environ["ADLC_RUN_OUTCOMES_LOG"]
     adapter = orch.adapter(run)
     allowed = set(adapter.block["env_passthrough"]) | set(adapter.block["auth_env"]) | {
         "ADLC_EXEC_RUN", "ADLC_EXEC_RUN_TAG", "GH_TOKEN", "GH_CONFIG_DIR"}
@@ -1151,7 +1157,8 @@ def test_delegate_unsupported_sets_the_env(tmp_path, monkeypatch):
         monkeypatch, b,
         ("shell_timeout_s: {value: 125, verified: true, delegate: supported}",
          "shell_timeout_s: {value: 60, verified: true, delegate: unsupported}"),
-        ("ADLC_HOME, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK", "ADLC_HOME, ADLC_FORGE_MOCK"))
+        ("ADLC_HOME, ADLC_RUN_OUTCOMES_LOG, ADLC_DISABLE_DELEGATE, ADLC_FORGE_MOCK",
+         "ADLC_HOME, ADLC_RUN_OUTCOMES_LOG, ADLC_FORGE_MOCK"))
     environ = {k: v for k, v in box.environ.items() if k != "ADLC_DISABLE_DELEGATE"}
     environ["OPERATOR_ONLY"] = "x"
     orch = box.go(orch=se.Orchestrator(str(box.repo), environ, box.out, eh.TOOLKIT), shared=True)
