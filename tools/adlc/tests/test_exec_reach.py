@@ -89,7 +89,9 @@ def test_no_runner_fence_reaches_deny_tier(records, adapter):
         rel, ordinal = rec["id"].split(":")[0].split("#")
         fence = fc.fences(fc.view(TOOLKIT, rel), rel)[int(ordinal) - 1]
         found, _sources = fc.plan(fence.code)
-        code = fc.transform(fence.code, {ph.arg: ["x"] for ph in found}, root="/abs/tk")
+        # A tied fence's reach includes the runner's own PR read (REQ-719 BR-12).
+        code = fc.reach_text(fence.code, found)
+        assert (fc.pr_tie_text("pr") in code) is ("pr" in rec.get("tied", [])), rec["id"]
         externals, problems, _funcs = fc.reach(code, index, adapter, TOOLKIT)
         assert problems == [], (rec["id"], problems)
         assert externals == rec["reach"], rec["id"]
@@ -135,15 +137,43 @@ def test_function_index_refuses_another_definition_form(tmp_path):
         fc.function_index(root)
 
 
+#: A ``gh`` that records like :mod:`recording_stubs` and answers the runner's PR read of PR
+#: 101 as an open, same-repository PR on :data:`TIE_BRANCH`; it prints nothing for any other
+#: call. ``%(log)s`` and ``%(branch)s`` are filled in.
+_ANSWERING_GH = r"""import json, os, sys
+argv = sys.argv[1:]
+with open(%(log)r, "a") as fh:
+    fh.write(json.dumps({"cmd": "gh", "argv": argv, "cwd": os.getcwd()}) + "\n")
+if argv[:2] == ["pr", "view"] and argv[3:] == ["--json", %(fields)r]:
+    print(json.dumps({"number": int(argv[2]), "state": "OPEN", "headRefName": %(branch)r,
+                      "isCrossRepository": False}))
+"""
+TIE_BRANCH = "feat/REQ-901-thing"
+
+
+def _answering_gh(bin_dir, log):
+    """Replace the recording ``gh`` in ``bin_dir`` with :data:`_ANSWERING_GH`."""
+    script = os.path.join(bin_dir, "gh.py")
+    with open(script, "w", encoding="utf-8") as fh:
+        fh.write(_ANSWERING_GH % {"log": log, "branch": TIE_BRANCH,
+                                  "fields": ",".join(fc.PR_TIE_FIELDS)})
+    with open(os.path.join(bin_dir, "gh"), "w", encoding="utf-8") as fh:
+        fh.write('#!/bin/sh\nexec python3 -I %s "$@"\n' % rs._sh_quote(script))
+
+
 def test_real_tree_reach_matches_golden(records, adapter, tmp_path, monkeypatch):
     """Benign path, dynamic: every runner fence runs under stubs with sample values; each
     recorded command is in its fence's static reach, none is a deny, and every push is the id
-    reservation. At least one case runs per runner fence."""
+    reservation. At least one case runs per runner fence.
+
+    A tied fence (REQ-719 BR-12) runs on the GitHub backend instead of the mock, so the
+    runner's own PR read reaches the recording `gh`: its first recorded call is that read, and
+    the rule that every recorded call is in the static reach covers it (LESSON-845)."""
     _memo(monkeypatch)
     policy = fc.exec_policy(TOOLKIT, adapter)
     wc = tmp_path / "wc"
     (wc / ".adlc" / "specs").mkdir(parents=True)
-    ran = 0
+    ran = tied = 0
     for rec in [r for r in records if r["route"] == "runner"]:
         log = str(tmp_path / ("calls-%d.jsonl" % ran))
         stubs = rs.install(str(tmp_path / ("bin-%d" % ran)), log)
@@ -151,16 +181,34 @@ def test_real_tree_reach_matches_golden(records, adapter, tmp_path, monkeypatch)
         # stubbed, the main worktree does not resolve, and the walk would start at `/`.
         env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"],
                    ADLC_FORGE_MOCK="1", ADLC_DISABLE_DELEGATE="1", ADLC_REPOS_ROOT=str(tmp_path))
+        if rec.get("tied"):
+            _answering_gh(stubs, log)
+            env.pop("ADLC_FORGE_MOCK")
+            env["ADLC_FORGE_PROVIDER_OVERRIDE"] = "github"
         err = io.StringIO()
         # `git` is a stub here, so the runner's own sandbox check (BUG-287), which asks git
-        # where the repository's git directory is, is switched off: this test audits the
-        # calls each fence's script makes.
+        # where the repository's git directory is, is switched off, and its read of the
+        # checked-out branch is given one: this test audits the calls each fence's script,
+        # and the runner's PR read, make.
         monkeypatch.setattr(fr, "sandboxed", lambda cwd, environ: None)
+        monkeypatch.setattr(fr, "checked_out_branch", lambda cwd, environ: TIE_BRANCH)
         fr.run(rec["id"], _sample_argv(rec, wc), TOOLKIT, environ=env, cwd=str(wc), err=err)
         assert "opaque_entry_refused" not in err.getvalue(), (rec["id"], err.getvalue())
         assert "fence_run_bad_value" not in err.getvalue(), (rec["id"], err.getvalue())
+        assert "fence_run_unverified" not in err.getvalue(), (rec["id"], err.getvalue())
         ran += 1
         calls = rs.calls(log)
+        reads = [c for c in calls if c["cmd"] == "gh" and
+                 c["argv"][3:] == ["--json", ",".join(fc.PR_TIE_FIELDS)]]
+        if rec.get("tied"):
+            # One read per tied value, made before any command of the fence.
+            assert len(reads) == len(rec["tied"]) and calls[:len(reads)] == reads, \
+                (rec["id"], calls)
+            assert all(c["argv"][:3] == ["pr", "view", "101"] for c in reads), reads
+            assert len(calls) > len(reads), (rec["id"], "the fence did not run", calls)
+            tied += 1
+        else:
+            assert reads == [], (rec["id"], reads)
         for call in calls:
             text = rs.command_text(call)
             assert not em.deny_hits(policy, text), (rec["id"], text)
@@ -168,6 +216,7 @@ def test_real_tree_reach_matches_golden(records, adapter, tmp_path, monkeypatch)
             assert _covered(shape, call["cmd"], rec["reach"]), (rec["id"], shape, rec["reach"])
         assert fc.push_problems([[c["cmd"]] + c["argv"] for c in calls]) == [], rec["id"]
     assert ran == len([r for r in records if r["route"] == "runner"]) and ran > 0
+    assert tied == len([r for r in records if r.get("tied")]) >= 2
 
 
 def _covered(shape, cmd, reach):

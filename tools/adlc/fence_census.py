@@ -49,6 +49,13 @@ is never re-read as shell, and the interpreter check keeps a value out of every 
 code. A placeholder inside single quotes, a here-document, or an interpreter's arguments makes
 the fence unroutable.
 
+**The PR tie** (REQ-719 ADR-3): a placeholder whose value is a PR number carries the PR mark
+(``Placeholder.pr``). ``fence-run`` reads each marked value back from the forge before the
+fence runs (:func:`pr_tie_text`, the one text of that read), a tied fence's reach is read with
+that read included, and its record names the values under ``tied``. A fence that hands an
+unmarked value to an ``adlc_forge_pr_*`` operation as its PR argument is unroutable
+(:func:`unmarked_pr_arguments`), so a fence added later starts tied or does not route.
+
 Standard library only.
 """
 
@@ -169,9 +176,13 @@ SCOPES = {
 
 
 class Placeholder(object):
-    __slots__ = ("key", "arg", "pattern", "multi", "file", "empty_ok", "path", "scope")
+    """``pr`` is the PR mark (REQ-719 ADR-3): a value bound to a marked placeholder is checked
+    by the runner to be the open PR of the branch checked out where it was called, before any
+    command of the fence runs (:func:`pr_tie_text`)."""
+    __slots__ = ("key", "arg", "pattern", "multi", "file", "empty_ok", "path", "scope", "pr")
 
-    def __init__(self, key, arg, pattern, multi=False, file=False, path=False, scope=None):
+    def __init__(self, key, arg, pattern, multi=False, file=False, path=False, scope=None,
+                 pr=False):
         self.key = key
         self.arg = arg
         # ``$`` also matches before a final newline: an ``--arg`` value is held to the whole
@@ -181,6 +192,7 @@ class Placeholder(object):
         self.file = file
         self.path = path
         self.scope = scope
+        self.pr = pr
         self.empty_ok = bool(self.pattern.match(""))
 
     def check_scope(self, value, cwd):
@@ -214,6 +226,10 @@ def _ph(key, arg, pattern, **kw):
     return key, Placeholder(key, arg, pattern, **kw)
 
 
+#: A PR number's pattern. Every placeholder that holds one carries the PR mark (REQ-719 BR-13).
+PR_NUMBER = r"[0-9]{1,9}"
+
+
 #: ``<name>`` placeholders, by the literal text between the angle brackets (ADR-3). Closed:
 #: a name not listed here makes its fence unroutable.
 PLACEHOLDERS = dict([
@@ -238,7 +254,7 @@ PLACEHOLDERS = dict([
     _ph("token, or empty", "reason", r"[a-z-]{0,40}"),
     _ph("owner/repo", "repo", r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}"),
     _ph("short title", "title", _LINE),
-    _ph("prNumber", "pr", r"[0-9]{1,9}"),
+    _ph("prNumber", "pr", PR_NUMBER, pr=True),
     _ph("id", "id", r"(?:(?:REQ|BUG|TASK|LESSON|ASSUME)-)?[0-9]{3,6}"),
     _ph("slug", "slug", r"[a-z0-9]+(?:-[a-z0-9]+){0,12}"),
     _ph("mark", "mark", r"adlc-transcript-mark-[0-9a-f]{16}"),
@@ -253,7 +269,7 @@ LITERAL_PLACEHOLDERS = dict([
 #: Free shell variables the prose tells the model to set before the fence (ADR-3): each is
 #: bound as ``ADLC_ARG_<name>`` like a placeholder. Closed, like PLACEHOLDERS.
 VAR_PLACEHOLDERS = dict([
-    _ph("prNumber", "prNumber", r"[0-9]{1,9}"),
+    _ph("prNumber", "prNumber", PR_NUMBER, pr=True),
     _ph("NEW_BODY", "NEW_BODY", r"[^\x00]{1,1048576}", file=True),
     _ph("FINAL_TITLE", "FINAL_TITLE", _LINE),
     # The path `skill-flag.sh create` prints, and nothing else: `mark` appends to <flag>.state
@@ -608,7 +624,217 @@ def plan(code):
     # Dry-run the rewrite with every value bound once, so a placeholder in a position the
     # runner will not rewrite is found now, not at run time.
     transform(code, {ph.arg: ["x"] for ph in found}, root="/abs/tk")
+    unmarked = unmarked_pr_arguments(code)
+    if unmarked:
+        op, what = unmarked[0]
+        raise Unroutable("passes %s, which carries no PR mark, as the PR argument of %s: the "
+                         "runner checks a PR number the model supplies only through a marked "
+                         "placeholder (REQ-719 BR-13)" % (what, op))
     return found, sources
+
+
+# --------------------------------------------------------------------------- the PR tie
+#: The fields the runner's PR read asks for (REQ-719 ADR-3), in the ``--fields`` form both
+#: backends and the mock normalize to ``key=value`` lines (REQ-659 BR-26).
+PR_TIE_FIELDS = ("number", "state", "headRefName", "isCrossRepository")
+
+
+def pr_tie_text(arg):
+    """The shell of the runner's read of one PR-marked value (REQ-719 ADR-3), the one text of
+    it: ``fence-run`` runs it after the fence's own preload and in the fence's own environment,
+    and :func:`reach_text` adds it to what a tied fence's static reach is read from, so the
+    read the runner makes and the read the audit sees cannot drift (LESSON-845)."""
+    return 'adlc_forge_pr_view "$%s" --fields %s' % (_env_name(arg), ",".join(PR_TIE_FIELDS))
+
+
+def tied_args(placeholders):
+    """The argument names of ``placeholders`` that carry the PR mark, sorted, once each."""
+    return sorted(dict.fromkeys(ph.arg for ph in placeholders if ph.pr))
+
+
+def reach_text(code, placeholders, root="/abs/tk"):
+    """The text a runner fence's static reach is read from: the runner's PR read for each tied
+    value (:func:`pr_tie_text`), then the body as the runner runs it, with a sample value
+    bound to each placeholder."""
+    tie = "".join(pr_tie_text(arg) + "\n" for arg in tied_args(placeholders))
+    return tie + transform(code, {ph.arg: ["x"] for ph in placeholders}, root=root)
+
+
+#: The ``adlc_forge_pr_*`` operations that take no PR: every other one is read as taking it
+#: (REQ-719 BR-13: view, edit, ready, comment, checks, merge), so an operation added to the
+#: adapter later starts checked (LESSON-781).
+NOT_PR_OPERATIONS = frozenset(("adlc_forge_pr_create", "adlc_forge_pr_list"))
+
+
+def is_pr_operation(name):
+    """Whether ``name`` is a forge operation whose positional argument is a PR."""
+    return name.startswith("adlc_forge_pr_") and name not in NOT_PR_OPERATIONS
+#: The options of those operations that take a value: the word after one is not the PR. An
+#: option not named here is read as taking none, so its value is checked as if it were the PR,
+#: which can only refuse more.
+_PR_OP_VALUE_FLAGS = frozenset(("--fields", "--json", "-q", "--jq", "-R", "--repo", "--title",
+                                "--body", "--body-file", "--match-head-commit", "--head",
+                                "--base", "--state"))
+
+
+def _strip_substitutions(text):
+    """``text`` with each command substitution (``$(…)`` and backticks) taken out: what a
+    command prints is not text the fence wrote (REQ-719 BR-14). An arithmetic ``$((…))`` is
+    text, and stays."""
+    out = []
+    i = 0
+    while i < len(text):
+        if text.startswith("$((", i):
+            end = _skip_paren(text, i + 1)
+            out.append(text[i:end])
+            i = end
+        elif text.startswith("$(", i):
+            i = _skip_paren(text, i + 1)
+        elif text[i] == "`":
+            end = text.find("`", i + 1)
+            i = len(text) if end == -1 else end + 1
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _unmarked_in(text, free, tainted):
+    """The first model-supplied value without the PR mark ``text`` holds, spelled as the fence
+    spells it, or ``None``: a ``<name>`` or literal placeholder, a free variable a table names,
+    or a variable the fence assigned from one (``tainted``)."""
+    for match in _PH_RE.finditer(text):
+        ph = _lookup(match.group(1))
+        if ph is not None and not ph.pr:
+            return "<%s>" % match.group(1)
+    for lit, ph in LITERAL_PLACEHOLDERS.items():
+        if lit in text and not ph.pr:
+            return lit
+    for match in _VAR_RE.finditer(text):
+        name = match.group(1) or match.group(2)
+        ph = VAR_PLACEHOLDERS.get(name)
+        if name in free and ph is not None and not ph.pr:
+            return "$%s" % name
+        if name in tainted:
+            return "$%s (assigned from %s)" % (name, tainted[name])
+    return None
+
+
+_ASSIGN_WORD = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
+_HEREDOC_RE = re.compile(r"<<-?\s*'?\"?([A-Za-z_][A-Za-z0-9_]*)'?\"?")
+
+
+def _assignments(code):
+    """``(names, text)`` for each place ``code`` gives variables a value from text it holds:
+    an assignment word (``x=…``) and a ``for x in …`` header, read with :func:`shell_tokens`,
+    command substitutions included and recursed into; and every here-document body, which
+    gives its text to whatever variable a ``read`` in the fence sets. A ``read`` from a pipe
+    is filled from a command's output, which is not a placeholder (BR-14)."""
+    out = []
+    tokens = shell_tokens(code)
+    k = 0
+    while k < len(tokens):
+        kind, val = tokens[k]
+        if kind == "subst":
+            out += _assignments(val)
+        elif kind == "word":
+            match = _ASSIGN_WORD.match(val)
+            if match:
+                out.append(([match.group(1)], match.group(2)))
+            elif val == "for" and k + 2 < len(tokens) and tokens[k + 1][0] == "word" and \
+                    tokens[k + 2] == ("word", "in"):
+                words = []
+                j = k + 3
+                while j < len(tokens) and tokens[j][0] != "op" and tokens[j] != ("word", "do"):
+                    if tokens[j][0] == "word":
+                        words.append(tokens[j][1])
+                    j += 1
+                out.append(([tokens[k + 1][1]], " ".join(words)))
+        k += 1
+    readers = []
+    for line in code.split("\n"):
+        if not line.lstrip().startswith("#"):
+            for match in _FOR_READ_RE.finditer(line):
+                if match.group(0).startswith("read"):
+                    readers += match.group(1).split()
+    lines = code.split("\n")
+    for k, line in enumerate(lines):
+        doc = _HEREDOC_RE.search(line)
+        if doc is None or "<<<" in line or line.lstrip().startswith("#"):
+            continue
+        body = []
+        for nxt in lines[k + 1:]:
+            if nxt.strip() == doc.group(1):
+                break
+            body.append(nxt)
+        if readers:
+            out.append((readers, "\n".join(body)))
+    return out
+
+
+def tainted_vars(code):
+    """``{name: what}``: each variable ``code`` assigns from text holding a model-supplied
+    value without the PR mark, directly or through another such variable (REQ-719 BR-13).
+    ``what`` names the value, as :func:`_unmarked_in` spells it."""
+    free = set(free_vars(code))
+    pairs = [(names, _strip_substitutions(text)) for names, text in _assignments(code)]
+    tainted = {}
+    changed = True
+    while changed:
+        changed = False
+        for names, text in pairs:
+            what = _unmarked_in(text, free, tainted)
+            if what is None:
+                continue
+            for name in names:
+                if name not in tainted:
+                    tainted[name] = what
+                    changed = True
+    return tainted
+
+
+def _pr_positionals(words):
+    """The words of one PR operation's call that can be its PR: every word after the
+    operation that is neither an option, an option's value, nor a redirection."""
+    out = []
+    skip = False
+    for word in words[1:]:
+        if skip:
+            skip = False
+            continue
+        bare = _bare(word)
+        # A bare `<prNumber>` is a placeholder the runner rewrites, not a redirection.
+        red = None if _PH_RE.match(word) else _REDIRECT_WORD.match(word)
+        if red:
+            skip = not red.group(1)
+            continue
+        if bare.startswith("-"):
+            skip = bare in _PR_OP_VALUE_FLAGS
+            continue
+        out.append(word)
+    return out
+
+
+def unmarked_pr_arguments(code):
+    """``[(operation, what)]`` for each call in ``code`` of a PR operation
+    (:func:`is_pr_operation`) whose PR argument holds a model-supplied value without the PR
+    mark (REQ-719 BR-13): a placeholder whose entry is unmarked, or a variable the fence
+    assigned from text holding one (:func:`tainted_vars`). A variable filled from a command's output, such as a number
+    ``adlc_forge_pr_create`` printed or a line ``read`` from a pipe, is not a value the model
+    supplies, and is not checked (BR-14). Empty when every such argument is marked."""
+    free = set(free_vars(code))
+    tainted = tainted_vars(code)
+    found = []
+    for words in simple_commands(code):
+        words = _unwrap(words) or []
+        if not words or not is_pr_operation(_bare(words[0])):
+            continue
+        for word in _pr_positionals(words):
+            what = _unmarked_in(word, free, tainted)
+            if what is not None:
+                found.append((_bare(words[0]), what))
+                break
+    return found
 
 
 def _env_name(arg, index=None):
@@ -1579,8 +1805,8 @@ def _route(fence, policy, index, root, denies):
         rec["route"], rec["reason"] = "unrouted", str(exc)
         rec["refused"] = _refused(policy, code)
         return rec
-    sample = {ph.arg: ["x"] for ph in found}
-    body = transform(code, sample, root="/abs/tk")
+    # A tied fence's reach includes the runner's own PR read (REQ-719 BR-12, LESSON-845).
+    body = reach_text(code, found)
     externals, problems, funcs = reach(body, index, (), root, denies)
     if problems:
         rec["route"] = "unrouted"
@@ -1590,6 +1816,9 @@ def _route(fence, policy, index, root, denies):
         return rec
     rec["route"] = "runner"
     rec["placeholders"] = sorted(dict.fromkeys(ph.arg for ph in found))
+    tied = tied_args(found)
+    if tied:
+        rec["tied"] = tied
     rec["sources"] = sources
     rec["reach"] = externals
     rec["functions"] = funcs
@@ -1658,7 +1887,7 @@ def unrouted(records):
 
 def golden_doc(records):
     """The committed golden: every id with its route, placeholders and reach."""
-    keep = ("id", "route", "reason", "placeholders", "sources", "reach", "push")
+    keep = ("id", "route", "reason", "placeholders", "tied", "sources", "reach", "push")
     return {"comment": "REQ-682 exec fence census. Regenerate with "
                        "`python3 tools/adlc/fence_census.py --write`; a diff here is a fence "
                        "whose route, values or reach changed.",

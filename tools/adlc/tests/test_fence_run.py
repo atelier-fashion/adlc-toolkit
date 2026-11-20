@@ -2,6 +2,7 @@
 accepting the union of every exec-capable adapter's runner routes (REQ-662 ADR-8, ADR-9)."""
 
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -121,6 +122,54 @@ def wc(tmp_path):
     path = tmp_path / "wc"
     (path / ".adlc" / "specs").mkdir(parents=True)
     return path
+
+
+#: The branch a forge-running test's working copy has checked out. PR 101, the PR every
+#: sample call passes, is open on it in that test's mock store: a fence that binds a PR number
+#: runs only for the PR of the branch checked out where the runner is called (REQ-719 ADR-3).
+PR_BRANCH = SAMPLES["branch"]
+
+
+def mock_pr(number, head, **fields):
+    """One PR record of the stateful mock forge's store (``tools/adlc/forge_mock.py``)."""
+    pr = {"number": number, "url": "https://mock.forge/acme/widgets/pull/%d" % number,
+          "state": "OPEN", "mergedAt": "", "body": "body of %d" % number,
+          "title": "title of %d" % number, "isDraft": True,
+          "createdAt": "2026-11-20T00:00:00Z", "headRefName": head, "baseRefName": "main",
+          "isCrossRepository": False, "mergeCommit": ""}
+    pr.update(fields)
+    return pr
+
+
+def pr_store(path, prs=None):
+    """A mock forge store whose PR 101 is open on :data:`PR_BRANCH`, or holding ``prs``."""
+    os.makedirs(str(path), exist_ok=True)
+    prs = [mock_pr(101, PR_BRANCH)] if prs is None else prs
+    with open(os.path.join(str(path), "config.json"), "w", encoding="utf-8") as fh:
+        json.dump({"remote": "", "owner": "acme", "name": "widgets"}, fh)
+    with open(os.path.join(str(path), "prs.json"), "w", encoding="utf-8") as fh:
+        json.dump({"next": max([p["number"] for p in prs] + [100]) + 1, "prs": prs}, fh)
+    return str(path)
+
+
+def repo_wc(path, branch=PR_BRANCH, commit=False):
+    """``path`` made a git working copy with ``branch`` checked out (unborn unless
+    ``commit``): what the runner's branch read and PR read need of it."""
+    os.makedirs(str(path), exist_ok=True)
+    _git("init", "-q", str(path))
+    _git("-C", str(path), "symbolic-ref", "HEAD", "refs/heads/%s" % branch)
+    if commit:
+        _git("-C", str(path), "commit", "-q", "--allow-empty", "-m", "a")
+    return path
+
+
+def forge_env(store, **extra):
+    """The caller's environment for a run against the stateful mock forge in ``store``."""
+    env = dict(os.environ, ADLC_FORGE_MOCK="1", ADLC_FORGE_MOCK_STORE=str(store),
+               ADLC_DISABLE_DELEGATE="1", **extra)
+    for key in ("ADLC_FORGE_MOCK_SCENARIO", "ADLC_EXEC_RUN", "ADLC_FORGE_PROVIDER_OVERRIDE"):
+        env.pop(key, None)
+    return env
 
 
 # ------------------------------------------------------------------------ refusals (BR-9)
@@ -474,8 +523,11 @@ def test_branch_push_is_bound_to_the_runs_req(two, pushable, monkeypatch):
 
 # ------------------------------------------------------------------------ BR-3, BR-5
 def test_run_reads_only_toolkit_text(cached, wc, tmp_path):
-    """A working copy's vendored partials and forge_config.py never run under the runner."""
+    """A working copy's vendored partials and forge_config.py never run under the runner, nor
+    under its own PR read: the working copy owns PR 101, so a fence that binds it gets past
+    that read and runs."""
     sentinel = tmp_path / "S"
+    repo_wc(wc)
     (wc / ".adlc" / "partials").mkdir(parents=True)
     for name in os.listdir(os.path.join(TOOLKIT, "partials")):
         if name.endswith(".sh"):
@@ -483,15 +535,17 @@ def test_run_reads_only_toolkit_text(cached, wc, tmp_path):
     for rel in ("tools/adlc/forge_config.py", ".adlc/tools/adlc/forge_config.py"):
         (wc / rel).parent.mkdir(parents=True, exist_ok=True)
         (wc / rel).write_text("open(%r, 'w').write('x')\n" % str(sentinel))
-    env = dict(os.environ, ADLC_FORGE_MOCK="1", ADLC_DISABLE_DELEGATE="1",
-               ADLC_REPOS_ROOT=str(tmp_path))
-    ran = 0
+    env = forge_env(pr_store(tmp_path / "store"), ADLC_REPOS_ROOT=str(tmp_path))
+    ran = tied = 0
     for rec in _by_route(cached, "runner"):
         if not set(rec["sources"]) & {"forge", "lessons", "delegate-gate", "id-recheck"}:
             continue
-        _run(rec["id"], _sample_argv(rec, wc), wc, environ=env)
+        _rc, err = _run(rec["id"], _sample_argv(rec, wc), wc, environ=env)
         ran += 1
-    assert ran >= 5
+        if rec.get("tied"):
+            assert "fence_run_" not in err and "opaque_entry_refused" not in err, err
+            tied += 1
+    assert ran >= 5 and tied >= 2
     assert not sentinel.exists()
 
 
@@ -535,13 +589,14 @@ def test_refusal_holds_against_env_defeats(cached, wc):
         assert not em.admits({"allow": ["Bash(%s:*)" % fr.runner_path(TOOLKIT)]}, defeat)
 
 
-def test_safe_forge_fences_run_under_mock(cached, wc):
+def test_safe_forge_fences_run_under_mock(cached, wc, tmp_path):
     """Benign path: pr_create, pr_view and pr_edit fences run against the forge mock and
-    refuse nothing."""
-    env = dict(os.environ, ADLC_FORGE_MOCK="1", ADLC_DISABLE_DELEGATE="1")
+    refuse nothing, from a working copy whose branch owns PR 101 (REQ-719 ADR-3)."""
+    repo_wc(wc)
+    env = forge_env(pr_store(tmp_path / "store"))
     forge = [r for r in _by_route(cached, "runner") if "forge" in r["sources"] and
              r["id"].split("#")[0] in fc.PIPELINE_FILES]
-    assert len(forge) >= 2
+    assert len(forge) >= 2 and len([r for r in forge if r.get("tied")]) >= 2
     for rec in forge:
         rc, err = _run(rec["id"], _sample_argv(rec, wc), wc, environ=env)
         assert "opaque_entry_refused" not in err, (rec["id"], err)
@@ -563,14 +618,18 @@ def test_azure_devops_backend_refused_under_the_runner(cached, wc, tmp_path):
 
 
 # ------------------------------------------------------------------------ BR-6, AC-5
-def test_hostile_values_never_run_code(cached, wc, tmp_path):
+def test_hostile_values_never_run_code(cached, wc, tmp_path, monkeypatch):
     """Every runner fence x every value it takes x every BR-6 hostile value: refused by its
     pattern, or bound as data. No sentinel, and no recorded argv a deny-tier rule matches."""
     sentinel = str(tmp_path / "S")
     log = str(tmp_path / "calls.jsonl")
     stubs = rs.install(str(tmp_path / "bin"), log)
-    env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"], ADLC_FORGE_MOCK="1",
-               ADLC_DISABLE_DELEGATE="1", ADLC_REPOS_ROOT=str(tmp_path))
+    env = forge_env(pr_store(tmp_path / "store"), ADLC_REPOS_ROOT=str(tmp_path),
+                    PATH=stubs + os.pathsep + os.environ["PATH"])
+    # `git` is a stub here, so the runner's read of the checked-out branch is given the branch
+    # that owns PR 101 in the store: a fence that binds a PR number then gets past the
+    # runner's PR read, which still runs, and its other values reach the fence.
+    monkeypatch.setattr(fr, "checked_out_branch", lambda cwd, environ: PR_BRANCH)
     adapter = ea.load("claude", TOOLKIT)
     policy = fc.exec_policy(TOOLKIT, adapter)
     cases = refused = 0

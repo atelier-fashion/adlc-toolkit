@@ -281,6 +281,9 @@
         "NEW_BODY",
         "prNumber"
       ],
+      "tied": [
+        "prNumber"
+      ],
       "sources": [
         "forge"
       ],
@@ -335,6 +338,9 @@
       "route": "runner",
       "placeholders": [
         "lane_escalated",
+        "pr"
+      ],
+      "tied": [
         "pr"
       ],
       "sources": [

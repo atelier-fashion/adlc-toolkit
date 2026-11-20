@@ -427,6 +427,23 @@ def test_bug287_prompt_says_how_to_call_the_runner():
     assert (fr.REFUSED, fr.BAD_VALUE, fr.SANDBOXED) == (3, 65, 69)
 
 
+def test_req719_prompt_says_what_75_means():
+    """AC-9: the delivered prompt says what the runner's exit 75 means and bounds the retry to
+    one, after the BUG-287 notes, which stay byte for byte; the scan passes, and the sentence
+    holds no token the scan refuses."""
+    text = pipeline().decode("utf-8")
+    sentence = ("Exit 75 with a `fence_run_unverified:` line means the runner could not read "
+                "the forge to check that a PR number you passed is the open PR of your "
+                "working copy's branch: nothing ran, so run the same line once more, and if it "
+                "answers the same way, report it as a blocker and stop.")
+    assert sentence in text and sentence in ep._EXEC_NOTES
+    assert ep._EXEC_NOTES.index(sentence) > ep._EXEC_NOTES.index(
+        "report the line and stop as the gate protocol says.")
+    assert not [t for t in ep.EMPTY_ALLOWLIST if t and t in sentence]
+    assert ep.scan(sentence) == []
+    assert fr.UNVERIFIED == 75 and fr.UNVERIFIED not in (fr.REFUSED, fr.BAD_VALUE, fr.SANDBOXED)
+
+
 def test_bug287_prompt_tells_the_session_to_read_the_clock():
     """Run 5: every timestamp was `T00:00:00Z`, and the merged line reported 79,318 s."""
     for text in (pipeline().decode("utf-8"), _bug287()):

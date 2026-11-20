@@ -1,7 +1,7 @@
 ---
 id: TASK-273
 title: "The PR tie: a mark on the placeholder, the runner checks a PR number is its caller's PR, and an unmarked PR argument does not route"
-status: draft
+status: complete
 parent: REQ-719
 repo: adlc-toolkit
 created: 2026-11-20
@@ -22,19 +22,20 @@ Implement architecture ADR-3. A value bound to a placeholder that carries the PR
 - `tools/adlc/tests/test_fence_pr_tie.py` — new.
 - `tools/adlc/tests/fixtures/exec-fence/` — a fixture fence that passes an unmarked placeholder as the PR argument of `adlc_forge_pr_edit`.
 - `tools/adlc/tests/test_fence_run.py`, `tools/adlc/tests/test_exec_reach.py`, `tools/adlc/tests/test_fence_census.py`, `tools/adlc/tests/test_exec_prompt.py` — the existing suites that run every runner fence with `pr=101`, and the pins that move.
+- `tools/adlc/fence_run.py` (`run`, `parse_values`, `read_arg_file`'s optional third parameter) and `tools/adlc/tests/test_fence_arg_file.py` — added at implementation: `run()` passed `os.getcwd()`, always the real spelling, so an absolute `--arg-file` path in the shell's spelling (`$PWD`, macOS's `/var`) was refused against BR-16. `$PWD` is now accepted as a spelling when it names the same directory.
 
 ## Acceptance Criteria
 
-- [ ] With the mock store holding the caller's PR on the checked-out branch and a second PR on another branch: the Phase 6 fence (`proceed/phases-6-8-ship.md#1`) called with the second PR's number exits 65 with one `fence_run_bad_value:` line, and the second PR's title, body and `isDraft` are unchanged; called with the caller's PR number it runs. The same two results hold for the lite escalation fence (`proceed/phases-lite.md#3`).
-- [ ] Exit 65 as well for: the mock's `cross-repo` scenario, its `head-other` scenario, a closed PR on the caller's own branch, and a number the forge does not know. The line names the value and the checked-out branch and holds no title, body, URL or head of the PR that was read.
-- [ ] With an error-class scenario (`network`, `auth-missing`) the fence exits 75 with one `fence_run_unverified:` line and nothing is changed. On a detached `HEAD` it exits 3 with one `opaque_entry_refused:` line and no forge call is recorded.
-- [ ] A call that reads `fence_run_sandboxed` (69) records no forge call, and a call whose value fails its pattern (65) records none.
-- [ ] Step 0's draft-PR fence (`proceed/phase-0-setup.md`, `adlc_forge_pr_create`) runs with no `pr_view` recorded before its own calls.
-- [ ] The fixture fence is unrouted: the census check fails and its message names the fence and the placeholder. `/architect` Step 5's `$prnum`, read by the fence from a command's output, still routes as it does today.
-- [ ] Every entry of `PLACEHOLDERS` and `VAR_PLACEHOLDERS` whose pattern is the PR-number pattern carries the mark (a test walks both tables).
-- [ ] The delivered exec prompt holds the sentence for 75: nothing ran, run the line once more, and if it answers the same way report it as a blocker. The prompt scan passes, and `test_bug287_prompt_says_how_to_call_the_runner`'s substrings are still present.
-- [ ] `python3 tools/adlc/fence_census.py --check` passes, and the reach audit passes with the runner's read recorded in the stubbed run of each tied fence.
-- [ ] `templates/permissions.yml` and every file under `harness/*/rendered/` are unchanged, and `tools/adlc/tests/test_harness_adapters.py` passes.
+- [x] With the mock store holding the caller's PR on the checked-out branch and a second PR on another branch: the Phase 6 fence (`proceed/phases-6-8-ship.md#1`) called with the second PR's number exits 65 with one `fence_run_bad_value:` line, and the second PR's title, body and `isDraft` are unchanged; called with the caller's PR number it runs. The same two results hold for the lite escalation fence (`proceed/phases-lite.md#3`).
+- [x] Exit 65 as well for: the mock's `cross-repo` scenario, its `head-other` scenario, a closed PR on the caller's own branch, and a number the forge does not know. The line names the value and the checked-out branch and holds no title, body, URL or head of the PR that was read.
+- [x] With an error-class scenario (`network`, `auth-missing`) the fence exits 75 with one `fence_run_unverified:` line and nothing is changed. On a detached `HEAD` it exits 3 with one `opaque_entry_refused:` line and no forge call is recorded.
+- [x] A call that reads `fence_run_sandboxed` (69) records no forge call, and a call whose value fails its pattern (65) records none.
+- [x] Step 0's draft-PR fence (`proceed/phase-0-setup.md`, `adlc_forge_pr_create`) runs with no `pr_view` recorded before its own calls.
+- [x] The fixture fence is unrouted: the census check fails and its message names the fence and the placeholder. `/architect` Step 5's `$prnum`, read by the fence from a command's output, still routes as it does today.
+- [x] Every entry of `PLACEHOLDERS` and `VAR_PLACEHOLDERS` whose pattern is the PR-number pattern carries the mark (a test walks both tables).
+- [x] The delivered exec prompt holds the sentence for 75: nothing ran, run the line once more, and if it answers the same way report it as a blocker. The prompt scan passes, and `test_bug287_prompt_says_how_to_call_the_runner`'s substrings are still present.
+- [x] `python3 tools/adlc/fence_census.py --check` passes, and the reach audit passes with the runner's read recorded in the stubbed run of each tied fence.
+- [x] `templates/permissions.yml` and every file under `harness/*/rendered/` are unchanged, and `tools/adlc/tests/test_harness_adapters.py` passes.
 - [ ] `python3 -m pytest tools/adlc/tests` passes.
 
 ## Verification
@@ -46,10 +47,17 @@ Implement architecture ADR-3. A value bound to a placeholder that carries the PR
 | BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_an_unreadable_forge_is_unverified_not_a_pass` | no |
 | BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_a_detached_head_is_a_refusal` | no |
 | BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_only_the_callers_open_pr_passes` | yes |
+| BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_the_verdict_reads_four_fields_and_fails_closed` | yes |
+| BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_the_adapters_own_refusal_is_passed_through` | no |
 | BR-12 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_no_forge_call_before_the_value_and_sandbox_checks` | no |
 | BR-12 | test-case | `tools/adlc/tests/test_exec_reach.py::test_real_tree_reach_matches_golden` | yes |
 | BR-13 | test-case | `tools/adlc/tests/test_fence_census.py::test_req719_an_unmarked_pr_argument_does_not_route` | yes |
+| BR-13 | test-case | `tools/adlc/tests/test_fence_census.py::test_req719_every_pr_number_placeholder_carries_the_mark` | yes |
+| BR-13 | test-case | `tools/adlc/tests/test_fence_census.py::test_req719_an_unmarked_pr_argument_is_unroutable` | no |
+| BR-13 | test-case | `tools/adlc/tests/test_fence_census.py::test_req719_every_operation_but_create_and_list_takes_a_pr` | yes |
 | BR-14 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_a_fence_that_takes_no_pr_number_reads_no_pr` | yes |
+| BR-14 | test-case | `tools/adlc/tests/test_fence_census.py::test_req719_a_marked_or_fence_made_pr_argument_routes` | yes |
+| BR-16 | test-case | `tools/adlc/tests/test_fence_arg_file.py::test_req719_an_absolute_path_in_the_shells_spelling_is_read` | yes |
 | BR-27 | test-case | `tools/adlc/tests/test_harness_adapters.py::test_no_flag_writes_nothing_new` | yes |
 | AC-8 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_another_pr_is_a_bad_value_and_is_untouched` | yes |
 | AC-9 | test-case | `tools/adlc/tests/test_exec_prompt.py::test_req719_prompt_says_what_75_means` | no |
@@ -67,3 +75,4 @@ Implement architecture ADR-3. A value bound to a placeholder that carries the PR
 - Regenerate the goldens with `python3 tools/adlc/fence_census.py --write`. No fence body changes in this task, so no fence id changes; only the `tied` key appears.
 - Message for 65 follows the existing shape: `fence_run_bad_value: <id>: value for <name> is not the PR of the branch checked out here (<branch>). Nothing ran: correct that value and run the line again.`
 - The 75 sentence must hold none of `exec_prompt.EMPTY_ALLOWLIST`'s tokens.
+- As implemented, BR-13's "a variable the fence assigns from text that holds one" (`fence_census.tainted_vars`): a variable is tainted when the fence gives it a value from text holding an unmarked placeholder, an unmarked free variable a table names, or an already tainted variable, computed to a fixed point. The text is the value of an assignment word (`x=…`), the words of a `for x in …` header, and, for every variable a `read` sets, each here-document body in the fence. Command substitutions (`$(…)`, backticks) are taken out of that text first: what a command prints is not a value the model supplied (BR-14), which is how `pr=$(adlc_forge_pr_create …)` and `/architect` Step 5's `$prnum`, read from a pipe, stay untainted. `$((…))` stays. The PR argument itself is held more strictly: every positional word of the call (options, their values and redirections skipped; an unknown option is read as taking none) is checked, substitutions included. The operations checked are every `adlc_forge_pr_*` but `pr_create` and `pr_list` (`fence_census.is_pr_operation`), a superset of BR-13's six, so an operation the adapter gains later starts checked (LESSON-781).

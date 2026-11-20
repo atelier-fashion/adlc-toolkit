@@ -30,19 +30,39 @@ depth, and the README's declared residual (f) says what stays open.
 how toolkit skills and agents reach an exec model: under BUG-260's isolation flags they are
 not loaded (ADR-5).
 
+**The PR tie** (REQ-719 ADR-3). A value bound to a placeholder with the PR mark
+(``fence_census.Placeholder.pr``) must be the caller's PR: an open PR of the forge repository
+of the calling directory, not cross-repository, whose head is the branch checked out there.
+After the value checks and the sandbox check, and before any command of the fence, the runner
+reads each such value once through the forge adapter, with the text
+``fence_census.pr_tie_text`` spells, the fence's preload and the fence's environment
+(:func:`pr_tie`).
+
 Exit codes: a fence's own status is passed through. 3 is the runner's refusal, and every
 refusal is exactly one stderr line, ``opaque_entry_refused: <id>: <reason>``, with nothing run
 (BR-9). No refusal prints the fence's environment: it holds the run's scoped credential.
-Two more statuses also mean nothing ran, and are the caller's to put right, not refusals
-(BUG-287): 65 with one ``fence_run_bad_value:`` line for a value that failed its check, and 69
+Three more statuses also mean nothing ran, and are the caller's to put right, not refusals
+(BUG-287): 65 with one ``fence_run_bad_value:`` line for a value that failed its check, 69
 with one ``fence_run_sandboxed:`` line for a call that finds itself inside a harness sandbox
-(:func:`sandboxed`).
+(:func:`sandboxed`), and 75 with one ``fence_run_unverified:`` line for a PR number the forge
+could not be read to check. The PR read decides as follows:
+
+- ``number`` the value, ``state=OPEN``, ``headRefName`` the checked-out branch and
+  ``isCrossRepository=false``: the fence runs.
+- any of those different, or ``error_class=pr-not-found``: 65, ``fence_run_bad_value:``,
+  naming the value and the checked-out branch and no field of the PR read.
+- no branch checked out, decided before any read: 3, ``opaque_entry_refused:``.
+- the adapter's own ``opaque_entry_refused:`` with status 3 (its Azure DevOps arm under the
+  runner, which would refuse the fence the same way): 3, that line passed through.
+- any other failure, an answer that does not parse, or no answer in 60 s: 75,
+  ``fence_run_unverified:`` with the reason.
 
 Standard library only.
 """
 
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -191,10 +211,12 @@ def show(rel, root, out=None, err=None):
 
 
 # --------------------------------------------------------------------------- run
-def parse_values(argv, placeholders, cwd, same_dir=()):
+def parse_values(argv, placeholders, cwd, same_dir=(), spellings=()):
     """``{arg: [values]}`` from ``--arg``/``--arg-file`` pairs, every value checked.
 
-    A value of an argument in ``same_dir`` must be ``cwd`` itself, compared by real path."""
+    A value of an argument in ``same_dir`` must be ``cwd`` itself, compared by real path.
+    ``spellings`` are other spellings of ``cwd`` an ``--arg-file`` path may start with
+    (:func:`given_spellings`)."""
     by_arg = {ph.arg: ph for ph in placeholders}
     values = {}
     i = 0
@@ -212,7 +234,7 @@ def parse_values(argv, placeholders, cwd, same_dir=()):
             raise Refusal(None, "%s is not a value this fence takes (it takes: %s)"
                                 % (name, ", ".join(sorted(by_arg)) or "none"))
         if flag == "--arg-file":
-            value = read_arg_file(value, cwd)
+            value = read_arg_file(value, cwd, spellings)
         elif ph.file:
             raise Refusal(None, "%s takes --arg-file, not --arg" % name)
         why = ph.check(value) or ph.check_scope(value, cwd)
@@ -239,14 +261,19 @@ def between_arg_file_opens():
     land. REQ-719 AC-12's test replaces it with a function that makes that swap."""
 
 
-def read_arg_file(path, cwd):
+def read_arg_file(path, cwd, spellings=()):
     """A file the model wrote: a regular file under the working directory, at most 1 MiB.
 
     It is walked from a handle on ``cwd`` (REQ-719 ADR-4, BR-15): each component is opened
     from the handle on the one before it, following no symlink, the last with ``O_NONBLOCK``
     so a FIFO cannot hold the runner. The checks are made on the opened descriptor and the
     text is read from it, so no path is checked and then opened again. Every failure is a
-    :class:`Refusal`, which :func:`parse_values` reports as a bad value."""
+    :class:`Refusal`, which :func:`parse_values` reports as a bad value.
+
+    An absolute path may start with ``cwd`` as given, with its real path, or with one of
+    ``spellings``: other spellings the caller has found name the same directory
+    (:func:`given_spellings`). Each is only cut off the path as text; the walk always starts
+    from ``cwd``."""
     if not path or "\x00" in path:
         raise Refusal(None, "--arg-file names no path")
     shown = path[:120]
@@ -261,7 +288,7 @@ def read_arg_file(path, cwd):
     # /private/var, LESSON-844), and that prefix is cut. Only cwd is resolved, never the file.
     parts = segments(path)
     if path.startswith("/"):
-        for base in (cwd, os.path.realpath(cwd)):
+        for base in (cwd, os.path.realpath(cwd)) + tuple(spellings):
             prefix = segments(base)
             if base.startswith("/") and parts[:len(prefix)] == prefix:
                 parts = parts[len(prefix):]
@@ -349,10 +376,15 @@ def child_env(environ, placeholders, values, root):
     return env
 
 
+def preload(root):
+    """The partials every fence, and the runner's PR read, run after: by absolute path from
+    the runner's own root (ADR-4)."""
+    return '. "%s/partials/adlc-home.sh"\n. "%s/partials/forge.sh"\n' % (root, root)
+
+
 def script_for(fence, values, root):
     """The preload closure, by absolute path, then the transformed fence (ADR-4)."""
-    preload = '. "%s/partials/adlc-home.sh"\n. "%s/partials/forge.sh"\n' % (root, root)
-    return preload + fc.transform(fence.code, values, root)
+    return preload(root) + fc.transform(fence.code, values, root)
 
 
 def find(fid, root):
@@ -449,9 +481,16 @@ def run_branch_refusal(branch, environ):
 #: 4), and the stderr line is what names the case.
 SANDBOXED = 69
 #: Exit status of a call whose ``--arg`` or ``--arg-file`` value failed its check
-#: (:func:`parse_values`). Not a refusal either: nothing ran, and a corrected value is checked
-#: the same way.
+#: (:func:`parse_values`), or whose PR number is not the caller's PR (:func:`pr_tie`). Not a
+#: refusal either: nothing ran, and a corrected value is checked the same way.
 BAD_VALUE = 65
+#: Exit status of a call whose PR number could not be checked, because the forge could not be
+#: read for it (:func:`pr_tie`, REQ-719 BR-11). Neither a pass nor a refusal: nothing ran, and
+#: the exec prompt bounds the retry to one before the session reports it as a blocker.
+UNVERIFIED = 75
+#: How long the runner waits for its PR read before it counts the forge as unread.
+PR_TIE_TIMEOUT = 60
+_ERROR_CLASS_RE = re.compile(r"^[a-z][a-z-]{0,39}$")
 
 
 def sandboxed(cwd, environ):
@@ -486,6 +525,139 @@ def sandboxed(cwd, environ):
             "ran. Run this fence-run line again as a command of its own.")
 
 
+# --------------------------------------------------------------------------- the PR tie
+def read_pr(arg, root, cwd, env):
+    """``(status, stdout, stderr)`` of the runner's read of the PR-marked value ``arg``: the
+    text :func:`fence_census.pr_tie_text` spells, run as the fence is, under ``/bin/sh`` in
+    ``cwd`` after :func:`preload` and in the fence's own environment ``env``
+    (:func:`child_env`), so it reads the forge repository of the calling directory and the
+    mock forge answers it. ``None`` when it gave no answer in :data:`PR_TIE_TIMEOUT` seconds:
+    its process group is then killed, so a hung backend does not hold the runner."""
+    script = preload(root) + fc.pr_tie_text(arg) + "\n"
+    try:
+        proc = subprocess.Popen(["/bin/sh", "-c", script], cwd=cwd, env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
+                                start_new_session=True)
+    except OSError as exc:
+        return -1, "", str(exc)
+    try:
+        out, errtext = proc.communicate(timeout=PR_TIE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return None
+    return proc.returncode, out, errtext
+
+
+_DIGITS_RE = re.compile(r"^[0-9]{1,18}$")
+
+
+def _pr_fields(out):
+    """The fields of a ``--fields`` answer, or ``None`` when it does not parse: a line that is
+    not ``key=value``, one of :data:`fence_census.PR_TIE_FIELDS` missing or given twice, a
+    ``number`` that is not one, or an ``isCrossRepository`` neither ``true`` nor ``false``."""
+    fields = {}
+    for line in out.splitlines():
+        if not line:
+            continue
+        key, sep, value = line.partition("=")
+        if not sep:
+            return None
+        if key in fc.PR_TIE_FIELDS:
+            if key in fields:
+                return None
+            fields[key] = value
+    if len(fields) != len(fc.PR_TIE_FIELDS) or not _DIGITS_RE.match(fields["number"]) or \
+            fields["isCrossRepository"] not in ("true", "false"):
+        return None
+    return fields
+
+
+def pr_verdict(value, branch, answer):
+    """What the runner's PR read (``answer``, :func:`read_pr`'s) says of ``value`` (REQ-719
+    ADR-3): ``(None, "")`` when it is the open, same-repository PR whose head is ``branch``.
+    Else ``(BAD_VALUE, "")`` when any field differs or the forge does not know the number;
+    ``(REFUSED, line)`` with the adapter's own ``opaque_entry_refused:`` line (its Azure DevOps
+    arm under the runner, which would refuse the fence the same way); and ``(UNVERIFIED,
+    why)`` for any other failure, an answer that does not parse, or no answer at all."""
+    if answer is None:
+        return UNVERIFIED, "no answer in %d s" % PR_TIE_TIMEOUT
+    status, out, errtext = answer
+    if status != 0:
+        refused = [ln for ln in errtext.splitlines() if ln.startswith("opaque_entry_refused:")]
+        if status == REFUSED and refused:
+            return REFUSED, refused[0][:400]
+        klass = next((ln.split("=", 1)[1] for ln in out.splitlines()
+                      if ln.startswith("error_class=")), "")
+        if klass == "pr-not-found":
+            return BAD_VALUE, ""
+        if _ERROR_CLASS_RE.match(klass):
+            return UNVERIFIED, "error_class=%s" % klass
+        return UNVERIFIED, "the read exited with status %d" % status
+    fields = _pr_fields(out)
+    if fields is None:
+        return UNVERIFIED, "its answer did not parse"
+    if int(fields["number"]) != int(value) or fields["state"] != "OPEN" or \
+            fields["headRefName"] != branch or fields["isCrossRepository"] != "false":
+        return BAD_VALUE, ""
+    return None, ""
+
+
+def pr_tie(fid, args, values, root, cwd, environ, env, err=None):
+    """``None`` when the value of each of ``args``, the fence's PR-marked arguments, is the
+    caller's PR; else the exit status, its one line written to ``err`` (REQ-719 BR-9 to BR-11).
+
+    The caller's PR is an open PR of the forge repository of ``cwd``, not cross-repository,
+    whose head is the branch checked out in ``cwd``. With no branch checked out no PR is, and
+    the call is refused before any forge read. The line for a value that is not the caller's
+    names the value and the branch, and no field of the PR that was read."""
+    err = err or sys.stderr
+    branch = checked_out_branch(cwd, environ)
+    if not branch:
+        return refuse(fid, "no branch is checked out here (a detached HEAD, or no repository), "
+                           "so no PR is this directory's and the value for %s cannot be "
+                           "checked" % " and ".join(args), err)
+    for arg in args:
+        value = values[arg][0]
+        status, text = pr_verdict(value, branch, read_pr(arg, root, cwd, env))
+        if status is None:
+            continue
+        if status == REFUSED:
+            err.write(text + "\n")
+        elif status == BAD_VALUE:
+            err.write("fence_run_bad_value: %s: value for %s, %s, is not the open PR of the "
+                      "branch checked out here (%s). Nothing ran: correct that value and run "
+                      "the line again.\n" % (fid, arg, value, branch))
+        else:
+            err.write("fence_run_unverified: %s: the forge could not be read to check that the "
+                      "value for %s is the open PR of the branch checked out here (%s). Nothing "
+                      "ran: run the same line once more, and if it answers the same way, report "
+                      "it as a blocker.\n" % (fid, arg, text))
+        return status
+    return None
+
+
+def given_spellings(cwd, environ):
+    """Another spelling of ``cwd`` an absolute ``--arg-file`` path may start with (BR-16):
+    ``$PWD``, the calling shell's spelling of its directory, when it is an absolute path
+    naming the same directory as ``cwd``. ``os.getcwd()`` is always the real spelling (macOS's
+    /private/var), and a model writes the one its shell shows (/var), LESSON-844."""
+    pwd = environ.get("PWD") or ""
+    if not pwd.startswith("/") or pwd == cwd or "\x00" in pwd:
+        return ()
+    try:
+        return (pwd,) if os.path.samefile(pwd, cwd) else ()
+    except (OSError, ValueError):
+        return ()
+
+
 def run(fid, argv, root, environ=None, cwd=None, err=None):
     environ = dict(os.environ if environ is None else environ)
     cwd = cwd or os.getcwd()
@@ -493,7 +665,8 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
         fence, rec = find(fid, root)
         placeholders = _placeholders_for(fence)
         try:
-            values = parse_values(argv, placeholders, cwd, same_dir_args(rec))
+            values = parse_values(argv, placeholders, cwd, same_dir_args(rec),
+                                  given_spellings(cwd, environ))
         except Refusal as exc:
             # A value of the wrong shape is the caller's to correct, not an entry the runner
             # refuses: a relative path where the fence takes an absolute one ended a real run
@@ -521,6 +694,13 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
         (err or sys.stderr).write("fence_run_sandboxed: %s: %s\n" % (fid, why))
         return SANDBOXED
     env = child_env(environ, placeholders, values, root)
+    # After the value checks and the sandbox check, so a chained call reads 69 and makes no
+    # forge call, and before any command of the fence (REQ-719 BR-12, LESSON-893).
+    tied = fc.tied_args(placeholders)
+    if tied:
+        status = pr_tie(fid, tied, values, root, cwd, environ, env, err)
+        if status is not None:
+            return status
     proc = subprocess.run(["/bin/sh", "-c", script], cwd=cwd, env=env)
     return proc.returncode
 

@@ -335,3 +335,104 @@ def test_a_variable_the_fence_assigns_is_left_alone():
     rec = next(r for r in fc.census(TOOLKIT, ea.load("claude", TOOLKIT))
                if r["id"].startswith("proceed/SKILL.md#1:"))
     assert rec["route"] == "runner" and "flag" not in rec["placeholders"]
+
+
+# --------------------------------------------------------------------------- REQ-719 BR-13
+UNMARKED_FIXTURE = os.path.join(HERE, "fixtures", "exec-fence", "unmarked-pr-arg.md")
+
+
+def test_req719_every_pr_number_placeholder_carries_the_mark():
+    """BR-13: the tie is keyed on the placeholder. Every entry of the closed tables whose
+    pattern is a PR number's carries the PR mark, and no other entry does."""
+    tables = (fc.PLACEHOLDERS, fc.LITERAL_PLACEHOLDERS, fc.VAR_PLACEHOLDERS)
+    pr_pattern = fc.Placeholder("x", "x", fc.PR_NUMBER).pattern.pattern
+    marked = []
+    for table in tables:
+        for key, ph in table.items():
+            assert ph.pr is (ph.pattern.pattern == pr_pattern), (key, ph.pattern.pattern)
+            if ph.pr:
+                marked.append((key, ph.arg))
+    assert sorted(marked) == [("prNumber", "pr"), ("prNumber", "prNumber")]
+
+
+def test_req719_every_operation_but_create_and_list_takes_a_pr():
+    """BR-13's six operations take a PR, and so does one the adapter gains later: the rule
+    names the two that take none, so a new operation starts checked (LESSON-781)."""
+    for op in ("view", "edit", "ready", "comment", "checks", "merge", "close"):
+        assert fc.is_pr_operation("adlc_forge_pr_" + op), op
+    for name in ("adlc_forge_pr_create", "adlc_forge_pr_list", "adlc_forge_commit_prs",
+                 "adlc_forge_branch_protection", "gh"):
+        assert not fc.is_pr_operation(name), name
+
+
+@pytest.mark.parametrize("code,what", [
+    # An unmarked placeholder handed straight to the operation, wherever the PR sits.
+    ('adlc_forge_pr_edit "<n>" --title "<short title>"', "<n>"),
+    ("adlc_forge_pr_merge --squash <n>", "<n>"),
+    ('adlc_forge_pr_ready "$LESSON_NUM"', "$LESSON_NUM"),
+    ('adlc_forge_pr_view "REQ-xxx" --fields state', "REQ-xxx"),
+    ('x=$(adlc_forge_pr_view "<n>" --json body -q .body)', "<n>"),
+    # A variable the fence assigns from text holding one, directly or through another.
+    ('n="<n>"\nadlc_forge_pr_view "$n" --json body', "$n (assigned from <n>)"),
+    ('n="<n>"; m="pr-$n"\nadlc_forge_pr_comment "$m" --body x', "$m (assigned from $n"),
+    ("n=$((<n> + 1))\nadlc_forge_pr_checks \"$n\"", "$n (assigned from <n>)"),
+    ('for n in "<n>" 7; do adlc_forge_pr_ready "$n"; done', "$n (assigned from <n>)"),
+    ("while read -r n; do adlc_forge_pr_edit \"$n\" --title x; done <<'EOF'\n<n>\nEOF",
+     "$n (assigned from <n>)"),
+])
+def test_req719_an_unmarked_pr_argument_is_unroutable(code, what):
+    """BR-13: a PR operation whose PR argument holds a model-supplied value without the mark,
+    or a variable the fence assigned from text holding one, is not routed, and the reason
+    names the operation and the value."""
+    with pytest.raises(fc.Unroutable) as caught:
+        fc.plan(code)
+    assert what in str(caught.value) and "PR mark" in str(caught.value), str(caught.value)
+
+
+@pytest.mark.parametrize("code", [
+    # Marked placeholders, in each spelling a fence uses.
+    'tmp=$(mktemp)\nadlc_forge_pr_edit "<prNumber>" --title "<short title>" --body-file "$tmp"',
+    'adlc_forge_pr_edit <prNumber> 2>/dev/null',
+    'adlc_forge_pr_ready "$prNumber"',
+    'n="<prNumber>"\nadlc_forge_pr_view "$n" --fields state',
+    # An unmarked value elsewhere in the call is not the PR.
+    'adlc_forge_pr_edit "$prNumber" --title "<short title>" --body "<n>"',
+    # BR-14: a number the fence fills from a command's output is not the model's.
+    'pr=$(adlc_forge_pr_create --title "<short title>" | sed -n "s/^number=//p")\n'
+    'adlc_forge_pr_view "$pr" --fields state',
+    'printf "%s\\n" "<n>" | while read -r p; do adlc_forge_pr_edit "$p" --title x; done',
+])
+def test_req719_a_marked_or_fence_made_pr_argument_routes(code):
+    """BR-13, BR-14: a marked value, or a number the fence's own commands produce, routes."""
+    fc.plan(code)
+    assert fc.unmarked_pr_arguments(code) == []
+
+
+def test_req719_an_unmarked_pr_argument_does_not_route(copy):
+    """AC-11: a fence that passes an unmarked placeholder as the PR argument of
+    `adlc_forge_pr_edit` is unrouted, and `fence_census.py --check` fails naming the fence and
+    the placeholder. `/architect` Step 5, whose `$prnum` is read from a command's output,
+    still routes, and binds no PR value."""
+    path = os.path.join(copy, "validate", "SKILL.md")
+    with open(UNMARKED_FIXTURE, encoding="utf-8") as fh:
+        extra = fh.read()
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n" + extra)
+    records = fc.census(copy, ea.load("claude", copy))
+    fence = fc.fences(fc.view(copy, "validate/SKILL.md"), "validate/SKILL.md")[-1]
+    bad = fc.unrouted(records)
+    assert [r["id"] for r in bad] == [fence.id], bad
+    assert "<n>" in bad[0]["reason"] and "adlc_forge_pr_edit" in bad[0]["reason"], bad[0]
+    out = subprocess.run([sys.executable, "-I", os.path.join(copy, "tools", "adlc",
+                                                             "fence_census.py"), "--check"],
+                         cwd=copy, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         universal_newlines=True)
+    assert out.returncode == 1, out.stderr
+    named = [ln for ln in out.stderr.splitlines() if ln.startswith("unrouted: ")]
+    assert named and all(fence.id in ln and "<n>" in ln for ln in named), out.stderr
+    architect = next(r for r in records if r["id"].startswith("architect/SKILL.md#") and
+                     "MAPPER_PATHS" in r["placeholders"])
+    assert architect["route"] == "runner" and "tied" not in architect, architect
+    code = fc.fences(fc.view(copy, "architect/SKILL.md"), "architect/SKILL.md")[
+        int(architect["id"].split("#")[1].split(":")[0]) - 1].code
+    assert 'adlc_forge_pr_edit "$prnum"' in code and "prnum" not in fc.tainted_vars(code)

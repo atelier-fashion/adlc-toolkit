@@ -323,3 +323,45 @@ def test_req719_no_path_is_resolved_then_opened(spelled):
             assert dir_fd is not None and "/" not in name and flags & os.O_NOFOLLOW, opened
         assert opened[1][1] & os.O_DIRECTORY
         assert opened[2][1] & os.O_NONBLOCK and not opened[2][1] & os.O_DIRECTORY
+
+
+def test_req719_an_absolute_path_in_the_shells_spelling_is_read(runner, spelled, monkeypatch,
+                                                                 capfd, tmp_path):
+    """BR-16 through the runner as it is called: `os.getcwd()` is always the real spelling,
+    while the calling shell's `$PWD`, the spelling a model writes, is the given one (macOS's
+    /var for /private/var). A path under `$PWD` is read when `$PWD` names the working
+    directory; a `$PWD` naming another directory, or a relative one, admits nothing."""
+    given, real = spelled
+    root, fid = runner
+    monkeypatch.chdir(given)
+    assert os.getcwd() == real
+    path = given + "/sub/value.txt"
+
+    def call(pwd):
+        err = io.StringIO()
+        env = dict(os.environ)
+        env.pop("PWD", None)
+        if pwd is not None:
+            env["PWD"] = pwd
+        rc = fr.run(fid, ["--arg-file", "NEW_BODY=%s" % path], root, environ=env, err=err)
+        return rc, err.getvalue()
+
+    rc, err = call(given)
+    assert rc == 0, err
+    assert capfd.readouterr().out == "bound:in sub\n"
+    # Without the shell's spelling the runner knows only the real one, as before.
+    for pwd in (None, real, "via/wc", str(tmp_path)):
+        rc, err = call(pwd)
+        _assert_bad_value(runner, rc, err, capfd.readouterr().out,
+                          "is not under the working directory")
+    # The real command line, from a shell whose $PWD is the given spelling.
+    out = subprocess.run([os.path.join(root, "tools", "adlc", "fence-run"), "run", fid,
+                          "--arg-file", "NEW_BODY=%s" % path], cwd=given,
+                         env=dict(os.environ, PWD=given), stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
+    assert out.returncode == 0 and out.stdout == "bound:in sub\n", out.stderr
+    # A `..` segment is still refused, whatever the spelling.
+    err = io.StringIO()
+    rc = fr.run(fid, ["--arg-file", "NEW_BODY=%s/sub/../value.txt" % given], root,
+                environ=dict(os.environ, PWD=given), err=err)
+    _assert_bad_value(runner, rc, err.getvalue(), capfd.readouterr().out, "'..' segment")
