@@ -1,10 +1,10 @@
 ---
 id: REQ-719
 title: "The exec engine's open findings from its first real run: `abort` drops a blocked run, the lane check works on a single-branch clone, a fence is held to its caller's PR, an arg file is opened without a window, a rejected run records `rejected`, and Phase 7 reads CI through the forge adapter"
-status: draft
+status: approved
 deployable: false
 created: 2026-11-19
-updated: 2026-11-19
+updated: 2026-11-20
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["python", "sh", "markdown"]
