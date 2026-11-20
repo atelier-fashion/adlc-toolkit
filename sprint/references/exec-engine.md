@@ -44,7 +44,13 @@ python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec approve '<REQ-id>' -
 
 ## Reject, answer, abort
 
-Each on an operator's instruction naming the REQ. `reject` records the reason and leaves the branch, PR and working copy for a person. `answer` relaunches a `blocked` REQ as a fresh process carrying the reply. `abort` is the only way a running or stalled harness is killed; it leaves the working copy.
+Each on an operator's instruction naming the REQ.
+
+- `reject` ends a run at the merge gate. It records the reason and leaves the branch, PR and working copy for a person.
+- `answer` relaunches a `blocked` REQ as a fresh process carrying the reply.
+- `abort` is the only way a running or stalled harness is killed, and the way to drop a `blocked` run instead of answering it. A blocked run has these two ways out, `answer` and `abort`, and its dashboard row prints both.
+
+`abort` on a blocked run ends it `failed` and leaves the branch, the PR and the working copy for a person. It signals nothing, makes no forge call and makes no one-way move, and an approval recorded before the run blocked is never executed. On a running or stalled run `abort` kills the harness first, then ends the run the same way. `abort` prints one line naming the REQ, who aborted it, the working copy, the branch and the PR: relay it as printed. The person looks at that branch and PR, and a new `/sprint --exec` run of the REQ reuses the working copy and the branch. A run at the merge gate is ended with `reject`: `abort` refuses it, naming `reject`.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -64,4 +70,4 @@ python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec resume
 
 ## Summary
 
-When nothing is left waiting on an operator, produce the Completed, Blocked and Close-out tables and the **Recurrence** section of Step 6 in `sprint/SKILL.md`, from `sprint-exec status` and over this run's REQ list. The program already emitted one run-outcome line per terminal, with engine `exec`.
+When nothing is left waiting on an operator, produce the Completed, Blocked and Close-out tables and the **Recurrence** section of Step 6 in `sprint/SKILL.md`, from `sprint-exec status` and over this run's REQ list. The program already emitted one run-outcome line per terminal, with engine `exec`: a rejected run's line reads `rejected`, and an aborted run's reads `failed` with the reason `aborted`.

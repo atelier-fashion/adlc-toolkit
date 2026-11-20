@@ -151,7 +151,10 @@ if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC
 out=$(adlc_forge_pr_view "$pr" --fields state,url); rc=$?
 ```
 
-The op set is `adlc_forge_pr_{create,ready,edit,view,list,merge,comment}`. The
+The op set is `adlc_forge_pr_{create,ready,edit,view,list,merge,comment,checks}`.
+`adlc_forge_pr_checks` (REQ-719) makes one CI read and never waits: it prints
+`checks=<pass|fail|pending|none>` and one `check=<state>` TAB `<name>` line per
+check, and a caller that wants a settled verdict reads again later. The
 GitHub backend (`gh`) is byte-compatible with the previous direct calls; the Azure
 DevOps backend uses `az repos`. Provider resolution is per-project `.adlc/config.yml`
 `forge.provider` > machine config > `auto` (origin-URL detection; unrecognized host
@@ -160,8 +163,10 @@ fails loud). Results/errors are normalized to one vocabulary (`state ∈
 `merge-blocked-by-policy` | `feature-unsupported` | `network`, with raw backend stderr
 preserved beneath the class). `forge.auth` stores a credential **source name** only
 (`gh`/`az`/an env-var NAME holding a PAT) — never a key value (a key-shaped value is
-refused). Two ops stay direct on purpose: `gh pr diff` (local read-only convenience)
-and `gh pr checks` (CI-status polling, out of scope). The `tools/lint-skills`
+refused). Two `gh` calls stay direct on purpose: `gh pr diff` (a local read-only
+convenience, in `/adversary`) and `gh pr checks` (waiting for CI, only in `/wrapup`
+and `/bugfix`). `/proceed`'s Phase 7 uses neither: it reads its diff from the local
+repository and its CI with `adlc_forge_pr_checks`. The `tools/lint-skills`
 `forge-direct-gh` check rejects any new direct `gh pr <op>` in a SKILL.md shell fence.
 Full contract: `partials/forge.md`.
 

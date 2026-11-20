@@ -334,6 +334,10 @@ def test_declared_residuals_block_lists_a_to_f():
     assert "A runner line must keep its fence id quoted." in block and "bare `#`" in block
     call = fr.runner_call({"id": "proceed/phase-0-setup.md#6:877a6b41"}, "/r", [])
     assert "run 'proceed/phase-0-setup.md#6:877a6b41'" in call
+    # The runner's arg-file rule and what it leaves (REQ-719 BR-17): one item, on every harness.
+    assert block.count("**An `--arg-file` is opened without following a symlink, and a hard "
+                       "link is not detected.**") == 1
+    assert "This holds on every harness." in block
     # Rule B: the rules are a convenience, never the gate.
     assert "never the gate (Rule B)" in block
     assert not _GATE_CLAIM.search(section), _GATE_CLAIM.search(section).group(0)
@@ -406,3 +410,157 @@ def test_bug287_the_old_line_is_the_one_that_fails():
     with pytest.raises(SystemExit):
         se._parser().parse_args(["reject", "REQ-901", "--channel", "skill", "not this sprint"])
     assert "Keep `--channel` before the REQ id" in read("sprint", "references", "exec-engine.md")
+
+
+# --------------------------------------------------------------------------- REQ-719
+#: The sentence REQ-719 BR-5 pins, where a document says what `abort` does to a blocked run.
+ABORT_LEAVES = ("`abort` on a blocked run ends it `failed` and leaves the branch, the PR and "
+                "the working copy for a person.")
+
+
+def _exec_section():
+    text = read("README.md")
+    section = text[text.index("### The `/sprint` exec engine"):]
+    return _flat(section[:section.index("### Harness adapters")])
+
+
+def _residuals_block():
+    section = _codex_section()
+    lo = section.index(RESIDUALS_OPEN)
+    return _flat(section[lo:section.index(RESIDUALS_CLOSE, lo)])
+
+
+def test_req719_the_reference_says_what_abort_leaves():
+    """REQ-719 BR-5, AC-5: the exec reference says in one place that `abort` on a blocked run
+    ends it `failed` and leaves the branch, the PR and the working copy for a person, names
+    both ways out of a blocked run, and says what a person does next. The README's exec
+    section and `sprint/SKILL.md` say it too, and each claim is one the engine's code makes."""
+    import inspect
+    import sprint_exec as se
+    ref = _flat(read("sprint", "references", "exec-engine.md"))
+    assert ref.count(ABORT_LEAVES) == 1
+    assert ref.count("the branch, the PR and the working copy") == 1
+    assert ("A blocked run has these two ways out, `answer` and `abort`, and its dashboard row "
+            "prints both.") in ref
+    assert "It signals nothing, makes no forge call and makes no one-way move" in ref
+    assert ("`abort` prints one line naming the REQ, who aborted it, the working copy, the "
+            "branch and the PR") in ref
+    assert ("The person looks at that branch and PR, and a new `/sprint --exec` run of the REQ "
+            "reuses the working copy and the branch.") in ref
+    assert "`abort` refuses it, naming `reject`" in ref
+    assert ("a rejected run's line reads `rejected`, and an aborted run's reads `failed` with "
+            "the reason `aborted`") in ref
+    # Every operator line the reference shows still parses (BUG-287), `abort`'s included.
+    assert "abort" in {argv[0] for argv in _documented_verb_lines()}
+
+    # What the reference says is what the engine does and prints.
+    row = inspect.getsource(se.render_row)
+    assert "sprint-exec answer --channel skill" in row and \
+        "sprint-exec abort --channel skill" in row
+    assert "a run at the gate is ended with `reject`, not `abort`" in \
+        inspect.getsource(se.Orchestrator.abort)
+    dropped = inspect.getsource(se.Orchestrator._aborted)
+    assert '"failed"' in dropped and '"abortedFrom"' in dropped
+    assert "aborted by %s; working copy left at %s, branch %s" in dropped
+
+    readme = _exec_section()
+    assert readme.count(ABORT_LEAVES) == 1
+    assert "**A blocked run has two ways out.** Its dashboard row prints both" in readme
+    skill = _flat(read("sprint", "SKILL.md"))
+    assert ("the two ways out of a blocked run: `answer` relaunches it with the operator's reply, "
+            "and `abort` drops it, leaving its branch, PR and working copy for a person") in skill
+
+
+def test_req719_readme_states_the_arg_file_residuals(tmp_path):
+    """REQ-719 BR-17, AC-13: the README's declared residuals for the runner state that a
+    symlink inside the working copy is now refused and that a hard link is not detected, and
+    `read_arg_file` behaves as they say."""
+    import pytest
+    block = _residuals_block()
+    assert ("A symlink inside the working copy that points inside it was accepted and is now "
+            "refused.") in block
+    assert ("A hard link is not detected: making one to a file needs access that already lets "
+            "the caller read that file.") in block
+    assert "This holds on every harness." in block
+    tools = _flat(read("tools", "adlc", "README.md"))
+    assert ("A symlink inside the working copy that points inside it is refused too, and a hard "
+            "link is not detected (the README's declared residuals).") in tools
+
+    # Both statements, run: a symlink pointing inside is refused, a hard link reads as a file.
+    wc = tmp_path / "wc"
+    wc.mkdir()
+    (wc / "body.txt").write_text("the body\n", encoding="utf-8")
+    (wc / "inside.txt").symlink_to("body.txt")
+    os.link(str(wc / "body.txt"), str(wc / "hard.txt"))
+    assert fr.read_arg_file("body.txt", str(wc)) == "the body\n"
+    with pytest.raises(fr.Refusal, match="symlink"):
+        fr.read_arg_file("inside.txt", str(wc))
+    assert fr.read_arg_file("hard.txt", str(wc)) == "the body\n"
+
+
+#: Each document REQ-719 BR-28 names, the two context documents, and the state schema, with
+#: the words that carry its change. Four were changed by other tasks (TASK-270, TASK-271,
+#: TASK-274) and are checked here as well. Text is compared with its whitespace flattened.
+REQ719_DOCUMENTS = (
+    (("sprint", "SKILL.md"), ("the two ways out of a blocked run", "`abort` drops it")),
+    (("sprint", "references", "exec-engine.md"), (ABORT_LEAVES, "`rejected`", "`aborted`")),
+    (("README.md",), (ABORT_LEAVES, "`fence_run_unverified:`", "held to the caller's PR",
+                      "`--single-branch`", "`adlc_forge_pr_checks`", "`proceed.ci.max_reads`",
+                      "A hard link is not detected")),
+    (("tools", "adlc", "README.md"), ("**75**", "`fence_run_unverified:`", "**The PR tie",
+                                      "following no symlink", "`exec.abortedFrom`",
+                                      "`pr_checks`", "`checks-pending-then-pass`")),
+    (("partials", "lane-check.md"), ("refs/remotes/origin/",)),
+    (("partials", "forge.md"), ("`adlc_forge_pr_checks`", "checks=<pass|fail|pending|none>")),
+    (("proceed", "phases-telemetry.md"), ("`rejected`", "`aborted`")),
+    (("templates", "config-template.yml"), ("max_reads", "interval_s")),
+    ((".adlc", "context", "architecture.md"), ("`adlc_forge_pr_checks`", "REQ-719 ADR-1",
+                                               "REQ-719 ADR-3", "REQ-719 ADR-5",
+                                               "`gh pr checks` stays direct only in `/wrapup` "
+                                               "and `/bugfix`")),
+    ((".adlc", "context", "conventions.md"), ("`adlc_forge_pr_checks`",
+                                              "only in `/wrapup` and `/bugfix`")),
+    (("proceed", "phases-state.md"), ("abortedBy, abortedAt, abortedFrom }",)),
+)
+#: The three amendment notes: requirement directory, the note's first line, and its words.
+REQ719_AMENDMENTS = (
+    ("REQ-659-sprint-exec-engine", "## Amendment (2026-11-20, REQ-719)",
+     ("**BR-10 and BR-20: `abort` drops a blocked run.**", "`exec.abortedFrom`",
+      "the refusal names `reject`")),
+    ("REQ-648-per-run-outcome-telemetry-and-recurrence", "## Amendment (2026-11-20, REQ-719)",
+     ("BR-5's rule", "`terminal` is `merged | pr-ready | blocked | failed | rejected`.",
+      "`blocked_reason` gains `aborted`.")),
+    ("REQ-682-exec-fences-run-without-widening",
+     "- **2026-11-20, a fourth runner status and the PR tie (REQ-719).**",
+     ("BR-9's refusal stays exit 3", "**The PR tie.**", "`fence_run_unverified:`",
+      "`tools/adlc/README.md` states all four statuses.")),
+)
+
+
+def test_req719_every_named_document_carries_its_change():
+    """REQ-719 BR-28, AC-22: each document BR-28 names carries its change, the CHANGELOG's
+    entry sits under the unreleased heading, and each of the three amendment notes is present
+    once, dated, naming REQ-719 and the rule it narrows or extends."""
+    missing = []
+    for parts, words in REQ719_DOCUMENTS:
+        text = _flat(read(*parts))
+        missing += ["%s: %s" % ("/".join(parts), w) for w in words if w not in text]
+    assert not missing, missing
+
+    log = read("CHANGELOG.md")
+    lo = log.index("## [Unreleased]")
+    unreleased = _flat(log[lo:log.index("\n## [", lo + 1)])
+    assert unreleased.count("(REQ-719).**") == 1
+    for word in ("`abort` drops a `blocked` run", "`rejected`", "`aborted`",
+                 "`fence_run_unverified:`", "follows no symlink", "`--single-branch`",
+                 "`adlc_forge_pr_checks <pr>`", "`proceed.ci.max_reads`"):
+        assert word in unreleased, word
+
+    for spec, first, words in REQ719_AMENDMENTS:
+        text = read(".adlc", "specs", spec, "requirement.md")
+        assert text.count(first) == 1, spec
+        lo = text.index(first)
+        ends = [i for i in (text.find("\n## ", lo + 1), text.find("\n- **20", lo + 1)) if i > 0]
+        note = _flat(text[lo:min(ends)])
+        for word in words:
+            assert word in note, (spec, word)

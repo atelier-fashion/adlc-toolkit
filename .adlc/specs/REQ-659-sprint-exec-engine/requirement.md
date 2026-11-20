@@ -241,6 +241,16 @@ Phase 1 re-measured this spec against `main` at `5025e40` (LESSON-751) and again
 | BR-14 "`adlc_lesson_check`" on `assumptions/*.md` | The check refuses a basename that is not `LESSON-<digits>-<slug>.md` | It runs on added lessons; an added assumption is gated by path and mode | `partials/lesson-check.md` |
 | AC-11 `bash tools/lint-skills/check.sh` | The lint is run by `sh` here | `sh tools/lint-skills/check.sh` | `.adlc/context/conventions.md` |
 
+## Amendment (2026-11-20, REQ-719)
+
+**BR-10 and BR-20: `abort` drops a blocked run.** Both rules say that `abort` against a REQ with no live recorded `exec.pid` is refused. REQ-719 BR-1 narrows that refusal: it now holds for every status except `blocked`. No verb, token or flag is added.
+
+- **The drop.** On a `blocked` run whose recorded `exec.pid` and `exec.closeOutPid` are not live, `abort` signals nothing, makes no forge call and no one-way move, and ends the run `failed`. The local branch, the remote branch, the PR and the working copy are left for a person, as `reject` and the kill arm leave them. What the engine rendered in the working copy is restored, trust is revoked, any approval token is discarded, the run leaves the merge queue and approvals held behind it are released. An approval recorded before the run blocked, as when a rebase conflict blocks an approved run, is never executed afterwards, by this supervisor or by a later `resume`.
+- **Both arms** record `exec.abortedFrom` (`running`, `stalled` or `blocked`) beside `exec.abortedBy` and `exec.abortedAt`, and print one line naming the REQ, who aborted it, the working copy, the branch and the PR.
+- **The other refusals stand.** On `awaiting_approval` with no live process the refusal names `reject`. On `approved`, `merging` and every terminal status it names the status, and the caller guard refuses `abort` from inside a run.
+
+This closes the first item the 2026-11-19 amendment left open.
+
 ## Amendment (2026-11-19, BUG-287)
 
 **What the first real pipeline run changed.** Six launches of one lite REQ on `codex-cli 0.166.0` against the mock forge (`.adlc/research/harness-probes/codex-exec-manual.md`).

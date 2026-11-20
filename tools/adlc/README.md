@@ -778,15 +778,40 @@ executable:
   bare `#`, so a bare id ran the runner inside the sandbox (measured on codex-cli 0.166.0,
   2026-11-18).
 - Exit codes: a fence's own status is passed through; **3** is the runner's refusal, always one
-  stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run. Two more statuses mean
-  nothing ran and the caller can put it right (BUG-287). **65**, with one
-  `fence_run_bad_value:` line, is a value of the wrong shape: a relative path where the fence
-  takes an absolute one, an `--arg-file` outside the working copy, a name the fence does not
-  take. **69**, with one `fence_run_sandboxed:` line, is a call that cannot write the
-  repository's git directory, which on Codex means it was chained after a command with no
-  allow and the whole line ran inside the sandbox: run it again as a command of its own. The
-  check is skipped where the git directory is inside the working copy. Both numbers sit above
-  what a fence's own commands return, and the stderr line is what names the case.
+  stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run. Three more statuses
+  mean nothing ran and the caller can put it right (BUG-287, REQ-719). **65**, with one
+  `fence_run_bad_value:` line, is a value to correct: a value of the wrong shape (a relative
+  path where the fence takes an absolute one, an `--arg-file` outside the working copy, a name
+  the fence does not take), or a PR number that is not the caller's PR (below). **69**, with
+  one `fence_run_sandboxed:` line, is a call that cannot write the repository's git directory,
+  which on Codex means it was chained after a command with no allow and the whole line ran
+  inside the sandbox: run it again as a command of its own. The check is skipped where the git
+  directory is inside the working copy. **75**, with one `fence_run_unverified:` line, is a PR
+  number the runner could not check because the forge could not be read: run the same line
+  once more, then report it as a blocker. The three numbers sit above what a fence's own
+  commands return, and the stderr line is what names the case.
+- **The PR tie (REQ-719 ADR-3).** A value bound to a placeholder whose value is a PR number
+  (`prNumber`, which carries the PR mark in `fence_census`'s closed tables) must be the
+  caller's PR: the open, same-repository PR whose head is the branch checked out where the
+  runner was called. After the value checks and the sandbox check, and before any command of
+  the fence, the runner reads each such value once, with `adlc_forge_pr_view <n> --fields
+  number,state,headRefName,isCrossRepository` under the fence's own preload and environment, so
+  it reads the forge repository of the calling directory and the mock forge answers it. Any
+  field that differs, or `error_class=pr-not-found`, is 65, and the line names the value and
+  the branch and no field of the PR it read. No branch checked out is 3, decided before any
+  read. The adapter's own `opaque_entry_refused:` (its Azure DevOps arm under the runner) is
+  passed through as 3. Any other error class, an answer that does not parse, or no answer in
+  60 s is 75. A tied fence's census record names its values under `tied`, and its reach
+  includes the read. A runner fence that hands an unmarked placeholder to an `adlc_forge_pr_*`
+  operation as its PR does not route, and `fence_census.py --check` fails naming it.
+- **`--arg-file`** is opened from a handle on the working directory, one path component at a
+  time, following no symlink at any component, the last included. The path is relative with
+  no `..` segment, or absolute under the working directory in its given spelling (`$PWD`) or
+  its real one (`/var` and `/private/var` on macOS); the file's own path is never resolved.
+  The regular-file check, the 1 MiB cap and the UTF-8 check are made on the opened
+  descriptor, and the text is read from it. A FIFO or a device is refused without blocking.
+  Every failure is 65. A symlink inside the working copy that points inside it is refused too,
+  and a hard link is not detected (the README's declared residuals).
 - **Its git environment.** No caller `GIT_*` variable reaches a fence, so neither does a
   caller's `GIT_SSH_COMMAND`, and every git call it makes is pinned to `core.fsmonitor=false`
   and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT`, over the repository's own config.
@@ -832,6 +857,21 @@ copy starts unreviewed and `codex exec` skips the hook silently, which is why th
 declares `context_delivery: prompt`. `agy -p` ends at the first tool it would need to prompt
 for, with exit 0 and an empty response, and a failed run exits 3 (REQ-658), which is why `ok`
 with no terminal claim is `failed` for every harness.
+
+**What REQ-719 adds to the engine.** `abort` has a second arm: a `blocked` run whose recorded
+`exec.pid` and `exec.closeOutPid` are not live is dropped. It ends `failed`, nothing is
+signalled, no forge call is made, and the branch, the PR and the working copy are left for a
+person. What the engine rendered is restored, trust is revoked, any approval token is
+discarded, the run leaves the merge queue, and approvals held behind it are released. On
+`awaiting_approval` with no live process `abort` is refused, naming `reject`. Both arms record
+`exec.abortedFrom`, the status `abort` found (`running`, `stalled` or `blocked`), beside
+`exec.abortedBy` and `exec.abortedAt`, and print one line naming the REQ, who aborted it, the
+working copy, the branch and the PR. In the run-outcome log `reject` writes the terminal
+`rejected` with an empty reason, which only engine `exec` may write, and `abort` writes
+`failed` with the reason `aborted`. The mock forge (`forge_mock.py`) answers `pr_checks`, the
+op behind `adlc_forge_pr_checks`, from a PR's `checks` list in its store, which the unrecorded
+helper `set-checks` writes, and from the scenarios `checks-pass`, `checks-fail`,
+`checks-pending`, `checks-none` and `checks-pending-then-pass`. A PR with no list reads `none`.
 
 ## `adlc agents render` (REQ-516)
 

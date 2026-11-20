@@ -594,6 +594,36 @@ is cut per `RELEASING.md`.
 
 ### Changed
 
+- **The exec engine's open findings from its first real run (REQ-719).** BUG-287 left six
+  findings that needed a decision first. Each is settled here, and no gate changes:
+  - `abort` drops a `blocked` run that has no live process. The run ends `failed`: nothing is
+    signalled, no forge call is made, and the branch, the PR and the working copy are left
+    for a person. An approval recorded before the run blocked is never executed. A blocked
+    run's dashboard row names both ways out, `answer` and `abort`, and `abort` on a run at
+    the merge gate is refused, naming `reject`. Both arms of `abort` record `exec.abortedFrom`
+    and print one line naming the REQ, who aborted it, the working copy, the branch and the PR.
+  - The run-outcome log gains the terminal `rejected`, which only engine `exec` writes, with
+    an empty reason, and the reason `aborted`, which `abort` writes under `failed`.
+    `check-run-outcomes.sh` counts `rejected` in a new last column, so no column moves. No
+    line is rewritten: a run rejected before this change stays `failed` / `other`.
+  - `fence-run` holds a PR-number value to the caller's PR, the open, same-repository PR whose
+    head is the branch checked out where the runner was called, with one read through the
+    forge adapter before the fence runs. Any other PR is exit 65, `fence_run_bad_value:`. When
+    the forge cannot be read for that check nothing runs, and the runner exits with the new
+    status 75 and one `fence_run_unverified:` line.
+  - `fence-run --arg-file` opens the file from a handle on the working directory and follows
+    no symlink at any component, so no path is checked and then opened again. A symlink inside
+    the working copy that points inside it was accepted and is now refused. A hard link is not
+    detected.
+  - The lite lane check fetches both branches each to its `refs/remotes/origin/<name>`, so on
+    a `--single-branch` clone it reaches the lane check's verdict instead of erroring.
+  - `partials/forge.sh` gains `adlc_forge_pr_checks <pr>`: one read that never waits, printing
+    `checks=<pass|fail|pending|none>` and then one `check=<state>` TAB `<name>` line per check,
+    on GitHub, Azure DevOps and the mock forge. Phase 7 of `/proceed` reads CI with it and its
+    diff from the local repository, so Phase 7 names no `gh` command. A `pending` verdict is
+    read again every `proceed.ci.interval_s` seconds (30) for at most `proceed.ci.max_reads`
+    reads (20), and a wait that ends still `pending` is never reported green. `gh pr checks`
+    stays a direct call only in `/wrapup` and `/bugfix`.
 - **`ask-tier-deny` can prove a codex baseline from `runner-baseline` (REQ-664 BR-17(e),
   amended 2026-11-17).** Codex's model never attempts a command no allow names, so
   `ask-tier-deny`'s `baseline` stayed `not-attempted` and `deny-under-allow` undecided
