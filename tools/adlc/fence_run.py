@@ -43,6 +43,7 @@ Standard library only.
 
 import os
 import re
+import stat
 import subprocess
 import sys
 
@@ -232,25 +233,86 @@ def parse_values(argv, placeholders, cwd, same_dir=()):
     return values
 
 
+def between_arg_file_opens():
+    """Does nothing. :func:`read_arg_file` calls it each time it holds a handle and is about to
+    open the next component of the path from it: the moment a swapped directory would have to
+    land. REQ-719 AC-12's test replaces it with a function that makes that swap."""
+
+
 def read_arg_file(path, cwd):
-    """A file the model wrote: a regular file under the working directory, at most 1 MiB."""
+    """A file the model wrote: a regular file under the working directory, at most 1 MiB.
+
+    It is walked from a handle on ``cwd`` (REQ-719 ADR-4, BR-15): each component is opened
+    from the handle on the one before it, following no symlink, the last with ``O_NONBLOCK``
+    so a FIFO cannot hold the runner. The checks are made on the opened descriptor and the
+    text is read from it, so no path is checked and then opened again. Every failure is a
+    :class:`Refusal`, which :func:`parse_values` reports as a bad value."""
     if not path or "\x00" in path:
         raise Refusal(None, "--arg-file names no path")
-    real = os.path.realpath(os.path.join(cwd, path))
-    base = os.path.realpath(cwd)
-    if os.path.commonpath([real, base]) != base:
-        raise Refusal(None, "--arg-file %r resolves outside the working directory" % path[:120])
-    if not os.path.isfile(real):
-        raise Refusal(None, "--arg-file %r is not a regular file" % path[:120])
-    size = os.path.getsize(real)
-    if size > MAX_ARG_FILE:
-        raise Refusal(None, "--arg-file %r is %d bytes, over the 1 MiB cap" % (path[:120], size))
-    with open(real, "rb") as fh:
-        data = fh.read(MAX_ARG_FILE + 1)
+    shown = path[:120]
+    if ".." in path.split("/"):
+        raise Refusal(None, "--arg-file %r has a '..' segment" % shown)
+
+    def segments(text):
+        return [part for part in text.split("/") if part not in ("", ".")]
+
+    # Cut to a relative path by text alone (BR-16). A relative path is used as given; an
+    # absolute one must start with cwd in its given or its real spelling (macOS's /var and
+    # /private/var, LESSON-844), and that prefix is cut. Only cwd is resolved, never the file.
+    parts = segments(path)
+    if path.startswith("/"):
+        for base in (cwd, os.path.realpath(cwd)):
+            prefix = segments(base)
+            if base.startswith("/") and parts[:len(prefix)] == prefix:
+                parts = parts[len(prefix):]
+                break
+        else:
+            raise Refusal(None, "--arg-file %r is not under the working directory %r: pass a "
+                                "path relative to it" % (shown, cwd))
+    try:
+        fd = os.open(cwd, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as exc:
+        raise Refusal(None, "--arg-file %r: the working directory cannot be opened (%s)"
+                            % (shown, exc.strerror))
+    try:
+        for i, name in enumerate(parts):
+            if i == len(parts) - 1:
+                flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_NOCTTY", 0)
+            else:
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            between_arg_file_opens()
+            try:
+                nxt = os.open(name, flags, dir_fd=fd)
+            except OSError as exc:
+                # A symlink met with O_NOFOLLOW is ELOOP on macOS and Linux, and may be
+                # ENOTDIR or EMLINK elsewhere: any failure here is the caller's to correct.
+                raise Refusal(None, "--arg-file %r: %r is a symlink or cannot be opened (%s)"
+                                    % (shown, name[:120], exc.strerror))
+            old, fd = fd, nxt
+            os.close(old)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refusal(None, "--arg-file %r is not a regular file" % shown)
+        if st.st_size > MAX_ARG_FILE:
+            raise Refusal(None, "--arg-file %r is %d bytes, over the 1 MiB cap"
+                                % (shown, st.st_size))
+        chunks = []
+        left = MAX_ARG_FILE + 1
+        while left > 0:
+            chunk = os.read(fd, min(left, 1 << 16))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    if len(data) > MAX_ARG_FILE:
+        raise Refusal(None, "--arg-file %r is over the 1 MiB cap" % shown)
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
-        raise Refusal(None, "--arg-file %r is not UTF-8 text" % path[:120])
+        raise Refusal(None, "--arg-file %r is not UTF-8 text" % shown)
 
 
 def git_env(environ):

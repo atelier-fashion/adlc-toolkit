@@ -1,7 +1,7 @@
 ---
 id: TASK-272
 title: "`--arg-file` is opened from a handle on the working directory, with no check-then-open window"
-status: draft
+status: complete
 parent: REQ-719
 repo: adlc-toolkit
 created: 2026-11-20
@@ -34,6 +34,7 @@ Rewrite `fence_run.read_arg_file` as architecture ADR-4 describes. Its signature
 | rule | kind | artifact | benign_path |
 |------|------|----------|-------------|
 | BR-15 | test-case | `tools/adlc/tests/test_fence_arg_file.py::test_req719_a_swapped_directory_leaks_nothing` | no |
+| BR-15 | test-case | `tools/adlc/tests/test_fence_arg_file.py::test_req719_no_path_is_resolved_then_opened` | no |
 | BR-16 | test-case | `tools/adlc/tests/test_fence_arg_file.py::test_req719_refused_paths_bind_nothing` | no |
 | BR-16 | test-case | `tools/adlc/tests/test_fence_arg_file.py::test_req719_a_plain_file_is_read_under_each_spelling` | yes |
 | AC-12 | test-case | `tools/adlc/tests/test_fence_arg_file.py::test_req719_a_fifo_is_refused_without_blocking` | no |
