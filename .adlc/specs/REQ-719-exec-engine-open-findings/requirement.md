@@ -179,7 +179,7 @@ _Explicit, testable constraints. Rules are grouped by finding; the numbering is 
 
 ## Open Questions
 
-- None blocking. Two decisions here reverse or extend a recorded one and are the owner's to confirm at review: `abort` taking a `blocked` run in place of a new verb (BR-1, against REQ-659 BR-10 and BR-20), and `rejected` as a fifth `terminal` value in place of a reason under `failed` (BR-18, against REQ-648's four-value vocabulary).
+- None. Two decisions here reverse or extend a recorded one. **The owner confirmed both on 2026-11-19**, after reading the spec PR (#302): `abort` taking a `blocked` run in place of a new verb (BR-1, against REQ-659 BR-10 and BR-20), and `rejected` as a fifth `terminal` value in place of a reason under `failed` (BR-18, against REQ-648's four-value vocabulary).
 
 ## Out of Scope
 
