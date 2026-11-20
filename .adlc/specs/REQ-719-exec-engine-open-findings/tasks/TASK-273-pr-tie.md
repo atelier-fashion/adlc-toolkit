@@ -45,6 +45,7 @@ Implement architecture ADR-3. A value bound to a placeholder that carries the PR
 | BR-10 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_another_pr_is_a_bad_value_and_is_untouched` | yes |
 | BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_an_unreadable_forge_is_unverified_not_a_pass` | no |
 | BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_a_detached_head_is_a_refusal` | no |
+| BR-11 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_only_the_callers_open_pr_passes` | yes |
 | BR-12 | test-case | `tools/adlc/tests/test_fence_pr_tie.py::test_req719_no_forge_call_before_the_value_and_sandbox_checks` | no |
 | BR-12 | test-case | `tools/adlc/tests/test_exec_reach.py::test_real_tree_reach_matches_golden` | yes |
 | BR-13 | test-case | `tools/adlc/tests/test_fence_census.py::test_req719_an_unmarked_pr_argument_does_not_route` | yes |
