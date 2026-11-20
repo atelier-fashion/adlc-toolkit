@@ -12,6 +12,8 @@
 #   explicit_emit      — the `emit` subcommand spelling behaves the same
 #   bad_state          — a missing state file: rc 0, one stderr line, log unchanged
 #   bad_terminal       — an out-of-vocabulary terminal: rc 0, one stderr line
+#   rejected_legacy    — REQ-719: `rejected` with --engine legacy: rc 0, log unchanged
+#   rejected_exec      — REQ-719: `rejected` with --engine exec appends one line, no reason
 #   record_passthrough — record-validate writes validateAttempts and relays its line
 #   record_carry       — record-carry fills only the keys the primary copy lacks
 #   record_failure     — a record on a missing state: rc 0, one stderr line
@@ -77,6 +79,21 @@ err=$(ADLC_RUN_OUTCOMES_LOG="$LOG" "$SUT" "$WRAP" --state "$STATE" --terminal do
 check "bad_terminal: rc 0" 0 "$rc"
 check "bad_terminal: emit failed line" 1 "$(printf '%s\n' "$err" | command grep -c '^run-outcome: emit failed (rc 2)')"
 check "bad_terminal: log unchanged" 3 "$(lines "$LOG")"
+
+# --- rejected_legacy (REQ-719 BR-18: only the exec engine writes `rejected`) ---
+cp "$LOG" "$SANDBOX/log.before"
+err=$(ADLC_RUN_OUTCOMES_LOG="$LOG" "$SUT" "$WRAP" --state "$STATE" --terminal rejected --engine legacy 2>&1 >/dev/null); rc=$?
+check "rejected_legacy: rc 0" 0 "$rc"
+check "rejected_legacy: emit failed line" 1 "$(printf '%s\n' "$err" | command grep -c '^run-outcome: emit failed (rc 2)')"
+if cmp -s "$SANDBOX/log.before" "$LOG"; then same=yes; else same=no; fi
+check "rejected_legacy: log byte-identical" yes "$same"
+
+# --- rejected_exec (the must-not-fire half) -------------------------------------
+err=$(ADLC_RUN_OUTCOMES_LOG="$LOG" "$SUT" "$WRAP" --state "$STATE" --terminal rejected --engine exec 2>&1 >/dev/null); rc=$?
+check "rejected_exec: rc" 0 "$rc"
+check "rejected_exec: no stderr" "" "$err"
+check "rejected_exec: four lines" 4 "$(lines "$LOG")"
+check "rejected_exec: terminal, empty reason" 1 "$(command grep -c '"engine":"exec","toolkit_version":"5.4.0","toolkit_sha":"c013262","terminal":"rejected","blocked_reason":""' "$LOG")"
 
 # --- record_passthrough -------------------------------------------------------
 out=$("$SUT" "$WRAP" record-validate --state "$STATE" --phase 1 --attempt 2 2>/dev/null); rc=$?

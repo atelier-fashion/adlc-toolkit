@@ -79,3 +79,6 @@ ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d
 if [ -f .adlc/partials/delegate-tools-path.sh ]; then . .adlc/partials/delegate-tools-path.sh; else . "$ADLC_TOOLKIT_ROOT/partials/delegate-tools-path.sh"; fi
 "$DELEGATE_TOOLS"/emit-run-outcome.sh --state "<state>" --terminal <merged|pr-ready|blocked|failed> --engine <solo|legacy> --reason "<token, or empty>"
 ```
+
+The terminal `rejected` and the reason `aborted` are written by the exec engine only
+(REQ-719); this fence never passes either.

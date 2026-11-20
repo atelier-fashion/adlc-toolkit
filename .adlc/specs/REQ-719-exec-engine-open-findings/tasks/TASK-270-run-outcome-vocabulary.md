@@ -1,7 +1,7 @@
 ---
 id: TASK-270
 title: "Run-outcome vocabulary: the `rejected` terminal and the `aborted` reason, in the emitter and in every reader"
-status: draft
+status: complete
 parent: REQ-719
 repo: adlc-toolkit
 created: 2026-11-20
@@ -27,13 +27,13 @@ Add the two values to the run-outcome log's vocabulary and to every reader of it
 
 ## Acceptance Criteria
 
-- [ ] `run_outcome.py emit --terminal rejected --engine exec` prints one line with `terminal` `rejected` and an empty `blocked_reason`, also when the state's `closeOut.status` is `failed`.
-- [ ] `--terminal rejected` with `--engine solo`, `legacy` or `workflow` exits 2 and prints no line. Through `emit-run-outcome.sh` the log file is unchanged and the wrapper exits 0.
-- [ ] `--terminal failed --reason aborted` records `blocked_reason` `aborted`, not `other`.
-- [ ] Over a log holding lines with and without the new values, `check-run-outcomes.sh` prints the old header's thirteen columns in their old positions with their old values, and `rejected` as column fourteen. A `rejected` line adds to `runs` and to no other count.
-- [ ] A log with only older lines prints `0` in the new column and parses as before.
-- [ ] `workflows/adlc-sprint.workflow.js`'s `TERMINAL.state` enum is unchanged, and a test reads it.
-- [ ] `tools/adlc/exec_prompt.py`'s telemetry anchors still match exactly once (run `tools/adlc/tests/test_exec_prompt.py`).
+- [x] `run_outcome.py emit --terminal rejected --engine exec` prints one line with `terminal` `rejected` and an empty `blocked_reason`, also when the state's `closeOut.status` is `failed`.
+- [x] `--terminal rejected` with `--engine solo`, `legacy` or `workflow` exits 2 and prints no line. Through `emit-run-outcome.sh` the log file is unchanged and the wrapper exits 0.
+- [x] `--terminal failed --reason aborted` records `blocked_reason` `aborted`, not `other`.
+- [x] Over a log holding lines with and without the new values, `check-run-outcomes.sh` prints the old header's thirteen columns in their old positions with their old values, and `rejected` as column fourteen. A `rejected` line adds to `runs` and to no other count.
+- [x] A log with only older lines prints `0` in the new column and parses as before.
+- [x] `workflows/adlc-sprint.workflow.js`'s `TERMINAL.state` enum is unchanged, and a test reads it.
+- [x] `tools/adlc/exec_prompt.py`'s telemetry anchors still match exactly once (run `tools/adlc/tests/test_exec_prompt.py`).
 
 ## Verification
 

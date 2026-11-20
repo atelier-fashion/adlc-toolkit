@@ -13,6 +13,8 @@ Subcommands::
     emit --state S --terminal T --engine E [--reason R] [--req REQ-xxx]
         Print one flat JSON line (every value a string; counts are quoted
         decimals or "-"). ``emit-run-outcome.sh`` appends it to the log.
+        ``--terminal rejected`` is a usage error with any engine but ``exec``,
+        and its line has an empty ``blocked_reason`` (REQ-719 BR-18).
     record-harness --state S --toolkit-root DIR [--fresh]
         Write ``harness: {version, sha}`` once; on a resume an existing one is
         kept (BR-10, never re-read). ``--fresh`` — a fresh Step 0, decided from
@@ -52,12 +54,17 @@ import tempfile
 
 # --- vocabularies ------------------------------------------------------------
 
-TERMINALS = ("merged", "pr-ready", "blocked", "failed")
+TERMINALS = ("merged", "pr-ready", "blocked", "failed", "rejected")
 ENGINES = ("solo", "legacy", "workflow", "exec")
+# `rejected` is a person declining a PR at the exec engine's merge gate
+# (REQ-719 BR-18). Only that engine has the gate, so only it may write the
+# terminal: the check names the one engine allowed, and any engine added later
+# starts refused.
+REJECTED_ENGINE = "exec"
 BLOCKED_REASONS = (
     "validation-exhausted", "reflector-questions", "merge-conflict",
     "merge-unverified", "close-out-failed", "setup-error", "no-worktree",
-    "no-pr", "other",
+    "no-pr", "aborted", "other",
 )
 SEVERITIES = ("Critical", "Major", "Minor", "Nit")
 # Agents that use a High/Medium/Low scale map on emission (REQ-648 Entities).
@@ -284,6 +291,8 @@ def build_record(state, terminal, engine, reason="", req=None, now=None):
         raise UsageError(f"--terminal must be one of {', '.join(TERMINALS)}")
     if engine not in ENGINES:
         raise UsageError(f"--engine must be one of {', '.join(ENGINES)}")
+    if terminal == "rejected" and engine != REJECTED_ENGINE:
+        raise UsageError(f"--terminal rejected is written by --engine {REJECTED_ENGINE} only")
     now = now or datetime.datetime.now(datetime.timezone.utc)
     state = state if isinstance(state, dict) else {}
 
@@ -296,6 +305,11 @@ def build_record(state, terminal, engine, reason="", req=None, now=None):
 
     if terminal in ("blocked", "failed"):
         blocked = normalize_blocked_reason(reason)
+    elif terminal == "rejected":
+        # A declined PR is neither a halt nor a close-out: no reason, whatever
+        # the state's closeOut says (BR-18). The operator's text stays in the
+        # approval ledger, never in this log.
+        blocked = ""
     else:
         close_out = state.get("closeOut") if isinstance(state.get("closeOut"), dict) else {}
         blocked = "close-out-failed" if close_out.get("status") == "failed" else ""
