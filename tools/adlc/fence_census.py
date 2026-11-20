@@ -255,6 +255,9 @@ PLACEHOLDERS = dict([
     _ph("owner/repo", "repo", r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}"),
     _ph("short title", "title", _LINE),
     _ph("prNumber", "pr", PR_NUMBER, pr=True),
+    # Phase 7's wait before one CI read (REQ-719 ADR-6): 0 to 90 seconds and nothing else, so
+    # one call lasts at most one interval plus one forge read, under a harness's shell limit.
+    _ph("ciWait", "ciWait", r"[0-9]|[1-8][0-9]|90"),
     _ph("id", "id", r"(?:(?:REQ|BUG|TASK|LESSON|ASSUME)-)?[0-9]{3,6}"),
     _ph("slug", "slug", r"[a-z0-9]+(?:-[a-z0-9]+){0,12}"),
     _ph("mark", "mark", r"adlc-transcript-mark-[0-9a-f]{16}"),

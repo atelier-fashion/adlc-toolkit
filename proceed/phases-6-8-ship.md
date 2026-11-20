@@ -97,7 +97,19 @@ forced-lite REQ in a solo run, is legitimate halt #4).
 
 Do all the steps below **for every touched repo's PR**:
 
-1. Review the full PR diff using `gh pr diff <prUrl>` (use the URL stored in `repos[<id>].prUrl`).
+1. Review the full PR diff, read from the local repository: the PR merges the pushed branch into the integration branch, so its diff is the three-dot, rename-aware diff from `origin/<integrationBranch>` to `HEAD`, once both refs are fetched and `HEAD` is the pushed head. Run this fence from that repo's worktree, with the literal values from state (`<worktree>` is `repos[<id>].worktree`, `<branch>` its branch). They sit inside single quotes, so write any `'` in a value as `'\''`:
+   ```sh
+   wt='<worktree>'; ib='<integrationBranch>'; br='<branch>'
+   if ! git -C "$wt" fetch origin "+refs/heads/$ib:refs/remotes/origin/$ib" "+refs/heads/$br:refs/remotes/origin/$br"; then
+     printf 'pr_diff=error\ndetail=fetch of origin/%s or origin/%s failed\n' "$ib" "$br"; rc=2
+   elif [ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$wt" rev-parse "origin/$br")" ]; then
+     printf 'pr_diff=error\ndetail=HEAD is not origin/%s, push first: the PR shows the remote head\n' "$br"; rc=2
+   else
+     git -C "$wt" diff -M "origin/$ib...HEAD"; rc=$?
+   fi
+   echo "pr_diff_rc=$rc"
+   ```
+   The fetch names each ref's destination, as the lane check's does, so it works in a `--single-branch` clone too. A `pr_diff=error` line comes with no diff: push the branch, or fix the fetch, and run the fence again.
 2. Check for:
    - Stray debug logs, TODOs, or commented-out code
    - Files that shouldn't have been included (secrets, generated files, unrelated changes)
@@ -107,10 +119,23 @@ Do all the steps below **for every touched repo's PR**:
 3. If issues are found:
    - Fix inside the owning repo's worktree, commit with message: `fix(scope): PR cleanup [REQ-xxx]`
    - Push that worktree's branch: `git -C <worktree> push`
-4. If CI checks are configured, verify each PR passes: `gh pr checks <prUrl>`. Wait for in-flight checks before moving on.
+4. Read each PR's CI through the forge adapter, from that repo's worktree. `<prNumber>` is `repos[<id>].prNumber`, and `<ciWait>` is the seconds the fence waits before its one read:
+   ```sh
+   ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
+   if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC_TOOLKIT_ROOT/partials/forge.sh"; fi
+   sleep '<ciWait>'
+   adlc_forge_pr_checks '<prNumber>'
+   ```
+   The wait between reads is yours; the fence reads no config. Before the first read, read two keys of `.adlc/config.yml` with your file tool: `proceed.ci.max_reads` (default 20), the most reads you make in all, and `proceed.ci.interval_s` (default 30), the seconds between two reads. An interval above 90 is read as 90. Pass `0` as `<ciWait>` on the first read and the interval on every later one, so no call lasts longer than one interval plus one forge read. The first line printed is the verdict, `checks=<pass|fail|pending|none>`, and each `check=<state>` line after it names one check. Act on the verdict:
+   - `pass`: CI is green, and the end-of-phase line says so.
+   - `none`: no CI checks are reported. The end-of-phase line says so, and the phase continues.
+   - `fail`: name the failing checks (the `check=fail` lines) and handle them as a Phase 7 issue: fix, commit and push as in step 3, then read again as for `pending`.
+   - `pending`: read again with `<ciWait>` set to `proceed.ci.interval_s`, at most `proceed.ci.max_reads` reads in all.
+
+   On the last read still `pending`, the phase never reports green. A solo run asks the operator whether to keep waiting, naming the pending checks. An unattended run (no operator present) stops and reports `blocked`, naming the pending checks in a `blockers` entry: `{"reason": "ci-pending", "pendingChecks": [<the name on each check=pending line>], "reads": <reads made>, "detail": "CI checks still pending after <reads made> reads: <names>"}`. A forge error (an `error_class=` line and a non-zero status) is no verdict and never green: read once more, and if it answers the same way, list it as a remaining concern.
 5. **Lite lane:** if steps 3–4 added any commit, re-run the lane check (`proceed/phases-lite.md` "The lane check") before leaving this phase (REQ-652 AC-16).
 
-**End-of-phase log**: Emit one line per PR — "<repo-id>: clean, CI green" — followed by an aggregate "All N PRs ready for merge" or list any remaining concerns. Continue to Phase 8 immediately.
+**End-of-phase log**: Emit one line per PR — "<repo-id>: clean, CI green" on `pass`, or "<repo-id>: clean, no CI checks reported" on `none` — followed by an aggregate "All N PRs ready for merge" or list any remaining concerns. Continue to Phase 8 immediately.
 
 ---
 

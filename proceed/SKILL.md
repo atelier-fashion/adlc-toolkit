@@ -394,9 +394,13 @@ Architecture or Reflection sections (`proceed/phases-lite.md`, BR-13).
 
 Lightweight per-PR sanity check — review already ran in Phase 5, do NOT
 re-run `/review` (`/adlc:review` on the plugin install). For every PR: review
-diff, catch stray debug/TODO/secret content, verify cross-repo contract
-consistency, push fixups in the owning worktree if needed, wait for
-`gh pr checks` to go green. End-of-phase log:
+the local diff from `origin/<integrationBranch>` to the pushed `HEAD`, catch
+stray debug/TODO/secret content, verify cross-repo contract consistency, push
+fixups in the owning worktree if needed, and read CI with `adlc_forge_pr_checks`
+(both fences are in the companion). `pass` is green and `none` reports no checks;
+`fail` is fixed and pushed like any cleanup; `pending` is read again every
+`proceed.ci.interval_s` seconds, at most `proceed.ci.max_reads` reads, and a wait
+that runs out is never green (solo: ask the operator; unattended: `blocked`). End-of-phase log:
 one line per PR, then "All N PRs ready for merge". **Lite lane:** if this phase
 added commits, re-run the lane check before leaving it.
 

@@ -221,7 +221,7 @@ if [ "$(pwd -P)" != "$(cd "$wt" && pwd -P)" ]; then
   printf 'lane_check=error\ntrigger=check-error\ndetail=run the check from the worktree itself, %s\n' "$wt"; rc=2
 elif [ -n "$(git -C "$wt" status --porcelain --untracked-files=normal)" ]; then
   printf 'lane_check=error\ntrigger=check-error\ndetail=the worktree has uncommitted changes\n'; rc=2
-elif ! git -C "$wt" fetch origin "$ib" "$br"; then
+elif ! git -C "$wt" fetch origin "+refs/heads/$ib:refs/remotes/origin/$ib" "+refs/heads/$br:refs/remotes/origin/$br"; then
   printf 'lane_check=error\ntrigger=check-error\ndetail=fetch of origin/%s or origin/%s failed\n' "$ib" "$br"; rc=2
 elif [ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$wt" rev-parse "origin/$br")" ]; then
   printf 'lane_check=error\ntrigger=check-error\ndetail=HEAD is not origin/%s, push first: the PR merges the remote head\n' "$br"; rc=2
@@ -240,7 +240,10 @@ runs in the check: the partial is sourced from the current directory, so it
 must be the worktree, clean, with no committed change to `.adlc/partials` or
 `.adlc/tools` in any letter case (the pathspec is `icase` because a macOS
 filesystem would source `.ADLC/partials/…` for `.adlc/partials/…`). A failed fetch is an error, not a pass against a
-stale ref. A local `HEAD` that differs from the remote branch is an error,
+stale ref. The fetch names each ref's destination, so `origin/<branch>` is
+written even where `remote.origin.fetch` names one branch only (a
+`--single-branch` clone, BUG-287), where a plain `git fetch origin <name>` and
+`git push -u` leave it unwritten. A local `HEAD` that differs from the remote branch is an error,
 because Phase 8 merges the remote head and a check of anything else certifies
 the wrong commit. A branch that edits the vendored `.adlc/partials` or
 `.adlc/tools` would otherwise be checked by its own edit; the engine itself

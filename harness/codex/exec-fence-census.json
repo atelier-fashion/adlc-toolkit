@@ -306,6 +306,50 @@
       ]
     },
     {
+      "id": "proceed/phases-6-8-ship.md#2:f6a8d63e",
+      "route": "runner",
+      "placeholders": [
+        "branch",
+        "integrationBranch",
+        "worktree"
+      ],
+      "reach": [
+        "git diff",
+        "git fetch",
+        "git rev-parse"
+      ]
+    },
+    {
+      "id": "proceed/phases-6-8-ship.md#3:d9acd654",
+      "route": "runner",
+      "placeholders": [
+        "ciWait",
+        "pr"
+      ],
+      "tied": [
+        "pr"
+      ],
+      "sources": [
+        "forge"
+      ],
+      "reach": [
+        "$adlc_fp_py",
+        "$adlc_mkp_py",
+        "az",
+        "cat",
+        "find",
+        "gh",
+        "gh pr checks",
+        "gh pr view",
+        "git",
+        "git remote",
+        "mktemp",
+        "python3",
+        "rm",
+        "sleep"
+      ]
+    },
+    {
       "id": "proceed/phases-lite.md#1:727c7156",
       "route": "runner",
       "reach": [
@@ -313,7 +357,7 @@
       ]
     },
     {
-      "id": "proceed/phases-lite.md#2:a75800ba",
+      "id": "proceed/phases-lite.md#2:d0c98c51",
       "route": "runner",
       "placeholders": [
         "branch",

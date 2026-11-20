@@ -1,7 +1,7 @@
 ---
 id: TASK-274
 title: "Skill text: the lane check fetches with explicit destinations, and Phase 7 reads its diff locally and its CI through the adapter"
-status: draft
+status: complete
 parent: REQ-719
 repo: adlc-toolkit
 created: 2026-11-20
@@ -29,19 +29,19 @@ Change the two skill files' fences and text (architecture ADR-2 and ADR-6, Phase
 
 ## Acceptance Criteria
 
-- [ ] The lane check fence fetches with `git -C "$wt" fetch origin "+refs/heads/$ib:refs/remotes/origin/$ib" "+refs/heads/$br:refs/remotes/origin/$br"`. Every guard before it and every line after it is unchanged.
-- [ ] In a throwaway `--single-branch` clone with the REQ's branch pushed, the fence run through `fence-run` prints `lane_check=pass` for a change inside the lite lane, and `refs/remotes/origin/<branch>` exists afterwards. With the remote made unreachable it prints `trigger=check-error` and the fetch detail. With an unpushed commit it prints the `HEAD is not origin/<branch>` detail. On an ordinary clone the verdict is what it was.
-- [ ] `fence-run show proceed/phases-lite.md` prints a runner call for the lane check fence under its new id, and both goldens hold that id.
-- [ ] `partials/lane-check.sh`'s header and `partials/lane-check.md` show the explicit fetch.
-- [ ] Phase 7's diff fence takes `<worktree>`, `<integrationBranch>` and `<branch>`, fetches with the same form, prints an error and no diff when `HEAD` is not the remote branch's head, and otherwise prints the three-dot, rename-aware diff from `origin/<integrationBranch>` to `HEAD`.
-- [ ] Phase 7's CI fence is `sleep '<ciWait>'` then `adlc_forge_pr_checks '<prNumber>'`, with the canonical root line and the guarded source of `forge.sh`. Both goldens route both new fences `runner`, the CI fence's record is `tied`, and `fence-run show proceed/phases-6-8-ship.md` prints a runner call for each.
-- [ ] The CI fence called with another PR's number exits 65 (the tie), and with `ciWait=91` exits 65 (the pattern).
-- [ ] Phase 7's text states: `pass` (the end-of-phase line says CI is green), `none` (it says no CI checks are reported, and the phase continues), `fail` (the failing checks are named and handled as a Phase 7 issue: fix, commit, push, read again), `pending` (read again with `ciWait` set to `proceed.ci.interval_s`, at most `proceed.ci.max_reads` reads in all); the two keys with their defaults 20 and 30, and that an interval above 90 is read as 90; that on the last read still `pending` the phase never reports green, a solo run asks the operator, and an unattended run reports `blocked` naming the pending checks.
-- [ ] No `gh` command appears in Phase 7 of `proceed/phases-6-8-ship.md` or in the Phase 7 paragraph of `proceed/SKILL.md`; a test asserts both.
-- [ ] `exec_prompt.py`'s anchors still match exactly once: `Continue to Phase 8 immediately.` stays in Phase 7's end-of-phase line, and every `_LITE_PAIRS` anchor is untouched. The prompt scan passes on the new text.
-- [ ] `templates/config-template.yml` documents both keys in a commented block, and `test_lane_check.py`'s template tests pass.
-- [ ] `proceed/SKILL.md` stays under 500 lines. `sh tools/lint-skills/check.sh`, `python3 tools/adlc/fence_census.py --check`, `python3 -m pytest tools/adlc/tests` and `pytest tools/lint-skills/tests` pass.
-- [ ] `templates/permissions.yml` and every file under `harness/*/rendered/` are unchanged.
+- [x] The lane check fence fetches with `git -C "$wt" fetch origin "+refs/heads/$ib:refs/remotes/origin/$ib" "+refs/heads/$br:refs/remotes/origin/$br"`. Every guard before it and every line after it is unchanged.
+- [x] In a throwaway `--single-branch` clone with the REQ's branch pushed, the fence run through `fence-run` prints `lane_check=pass` for a change inside the lite lane, and `refs/remotes/origin/<branch>` exists afterwards. With the remote made unreachable it prints `trigger=check-error` and the fetch detail. With an unpushed commit it prints the `HEAD is not origin/<branch>` detail. On an ordinary clone the verdict is what it was.
+- [x] `fence-run show proceed/phases-lite.md` prints a runner call for the lane check fence under its new id, and both goldens hold that id.
+- [x] `partials/lane-check.sh`'s header and `partials/lane-check.md` show the explicit fetch.
+- [x] Phase 7's diff fence takes `<worktree>`, `<integrationBranch>` and `<branch>`, fetches with the same form, prints an error and no diff when `HEAD` is not the remote branch's head, and otherwise prints the three-dot, rename-aware diff from `origin/<integrationBranch>` to `HEAD`.
+- [x] Phase 7's CI fence is `sleep '<ciWait>'` then `adlc_forge_pr_checks '<prNumber>'`, with the canonical root line and the guarded source of `forge.sh`. Both goldens route both new fences `runner`, the CI fence's record is `tied`, and `fence-run show proceed/phases-6-8-ship.md` prints a runner call for each.
+- [x] The CI fence called with another PR's number exits 65 (the tie), and with `ciWait=91` exits 65 (the pattern).
+- [x] Phase 7's text states: `pass` (the end-of-phase line says CI is green), `none` (it says no CI checks are reported, and the phase continues), `fail` (the failing checks are named and handled as a Phase 7 issue: fix, commit, push, read again), `pending` (read again with `ciWait` set to `proceed.ci.interval_s`, at most `proceed.ci.max_reads` reads in all); the two keys with their defaults 20 and 30, and that an interval above 90 is read as 90; that on the last read still `pending` the phase never reports green, a solo run asks the operator, and an unattended run reports `blocked` naming the pending checks.
+- [x] No `gh` command appears in Phase 7 of `proceed/phases-6-8-ship.md` or in the Phase 7 paragraph of `proceed/SKILL.md`; a test asserts both.
+- [x] `exec_prompt.py`'s anchors still match exactly once: `Continue to Phase 8 immediately.` stays in Phase 7's end-of-phase line, and every `_LITE_PAIRS` anchor is untouched. The prompt scan passes on the new text.
+- [x] `templates/config-template.yml` documents both keys in a commented block, and `test_lane_check.py`'s template tests pass.
+- [x] `proceed/SKILL.md` stays under 500 lines. `sh tools/lint-skills/check.sh`, `python3 tools/adlc/fence_census.py --check`, `python3 -m pytest tools/adlc/tests` and `pytest tools/lint-skills/tests` pass.
+- [x] `templates/permissions.yml` and every file under `harness/*/rendered/` are unchanged.
 
 ## Verification
 
