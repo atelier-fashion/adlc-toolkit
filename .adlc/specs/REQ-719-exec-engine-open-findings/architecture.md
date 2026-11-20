@@ -59,8 +59,11 @@ status:
 
 - `blocked`: the drop. Nothing is signalled. In order: `restore_surfaces`, `exec.update` with
   `abortedBy`, `abortedAt` and `abortedFrom: "blocked"`, `status = "failed"`, `revoke_trust`,
-  `_carry(run)`, `tokens.pop(req)`, removal from `self.queue` if present, `_emit(run, "failed",
-  "aborted")`, the printed line, `_release_holds()`.
+  `_carry(run, {})`, `tokens.pop(req)`, removal from `self.queue` if present, `_emit(run, "failed",
+  "aborted")`, the printed line, `_release_holds()`. The carry passes an empty state, as `reject`'s
+  does: the working copy's state was carried when the run blocked and no harness has run since,
+  and carrying it again would replace the engine's own blocker entry (a rebase conflict's) with
+  the session's list.
 - `awaiting_approval`: refused, and the message names `reject` (BR-4).
 - anything else: today's refusal, naming the status.
 
@@ -132,6 +135,14 @@ fail naming the fence and the placeholder. A variable the fence fills from a com
 (`/architect` Step 5's `$prnum`, a number `adlc_forge_pr_create` printed) is not a placeholder
 and is not checked (BR-14).
 
+**How "assigns from text that holds one" is decided (as built, TASK-273).** A variable is
+tainted when an assignment, a `for … in` header or a here-document a `read` consumes holds an
+unmarked placeholder or another tainted variable. Command substitutions are removed first,
+because a command's output is not a value the model supplied (BR-14); so `x=$(printf %s "<n>")`
+is not caught, which is BR-14's line and a declared gap. Every positional word of the call is
+checked, and the operations checked are every `adlc_forge_pr_*` except `pr_create` and
+`pr_list`, so an operation added later starts checked.
+
 **Why a view of the value and not a list by head.** `adlc_forge_pr_list --head` on Azure DevOps
 returns no head name and every state, and a list answers "which PRs has this branch", which
 needs a second comparison. One view of the value answers the question asked: is this number the
@@ -150,6 +161,10 @@ caller's PR.
    `O_RDONLY | O_NOFOLLOW | O_NONBLOCK` and `dir_fd`.
 4. Calls `fstat` on that descriptor: a regular file, at most 1 MiB. Reads from the same
    descriptor, at most the cap plus one byte, and decodes UTF-8.
+
+The given spelling of the working directory is `$PWD` when it is absolute and names the same
+directory as `os.getcwd()`, which on macOS always answers in the real spelling; `run()` passes
+it as a third, optional argument (found by TASK-272, built in TASK-273).
 
 Every failure is a `Refusal`, which `parse_values` already turns into 65. `O_NONBLOCK` is what
 keeps a FIFO from blocking the open. A module-level no-op, called between two component opens,
