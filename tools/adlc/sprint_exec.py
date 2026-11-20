@@ -880,7 +880,9 @@ class Orchestrator(object):
                         "promptPath": "prompt.txt", "logPath": "stdout.json", "stalledAt": None,
                         "trustMechanism": batch.adapter.trust_grant, "trustGrantedAt": None,
                         "trustRevokedAt": None, "exitCode": None, "exitClass": None,
-                        "abortedBy": None, "abortedAt": None}}
+                        # Who aborted the run, when, and the status `abort` found it in
+                        # (`running`, `stalled` or `blocked`; REQ-719 BR-19).
+                        "abortedBy": None, "abortedAt": None, "abortedFrom": None}}
         if batch.policy is not None:
             # What this run checks the user policy folder against, before each launch and
             # resume and when each harness exits (REQ-662 BR-4); a newer, unmarked record of the
@@ -2171,7 +2173,9 @@ class Orchestrator(object):
             self.revoke_trust(run)
             self._carry(run, {})
             self.restore_surfaces(run)          # the working copy is left (REQ-662 BR-17)
-            self._emit(run, "failed", "other")
+            # The engine's own terminal, with no reason: the operator's text is the ledger's
+            # alone, never the run-outcome log's (REQ-719 BR-18).
+            self._emit(run, "rejected", "")
             self.say("%s rejected: %s" % (req, reason))
             self._release_holds()
 
@@ -2221,10 +2225,11 @@ class Orchestrator(object):
             raise Refused(why)
 
     def abort(self, req, by="", caller_pid=None, caller_env=None):
-        """The only way a running or stalled harness is killed (BR-20). A recorded pid is
-        signalled only while it is still the process recorded (:func:`same_process`): one the
-        OS has given another process since is never signalled, and reads as no live process
-        (REQ-662 BR-18)."""
+        """The only way a running or stalled harness is killed (BR-20), and the way a blocked
+        run with no live process is dropped (REQ-719 BR-1). A recorded pid is signalled only
+        while it is still the process recorded (:func:`same_process`): one the OS has given
+        another process since is never signalled, and reads as no live process (REQ-662
+        BR-18). Returns the line it printed."""
         with self.lock:
             run = self._run(req)
             self.caller_guard(run, caller_env, caller_pid)
@@ -2237,11 +2242,21 @@ class Orchestrator(object):
                     os.killpg(int(close), signal.SIGTERM)
                 except OSError:
                     pass
-                self.say("%s close-out aborted by %s" % (req, by))
-                return
+                line = "%s close-out aborted by %s" % (req, by)
+                self.say(line)
+                return line
+            if not alive and run.status == "blocked":
+                # The drop (REQ-719 ADR-1): nothing is signalled and nothing goes to the forge.
+                # The branch, the PR and the working copy are left to a person.
+                self.restore_surfaces(run)      # the working copy is left (REQ-662 BR-17)
+                return self._aborted(run, by, "blocked", {})
+            if not alive and run.status == "awaiting_approval":
+                raise Refused("%s has no live process; its last status is awaiting_approval, "
+                              "and a run at the gate is ended with `reject`, not `abort`" % req)
             if not alive:
                 raise Refused("%s has no live process; its last status is %s"
                               % (req, run.status))
+            found = run.status
             try:
                 os.killpg(int(pid), signal.SIGTERM)
             except OSError:
@@ -2256,12 +2271,51 @@ class Orchestrator(object):
             if proc is not None:
                 proc.poll()
             self.restore_surfaces(run)          # the working copy is left (REQ-662 BR-17)
-            run.exec.update({"abortedBy": by, "abortedAt": el.now()})
-            run.status = "failed"
-            self.revoke_trust(run)
-            self._carry(run)
-            self._emit(run, "failed", "other")
-            self.say("%s aborted by %s; working copy left at %s" % (req, by, run.wc))
+            return self._aborted(run, by, found, None)
+
+    def _aborted(self, run, by, found, state):
+        """What both arms of :meth:`abort` do once no harness is at work for ``run``: it ends
+        ``failed``, recording who aborted it, when and the status ``found``; its trust is
+        revoked and its state carried (``state``: None carries the working copy's, as after a
+        kill; ``{}`` only what the engine owns, as `reject` does); any approval token held for
+        it is discarded and it leaves the merge queue, so an approval recorded before it was
+        blocked is never executed; one run-outcome line, ``failed`` / ``aborted``; one printed
+        line; and an approval held behind it is released (REQ-719 BR-2, BR-19)."""
+        run.exec.update({"abortedBy": by, "abortedAt": el.now(), "abortedFrom": found})
+        run.status = "failed"
+        self.revoke_trust(run)
+        self._carry(run, state)
+        self.tokens.pop(run.req, None)
+        if run.req in self.queue:
+            self.queue.remove(run.req)
+        self._emit(run, "failed", "aborted")
+        urls = self._pr_urls(run)
+        line = "%s aborted by %s; working copy left at %s, branch %s%s" % (
+            run.req, by, run.wc, run.doc["branch"], ", PR %s" % ", ".join(urls) if urls else "")
+        self.say(line)
+        self._release_holds()
+        return line
+
+    def _pr_urls(self, run):
+        """The PR URLs recorded for ``run``: its plan's, the engine's own record, else each
+        repo's ``prUrl`` in the primary path's state that parses as a PR on the run's forge
+        host. State is the model's data, so a value that does not parse is not printed."""
+        doc = run.ledger().trusted()
+        if doc and isinstance(doc.get("plan"), dict):
+            return [pr["url"] for pr in doc["plan"].get("prs") or [] if pr.get("url")]
+        repos = run.read_primary_state().get("repos")
+        repos = repos if isinstance(repos, dict) else {}
+        out = []
+        for rid in [run.primary_repo] + sorted(r for r in run.doc["repos"]
+                                               if r != run.primary_repo):
+            entry = repos.get(rid)
+            url = entry.get("prUrl") if isinstance(entry, dict) else None
+            try:
+                es.parse_pr_url(url, self.host_of(run))
+            except es.SafetyError:
+                continue
+            out.append(url)
+        return out
 
     def _run(self, req):
         es.valid_req(req)
@@ -2991,7 +3045,9 @@ class Orchestrator(object):
             allow, invocation = self._op_allowance(request, pid)
             self.answer(request["req"], request.get("text", ""), pid, env, allow, invocation)
         elif op == "abort":
-            self.abort(request["req"], request.get("decidedBy", ""), pid, env)
+            # The line the supervisor printed, so the client prints it too.
+            return {"ok": True, "result": self.abort(request["req"], request.get("decidedBy", ""),
+                                                     pid, env)}
         elif op == "reissue":
             run = self._run(request["req"])
             if run.status != "awaiting_approval":
@@ -3146,6 +3202,11 @@ def render_row(run, violations=()):
     if run.status == "blocked":
         for item in run.read_primary_state().get("blockers") or []:
             lines.append("  blocked: a person must look: %s" % json.dumps(item)[:300])
+        # Both ways out, each a line the CLI parses: `--channel` before the REQ id, so the
+        # reply after it is read as one (REQ-719 BR-5).
+        lines.append("  answer it: sprint-exec answer --channel skill '%s' '<reply>'" % run.req)
+        lines.append("  or drop it, leaving its branch, PR and working copy: "
+                     "sprint-exec abort --channel skill '%s'" % run.req)
     closing = run.read_primary_state().get("closeOut")
     if isinstance(closing, dict) and closing.get("status") not in (None, "ok"):
         lines.append("  close-out: %s — %s" % (closing.get("status"), closing.get("reason")))

@@ -1864,3 +1864,273 @@ def test_bug287_the_launch_and_the_relaunch_name_the_forge_repo_and_the_state_fi
         assert "primary repo is `acme/widgets`." in text, name
         assert "Wherever a fence takes `<state>`, pass `%s`" % state in text, name
         assert "You have no clock." in text, name
+
+
+# ---- REQ-719: `abort` drops a blocked run; `reject` and `abort` in the run-outcome log ---------
+def _aborted_line(run, urls):
+    """The one line `abort` prints (REQ-719 BR-2)."""
+    return "%s aborted by operator; working copy left at %s, branch %s, PR %s" % (
+        run.req, run.wc, run.doc["branch"], ", ".join(urls))
+
+
+def test_req719_abort_drops_a_blocked_run(box, tmp_path, monkeypatch):
+    """REQ-719 BR-1, BR-29: `abort` takes a run at `blocked` whose recorded harness and
+    close-out pids are not live. Nothing is signalled. The run ends `failed` with who aborted
+    it, when, and `abortedFrom: blocked`, in the run record and the primary path's state; the
+    token held for it is discarded; and it prints one line naming the REQ, who aborted it, the
+    working copy, the branch and the PR. Offline: the mock forge, and every directory the run
+    writes under a throwaway one."""
+    for key in ("HOME", "ADLC_HOME", "XDG_STATE_HOME", "ADLC_FORGE_MOCK_STORE",
+                "ADLC_RUN_OUTCOMES_LOG"):
+        assert os.path.realpath(box.environ[key]).startswith(os.path.realpath(str(tmp_path))), key
+    assert box.environ["ADLC_FORGE_MOCK"] == "1"
+    box.blocked()
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    assert run.status == "blocked" and REQ not in orch.children
+    assert not se.recorded_harness_pids(run.doc)
+    assert os.path.realpath(run.path).startswith(os.path.realpath(str(tmp_path)))
+    url = run.read_primary_state()["repos"]["widgets"]["prUrl"]
+    # A token held for the run: the drop discards it, as `reject` does.
+    orch.tokens[REQ] = {"approve": el.token_digest(el.mint_token()), "gate": None}
+    signalled = []
+    real_kill = os.kill
+
+    def kill(pid, sig):
+        if sig == 0:                            # a liveness probe, not a signal
+            return real_kill(pid, sig)
+        signalled.append(("kill", pid, sig))
+
+    monkeypatch.setattr(os, "kill", kill)
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signalled.append(("killpg", pid, sig)))
+    said = len(box.out.getvalue())
+    line = orch.abort(REQ, by="operator")
+    monkeypatch.undo()
+    assert signalled == []
+    assert run.status == "failed"
+    assert run.exec["abortedBy"] == "operator" and run.exec["abortedAt"]
+    assert run.exec["abortedFrom"] == "blocked"
+    assert REQ not in orch.tokens
+    state = run.read_primary_state()
+    assert state["status"] == "failed" and state["exec"]["abortedFrom"] == "blocked"
+    # Why it blocked stays on the record a person reads.
+    assert state["blockers"] == [{"reason": "reflector-questions", "question": "which?"}]
+    assert se.Run.load(run.path).exec["abortedFrom"] == "blocked"
+    assert line == _aborted_line(run, [url])
+    assert box.out.getvalue()[said:] == line + "\n"
+
+
+def test_req719_the_drop_makes_no_one_way_move_and_no_forge_call(tmp_path, monkeypatch):
+    """REQ-719 BR-2, AC-1: the drop leaves the local and the remote branch, the PR and the
+    working copy as they were, for a person. It restores what the engine rendered and hid in
+    the working copy, holds no trust grant and leaves the user config as it found it, logs no
+    `one_way_move`, and makes no forge call: `calls.log` gains no line. On a file-rendering
+    adapter whose trust grant writes the user config."""
+    box = eh.trust_sandbox(tmp_path, monkeypatch)
+    base = 'model = "operator"\n'
+    eh.commit_on_main(box, {eh.FILE_CONFIG: base})
+    box.blocked(add=["src"])
+    user = box.user_files()
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    wc = run.wc
+    assert run.status == "blocked"
+    # At the block the render is still in the working copy, and hidden.
+    assert eh.read_text(os.path.join(wc, eh.FILE_CONFIG)) != base
+    assert os.path.exists(os.path.join(wc, eh.FILE_RULE))
+    branch = run.doc["branch"]
+    remote = eh.git(box.bare, "rev-parse", "refs/heads/" + branch).strip()
+    local = eh.git(box.repo, "rev-parse", "refs/heads/" + branch).strip()
+    prs = (box.store / "prs.json").read_text()
+    calls = (box.store / "calls.log").read_text()
+    logged = len(box.log(run))
+    orch.abort(REQ, by="operator")
+    assert run.status == "failed" and run.exec["abortedFrom"] == "blocked"
+    assert eh.git(box.bare, "rev-parse", "refs/heads/" + branch).strip() == remote
+    assert eh.git(box.repo, "rev-parse", "refs/heads/" + branch).strip() == local
+    assert eh.git(wc, "rev-parse", "HEAD").strip() == local
+    assert (box.store / "prs.json").read_text() == prs
+    [pr] = json.loads(prs)["prs"]
+    assert (pr["state"], pr["isDraft"], pr["title"], pr["body"]) == (
+        "OPEN", False, "%s: thing" % REQ, "body")
+    assert (box.store / "calls.log").read_text() == calls
+    assert os.path.isdir(wc)
+    assert eh.read_text(os.path.join(wc, eh.FILE_CONFIG)) == base
+    assert not os.path.lexists(os.path.join(wc, eh.FILE_RULE))
+    assert "S" not in [ln.split()[0] for ln in eh.git(wc, "ls-files", "-t").splitlines()]
+    assert subprocess.run(["git", "-C", wc, "config", "--worktree", "--get",
+                           "core.excludesFile"], stdout=subprocess.PIPE).returncode != 0
+    assert eh.git(wc, "status", "--porcelain", "-uall") == ""
+    assert not run.doc.get("trustGrants") and run.exec["trustRevokedAt"]
+    assert box.user_files() == user
+    assert not [r for r in box.log(run) if r["kind"] == "one_way_move"]
+    dropped = box.log(run)[logged:]
+    assert not [r for r in dropped if r["kind"] == "partial" and r["argv"][0] == "forge.sh"]
+    assert not [r for r in dropped if r["kind"] == "git"
+                and ({"push", "fetch"} & set(r["argv"]))]
+
+
+def test_req719_an_approved_then_conflicted_run_is_never_merged_after_the_drop(tmp_path):
+    """REQ-719 BR-2, AC-3: a run approved and then blocked by a rebase conflict holds a
+    recorded approval. After the drop it is never executed, by the three paths that could reach
+    it: it is out of the merge queue, `answer` refuses it, and a later `resume` skips it. The
+    REQ whose approval was queued behind it is released and merges."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902", "REQ-903"))
+    box.req("REQ-901", files={"README.md": "AAA\nline two\nline three\n"})
+    box.req("REQ-902", files={"README.md": "BBB\nline two\nline three\n", "c.txt": "902\n"},
+            sleep_first=1.5)
+    box.req("REQ-903", files={"c.txt": "903\n"}, sleep_first=3)
+    orch = box.go(shared=True)
+    second, third = orch.runs["REQ-902"], orch.runs["REQ-903"]
+    box.approve(orch, REQ)                      # REQ-901 merges: main moves under REQ-902
+    assert orch.runs[REQ].status == "merged"
+    assert box.approve(orch, "REQ-902", drain=False) == "approved"
+    assert box.approve(orch, "REQ-903", drain=False) == "approved (queued behind REQ-902)"
+    orch.drain()
+    assert second.status == "blocked" and third.status == "approved"
+    assert second.read_primary_state()["blockers"][0]["conflictFiles"] == ["README.md"]
+    assert second.ledger().read()["decision"]["decision"] == "approved"
+    url = second.ledger().read()["plan"]["prs"][0]["url"]
+    line = orch.abort("REQ-902", by="operator")
+    assert line == _aborted_line(second, [url])
+    assert second.status == "failed" and second.exec["abortedFrom"] == "blocked"
+    # The queue: `execute` is reached from it alone, and the run is not in it.
+    assert "REQ-902" not in orch.queue and orch.queue == ["REQ-903"]
+    assert third.doc["holdBehind"] is None
+    assert se.Run.load(third.path).doc["holdBehind"] is None
+    # `answer` refuses a status that is not `blocked`.
+    with pytest.raises(se.Refused, match="REQ-902 is failed, not blocked"):
+        orch.answer("REQ-902", "go on")
+    assert len(box.argvs("REQ-902")) == 1
+    # A later supervisor skips a terminal run, and drains the one queued behind it.
+    later = box.orch()
+    later.resume()
+    assert sorted(later.runs) == ["REQ-903"] and later.queue == ["REQ-903"]
+    later.drain()
+    assert later.runs["REQ-903"].status == "merged"
+    assert se.Run.load(second.path).status == "failed"
+    merged = [c["argv"][0] for c in box.calls("pr_merge")]
+    assert url not in merged
+    assert later.runs["REQ-903"].ledger().read()["plan"]["prs"][0]["url"] in merged
+
+
+def test_req719_answer_after_the_drop_is_refused(tmp_path):
+    """REQ-719 BR-3: `answer` after the drop is refused naming `failed`, and nothing is
+    launched. The other order is not a refusal: an `abort` after an `answer` finds the
+    relaunched harness live and kills it, as REQ-659 BR-20 has it."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    box.blocked("REQ-901")
+    box.blocked("REQ-902", after_answer={"status": "awaiting_approval",
+                                         "claim": "awaiting_approval", "blockers": None,
+                                         "sleep_first": 30})
+    orch = box.go(shared=True)
+    first, second = orch.runs["REQ-901"], orch.runs["REQ-902"]
+    assert first.status == second.status == "blocked"
+    orch.abort("REQ-901", by="operator")
+    with pytest.raises(se.Refused, match="REQ-901 is failed, not blocked"):
+        orch.answer("REQ-901", "too late")
+    assert first.status == "failed" and "REQ-901" not in orch.children
+    assert len(box.argvs("REQ-901")) == 1
+    orch.answer("REQ-902", "the second option")
+    pid = second.exec["pid"]
+    assert second.status == "running" and se.same_process(pid, second.exec["pidStart"])
+    eh.until(lambda: len(box.argvs("REQ-902")) == 2, what="the relaunch to start")
+    orch.abort("REQ-902", by="operator")
+    eh.until(lambda: not se.pid_alive(pid), timeout=10, what="the relaunched harness to be gone")
+    assert second.status == "failed" and second.exec["abortedFrom"] == "running"
+    assert "REQ-902" not in orch.children
+
+
+def test_req719_abort_is_still_refused_elsewhere(tmp_path):
+    """REQ-719 BR-4, AC-4: every refusal but the blocked one stands, with nothing changed. At
+    `awaiting_approval` with no live process the message names `reject`; on `approved`,
+    `merged` and `rejected` it names the status; from inside a run (`ADLC_EXEC_RUN`) the caller
+    guard refuses even a blocked run, in process and through the client. `abort` mints and
+    prints no token (LESSON-781)."""
+    reqs = ("REQ-901", "REQ-902", "REQ-903", "REQ-904")
+    box = eh.Sandbox(tmp_path, reqs=reqs)
+    box.blocked("REQ-904")
+    orch = box.go(shared=True)
+    runs = [orch.runs[req] for req in reqs]
+    merged, rejected, gate, blocked = runs
+    box.approve(orch, "REQ-901")
+    orch.reject("REQ-902", "no", decided_by="operator")
+    assert [r.status for r in runs] == ["merged", "rejected", "awaiting_approval", "blocked"]
+
+    def snapshot(run):
+        return (json.dumps(run.doc, sort_keys=True),
+                json.dumps(run.read_primary_state(), sort_keys=True), len(box.outcomes()),
+                run.req in orch.tokens, (box.store / "calls.log").read_text(),
+                box.out.getvalue())
+
+    def refused(run, match, **kw):
+        before = snapshot(run)
+        with pytest.raises(se.Refused, match=match):
+            orch.abort(run.req, by="operator", **kw)
+        assert snapshot(run) == before
+
+    refused(gate, r"REQ-903 has no live process; its last status is awaiting_approval, .*"
+                  r"`reject`")
+    assert "REQ-903" in orch.tokens
+    refused(merged, r"REQ-901 has no live process; its last status is merged$")
+    refused(rejected, r"REQ-902 has no live process; its last status is rejected$")
+    refused(blocked, "Rule B", caller_env={"ADLC_EXEC_RUN": "REQ-904"})
+    inside = box.orch(ADLC_EXEC_RUN="REQ-904")
+    before = snapshot(blocked)
+    with pytest.raises(se.Refused, match="Rule B"):
+        se._client(inside, se._parser().parse_args(["abort", "--channel", "skill", "REQ-904"]))
+    assert se.Run.load(blocked.path).status == "blocked" and snapshot(blocked) == before
+    box.approve(orch, "REQ-903", drain=False)
+    refused(gate, r"REQ-903 has no live process; its last status is approved$")
+    assert orch.queue == ["REQ-903"]
+    # The guard was all that stood in the way of the blocked run.
+    orch.abort("REQ-904", by="operator")
+    assert blocked.status == "failed"
+
+
+def test_req719_reject_records_rejected(box):
+    """REQ-719 BR-18, AC-14: `reject` appends exactly one run-outcome line: `terminal`
+    `rejected`, `engine` `exec` and an empty `blocked_reason`. The operator's reason is the
+    ledger's alone: it is nowhere in the log."""
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    before = box.outcomes()
+    reason = "not this sprint, see thread 5c1e9"
+    orch.reject(REQ, reason, decided_by="operator")
+    assert run.ledger().read()["decision"]["reason"] == reason
+    [line] = box.outcomes()[len(before):]
+    assert (line["terminal"], line["engine"], line["blocked_reason"], line["req"]) == (
+        "rejected", "exec", "", REQ)
+    text = eh.read_text(box.environ["ADLC_RUN_OUTCOMES_LOG"])
+    assert reason not in text and "5c1e9" not in text
+
+
+def test_req719_abort_records_aborted_from_both_arms(tmp_path):
+    """REQ-719 BR-19, AC-15: the kill of a running harness and the drop of a blocked run each
+    append one run-outcome line, `failed` / `aborted`, and record the status found in
+    `exec.abortedFrom`. A run that blocked and was dropped has two lines, `blocked` then
+    `failed`."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    box.req("REQ-901", sleep_first=30)
+    box.blocked("REQ-902")
+    orch = box.start(shared=True)
+    running, blocked = orch.runs["REQ-901"], orch.runs["REQ-902"]
+    eh.until(lambda: os.path.exists(running.wc_state_path()), what="REQ-901's harness to start")
+
+    def settled():
+        orch.poll_once()
+        return blocked.status == "blocked"
+
+    eh.until(settled, what="REQ-902 to block")
+    assert running.status == "running"
+    pid = running.exec["pid"]
+    orch.abort("REQ-901", by="operator")
+    orch.abort("REQ-902", by="operator")
+    eh.until(lambda: not se.pid_alive(pid), timeout=10, what="REQ-901's harness to be gone")
+    box.wait(orch)
+    assert running.exec["abortedFrom"] == "running" and blocked.exec["abortedFrom"] == "blocked"
+    assert [(o["terminal"], o["blocked_reason"]) for o in box.outcomes("REQ-901")] == [
+        ("failed", "aborted")]
+    assert [(o["terminal"], o["blocked_reason"]) for o in box.outcomes("REQ-902")] == [
+        ("blocked", "reflector-questions"), ("failed", "aborted")]
+    assert {o["engine"] for o in box.outcomes()} == {"exec"}
