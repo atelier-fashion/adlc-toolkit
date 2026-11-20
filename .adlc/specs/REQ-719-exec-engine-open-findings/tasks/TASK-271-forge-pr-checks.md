@@ -1,7 +1,7 @@
 ---
 id: TASK-271
 title: "`adlc_forge_pr_checks`: one CI read through the forge adapter, on GitHub, Azure DevOps and the mock"
-status: draft
+status: complete
 parent: REQ-719
 repo: adlc-toolkit
 created: 2026-11-20

@@ -860,6 +860,223 @@ contains "real github pin is forwarded" "pr merge 7 --squash --match-head-commit
 PATH=$OLDPATH4; export PATH
 unset ADLC_FORGE_PROVIDER_OVERRIDE ADLC_TOOLKIT_ROOT
 
+# ===========================================================================
+# REQ-719 BR-22, BR-23, AC-17: adlc_forge_pr_checks, one CI read that never waits
+# ===========================================================================
+TAB=$(printf '\t')
+first() { printf '%s\n' "$1" | head -n 1; }
+ADLC_TOOLKIT_ROOT=$ROOT; export ADLC_TOOLKIT_ROOT
+
+# --- pr_checks mock: each scenario, on both providers, with no store ---------------
+ADLC_FORGE_MOCK=1; export ADLC_FORGE_MOCK
+unset ADLC_FORGE_PROVIDER_OVERRIDE ADLC_FORGE_MOCK_STORE
+for prov in github azure-devops; do
+  ADLC_FORGE_MOCK_PROVIDER=$prov; export ADLC_FORGE_MOCK_PROVIDER
+  for v in pass fail pending none; do
+    ADLC_FORGE_MOCK_SCENARIO=checks-$v; export ADLC_FORGE_MOCK_SCENARIO
+    out=$(adlc_forge_pr_checks 101 2>&1); rc=$?
+    check "pr_checks mock $prov checks-$v rc" "0" "$rc"
+    check "pr_checks mock $prov checks-$v verdict" "checks=$v" "$(first "$out")"
+  done
+  ADLC_FORGE_MOCK_SCENARIO=checks-fail; export ADLC_FORGE_MOCK_SCENARIO
+  check "pr_checks mock $prov lists each check" \
+    "$(printf 'checks=fail\ncheck=fail\tbuild\ncheck=pass\tlint')" "$(adlc_forge_pr_checks 101 2>&1)"
+  ADLC_FORGE_MOCK_SCENARIO=ok; export ADLC_FORGE_MOCK_SCENARIO
+  check "pr_checks mock $prov: a PR with no checks recorded reads none" "checks=none" \
+    "$(adlc_forge_pr_checks 101 2>&1)"
+  ADLC_FORGE_MOCK_SCENARIO=checks-pending-then-pass; export ADLC_FORGE_MOCK_SCENARIO
+  out=$(adlc_forge_pr_checks 101 2>&1); rc=$?
+  check "pr_checks mock $prov pending-then-pass without a store rc" "1" "$rc"
+  check "pr_checks mock $prov pending-then-pass without a store is an error" \
+    "error_class=feature-unsupported" "$(first "$out")"
+  ADLC_FORGE_MOCK_SCENARIO=network; export ADLC_FORGE_MOCK_SCENARIO
+  out=$(adlc_forge_pr_checks 101 2>&1); rc=$?
+  check "pr_checks mock $prov error scenario rc" "1" "$rc"
+  check "pr_checks mock $prov error scenario class" "error_class=network" "$(first "$out")"
+  ADLC_FORGE_MOCK_SCENARIO=checks-pass; export ADLC_FORGE_MOCK_SCENARIO
+  out=$(adlc_forge_pr_checks 9 2>&1); rc=$?
+  check "pr_checks mock $prov unknown PR rc" "1" "$rc"
+  check "pr_checks mock $prov unknown PR class" "error_class=pr-not-found" "$(first "$out")"
+done
+
+# Benign path: every other op answers under a checks-* scenario exactly as under ok.
+for prov in github azure-devops; do
+  ADLC_FORGE_MOCK_PROVIDER=$prov; export ADLC_FORGE_MOCK_PROVIDER
+  for op in pr_create pr_ready pr_edit pr_view pr_list pr_merge pr_comment; do
+    ADLC_FORGE_MOCK_SCENARIO=ok; export ADLC_FORGE_MOCK_SCENARIO
+    want=$(adlc_forge_"$op" 101 2>&1; echo "rc=$?")
+    for v in pass fail pending none pending-then-pass; do
+      ADLC_FORGE_MOCK_SCENARIO=checks-$v; export ADLC_FORGE_MOCK_SCENARIO
+      check "pr_checks: $prov/$op is unchanged under checks-$v" "$want" \
+        "$(adlc_forge_"$op" 101 2>&1; echo "rc=$?")"
+    done
+  done
+  ADLC_FORGE_MOCK_SCENARIO=ok; export ADLC_FORGE_MOCK_SCENARIO
+  want=$(adlc_forge_pr_view 101 --fields number,headRefOid,files 2>&1; adlc_forge_branch_protection main; adlc_forge_commit_prs abc)
+  ADLC_FORGE_MOCK_SCENARIO=checks-fail; export ADLC_FORGE_MOCK_SCENARIO
+  check "pr_checks: $prov python-mock ops are unchanged under checks-fail" "$want" \
+    "$(adlc_forge_pr_view 101 --fields number,headRefOid,files 2>&1; adlc_forge_branch_protection main; adlc_forge_commit_prs abc)"
+done
+
+# --- pr_checks mock with a store: the recorded list, set-checks, the per-PR count ---
+CKSTORE=$(mktemp -d "$SBX/ckstore.XXXXXX")
+ADLC_FORGE_MOCK_STORE=$CKSTORE; ADLC_FORGE_MOCK_PROVIDER=github; ADLC_FORGE_MOCK_SCENARIO=ok
+export ADLC_FORGE_MOCK_STORE ADLC_FORGE_MOCK_PROVIDER ADLC_FORGE_MOCK_SCENARIO
+adlc_forge_pr_create --base main --head feat/x --title T --body B >/dev/null 2>&1
+check "pr_checks store: no checks recorded reads none" "checks=none" "$(adlc_forge_pr_checks 101 2>&1)"
+command python3 "$ROOT/tools/adlc/forge_mock.py" set-checks 101 pass=build skipped=docs "pending=e2e${TAB}linux"
+check "pr_checks store: set-checks rc" "0" "$?"
+check "pr_checks store: a read prints the stored list" \
+  "$(printf 'checks=pending\ncheck=pass\tbuild\ncheck=skipped\tdocs\ncheck=pending\te2e linux')" \
+  "$(adlc_forge_pr_checks 101 2>&1)"
+command python3 "$ROOT/tools/adlc/forge_mock.py" set-checks 101 skipped=docs
+check "pr_checks store: only skipped checks read pass" "checks=pass" "$(first "$(adlc_forge_pr_checks 101 2>&1)")"
+ADLC_FORGE_MOCK_SCENARIO=checks-pending-then-pass; export ADLC_FORGE_MOCK_SCENARIO
+check "pr_checks store: pending-then-pass reads pending first" "checks=pending" \
+  "$(first "$(adlc_forge_pr_checks 101 2>&1)")"
+check "pr_checks store: pending-then-pass reads pass afterwards" "checks=pass" \
+  "$(first "$(adlc_forge_pr_checks 101 2>&1)")"
+check "pr_checks store: and stays pass" "checks=pass" "$(first "$(adlc_forge_pr_checks 101 2>&1)")"
+contains "pr_checks store: the read is recorded" '"op": "pr_checks"' "$(cat "$CKSTORE/calls.log")"
+unset ADLC_FORGE_MOCK ADLC_FORGE_MOCK_PROVIDER ADLC_FORGE_MOCK_SCENARIO ADLC_FORGE_MOCK_STORE
+
+# --- pr_checks GitHub, with a recording gh stub built from gh 2.103.3's measured answers ---
+# Rows are what `--jq '.[] | [.bucket, .name] | @tsv'` prints: @tsv writes a name's tab,
+# newline and backslash as \t, \n and \\. A failing check exits 1 with its rows, a pending
+# one 8; no checks is exit 1 with nothing on stdout; an unknown PR is exit 1 (2026-11-20).
+CKDIR="$SBX/ckbin"; mkdir -p "$CKDIR"; CKREC="$SBX/ck.rec"; export CKREC
+cat > "$CKDIR/gh" <<'CKGH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$CKREC"
+case "$CK_CASE" in
+  pass)    printf 'pass\tbuild\npass\tlint\n'; exit 0 ;;
+  fail)    printf 'fail\tbuild\npass\tlint\n'; exit 1 ;;
+  pending) printf 'pending\tbuild\npass\tlint\n'; exit 8 ;;
+  cancel)  printf 'cancel\tdeploy\npass\tlint\n'; exit 1 ;;
+  skipped) printf 'skipping\tdocs\n'; exit 0 ;;
+  names)   printf 'pass\tunit\\ttests\\nlinux\npass\tback\\\\slash\nfail\traw\ttab\n'; exit 1 ;;
+  none)    echo "no checks reported on the 'feat/x' branch" >&2; exit 1 ;;
+  empty)   exit 0 ;;
+  unknown) echo 'GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)' >&2; exit 1 ;;
+  auth)    echo 'To get started with GitHub CLI, please run:  gh auth login' >&2; exit 4 ;;
+esac
+exit 2
+CKGH
+chmod +x "$CKDIR/gh"
+OLDPATH6=$PATH; PATH="$CKDIR:$PATH"; export PATH
+ADLC_FORGE_PROVIDER_OVERRIDE=github; export ADLC_FORGE_PROVIDER_OVERRIDE
+ckgh() { # ckgh <case> <expected verdict> <description>
+  CK_CASE=$1; export CK_CASE
+  out=$(adlc_forge_pr_checks 9 2>&1); rc=$?
+  check "pr_checks github $3: rc" "0" "$rc"
+  check "pr_checks github $3: verdict" "checks=$2" "$(first "$out")"
+}
+: > "$CKREC"
+ckgh pass pass "all passing (exit 0)"
+check "pr_checks github: the gh command run" \
+  "pr checks 9 --json name,bucket --jq .[] | [.bucket, .name] | @tsv" "$(cat "$CKREC")"
+check "pr_checks github: each check listed" \
+  "$(printf 'checks=pass\ncheck=pass\tbuild\ncheck=pass\tlint')" "$out"
+ckgh fail fail "one failing (exit 1 with rows)"
+contains "pr_checks github: the failed check is listed" "check=fail${TAB}build" "$out"
+ckgh pending pending "one in flight (exit 8 with rows)"
+contains "pr_checks github: the pending check is listed" "check=pending${TAB}build" "$out"
+ckgh cancel fail "a cancelled check"
+contains "pr_checks github: cancel reads fail" "check=fail${TAB}deploy" "$out"
+ckgh skipped pass "only skipped checks"
+check "pr_checks github: skipping reads skipped" "$(printf 'checks=pass\ncheck=skipped\tdocs')" "$out"
+ckgh none none "no checks reported (exit 1)"
+check "pr_checks github: no checks is the verdict alone" "checks=none" "$out"
+ckgh empty none "no rows on exit 0"
+ckgh names fail "names holding a tab, a newline, a backslash"
+check "pr_checks github: each name on one line, with spaces" \
+  "$(printf 'checks=fail\ncheck=pass\tunit tests linux\ncheck=pass\tback\\slash\ncheck=fail\traw tab')" "$out"
+CK_CASE=unknown; export CK_CASE
+out=$(adlc_forge_pr_checks 999999 2>&1); rc=$?
+check "pr_checks github unknown PR: nonzero rc" "1" "$( [ "$rc" -ne 0 ] && echo 1 || echo 0 )"
+check "pr_checks github unknown PR: class" "error_class=pr-not-found" "$(first "$out")"
+contains "pr_checks github unknown PR: raw kept" "raw=GraphQL: Could not resolve to a PullRequest" "$out"
+CK_CASE=auth; export CK_CASE
+out=$(adlc_forge_pr_checks 9 2>&1); rc=$?
+check "pr_checks github auth: rc is gh's" "4" "$rc"
+check "pr_checks github auth: class" "error_class=auth-missing" "$(first "$out")"
+: > "$CKREC"
+out=$(adlc_forge_pr_checks 2>&1); rc=$?
+check "pr_checks github no ref: rc" "1" "$rc"
+check "pr_checks github no ref: class" "error_class=pr-not-found" "$(first "$out")"
+check "pr_checks github no ref: gh never ran" "" "$(cat "$CKREC")"
+check "classify gh's unknown-PR answer" "pr-not-found" \
+  "$(_adlc_forge_classify 'GraphQL: Could not resolve to a PullRequest with the number of 999999. (repository.pullRequest)')"
+
+# --- pr_checks Azure DevOps, with a recording az stub ------------------------------
+cat > "$CKDIR/az" <<'CKAZ'
+#!/bin/sh
+printf '%s\n' "$*" >> "$CKREC"
+case "$CK_CASE" in
+  missing) echo 'ERROR: TF401174: The pull request does not exist' >&2; exit 1 ;;
+esac
+cat "$CK_JSON"
+CKAZ
+chmod +x "$CKDIR/az"
+ckev() { # ckev <policy type> <status> <name>: one policy evaluation, as az prints it
+  printf '{"configuration":{"type":{"displayName":"%s"},"settings":{"displayName":"%s"}},"context":{},"status":"%s"}' "$1" "$3" "$2"
+}
+ckjson() { # ckjson <file> <evaluation>...: a JSON array of them
+  f=$1; shift
+  printf '[' > "$f"; sep=""
+  for e in "$@"; do printf '%s%s' "$sep" "$e" >> "$f"; sep=","; done
+  printf ']\n' >> "$f"
+}
+ADLC_FORGE_PROVIDER_OVERRIDE=azure-devops; export ADLC_FORGE_PROVIDER_OVERRIDE
+CK_CASE=json; CK_JSON="$SBX/ck.json"; export CK_CASE CK_JSON
+ckjson "$CK_JSON" "$(ckev Build approved ci)" "$(ckev Status rejected sonar)" \
+  "$(ckev Build broken nightly)" "$(ckev Status queued deploy)" "$(ckev Build running e2e)" \
+  "$(ckev Build notApplicable docs)" "$(ckev 'Minimum number of reviewers' rejected reviewers)"
+: > "$CKREC"
+out=$(adlc_forge_pr_checks 9 2>&1); rc=$?
+check "pr_checks ado: the az command run" "repos pr policy list --id 9 --output json" "$(cat "$CKREC")"
+check "pr_checks ado mixed: rc" "0" "$rc"
+check "pr_checks ado: each status maps, and the reviewer policy is not listed" \
+  "$(printf 'checks=fail\ncheck=pass\tci\ncheck=fail\tsonar\ncheck=fail\tnightly\ncheck=pending\tdeploy\ncheck=pending\te2e\ncheck=skipped\tdocs')" "$out"
+ckado() { # ckado <expected verdict> <description> <evaluation>...
+  want=$1; desc=$2; shift 2
+  ckjson "$CK_JSON" "$@"
+  out=$(adlc_forge_pr_checks 9 2>&1); rc=$?
+  check "pr_checks ado $desc: rc" "0" "$rc"
+  check "pr_checks ado $desc: verdict" "checks=$want" "$(first "$out")"
+}
+ckado pass "approved and notApplicable" "$(ckev Build approved ci)" "$(ckev Status notApplicable docs)"
+ckado pass "only notApplicable" "$(ckev Build notApplicable docs)"
+ckado pending "queued" "$(ckev Status queued deploy)" "$(ckev Build approved ci)"
+ckado pending "running" "$(ckev Build running e2e)"
+ckado fail "rejected" "$(ckev Status rejected sonar)" "$(ckev Build running e2e)"
+ckado fail "broken" "$(ckev Build broken nightly)"
+ckado none "only a reviewer policy" "$(ckev 'Required reviewers' rejected owners)"
+check "pr_checks ado: a reviewer policy is not a check" "checks=none" "$out"
+ckado none "no evaluations"
+# A Status check named by genre and name, and a Build policy whose display name is translated.
+ckado pass "named by type id and status name" \
+  '{"configuration":{"type":{"id":"0609b952-1397-4640-95ec-e00a01b2c241","displayName":"Compilation"},"settings":{}},"context":{"buildDefinitionName":"CI build"},"status":"approved"}' \
+  '{"configuration":{"type":{"displayName":"Status"},"settings":{"statusGenre":"sec","statusName":"scan\tnow"}},"status":"approved"}'
+check "pr_checks ado: names from the build definition and the status, on one line" \
+  "$(printf 'checks=pass\ncheck=pass\tCI build\ncheck=pass\tsec/scan now')" "$out"
+printf 'not json\n' > "$CK_JSON"
+out=$(adlc_forge_pr_checks 9 2>&1); rc=$?
+check "pr_checks ado: an answer that is not JSON is an error, not none" "error_class=network" "$(first "$out")"
+check "pr_checks ado: and its rc" "1" "$rc"
+CK_CASE=missing; export CK_CASE
+out=$(adlc_forge_pr_checks 9 2>&1); rc=$?
+check "pr_checks ado missing PR: rc" "1" "$rc"
+check "pr_checks ado missing PR: class" "error_class=pr-not-found" "$(first "$out")"
+# Under fence-run the Azure DevOps backend is refused before az runs (REQ-682 BR-5).
+: > "$CKREC"
+err=$(ADLC_FENCE_TOOLKIT_ONLY=1; export ADLC_FENCE_TOOLKIT_ONLY; adlc_forge_pr_checks 9 2>&1 >/dev/null); rc=$?
+check "pr_checks ado under fence-run: rc 3" "3" "$rc"
+contains "pr_checks ado under fence-run: refused" "opaque_entry_refused" "$err"
+check "pr_checks ado under fence-run: az never ran" "" "$(cat "$CKREC")"
+PATH=$OLDPATH6; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE ADLC_TOOLKIT_ROOT CK_CASE CK_JSON CKREC
+
 rm -rf "$SBX"
 
 echo ""
