@@ -766,8 +766,9 @@ is cut per `RELEASING.md`.
   run that fence, then the stamp again, and never stop for it. The line `run_outcome.py`
   prints says the same, and `emit-run-outcome.sh`'s `failed` line ends "telemetry never halts
   the pipeline, so carry on". The stamp still creates no file. A solo `/proceed` reads the
-  same text and does nothing differently: there the lessons fence has always run first. Not
-  verified by a real launch: the tests drive the fake harness.
+  same text and does nothing differently: there the lessons fence has always run first. The
+  tests drive the fake harness. One real Codex launch since ran the lessons fence before the
+  stamp, so the new line met no real session.
 
 - **`/sprint --exec` gets a real session to the merge gate, and to a merge a forge accepts
   (BUG-287).** The first whole pipeline run on a real harness (`codex-cli 0.166.0`, six

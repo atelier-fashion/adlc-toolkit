@@ -10,8 +10,8 @@ domain: "adlc"
 stack: ["markdown", "python"]
 concerns: ["reliability", "developer-experience"]
 tags: ["sprint-exec", "exec-prompt", "run-outcome", "telemetry", "codex", "step-0", "pipeline-state"]
-introduced_by: []
-attribution: none
+introduced_by: [REQ-661, REQ-648]
+attribution: derived
 ---
 
 ## Description
@@ -99,9 +99,10 @@ call that should not have been made. An exec-only note was also weighed: the tel
 is what every engine reads, the sentence is true for all of them, and it changes nothing a
 solo run does, so it went there.
 
-`introduced_by` is left empty. `git blame` on the root-cause lines returns two candidates,
-REQ-661 for the telemetry file's opening and REQ-648 for `read_state` and the wrapper's line.
-With more than one, the choice is the operator's.
+`introduced_by` names both candidates `git blame` returns on the root-cause lines: REQ-661
+for the telemetry file's opening and REQ-648 for `read_state` and the wrapper's line. With
+more than one the choice is the operator's, and the owner chose both on 2026-11-21: the two
+gaps above are one each.
 
 ## Resolution
 
@@ -117,10 +118,16 @@ With more than one, the choice is the operator's.
   creates this file, so if that fence has not run, run it, then this one again)`, and the
   wrapper's `failed` line ends "telemetry never halts the pipeline, so carry on". Exit codes
   are as before, and nothing is created.
-- **Not verified by a real launch.** The tests drive the fake harness: its session makes
-  launch 7's early call through the fence runner under the engine, on the shipped Codex block,
-  and the run reaches the gate with the stamp and the lessons in the primary path's state.
-  Whether a real model now carries on where launch 7 stopped is not measured.
+- **The tests drive the fake harness.** Its session makes launch 7's early call through the
+  fence runner under the engine, on the shipped Codex block, and the run reaches the gate with
+  the stamp and the lessons in the primary path's state.
+- **One real launch since** (launch 9, 2026-11-21, `main` at `f53f322`, in
+  `codex-exec-manual.md`). The session ran the lessons fence, then R1, which stamped on its
+  first call; no fence ran early and `state file not found` was never printed. So the text was
+  followed once, where both earlier sessions had not followed the order, and the line's new
+  wording met no real session: whether a real model carries on after reading it is still not
+  measured. The run later blocked at Phase 4 on a refused `rm -f … && git add … && git commit`
+  line, which is not this bug (fact 11 there).
 
 ## Regression Test
 
@@ -149,4 +156,5 @@ written anyway, each citing this bug:
 
 Merged as `ff855d9` (PR #305) on 2026-11-21. The toolkit has no deploy target: the fix is live
 for a symlink install when its clone pulls `main`, and for a plugin install at the next
-release. No real `codex` or `claude` launch has run against it. LESSON-899.
+release. One real `codex` launch has run against it (launch 9, above); no real `claude` launch
+has. LESSON-899.

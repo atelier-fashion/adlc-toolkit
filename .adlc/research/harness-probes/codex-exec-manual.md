@@ -193,8 +193,43 @@ the same (`state file not found: <path> (nothing recorded, and not a blocker: �
 wrapper's `failed` line ends "telemetry never halts the pipeline, so carry on". R1 still
 creates no file: the first writer of `<state>` decides fresh or resume. The fake session makes
 launch 7's early call under the engine and reaches the gate
-(`test_bug289_early_harness_stamp.py`). **No real launch has verified it**: whether a real
-model now goes on where launch 7 stopped is not measured.
+(`test_bug289_early_harness_stamp.py`). One real launch has run against it since, launch 9
+below: its session ran the fences in order, so the text was followed once and the line's new
+wording met no real session.
+
+## One launch for BUG-289 (2026-11-21)
+
+`adlc sprint-exec run --harness codex REQ-900` once more, the same lite REQ and the same staging
+as launches 7 and 8, `codex-cli 0.166.0`. The clone and the engine were both `main` at
+`f53f322`, which holds the BUG-289 text and line. Nothing was approved.
+
+| Launch | Ended | Time | Why |
+|---|---|---|---|
+| 9 | `blocked`, Phase 4, then `failed` by `abort` | 2 min 24 s to the block | Step 0 ran in the order the files give: the lessons fence, then R1, which stamped `harness: 5.4.0 f53f322` on its first and only call, then the push and draft-PR fences. No telemetry fence ran before the lessons fence, and no fence printed `state file not found`. The session implemented the REQ and its tests passed, 54 of 54. It then put `rm -f /tmp/… && git add … && git commit …` on one line. `rm -f` is in the deny tier, so Codex refused the line, and the session reported `blocked` / `git-commit-blocked` without running the commit on a line of its own |
+
+What launch 9 shows of BUG-289:
+
+- **The order.** In launches 7 and 8 both sessions ran R1 before the lessons fence. Here the
+  one session did not, and the primary path's state held `lessons.step0` and `harness` before
+  the first push. That is one launch of one model: it shows the text can be followed, not how
+  often it is.
+- **The line was not exercised.** R1 was never run early, so what a real session does on
+  reading `state file not found: <path> (nothing recorded, and not a blocker: …)` is still
+  measured only by the fake.
+- **The run did not reach the gate,** for a reason that has nothing to do with the stamp
+  (fact 11).
+
+Launch 9 used 1.3 M input tokens, 1.2 M of them cached, and 6.6 k output tokens.
+`~/.codex/config.toml` had the same checksum before and after the launch and held no entry for
+the clone.
+
+**11. One denied command on a line refuses the whole line, and the session may report another
+cause.** The refused line left no item in the `--json` stream. The refusal
+(``rejected: policy forbids commands starting with `rm -f` ``) is only in the session's stderr
+log. The session's own account was that Git could not create `index.lock` because the shared
+`.git` is outside the writable roots, and that no fence commits. `git add … && git commit …` on
+a line of its own has an allow for each part (fact 8), and the session did not try it. Not
+changed by BUG-289.
 
 ## `adlc_forge_pr_checks` against GitHub (2026-11-21)
 
