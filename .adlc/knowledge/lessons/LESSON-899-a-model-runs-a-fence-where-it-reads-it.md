@@ -10,7 +10,7 @@ bug: BUG-289
 created: 2026-11-21
 updated: 2026-11-21
 kind: process
-evidence: "BUG-289; .adlc/research/harness-probes/codex-exec-manual.md launches 7 and 8, fact 10 (codex-cli 0.166.0): both sessions ran R1 on reading proceed/phases-telemetry.md, before Step 0's lessons fence; launch 8 went on, launch 7 reported blocked / setup-error after 55 s on `state file not found`. tools/adlc/tests/test_bug289_early_harness_stamp.py failed before ff855d9 and passes after. The effect of ff855d9 on a real session is not measured"
+evidence: "BUG-289; .adlc/research/harness-probes/codex-exec-manual.md launches 7 and 8, fact 10 (codex-cli 0.166.0): both sessions ran R1 on reading proceed/phases-telemetry.md, before Step 0's lessons fence; launch 8 went on, launch 7 reported blocked / setup-error after 55 s on `state file not found`. tools/adlc/tests/test_bug289_early_harness_stamp.py failed before ff855d9 and passes after. One real launch since (launch 9, f53f322) ran the lessons fence before R1; the line's new wording has met no real session"
 confidence: medium
 enforcement: test:tools/adlc/tests/test_bug289_early_harness_stamp.py
 generalizes: []
