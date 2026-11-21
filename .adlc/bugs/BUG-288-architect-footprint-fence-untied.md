@@ -1,7 +1,7 @@
 ---
 id: BUG-288
 title: "/architect's footprint fence reads and edits whatever PR the session's state file names"
-status: open
+status: resolved
 severity: high
 created: 2026-11-21
 updated: 2026-11-21
@@ -151,6 +151,15 @@ the mock forge ignored `-q .body`, so the benign-path case passed on a body the 
 wrapped in JSON. The mock now prints the field for `pr_view --json <field> -q .<field>`, as
 `gh` does, and the benign-path case asserts the exact body after one run and after a second,
 which replaces the block.
+
+## Deployment
+
+Merged as `f53f322` (PR #307) on 2026-11-21, squash, pinned to the reviewed head `5e14010`.
+The toolkit has no deploy target: the fix is live for a symlink install when its clone pulls
+`main`, and for a plugin install at the next release.
+
+Lessons: LESSON-900 (a runner fence loses a bound value silently) and LESSON-901 (a substring
+assertion hides a mock that drops an option).
 
 ## Regression Test
 
