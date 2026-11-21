@@ -212,3 +212,11 @@ _Explicit, testable constraints. Rules are grouped by finding; the numbering is 
 - LESSON-844 (lesson, score 9): A tool rule with no path in it admits every path
 
 Also read, outside the top 15: REQ-648 (the RunOutcome vocabulary), REQ-520 (the forge adapter), REQ-652 (the lane check).
+
+## Deferred
+
+- **`/architect`'s footprint fence is not held to the caller's PR.** It takes its PR number from `pipeline-state.json`, which the session writes. It is older than this requirement, is named in `DECLARED_UNTIED`, and has its own follow-up.
+- **The harness stamp can run before the state file exists under an exec run** (research note, fact 10). It ended launch 7. It has its own follow-up.
+- **Test helpers are still imported across test modules** (`test_fence_run` is imported by four other test files). Left as it was: moving them while three fix groups edited those files would have risked more than it fixed.
+- **A fence's `git fetch` honours repository config** (REQ-662 BR-19 (f)), now at one more site, the Phase 7 diff fence. BR-12 leaves it to the sandbox proposal.
+- **`pass`, `fail` and `pending` were not read against GitHub.** This repository has no CI workflow, so BR-26's real read covers `none` and the missing-PR error only.
