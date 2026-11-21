@@ -159,7 +159,7 @@ def runner_call(rec, root, placeholders):
 
 
 def _placeholders_for(fence):
-    found, _sources = fc.plan(fence.code, fence.id)
+    found, _sources = fc.plan(fence.code)
     out = []
     for ph in found:
         if ph.arg not in [p.arg for p in out]:

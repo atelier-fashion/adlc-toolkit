@@ -624,13 +624,18 @@
       ]
     },
     {
-      "id": "architect/SKILL.md#2:587fb45d",
+      "id": "architect/SKILL.md#2:614b1b28",
       "route": "runner",
       "placeholders": [
         "MAPPER_PATHS",
-        "REQ"
+        "PRIMARY_WORKTREE",
+        "REPO_ID",
+        "REQ",
+        "prNumber"
       ],
-      "untied": "the footprint publish takes $prnum from the pipeline-state.json that $REQ selects, a file the session writes: an older gap of BR-13's kind, kept routed until its owner decides (REQ-719 Phase 5)",
+      "tied": [
+        "prNumber"
+      ],
       "sources": [
         "forge"
       ],

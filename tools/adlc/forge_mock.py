@@ -293,7 +293,16 @@ def op_pr_view(argv):
         return 0
     wanted = _flag(argv, "--json")
     if wanted:
-        print(json.dumps({f: _value(pr, f, scenario) for f in wanted.split(",")}))
+        doc = {f: _value(pr, f, scenario) for f in wanted.split(",")}
+        query = _flag(argv, "-q") or _flag(argv, "--jq")
+        if query and query[:1] == "." and query[1:] in doc:
+            # `gh pr view --json body -q .body` prints the field itself, not a JSON document:
+            # a fence that reads a body and writes it back keeps it byte for byte (BUG-288).
+            # Only this one query shape is modelled; any other prints the document, as before.
+            value = doc[query[1:]]
+            print(value if isinstance(value, str) else json.dumps(value))
+            return 0
+        print(json.dumps(doc))
         return 0
     for field in ("number", "url", "state", "mergedAt", "body"):
         _kv(field, _value(pr, field, scenario))

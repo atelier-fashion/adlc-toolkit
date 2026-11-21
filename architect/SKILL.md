@@ -202,10 +202,25 @@ task with **no** `repo:` field attributes to the **primary** repo (single-repo p
 mapper-fallback. A path is attributed to a repo solely by its task's `repo:` tag — never
 broadcast to all PRs, never inferred from the path string.
 
-**Iterate every PR (BR-2, BR-3).** Loop over every touched repo's `prNumber` from
-`pipeline-state.json` — do NOT use `head -1`. Each PR receives only its own repo's lines. In
-single-repo mode the loop degenerates to one repo / one PR / one block, with no separate code
-path and no "coarse" flag.
+**One repo and one PR per run of the fence (BR-2, BR-3, BUG-288).** The fence publishes one
+repo's footprint into one PR: the PR of the directory it runs in. Set these before it, and run it
+once per touched repo that has a `prNumber` in `pipeline-state.json` — do NOT use `head -1`:
+
+- `prNumber`: that repo's `repos[<id>].prNumber`. It is the only PR number the fence hands the
+  forge. The fence never takes one from `pipeline-state.json`: it reads the state file to find the
+  repo, and stops without publishing when the file names a different PR for it.
+- `REPO_ID`: the repo's id. Leave it empty in single-repo mode and for the primary repo.
+- `PRIMARY_WORKTREE`: the primary repo's worktree, only when the fence runs somewhere else. The
+  spec, its tasks and the state file live in the primary alone. Leave it empty otherwise.
+- `REQ` and `MAPPER_PATHS`: as described after the fence.
+
+In single-repo mode that is one run, in the worktree, with `prNumber` set. In cross-repo mode run
+the fence **from each touched repo's own worktree**, because the forge adapter takes the
+repository from the directory it runs in: a sibling's PR number read from the primary's worktree
+names an unrelated PR of the primary repo. Each PR receives only its own repo's lines. Under
+`/sprint --exec` the fence runner checks `prNumber` against the forge before the fence starts, and
+runs it only for the open PR of the branch checked out where the runner was called, so a session
+publishes into its own working copy's PR and no other.
 
 **Sanitize on write (BR-5, LESSON-008).** Every emitted line MUST pass the same validation the
 read side applies — reject any line containing `..`, then charset-validate
@@ -232,12 +247,16 @@ if [ -f .adlc/partials/forge.sh ]; then . .adlc/partials/forge.sh; else . "$ADLC
 # reached only when $REQ is unset.
 # find, not ls globs: zsh errors on unmatched globs ("no matches found") instead of
 # passing the pattern through, so a glob here breaks sh/bash/zsh parity.
+# The spec dir is looked for under the primary repo's worktree: this directory, or
+# $PRIMARY_WORKTREE when the fence runs in a sibling repo's worktree (cross-repo mode).
+root="$PRIMARY_WORKTREE"
+[ -n "$root" ] || root=.
 state=""
 if [ -n "$REQ" ]; then
-  state=$(find .adlc/specs -type f -path "*/${REQ}-*/pipeline-state.json" 2>/dev/null | sort | head -1)
+  state=$(find "$root/.adlc/specs" -type f -path "*/${REQ}-*/pipeline-state.json" 2>/dev/null | sort | head -1)
   [ -n "$state" ] || { echo "architect: no pipeline-state.json for $REQ — standalone run, skipping footprint publish"; exit 0; }
 else
-  state=$(find .adlc/specs -type f -path "*/REQ-*/pipeline-state.json" 2>/dev/null | sort | head -1)
+  state=$(find "$root/.adlc/specs" -type f -path "*/REQ-*/pipeline-state.json" 2>/dev/null | sort | head -1)
   [ -n "$state" ] || { echo "architect: no pipeline-state.json — standalone run, skipping footprint publish"; exit 0; }
 fi
 specdir=$(dirname "$state")   # THIS REQ's spec dir — task glob is scoped here, not all specs.
@@ -260,7 +279,8 @@ primary=$(awk '
   inrepos && cur!="" && /"primary"[[:space:]]*:[[:space:]]*true/ { print cur; exit }
 ' "$state" 2>/dev/null)
 # Touched repo ids that have a prNumber, one TSV line per repo: "<repo-id><TAB><prNumber>".
-# Each prNumber stays bound to its owning repo id (NOT head -1). Same dual-format awk.
+# Each prNumber stays bound to its owning repo id (NOT head -1). Same dual-format awk. These
+# numbers only CHECK the caller's $prNumber below: none of them is ever a forge argument.
 repos_prs=$(awk -v TAB="$tab" '
   /"repos"[[:space:]]*:/ { inrepos=1 }
   inrepos && /"[A-Za-z0-9_.-]+"[[:space:]]*:[[:space:]]*\{/ {
@@ -276,57 +296,79 @@ repos_prs=$(awk -v TAB="$tab" '
 ' "$state" 2>/dev/null)
 [ -n "$repos_prs" ] || { echo "architect: no draft PR (no prNumber in state) — skipping footprint publish"; exit 0; }
 
-printf '%s\n' "$repos_prs" | while IFS="$tab" read -r repo prnum; do
-  [ -n "$repo" ] && [ -n "$prnum" ] || continue
-  # Collect this repo's task-attributed file paths (first backtick token of each bullet under
-  # "## Files to Create/Modify"); a task with no repo: attributes to $primary.
-  lines=""
-  # while-read over find, not a for-glob: zsh errors on unmatched globs ("no matches
-  # found") instead of passing the pattern through. Heredoc (not a pipe) so $lines
-  # accumulated in the loop survives it.
-  while IFS= read -r tf; do
-    [ -f "$tf" ] || continue
-    trepo=$(sed -nE 's/^repo:[[:space:]]*([A-Za-z0-9_.-]+).*/\1/p' "$tf" | head -1)
-    [ -n "$trepo" ] || trepo="$primary"
-    [ "$trepo" = "$repo" ] || continue
-    paths=$(awk '/^## Files to Create\/Modify/{f=1;next} /^## /{f=0} f && /^- /{print}' "$tf" \
-      | sed -nE 's/^- *`([^`]+)`.*/\1/p')
-    [ -n "$paths" ] && lines=$(printf '%s\n%s\n' "$lines" "$paths")
-  done <<TASKS_EOF
+# ONE repo and ONE PR per run (BUG-288). The repo is $REPO_ID, or the primary when it is empty.
+# The PR is "$prNumber" and nothing else: pipeline-state.json is a file the session writes, so a
+# number read from it must never choose the PR a forge call reads or edits. Under /sprint --exec
+# the fence runner has already checked "$prNumber" against the forge (the open PR of the branch
+# checked out here) before this fence starts. The state file's number for the repo is compared
+# with it, so a mixed-up repo or number publishes nothing.
+repo="$REPO_ID"
+[ -n "$repo" ] || repo="$primary"
+[ -n "$repo" ] || { echo "architect: pipeline-state.json marks no primary repo and REPO_ID is empty — skipping footprint publish"; exit 0; }
+want=""
+while IFS="$tab" read -r r n; do
+  [ "$r" = "$repo" ] && want="$n"
+done <<PRS_EOF
+$repos_prs
+PRS_EOF
+[ -n "$want" ] || { echo "architect: repo $repo has no draft PR (no prNumber in state) — skipping footprint publish"; exit 0; }
+if [ "$prNumber" != "$want" ]; then
+  echo "architect: footprint NOT published — the PR number given (#$prNumber) is not the draft PR that pipeline-state.json records as #$want. Set the variable to that number, in that worktree, and run this fence again." >&2
+  exit 2
+fi
+# Collect this repo's task-attributed file paths (first backtick token of each bullet under
+# "## Files to Create/Modify"); a task with no repo: attributes to $primary.
+lines=""
+# while-read over find, not a for-glob: zsh errors on unmatched globs ("no matches
+# found") instead of passing the pattern through. Heredoc (not a pipe) so $lines
+# accumulated in the loop survives it.
+while IFS= read -r tf; do
+  [ -f "$tf" ] || continue
+  trepo=$(sed -nE 's/^repo:[[:space:]]*([A-Za-z0-9_.-]+).*/\1/p' "$tf" | head -1)
+  [ -n "$trepo" ] || trepo="$primary"
+  [ "$trepo" = "$repo" ] || continue
+  paths=$(awk '/^## Files to Create\/Modify/{f=1;next} /^## /{f=0} f && /^- /{print}' "$tf" \
+    | sed -nE 's/^- *`([^`]+)`.*/\1/p')
+  [ -n "$paths" ] && lines=$(printf '%s\n%s\n' "$lines" "$paths")
+done <<TASKS_EOF
 $(find "$specdir"/tasks -name 'TASK-*.md' 2>/dev/null | sort)
 TASKS_EOF
-  # Repo-qualify, sanitize (reject .. then charset-validate), dedupe.
-  safe=$(printf '%s\n' "$lines" | sed '/^$/d' \
-    | while IFS= read -r p; do printf '%s:%s\n' "$repo" "$p"; done \
-    | grep -vE '\.\.' | grep -E '^[A-Za-z0-9_.-]*:?[A-Za-z0-9_./*-]+$' | sort -u)
-  if [ -z "$safe" ]; then
-    # BR-4 fallback: architecture-mapper paths attributed to primary (only for the primary PR).
-    if [ "$repo" = "$primary" ] && [ -n "$MAPPER_PATHS" ]; then
-      safe=$(printf '%s\n' "$MAPPER_PATHS" | sed '/^$/d' \
-        | while IFS= read -r p; do printf '%s:%s\n' "$primary" "$p"; done \
-        | grep -vE '\.\.' | grep -E '^[A-Za-z0-9_.-]*:?[A-Za-z0-9_./*-]+$' | sort -u)
-      [ -n "$safe" ] && echo "architect: repo=$repo source: mapper-fallback (no task file list)"
-    fi
+# Repo-qualify, sanitize (reject .. then charset-validate), dedupe.
+safe=$(printf '%s\n' "$lines" | sed '/^$/d' \
+  | while IFS= read -r p; do printf '%s:%s\n' "$repo" "$p"; done \
+  | grep -vE '\.\.' | grep -E '^[A-Za-z0-9_.-]*:?[A-Za-z0-9_./*-]+$' | sort -u)
+if [ -z "$safe" ]; then
+  # BR-4 fallback: architecture-mapper paths attributed to primary (only for the primary PR).
+  if [ "$repo" = "$primary" ] && [ -n "$MAPPER_PATHS" ]; then
+    safe=$(printf '%s\n' "$MAPPER_PATHS" | sed '/^$/d' \
+      | while IFS= read -r p; do printf '%s:%s\n' "$primary" "$p"; done \
+      | grep -vE '\.\.' | grep -E '^[A-Za-z0-9_.-]*:?[A-Za-z0-9_./*-]+$' | sort -u)
+    [ -n "$safe" ] && echo "architect: repo $repo source: mapper-fallback (no task file list)"
   fi
-  if [ -z "$safe" ]; then
-    echo "architect: repo=$repo has zero attributable files — skipping (no empty block)"
-    continue
-  fi
-  tmp=$(mktemp "${TMPDIR:-/tmp}/footprint.XXXXXX") || continue
-  if base=$(adlc_forge_pr_view "$prnum" --json body -q .body 2>/dev/null); then
-    base=$(printf '%s\n' "$base" | sed "/^${tick}adlc-footprint/,/^${tick}/d")
-    { printf '%s\n\n%sadlc-footprint\n' "$base" "$tick"; printf '%s\n' "$safe"; printf '%s\n' "$tick"; } > "$tmp"
-    adlc_forge_pr_edit "$prnum" --body-file "$tmp" >/dev/null 2>&1 && echo "architect: published footprint for repo=$repo to PR #$prnum"
-  fi
-  rm -f "$tmp"
-done
+fi
+if [ -z "$safe" ]; then
+  echo "architect: repo $repo has zero attributable files — skipping (no empty block)"
+  exit 0
+fi
+tmp=$(mktemp "${TMPDIR:-/tmp}/footprint.XXXXXX") || exit 1
+if base=$(adlc_forge_pr_view "$prNumber" --json body -q .body 2>/dev/null); then
+  base=$(printf '%s\n' "$base" | sed "/^${tick}adlc-footprint/,/^${tick}/d")
+  { printf '%s\n\n%sadlc-footprint\n' "$base" "$tick"; printf '%s\n' "$safe"; printf '%s\n' "$tick"; } > "$tmp"
+  adlc_forge_pr_edit "$prNumber" --body-file "$tmp" >/dev/null 2>&1 && echo "architect: published footprint of repo $repo to PR #$prNumber"
+fi
+rm -f "$tmp"
 ```
 
-`$MAPPER_PATHS` holds the architecture-mapper affected-file list (bare paths, no repo column)
-captured during Step 2 — used only for the BR-4 primary-repo fallback when a task carries no file
-list. Other sessions read each block via `adlc_forge_pr_view --json body` (consumed by `/manifest`'s
-ordering verdict). The block is split-free (newline iteration, no unquoted word-splitting) so it
-behaves identically under `sh` and `zsh` (LESSON-329), and uses `mktemp` + cleanup per PR.
+`$REQ` is the REQ id the skill is operating on. `$MAPPER_PATHS` holds the architecture-mapper
+affected-file list (bare paths, no repo column) captured during Step 2 — used only for the BR-4
+primary-repo fallback when a task carries no file list. `$prNumber`, `$REPO_ID` and
+`$PRIMARY_WORKTREE` are described before the fence. The fence exits 2, having read and written no
+PR, when `$prNumber` is not the number the state file records for the repo; a standalone run, a
+repo with no draft PR and a repo with no attributable file each skip with a one-line note and
+exit 0. Other sessions read each block via `adlc_forge_pr_view --json body` (consumed by
+`/manifest`'s ordering verdict). The block is split-free (newline iteration, no unquoted
+word-splitting) so it behaves identically under `sh` and `zsh` (LESSON-329), and uses `mktemp` +
+cleanup.
 
 ### Step 6: Update Requirement Status
 

@@ -59,8 +59,7 @@ placeholder, a marked variable or a name set once from ``adlc_forge_pr_create`` 
 ``adlc_forge_pr_list``, then literal options and their values. The check does not follow
 where a value came from; what is not a shape is refused. So is a fence whose PR operations
 the check cannot read or the tie cannot cover (:func:`pr_operation_problems`). A fence added
-later starts tied or does not route. The one exception is :data:`DECLARED_UNTIED`, keyed by
-full fence id, whose records name the reason under ``untied``.
+later starts tied or does not route, and no table exempts one (BUG-288).
 
 Standard library only.
 """
@@ -289,6 +288,13 @@ VAR_PLACEHOLDERS = dict([
     _ph("LESSON_NUM", "LESSON_NUM", r"[0-9]{1,6}"),
     _ph("MAPPER_PATHS", "MAPPER_PATHS", r"(?:[A-Za-z0-9_][A-Za-z0-9_./-]{0,300}\n?){0,500}",
         file=True),
+    # /architect Step 5 (BUG-288), both empty for a single-repo run: the repo whose footprint
+    # one call publishes (empty: the primary), and the primary repo's worktree, where the spec
+    # and the state file are looked for (empty: the working directory). A path that is given
+    # must name the working directory or one under it. That holds the value only: what lies
+    # under it is the session's, a symlink included, as it was before (README, residuals).
+    _ph("REPO_ID", "REPO_ID", r"(?:[A-Za-z0-9_][A-Za-z0-9._-]{0,63})?"),
+    _ph("PRIMARY_WORKTREE", "PRIMARY_WORKTREE", r"(?:\.|%s)?" % _PATH, path=True, scope="cwd"),
 ])
 #: Variables a fence reads that the run provides: the environment, the shell, or a partial
 #: the fence sources. Never a placeholder.
@@ -599,12 +605,11 @@ def _lookup(key):
     return PLACEHOLDERS.get(key) or LITERAL_PLACEHOLDERS.get(key)
 
 
-def plan(code, fid=None):
+def plan(code):
     """``(placeholders, sources)`` of a body the runner can run, or :class:`Unroutable`.
 
     ``placeholders`` is a list of :class:`Placeholder` (``<name>`` ones, literal ones and
-    free variables) and ``sources`` the partials the body sources, in order. ``fid`` is the
-    fence's id: a fence :data:`DECLARED_UNTIED` names routes with an unmarked PR argument.
+    free variables) and ``sources`` the partials the body sources, in order.
     """
     sources = []
     found = []
@@ -644,7 +649,7 @@ def plan(code, fid=None):
     if problems:
         raise Unroutable(problems[0])
     unmarked = unmarked_pr_arguments(code)
-    if unmarked and fid not in DECLARED_UNTIED:
+    if unmarked:
         op, word = unmarked[0]
         if word is None:
             raise Unroutable("calls %s with no PR argument: gh would take the PR of the "
@@ -720,17 +725,6 @@ PR_OP_VALUE_OPTIONS = {
 #: for these options.
 PR_VIEW_RAW_OPTIONS = frozenset(("--json", "-q", "--jq", "-t", "--template"))
 _VIEW_RAW_TRIGGERS = frozenset(("--json", "-q", "--jq", "-R", "--repo"))
-
-#: Fences that route although a PR operation in them takes an argument that is none of the
-#: shapes :func:`unmarked_pr_arguments` admits, each with why, by full fence id: any edit to the
-#: fence changes its id and drops its entry. Each such record names the reason under
-#: ``untied``, in the census and in the goldens.
-DECLARED_UNTIED = {
-    "architect/SKILL.md#2:587fb45d":
-        "the footprint publish takes $prnum from the pipeline-state.json that $REQ selects, a "
-        "file the session writes: an older gap of BR-13's kind, kept routed until its owner "
-        "decides (REQ-719 Phase 5)",
-}
 
 _ASSIGN_WORD = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
 #: The PR operations a fence names, wherever it names them.
@@ -1017,8 +1011,7 @@ def _functions_defined(code):
 
 def pr_operation_problems(code):
     """Why ``code``'s PR operations cannot be checked at all (REQ-719 BR-13), each a reason the
-    fence does not route, or empty. It holds for every fence, a :data:`DECLARED_UNTIED` one
-    included:
+    fence does not route, or empty:
 
     - a PR operation named anywhere but as the command of a call the check reads: through
       ``xargs``, ``eval``, ``sh -c``, a variable or a string, its argv is not words it can see;
@@ -2058,7 +2051,7 @@ def _route(fence, policy, index, root, denies):
         rec["route"] = "direct"
         return rec
     try:
-        found, sources = plan(code, fence.id)
+        found, sources = plan(code)
     except Unroutable as exc:
         rec["route"], rec["reason"] = "unrouted", str(exc)
         rec["refused"] = _refused(policy, code)
@@ -2077,8 +2070,6 @@ def _route(fence, policy, index, root, denies):
     tied = tied_args(found)
     if tied:
         rec["tied"] = tied
-    if fence.id in DECLARED_UNTIED:
-        rec["untied"] = DECLARED_UNTIED[fence.id]
     rec["sources"] = sources
     rec["reach"] = externals
     rec["functions"] = funcs
@@ -2147,7 +2138,7 @@ def unrouted(records):
 
 def golden_doc(records):
     """The committed golden: every id with its route, placeholders and reach."""
-    keep = ("id", "route", "reason", "placeholders", "tied", "untied", "sources", "reach", "push")
+    keep = ("id", "route", "reason", "placeholders", "tied", "sources", "reach", "push")
     return {"comment": "REQ-682 exec fence census. Regenerate with "
                        "`python3 tools/adlc/fence_census.py --write`; a diff here is a fence "
                        "whose route, values or reach changed.",
