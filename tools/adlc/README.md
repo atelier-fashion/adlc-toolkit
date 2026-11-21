@@ -830,11 +830,14 @@ executable:
   a PR operation reached through `xargs`, `eval`, `sh -c`, a variable or a string instead of
   being a command the check reads. At run time the runner marks every bound `ADLC_ARG_*`
   readonly before the fence's body, and gives the fence `/dev/null` as stdin.
-  **One fence is declared untied.** `/architect`'s footprint fence (`architect/SKILL.md`)
-  takes its PR number from `pipeline-state.json`, which the session writes, so it is not held
-  to the caller's PR. `fence_census.py` names it in a closed table, `DECLARED_UNTIED`, keyed
-  by its full fence id so any edit to the fence drops the exemption; it routes, and its record
-  in both census files carries `untied` with the reason (the README's declared residuals).
+  **No fence is exempt (BUG-288).** `/architect`'s footprint fence (`architect/SKILL.md`)
+  took its PR number from `pipeline-state.json`, which the session writes, and was the one
+  fence a table, `DECLARED_UNTIED`, let route untied. It now takes the number as the marked
+  `"$prNumber"` and publishes one repo's footprint per call, so the runner's read covers it
+  and its census record carries `tied`. The table and the `untied` key are gone, and
+  `fence_census.plan` takes no fence id: a PR operation whose argument is not a closed shape
+  does not route, whichever fence holds it. The state file's number is only compared with the
+  bound value, and a difference ends the fence with status 2 before any forge call.
   **The tie trusts the caller's forge selection.** The read runs in the fence's own
   environment, so `GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE` and the
   `ADLC_FORGE_MOCK*` variables are the caller's: a session that sets one of them for the

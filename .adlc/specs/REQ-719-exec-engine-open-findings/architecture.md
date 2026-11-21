@@ -201,7 +201,9 @@ of shapes that traces nothing:
   `pipeline-state.json`, which the session writes. `DECLARED_UNTIED` names it by its full
   fence id, so any edit to it drops the exemption, and its census record carries `untied`.
   The security re-audit showed a session can use it to rewrite another PR's body. It is
-  older than this requirement and is left for the owner's decision.
+  older than this requirement and is left for the owner's decision. (Closed afterwards by
+  BUG-288: the fence takes its PR as the marked `$prNumber`, and `DECLARED_UNTIED` and
+  `untied` are removed.)
 - The tie's other declared residual: its read runs in the fence's environment, so it trusts
   the caller's forge selection (`GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE`,
   `ADLC_FORGE_MOCK*`), and its branch check rests on `ADLC_EXEC_RUN` being set for the call.

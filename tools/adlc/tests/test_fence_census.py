@@ -577,7 +577,7 @@ def test_req719_a_call_that_is_not_a_closed_shape_is_refused(case, body, op, wha
     word (or what hides it). With the canonical root and source lines, as a fence has them."""
     code = fc.ROOT_LINE + "\n" + SOURCE_FORGE + "\n" + body
     with pytest.raises(fc.Unroutable) as caught:
-        fc.plan(code, "probe/SKILL.md#1:00000000")
+        fc.plan(code)
     reason = str(caught.value)
     assert op in reason and (what is None or what in reason), reason
 
@@ -623,8 +623,8 @@ def test_req719_a_closed_shape_routes(body):
 def test_req719_an_unmarked_pr_argument_does_not_route(copy):
     """AC-11: a fence that passes an unmarked placeholder as the PR argument of
     `adlc_forge_pr_edit` is unrouted, and `fence_census.py --check` fails naming the fence and
-    the placeholder. `/architect` Step 5, whose `$prnum` is read from the state file, routes
-    only through DECLARED_UNTIED, and binds no PR value."""
+    the placeholder. `/architect` Step 5 takes its PR as the marked `$prNumber` and routes
+    tied, through no exemption (BUG-288)."""
     path = os.path.join(copy, "validate", "SKILL.md")
     with open(UNMARKED_FIXTURE, encoding="utf-8") as fh:
         extra = fh.read()
@@ -644,11 +644,11 @@ def test_req719_an_unmarked_pr_argument_does_not_route(copy):
     assert named and all(fence.id in ln and "<n>" in ln for ln in named), out.stderr
     architect = next(r for r in records if r["id"].startswith("architect/SKILL.md#") and
                      "MAPPER_PATHS" in r["placeholders"])
-    assert architect["route"] == "runner" and "tied" not in architect, architect
-    assert architect["untied"] == fc.DECLARED_UNTIED[architect["id"]]
+    assert architect["route"] == "runner" and architect["tied"] == ["prNumber"], architect
+    assert "untied" not in architect
     code = fc.fences(fc.view(copy, "architect/SKILL.md"), "architect/SKILL.md")[
         int(architect["id"].split("#")[1].split(":")[0]) - 1].code
-    assert ("adlc_forge_pr_view", '"$prnum"') in fc.unmarked_pr_arguments(code)
+    assert fc.unmarked_pr_arguments(code) == []
 
 
 def test_req719_the_option_table_is_read_from_the_adapter():
@@ -670,27 +670,43 @@ def test_req719_the_option_table_is_read_from_the_adapter():
         [("adlc_forge_pr_new", "x")]
 
 
-def test_req719_declared_untied_is_one_fence_that_needs_it(records):
-    """DECLARED_UNTIED holds exactly the architect footprint fence, whose id is still in the
-    census, which routes only through the table: a PR operation in it takes `"$prnum"`, which
-    is none of the shapes, the same code under any other id is refused, and its record and
-    the goldens name the reason under `untied`."""
-    assert list(fc.DECLARED_UNTIED) == ["architect/SKILL.md#2:587fb45d"]
-    fid = "architect/SKILL.md#2:587fb45d"
-    rec = next(r for r in records if r["id"] == fid)
-    assert rec["route"] == "runner" and rec["untied"] == fc.DECLARED_UNTIED[fid]
-    code = fc.fences(fc.view(TOOLKIT, "architect/SKILL.md"), "architect/SKILL.md")[1].code
-    assert fc.unmarked_pr_arguments(code), "the exemption is no longer needed: drop it"
+#: `/architect` Step 5's two forge calls as they were before BUG-288: the PR number came from a
+#: loop over the state file's lines.
+BUG288_OLD_CALLS = """tab=$(printf '\\t'); tmp=$(mktemp); repos_prs=$(cat state.tsv)
+printf '%s\\n' "$repos_prs" | while IFS="$tab" read -r repo prnum; do
+  if base=$(adlc_forge_pr_view "$prnum" --json body -q .body 2>/dev/null); then
+    adlc_forge_pr_edit "$prnum" --body-file "$tmp" >/dev/null 2>&1
+  fi
+done"""
+
+
+def test_bug288_no_fence_is_exempt_from_the_pr_tie(records):
+    """BUG-288: the exemption table is gone, and nothing routes untied. The architect
+    footprint fence takes its PR as the marked `$prNumber`: every PR operation in it is a
+    closed shape, its record and the goldens name `prNumber` under `tied`, and no record or
+    golden carries `untied`. The calls it made before, with a number read from the state
+    file, are refused: `plan` takes no fence id, so no id can admit them."""
+    assert not hasattr(fc, "DECLARED_UNTIED")
+    rec = next(r for r in records if r["id"].startswith("architect/SKILL.md#") and
+               "MAPPER_PATHS" in r["placeholders"])
+    assert rec["route"] == "runner" and rec["tied"] == ["prNumber"], rec
+    code = fc.fences(fc.view(TOOLKIT, "architect/SKILL.md"), "architect/SKILL.md")[
+        int(rec["id"].split("#")[1].split(":")[0]) - 1].code
+    assert fc.unmarked_pr_arguments(code) == [] and fc.pr_operation_problems(code) == []
+    assert '"$prnum"' not in code and code.count('"$prNumber"') >= 3
+    fc.plan(code)
+    old = fc.ROOT_LINE + "\n" + SOURCE_FORGE + "\n" + BUG288_OLD_CALLS
+    assert ("adlc_forge_pr_view", '"$prnum"') in fc.unmarked_pr_arguments(old)
     with pytest.raises(fc.Unroutable, match="none of the shapes"):
-        fc.plan(code)
-    with pytest.raises(fc.Unroutable, match="none of the shapes"):
-        fc.plan(code, "architect/SKILL.md#2:00000000")
-    fc.plan(code, fid)
+        fc.plan(old)
+    with pytest.raises(TypeError):
+        fc.plan(old, rec["id"])
     for adapter in fc.exec_adapters(TOOLKIT):
         with open(os.path.join(TOOLKIT, fc.golden_path(adapter.name)), encoding="utf-8") as fh:
             golden = {r["id"]: r for r in json.load(fh)["fences"]}
-        assert golden[fid]["untied"] == fc.DECLARED_UNTIED[fid], adapter.name
-    assert [r["id"] for r in records if r.get("untied")] == [fid]
+        assert golden[rec["id"]]["tied"] == ["prNumber"], adapter.name
+        assert not [r for r in golden.values() if "untied" in r], adapter.name
+    assert [r["id"] for r in records if "untied" in r] == []
 
 
 def test_req719_the_taint_flow_is_gone():

@@ -129,6 +129,24 @@ def test_view_scenarios(forge, scenario, field, expect):
     assert expect in run(store, "pr_view", "101", "--fields", field, scenario=scenario).stdout
 
 
+def test_bug288_view_with_a_one_field_query_prints_the_field(forge):
+    """`gh pr view --json body -q .body` prints the body itself, and so does the mock, so a
+    fence that reads a body and writes it back keeps it byte for byte. With no query, or one
+    the mock does not model, it prints the JSON document, as before."""
+    store, _ = forge
+    run(store, "make-head", "feat/x", "main", "b.txt=b\n")
+    run(store, "pr_create", "--base", "main", "--head", "feat/x", "--body", "line one\nline two")
+    for flag in ("-q", "--jq"):
+        out = run(store, "pr_view", "101", "--json", "body", flag, ".body")
+        assert out.returncode == 0 and out.stdout == "line one\nline two\n", out.stdout
+    assert run(store, "pr_view", "101", "--json", "number", "-q", ".number").stdout == "101\n"
+    plain = {"body": "line one\nline two"}
+    assert json.loads(run(store, "pr_view", "101", "--json", "body").stdout) == plain
+    assert json.loads(run(store, "pr_view", "101", "--json", "body", "-q", ".title").stdout) == plain
+    assert json.loads(run(store, "pr_view", "101", "--json", "body", "-q",
+                          ".body | length").stdout) == plain
+
+
 def test_second_open_pr_and_error_scenario(forge):
     store, _ = forge
     run(store, "make-head", "feat/x", "main", "b.txt=b\n")

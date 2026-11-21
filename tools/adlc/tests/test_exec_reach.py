@@ -18,6 +18,7 @@ push of REQ-662 ADR-9.
 """
 
 import io
+import json
 import os
 import shutil
 import sys
@@ -88,7 +89,7 @@ def test_no_runner_fence_reaches_deny_tier(records, adapter):
     for rec in runners:
         rel, ordinal = rec["id"].split(":")[0].split("#")
         fence = fc.fences(fc.view(TOOLKIT, rel), rel)[int(ordinal) - 1]
-        found, _sources = fc.plan(fence.code, fence.id)
+        found, _sources = fc.plan(fence.code)
         # A tied fence's reach includes the runner's own PR read (REQ-719 BR-12).
         code = fc.reach_text(fence.code, found)
         assert (fc.pr_tie_text("pr") in code) is ("pr" in rec.get("tied", [])), rec["id"]
@@ -173,6 +174,14 @@ def test_real_tree_reach_matches_golden(records, adapter, tmp_path, monkeypatch)
     policy = fc.exec_policy(TOOLKIT, adapter)
     wc = tmp_path / "wc"
     (wc / ".adlc" / "specs").mkdir(parents=True)
+    # `/architect` Step 5 is tied (BUG-288) and publishes only for a REQ whose state file
+    # names the PR it is given, so the sample REQ has one, and a task with a file to publish.
+    spec = wc / ".adlc" / "specs" / "REQ-901-thing"
+    (spec / "tasks").mkdir(parents=True)
+    (spec / "pipeline-state.json").write_text(json.dumps(
+        {"req": "REQ-901", "repos": {"solo": {"primary": True, "prNumber": 101}}}, indent=2))
+    (spec / "tasks" / "TASK-901.md").write_text(
+        "## Files to Create/Modify\n- `src/thing.py` — the file\n")
     ran = tied = 0
     for rec in [r for r in records if r["route"] == "runner"]:
         log = str(tmp_path / ("calls-%d.jsonl" % ran))

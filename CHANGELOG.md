@@ -656,8 +656,9 @@ is cut per `RELEASING.md`.
     options and their one-word values. Any other word does not route, nor does a call with no
     PR argument, `-R`/`--repo`, a function or alias beside a PR operation, or an operation
     reached through `xargs`, `eval` or `sh -c`.
-    `/architect`'s footprint fence, which takes its PR number from the session-written state
-    file, is the one fence declared untied (`DECLARED_UNTIED`, `untied` in both census files).
+    `/architect`'s footprint fence, which took its PR number from the session-written state
+    file, was the one fence declared untied; BUG-288, under Fixed, ties it and removes the
+    table.
   - Under an exec run the PR tie also refuses a checked-out branch that is not the run's own
     (exit 3, before any forge read), so a local branch named after another PR's head no
     longer passes the tie for that PR.
@@ -729,6 +730,32 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **`/architect`'s footprint fence is held to the caller's PR (BUG-288).** Step 5's fence
+  read `prNumber` from `pipeline-state.json` and handed it to `adlc_forge_pr_view` and
+  `adlc_forge_pr_edit`. Under `/sprint --exec` the session writes that file and the fence runs
+  outside the sandbox with the run's forge credential, so a session that wrote another PR's
+  number into its state file had that PR's body rewritten. It was the one routed fence
+  outside the PR tie (`DECLARED_UNTIED`).
+  - The fence takes the PR as `prNumber`, a value the caller sets and the fence runner checks
+    against the forge before the fence starts. It hands the forge that number and no other.
+    The state file's number is only compared with it: a difference ends the fence with status
+    2, one line on stderr and no forge call.
+  - One run publishes one repo's footprint into one PR. `REPO_ID` names the repo (empty: the
+    primary) and `PRIMARY_WORKTREE` the primary's worktree when the fence runs elsewhere
+    (empty: the current directory). In cross-repo mode the caller runs the fence once per
+    touched repo, from that repo's worktree. Before, the fence looped over every repo from
+    the primary's worktree, so a sibling's PR number was read and edited in the primary
+    repo's forge: an unrelated PR of the primary, or none.
+  - `DECLARED_UNTIED` and the `untied` key of the census files are removed, and
+    `fence_census.plan` takes no fence id, so no fence can be exempted from the closed shapes.
+  - The mock forge (`forge_mock.py`) prints the field itself for
+    `pr_view --json <field> -q .<field>`, as `gh` does. It printed the JSON document, so a
+    fence that read a body and wrote it back wrapped it in JSON under the mock.
+  - **Action for `/proceed` and `/sprint` users:** none beyond what the skill text now says
+    (set `prNumber` before the fence). Under `--exec` a multi-repo run publishes the primary
+    repo's footprint only: the tie reads the PR of the directory the runner is called from,
+    and the runner refuses a `PRIMARY_WORKTREE` outside it.
+
 - **A harness stamp made too early no longer reads as a failed setup (BUG-289).** Two real
   Codex sessions ran the harness stamp (R1) as soon as they had read
   `proceed/phases-telemetry.md`, before Step 0's lessons fence had created the primary path's
@@ -741,6 +768,7 @@ is cut per `RELEASING.md`.
   the pipeline, so carry on". The stamp still creates no file. A solo `/proceed` reads the
   same text and does nothing differently: there the lessons fence has always run first. Not
   verified by a real launch: the tests drive the fake harness.
+
 - **`/sprint --exec` gets a real session to the merge gate, and to a merge a forge accepts
   (BUG-287).** The first whole pipeline run on a real harness (`codex-cli 0.166.0`, six
   launches of one lite REQ against the mock forge) ended before the gate four times and then
