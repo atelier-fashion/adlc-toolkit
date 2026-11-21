@@ -2,8 +2,11 @@
 
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
@@ -1867,19 +1870,66 @@ def test_bug287_the_launch_and_the_relaunch_name_the_forge_repo_and_the_state_fi
 
 
 # ---- REQ-719: `abort` drops a blocked run; `reject` and `abort` in the run-outcome log ---------
+@pytest.fixture
+def reaped():
+    """Register an orchestrator (``reaped(orch)`` returns it); at teardown every fake harness it
+    still holds is killed, by its process group: a child it started, and a recorded pid that is
+    still the process recorded (`same_process`). A test that fails before its own `abort`
+    leaves no 30-second sleeper behind."""
+    held = []
+
+    def register(orch):
+        held.append(orch)
+        return orch
+
+    yield register
+    pids = set()
+    for orch in held:
+        pids.update(proc.pid for proc in orch.children.values() if proc.poll() is None)
+        pids.update(run.exec["pid"] for run in orch.all_runs()
+                    if run.exec.get("pid") and se.same_process(run.exec["pid"],
+                                                               run.exec.get("pidStart")))
+    for pid in pids:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    for orch in held:
+        for proc in orch.children.values():
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+
+
 def _aborted_line(run, urls):
     """The one line `abort` prints (REQ-719 BR-2)."""
     return "%s aborted by operator; working copy left at %s, branch %s, PR %s" % (
         run.req, run.wc, run.doc["branch"], ", ".join(urls))
 
 
-def test_req719_abort_drops_a_blocked_run(box, tmp_path, monkeypatch):
+def _recording_signals(mp, signalled):
+    """Record every signal `os.kill` and `os.killpg` would send, through ``mp``, sending none; a
+    liveness probe (signal 0) still runs."""
+    real_kill = os.kill
+
+    def kill(pid, sig):
+        if sig == 0:                            # a liveness probe, not a signal
+            return real_kill(pid, sig)
+        signalled.append(("kill", pid, sig))
+
+    mp.setattr(os, "kill", kill)
+    mp.setattr(os, "killpg", lambda pid, sig: signalled.append(("killpg", pid, sig)))
+
+
+def test_req719_abort_drops_a_blocked_run(box, tmp_path):
     """REQ-719 BR-1, BR-29: `abort` takes a run at `blocked` whose recorded harness and
     close-out pids are not live. Nothing is signalled. The run ends `failed` with who aborted
     it, when, and `abortedFrom: blocked`, in the run record and the primary path's state; the
     token held for it is discarded; and it prints one line naming the REQ, who aborted it, the
     working copy, the branch and the PR. Offline: the mock forge, and every directory the run
-    writes under a throwaway one."""
+    writes under a throwaway one. The signal patch ends in its own context, so conftest's HOME
+    sandbox stays in place for the rest of the test."""
     for key in ("HOME", "ADLC_HOME", "XDG_STATE_HOME", "ADLC_FORGE_MOCK_STORE",
                 "ADLC_RUN_OUTCOMES_LOG"):
         assert os.path.realpath(box.environ[key]).startswith(os.path.realpath(str(tmp_path))), key
@@ -1894,18 +1944,10 @@ def test_req719_abort_drops_a_blocked_run(box, tmp_path, monkeypatch):
     # A token held for the run: the drop discards it, as `reject` does.
     orch.tokens[REQ] = {"approve": el.token_digest(el.mint_token()), "gate": None}
     signalled = []
-    real_kill = os.kill
-
-    def kill(pid, sig):
-        if sig == 0:                            # a liveness probe, not a signal
-            return real_kill(pid, sig)
-        signalled.append(("kill", pid, sig))
-
-    monkeypatch.setattr(os, "kill", kill)
-    monkeypatch.setattr(os, "killpg", lambda pid, sig: signalled.append(("killpg", pid, sig)))
     said = len(box.out.getvalue())
-    line = orch.abort(REQ, by="operator")
-    monkeypatch.undo()
+    with pytest.MonkeyPatch.context() as mp:
+        _recording_signals(mp, signalled)
+        line = orch.abort(REQ, by="operator")
     assert signalled == []
     assert run.status == "failed"
     assert run.exec["abortedBy"] == "operator" and run.exec["abortedAt"]
@@ -1970,27 +2012,35 @@ def test_req719_the_drop_makes_no_one_way_move_and_no_forge_call(tmp_path, monke
                 and ({"push", "fetch"} & set(r["argv"]))]
 
 
-def test_req719_an_approved_then_conflicted_run_is_never_merged_after_the_drop(tmp_path):
-    """REQ-719 BR-2, AC-3: a run approved and then blocked by a rebase conflict holds a
-    recorded approval. After the drop it is never executed, by the three paths that could reach
-    it: it is out of the merge queue, `answer` refuses it, and a later `resume` skips it. The
-    REQ whose approval was queued behind it is released and merges."""
+def _queued_behind_a_conflict(tmp_path, **second):
+    """REQ-901 merged; REQ-902 approved and then blocked by a rebase conflict on README.md,
+    its approval recorded; REQ-903 approved and queued behind REQ-902. ``second`` adds to
+    REQ-902's script. Returns the sandbox, the orchestrator, REQ-902's and REQ-903's runs and
+    REQ-902's PR URL."""
     box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902", "REQ-903"))
     box.req("REQ-901", files={"README.md": "AAA\nline two\nline three\n"})
     box.req("REQ-902", files={"README.md": "BBB\nline two\nline three\n", "c.txt": "902\n"},
-            sleep_first=1.5)
+            sleep_first=1.5, **second)
     box.req("REQ-903", files={"c.txt": "903\n"}, sleep_first=3)
     orch = box.go(shared=True)
-    second, third = orch.runs["REQ-902"], orch.runs["REQ-903"]
+    blocked, queued = orch.runs["REQ-902"], orch.runs["REQ-903"]
     box.approve(orch, REQ)                      # REQ-901 merges: main moves under REQ-902
     assert orch.runs[REQ].status == "merged"
     assert box.approve(orch, "REQ-902", drain=False) == "approved"
     assert box.approve(orch, "REQ-903", drain=False) == "approved (queued behind REQ-902)"
     orch.drain()
-    assert second.status == "blocked" and third.status == "approved"
-    assert second.read_primary_state()["blockers"][0]["conflictFiles"] == ["README.md"]
-    assert second.ledger().read()["decision"]["decision"] == "approved"
-    url = second.ledger().read()["plan"]["prs"][0]["url"]
+    assert blocked.status == "blocked" and queued.status == "approved"
+    assert blocked.read_primary_state()["blockers"][0]["conflictFiles"] == ["README.md"]
+    assert blocked.ledger().read()["decision"]["decision"] == "approved"
+    return box, orch, blocked, queued, blocked.ledger().read()["plan"]["prs"][0]["url"]
+
+
+def test_req719_an_approved_then_conflicted_run_is_never_merged_after_the_drop(tmp_path):
+    """REQ-719 BR-2, AC-3: a run approved and then blocked by a rebase conflict holds a
+    recorded approval. After the drop it is never executed, by the three paths that could reach
+    it: it is out of the merge queue, `answer` refuses it, and a later `resume` skips it. The
+    REQ whose approval was queued behind it is released and merges."""
+    box, orch, second, third, url = _queued_behind_a_conflict(tmp_path)
     line = orch.abort("REQ-902", by="operator")
     assert line == _aborted_line(second, [url])
     assert second.status == "failed" and second.exec["abortedFrom"] == "blocked"
@@ -2014,7 +2064,7 @@ def test_req719_an_approved_then_conflicted_run_is_never_merged_after_the_drop(t
     assert later.runs["REQ-903"].ledger().read()["plan"]["prs"][0]["url"] in merged
 
 
-def test_req719_answer_after_the_drop_is_refused(tmp_path):
+def test_req719_answer_after_the_drop_is_refused(tmp_path, reaped):
     """REQ-719 BR-3: `answer` after the drop is refused naming `failed`, and nothing is
     launched. The other order is not a refusal: an `abort` after an `answer` finds the
     relaunched harness live and kills it, as REQ-659 BR-20 has it."""
@@ -2023,7 +2073,7 @@ def test_req719_answer_after_the_drop_is_refused(tmp_path):
     box.blocked("REQ-902", after_answer={"status": "awaiting_approval",
                                          "claim": "awaiting_approval", "blockers": None,
                                          "sleep_first": 30})
-    orch = box.go(shared=True)
+    orch = reaped(box.go(shared=True))
     first, second = orch.runs["REQ-901"], orch.runs["REQ-902"]
     assert first.status == second.status == "blocked"
     orch.abort("REQ-901", by="operator")
@@ -2105,7 +2155,7 @@ def test_req719_reject_records_rejected(box):
     assert reason not in text and "5c1e9" not in text
 
 
-def test_req719_abort_records_aborted_from_both_arms(tmp_path):
+def test_req719_abort_records_aborted_from_both_arms(tmp_path, reaped):
     """REQ-719 BR-19, AC-15: the kill of a running harness and the drop of a blocked run each
     append one run-outcome line, `failed` / `aborted`, and record the status found in
     `exec.abortedFrom`. A run that blocked and was dropped has two lines, `blocked` then
@@ -2113,7 +2163,7 @@ def test_req719_abort_records_aborted_from_both_arms(tmp_path):
     box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
     box.req("REQ-901", sleep_first=30)
     box.blocked("REQ-902")
-    orch = box.start(shared=True)
+    orch = reaped(box.start(shared=True))
     running, blocked = orch.runs["REQ-901"], orch.runs["REQ-902"]
     eh.until(lambda: os.path.exists(running.wc_state_path()), what="REQ-901's harness to start")
 
@@ -2134,3 +2184,421 @@ def test_req719_abort_records_aborted_from_both_arms(tmp_path):
     assert [(o["terminal"], o["blocked_reason"]) for o in box.outcomes("REQ-902")] == [
         ("blocked", "reflector-questions"), ("failed", "aborted")]
     assert {o["engine"] for o in box.outcomes()} == {"exec"}
+
+
+# ---- REQ-719 Phase 5: the hold, the unblock pass and the abort's line ---------------------------
+def _offline(box, argv):
+    """`adlc sprint-exec <argv>` with no supervisor running, as the client makes it: a fresh
+    orchestrator that loads only the run named (`_client`)."""
+    orch = box.orch()
+    assert se._client(orch, se._parser().parse_args(argv)) == 0
+    return orch
+
+
+def test_req719_an_offline_abort_releases_the_hold_queued_behind_it(tmp_path):
+    """REQ-719 BR-2, BR-3: the drop of a blocked run made with no supervisor running releases
+    the approval queued behind it. The client's orchestrator loads only the run it drops, and a
+    later `resume` skips that terminal run, so the hold is read from disk: REQ-903 merges, the
+    run it was held behind is never merged, and the new supervisor is done."""
+    box, _orch, second, third, url = _queued_behind_a_conflict(tmp_path)
+    offline = _offline(box, ["abort", "--channel", "skill", "REQ-902"])
+    assert sorted(offline.runs) == ["REQ-902"]
+    assert se.Run.load(second.path).status == "failed"
+    assert _aborted_line(second, [url]) + "\n" in box.out.getvalue()
+    later = box.orch()
+    later.resume()
+    assert sorted(later.runs) == ["REQ-903"] and later.queue == ["REQ-903"]
+    later.drain()
+    resumed = later.runs["REQ-903"]
+    assert resumed.doc["holdBehind"] is None and se.Run.load(third.path).doc["holdBehind"] is None
+    assert resumed.status == "merged"
+    merged = [c["argv"][0] for c in box.calls("pr_merge")]
+    assert url not in merged and resumed.ledger().read()["plan"]["prs"][0]["url"] in merged
+    assert se.Run.load(second.path).status == "failed"
+    assert later.done()
+
+
+def test_req719_an_offline_reject_releases_the_hold_queued_behind_it(tmp_path):
+    """REQ-659 BR-10, REQ-719 BR-2: the same for a `reject` made with no supervisor running.
+    REQ-902's approval is queued behind REQ-901, which is rejected through the client; a later
+    `resume` reads REQ-901's rejection from disk, and REQ-902 merges."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    box.req("REQ-901", files={"shared/a.txt": "901\n"})
+    box.req("REQ-902", files={"shared/a.txt": "902\n"}, sleep_first=1.5)
+    orch = box.go(shared=True)
+    first, second = orch.runs[REQ], orch.runs["REQ-902"]
+    url = first.ledger().read()["plan"]["prs"][0]["url"]
+    assert box.approve(orch, "REQ-902", drain=False) == "approved (queued behind REQ-901)"
+    offline = _offline(box, ["reject", "--channel", "skill", REQ, "not this sprint"])
+    assert sorted(offline.runs) == [REQ] and se.Run.load(first.path).status == "rejected"
+    later = box.orch()
+    later.resume()
+    assert sorted(later.runs) == ["REQ-902"] and later.queue == ["REQ-902"]
+    later.drain()
+    resumed = later.runs["REQ-902"]
+    assert resumed.doc["holdBehind"] is None and se.Run.load(second.path).doc["holdBehind"] is None
+    assert resumed.status == "merged"
+    assert url not in [c["argv"][0] for c in box.calls("pr_merge")]
+    assert later.done()
+
+
+def test_req719_a_hold_on_a_run_that_cannot_be_loaded_stands(tmp_path, monkeypatch):
+    """REQ-719 BR-2: a hold whose run this supervisor has not loaded is cleared from disk only
+    when that run's newest record is terminal or it has none; a record found that then cannot
+    be loaded keeps it. (A record no reader can parse names no REQ, so `find_run`, like
+    `resume`, does not find it: for the hold that is no run.)"""
+    box, _orch, second, _third, _url = _queued_behind_a_conflict(tmp_path)
+    later = box.orch()
+    assert later._hold_cleared("REQ-902") is False          # blocked on disk
+    assert later._hold_cleared("REQ-999") is True           # no run at all
+    assert later._hold_cleared(REQ) is True                 # merged on disk
+
+    def unreadable(path):
+        raise se.Refused("run record unreadable in %s" % path)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(se.Run, "load", staticmethod(unreadable))
+        assert later._hold_cleared(REQ) is False
+    assert not later.runs
+
+
+def _in_another_thread(act):
+    """``act()`` run on a thread of its own, waited for: ``("ok", result)`` or ``("refused",
+    message)``. A thread still running after 30 seconds fails the test (a deadlock)."""
+    out = []
+
+    def body():
+        try:
+            out.append(("ok", act()))
+        except se.Refused as exc:
+            out.append(("refused", str(exc)))
+
+    thread = threading.Thread(target=body)
+    thread.start()
+    thread.join(30)
+    assert not thread.is_alive(), "the competing call did not return"
+    return out[0]
+
+
+def _held_behind_the_first(tmp_path, **after):
+    """REQ-902 blocked behind REQ-901, which merges cleanly; the unblock pass then rebases and
+    relaunches REQ-902, whose relaunch goes to the gate (``after`` adds to that script)."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    box.req("REQ-901", files={"a.txt": "901\n"})
+    box.req("REQ-902", files={"b.txt": "902\n"}, status="blocked", claim="blocked",
+            blockers=[{"blockedBy": "REQ-901", "conflictFiles": ["a.txt"], "holdState": "held",
+                       "rebaseAttempts": 0}],
+            after_answer=dict({"status": "awaiting_approval", "claim": "awaiting_approval",
+                               "blockers": None, "files": {"c.txt": "902\n"}}, **after))
+    orch = box.go(shared=True)
+    held = orch.runs["REQ-902"]
+    assert held.status == "blocked"
+    return box, orch, held
+
+
+def _during_the_unblock_pass(monkeypatch, orch, act):
+    """Run ``act`` on another thread at the point the merge worker's unblock pass fetches the
+    integration branch for the held REQ, once REQ-901 has merged, and wait for it. Returns the
+    list its one outcome is appended to (:func:`_in_another_thread`)."""
+    real = eg.fetch_integration
+    seen = []
+
+    def fetch(toolbox, repo, ib):
+        if not seen and orch.runs[REQ].status == "merged":
+            seen.append(_in_another_thread(act))
+        return real(toolbox, repo, ib)
+
+    monkeypatch.setattr(eg, "fetch_integration", fetch)
+    return seen
+
+
+BEING_REBASED = ("REQ-902 is being rebased after REQ-901 merged; run the command again in a "
+                 "moment")
+
+
+def test_req719_abort_during_the_unblock_pass_is_refused(tmp_path, monkeypatch, reaped):
+    """REQ-719 BR-3: an `abort` that arrives while the merge worker rebases and relaunches a held
+    REQ is refused, saying so and to run it again; nothing is signalled and nothing changes. The
+    run is relaunched once and is not `failed`. Once the pass is over the run is `running`, and
+    the same `abort` kills its harness as before (REQ-659 BR-20)."""
+    box, orch, held = _held_behind_the_first(tmp_path, sleep_first=30)
+    reaped(orch)
+    seen = _during_the_unblock_pass(monkeypatch, orch,
+                                    lambda: orch.abort("REQ-902", by="operator"))
+    box.approve(orch, REQ)
+    assert orch.runs[REQ].status == "merged"
+    assert seen == [("refused", BEING_REBASED)]
+    assert held.status == "running" and held.doc["launches"] == 2
+    assert held.exec["abortedBy"] is None
+    assert [o["terminal"] for o in box.outcomes("REQ-902")] == ["blocked"]
+    eh.until(lambda: len(box.argvs("REQ-902")) == 2, what="the relaunch to start")
+    pid = held.exec["pid"]
+    assert se.same_process(pid, held.exec["pidStart"])
+    orch.abort("REQ-902", by="operator")
+    eh.until(lambda: not se.pid_alive(pid), timeout=10, what="the relaunched harness to be gone")
+    assert held.status == "failed" and held.exec["abortedFrom"] == "running"
+    assert len(box.argvs("REQ-902")) == 2
+
+
+def test_req719_answer_during_the_unblock_pass_is_refused(tmp_path, monkeypatch):
+    """REQ-719 BR-3: an `answer` that arrives while the merge worker rebases and relaunches a
+    held REQ is refused the same way, so the run is launched once more, not twice, and the
+    refused reply reaches no prompt."""
+    box, orch, held = _held_behind_the_first(tmp_path)
+    seen = _during_the_unblock_pass(monkeypatch, orch,
+                                    lambda: orch.answer("REQ-902", "the second option"))
+    box.approve(orch, REQ)
+    assert seen == [("refused", BEING_REBASED)]
+    box.wait(orch)
+    assert held.status == "awaiting_approval" and held.doc["launches"] == 2
+    assert len(box.argvs("REQ-902")) == 2
+    assert "the second option" not in eh.read_text(held.file("prompt.2.txt"))
+
+
+def test_req719_a_blocked_run_dropped_with_no_unblock_pass_in_flight_is_not_relaunched(
+        tmp_path):
+    """REQ-719 BR-1, BR-3: the benign path. A held REQ dropped while nothing rebases it drops,
+    and the unblock pass after its blocker merges leaves it alone: no relaunch, no rebase."""
+    box, orch, held = _held_behind_the_first(tmp_path)
+    orch.abort("REQ-902", by="operator")
+    assert held.status == "failed" and held.exec["abortedFrom"] == "blocked"
+    logged = len(box.log(held))
+    box.approve(orch, REQ)
+    assert orch.runs[REQ].status == "merged"
+    assert held.status == "failed" and held.doc["launches"] == 1
+    assert len(box.argvs("REQ-902")) == 1
+    assert not [r for r in box.log(held)[logged:] if r["kind"] == "git" and "rebase" in r["argv"]]
+
+
+def test_req719_a_drop_between_the_scan_and_the_rebase_stops_the_unblock_pass(tmp_path,
+                                                                              monkeypatch):
+    """REQ-719 BR-3: the unblock pass reads a held REQ's status again under the lock before it
+    acts. An `abort` that drops the run after the pass found it `blocked` and before the rebase
+    leaves it dropped: the worker rebases nothing, pushes nothing, grants no trust and
+    relaunches nothing."""
+    box, orch, held = _held_behind_the_first(tmp_path)
+    real = se.Orchestrator.rank
+    seen = []
+
+    def rank(run):
+        # The pass ranks what it found just before it rebases each one.
+        if run is held and orch.runs[REQ].status == "merged" and not seen:
+            seen.append(_in_another_thread(lambda: orch.abort("REQ-902", by="operator")))
+        return real(run)
+
+    monkeypatch.setattr(orch, "rank", rank)
+    logged = len(box.log(held))
+    box.approve(orch, REQ)
+    assert orch.runs[REQ].status == "merged"
+    assert seen and seen[0][0] == "ok" and held.exec["abortedFrom"] == "blocked"
+    assert held.status == "failed" and held.doc["launches"] == 1
+    assert len(box.argvs("REQ-902")) == 1
+    after = [r for r in box.log(held)[logged:] if r["kind"] == "git"]
+    assert not [r for r in after if {"rebase", "push"} & set(r["argv"])]
+    assert not held.doc.get("trustGrants")
+
+
+def _held_by_another_thread(lock):
+    """Whether some other thread holds ``lock`` now: a thread of its own cannot take it without
+    waiting."""
+    got = []
+
+    def probe():
+        took = lock.acquire(blocking=False)
+        got.append(took)
+        if took:
+            lock.release()
+
+    thread = threading.Thread(target=probe)
+    thread.start()
+    thread.join(10)
+    return got == [False]
+
+
+@pytest.mark.parametrize("how,reason", [("conflict", "merge-conflict"), ("mismatch", "other")])
+def test_req719_an_abort_waits_until_the_block_is_recorded(tmp_path, monkeypatch, how, reason):
+    """REQ-719 BR-3, BR-19: the merge worker's `blocked` (a rebase conflict's hold, a rebase
+    whose changed paths moved) is one step under the supervisor's lock: the status, the carry
+    and the run-outcome line. An `abort` that arrives in that step waits for it, so the REQ's
+    run-outcome lines read `blocked` and then `failed` / `aborted`, never the other order."""
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    if how == "conflict":
+        box.req("REQ-901", files={"README.md": "AAA\nline two\nline three\n"})
+        box.req("REQ-902", files={"README.md": "BBB\nline two\nline three\n"}, sleep_first=1.5)
+    else:
+        box.req("REQ-901", files={"a.txt": "901\n"})
+        box.req("REQ-902", files={"b.txt": "902\n"})
+    orch = box.go(shared=True)
+    second = orch.runs["REQ-902"]
+    box.approve(orch, REQ)
+    if how == "mismatch":
+        monkeypatch.setattr(eg, "trial_merge", lambda *a: (1, ["b.txt"]))
+        monkeypatch.setattr(eg, "changed_paths", lambda *a: [["A", "other.txt"]])
+    held_at = []
+    aborts = []
+    threads = []
+
+    def seam(real):
+        def call(run, *args, **kw):
+            if run is second and run.status == "blocked" and not run.exec.get("abortedBy"):
+                held_at.append((real.__name__, _held_by_another_thread(orch.lock)))
+                if not threads:
+                    thread = threading.Thread(target=lambda: aborts.append(
+                        orch.abort("REQ-902", by="operator")))
+                    thread.start()
+                    threads.append(thread)
+            return real(run, *args, **kw)
+        return call
+
+    monkeypatch.setattr(orch, "_carry", seam(orch._carry))
+    monkeypatch.setattr(orch, "_emit", seam(orch._emit))
+    box.approve(orch, "REQ-902")
+    threads[0].join(30)
+    assert not threads[0].is_alive() and len(aborts) == 1
+    assert ("_carry", True) in held_at and ("_emit", True) in held_at
+    assert all(held for _name, held in held_at), held_at
+    assert second.status == "failed" and second.exec["abortedFrom"] == "blocked"
+    assert [(o["terminal"], o["blocked_reason"]) for o in box.outcomes("REQ-902")] == [
+        ("blocked", reason), ("failed", "aborted")]
+    assert merged_count(box) == 2, "REQ-902 was not merged"
+
+
+def test_req719_a_run_ended_after_it_left_the_queue_is_not_merged(box, monkeypatch):
+    """REQ-719 BR-2: `execute` does not act on a terminal run. A run that ends between leaving
+    the merge queue and `execute` gets one line and nothing else: no forge call, no merge, no
+    ledger write."""
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    box.approve(orch, drain=False)
+    real = orch.next_ready
+
+    def next_ready():
+        ready = real()
+        if ready is not None:
+            ready.status = "failed"             # an ending landing after the dequeue
+        return ready
+
+    monkeypatch.setattr(orch, "next_ready", next_ready)
+    calls = (box.store / "calls.log").read_text()
+    ledger = eh.read_text(run.ledger().path)
+    logged = len(box.log(run))
+    said = len(box.out.getvalue())
+    orch.drain()
+    assert box.out.getvalue()[said:] == "REQ-901 is failed: nothing is merged for it\n"
+    assert (box.store / "calls.log").read_text() == calls and merged_count(box) == 0
+    assert eh.read_text(run.ledger().path) == ledger
+    assert box.log(run)[logged:] == []
+    assert run.status == "failed"
+
+
+def test_req719_abort_prints_only_a_well_formed_pr_url(box):
+    """REQ-719 BR-2: a blocked run before the gate has no plan, so the PR URL `abort` prints is
+    read from the state the model writes. A `prUrl` on another host, one holding a newline or
+    another control character, one that is not a string, and a run with no PR at all each
+    print no URL; a well-formed one on the run's host does. The printed line stays one line."""
+    box.blocked()
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    good = run.read_primary_state()["repos"]["widgets"]["prUrl"]
+    assert good.startswith("https://mock.forge/acme/widgets/pull/")
+
+    def recorded(repos):
+        state = run.read_primary_state()
+        if repos is None:
+            state.pop("repos", None)
+        else:
+            state["repos"] = repos
+        run.write_primary_state(state)
+        return orch._pr_urls(run)
+
+    hostile = [good.replace("mock.forge", "evil.example"), good + "\n", good + "\r\n",
+               good.replace("/pull/", "/pull/\n"), good + "\x1b[2J", "\x07" + good,
+               good + "\t", 102, [good], {"url": good}, None, ""]
+    for value in hostile:
+        assert recorded({"widgets": {"prUrl": value}}) == [], repr(value)
+    for repos in ({"widgets": {}}, {"widgets": "x"}, {}, "not a map", None):
+        assert recorded(repos) == [], repr(repos)
+    assert recorded({"widgets": {"prUrl": good}}) == [good]
+    recorded({"widgets": {"prUrl": good + "\n"}})
+    said = len(box.out.getvalue())
+    line = orch.abort(REQ, by="operator")
+    assert line == "%s aborted by operator; working copy left at %s, branch %s" % (
+        REQ, run.wc, run.doc["branch"])
+    assert box.out.getvalue()[said:] == line + "\n"
+
+
+def test_req719_a_pid_the_os_gave_another_process_does_not_stop_the_drop(box):
+    """REQ-719 BR-1, REQ-662 BR-18: a blocked run whose recorded harness and close-out pids are
+    alive but are other processes (`same_process` is false) is dropped, and neither process is
+    signalled."""
+    box.blocked()
+    orch = box.go(shared=True)
+    run = orch.runs[REQ]
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                             start_new_session=True)
+    try:
+        eh.until(lambda: se.process_start(other.pid), what="the other process to start")
+        run.exec.update({"pid": other.pid, "pidStart": NOT_ITS_START, "closeOutPid": other.pid,
+                         "closeOutPidStart": NOT_ITS_START})
+        assert se.pid_alive(other.pid) and not se.same_process(other.pid, NOT_ITS_START)
+        signalled = []
+        with pytest.MonkeyPatch.context() as mp:
+            _recording_signals(mp, signalled)
+            orch.abort(REQ, by="operator")
+        assert signalled == []
+        assert run.status == "failed" and run.exec["abortedFrom"] == "blocked"
+        assert other.poll() is None
+    finally:
+        if other.poll() is None:
+            other.kill()
+        other.wait()
+
+
+def test_req719_abort_of_a_stalled_run_records_aborted_from_stalled(box, reaped):
+    """REQ-719 BR-19: the kill of a stalled harness records `abortedFrom: stalled` and appends
+    one run-outcome line, `failed` / `aborted`."""
+    box.req(sleep_first=30)
+    orch = reaped(box.start(shared=True))
+    run = orch.runs[REQ]
+    eh.until(lambda: os.path.exists(run.wc_state_path()), what="the harness to write state")
+    run.doc["config"]["stall_minutes"] = 1
+    old = time.time() - 120
+    os.utime(run.wc_state_path(), (old, old))
+    orch.poll_once()
+    assert run.status == "stalled"
+    pid = run.exec["pid"]
+    orch.abort(REQ, by="operator")
+    eh.until(lambda: not se.pid_alive(pid), timeout=10, what="the harness to be gone")
+    assert run.status == "failed" and run.exec["abortedFrom"] == "stalled"
+    assert se.Run.load(run.path).exec["abortedFrom"] == "stalled"
+    assert [(o["terminal"], o["blocked_reason"]) for o in box.outcomes(REQ)] == [
+        ("failed", "aborted")]
+
+
+def test_req719_the_kill_discards_the_token_leaves_the_queue_and_releases_the_hold(
+        tmp_path, reaped):
+    """REQ-719 BR-2: the kill arm ends a run as the drop does. REQ-902, approved and then blocked
+    by a rebase conflict, is answered and its relaunch is killed: any token held for it is
+    discarded, it leaves the merge queue, and REQ-903's approval queued behind it is released
+    and merges, while REQ-902's PR is never merged."""
+    box, orch, second, third, url = _queued_behind_a_conflict(
+        tmp_path, after_answer={"status": "awaiting_approval", "claim": "awaiting_approval",
+                                "blockers": None, "sleep_first": 30})
+    reaped(orch)
+    orch.answer("REQ-902", "the second option")
+    eh.until(lambda: len(box.argvs("REQ-902")) == 2, what="the relaunch to start")
+    pid = second.exec["pid"]
+    assert second.status == "running" and se.same_process(pid, second.exec["pidStart"])
+    # What the drop's test holds the kill arm to as well: a token and a queue entry for it.
+    orch.tokens["REQ-902"] = {"approve": el.token_digest(el.mint_token()), "gate": None}
+    orch.queue.insert(0, "REQ-902")
+    assert third.doc["holdBehind"] == "REQ-902"
+    line = orch.abort("REQ-902", by="operator")
+    eh.until(lambda: not se.pid_alive(pid), timeout=10, what="the relaunched harness to be gone")
+    assert line == _aborted_line(second, [url])
+    assert second.status == "failed" and second.exec["abortedFrom"] == "running"
+    assert "REQ-902" not in orch.tokens and orch.queue == ["REQ-903"]
+    assert third.doc["holdBehind"] is None and se.Run.load(third.path).doc["holdBehind"] is None
+    orch.drain()
+    assert third.status == "merged"
+    assert url not in [c["argv"][0] for c in box.calls("pr_merge")]

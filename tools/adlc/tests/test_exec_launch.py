@@ -2898,7 +2898,9 @@ def test_req719_a_blocked_row_names_answer_and_abort(two):
 def test_req719_an_exhausted_ci_wait_ends_blocked(box):
     """REQ-719 BR-25, AC-19: a session whose CI wait ran out with checks still pending reports
     `blocked`, naming them. The run ends `blocked`, never at the gate (no plan, no token), and
-    its row names the pending checks and both ways out."""
+    its row names the pending checks and both ways out.
+    The session is the scripted fake: this shows what the engine does with that report, not
+    that a real session following Phase 7 writes it (`test_phase7_text.py` holds the text)."""
     pending = {"reason": "ci-pending", "pendingChecks": ["build", "lint"], "reads": 20,
                "detail": "CI checks still pending after 20 reads: build, lint"}
     box.blocked(blockers=[pending])
@@ -2916,3 +2918,27 @@ def test_req719_an_exhausted_ci_wait_ends_blocked(box):
     assert [argv[0] for argv in eh.ways_out(row)] == ["answer", "abort"]
     assert [(o["terminal"], o["engine"]) for o in box.outcomes("REQ-901")] == [
         ("blocked", "exec")]
+
+
+def test_req719_the_drop_names_the_repositories_already_merged(tmp_path):
+    """REQ-719 BR-2: in a cross-repo plan a run can block after some of its repositories have
+    merged, so the drop's line names them, read from the run record the engine writes after
+    each merge (`_note_merged`), and the operator is not told everything was left as it was.
+    A `merged` flag the model wrote in its own state is not named. The mock forge holds one
+    repository's PRs, so `side`'s merge is that record, made here as `execute` makes it."""
+    box = eh.Sandbox(tmp_path, config=CROSS_REPO)
+    _sibling(tmp_path, box)
+    box.blocked(siblings={"side": False})
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "blocked" and sorted(run.doc["repos"]) == ["side", "widgets"]
+    state = run.read_primary_state()
+    url = state["repos"]["widgets"]["prUrl"]
+    state["repos"]["widgets"]["merged"] = True          # the model's word, not the engine's
+    run.write_primary_state(state)
+    orch._note_merged(run, "side")
+    assert se.Run.load(run.path).doc["mergedRepos"] == ["side"]
+    line = orch.abort("REQ-901", by="operator")
+    assert line == ("REQ-901 aborted by operator; working copy left at %s, branch %s, PR %s; "
+                    "already merged: side" % (run.wc, run.doc["branch"], url))
+    assert run.status == "failed" and run.exec["abortedFrom"] == "blocked"
