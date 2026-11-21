@@ -1,7 +1,7 @@
 ---
 id: BUG-289
 title: "An exec session that stamps the harness before the state file exists can report `blocked` and lose the launch"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-21
 updated: 2026-11-21
@@ -144,3 +144,9 @@ written anyway, each citing this bug:
 - `tools/delegate/tests/test_run_outcome.py` — one test
 - `.adlc/research/harness-probes/codex-exec-manual.md` — fact 10
 - `CHANGELOG.md` — Unreleased, Fixed
+
+## Deployment
+
+Merged as `ff855d9` (PR #305) on 2026-11-21. The toolkit has no deploy target: the fix is live
+for a symlink install when its clone pulls `main`, and for a plugin install at the next
+release. No real `codex` or `claude` launch has run against it. LESSON-899.
