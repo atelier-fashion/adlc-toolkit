@@ -1,7 +1,7 @@
 ---
 id: TASK-277
 title: "Evidence: one whole pipeline on real Codex past Phase 7 against the mock forge, and one real GitHub read"
-status: draft
+status: complete
 parent: REQ-719
 repo: adlc-toolkit
 created: 2026-11-20
@@ -20,10 +20,10 @@ Record the two measurements BR-26 asks for. Both are operator-requested runs: th
 
 ## Acceptance Criteria
 
-- [ ] One `/sprint --exec` launch of a lite REQ with a real `codex exec`, in a throwaway clone with a local bare origin and the stateful mock forge, reaches the merge gate with Phase 7 passed and no `answer` given. The row records the date, the Codex version, the commit of this branch, what Phase 7 read, and how the run ended.
-- [ ] `adlc_forge_pr_checks` is run once against a real PR of this repository on GitHub, and its stdout and return status are recorded.
-- [ ] The staging follows the recipe already in the note (throwaway `ADLC_HOME`, `XDG_STATE_HOME` and outcomes log; pushes only to the local bare origin; `~/.codex/config.toml` checksummed before and after; no recovery marker left).
-- [ ] The whole suite passes with `HOME` pointed at an empty throwaway directory, and leaves no file under the operator's real home.
+- [x] One `/sprint --exec` launch of a lite REQ with a real `codex exec`, in a throwaway clone with a local bare origin and the stateful mock forge, reaches the merge gate with Phase 7 passed and no `answer` given. The row records the date, the Codex version, the commit of this branch, what Phase 7 read, and how the run ended.
+- [x] `adlc_forge_pr_checks` is run once against a real PR of this repository on GitHub, and its stdout and return status are recorded.
+- [x] The staging follows the recipe already in the note (throwaway `ADLC_HOME`, `XDG_STATE_HOME` and outcomes log; pushes only to the local bare origin; `~/.codex/config.toml` checksummed before and after; no recovery marker left).
+- [x] The whole suite passes with `HOME` pointed at an empty throwaway directory, and leaves no file under the operator's real home.
 
 ## Verification
 

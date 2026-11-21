@@ -52,6 +52,10 @@ def _no_inherited_toolkit_env(monkeypatch):
     monkeypatch.delenv("ADLC_HOME", raising=False)
     monkeypatch.delenv("ADLC_CONFIG", raising=False)
     monkeypatch.delenv("ADLC_REPOS_ROOT", raising=False)
+    # REQ-719 BR-29: the exec engine keeps its run records under `$XDG_STATE_HOME`, or under
+    # `~/.local/state` without it. Unset, they follow the throwaway `HOME` above; inherited,
+    # they would be the runner's own.
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
 
 
 @pytest.fixture(scope="session")
