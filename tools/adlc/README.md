@@ -799,11 +799,36 @@ executable:
   it reads the forge repository of the calling directory and the mock forge answers it. Any
   field that differs, or `error_class=pr-not-found`, is 65, and the line names the value and
   the branch and no field of the PR it read. No branch checked out is 3, decided before any
-  read. The adapter's own `opaque_entry_refused:` (its Azure DevOps arm under the runner) is
-  passed through as 3. Any other error class, an answer that does not parse, or no answer in
-  60 s is 75. A tied fence's census record names its values under `tied`, and its reach
-  includes the read. A runner fence that hands an unmarked placeholder to an `adlc_forge_pr_*`
-  operation as its PR does not route, and `fence_census.py --check` fails naming it.
+  read. Under an exec run the branch checked out must also be the run's own branch
+  (`run_branch_refusal`, the check a push fence gets): any other is 3, with an
+  `opaque_entry_refused:` line, before any read. Without it a session could check out a local
+  branch named after another PR's head and pass the tie for that PR. The adapter's own
+  `opaque_entry_refused:` (its Azure DevOps arm under the runner) is passed through as 3. Any other error class, an answer that does not parse, or no answer in
+  20 s is 75. A tied fence's census record names its values under `tied`, and its reach
+  includes the read. One tied CI call, Phase 7's, therefore lasts at most its wait (`ciWait`
+  admits 0 to 60 seconds), the read (at most 20 s) and one forge read.
+  The routing rule fails closed. A runner fence does not route, and `fence_census.py --check`
+  fails naming the operation and the value, when a positional argument of any
+  `adlc_forge_pr_*` operation but `pr_create` and `pr_list` holds anything the check cannot
+  trace to a marked placeholder or to clean text: an unmarked placeholder, a positional
+  parameter (`$1`, `$@`; the runner hands a fence none), or a variable any of whose
+  assignments holds one. Assignments include what a command substitution, a `for` list, a
+  here-document, a here-string, or the pipeline or compound statement feeding a `read`
+  holds. Only what `adlc_forge_pr_create` or `adlc_forge_pr_list` prints is exempt (BR-14).
+  Option values are skipped only for the options the adapter's own parser consumes a value
+  for, so a word after any other option is checked as the PR, and `-R`/`--repo` on a PR
+  operation is refused: the tie's read is made without it. The check is flow-insensitive, so
+  a name ever assigned from tainted text is tainted wherever it is used.
+  **One fence is declared untied.** `/architect`'s footprint fence (`architect/SKILL.md`)
+  takes its PR number from `pipeline-state.json`, which the session writes, so it is not held
+  to the caller's PR. `fence_census.py` names it in a closed table, `DECLARED_UNTIED`, keyed
+  by its full fence id so any edit to the fence drops the exemption; it routes, and its record
+  in both census files carries `untied` with the reason (the README's declared residuals).
+  **The tie trusts the caller's forge selection.** The read runs in the fence's own
+  environment, so `GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE` and the
+  `ADLC_FORGE_MOCK*` variables are the caller's: a session that sets one of them for the
+  runner chooses which forge answers the tie, and the fence's own forge calls go to the same
+  place (the README's declared residuals).
 - **`--arg-file`** is opened from a handle on the working directory, one path component at a
   time, following no symlink at any component, the last included. The path is relative with
   no `..` segment, or absolute under the working directory in its given spelling (`$PWD`) or
@@ -819,6 +844,9 @@ executable:
   pins point at its run directory and would break an operator's push credentials, so the
   runner does not take them. The rest of that config is honoured, and a model can write it, so
   the two pins are defense in depth (the README's declared residual (f)).
+- **Its Python.** A fence runs in the working copy, which the session writes. Every inline
+  `python3 -c` helper in `partials/forge.sh` runs as `python3 -I -c` (REQ-719), so a module
+  planted there, such as a `json.py`, is not imported in place of the standard library's.
 
 **One census per adapter (REQ-662 ADR-8).** Each exec-capable adapter has its committed census,
 `harness/<name>/exec-fence-census.json`: every fence, its route, its values and its reach. On
@@ -866,12 +894,20 @@ discarded, the run leaves the merge queue, and approvals held behind it are rele
 `awaiting_approval` with no live process `abort` is refused, naming `reject`. Both arms record
 `exec.abortedFrom`, the status `abort` found (`running`, `stalled` or `blocked`), beside
 `exec.abortedBy` and `exec.abortedAt`, and print one line naming the REQ, who aborted it, the
-working copy, the branch and the PR. In the run-outcome log `reject` writes the terminal
+working copy, the branch and the PR. The kill arm also discards the token, takes the run out
+of the merge queue and releases approvals held behind it. `abort` and `answer` are refused,
+with nothing changed, while the merge worker is rebasing that run after another REQ merged:
+run the command again once the worker has relaunched it or halted it again. A hold is released
+once the run it waits behind is terminal, read from disk when this supervisor has not loaded
+it, or has no run on disk at all, so an `abort` or `reject` made with no supervisor running
+no longer leaves a later `resume` waiting. In the run-outcome log `reject` writes the terminal
 `rejected` with an empty reason, which only engine `exec` may write, and `abort` writes
 `failed` with the reason `aborted`. The mock forge (`forge_mock.py`) answers `pr_checks`, the
-op behind `adlc_forge_pr_checks`, from a PR's `checks` list in its store, which the unrecorded
-helper `set-checks` writes, and from the scenarios `checks-pass`, `checks-fail`,
-`checks-pending`, `checks-none` and `checks-pending-then-pass`. A PR with no list reads `none`.
+op behind `adlc_forge_pr_checks`, from a PR's `checks` list in its store, and from the
+scenarios `checks-pass`, `checks-fail`, `checks-pending`, `checks-none` and
+`checks-pending-then-pass`. A PR with no list reads `none`. A fixture writes that list with
+`forge_mock.py set-checks`, a helper and not a forge op: like `make-head` it is not written to
+`calls.log`, so a test's record of forge calls never shows it, and no scenario applies to it.
 
 ## `adlc agents render` (REQ-516)
 

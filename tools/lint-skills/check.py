@@ -130,10 +130,13 @@ The per-file checks (each a pure ``(text, rel) -> list[Finding]`` except
    fence (REQ-520 BR-1). PR-lifecycle ops must route through
    ``partials/forge.sh`` (the ``adlc_forge_*`` functions), never ``gh pr``
    directly, so switching a project between GitHub and Azure DevOps stays a
-   config change. The op list matches the adapter's surface exactly
-   (create/ready/edit/view/list/merge/comment); ``gh pr diff`` and
-   ``gh pr checks`` are exempt — a local read-only diff convenience and
-   CI-status polling, the latter explicitly out of scope. Only shell fences
+   config change. The op list is the adapter's PR-lifecycle surface
+   (create/ready/edit/view/list/merge/comment). ``gh pr diff`` and
+   ``gh pr checks`` are exempt: a read-only diff convenience (``/adversary``)
+   and the CI waits ``/wrapup`` and ``/bugfix`` still make directly, from when
+   REQ-520 left CI out of scope. ``/proceed``'s Phase 7 calls neither since
+   REQ-719: it reads its diff locally and its CI with
+   ``adlc_forge_pr_checks``, which a new CI read uses too. Only shell fences
    are scanned, so prose / lesson mentions of ``gh pr`` are never flagged.
 8. ``check_read_bin_fallback`` — the ``ADLC_READ_BIN`` call-site contract inside
    a shell fence (REQ-609 BR-12, ADR-3). ``partials/delegate-gate.sh`` is the
@@ -606,9 +609,11 @@ FN_CALL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\b")
 
 # REQ-520 BR-1: a direct `gh pr <op>` call inside a shell fence. PR-lifecycle ops
 # MUST go through partials/forge.sh (adlc_forge_*), never `gh pr` directly. The
-# ops covered are exactly the adapter's: create/ready/edit/view/list/merge/comment.
-# `gh pr diff` and `gh pr checks` are EXEMPT — diff is a local read-only convenience
-# and CI-status polling is explicitly out of scope (REQ-520 Out of Scope). The guard
+# ops covered are the adapter's PR-lifecycle ones: create/ready/edit/view/list/merge/comment.
+# `gh pr diff` and `gh pr checks` are EXEMPT — diff is a read-only convenience
+# (/adversary), and /wrapup and /bugfix still wait for CI with a direct `gh pr checks`,
+# from when REQ-520 left CI out of scope. /proceed's Phase 7 calls neither since
+# REQ-719 (local diff, `adlc_forge_pr_checks`), and a new CI read uses the adapter. The guard
 # is written against the POST-migration shape (LESSON-019: presence guards rot when
 # the indirection moves) and only scans shell fences so prose/lesson mentions of
 # `gh pr` are never flagged.
@@ -2038,10 +2043,11 @@ def check_forge_direct_gh(text: str, rel: str) -> list[Finding]:
     PR-lifecycle ops must go through ``partials/forge.sh`` (the ``adlc_forge_*``
     functions), never ``gh pr`` directly, so switching a project between GitHub
     and Azure DevOps is a config change. ``gh pr diff`` and ``gh pr checks`` are
-    EXEMPT (a local read-only diff convenience and CI-status polling, the latter
-    explicitly out of scope). Only shell fences are scanned, so prose / lesson
-    mentions of ``gh pr`` are never flagged. The op list matches the adapter's
-    surface exactly — written against the post-migration shape (LESSON-019).
+    EXEMPT: a read-only diff convenience in ``/adversary``, and the direct CI waits
+    ``/wrapup`` and ``/bugfix`` still make (``/proceed``'s Phase 7 reads CI with
+    ``adlc_forge_pr_checks`` since REQ-719). Only shell fences are scanned, so prose /
+    lesson mentions of ``gh pr`` are never flagged. The op list is the adapter's
+    PR-lifecycle surface — written against the post-migration shape (LESSON-019).
     """
     findings: list[Finding] = []
     for _lang, _idx, _start, body in _iter_fences(text):
@@ -2053,7 +2059,8 @@ def check_forge_direct_gh(text: str, rel: str) -> list[Finding]:
                         rel, lineno, "forge-direct-gh",
                         f"direct 'gh pr {op}' in a shell fence — route PR ops "
                         "through partials/forge.sh (adlc_forge_pr_%s); only "
-                        "'gh pr diff'/'gh pr checks' may be called directly"
+                        "'gh pr diff'/'gh pr checks' are exempt, and a new CI "
+                        "read uses adlc_forge_pr_checks"
                         % op,
                     )
                 )

@@ -57,7 +57,7 @@ import tempfile
 TERMINALS = ("merged", "pr-ready", "blocked", "failed", "rejected")
 ENGINES = ("solo", "legacy", "workflow", "exec")
 # `rejected` is a person declining a PR at the exec engine's merge gate
-# (REQ-719 BR-18). Only that engine has the gate, so only it may write the
+# (REQ-719 BR-18). Only that engine has the gate, so only it may write this
 # terminal: the check names the one engine allowed, and any engine added later
 # starts refused.
 REJECTED_ENGINE = "exec"

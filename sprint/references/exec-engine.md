@@ -59,6 +59,10 @@ python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec reject --channel ski
 
 `answer` and `abort` take the same shape: `sprint-exec answer --channel skill '<REQ-id>' '<reply>'`, `sprint-exec abort --channel skill '<REQ-id>'`. Keep `--channel` before the REQ id: after it, the reason or reply is not read as one.
 
+## A run is held to its own PR
+
+A fence that takes a PR number runs only for the run's own PR. Before the fence runs, the fence runner reads the number through the forge adapter and refuses any other PR (exit 65), a forge it could not read (75), and a checked-out branch that is not the run's own (3, before any read, so a local branch named after another PR's head does not pass). Two gaps are declared in the README: the read trusts the caller's forge selection (`GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_MOCK*`), and `/architect`'s footprint fence takes its PR number from `pipeline-state.json`, which the session writes, so that one fence is not held to the run's PR (`untied` in both census files).
+
 ## When the supervisor is gone
 
 `approve` and `answer` need a live supervisor, because the token's digest lives in its memory. If either says no supervisor holds the run, start one in the background. It prints fresh tokens for every REQ at the gate.

@@ -28,7 +28,7 @@ You are in subagent mode if you were explicitly told so in your launch prompt.
 
 Before you stop at any of the four, emit the run-outcome line (**Run-outcome telemetry** R5 in `proceed/phases-telemetry.md`, `blocked`, with that halt's token).
 
-For everything else — including every **End-of-phase log** block below, every agent dispatch, every commit, every PR creation, every CI read that has reads left — you **continue immediately** to the next step without asking the user. Prompt only for tool-level permissions on truly destructive operations (these are governed by `.claude/settings.json`, not this skill).
+For everything else — including every **End-of-phase log** block below, every agent dispatch, every commit, every PR creation, every CI read until the wait ends — you **continue immediately** to the next step without asking the user. Prompt only for tool-level permissions on truly destructive operations (these are governed by `.claude/settings.json`, not this skill).
 
 **Writing logs vs asking questions**: when the skill says "report X" or "log Y", emit a one-line status line to the conversation and continue. Do NOT phrase it as a question or wait for acknowledgment. A bad example: "Spec validated — shall I proceed to Phase 2?" A good example: "Spec validated. Moving to Phase 2."
 
@@ -397,10 +397,11 @@ re-run `/review` (`/adlc:review` on the plugin install). For every PR: review
 the local diff from `origin/<integrationBranch>` to the pushed `HEAD`, catch
 stray debug/TODO/secret content, verify cross-repo contract consistency, push
 fixups in the owning worktree if needed, and read CI with `adlc_forge_pr_checks`
-(both fences are in the companion). `pass` is green and `none` reports no checks;
-`fail` is fixed and pushed like any cleanup; `pending` is read again every
-`proceed.ci.interval_s` seconds, at most `proceed.ci.max_reads` reads, and a wait
-that runs out is never green (solo: ask the operator; unattended: `blocked`). End-of-phase log:
+(both fences are in the companion). `pass` is green and a second `none` in a row
+reports no checks; `fail` is fixed and pushed like any cleanup; `pending` is read
+again every `proceed.ci.interval_s` seconds, at most `proceed.ci.max_reads` reads.
+A wait that runs out, or two forge errors in a row, is never green and never leaves
+Phase 7 (solo: ask the operator; subagent mode: `blocked`). End-of-phase log:
 one line per PR, then "All N PRs ready for merge". **Lite lane:** if this phase
 added commits, re-run the lane check before leaving it.
 
@@ -430,7 +431,7 @@ lane:** re-run the lane check immediately before the pre-merge trial-merge gate.
 
 - **Test failures during implementation**: Stop the current task, diagnose the failure, fix it inside the task's target-repo worktree, and re-run tests before continuing. If you can't fix it after 2 attempts, pause and ask the user.
 - **Validation stuck after 3 loops**: Present the remaining FAIL items and ask the user how to proceed (fix manually, skip validation, or abort).
-- **CI still pending after the last read** (Phase 7): the wait in `proceed/phases-6-8-ship.md` step 4 has run out. It is not one of the four halt points: like the two cases above, it is something the pipeline cannot clear by itself. Never report CI green. In a solo run, name the pending checks and ask the user whether to keep waiting. In subagent mode, or with no operator present, report `blocked` with the `ci-pending` blocker. Either way, emit the run-outcome line first (**Run-outcome telemetry** R5, `blocked`, `other`).
+- **CI not green when the wait ends** (Phase 7): the reads in `proceed/phases-6-8-ship.md` step 4 ran out with checks still pending or still failing, or a forge error answered twice in a row. It is not a fifth halt point: like a test failure that two attempts did not fix (above), it is something the pipeline cannot clear by itself. Never report CI green, and do not leave Phase 7. In a solo run it is a question to the user: name the checks (or the error class) and ask whether to keep waiting. In subagent mode (a `/sprint` runner, with no operator present) it ends the run: report `blocked` with the blocker step 4 names, `ci-pending`, `ci-failed` or `ci-unread`. Either way, emit the run-outcome line first (**Run-outcome telemetry** R5, `blocked`, `other`).
 - **Missing context files**: If `.adlc/context/` files don't exist in the primary repo, stop and tell the user to run `/init` (`/adlc:init` on the plugin install) first. Do not proceed without context files.
 - **Missing sibling repo**: If `.adlc/config.yml` references a sibling whose path doesn't exist or isn't a git repo, stop at Step 0 and list the missing repos. The user must clone or fix paths before retrying.
 - **Task with unknown `repo:` value**: If a task frontmatter names a repo id not in the registry, stop Phase 4 and surface the mismatch — either the config or the task is wrong.

@@ -3,8 +3,9 @@
 Phase 7 reads a PR's diff from the local repository, with a fence that fetches both refs with
 their destinations named (ADR-2) and refuses a local `HEAD` that is not the pushed head, and
 reads CI through `adlc_forge_pr_checks`, one read per call, in a fence that binds the PR number
-(so the runner ties it to the caller's PR, ADR-3) and waits `<ciWait>` seconds, 0 to 90, first.
-The wait between reads, the read count and what each verdict means are the text's.
+(so the runner ties it to the caller's PR, ADR-3) and waits `<ciWait>` seconds, 0 to 60, first.
+The wait between reads, the read count, what each verdict means and the one rule that ends a
+wait without green are the text's.
 
 The fences run through the real `fence-run` shim: the diff fence in a `--single-branch` clone
 of a throwaway bare origin, the CI fence against the stateful mock forge in a throwaway store.
@@ -79,8 +80,25 @@ def _record(records, fence):
 
 
 # ------------------------------------------------------------------------ BR-24, AC-18
-#: A `gh` command word: `gh` as a whole word, as a fence or the prose would name one.
-GH_WORD = re.compile(r"(?<![\w/.-])gh(?![\w-])")
+#: A `gh` command word: `gh` as a whole word, as a fence or the prose would name one, bare or
+#: at the end of a path (`/usr/local/bin/gh`, `./gh`).
+GH_WORD = re.compile(r"(?:(?<![\w/.-])|(?<=/))gh(?![\w-])")
+#: The Agent Skills specification's line budget for a SKILL.md, which `tools/lint-skills`
+#: enforces as `SKILL_LINE_BUDGET`: Phase 7's text must fit `proceed/SKILL.md` under it.
+SKILL_LINE_BUDGET = 500
+
+
+@pytest.mark.parametrize("text,found", [
+    ("gh pr checks 5", ["gh"]), ("/usr/local/bin/gh pr checks 5", ["gh"]),
+    ("./gh pr diff 5", ["gh"]), ("~/bin/gh pr view 5", ["gh"]), ("x=$(gh pr checks 5)", ["gh"]),
+    ("a; gh pr diff", ["gh"]), ("`gh`", ["gh"]),
+    ("adlc_forge_pr_checks '<prNumber>'", []), ("github.com", []), ("gh-pages", []),
+    ("ghost", []), ("sigh", []), ("ADLC_GH", []), ("gh_token", []), ("a.gh", []),
+])
+def test_req719_gh_word_finds_a_bare_or_path_qualified_gh(text, found):
+    """The scan Phase 7 is held to finds `gh` as a command word, bare or path-qualified, and
+    not inside another word or name."""
+    assert GH_WORD.findall(text) == found
 
 
 def test_req719_phase_7_names_no_gh_command():
@@ -95,8 +113,8 @@ def test_req719_phase_7_names_no_gh_command():
     assert "`origin/<integrationBranch>` to `HEAD`" in ship
     assert "the local diff from `origin/<integrationBranch>` to the pushed `HEAD`" in skill
     assert "re-run the lane check before leaving it" in _read("proceed/SKILL.md")
-    assert sum(1 for _ in open(os.path.join(TOOLKIT, "proceed", "SKILL.md"),
-                               encoding="utf-8")) < 500
+    # Counted as `wc -l` and the lint count it: newlines.
+    assert _read("proceed/SKILL.md").count("\n") < SKILL_LINE_BUDGET
 
 
 def test_req719_phase_7_fences_route_runner(records):
@@ -109,7 +127,7 @@ def test_req719_phase_7_fences_route_runner(records):
     assert diff.code.startswith("wt='<worktree>'; ib='<integrationBranch>'; br='<branch>'\n")
     assert "if ! %s; then\n" % EXPLICIT_FETCH in diff.code
     assert 'rev-parse "origin/$br"' in diff.code
-    assert 'git -C "$wt" diff -M "origin/$ib...HEAD"' in diff.code
+    assert 'git -C "$wt" diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"' in diff.code
     assert checks.code.split("\n") == [fc.ROOT_LINE, SOURCE_FORGE, "sleep '<ciWait>'",
                                        "adlc_forge_pr_checks '<prNumber>'"]
     for name in ("claude", "codex"):
@@ -135,14 +153,15 @@ def test_req719_phase_7_fences_route_runner(records):
 
 
 @pytest.mark.parametrize("value,ok", [
-    ("0", True), ("1", True), ("9", True), ("10", True), ("30", True), ("89", True),
-    ("90", True), ("91", False), ("99", False), ("100", False), ("900", False),
+    ("0", True), ("1", True), ("9", True), ("10", True), ("30", True), ("59", True),
+    ("60", True), ("61", False), ("69", False), ("89", False), ("90", False), ("91", False),
+    ("99", False), ("100", False), ("600", False),
     ("05", False), ("00", False), ("-1", False), ("", False), (" 5", False), ("5\n", False),
     ("1.5", False), ("1e1", False), ("$(sleep 999)", False),
 ])
-def test_req719_ci_wait_admits_0_to_90_only(value, ok):
-    """`ciWait` admits the integers 0 to 90 and nothing else, so one call lasts at most one
-    interval plus one forge read."""
+def test_req719_ci_wait_admits_0_to_60_only(value, ok):
+    """`ciWait` admits the integers 0 to 60 and nothing else, so one call lasts at most the
+    wait, the runner's PR read and one forge read."""
     ph = fc.PLACEHOLDERS["ciWait"]
     assert ph.arg == "ciWait" and not ph.pr
     assert (ph.check(value) is None) is ok, (value, ph.check(value))
@@ -220,7 +239,7 @@ def _mock_calls(store):
 def test_req719_ci_fence_reads_only_the_callers_pr_after_a_bounded_wait(records, tmp_path):
     """AC-18's CI fence, run: for the caller's PR it waits `ciWait` seconds and prints one
     read, verdict first. Another PR's number exits 65 (the tie) after the runner's one read
-    and before any CI read, and a `ciWait` of 91 exits 65 (the pattern) before any forge
+    and before any CI read, and a `ciWait` of 61 exits 65 (the pattern) before any forge
     call."""
     _diff, checks = ship_fences()
     fid = _record(records, checks)["id"]
@@ -237,8 +256,8 @@ def test_req719_ci_fence_reads_only_the_callers_pr_after_a_bounded_wait(records,
     assert rc == fr.BAD_VALUE == 65, (rc, out, err)
     assert out == "" and err.startswith("fence_run_bad_value: %s: value for pr, 102" % fid), err
     assert _mock_calls(store) == ["pr_view"]
-    # A wait above 90: the pattern refuses it before any forge call.
-    rc, out, err = fence_run(fid, wc, ["--arg", "ciWait=91", "--arg", "pr=101"], env=env)
+    # A wait above 60: the pattern refuses it before any forge call.
+    rc, out, err = fence_run(fid, wc, ["--arg", "ciWait=61", "--arg", "pr=101"], env=env)
     assert rc == fr.BAD_VALUE, (rc, out, err)
     assert out == "" and err.startswith("fence_run_bad_value: %s: " % fid) and "ciWait" in err
     assert _mock_calls(store) == []
@@ -261,30 +280,87 @@ def test_req719_ci_fence_prints_each_verdict(records, tmp_path, checks, first):
                                                for c in checks], out
 
 
+#: A `gh` stub in the forge tests' shape (`partials/tests/forge.test.sh`): it records its argv
+#: and prints the rows `--jq '.[] | [.bucket, .name] | @tsv'` prints for one check that
+#: failed and one still in flight, then exits with `$GH_RC`.
+GH_STUB = """#!/bin/sh
+printf '%s\\n' "$*" >> "$GH_REC"
+printf 'fail\\tbuild\\npending\\tlint\\n'
+exit "$GH_RC"
+"""
+
+
+@pytest.mark.parametrize("gh_rc", ["1", "8"])
+def test_req719_github_reads_fail_when_one_check_failed_and_one_is_pending(tmp_path, gh_rc):
+    """BR-22 on the GitHub backend, with a stubbed `gh`: one check failed and another is still
+    in flight reads `fail`, whichever of its two answering statuses `gh` exits with, and both
+    checks are listed. Fail wins, so Phase 7 fixes the failure rather than waiting on it."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    stub = bindir / "gh"
+    stub.write_text(GH_STUB, encoding="utf-8")
+    stub.chmod(0o755)
+    rec = tmp_path / "gh.rec"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("ADLC_FORGE")}
+    env.update(PATH="%s%s%s" % (bindir, os.pathsep, os.environ.get("PATH", "")),
+               ADLC_TOOLKIT_ROOT=TOOLKIT, ADLC_FORGE_PROVIDER_OVERRIDE="github",
+               GH_REC=str(rec), GH_RC=gh_rc)
+    proc = subprocess.run(["/bin/sh", "-c", '. "$ADLC_TOOLKIT_ROOT/partials/forge.sh" && '
+                           "adlc_forge_pr_checks 9"], cwd=str(tmp_path), env=env,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=True, timeout=60)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert proc.stdout.splitlines() == ["checks=fail", "check=fail\tbuild",
+                                        "check=pending\tlint"], proc.stdout
+    assert rec.read_text(encoding="utf-8").splitlines() == [
+        "pr checks 9 --json name,bucket --jq .[] | [.bucket, .name] | @tsv"]
+
+
 # ------------------------------------------------------------------------ BR-25, AC-19
-#: The statements BR-25 requires of Phase 7's text, each as the companion words it.
+#: The statements BR-25 requires of Phase 7's text, each as the companion words it: each
+#: verdict, the second read on `none`, the wait's keys, and the one rule that ends a wait
+#: without green, with its three `blockers` entries in subagent mode.
 VERDICT_STATEMENTS = (
     "- `pass`: CI is green, and the end-of-phase line says so.",
-    "- `none`: no CI checks are reported. The end-of-phase line says so, and the phase "
-    "continues.",
+    "- `none`: a first `none` is not final, since the forge may not have registered the checks "
+    "for the push yet: read once more after one interval. A second `none` in a row means no CI "
+    "checks are reported. The end-of-phase line says so, and the phase continues. Any other "
+    "answer on that read is handled as that verdict.",
     "- `fail`: name the failing checks (the `check=fail` lines) and handle them as a Phase 7 "
     "issue: fix, commit and push as in step 3, then read again as for `pending`.",
     "- `pending`: read again with `<ciWait>` set to `proceed.ci.interval_s`, at most "
     "`proceed.ci.max_reads` reads in all.",
     "`proceed.ci.max_reads` (default 20)",
     "`proceed.ci.interval_s` (default 30)",
-    "An interval above 90 is read as 90.",
-    "Pass `0` as `<ciWait>` on the first read and the interval on every later one, so no call "
-    "lasts longer than one interval plus one forge read.",
     "with your file tool",
-    "On the last read still `pending`, the phase never reports green.",
-    "A solo run asks the operator whether to keep waiting, naming the pending checks.",
-    "An unattended run (no operator present) stops and reports `blocked`, naming the pending "
-    "checks in a `blockers` entry",
-    '"reason": "ci-pending"',
+    "A forge error (an `error_class=` line and a non-zero status) is no verdict and never "
+    "green: read once more after one interval.",
+    "That one more read, after a forge error or a first `none`, is made even when the reads "
+    "have run out.",
+    "**One rule ends the wait without green:** when the reads run out, or a forge error "
+    "answers twice in a row, with no `pass` and no second `none`, the phase never reports "
+    "green and the run does not leave Phase 7.",
+    "A solo run asks the operator whether to keep waiting, naming the checks: the pending "
+    "ones, the failing ones, or the error class.",
+    "With no operator present (subagent mode: a `/sprint` runner, legacy or `--exec`) the run "
+    "stops and reports `blocked`, with one `blockers` entry whose `reason` names the ending:",
+    # The engine test (test_exec_launch.py) reads this entry: it stays byte for byte.
+    '- checks still pending on the last read: `{"reason": "ci-pending", "pendingChecks": '
+    '[<the name on each check=pending line>], "reads": <reads made>, "detail": "CI checks '
+    'still pending after <reads made> reads: <names>"}`',
+    '- checks still failing on the last read: `{"reason": "ci-failed", "failingChecks": '
+    '[<the name on each check=fail line>], "reads": <reads made>, "detail": "CI checks still '
+    'failing after <reads made> reads: <names>"}`',
+    '- a forge error on two reads in a row: `{"reason": "ci-unread", "reads": <reads made>, '
+    '"detail": "<the error_class read>"}`',
     '"<repo-id>: clean, CI green" on `pass`',
     '"<repo-id>: clean, no CI checks reported" on `none`',
+    "A CI wait that ended without either never reaches this line (step 4).",
 )
+#: The pending entry as it stood before the three endings, which the engine test reads.
+CI_PENDING_ENTRY = ('{"reason": "ci-pending", "pendingChecks": [<the name on each '
+                    'check=pending line>], "reads": <reads made>, "detail": "CI checks still '
+                    'pending after <reads made> reads: <names>"}')
 STEP_5 = ("5. **Lite lane:** if steps 3–4 added any commit, re-run the lane check "
           "(`proceed/phases-lite.md` \"The lane check\") before leaving this phase "
           "(REQ-652 AC-16).")
@@ -294,29 +370,45 @@ TEMPLATE_BLOCK = "# proceed:\n#   ci:\n#     max_reads: 20\n#     interval_s: 30
 
 def test_req719_phase_7_states_each_verdict_and_the_wait():
     """BR-25, AC-19: Phase 7 states each verdict's handling, the two config keys with their
-    defaults and the cap on the interval, and that a wait that runs out never reports green:
-    a solo run asks, an unattended run reports `blocked` naming the pending checks. Step 5 and
-    the end-of-phase line's `Continue to Phase 8 immediately.` stay as they were, the
-    template documents both keys in a commented block, and `proceed/SKILL.md` names them."""
+    defaults and the cap on the interval, and the one rule that ends a wait without green:
+    the reads run out or a forge error answers twice, and the phase neither reports green nor
+    leaves Phase 7; a solo run asks, and in subagent mode the run reports `blocked` with a
+    `ci-pending`, `ci-failed` or `ci-unread` entry. Step 5 and the end-of-phase line's
+    `Continue to Phase 8 immediately.` stay as they were, the template documents both keys in
+    a commented block, and `proceed/SKILL.md` names them, with its error-handling bullet."""
     text = _read(SHIP)
     ship = phase7(text)
     for statement in VERDICT_STATEMENTS:
         assert ship.count(statement) == 1, statement
+    assert ship.count(CI_PENDING_ENTRY) == 1
+    # No ending of the wait falls through to Phase 8 as a concern.
+    assert "remaining concern" not in ship
     assert STEP_5 in ship
     assert text.count("Continue to Phase 8 immediately.") == 1
     end = [ln for ln in ship.splitlines() if ln.startswith("**End-of-phase log**")]
     assert len(end) == 1 and end[0].endswith("Continue to Phase 8 immediately."), end
     skill = skill_phase7()
     for key in ("`proceed.ci.interval_s`", "`proceed.ci.max_reads`", "never green",
-                "solo: ask the operator", "unattended: `blocked`"):
-        assert key in skill, key
+                "a second `none` in a row", "two forge errors in a row", "never leaves",
+                "solo: ask the operator", "subagent mode: `blocked`"):
+        assert key in " ".join(skill.split()), key
+    full = _read("proceed/SKILL.md")
+    errors = full[full.index("## Error Handling\n"):]
+    [bullet] = [ln for ln in errors.splitlines() if ln.startswith("- **CI not green when")]
+    for word in ("It is not a fifth halt point", "In a solo run it is a question to the user",
+                 "In subagent mode (a `/sprint` runner, with no operator present) it ends the "
+                 "run: report `blocked`", "`ci-pending`, `ci-failed` or `ci-unread`",
+                 "(**Run-outcome telemetry** R5, `blocked`, `other`)"):
+        assert word in bullet, word
+    assert "the two cases above" not in full and "unattended" not in skill
+    assert "exactly **four** legitimate halt points" in full
     template = _read("templates/config-template.yml")
     assert template.count(TEMPLATE_BLOCK) == 1
     assert template.index("\n# sprint:\n") < template.index(TEMPLATE_BLOCK)
     assert template.index(TEMPLATE_BLOCK) < template.index("\ngcp:\n")
     block = template[template.rindex("# ----", 0, template.index(TEMPLATE_BLOCK)):]
     block = block[:block.index(TEMPLATE_BLOCK)]
-    assert "Defaults: `max_reads` 20 and `interval_s` 30. An interval above 90 is read" in block
+    assert "Defaults: `max_reads` 20 and `interval_s` 30. An interval above 60 is read" in block
     assert not [ln for ln in TEMPLATE_BLOCK.splitlines() if not ln.startswith("#")]
 
 
@@ -327,5 +419,34 @@ def test_req719_phase_7_survives_the_exec_prompt():
     section = view[view.index("### Phase 7: PR Cleanup & CI\n"):]
     assert "Continue to the merge gate immediately." in section
     assert "Continue to Phase 8 immediately." not in view
-    assert "adlc_forge_pr_checks '<prNumber>'" in section and "On the last read" in section
+    assert "adlc_forge_pr_checks '<prNumber>'" in section
+    assert "**One rule ends the wait without green:**" in section
+    assert '"reason": "ci-failed"' in section and '"reason": "ci-unread"' in section
     assert ep.scan(section) == []
+
+
+def _ci_wait_cap():
+    """The largest wait `ciWait`'s pattern admits, read from the placeholder itself."""
+    ph = fc.PLACEHOLDERS["ciWait"]
+    return max(v for v in range(0, 1000) if ph.check(str(v)) is None)
+
+
+def test_req719_the_documents_state_the_bound_the_code_holds():
+    """BR-25 / D3: the bound each document states for one CI call is the one the code holds:
+    the wait `ciWait`'s pattern admits, read from the placeholder, and the runner's timeout on
+    its own PR read, `fence_run.PR_TIE_TIMEOUT`. One call is that wait, that read and one forge
+    read."""
+    cap, tie = _ci_wait_cap(), fr.PR_TIE_TIMEOUT
+    assert (cap, tie) == (60, 20)
+    ship = phase7(_read(SHIP))
+    assert ship.count("An interval above %d is read as %d." % (cap, cap)) == 1
+    assert ("so one call lasts at most the interval, the fence runner's own read of the PR (at "
+            "most %d seconds, under `/sprint --exec`) and one forge read." % tie) in ship
+    template = " ".join(l.lstrip("# ") for l in _read("templates/config-template.yml")
+                        .splitlines())
+    assert ("An interval above %d is read as %d, so one call (the wait, the fence runner's PR "
+            "read of at most %d s and one forge read)" % (cap, cap, tie)) in template
+    readme = " ".join(_read("README.md").split())
+    assert "(30 by default, %d at most)" % cap in readme
+    tools = " ".join(_read("tools/adlc/README.md").split())
+    assert "or no answer in %d s is 75" % tie in tools

@@ -70,6 +70,28 @@ status:
 The kill arm writes `abortedFrom` with the status it found (`running` or `stalled`), emits
 `failed` / `aborted`, and also calls `_release_holds()`.
 
+**As built (TASK-275 and the Phase 5 fixes).** Both arms end in one method, `_aborted`, so the
+kill arm does everything the drop does once the harness is gone: it revokes trust, carries the
+working copy's state (the drop carries an empty state, as above), discards any approval token
+held for the run, takes the run out of the merge queue, emits `failed` / `aborted`, prints the
+line and releases holds. The printed line names the REQ, who aborted it, the working copy, the
+branch and the PR URL when one is recorded: the approval plan's, else each repo's `prUrl` in
+the primary path's state that parses as a PR on the run's forge host, so a malformed value in
+state is not printed. Two races the review found are closed:
+
+- **The unblock pass.** After a merge the worker restores a held run's surfaces, rebases it,
+  force-pushes and relaunches it, outside the supervisor's lock. The Orchestrator keeps the set
+  of REQs it is rebasing after a merge: the worker re-checks `blocked` and adds the REQ under
+  the lock, and removes it under the lock once the relaunch has finished or failed. `abort` and
+  `answer` refuse a REQ in that set, naming the REQ that merged and saying to run the command
+  again in a moment, and change nothing. `_hold` and `_block` set `blocked`, carry and emit in
+  one step under the lock, so no `abort` lands between them.
+- **Holds after an offline drop.** `_client` runs `abort` (and `reject`) on a fresh
+  Orchestrator that has loaded only that run, and `resume` skips a terminal run, so a hold
+  behind it was never released and `done()` never came. `_release_holds` now reads the run a
+  REQ is held behind from disk when it is not loaded, and treats the hold as cleared when that
+  run is terminal, or when no run for it exists on disk; a run it cannot load keeps the hold.
+
 **Why no ledger write.** An approval recorded before a rebase conflict is never executed after
 the drop for three reasons that already hold: `execute` is reached only from the queue, the run
 is removed from it; `answer` refuses a status that is not `blocked`; `resume` skips a terminal
@@ -118,8 +140,12 @@ answers it, and it reads the forge repository of the directory the runner was ca
 | `state=OPEN`, `headRefName` equal to the checked-out branch, `isCrossRepository=false`, `number` equal to the value | the fence runs | none |
 | any field differs, or `error_class=pr-not-found` | 65 | `fence_run_bad_value:` naming the value and the checked-out branch, and no field of the PR read |
 | no branch checked out | 3 | `opaque_entry_refused:` (decided before any forge read) |
+| under an exec run, a checked-out branch that is not the run's own (`run_branch_refusal`, as for a push fence; added after the security review) | 3 | `opaque_entry_refused:` (decided before any forge read) |
+
+Without the branch row a session could `git checkout -b <another PR's head name>` in its
+working copy and pass the tie for that PR: the head name is all the read compares.
 | the adapter's own `opaque_entry_refused:` (Azure DevOps under the runner) | 3 | that line, passed through: the fence itself would be refused the same way |
-| any other error class, unparseable output, or no answer in 60 s | 75 | `fence_run_unverified:` with the error class |
+| any other error class, unparseable output, or no answer in 20 s (`PR_TIE_TIMEOUT`; 60 s before the review, see ADR-6) | 75 | `fence_run_unverified:` with the error class |
 
 **The reach.** A runner fence that binds a marked placeholder has the check's command added to
 the text its static reach is computed from, and its census record gains `"tied": ["<arg>"]`.
@@ -135,13 +161,40 @@ fail naming the fence and the placeholder. A variable the fence fills from a com
 (`/architect` Step 5's `$prnum`, a number `adlc_forge_pr_create` printed) is not a placeholder
 and is not checked (BR-14).
 
-**How "assigns from text that holds one" is decided (as built, TASK-273).** A variable is
-tainted when an assignment, a `for … in` header or a here-document a `read` consumes holds an
-unmarked placeholder or another tainted variable. Command substitutions are removed first,
-because a command's output is not a value the model supplied (BR-14); so `x=$(printf %s "<n>")`
-is not caught, which is BR-14's line and a declared gap. Every positional word of the call is
-checked, and the operations checked are every `adlc_forge_pr_*` except `pr_create` and
-`pr_list`, so an operation added later starts checked.
+**How the rule is decided (as built after the Phase 5 review; TASK-273 built a first version
+that failed open).** It fails closed: what the check cannot trace does not route.
+
+- Every positional word of every `adlc_forge_pr_*` operation but `pr_create` and `pr_list` is
+  checked, so an operation added later starts checked. A word is acceptable only when every
+  placeholder and variable in it is marked, or is a variable every one of whose assignments is
+  clean.
+- Text taints the variable it gives a value to when it holds an unmarked placeholder, an
+  unmarked free variable a table names, a tainted variable or a positional parameter. That
+  text includes what is inside a command substitution (`n=$(printf %s "<id>")` is caught), the
+  list of a `for`, a here-document, a here-string, and, for a `read`, the text of the pipeline
+  or compound statement that feeds it. Taint is iterated to a fixed point and is
+  flow-insensitive: a name ever assigned from tainted text is tainted everywhere, so reusing a
+  name is refused.
+- The one exemption is BR-14's: a substitution or pipeline whose command is
+  `adlc_forge_pr_create` or `adlc_forge_pr_list` contributes no taint, whatever its arguments
+  hold.
+- A positional parameter (`$1` to `$9`, `${1}`, `$@`, `$*`) as a PR argument is refused: the
+  runner hands a fence none, so one is always something the fence put there (`set --`, a
+  function's arguments).
+- Option values are skipped per operation, only for the options the adapter's parser in
+  `partials/forge.sh` really consumes a value for; a word after any other option is checked as
+  the PR. `-R`/`--repo` on a PR operation is refused: the tie's read is made without it, so the
+  operation would act in a repository the tie never looked at.
+
+That catches one existing fence, rightly: `/architect`'s footprint fence takes `prnum` from
+`pipeline-state.json`, which the session writes, selected by `$REQ`. It is an older gap of the
+same kind and is not fixed in this requirement. `fence_census.py` names it in a closed table,
+`DECLARED_UNTIED`, keyed by its full fence id with the reason, so the fence routes and any edit
+to it drops the exemption; its census record and both goldens carry `untied` with the reason,
+and a test pins that the table holds exactly that id and that the id still exists. The README
+declares it, beside the tie's other residual: the read trusts the caller's forge selection
+(`GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE`, `ADLC_FORGE_MOCK*`), since it runs
+in the fence's environment.
 
 **Why a view of the value and not a list by head.** `adlc_forge_pr_list --head` on Azure DevOps
 returns no head name and every state, and a list answers "which PRs has this branch", which
@@ -204,12 +257,29 @@ per check.
 
 - The diff fence takes `<worktree>`, `<integrationBranch>` and `<branch>`, fetches with ADR-2's
   line, errors when `HEAD` is not `origin/<branch>`, and prints `git diff -M
-  origin/<integrationBranch>...HEAD`.
+  origin/<integrationBranch>...HEAD`. As built it runs `git diff -M --no-ext-diff
+  --no-textconv`, so a `diff.external` or textconv driver the session wrote into the
+  repository's config is not run by the diff (found by the security review).
 - The CI fence is `sleep '<ciWait>'` and then `adlc_forge_pr_checks '<prNumber>'`. `ciWait` is
-  a new placeholder holding 0 to 90 seconds. The first read passes 0, and each later read
-  passes `proceed.ci.interval_s`. One call therefore lasts at most one interval plus one forge
-  read, under a harness's 120 s shell limit (BR-25). The fence binds a marked placeholder, so
-  ADR-3 ties it to the caller's PR.
+  a new placeholder holding 0 to 60 seconds (90 before the review). The first read passes 0,
+  and each later read passes `proceed.ci.interval_s`. Under an exec run one call is the wait
+  (at most 60 s), the runner's own PR read (at most 20 s, `PR_TIE_TIMEOUT`) and one forge
+  read, so it stays under a harness's 120 s shell limit (BR-25); at 90 and 60 the first two
+  alone reached 150 s. The fence binds a marked placeholder, so ADR-3 ties it to the caller's
+  PR.
+- **As built after the review, a first `none` is not final:** the forge may not have
+  registered the checks for the push yet, so the text reads once more after one interval, and
+  only a second `none` in a row is "no CI checks reported". Any other answer on that read is
+  handled as that verdict.
+- **One rule ends a wait without green.** When the reads run out, or a forge error answers
+  twice in a row, with no `pass` and no second `none`, the phase never reports green and the
+  run does not leave Phase 7 (before the review a forge error read twice, and `fail` on the
+  last read, fell through to Phase 8). The one more read after a forge error or a first
+  `none` is made even when the reads have run out. A solo run asks the operator. In subagent
+  mode the run reports `blocked` with one `blockers` entry: `ci-pending` (`pendingChecks`,
+  the shape the engine test reads, unchanged), `ci-failed` (`failingChecks`, the names on the
+  `check=fail` lines) or `ci-unread` (`detail`, the error class read). None is a fifth halt
+  point.
 
 **Why the sleep is in the fence.** Under an exec run a bare `sleep` is a command of the model's
 own, which the Claude exec allowlist does not carry and which this requirement must not add
@@ -218,7 +288,7 @@ own, which the Claude exec allowlist does not carry and which this requirement m
 **Why the two keys are read from prose.** `/proceed` reads `.adlc/config.yml` keys such as
 `branches.integration` and `merge_order` with its file tool, as its text tells it to. Phase 7's
 text names `proceed.ci.max_reads` (default 20) and `proceed.ci.interval_s` (default 30, at most
-90) the same way. The interval is bounded mechanically by `ciWait`'s pattern; the count is the
+60) the same way. The interval is bounded mechanically by `ciWait`'s pattern; the count is the
 text's, as the three-attempt validation limit is.
 
 ## Sequence: a fence that binds a PR number
@@ -226,7 +296,8 @@ text's, as the three-attempt validation limit is.
 1. The session calls `fence-run run 'proceed/phases-6-8-ship.md#1:<sha>' --arg prNumber=304 …`.
 2. The runner finds the fence in a fresh census, checks each value's pattern (65 on a bad one),
    checks the pushed-branch rule, and checks it is outside the sandbox (69).
-3. It reads the checked-out branch. With none, it refuses (3).
+3. It reads the checked-out branch. With none, or under an exec run with one that is not the
+   run's own branch, it refuses (3).
 4. It runs the check's text once for `prNumber`, and compares the four fields (65, 75 or 3 as
    ADR-3's table says).
 5. It runs the fence.
@@ -273,4 +344,7 @@ starts tied), LESSON-844 (both spellings of the working directory are accepted),
 In the exec engine paragraph: `abort` drops a blocked run. In the run-outcome paragraph: the
 fifth terminal and the new reason. In the forge adapter paragraph: `adlc_forge_pr_checks` joins
 the operation set, and `gh pr checks` stays direct only in `/wrapup` and `/bugfix`. A sentence
-on the PR tie beside the fence runner. TASK-276 writes them.
+on the PR tie beside the fence runner. TASK-276 writes them. (The review found that set
+incomplete: the workflow engine's Phase 7 prompt calls `gh pr checks` too, and
+`tools/adlc/harness_probe.py` lists it as a routine allow entry. The context documents name
+all of them.)

@@ -1,6 +1,7 @@
 """The exec engine's docs, and what it leaves alone (REQ-659 BR-1, BR-19), and the Codex
 exec section with its declared residuals (REQ-662 BR-14, BR-19)."""
 
+import hashlib
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.insert(0, HERE)
 
 import exec_adapter as ea  # noqa: E402
 import exec_prompt as ep  # noqa: E402
@@ -430,12 +432,17 @@ def _residuals_block():
     return _flat(section[lo:section.index(RESIDUALS_CLOSE, lo)])
 
 
-def test_req719_the_reference_says_what_abort_leaves():
+def test_req719_the_reference_says_what_abort_leaves(tmp_path):
     """REQ-719 BR-5, AC-5: the exec reference says in one place that `abort` on a blocked run
     ends it `failed` and leaves the branch, the PR and the working copy for a person, names
     both ways out of a blocked run, and says what a person does next. The README's exec
-    section and `sprint/SKILL.md` say it too, and each claim is one the engine's code makes."""
-    import inspect
+    section and `sprint/SKILL.md` say it too, and each claim is one the engine makes when it
+    runs: against the fake harness and the mock forge, a blocked run's row prints both ways
+    out, `abort` refuses a run at the gate naming `reject`, and the drop ends the run `failed`
+    and prints one line naming the REQ, who aborted it, the working copy, the branch and the
+    PR."""
+    import pytest
+    import exec_helpers as eh
     import sprint_exec as se
     ref = _flat(read("sprint", "references", "exec-engine.md"))
     assert ref.count(ABORT_LEAVES) == 1
@@ -453,15 +460,30 @@ def test_req719_the_reference_says_what_abort_leaves():
     # Every operator line the reference shows still parses (BUG-287), `abort`'s included.
     assert "abort" in {argv[0] for argv in _documented_verb_lines()}
 
-    # What the reference says is what the engine does and prints.
-    row = inspect.getsource(se.render_row)
-    assert "sprint-exec answer --channel skill" in row and \
-        "sprint-exec abort --channel skill" in row
-    assert "a run at the gate is ended with `reject`, not `abort`" in \
-        inspect.getsource(se.Orchestrator.abort)
-    dropped = inspect.getsource(se.Orchestrator._aborted)
-    assert '"failed"' in dropped and '"abortedFrom"' in dropped
-    assert "aborted by %s; working copy left at %s, branch %s" in dropped
+    # What the reference says is what the engine does and prints, run.
+    box = eh.Sandbox(tmp_path, reqs=("REQ-901", "REQ-902"))
+    box.blocked("REQ-902")
+    orch = box.go(shared=True)
+    gate, blocked = orch.runs["REQ-901"], orch.runs["REQ-902"]
+    assert (gate.status, blocked.status) == ("awaiting_approval", "blocked")
+    # Both ways out on the blocked row, each a line the reference's own shape parses.
+    found = eh.ways_out(se.render_row(blocked))
+    assert [argv[0] for argv in found] == ["answer", "abort"]
+    for argv in found:
+        assert argv[1:4] == ["--channel", "skill", "REQ-902"], argv
+    assert eh.ways_out(se.render_row(gate)) == []
+    # A run at the gate: refused, naming `reject`, and nothing changes.
+    with pytest.raises(se.Refused, match="`reject`"):
+        orch.abort("REQ-901", by="operator")
+    assert gate.status == "awaiting_approval"
+    # The drop: `failed`, `abortedFrom: blocked`, and one printed line naming each thing.
+    url = blocked.read_primary_state()["repos"]["widgets"]["prUrl"]
+    line = orch.abort("REQ-902", by="operator")
+    assert "\n" not in line and line.startswith("REQ-902 aborted by operator"), line
+    for part in (blocked.wc, blocked.doc["branch"], url):
+        assert part in line, (part, line)
+    assert blocked.status == "failed" and blocked.exec["abortedFrom"] == "blocked"
+    assert box.out.getvalue().endswith(line + "\n")
 
     readme = _exec_section()
     assert readme.count(ABORT_LEAVES) == 1
@@ -516,10 +538,11 @@ REQ719_DOCUMENTS = (
     (("templates", "config-template.yml"), ("max_reads", "interval_s")),
     ((".adlc", "context", "architecture.md"), ("`adlc_forge_pr_checks`", "REQ-719 ADR-1",
                                                "REQ-719 ADR-3", "REQ-719 ADR-5",
-                                               "`gh pr checks` stays direct only in `/wrapup` "
-                                               "and `/bugfix`")),
+                                               "`ciWait`", "`proceed.ci.max_reads`",
+                                               "`proceed.ci.interval_s`", "`tied`", "`untied`",
+                                               "`fence_run_unverified:`")),
     ((".adlc", "context", "conventions.md"), ("`adlc_forge_pr_checks`",
-                                              "only in `/wrapup` and `/bugfix`")),
+                                              "runs as `python3 -I -c`")),
     (("proceed", "phases-state.md"), ("abortedBy, abortedAt, abortedFrom }",)),
 )
 #: The three amendment notes: requirement directory, the note's first line, and its words.
@@ -564,3 +587,94 @@ def test_req719_every_named_document_carries_its_change():
         note = _flat(text[lo:min(ends)])
         for word in words:
             assert word in note, (spec, word)
+
+
+#: Where a skill or the workflow engine may still call `gh pr checks` directly, and the
+#: words each context document uses for that place.
+DIRECT_GH_PR_CHECKS = {
+    "wrapup/SKILL.md": "`/wrapup`",
+    "bugfix/SKILL.md": "`/bugfix`",
+    "workflows/adlc-sprint.workflow.js": "`workflows/adlc-sprint.workflow.js`",
+}
+
+
+def _skill_and_workflow_texts():
+    """``{relative path: text}`` of every skill markdown file and workflow script the toolkit
+    ships: what a model or the workflow engine is told to run. Tests are not shipped text."""
+    out = {}
+    for top in sorted(os.listdir(TOOLKIT)):
+        base = os.path.join(TOOLKIT, top)
+        if top.startswith(".") or not os.path.isdir(base):
+            continue
+        is_skill = os.path.isfile(os.path.join(base, "SKILL.md"))
+        if not (is_skill or top in ("workflows", "agents")):
+            continue
+        for dirpath, dirnames, files in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d not in ("tests", "node_modules")]
+            for name in files:
+                if name.endswith(".md") or (top == "workflows" and name.endswith(".js")):
+                    path = os.path.join(dirpath, name)
+                    with open(path, encoding="utf-8") as fh:
+                        out[os.path.relpath(path, TOOLKIT)] = fh.read()
+    return out
+
+
+def test_req719_the_context_documents_name_every_direct_gh_pr_checks():
+    """REQ-719 D7: the two context documents name the real set of places that still call
+    `gh pr checks` directly, read from the shipped text, and `/proceed` is not one of them:
+    its Phase 7 reads CI with `adlc_forge_pr_checks`."""
+    texts = _skill_and_workflow_texts()
+    found = {rel for rel, text in texts.items() if "gh pr checks" in text}
+    assert found == set(DIRECT_GH_PR_CHECKS), sorted(found)
+    assert not [rel for rel in texts if rel.startswith("proceed/") and "gh pr checks" in texts[rel]]
+    for rel in (os.path.join(".adlc", "context", "architecture.md"),
+                os.path.join(".adlc", "context", "conventions.md")):
+        flat = _flat(read(rel))
+        lo = flat.index("`gh pr checks`", flat.index("`adlc_forge_pr_checks`"))
+        claim = flat[lo:lo + 400]
+        for words in DIRECT_GH_PR_CHECKS.values():
+            assert words in claim, (rel, words, claim)
+        assert "`tools/adlc/harness_probe.py`" in claim, rel
+        assert "only in `/wrapup` and `/bugfix`" not in flat, rel
+    # The probe's routine set is where harness_probe.py names it: an allow entry, not a call.
+    import harness_probe as hp
+    assert "gh pr checks" in hp.ROUTINE_SET["gh read"]
+
+
+#: REQ-719 AC-21 (BR-27): the rendered permission files this REQ must leave untouched, with
+#: the sha256 of each at `origin/main` when the branch was cut (439b133), computed with
+#: `git show origin/main:<path> | shasum -a 256`. A later REQ that changes a render on purpose
+#: updates its digest here, in the same commit.
+REQ719_UNCHANGED_RENDERS = {
+    ".claude/settings.json":
+        "cd4059767b7a225b7c727e583d31dea7b84b85835299222aeb7427ce76f269ab",
+    "harness/claude/rendered/settings.json":
+        "cd4059767b7a225b7c727e583d31dea7b84b85835299222aeb7427ce76f269ab",
+    "harness/codex/rendered/adlc.rules":
+        "671ed42360847770e8d6833c8b0c6838db01df320b82c27a2847ac771b68ab89",
+    "harness/codex/rendered/agents.json":
+        "f2247d2b60d33a3c59189f4b29528fc18251b696cea62e4e9754e3d055150030",
+    "harness/codex/rendered/config.toml":
+        "c73e8bece7ee8c99689e2c62932ffeb52126a24b55782659b5d9811bfdd253f7",
+    "harness/codex/rendered/hooks.json":
+        "76385f7da1375907ede812271d79b952e8ef3c0c95e004afe9cf5352745ad70e",
+    "templates/permissions.yml":
+        "e333a14ec1be70d616fe1b3dc22197320d229d9a15d5d5ecb7e4ef276eebcfa9",
+}
+
+
+def test_req719_the_rendered_permissions_are_the_bytes_before_this_change():
+    """REQ-719 AC-21 (BR-27): the interactive render (`.claude/settings.json` and the claude
+    adapter's committed copy), every codex rendered file and their source,
+    `templates/permissions.yml`, are byte for byte what they were before this requirement,
+    held to literal digests rather than to a fresh render that would move with the code."""
+    changed = {}
+    for rel, digest in sorted(REQ719_UNCHANGED_RENDERS.items()):
+        with open(os.path.join(TOOLKIT, rel), "rb") as fh:
+            got = hashlib.sha256(fh.read()).hexdigest()
+        if got != digest:
+            changed[rel] = got
+    assert not changed, changed
+    codex = sorted(os.listdir(os.path.join(TOOLKIT, "harness", "codex", "rendered")))
+    assert ["harness/codex/rendered/%s" % n for n in codex] == sorted(
+        r for r in REQ719_UNCHANGED_RENDERS if r.startswith("harness/codex/"))

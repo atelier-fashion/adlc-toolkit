@@ -164,10 +164,16 @@ fails loud). Results/errors are normalized to one vocabulary (`state ∈
 preserved beneath the class). `forge.auth` stores a credential **source name** only
 (`gh`/`az`/an env-var NAME holding a PAT) — never a key value (a key-shaped value is
 refused). Two `gh` calls stay direct on purpose: `gh pr diff` (a local read-only
-convenience, in `/adversary`) and `gh pr checks` (waiting for CI, only in `/wrapup`
-and `/bugfix`). `/proceed`'s Phase 7 uses neither: it reads its diff from the local
+convenience, in `/adversary`) and `gh pr checks` (waiting for CI). `gh pr checks` is
+called directly in `/wrapup`, `/bugfix` and the workflow engine's Phase 7 prompt
+(`workflows/adlc-sprint.workflow.js`), and `tools/adlc/harness_probe.py` lists it among
+the routine `gh read` allow entries it probes; a new CI read uses `adlc_forge_pr_checks`.
+`/proceed`'s Phase 7 uses neither: it reads its diff from the local
 repository and its CI with `adlc_forge_pr_checks`. The `tools/lint-skills`
 `forge-direct-gh` check rejects any new direct `gh pr <op>` in a SKILL.md shell fence.
+Inline Python in a partial runs as `python3 -I -c`: a fence runs in a working copy the
+session writes, and without `-I` a planted module such as `json.py` there is imported in
+place of the standard library's (REQ-719).
 Full contract: `partials/forge.md`.
 
 ## Context loading pattern

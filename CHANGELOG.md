@@ -623,7 +623,36 @@ is cut per `RELEASING.md`.
     diff from the local repository, so Phase 7 names no `gh` command. A `pending` verdict is
     read again every `proceed.ci.interval_s` seconds (30) for at most `proceed.ci.max_reads`
     reads (20), and a wait that ends still `pending` is never reported green. `gh pr checks`
-    stays a direct call only in `/wrapup` and `/bugfix`.
+    stays a direct call in `/wrapup`, `/bugfix` and the workflow engine's Phase 7 prompt.
+  - Phase 7 has one rule for a CI wait that ends without green: the reads run out with checks
+    still pending or still failing, or a forge error answers twice in a row. The run never
+    reports green and does not leave Phase 7: a solo run asks you, and a `/sprint` run ends
+    `blocked` with a `ci-pending`, `ci-failed` or `ci-unread` blocker. Before, a forge error
+    read twice and `fail` on the last read went on to the merge.
+  - A first `none` from the CI read is no longer final: Phase 7 reads once more after one
+    interval, since the forge may not have registered the checks for the push yet, and only a
+    second `none` in a row means no CI checks.
+  - `proceed.ci.interval_s` is capped at 60 seconds (was 90), and the fence runner gives its PR
+    read 20 seconds (was 60), so one tied CI call, the wait, that read and one forge read,
+    stays under a harness's 120-second shell limit.
+  - `abort` and `answer` are refused, with nothing changed, while the merge worker is rebasing
+    that run after another REQ merged: run the command again in a moment.
+  - An approval held behind a run is released once that run is terminal on disk, or has no
+    run on disk, so an `abort` or `reject` made with no supervisor running no longer leaves a
+    later `resume` waiting forever.
+  - The census check on PR arguments fails closed: a value that reaches an `adlc_forge_pr_*`
+    operation through a command substitution, a pipe into `read`, a here-string, a `for` list
+    or a positional parameter is checked like a direct one, option values are skipped only
+    where the adapter consumes one, and `-R`/`--repo` on a PR operation does not route.
+    `/architect`'s footprint fence, which takes its PR number from the session-written state
+    file, is the one fence declared untied (`DECLARED_UNTIED`, `untied` in both census files).
+  - Under an exec run the PR tie also refuses a checked-out branch that is not the run's own
+    (exit 3, before any forge read), so a local branch named after another PR's head no
+    longer passes the tie for that PR.
+  - Every inline `python3 -c` helper in `partials/forge.sh` runs as `python3 -I -c`, so a
+    module such as `json.py` planted in the working copy is not imported.
+  - Phase 7's diff fence runs `git diff --no-ext-diff --no-textconv`, so a `diff.external` or
+    textconv driver the session wrote into the repository's config is not run.
 - **`ask-tier-deny` can prove a codex baseline from `runner-baseline` (REQ-664 BR-17(e),
   amended 2026-11-17).** Codex's model never attempts a command no allow names, so
   `ask-tier-deny`'s `baseline` stayed `not-attempted` and `deny-under-allow` undecided
