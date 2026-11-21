@@ -10,8 +10,9 @@ answered from in-memory defaults, so an old call site sees no change.
 The store::
 
     config.json    {"remote": "<bare repo>", "owner": "...", "name": "..."}
-    prs.json       {"next": 101, "prs": [...]}
+    prs.json       {"next": 101, "prs": [...]}; a PR may hold "checks": [{name, state}]
     commit_prs.json {"<sha>": [numbers]}
+    checks_reads.json {"<number>": reads}: checks-pending-then-pass's count per PR
     calls.log      one JSON line per call: {op, argv, repo}
     scenario       optional: one ADLC_FORGE_MOCK_SCENARIO value, read at each call
 
@@ -20,8 +21,16 @@ The store::
 ``merged``, ``protection-ok``, ``protection-no-pr``, ``protection-bypass``,
 ``protection-force-push``, ``protection-deletion``, ``protection-lookup-fail``.
 
+``pr_checks`` (REQ-719 BR-23) reads a PR's ``checks`` list, and a PR with none recorded
+reads ``none``. The scenarios ``checks-pass``, ``checks-fail``, ``checks-pending`` and
+``checks-none`` replace the list; ``checks-pending-then-pass`` reads ``pending`` on a PR's
+first read and ``pass`` on every later one, and needs a store to count in. Every other op
+reads a ``checks-*`` scenario as ``ok``, and the error-class scenarios are the forge error.
+
 ``make-head`` builds a PR-head commit in the bare remote with plumbing, so a fixture can
 state a rename, a symlink, a gitlink or a mode that a working tree makes awkward.
+``set-checks`` writes a PR's ``checks`` list. Neither is a forge op: neither is recorded
+in ``calls.log``, and no scenario applies to them.
 """
 
 import fcntl
@@ -32,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 
 import forge_protection
 
@@ -401,6 +411,56 @@ PROTECTION = {
 }
 
 
+#: A check's states, in adlc_forge_pr_checks's contract (REQ-719 ADR-6).
+CHECK_STATES = ("pass", "fail", "pending", "skipped")
+#: The ``checks-*`` scenarios with a fixed list. ``checks-pass`` holds a skipped check,
+#: which does not change the verdict.
+CHECKS = {
+    "checks-pass": [{"name": "build", "state": "pass"}, {"name": "docs", "state": "skipped"}],
+    "checks-fail": [{"name": "build", "state": "fail"}, {"name": "lint", "state": "pass"}],
+    "checks-pending": [{"name": "build", "state": "pending"}, {"name": "lint", "state": "pass"}],
+    "checks-none": [],
+}
+PENDING_THEN_PASS = "checks-pending-then-pass"
+
+
+def _one_line(name):
+    """A check name on one line: each control character, tab and newline included, a space."""
+    return "".join(" " if unicodedata.category(c) == "Cc" else c for c in str(name))
+
+
+def op_pr_checks(argv):
+    """One read of a PR's CI, as the adapter prints it: ``checks=<verdict>``, then one
+    ``check=<state>`` TAB ``<name>`` line per check. A state outside the four reads pending."""
+    scenario = _scenario()
+    prs = _all_prs()
+    pr = _find(_positional(argv), prs)
+    if pr is None:
+        return _err("pr-not-found", "mock: no such PR")
+    if scenario == PENDING_THEN_PASS:
+        if not _store():
+            return _err("feature-unsupported", "mock: %s counts each PR's reads, which needs "
+                        "ADLC_FORGE_MOCK_STORE" % PENDING_THEN_PASS)
+        reads = _load("checks_reads.json", {})
+        key = str(pr["number"])
+        checks = [{"name": "build", "state": "pass" if reads.get(key, 0) else "pending"}]
+        reads[key] = reads.get(key, 0) + 1
+        _dump("checks_reads.json", reads)
+    elif scenario in CHECKS:
+        checks = CHECKS[scenario]
+    else:
+        checks = pr.get("checks") or []
+    rows = [(c.get("state") if c.get("state") in CHECK_STATES else "pending", c.get("name", ""))
+            for c in checks]
+    states = [state for state, _ in rows]
+    verdict = ("fail" if "fail" in states else "pending" if "pending" in states
+               else "pass" if states else "none")
+    print("checks=%s" % verdict)
+    for state, name in rows:
+        print("check=%s\t%s" % (state, _one_line(name)))
+    return 0
+
+
 def op_branch_protection(argv):
     scenario = _scenario()
     if scenario not in PROTECTION:
@@ -482,10 +542,39 @@ def make_head(argv):
     return 0
 
 
+def set_checks(argv):
+    """``set-checks <pr> [<state>=<name>]...``: write a PR's ``checks`` list, in order. Each
+    state is one of :data:`CHECK_STATES`; with no spec the list is empty. Prints nothing."""
+    if not _store():
+        sys.stderr.write("forge_mock: set-checks needs ADLC_FORGE_MOCK_STORE\n")
+        return 2
+    if not argv:
+        sys.stderr.write("usage: forge_mock.py set-checks <pr> [<state>=<name>]...\n")
+        return 2
+    checks = []
+    for spec in argv[1:]:
+        state, sep, name = spec.partition("=")
+        if not sep or state not in CHECK_STATES:
+            sys.stderr.write("forge_mock: set-checks: %r is not <state>=<name>, a state of %s\n"
+                             % (spec, ", ".join(CHECK_STATES)))
+            return 2
+        checks.append({"name": name, "state": state})
+    with open(os.path.join(_store(), ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        prs = _all_prs()
+        pr = _find(argv[0], prs)
+        if pr is None:
+            sys.stderr.write("forge_mock: set-checks: no PR %s in the store\n" % argv[0])
+            return 1
+        pr["checks"] = checks
+        _save(prs)
+    return 0
+
+
 OPS = {"pr_create": op_pr_create, "pr_ready": op_pr_ready, "pr_edit": op_pr_edit,
        "pr_view": op_pr_view, "pr_list": op_pr_list, "pr_merge": op_pr_merge,
        "pr_comment": op_pr_comment, "branch_protection": op_branch_protection,
-       "commit_prs": op_commit_prs}
+       "commit_prs": op_commit_prs, "pr_checks": op_pr_checks}
 
 
 def main(argv):
@@ -495,6 +584,8 @@ def main(argv):
     op, rest = argv[1], argv[2:]
     if op == "make-head":
         return make_head(rest)
+    if op == "set-checks":
+        return set_checks(rest)
     scenario = _scenario()
     if scenario in ERROR_CLASSES and op in OPS:
         return _err(scenario, "mock backend (%s): simulated %s for %s" % (_provider(), scenario,

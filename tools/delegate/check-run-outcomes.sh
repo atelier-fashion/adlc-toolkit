@@ -22,6 +22,10 @@
 #       The latest line per REQ within the window, grouped by toolkit_version:
 #           toolkit_version runs merged pr_ready blocked failed
 #           mean_validate_retries verify_loop_rate critical major minor nit top_classes
+#           rejected
+#       `rejected` (REQ-719 BR-20) is the last column, so no earlier one moves.
+#       A rejected run counts in `runs` and in no other terminal column, so in
+#       no failure figure; its retries and findings count as any run's do.
 #       Exit contract — distinct signals for distinct empties (LESSON-571):
 #         log absent                                   -> rc 0, no output
 #         no parsed line inside the window             -> rc 0, `no runs in <N>d window`
@@ -165,10 +169,10 @@ out=$(LC_ALL=C awk -v cutoff="$cutoff" "$PARSE"'
                 if (best == "") break
                 used[best] = 1; top = top (top == "" ? "" : ",") cl[best] "=" bk
             }
-            printf "%s\t%d\t%d\t%d\t%d\t%d\t%.2f\t%.2f\t%d\t%d\t%d\t%d\t%s\n", v, runs[v],
+            printf "%s\t%d\t%d\t%d\t%d\t%d\t%.2f\t%.2f\t%d\t%d\t%d\t%d\t%s\t%d\n", v, runs[v],
                 term[v SUBSEP "merged"], term[v SUBSEP "pr-ready"], term[v SUBSEP "blocked"],
                 term[v SUBSEP "failed"], vr[v] / runs[v], looped[v] / runs[v],
-                sc[v], sj[v], sm[v], sn[v], (top == "" ? "-" : top)
+                sc[v], sj[v], sm[v], sn[v], (top == "" ? "-" : top), term[v SUBSEP "rejected"]
         }
     }' "$LOG")
 rc=$?
@@ -185,6 +189,6 @@ if [ -z "$out" ]; then
     echo "no runs in ${window_days}d window"
     exit 0
 fi
-printf 'toolkit_version\truns\tmerged\tpr_ready\tblocked\tfailed\tmean_validate_retries\tverify_loop_rate\tcritical\tmajor\tminor\tnit\ttop_classes\n'
+printf 'toolkit_version\truns\tmerged\tpr_ready\tblocked\tfailed\tmean_validate_retries\tverify_loop_rate\tcritical\tmajor\tminor\tnit\ttop_classes\trejected\n'
 printf '%s\n' "$out" | LC_ALL=C sort -t "$TAB" -k1,1
 exit 0

@@ -26,12 +26,12 @@ NOW = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
 
 
 def line(req, classes=(), terminal="merged", version="5.4.0", when=None, severity="Major",
-         loops=0, attempts=None, reason=""):
+         loops=0, attempts=None, reason="", engine="legacy"):
     state = {"req": req, "harness": {"version": version, "sha": "c013262"},
              "verify": {"findings": [{"severity": severity, "class": c, "title": c} for c in classes],
                         "loops": loops},
              "validateAttempts": attempts or {}}
-    rec = RO.build_record(state, terminal, "legacy", reason=reason, now=when or NOW)
+    rec = RO.build_record(state, terminal, engine, reason=reason, now=when or NOW)
     rec["req"] = req  # the AC-5 fixture names REQ-1..REQ-3, which the emitter would not
     return RO.encode(rec)
 
@@ -142,15 +142,96 @@ def test_summary_groups_by_toolkit_version(tmp_path):
     out = run(tmp_path, log, "--window", "7d")
     assert out.returncode == 0, out.stderr
     table = rows(out)
-    assert table[0] == ["toolkit_version", "runs", "merged", "pr_ready", "blocked", "failed",
-                        "mean_validate_retries", "verify_loop_rate", "critical", "major", "minor",
-                        "nit", "top_classes"]
+    assert table[0] == OLD_HEADER + ["rejected"]
     v531, v540 = table[1], table[2]
     assert v531[:6] == ["5.3.1", "2", "1", "0", "1", "0"]
     assert v531[6:8] == ["1.00", "0.50"]
     assert v531[8:12] == ["0", "3", "0", "0"]
     assert v531[12] == "LESSON-390=2,a-class=1"
     assert v540[:6] == ["5.4.0", "1", "0", "1", "0", "0"] and v540[12] == "-"
+    assert v531[13] == v540[13] == "0"
+
+
+# REQ-648's header. REQ-719 adds `rejected` after it, so none of these moves.
+OLD_HEADER = ["toolkit_version", "runs", "merged", "pr_ready", "blocked", "failed",
+              "mean_validate_retries", "verify_loop_rate", "critical", "major", "minor",
+              "nit", "top_classes"]
+
+
+def _legacy_failed_other(req, version):
+    """A line exactly as REQ-648 wrote it, by hand: how a run rejected before
+    REQ-719 is recorded (`failed` / `other`). No line is ever rewritten."""
+    ts = NOW.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return ('{"timestamp":"' + ts + '","skill":"proceed","step":"run-outcome","req":"' + req + '",'
+            '"repo":"adlc-toolkit","engine":"exec","toolkit_version":"' + version + '",'
+            '"toolkit_sha":"c013262","terminal":"failed","blocked_reason":"other",'
+            '"validate_retries":"0","verify_loops":"0","findings_critical":"0",'
+            '"findings_major":"0","findings_minor":"0","findings_nit":"0",'
+            '"finding_classes":"","lessons_cited":"","lessons_written":"","elapsed_s":"-"}')
+
+
+def _req719_logs():
+    """Lines from before REQ-719, then the same log with the new values added."""
+    before = [
+        line("REQ-101", ["a-class"], version="5.4.0", attempts={"phase1": 2}, loops=1),
+        line("REQ-102", ["a-class"], version="5.4.0", terminal="blocked", reason="merge-conflict"),
+        _legacy_failed_other("REQ-103", "5.4.0"),
+        line("REQ-104", [], version="5.5.0", terminal="pr-ready"),
+    ]
+    new = [
+        line("REQ-105", ["b-class"], version="5.5.0", terminal="rejected", engine="exec",
+             severity="Minor", attempts={"phase3": 3}, loops=1),
+        line("REQ-106", [], version="5.5.0", terminal="failed", engine="exec", reason="aborted"),
+        # blocked, answered, relaunched, then declined at the gate: the latest line wins
+        line("REQ-107", ["c-class"], version="5.5.0", terminal="blocked", engine="exec",
+             reason="merge-conflict"),
+        line("REQ-107", ["c-class"], version="5.5.0", terminal="rejected", engine="exec"),
+    ]
+    return before, new
+
+
+def test_req719_rejected_has_its_own_last_column(tmp_path):
+    before, new = _req719_logs()
+
+    # must-not-fire: a log with only older lines parses as before, with 0 in the new column
+    old = run(tmp_path, before)
+    assert old.returncode == 0, old.stderr
+    old_table = rows(old)
+    assert old_table[0] == OLD_HEADER + ["rejected"]
+    assert old_table[1] == ["5.4.0", "3", "1", "0", "1", "1", "0.33", "0.33", "0", "2", "0", "0",
+                            "a-class=2", "0"]
+    assert old_table[2] == ["5.5.0", "1", "0", "1", "0", "0", "0.00", "0.00", "0", "0", "0", "0",
+                            "-", "0"]
+
+    # the old and new values together: every old column in its old position
+    mixed = run(tmp_path, before + new)
+    assert mixed.returncode == 0, mixed.stderr
+    table = rows(mixed)
+    assert table[0][:13] == OLD_HEADER and table[0][13:] == ["rejected"]
+    assert all(len(r) == 14 for r in table)
+    assert table[1] == old_table[1], "a version with no new line is unchanged, column for column"
+    assert table[2] == ["5.5.0", "4", "0", "1", "0", "1", "0.50", "0.25", "0", "1", "1", "0",
+                        "b-class=1,c-class=1", "2"]
+
+    # a rejected line adds to `runs` and to no terminal count: not merged, not a failure
+    one = run(tmp_path, before + new[:1])
+    v550_before, v550_one = old_table[2], rows(one)[2]
+    assert int(v550_one[1]) == int(v550_before[1]) + 1
+    assert v550_one[13] == "1"
+    assert v550_one[2:6] == v550_before[2:6]
+    # `aborted` is a failed run like any other: it counts in `failed`, never in `rejected`
+    aborted = rows(run(tmp_path, before + new[1:2]))[2]
+    assert (aborted[1], aborted[5], aborted[13]) == ("2", "1", "0")
+
+
+@pytest.mark.parametrize("shell", ["sh", "dash", "bash", "zsh"])
+def test_req719_rejected_column_under_each_shell(tmp_path, shell):
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} not installed")
+    before, new = _req719_logs()
+    table = rows(run(tmp_path, before + new, shell=shell))
+    assert table[0] == OLD_HEADER + ["rejected"], shell
+    assert [r[13] for r in table[1:]] == ["0", "2"], shell
 
 
 def test_window_must_be_digits(tmp_path):

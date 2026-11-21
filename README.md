@@ -421,6 +421,43 @@ under `/sprint --exec`" below. Copilot CLI, Cursor and Antigravity CLI are later
 REQ-662: their adapters have no exec block yet, and the engine refuses each by name. A GitHub
 repo only: `--exec` on Azure DevOps is refused until a merge can be pinned there.
 
+**A blocked run has two ways out.** Its dashboard row prints both: `answer` relaunches it with
+your reply, and `abort` drops it. `abort` on a blocked run ends it `failed` and leaves the
+branch, the PR and the working copy for a person. It signals nothing, makes no forge call and
+makes no one-way move, and an approval recorded before the run blocked is never executed. On a
+running or stalled run `abort` kills the harness first, then ends the run the same way. It
+prints one line naming the REQ, who aborted it, the working copy, the branch and the PR. Look
+at that branch and PR: a new `/sprint --exec` run of the REQ reuses the working copy and the
+branch. A run at the merge gate is ended with `reject`, and `abort` refuses it, saying so. In
+the run-outcome log a rejected run reads `rejected`, and an aborted one reads `failed` with
+the reason `aborted`.
+
+**What the fence runner answers.** A fence's own exit status is passed through. Exit 3 with
+one `opaque_entry_refused:` line is a refusal. Three more statuses mean nothing ran and the
+session can put it right: 65 with one `fence_run_bad_value:` line is a value to correct, 69
+with one `fence_run_sandboxed:` line is a call to run again as a command of its own, and 75
+with one `fence_run_unverified:` line means the forge could not be read to check a PR number,
+so the session runs the line once more and then reports it as a blocker. **A PR number is held
+to the caller's PR:** the open, same-repository PR whose head is the branch checked out where
+the runner was called. Before a fence that takes a PR number runs, the runner reads that number
+once through the forge adapter, which the mock forge also answers. Any other PR, or a number
+the forge does not know, is 65. With no branch checked out, or under an exec run with a branch
+that is not the run's own, it is 3, before any read.
+
+**The lane check's fetch, and Phase 7's diff and CI.** The lane check fence fetches the
+integration branch and the REQ's branch each to its `refs/remotes/origin/<name>`, so on a
+`--single-branch` clone it reaches the lane check's verdict instead of erroring, which used to
+escalate an unattended lite run. Phase 7 reads the PR's diff from the local repository, the
+three-dot diff from the fetched integration branch to `HEAD`, and its CI with the forge
+adapter's `adlc_forge_pr_checks`, which the mock forge answers too. A `pending` verdict is read
+again every `proceed.ci.interval_s` seconds (30 by default, 60 at most), at most
+`proceed.ci.max_reads` times in all (20 by default). A first `none` is read once more, since the
+forge may not have registered the checks for the push yet, and only a second `none` means no CI
+checks. A wait that ends still `pending` or still `fail`, or a forge error on two reads in a
+row, is never reported green and never leaves Phase 7: a solo run asks you, and an unattended
+run reports `blocked` with a `ci-pending`, `ci-failed` or `ci-unread` blocker naming the checks
+or the error.
+
 What follows in this section is the engine and its Claude adapter. The approval protocol and
 the gates hold on every harness. What changes per harness is the adapter's `exec:` block in
 `harness/<name>.yml`, and with it what the allow and deny rules leave open: the residuals
@@ -695,6 +732,9 @@ Each REQ gets one headless `codex exec` session in a linked worktree, under the 
 - **`skip-worktree` hiding is defeatable:** `git add --sparse` and `git update-index --no-skip-worktree` undo it. The halt's exec-path gate is the control.
 - **`rules_reload` is `unknown`, treated as live.** No probe measures whether Codex re-reads a rule file mid-session, so an edit to `.codex/` that an allowed command makes mid-run may take effect. The engine re-renders the directory before every launch and resume, and a change found when the harness exits blocks the run.
 - **A fence run through `fence-run` is bounded by the reach audit** (REQ-682 ADR-7, `tools/adlc/tests/test_exec_reach.py`), **not by the allowlist or the sandbox.** Its git calls honour the repository's own config apart from the two pins, `core.fsmonitor` and `core.hooksPath`, which are defense in depth, and a model can write that config. So what a fence's push runs and where it goes stay open: `core.sshCommand`, a credential helper, `url.<base>.insteadOf`, `remote.origin.pushurl` and `remote.origin.push`. The runner pins no more because the orchestrator's own ssh and credential pins would break your push credentials. The branch push is bound to the run's REQ id through `ADLC_EXEC_RUN`, which a command can clear for itself, so that binding adds to the directory and checked-out-branch checks and does not replace them.
+- **An `--arg-file` is opened without following a symlink, and a hard link is not detected.** This holds on every harness. The runner opens the file from a handle on the working directory, one path component at a time, and refuses a symlink at any component, so no path is checked and then opened again. A symlink inside the working copy that points inside it was accepted and is now refused. Pass the file's own path instead. A hard link is not detected: making one to a file needs access that already lets the caller read that file.
+- **The PR tie trusts the caller's forge selection.** This holds on every harness. The runner makes its PR read in the environment the fence gets, so the variables that pick which forge answers, `GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE` and the `ADLC_FORGE_MOCK*` variables, are the caller's. A session that sets one of them for the runner chooses which forge answers the tie, and the fence's own forge calls then go to the same place.
+- **One fence is not held to the caller's PR.** `/architect`'s footprint fence (`architect/SKILL.md`) takes its PR number from `pipeline-state.json`, which the session writes, not from a value the runner checks. The census names it in a closed table, `DECLARED_UNTIED` in `tools/adlc/fence_census.py`, keyed by its full fence id, so any edit to the fence drops the exemption, and both census files mark its record `untied` with the reason.
 - **The nested-launch refusal reads the caller's own state directory for `run`.** A process inside a run that clears `ADLC_EXEC_RUN` and points `HOME` or `XDG_STATE_HOME` elsewhere finds no live run to descend from. Where you set `XDG_STATE_HOME`, the process need not point anything elsewhere: the child is not given that variable, so a nested `run` already reads a different state directory. What it then starts is a separate engine with its own pre-flight and its own approval gate; it cannot approve the run it came from.
 - **Process ancestry does not hold against a process that detaches.** A process the model starts can detach: re-parented, out of the process group and with the run variables cleared, it is found by neither the nested-launch guard nor the straggler sweep. `answer` takes no token, so such a process can answer a blocked run's question in your name, and the run relaunches with that reply. That is REQ-659's design and holds on Claude as well; an answer token is proposed as a follow-up.
 - **A runner line must keep its fence id quoted.** Codex matches no prefix rule against a command with a bare `#`, so a bare id runs the runner inside the sandbox, where its push fails. The engine prints the id quoted; REQ-664's `runner-prefix` probe does not exercise a `#`.

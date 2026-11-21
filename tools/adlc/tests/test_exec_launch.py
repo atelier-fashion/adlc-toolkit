@@ -2805,3 +2805,140 @@ def test_a_grant_that_fails_with_an_oserror_is_revoked_from_its_pending_record(t
     assert run.doc["trustGrants"] == {} and run.exec["trustRevokedAt"]
     assert orch.runs["REQ-902"].status == "awaiting_approval"
     assert eh.read_text(box.user_config) == eh.USER_CONFIG
+
+
+# ---- REQ-719: a blocked run's ways out ---------------------------------------------------------
+def _blocked_on_disk(box, req="REQ-901"):
+    """``req``'s newest run record, once its status reads ``blocked``; None before."""
+    path = el.find_run(os.path.realpath(str(box.repo)), req, box.environ)
+    if path is None:
+        return None
+    run = se.Run.load(path)
+    return run if run.status == "blocked" else None
+
+
+def test_req719_the_supervisor_exits_after_its_last_blocked_run_is_dropped(tmp_path):
+    """REQ-719 BR-3, AC-2: `adlc sprint-exec abort` drops a blocked run with no supervisor
+    running (the client runs it in process) and through a live supervisor. A supervisor whose
+    last open run was the blocked one then exits on its own: nothing signals it."""
+    (tmp_path / "alone").mkdir()
+    box = eh.Sandbox(tmp_path / "alone")
+    box.blocked()
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "blocked" and se.client_call(run, {"op": "ping"}) is None
+    url = run.read_primary_state()["repos"]["widgets"]["prUrl"]
+    calls = len(box.calls())
+    res = _engine(box, ["abort", "REQ-901"])
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.splitlines() == [
+        "REQ-901 aborted by operator; working copy left at %s, branch %s, PR %s"
+        % (run.wc, run.doc["branch"], url)]
+    done = se.Run.load(run.path)
+    assert done.status == "failed" and done.exec["abortedBy"] == "operator"
+    assert done.exec["abortedFrom"] == "blocked" and done.exec["abortedAt"]
+    assert len(box.calls()) == calls and os.path.isdir(run.wc)
+    assert [(o["terminal"], o["blocked_reason"]) for o in box.outcomes("REQ-901")][-1] == (
+        "failed", "aborted")
+
+    (tmp_path / "held").mkdir()
+    box = eh.Sandbox(tmp_path / "held")
+    box.blocked()
+    out = tmp_path / "supervisor.out"
+    with open(str(out), "w") as fh:
+        sup = subprocess.Popen([sys.executable, ENTRY, "sprint-exec", "run", "REQ-901",
+                                "--shared-credentials"], cwd=str(box.repo),
+                               env=dict(box.environ, PYTHONPATH=""), stdout=fh,
+                               stderr=subprocess.STDOUT)
+    try:
+        run = eh.until(lambda: _blocked_on_disk(box), timeout=120,
+                       what="the supervisor's run to block")
+        assert sup.poll() is None, out.read_text()
+        assert se.client_call(run, {"op": "ping"})["ok"] is True
+        res = _engine(box, ["abort", "REQ-901"])
+        assert res.returncode == 0, res.stderr
+        assert res.stdout.startswith("REQ-901 aborted by operator; working copy left at %s, "
+                                     "branch %s, PR " % (run.wc, run.doc["branch"]))
+        assert sup.wait(timeout=60) == 0, out.read_text()
+    finally:
+        if sup.poll() is None:
+            sup.kill()
+            sup.wait()
+    done = se.Run.load(run.path)
+    assert done.status == "failed" and done.exec["abortedFrom"] == "blocked"
+    assert "REQ-901 aborted by operator" in out.read_text()
+    assert not os.path.exists(run.doc["supervisorDir"])
+
+
+def test_req719_a_blocked_row_names_answer_and_abort(two):
+    """REQ-719 BR-5, AC-5: `adlc sprint-exec status` shows a blocked run's two ways out,
+    `answer` and `abort`, each a line the CLI parses with `--channel` before the REQ id, and
+    neither on a row of another status: a run at the gate, or the same run once dropped."""
+    two.blocked("REQ-901")
+    orch = two.go(shared=True)
+    assert orch.runs["REQ-901"].status == "blocked"
+    assert orch.runs["REQ-902"].status == "awaiting_approval"
+    res = _engine(two, ["status"])
+    assert res.returncode == 0, res.stderr
+    rows = eh.status_rows(res.stdout)
+    found = eh.ways_out(rows["REQ-901"])
+    assert [argv[0] for argv in found] == ["answer", "abort"]
+    parser = se._parser()
+    for argv in found:
+        assert argv.index("--channel") < argv.index("REQ-901"), argv
+        args = parser.parse_args(argv)          # SystemExit(2) is the failure this guards
+        assert (args.verb, args.req, args.channel) == (argv[0], "REQ-901", "skill")
+    assert parser.parse_args(found[0]).text == "<reply>"
+    assert eh.ways_out(rows["REQ-902"]) == []
+    orch.abort("REQ-901", by="operator")
+    rows = eh.status_rows(_engine(two, ["status"]).stdout)
+    assert "| failed |" in rows["REQ-901"][0] and eh.ways_out(rows["REQ-901"]) == []
+
+
+def test_req719_an_exhausted_ci_wait_ends_blocked(box):
+    """REQ-719 BR-25, AC-19: a session whose CI wait ran out with checks still pending reports
+    `blocked`, naming them. The run ends `blocked`, never at the gate (no plan, no token), and
+    its row names the pending checks and both ways out.
+    The session is the scripted fake: this shows what the engine does with that report, not
+    that a real session following Phase 7 writes it (`test_phase7_text.py` holds the text)."""
+    pending = {"reason": "ci-pending", "pendingChecks": ["build", "lint"], "reads": 20,
+               "detail": "CI checks still pending after 20 reads: build, lint"}
+    box.blocked(blockers=[pending])
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "blocked"
+    assert not run.ledger().exists() and "REQ-901" not in orch.tokens
+    assert "approve REQ-901 --token" not in box.out.getvalue()
+    assert run.read_primary_state()["blockers"] == [pending]
+    res = _engine(box, ["status"])
+    assert res.returncode == 0, res.stderr
+    row = eh.status_rows(res.stdout)["REQ-901"]
+    assert "| blocked |" in row[0]
+    assert any("ci-pending" in line and "build" in line and "lint" in line for line in row)
+    assert [argv[0] for argv in eh.ways_out(row)] == ["answer", "abort"]
+    assert [(o["terminal"], o["engine"]) for o in box.outcomes("REQ-901")] == [
+        ("blocked", "exec")]
+
+
+def test_req719_the_drop_names_the_repositories_already_merged(tmp_path):
+    """REQ-719 BR-2: in a cross-repo plan a run can block after some of its repositories have
+    merged, so the drop's line names them, read from the run record the engine writes after
+    each merge (`_note_merged`), and the operator is not told everything was left as it was.
+    A `merged` flag the model wrote in its own state is not named. The mock forge holds one
+    repository's PRs, so `side`'s merge is that record, made here as `execute` makes it."""
+    box = eh.Sandbox(tmp_path, config=CROSS_REPO)
+    _sibling(tmp_path, box)
+    box.blocked(siblings={"side": False})
+    orch = box.go(shared=True)
+    run = orch.runs["REQ-901"]
+    assert run.status == "blocked" and sorted(run.doc["repos"]) == ["side", "widgets"]
+    state = run.read_primary_state()
+    url = state["repos"]["widgets"]["prUrl"]
+    state["repos"]["widgets"]["merged"] = True          # the model's word, not the engine's
+    run.write_primary_state(state)
+    orch._note_merged(run, "side")
+    assert se.Run.load(run.path).doc["mergedRepos"] == ["side"]
+    line = orch.abort("REQ-901", by="operator")
+    assert line == ("REQ-901 aborted by operator; working copy left at %s, branch %s, PR %s; "
+                    "already merged: side" % (run.wc, run.doc["branch"], url))
+    assert run.status == "failed" and run.exec["abortedFrom"] == "blocked"

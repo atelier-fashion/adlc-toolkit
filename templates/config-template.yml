@@ -247,6 +247,24 @@ bugfix:
 #       command: "./deploy.sh production"
 
 # ---------------------------------------------------------------------------
+# proceed: How `/proceed` Phase 7 waits for CI. Optional.
+# ---------------------------------------------------------------------------
+# Phase 7 reads each PR's CI with one forge read per call. While the verdict
+# is `pending` it reads again, `ci.interval_s` seconds apart, up to
+# `ci.max_reads` reads in all. A wait that runs out, or two forge errors in a
+# row, never reports CI green: a solo run asks the operator, and a `/sprint`
+# run ends `blocked`, naming the checks still pending or failing.
+#
+# Defaults: `max_reads` 20 and `interval_s` 30. An interval above 60 is read
+# as 60, so one call (the wait, the fence runner's PR read of at most 20 s and
+# one forge read) stays under a harness's shell timeout.
+#
+# proceed:
+#   ci:
+#     max_reads: 20
+#     interval_s: 30
+
+# ---------------------------------------------------------------------------
 # gcp: GCP-specific deploy config. Only relevant if `stack.backends` includes
 # `cloud-run` or your CI/CD targets GCP.
 # ---------------------------------------------------------------------------

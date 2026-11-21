@@ -30,19 +30,49 @@ depth, and the README's declared residual (f) says what stays open.
 how toolkit skills and agents reach an exec model: under BUG-260's isolation flags they are
 not loaded (ADR-5).
 
+**The PR tie** (REQ-719 ADR-3). A value bound to a placeholder with the PR mark
+(``fence_census.Placeholder.pr``) must be the caller's PR: an open PR of the forge repository
+of the calling directory, not cross-repository, whose head is the branch checked out there.
+After the value checks and the sandbox check, and before any command of the fence, the runner
+reads each such value once through the forge adapter, with the text
+``fence_census.pr_tie_text`` spells, the fence's preload and the fence's environment
+(:func:`pr_tie`).
+
 Exit codes: a fence's own status is passed through. 3 is the runner's refusal, and every
 refusal is exactly one stderr line, ``opaque_entry_refused: <id>: <reason>``, with nothing run
 (BR-9). No refusal prints the fence's environment: it holds the run's scoped credential.
-Two more statuses also mean nothing ran, and are the caller's to put right, not refusals
-(BUG-287): 65 with one ``fence_run_bad_value:`` line for a value that failed its check, and 69
+Three more statuses also mean nothing ran, and are the caller's to put right, not refusals
+(BUG-287): 65 with one ``fence_run_bad_value:`` line for a value that failed its check, 69
 with one ``fence_run_sandboxed:`` line for a call that finds itself inside a harness sandbox
-(:func:`sandboxed`).
+(:func:`sandboxed`), and 75 with one ``fence_run_unverified:`` line for a PR number the forge
+could not be read to check. The PR read decides as follows:
+
+- ``number`` the value, ``state=OPEN``, ``headRefName`` the checked-out branch and
+  ``isCrossRepository=false``: the fence runs.
+- any of those different, or ``error_class=pr-not-found``: 65, ``fence_run_bad_value:``,
+  naming the value and the checked-out branch and no field of the PR read.
+- no branch checked out (a detached HEAD, or no repository), decided before any read: 3,
+  ``opaque_entry_refused:``; the checked-out branch not the exec run's own
+  (``ADLC_EXEC_RUN``, REQ-662 ADR-9): 3 as well, also before any read.
+- the adapter's own ``opaque_entry_refused:`` with status 3 (its Azure DevOps arm under the
+  runner, which would refuse the fence the same way): 3, that line passed through.
+- a read that exited 126, 127 or above 128 (a backend that is not there or was killed), any
+  other failure, an answer that does not parse, no answer in ``PR_TIE_TIMEOUT`` (20 s), or a
+  branch that could not be read: 75, ``fence_run_unverified:`` with the reason.
+
+So a tied call lasts at most that read (20 s) and then its fence: for Phase 7's CI fence, its
+wait (``ciWait``, at most 60 s) and one forge read.
+
+The fence runs with ``/dev/null`` for its standard input: no value reaches it but the bound
+ones.
 
 Standard library only.
 """
 
 import os
 import re
+import signal
+import stat
 import subprocess
 import sys
 
@@ -58,6 +88,12 @@ REFUSED = 3
 ROOT_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
 _ID_RE = re.compile(r"^([A-Za-z0-9_./-]+)#([0-9]{1,4}):([0-9a-f]{8})$")
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+#: ``ADLC_EXEC_RUN``, as the orchestrator sets it: the run's REQ id (REQ-662 ADR-9).
+_RUN_ID_RE = re.compile(r"^REQ-[0-9]{3,6}\Z")
+#: An ``error_class=`` value the adapter prints (partials/forge.sh, BR-4).
+_ERROR_CLASS_RE = re.compile(r"^[a-z][a-z-]{0,39}$")
+#: The ``number`` field of the runner's PR read.
+_DIGITS_RE = re.compile(r"^[0-9]{1,18}$")
 MAX_ARG_FILE = 1 << 20
 RUNNER_REL = "tools/adlc/fence-run"
 #: Config every git call of a fence, and the branch check, is pinned to, over whatever the
@@ -71,8 +107,6 @@ RUNNER_REL = "tools/adlc/fence-run"
 #: rest of its list is not carried over either. Every other key of the repository's config is
 #: honoured, so this is defense in depth, and the README's declared residual (f) says so.
 GIT_PINS = (("core.fsmonitor", "false"), ("core.hooksPath", "/dev/null"))
-#: ``ADLC_EXEC_RUN``, as the orchestrator sets it: the run's REQ id (REQ-662 ADR-9).
-_RUN_ID_RE = re.compile(r"^REQ-[0-9]{3,6}$")
 
 
 class Refusal(Exception):
@@ -125,7 +159,7 @@ def runner_call(rec, root, placeholders):
 
 
 def _placeholders_for(fence):
-    found, _sources = fc.plan(fence.code)
+    found, _sources = fc.plan(fence.code, fence.id)
     out = []
     for ph in found:
         if ph.arg not in [p.arg for p in out]:
@@ -190,10 +224,12 @@ def show(rel, root, out=None, err=None):
 
 
 # --------------------------------------------------------------------------- run
-def parse_values(argv, placeholders, cwd, same_dir=()):
+def parse_values(argv, placeholders, cwd, same_dir=(), spellings=()):
     """``{arg: [values]}`` from ``--arg``/``--arg-file`` pairs, every value checked.
 
-    A value of an argument in ``same_dir`` must be ``cwd`` itself, compared by real path."""
+    A value of an argument in ``same_dir`` must be ``cwd`` itself, compared by real path.
+    ``spellings`` are other spellings of ``cwd`` an ``--arg-file`` path may start with
+    (:func:`given_spellings`)."""
     by_arg = {ph.arg: ph for ph in placeholders}
     values = {}
     i = 0
@@ -211,7 +247,7 @@ def parse_values(argv, placeholders, cwd, same_dir=()):
             raise Refusal(None, "%s is not a value this fence takes (it takes: %s)"
                                 % (name, ", ".join(sorted(by_arg)) or "none"))
         if flag == "--arg-file":
-            value = read_arg_file(value, cwd)
+            value = read_arg_file(value, cwd, spellings)
         elif ph.file:
             raise Refusal(None, "%s takes --arg-file, not --arg" % name)
         why = ph.check(value) or ph.check_scope(value, cwd)
@@ -232,25 +268,92 @@ def parse_values(argv, placeholders, cwd, same_dir=()):
     return values
 
 
-def read_arg_file(path, cwd):
-    """A file the model wrote: a regular file under the working directory, at most 1 MiB."""
+def between_arg_file_opens():
+    """A test seam: it does nothing, here or in production. :func:`read_arg_file` calls it each
+    time it holds a handle and is about to open the next component of the path from it: the
+    moment a swapped directory would have to land. REQ-719 AC-12's test replaces it with a
+    function that makes that swap."""
+
+
+def read_arg_file(path, cwd, spellings=()):
+    """A file the model wrote: a regular file under the working directory, at most 1 MiB.
+
+    It is walked from a handle on ``cwd`` (REQ-719 ADR-4, BR-15): each component is opened
+    from the handle on the one before it, following no symlink, the last with ``O_NONBLOCK``
+    so a FIFO cannot hold the runner. The checks are made on the opened descriptor and the
+    text is read from it, so no path is checked and then opened again. Every failure is a
+    :class:`Refusal`, which :func:`parse_values` reports as a bad value.
+
+    An absolute path may start with ``cwd`` as given, with its real path, or with one of
+    ``spellings``: other spellings the caller has found name the same directory
+    (:func:`given_spellings`). Each is only cut off the path as text; the walk always starts
+    from ``cwd``."""
     if not path or "\x00" in path:
         raise Refusal(None, "--arg-file names no path")
-    real = os.path.realpath(os.path.join(cwd, path))
-    base = os.path.realpath(cwd)
-    if os.path.commonpath([real, base]) != base:
-        raise Refusal(None, "--arg-file %r resolves outside the working directory" % path[:120])
-    if not os.path.isfile(real):
-        raise Refusal(None, "--arg-file %r is not a regular file" % path[:120])
-    size = os.path.getsize(real)
-    if size > MAX_ARG_FILE:
-        raise Refusal(None, "--arg-file %r is %d bytes, over the 1 MiB cap" % (path[:120], size))
-    with open(real, "rb") as fh:
-        data = fh.read(MAX_ARG_FILE + 1)
+    shown = path[:120]
+    if ".." in path.split("/"):
+        raise Refusal(None, "--arg-file %r has a '..' segment" % shown)
+
+    def segments(text):
+        return [part for part in text.split("/") if part not in ("", ".")]
+
+    # Cut to a relative path by text alone (BR-16). A relative path is used as given; an
+    # absolute one must start with cwd in its given or its real spelling (macOS's /var and
+    # /private/var, LESSON-844), and that prefix is cut. Only cwd is resolved, never the file.
+    parts = segments(path)
+    if path.startswith("/"):
+        for base in (cwd, os.path.realpath(cwd)) + tuple(spellings):
+            prefix = segments(base)
+            if base.startswith("/") and parts[:len(prefix)] == prefix:
+                parts = parts[len(prefix):]
+                break
+        else:
+            raise Refusal(None, "--arg-file %r is not under the working directory %r: pass a "
+                                "path relative to it" % (shown, cwd))
+    try:
+        fd = os.open(cwd, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as exc:
+        raise Refusal(None, "--arg-file %r: the working directory cannot be opened (%s)"
+                            % (shown, exc.strerror))
+    try:
+        for i, name in enumerate(parts):
+            if i == len(parts) - 1:
+                flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_NOCTTY", 0)
+            else:
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            between_arg_file_opens()
+            try:
+                nxt = os.open(name, flags, dir_fd=fd)
+            except OSError as exc:
+                # A symlink met with O_NOFOLLOW is ELOOP on macOS and Linux, and may be
+                # ENOTDIR or EMLINK elsewhere: any failure here is the caller's to correct.
+                raise Refusal(None, "--arg-file %r: %r is a symlink or cannot be opened (%s)"
+                                    % (shown, name[:120], exc.strerror))
+            old, fd = fd, nxt
+            os.close(old)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refusal(None, "--arg-file %r is not a regular file" % shown)
+        if st.st_size > MAX_ARG_FILE:
+            raise Refusal(None, "--arg-file %r is %d bytes, over the 1 MiB cap"
+                                % (shown, st.st_size))
+        chunks = []
+        left = MAX_ARG_FILE + 1
+        while left > 0:
+            chunk = os.read(fd, min(left, 1 << 16))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+    finally:
+        os.close(fd)
+    data = b"".join(chunks)
+    if len(data) > MAX_ARG_FILE:
+        raise Refusal(None, "--arg-file %r is over the 1 MiB cap" % shown)
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
-        raise Refusal(None, "--arg-file %r is not UTF-8 text" % path[:120])
+        raise Refusal(None, "--arg-file %r is not UTF-8 text" % shown)
 
 
 def git_env(environ):
@@ -267,6 +370,17 @@ def git_env(environ):
         env["GIT_CONFIG_KEY_%d" % i] = key
         env["GIT_CONFIG_VALUE_%d" % i] = value
     return env
+
+
+def bound_names(placeholders, values):
+    """The ``ADLC_ARG_*`` names :func:`child_env` binds for ``placeholders``, in order."""
+    names = []
+    for ph in placeholders:
+        if ph.multi:
+            names += [fc._env_name(ph.arg, k) for k in range(len(values.get(ph.arg, [])))]
+        else:
+            names.append(fc._env_name(ph.arg))
+    return names
 
 
 def child_env(environ, placeholders, values, root):
@@ -287,10 +401,20 @@ def child_env(environ, placeholders, values, root):
     return env
 
 
-def script_for(fence, values, root):
-    """The preload closure, by absolute path, then the transformed fence (ADR-4)."""
-    preload = '. "%s/partials/adlc-home.sh"\n. "%s/partials/forge.sh"\n' % (root, root)
-    return preload + fc.transform(fence.code, values, root)
+def preload(root):
+    """The partials every fence, and the runner's PR read, run after: by absolute path from
+    the runner's own root (ADR-4)."""
+    return '. "%s/partials/adlc-home.sh"\n. "%s/partials/forge.sh"\n' % (root, root)
+
+
+def script_for(fence, values, root, placeholders=()):
+    """The preload closure, by absolute path, then each bound value made readonly, then the
+    transformed fence (ADR-4). A value is checked, and a PR number tied, before the fence runs:
+    readonly keeps the fence from replacing one afterwards, by any spelling of its name
+    (``printf -v``, ``read``, a computed name), which the census's text check cannot see."""
+    names = bound_names(placeholders, values)
+    lock = "readonly %s\n" % " ".join(names) if names else ""
+    return preload(root) + lock + fc.transform(fence.code, values, root)
 
 
 def find(fid, root):
@@ -346,17 +470,35 @@ def head_args(rec):
     return push_args(rec, "head")
 
 
+class BranchUnread(Exception):
+    """The checked-out branch could not be read: git failed, not because HEAD is detached or
+    the directory is no repository. The message is why."""
+
+
 def checked_out_branch(cwd, environ):
-    """The branch ``cwd`` has checked out, or ``""`` on a detached HEAD or outside a
-    repository. It reads under the fence's own git environment (:func:`git_env`), so no
-    ``GIT_*`` variable of the caller reaches it and the push sees the same repository."""
+    """The branch ``cwd`` has checked out, or ``""`` on a detached HEAD (``git symbolic-ref
+    --quiet`` exits 1 and says nothing) or outside a repository. Any other failure, such as a
+    ``safe.directory`` refusal or no ``git``, raises :class:`BranchUnread`: it says nothing
+    about which branch is checked out. It reads under the fence's own git environment
+    (:func:`git_env`), so no ``GIT_*`` variable of the caller reaches it and the push sees the
+    same repository; ``LC_ALL=C`` keeps git's "not a git repository" in the words it is read
+    by."""
+    env = dict(git_env(environ), LC_ALL="C")
     try:
         proc = subprocess.run(["git", "-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"],
-                              env=git_env(environ), stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, universal_newlines=True)
-    except OSError:
+                              env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              universal_newlines=True, errors="replace")
+    except OSError as exc:
+        raise BranchUnread("git could not be run (%s)" % exc.strerror)
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    errtext = proc.stderr.strip()
+    if proc.returncode == 1 and not errtext:
         return ""
-    return proc.stdout.strip() if proc.returncode == 0 else ""
+    if proc.returncode == 128 and "not a git repository" in errtext:
+        return ""
+    first = errtext.splitlines()[0][:200] if errtext else "no message"
+    raise BranchUnread("git symbolic-ref exited %d: %s" % (proc.returncode, first))
 
 
 def run_branch_refusal(branch, environ):
@@ -387,9 +529,17 @@ def run_branch_refusal(branch, environ):
 #: 4), and the stderr line is what names the case.
 SANDBOXED = 69
 #: Exit status of a call whose ``--arg`` or ``--arg-file`` value failed its check
-#: (:func:`parse_values`). Not a refusal either: nothing ran, and a corrected value is checked
-#: the same way.
+#: (:func:`parse_values`), or whose PR number is not the caller's PR (:func:`pr_tie`). Not a
+#: refusal either: nothing ran, and a corrected value is checked the same way.
 BAD_VALUE = 65
+#: Exit status of a call whose PR number could not be checked, because the forge could not be
+#: read for it (:func:`pr_tie`, REQ-719 BR-11). Neither a pass nor a refusal: nothing ran, and
+#: the exec prompt bounds the retry to one before the session reports it as a blocker.
+UNVERIFIED = 75
+#: How long the runner waits for its PR read before it counts the forge as unread. It is part
+#: of every tied call's length: this read, then the fence (for Phase 7's CI fence, a wait of at
+#: most 60 s and one forge read, REQ-719 ADR-6), under a harness's shell limit.
+PR_TIE_TIMEOUT = 20
 
 
 def sandboxed(cwd, environ):
@@ -424,6 +574,160 @@ def sandboxed(cwd, environ):
             "ran. Run this fence-run line again as a command of its own.")
 
 
+# --------------------------------------------------------------------------- the PR tie
+def read_pr(arg, root, cwd, env):
+    """``(status, stdout, stderr)`` of the runner's read of the PR-marked value ``arg``: the
+    text :func:`fence_census.pr_tie_text` spells, run as the fence is, under ``/bin/sh`` in
+    ``cwd`` after :func:`preload` and in the fence's own environment ``env``
+    (:func:`child_env`), so it reads the forge repository of the calling directory and the
+    mock forge answers it. ``None`` when it gave no answer in :data:`PR_TIE_TIMEOUT` seconds:
+    its process group is then killed, so a hung backend does not hold the runner."""
+    script = preload(root) + fc.pr_tie_text(arg) + "\n"
+    try:
+        proc = subprocess.Popen(["/bin/sh", "-c", script], cwd=cwd, env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
+                                start_new_session=True)
+    except OSError as exc:
+        return -1, "", str(exc)
+    try:
+        out, errtext = proc.communicate(timeout=PR_TIE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return None
+    return proc.returncode, out, errtext
+
+
+def _pr_fields(out):
+    """The fields of a ``--fields`` answer, or ``None`` when it does not parse: a line that is
+    not ``key=value``, one of :data:`fence_census.PR_TIE_FIELDS` missing or given twice, a
+    ``number`` that is not one, or an ``isCrossRepository`` neither ``true`` nor ``false``."""
+    fields = {}
+    for line in out.splitlines():
+        if not line:
+            continue
+        key, sep, value = line.partition("=")
+        if not sep:
+            return None
+        if key in fc.PR_TIE_FIELDS:
+            if key in fields:
+                return None
+            fields[key] = value
+    if len(fields) != len(fc.PR_TIE_FIELDS) or not _DIGITS_RE.match(fields["number"]) or \
+            fields["isCrossRepository"] not in ("true", "false"):
+        return None
+    return fields
+
+
+def pr_verdict(value, branch, answer):
+    """What the runner's PR read (``answer``, :func:`read_pr`'s) says of ``value`` (REQ-719
+    ADR-3): ``(None, "")`` when it is the open, same-repository PR whose head is ``branch``.
+    Else ``(UNVERIFIED, why)`` for a read that exited 126, 127 or above 128, whatever it
+    printed: the backend could not be run, or was killed. Then ``(BAD_VALUE, "")`` when any
+    field differs or the forge does not know the number; ``(REFUSED, line)`` with the adapter's
+    own ``opaque_entry_refused:`` line (its Azure DevOps arm under the runner, which would
+    refuse the fence the same way); and ``(UNVERIFIED, why)`` for any other failure, an answer
+    that does not parse, or no answer at all."""
+    if answer is None:
+        return UNVERIFIED, "no answer in %d s" % PR_TIE_TIMEOUT
+    status, out, errtext = answer
+    if status in (126, 127) or status > 128 or status < 0:
+        # The shell could not run the backend, or it was killed: a classifier that reads its
+        # `command not found` as the forge's `not found` must not make this a bad value.
+        return UNVERIFIED, "the read exited with status %d" % status
+    if status != 0:
+        refused = [ln for ln in errtext.splitlines() if ln.startswith("opaque_entry_refused:")]
+        if status == REFUSED and refused:
+            return REFUSED, refused[0][:400]
+        klass = next((ln.split("=", 1)[1] for ln in out.splitlines()
+                      if ln.startswith("error_class=")), "")
+        if klass == "pr-not-found":
+            return BAD_VALUE, ""
+        if _ERROR_CLASS_RE.match(klass):
+            return UNVERIFIED, "error_class=%s" % klass
+        return UNVERIFIED, "the read exited with status %d" % status
+    fields = _pr_fields(out)
+    if fields is None:
+        return UNVERIFIED, "its answer did not parse"
+    if int(fields["number"]) != int(value) or fields["state"] != "OPEN" or \
+            fields["headRefName"] != branch or fields["isCrossRepository"] != "false":
+        return BAD_VALUE, ""
+    return None, ""
+
+
+def pr_tie(fid, args, values, root, cwd, environ, env, err=None):
+    """``None`` when the value of each of ``args``, the fence's PR-marked arguments, is the
+    caller's PR; else the exit status, its one line written to ``err`` (REQ-719 BR-9 to BR-11).
+
+    The caller's PR is an open PR of the forge repository of ``cwd``, not cross-repository,
+    whose head is the branch checked out in ``cwd``. With no branch checked out no PR is, and
+    the call is refused before any forge read. Under an exec run the branch must also be the
+    run's own (:func:`run_branch_refusal`, REQ-719 BR-9): the session can check out a local
+    branch named after another REQ's head, so the name alone is not the caller's PR, and that
+    too is refused before any read. A branch that cannot be read is 75. The line for a value
+    that is not the caller's names the value and the branch, and no field of the PR read."""
+    err = err or sys.stderr
+    what = " and ".join(args)
+    try:
+        branch = checked_out_branch(cwd, environ)
+    except BranchUnread as exc:
+        err.write("fence_run_unverified: %s: the branch checked out here could not be read to "
+                  "check the value for %s (%s). Nothing ran: run the same line once more, and "
+                  "if it answers the same way, report it as a blocker.\n" % (fid, what, exc))
+        return UNVERIFIED
+    if not branch:
+        return refuse(fid, "no branch is checked out here (a detached HEAD, or no repository), "
+                           "so no PR is this directory's and the value for %s cannot be "
+                           "checked" % what, err)
+    why = run_branch_refusal(branch, environ)
+    if why:
+        run_id = environ.get("ADLC_EXEC_RUN", "")
+        if _RUN_ID_RE.fullmatch(run_id):
+            why = ("the branch checked out here, %s, is not this exec run's: ADLC_EXEC_RUN names "
+                   "%s, so only <type>/%s-<rest> is, and no PR on another branch is the "
+                   "caller's (the value for %s is not checked)" % (branch, run_id, run_id, what))
+        return refuse(fid, why, err)
+    for arg in args:
+        value = values[arg][0]
+        status, text = pr_verdict(value, branch, read_pr(arg, root, cwd, env))
+        if status is None:
+            continue
+        if status == REFUSED:
+            err.write(text + "\n")
+        elif status == BAD_VALUE:
+            err.write("fence_run_bad_value: %s: value for %s, %s, is not the open PR of the "
+                      "branch checked out here (%s). Nothing ran: correct that value and run "
+                      "the line again.\n" % (fid, arg, value, branch))
+        else:
+            err.write("fence_run_unverified: %s: the forge could not be read to check that the "
+                      "value for %s is the open PR of the branch checked out here (%s). Nothing "
+                      "ran: run the same line once more, and if it answers the same way, report "
+                      "it as a blocker.\n" % (fid, arg, text))
+        return status
+    return None
+
+
+def given_spellings(cwd, environ):
+    """Another spelling of ``cwd`` an absolute ``--arg-file`` path may start with (BR-16):
+    ``$PWD``, the calling shell's spelling of its directory, when it is an absolute path
+    naming the same directory as ``cwd``. ``os.getcwd()`` is always the real spelling (macOS's
+    /private/var), and a model writes the one its shell shows (/var), LESSON-844."""
+    pwd = environ.get("PWD") or ""
+    if not pwd.startswith("/") or pwd == cwd or "\x00" in pwd:
+        return ()
+    try:
+        return (pwd,) if os.path.samefile(pwd, cwd) else ()
+    except (OSError, ValueError):
+        return ()
+
+
 def run(fid, argv, root, environ=None, cwd=None, err=None):
     environ = dict(os.environ if environ is None else environ)
     cwd = cwd or os.getcwd()
@@ -431,7 +735,8 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
         fence, rec = find(fid, root)
         placeholders = _placeholders_for(fence)
         try:
-            values = parse_values(argv, placeholders, cwd, same_dir_args(rec))
+            values = parse_values(argv, placeholders, cwd, same_dir_args(rec),
+                                  given_spellings(cwd, environ))
         except Refusal as exc:
             # A value of the wrong shape is the caller's to correct, not an entry the runner
             # refuses: a relative path where the fence takes an absolute one ended a real run
@@ -442,14 +747,21 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
                 "line again.\n" % (fid, exc.reason))
             return BAD_VALUE
         for name in head_args(rec):
-            head = checked_out_branch(cwd, environ)
+            # A branch that cannot be read is the push's refusal (3), where the PR tie answers
+            # 75 (:func:`pr_tie`). The push's guard (REQ-662 ADR-9) answers only "run" or 3, and
+            # pushes nothing on any doubt about the branch; the tie's 75 bounds one retry of a
+            # read that can fail in passing. A failed git read is not transient either way.
+            try:
+                head = checked_out_branch(cwd, environ)
+            except BranchUnread as exc:
+                raise Refusal(None, "the branch checked out here could not be read: %s" % exc)
             if values.get(name) != [head]:
                 raise Refusal(None, "value for %s is not the branch checked out here (%s)"
                                     % (name, head or "no branch"))
             why = run_branch_refusal(head, environ)
             if why:
                 raise Refusal(None, why)
-        script = script_for(fence, values, root)
+        script = script_for(fence, values, root, placeholders)
     except Refusal as exc:
         return refuse(exc.subject or fid, exc.reason, err)
     except fc.Unroutable as exc:
@@ -459,7 +771,14 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
         (err or sys.stderr).write("fence_run_sandboxed: %s: %s\n" % (fid, why))
         return SANDBOXED
     env = child_env(environ, placeholders, values, root)
-    proc = subprocess.run(["/bin/sh", "-c", script], cwd=cwd, env=env)
+    # After the value checks and the sandbox check, so a chained call reads 69 and makes no
+    # forge call, and before any command of the fence (REQ-719 BR-12, LESSON-893).
+    tied = fc.tied_args(placeholders)
+    if tied:
+        status = pr_tie(fid, tied, values, root, cwd, environ, env, err)
+        if status is not None:
+            return status
+    proc = subprocess.run(["/bin/sh", "-c", script], cwd=cwd, env=env, stdin=subprocess.DEVNULL)
     return proc.returncode
 
 

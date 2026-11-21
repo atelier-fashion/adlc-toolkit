@@ -778,15 +778,76 @@ executable:
   bare `#`, so a bare id ran the runner inside the sandbox (measured on codex-cli 0.166.0,
   2026-11-18).
 - Exit codes: a fence's own status is passed through; **3** is the runner's refusal, always one
-  stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run. Two more statuses mean
-  nothing ran and the caller can put it right (BUG-287). **65**, with one
-  `fence_run_bad_value:` line, is a value of the wrong shape: a relative path where the fence
-  takes an absolute one, an `--arg-file` outside the working copy, a name the fence does not
-  take. **69**, with one `fence_run_sandboxed:` line, is a call that cannot write the
-  repository's git directory, which on Codex means it was chained after a command with no
-  allow and the whole line ran inside the sandbox: run it again as a command of its own. The
-  check is skipped where the git directory is inside the working copy. Both numbers sit above
-  what a fence's own commands return, and the stderr line is what names the case.
+  stderr line `opaque_entry_refused: <id>: <reason>`, with nothing run. Three more statuses
+  mean nothing ran and the caller can put it right (BUG-287, REQ-719). **65**, with one
+  `fence_run_bad_value:` line, is a value to correct: a value of the wrong shape (a relative
+  path where the fence takes an absolute one, an `--arg-file` outside the working copy, a name
+  the fence does not take), or a PR number that is not the caller's PR (below). **69**, with
+  one `fence_run_sandboxed:` line, is a call that cannot write the repository's git directory,
+  which on Codex means it was chained after a command with no allow and the whole line ran
+  inside the sandbox: run it again as a command of its own. The check is skipped where the git
+  directory is inside the working copy. **75**, with one `fence_run_unverified:` line, is a PR
+  number the runner could not check because the forge could not be read: run the same line
+  once more, then report it as a blocker. The three numbers sit above what a fence's own
+  commands return, and the stderr line is what names the case.
+- **The PR tie (REQ-719 ADR-3).** A value bound to a placeholder whose value is a PR number
+  (`prNumber`, which carries the PR mark in `fence_census`'s closed tables) must be the
+  caller's PR: the open, same-repository PR whose head is the branch checked out where the
+  runner was called. After the value checks and the sandbox check, and before any command of
+  the fence, the runner reads each such value once, with `adlc_forge_pr_view <n> --fields
+  number,state,headRefName,isCrossRepository` under the fence's own preload and environment, so
+  it reads the forge repository of the calling directory and the mock forge answers it. Any
+  field that differs, or `error_class=pr-not-found`, is 65, and the line names the value and
+  the branch and no field of the PR it read. No branch checked out is 3, decided before any
+  read. Under an exec run the branch checked out must also be the run's own branch
+  (`run_branch_refusal`, the check a push fence gets): any other is 3, with an
+  `opaque_entry_refused:` line, before any read. Without it a session could check out a local
+  branch named after another PR's head and pass the tie for that PR. The adapter's own
+  `opaque_entry_refused:` (its Azure DevOps arm under the runner) is passed through as 3. Any other error class, an answer that does not parse, or no answer in
+  20 s is 75. So is a forge CLI that could not be run (the read exited 126, 127 or on a signal:
+  a missing `gh` is not a wrong number), and a branch git could not name for a reason other
+  than a detached `HEAD`. The branch check rests on `ADLC_EXEC_RUN` being set for the call, as
+  the push rule does (REQ-662): with it unset the tie holds the checked-out branch only. A tied fence's census record names its values under `tied`, and its reach
+  includes the read. One tied CI call, Phase 7's, therefore lasts at most its wait (`ciWait`
+  admits 0 to 60 seconds), the read (at most 20 s) and one forge read.
+  The routing rule is a closed set of shapes (BR-13). The fence text is the toolkit's, so this
+  is a check on its authors, and it does not trace where a value came from: a runner fence
+  does not route, and `fence_census.py --check` fails naming the operation and the word,
+  unless every call of an `adlc_forge_pr_*` operation but `pr_create` and `pr_list` is its one
+  PR argument first, then literal options, the one-word values of the options the adapter's
+  own parser consumes a value for, and redirections. The PR argument is a marked placeholder
+  alone in its word (`'<prNumber>'`), a marked variable alone and double-quoted
+  (`"$prNumber"`), or `"$n"` where `n` is set exactly once in the fence, by an assignment
+  whose whole value is one `$(adlc_forge_pr_create …)` or `$(adlc_forge_pr_list …)` with
+  literal arguments (BR-14). Any other word is refused: an unmarked placeholder, a variable of
+  any other origin, a positional parameter, an unquoted or mixed expansion, a second
+  positional. A call with no PR argument is refused too: `gh` would then take the PR of the
+  branch's own configuration, which the session writes. Refused as well, in a fence with a PR
+  operation: `-R`/`--repo` in any spelling (the tie's read is made without it); an assignment
+  to a `GH_*`, `GIT_*`, `ADLC_FORGE_*` name, `HOME`, `XDG_CONFIG_HOME` or `PATH`; a `cd`; an
+  `ADLC_ARG_*` name written in the fence; a function, an alias, `unalias`, `unset -f`, `hash`
+  or `enable` (the adapter runs `gh`, `printf` and more by name); a process substitution; and
+  a PR operation reached through `xargs`, `eval`, `sh -c`, a variable or a string instead of
+  being a command the check reads. At run time the runner marks every bound `ADLC_ARG_*`
+  readonly before the fence's body, and gives the fence `/dev/null` as stdin.
+  **One fence is declared untied.** `/architect`'s footprint fence (`architect/SKILL.md`)
+  takes its PR number from `pipeline-state.json`, which the session writes, so it is not held
+  to the caller's PR. `fence_census.py` names it in a closed table, `DECLARED_UNTIED`, keyed
+  by its full fence id so any edit to the fence drops the exemption; it routes, and its record
+  in both census files carries `untied` with the reason (the README's declared residuals).
+  **The tie trusts the caller's forge selection.** The read runs in the fence's own
+  environment, so `GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE` and the
+  `ADLC_FORGE_MOCK*` variables are the caller's: a session that sets one of them for the
+  runner chooses which forge answers the tie, and the fence's own forge calls go to the same
+  place (the README's declared residuals).
+- **`--arg-file`** is opened from a handle on the working directory, one path component at a
+  time, following no symlink at any component, the last included. The path is relative with
+  no `..` segment, or absolute under the working directory in its given spelling (`$PWD`) or
+  its real one (`/var` and `/private/var` on macOS); the file's own path is never resolved.
+  The regular-file check, the 1 MiB cap and the UTF-8 check are made on the opened
+  descriptor, and the text is read from it. A FIFO or a device is refused without blocking.
+  Every failure is 65. A symlink inside the working copy that points inside it is refused too,
+  and a hard link is not detected (the README's declared residuals).
 - **Its git environment.** No caller `GIT_*` variable reaches a fence, so neither does a
   caller's `GIT_SSH_COMMAND`, and every git call it makes is pinned to `core.fsmonitor=false`
   and `core.hooksPath=/dev/null` through `GIT_CONFIG_COUNT`, over the repository's own config.
@@ -794,6 +855,9 @@ executable:
   pins point at its run directory and would break an operator's push credentials, so the
   runner does not take them. The rest of that config is honoured, and a model can write it, so
   the two pins are defense in depth (the README's declared residual (f)).
+- **Its Python.** A fence runs in the working copy, which the session writes. Every inline
+  `python3 -c` helper in `partials/forge.sh` runs as `python3 -I -c` (REQ-719), so a module
+  planted there, such as a `json.py`, is not imported in place of the standard library's.
 
 **One census per adapter (REQ-662 ADR-8).** Each exec-capable adapter has its committed census,
 `harness/<name>/exec-fence-census.json`: every fence, its route, its values and its reach. On
@@ -832,6 +896,31 @@ copy starts unreviewed and `codex exec` skips the hook silently, which is why th
 declares `context_delivery: prompt`. `agy -p` ends at the first tool it would need to prompt
 for, with exit 0 and an empty response, and a failed run exits 3 (REQ-658), which is why `ok`
 with no terminal claim is `failed` for every harness.
+
+**What REQ-719 adds to the engine.** `abort` has a second arm: a `blocked` run whose recorded
+`exec.pid` and `exec.closeOutPid` are not live is dropped. It ends `failed`, nothing is
+signalled, no forge call is made, and the branch, the PR and the working copy are left for a
+person. What the engine rendered is restored, trust is revoked, any approval token is
+discarded, the run leaves the merge queue, and approvals held behind it are released. On
+`awaiting_approval` with no live process `abort` is refused, naming `reject`. Both arms record
+`exec.abortedFrom`, the status `abort` found (`running`, `stalled` or `blocked`), beside
+`exec.abortedBy` and `exec.abortedAt`, and print one line naming the REQ, who aborted it, the
+working copy, the branch and the PR, and, when the run was blocked after some repositories
+of a cross-repo plan had merged, `; already merged: <repo ids>`, read from `mergedRepos` in
+the run record, which only the engine writes. The kill arm also discards the token, takes the run out
+of the merge queue and releases approvals held behind it. `abort` and `answer` are refused,
+with nothing changed, while the merge worker is rebasing that run after another REQ merged:
+run the command again once the worker has relaunched it or halted it again. A hold is released
+once the run it waits behind is terminal, read from disk when this supervisor has not loaded
+it, or has no run on disk at all, so an `abort` or `reject` made with no supervisor running
+no longer leaves a later `resume` waiting. In the run-outcome log `reject` writes the terminal
+`rejected` with an empty reason, which only engine `exec` may write, and `abort` writes
+`failed` with the reason `aborted`. The mock forge (`forge_mock.py`) answers `pr_checks`, the
+op behind `adlc_forge_pr_checks`, from a PR's `checks` list in its store, and from the
+scenarios `checks-pass`, `checks-fail`, `checks-pending`, `checks-none` and
+`checks-pending-then-pass`. A PR with no list reads `none`. A fixture writes that list with
+`forge_mock.py set-checks`, a helper and not a forge op: like `make-head` it is not written to
+`calls.log`, so a test's record of forge calls never shows it, and no scenario applies to it.
 
 ## `adlc agents render` (REQ-516)
 
