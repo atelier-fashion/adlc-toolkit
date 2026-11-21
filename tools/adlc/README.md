@@ -810,26 +810,26 @@ executable:
   the push rule does (REQ-662): with it unset the tie holds the checked-out branch only. A tied fence's census record names its values under `tied`, and its reach
   includes the read. One tied CI call, Phase 7's, therefore lasts at most its wait (`ciWait`
   admits 0 to 60 seconds), the read (at most 20 s) and one forge read.
-  The routing rule fails closed. A runner fence does not route, and `fence_census.py --check`
-  fails naming the operation and the value, when a positional argument of any
-  `adlc_forge_pr_*` operation but `pr_create` and `pr_list` holds anything the check cannot
-  trace to a marked placeholder or to clean text: an unmarked placeholder, a positional
-  parameter (`$1`, `$@`; the runner hands a fence none), or a variable any of whose
-  assignments holds one. Assignments include what a command substitution, a `for` list, a
-  here-document, a here-string, or the pipeline or compound statement feeding a `read`
-  holds. Only what `adlc_forge_pr_create` or `adlc_forge_pr_list` prints is exempt (BR-14).
-  Option values are skipped only for the options the adapter's own parser consumes a value
-  for, so a word after any other option is checked as the PR, and `-R`/`--repo` on a PR
-  operation is refused: the tie's read is made without it. Refused for the same reason is
-  anything else in a fence with a PR operation that would move the operation away from what
-  the tie read, or out of the check's sight: an assignment to a `GH_*`, `GIT_*`,
-  `ADLC_FORGE_*` name or to `HOME`, a `cd`, an `ADLC_ARG_*` name written in the fence, and a
-  PR operation reached through `xargs`, `eval`, `sh -c`, a variable or a string instead of
-  being a command the check reads. What cannot be traced at all counts as tainted: a `read`
-  from the fence's own stdin (the runner gives a fence `/dev/null` there), a `for` with no
-  list, `printf -v`, `${x:=…}`, arithmetic assignment and a value written to a file and read
-  back. The check is flow-insensitive, so a name ever assigned from tainted text is tainted
-  wherever it is used.
+  The routing rule is a closed set of shapes (BR-13). The fence text is the toolkit's, so this
+  is a check on its authors, and it does not trace where a value came from: a runner fence
+  does not route, and `fence_census.py --check` fails naming the operation and the word,
+  unless every call of an `adlc_forge_pr_*` operation but `pr_create` and `pr_list` is its one
+  PR argument first, then literal options, the one-word values of the options the adapter's
+  own parser consumes a value for, and redirections. The PR argument is a marked placeholder
+  alone in its word (`'<prNumber>'`), a marked variable alone and double-quoted
+  (`"$prNumber"`), or `"$n"` where `n` is set exactly once in the fence, by an assignment
+  whose whole value is one `$(adlc_forge_pr_create …)` or `$(adlc_forge_pr_list …)` with
+  literal arguments (BR-14). Any other word is refused: an unmarked placeholder, a variable of
+  any other origin, a positional parameter, an unquoted or mixed expansion, a second
+  positional. A call with no PR argument is refused too: `gh` would then take the PR of the
+  branch's own configuration, which the session writes. Refused as well, in a fence with a PR
+  operation: `-R`/`--repo` in any spelling (the tie's read is made without it); an assignment
+  to a `GH_*`, `GIT_*`, `ADLC_FORGE_*` name, `HOME`, `XDG_CONFIG_HOME` or `PATH`; a `cd`; an
+  `ADLC_ARG_*` name written in the fence; a function, an alias, `unalias`, `unset -f`, `hash`
+  or `enable` (the adapter runs `gh`, `printf` and more by name); a process substitution; and
+  a PR operation reached through `xargs`, `eval`, `sh -c`, a variable or a string instead of
+  being a command the check reads. At run time the runner marks every bound `ADLC_ARG_*`
+  readonly before the fence's body, and gives the fence `/dev/null` as stdin.
   **One fence is declared untied.** `/architect`'s footprint fence (`architect/SKILL.md`)
   takes its PR number from `pipeline-state.json`, which the session writes, so it is not held
   to the caller's PR. `fence_census.py` names it in a closed table, `DECLARED_UNTIED`, keyed

@@ -105,7 +105,7 @@ Do all the steps below **for every touched repo's PR**:
    elif [ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$wt" rev-parse "origin/$br")" ]; then
      printf 'pr_diff=error\ndetail=HEAD is not origin/%s, push first: the PR shows the remote head\n' "$br"; rc=2
    else
-     git -C "$wt" --no-pager diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"; rc=$?
+     git -C "$wt" -c core.pager=cat diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"; rc=$?
    fi
    echo "pr_diff_rc=$rc"
    ```

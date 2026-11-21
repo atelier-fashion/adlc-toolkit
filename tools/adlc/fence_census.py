@@ -742,6 +742,7 @@ _FORGE_ENV = re.compile(r"^(?:GH_[A-Z0-9_]*|GIT_[A-Z0-9_]*|ADLC_FORGE_[A-Z0-9_]*
                         r"XDG_CONFIG_HOME|PATH)(?:\+?=|$)")
 #: The commands that run the command after them as it is, for finding a call's head.
 _PASS_THROUGH = ("command", "exec", "nohup", "time")
+_PROCESS_SUBST = re.compile(r"[<>]\(")
 #: Commands that change what a name runs: an alias, a hashed path, a disabled builtin.
 _RENAMERS = frozenset(("alias", "unalias", "hash", "enable"))
 #: A PR argument in one of its exact spellings: a placeholder alone in its word, bare or
@@ -1027,7 +1028,10 @@ def pr_operation_problems(code):
       or changing directory, in a fence with a PR operation, for the same reason;
     - a function, an alias, ``unalias``, ``unset -f``, ``hash`` or ``enable`` in a fence with a
       PR operation: the adapter's functions run ``gh``, ``printf``, ``mktemp`` and more by name,
-      so a name that runs something else changes what an operation does or prints."""
+      so a name that runs something else changes what an operation does or prints;
+    - a process substitution (``<(…)``, ``>(…)``): the check's reader ends a command at ``(``,
+      so a word after one would be an argument of the operation it never read. ``/bin/sh``,
+      which runs a fence, has none anyway."""
     bodies = {}
     toks = shell_tokens(code, bodies)
     texts = [_dequote(v) for k, v in toks if k == "word"] + list(bodies.values())
@@ -1056,6 +1060,13 @@ def pr_operation_problems(code):
             problems.append("sets %s in a fence with a PR operation: the runner's PR read is "
                             "made without it, so the operation would act where the tie never "
                             "read (REQ-719 BR-13)" % _dequote(val).split("=", 1)[0])
+    for line in code.split("\n"):
+        if not line.lstrip().startswith("#") and _PROCESS_SUBST.search(line):
+            problems.append("uses a process substitution (%s) in a fence with a PR operation: "
+                            "the check reads what follows it as another command, so a word "
+                            "after it would reach the operation unread (REQ-719 BR-13)"
+                            % _PROCESS_SUBST.search(line).group(0))
+            break
     for name in _functions_defined(code):
         problems.append("defines the function %s in a fence with a PR operation: the adapter "
                         "runs `gh`, `printf` and more by name, so a function can change what "

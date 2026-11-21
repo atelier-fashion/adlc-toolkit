@@ -557,6 +557,14 @@ REFUSED = [
     ("F11: bash -c", 'bash -c "adlc_forge_pr_view 5"', "adlc_forge_pr_view", "sh -c"),
     ("F11: a variable", "f=adlc_forge_pr_edit\n$f <id> --title x", "adlc_forge_pr_edit",
      "a variable"),
+    # A process substitution ends the command for the check's reader, so the word after it
+    # would be an argument the check never read.
+    ("a process substitution, then a word",
+     "adlc_forge_pr_edit '<prNumber>' --body-file <(echo x) 7", "PR operation",
+     "process substitution"),
+    ("an output process substitution, then a word",
+     "adlc_forge_pr_edit '<prNumber>' --title x >(cat) 7", "PR operation",
+     "process substitution"),
 ]
 
 

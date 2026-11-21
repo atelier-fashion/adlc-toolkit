@@ -164,53 +164,47 @@ placeholder without the mark, or a variable the fence assigns from text that hol
 fence is then unrouted, and `fence_census.py --check` and `test_real_tree_has_no_unrouted_fence`
 fail naming the fence and the placeholder. A variable the fence fills from a command's output
 (`/architect` Step 5's `$prnum`, a number `adlc_forge_pr_create` printed) is not a placeholder
-and is not checked (BR-14).
+and is not checked (BR-14). That paragraph is the design as first written; the next one is
+the rule as built.
 
-**How the rule is decided (as built after the Phase 5 review; TASK-273 built a first version
-that failed open).** It fails closed: what the check cannot trace does not route.
+**How the rule is decided (as built).** TASK-273 built the paragraph above, and the Phase 5
+review showed it failed open (a substitution, a pipe, a here-string and `$1` all got through).
+A first fix traced where each value came from, and the re-verification got past it again: the
+output of a fence-defined function, a file written and read back, the environment read by
+name, an exit status, word splitting. Tracing values through shell does not close. The fence
+text is the toolkit's own, so the rule is a check on its authors, and it is now a closed set
+of shapes that traces nothing:
 
-- Every positional word of every `adlc_forge_pr_*` operation but `pr_create` and `pr_list` is
-  checked, so an operation added later starts checked. A word is acceptable only when every
-  placeholder and variable in it is marked, or is a variable every one of whose assignments is
-  clean.
-- Text taints the variable it gives a value to when it holds an unmarked placeholder, an
-  unmarked free variable a table names, a tainted variable or a positional parameter. That
-  text includes what is inside a command substitution (`n=$(printf %s "<id>")` is caught), the
-  list of a `for`, a here-document, a here-string, and, for a `read`, the text of the pipeline
-  or compound statement that feeds it. Taint is iterated to a fixed point and is
-  flow-insensitive: a name ever assigned from tainted text is tainted everywhere, so reusing a
-  name is refused.
-- The one exemption is BR-14's: a substitution or pipeline whose command is
-  `adlc_forge_pr_create` or `adlc_forge_pr_list` contributes no taint, whatever its arguments
-  hold.
-- What cannot be traced counts as tainted: a `read` from the fence's own stdin (the runner
-  gives a fence `/dev/null` there), a `for` with no list, `printf -v`, `${x:=…}`, arithmetic
-  assignment, a computed variable name, and a value written to a file and read back.
-- A PR operation must be a command the check reads. One reached through `xargs`, `eval`,
-  `sh -c`, a variable or a string is refused, and so is anything in the fence that would move
-  the operation away from what the tie read: `-R`/`--repo` in any spelling, an assignment to
-  a `GH_*`, `GIT_*`, `ADLC_FORGE_*` name or to `HOME`, a `cd`, and an `ADLC_ARG_*` name.
+- Every call of an `adlc_forge_pr_*` operation but `pr_create` and `pr_list` is its one PR
+  argument first, then literal options, the one-word values of the options that operation's
+  parser in `partials/forge.sh` consumes a value for (`PR_OP_VALUE_OPTIONS`), and redirections.
+  An operation added later starts checked.
+- The PR argument is one of three spellings: a marked placeholder alone in its word, a marked
+  free variable alone and double-quoted, or `"$n"` where `n` is written exactly once in the
+  fence, by an assignment whose whole value is one `$(adlc_forge_pr_create …)` or
+  `$(adlc_forge_pr_list …)` with literal arguments (BR-14). Anything else is refused, naming
+  the operation and the word. So is a call with no PR argument: `gh` would take the PR of the
+  branch's own configuration, which the session writes.
+- A fence with a PR operation holds none of: `-R`/`--repo` in any spelling; an assignment to a
+  `GH_*`, `GIT_*`, `ADLC_FORGE_*` name, `HOME`, `XDG_CONFIG_HOME` or `PATH`; a `cd`; an
+  `ADLC_ARG_*` name; a function, an alias, `unalias`, `unset -f`, `hash` or `enable`; a process
+  substitution; a PR operation reached through `xargs`, `eval`, `sh -c`, a variable or a
+  string. Each would move the operation away from what the tie read, or out of the check's
+  sight.
+- At run time the runner marks every bound `ADLC_ARG_*` readonly before the fence's body and
+  gives the fence `/dev/null` as stdin.
 - The runner's verdicts gained two unverified cases (75): a forge CLI that could not be run
   (the read exited 126, 127 or on a signal; the classifier files a shell's "command not
   found" under `network`, not `pr-not-found`), and a branch git could not name for a reason
   other than a detached `HEAD`. A directory that is not a repository still reads 3.
-- A positional parameter (`$1` to `$9`, `${1}`, `$@`, `$*`) as a PR argument is refused: the
-  runner hands a fence none, so one is always something the fence put there (`set --`, a
-  function's arguments).
-- Option values are skipped per operation, only for the options the adapter's parser in
-  `partials/forge.sh` really consumes a value for; a word after any other option is checked as
-  the PR. `-R`/`--repo` on a PR operation is refused: the tie's read is made without it, so the
-  operation would act in a repository the tie never looked at.
-
-That catches one existing fence, rightly: `/architect`'s footprint fence takes `prnum` from
-`pipeline-state.json`, which the session writes, selected by `$REQ`. It is an older gap of the
-same kind and is not fixed in this requirement. `fence_census.py` names it in a closed table,
-`DECLARED_UNTIED`, keyed by its full fence id with the reason, so the fence routes and any edit
-to it drops the exemption; its census record and both goldens carry `untied` with the reason,
-and a test pins that the table holds exactly that id and that the id still exists. The README
-declares it, beside the tie's other residual: the read trusts the caller's forge selection
-(`GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE`, `ADLC_FORGE_MOCK*`), since it runs
-in the fence's environment.
+- One fence is declared untied: `/architect`'s footprint fence takes its PR number from
+  `pipeline-state.json`, which the session writes. `DECLARED_UNTIED` names it by its full
+  fence id, so any edit to it drops the exemption, and its census record carries `untied`.
+  The security re-audit showed a session can use it to rewrite another PR's body. It is
+  older than this requirement and is left for the owner's decision.
+- The tie's other declared residual: its read runs in the fence's environment, so it trusts
+  the caller's forge selection (`GH_REPO`, `ADLC_FORGE_REPO`, `ADLC_FORGE_PROVIDER_OVERRIDE`,
+  `ADLC_FORGE_MOCK*`), and its branch check rests on `ADLC_EXEC_RUN` being set for the call.
 
 **Why a view of the value and not a list by head.** `adlc_forge_pr_list --head` on Azure DevOps
 returns no head name and every state, and a list answers "which PRs has this branch", which
@@ -273,7 +267,7 @@ per check.
 
 - The diff fence takes `<worktree>`, `<integrationBranch>` and `<branch>`, fetches with ADR-2's
   line, errors when `HEAD` is not `origin/<branch>`, and prints `git diff -M
-  origin/<integrationBranch>...HEAD`. As built it runs `git --no-pager diff -M
+  origin/<integrationBranch>...HEAD`. As built it runs `git -c core.pager=cat diff -M
   --no-ext-diff --no-textconv`, so a `diff.external`, a textconv driver or a `core.pager` the
   session wrote into the repository's config is not run by the diff (found by the security
   review). Its `git fetch` still honours the repository's config, as every fetch a fence makes

@@ -650,10 +650,12 @@ is cut per `RELEASING.md`.
   - An approval held behind a run is released once that run is terminal on disk, or has no
     run on disk, so an `abort` or `reject` made with no supervisor running no longer leaves a
     later `resume` waiting forever.
-  - The census check on PR arguments fails closed: a value that reaches an `adlc_forge_pr_*`
-    operation through a command substitution, a pipe into `read`, a here-string, a `for` list
-    or a positional parameter is checked like a direct one, option values are skipped only
-    where the adapter consumes one, and `-R`/`--repo` on a PR operation does not route.
+  - The census check on PR arguments is a closed set of shapes: every call of an
+    `adlc_forge_pr_*` operation is its one PR argument first (a marked placeholder, a marked
+    variable, or the number `adlc_forge_pr_create` printed in the same fence), then literal
+    options and their one-word values. Any other word does not route, nor does a call with no
+    PR argument, `-R`/`--repo`, a function or alias beside a PR operation, or an operation
+    reached through `xargs`, `eval` or `sh -c`.
     `/architect`'s footprint fence, which takes its PR number from the session-written state
     file, is the one fence declared untied (`DECLARED_UNTIED`, `untied` in both census files).
   - Under an exec run the PR tie also refuses a checked-out branch that is not the run's own
@@ -661,7 +663,7 @@ is cut per `RELEASING.md`.
     longer passes the tie for that PR.
   - Every inline `python3 -c` helper in `partials/forge.sh` runs as `python3 -I -c`, so a
     module such as `json.py` planted in the working copy is not imported.
-  - Phase 7's diff fence runs `git --no-pager diff --no-ext-diff --no-textconv`, so a
+  - Phase 7's diff fence runs `git -c core.pager=cat diff --no-ext-diff --no-textconv`, so a
     `diff.external`, a textconv driver or a pager the session wrote into the repository's
     config is not run.
 - **`ask-tier-deny` can prove a codex baseline from `runner-baseline` (REQ-664 BR-17(e),

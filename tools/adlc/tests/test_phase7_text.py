@@ -127,7 +127,7 @@ def test_req719_phase_7_fences_route_runner(records):
     assert diff.code.startswith("wt='<worktree>'; ib='<integrationBranch>'; br='<branch>'\n")
     assert "if ! %s; then\n" % EXPLICIT_FETCH in diff.code
     assert 'rev-parse "origin/$br"' in diff.code
-    assert 'git -C "$wt" --no-pager diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"' in diff.code
+    assert 'git -C "$wt" -c core.pager=cat diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"' in diff.code
     assert checks.code.split("\n") == [fc.ROOT_LINE, SOURCE_FORGE, "sleep '<ciWait>'",
                                        "adlc_forge_pr_checks '<prNumber>'"]
     for name in ("claude", "codex"):
