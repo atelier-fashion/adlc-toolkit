@@ -127,7 +127,7 @@ def test_req719_phase_7_fences_route_runner(records):
     assert diff.code.startswith("wt='<worktree>'; ib='<integrationBranch>'; br='<branch>'\n")
     assert "if ! %s; then\n" % EXPLICIT_FETCH in diff.code
     assert 'rev-parse "origin/$br"' in diff.code
-    assert 'git -C "$wt" diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"' in diff.code
+    assert 'git -C "$wt" --no-pager diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"' in diff.code
     assert checks.code.split("\n") == [fc.ROOT_LINE, SOURCE_FORGE, "sleep '<ciWait>'",
                                        "adlc_forge_pr_checks '<prNumber>'"]
     for name in ("claude", "codex"):
@@ -327,7 +327,9 @@ VERDICT_STATEMENTS = (
     "checks are reported. The end-of-phase line says so, and the phase continues. Any other "
     "answer on that read is handled as that verdict.",
     "- `fail`: name the failing checks (the `check=fail` lines) and handle them as a Phase 7 "
-    "issue: fix, commit and push as in step 3, then read again as for `pending`.",
+    "issue: fix, commit and push as in step 3, then read again as for `pending`. With no read "
+    "left, push the fix all the same: the `ci-failed` entry then names the checks as read "
+    "before that push.",
     "- `pending`: read again with `<ciWait>` set to `proceed.ci.interval_s`, at most "
     "`proceed.ci.max_reads` reads in all.",
     "`proceed.ci.max_reads` (default 20)",
@@ -335,8 +337,12 @@ VERDICT_STATEMENTS = (
     "with your file tool",
     "A forge error (an `error_class=` line and a non-zero status) is no verdict and never "
     "green: read once more after one interval.",
-    "That one more read, after a forge error or a first `none`, is made even when the reads "
-    "have run out.",
+    # One read past the last in all, so a forge that alternates `none` and an error cannot
+    # keep the wait open (LESSON-892).
+    "Past `proceed.ci.max_reads`, one such read is made in all, after a forge error or a "
+    "first `none`: unless it is `pass` or a second `none` in a row, it ends the wait as its "
+    "own answer does (`pending` as `ci-pending`, `fail` as `ci-failed`, a forge error as "
+    "`ci-unread`).",
     "**One rule ends the wait without green:** when the reads run out, or a forge error "
     "answers twice in a row, with no `pass` and no second `none`, the phase never reports "
     "green and the run does not leave Phase 7.",
@@ -351,7 +357,8 @@ VERDICT_STATEMENTS = (
     '- checks still failing on the last read: `{"reason": "ci-failed", "failingChecks": '
     '[<the name on each check=fail line>], "reads": <reads made>, "detail": "CI checks still '
     'failing after <reads made> reads: <names>"}`',
-    '- a forge error on two reads in a row: `{"reason": "ci-unread", "reads": <reads made>, '
+    '- a forge error on two reads in a row, or on the one read past the last: `{"reason": '
+    '"ci-unread", "reads": <reads made>, '
     '"detail": "<the error_class read>"}`',
     '"<repo-id>: clean, CI green" on `pass`',
     '"<repo-id>: clean, no CI checks reported" on `none`',

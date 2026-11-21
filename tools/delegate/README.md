@@ -436,8 +436,10 @@ created mode 0600. Unlike the delegation tools these need only the system
 `setup-error`, `no-worktree`, `no-pr`, `aborted` and `other`. Only the exec
 engine writes `rejected` (a person declined the PR at its merge gate) and
 `aborted` (its `abort` verb ended the run, with `terminal` `failed`) (REQ-719):
-`emit` refuses `rejected` with any other `--engine` as a usage error, and a
-`rejected` line's `blocked_reason` is always empty. A run rejected before
+`emit` refuses `rejected` with any other `--engine` as a usage error, a
+`rejected` line's `blocked_reason` is always empty, and `aborted` from any other
+`--engine` is written as `other`, so a session's own line cannot claim an
+operator's abort. A run rejected before
 REQ-719 stays recorded `failed` / `other`.
 
 The record is flat (every value a string, counts as quoted decimals or `-`), so

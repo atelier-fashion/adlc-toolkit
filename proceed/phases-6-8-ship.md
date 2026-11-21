@@ -105,7 +105,7 @@ Do all the steps below **for every touched repo's PR**:
    elif [ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$wt" rev-parse "origin/$br")" ]; then
      printf 'pr_diff=error\ndetail=HEAD is not origin/%s, push first: the PR shows the remote head\n' "$br"; rc=2
    else
-     git -C "$wt" diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"; rc=$?
+     git -C "$wt" --no-pager diff -M --no-ext-diff --no-textconv "origin/$ib...HEAD"; rc=$?
    fi
    echo "pr_diff_rc=$rc"
    ```
@@ -129,13 +129,13 @@ Do all the steps below **for every touched repo's PR**:
    The wait between reads is yours; the fence reads no config. Before the first read, read two keys of `.adlc/config.yml` with your file tool: `proceed.ci.max_reads` (default 20), the most reads you make in all, and `proceed.ci.interval_s` (default 30), the seconds between two reads. An interval above 60 is read as 60. Pass `0` as `<ciWait>` on the first read and the interval on every later one, so one call lasts at most the interval, the fence runner's own read of the PR (at most 20 seconds, under `/sprint --exec`) and one forge read. The first line printed is the verdict, `checks=<pass|fail|pending|none>`, and each `check=<state>` line after it names one check. Act on the verdict:
    - `pass`: CI is green, and the end-of-phase line says so.
    - `none`: a first `none` is not final, since the forge may not have registered the checks for the push yet: read once more after one interval. A second `none` in a row means no CI checks are reported. The end-of-phase line says so, and the phase continues. Any other answer on that read is handled as that verdict.
-   - `fail`: name the failing checks (the `check=fail` lines) and handle them as a Phase 7 issue: fix, commit and push as in step 3, then read again as for `pending`.
+   - `fail`: name the failing checks (the `check=fail` lines) and handle them as a Phase 7 issue: fix, commit and push as in step 3, then read again as for `pending`. With no read left, push the fix all the same: the `ci-failed` entry then names the checks as read before that push.
    - `pending`: read again with `<ciWait>` set to `proceed.ci.interval_s`, at most `proceed.ci.max_reads` reads in all.
 
-   A forge error (an `error_class=` line and a non-zero status) is no verdict and never green: read once more after one interval. That one more read, after a forge error or a first `none`, is made even when the reads have run out. **One rule ends the wait without green:** when the reads run out, or a forge error answers twice in a row, with no `pass` and no second `none`, the phase never reports green and the run does not leave Phase 7. A solo run asks the operator whether to keep waiting, naming the checks: the pending ones, the failing ones, or the error class. With no operator present (subagent mode: a `/sprint` runner, legacy or `--exec`) the run stops and reports `blocked`, with one `blockers` entry whose `reason` names the ending:
+   A forge error (an `error_class=` line and a non-zero status) is no verdict and never green: read once more after one interval. Past `proceed.ci.max_reads`, one such read is made in all, after a forge error or a first `none`: unless it is `pass` or a second `none` in a row, it ends the wait as its own answer does (`pending` as `ci-pending`, `fail` as `ci-failed`, a forge error as `ci-unread`). **One rule ends the wait without green:** when the reads run out, or a forge error answers twice in a row, with no `pass` and no second `none`, the phase never reports green and the run does not leave Phase 7. A solo run asks the operator whether to keep waiting, naming the checks: the pending ones, the failing ones, or the error class. With no operator present (subagent mode: a `/sprint` runner, legacy or `--exec`) the run stops and reports `blocked`, with one `blockers` entry whose `reason` names the ending:
    - checks still pending on the last read: `{"reason": "ci-pending", "pendingChecks": [<the name on each check=pending line>], "reads": <reads made>, "detail": "CI checks still pending after <reads made> reads: <names>"}`
    - checks still failing on the last read: `{"reason": "ci-failed", "failingChecks": [<the name on each check=fail line>], "reads": <reads made>, "detail": "CI checks still failing after <reads made> reads: <names>"}`
-   - a forge error on two reads in a row: `{"reason": "ci-unread", "reads": <reads made>, "detail": "<the error_class read>"}`
+   - a forge error on two reads in a row, or on the one read past the last: `{"reason": "ci-unread", "reads": <reads made>, "detail": "<the error_class read>"}`
 5. **Lite lane:** if steps 3–4 added any commit, re-run the lane check (`proceed/phases-lite.md` "The lane check") before leaving this phase (REQ-652 AC-16).
 
 **End-of-phase log**: Emit one line per PR — "<repo-id>: clean, CI green" on `pass`, or "<repo-id>: clean, no CI checks reported" on `none` — followed by an aggregate "All N PRs ready for merge". A CI wait that ended without either never reaches this line (step 4). Continue to Phase 8 immediately.

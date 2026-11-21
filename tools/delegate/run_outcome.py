@@ -66,6 +66,8 @@ BLOCKED_REASONS = (
     "merge-unverified", "close-out-failed", "setup-error", "no-worktree",
     "no-pr", "aborted", "other",
 )
+# Reasons only the exec engine writes: its `abort` verb ended the run (REQ-719 BR-19).
+EXEC_ONLY_REASONS = ("aborted",)
 SEVERITIES = ("Critical", "Major", "Minor", "Nit")
 # Agents that use a High/Medium/Low scale map on emission (REQ-648 Entities).
 SEVERITY_MAP = {
@@ -305,6 +307,11 @@ def build_record(state, terminal, engine, reason="", req=None, now=None):
 
     if terminal in ("blocked", "failed"):
         blocked = normalize_blocked_reason(reason)
+        if blocked in EXEC_ONLY_REASONS and engine != REJECTED_ENGINE:
+            # A session writes its own line through a fence, with any reason token: one
+            # that only the exec engine may write reads `other` from anyone else, so an
+            # operator's abort cannot be forged in the log (REQ-719).
+            blocked = "other"
     elif terminal == "rejected":
         # A declined PR is neither a halt nor a close-out: no reason, whatever
         # the state's closeOut says (BR-18). The operator's text stays in the

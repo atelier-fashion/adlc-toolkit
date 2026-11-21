@@ -803,10 +803,11 @@ executable:
   (`run_branch_refusal`, the check a push fence gets): any other is 3, with an
   `opaque_entry_refused:` line, before any read. Without it a session could check out a local
   branch named after another PR's head and pass the tie for that PR. The adapter's own
-  `opaque_entry_refused:` (its Azure DevOps arm under the runner) is passed through as 3. Any other error class, an answer that does not parse, no answer in
-  20 s, a forge CLI that could not be run (the read exited 126, 127 or on a signal: a missing
-  `gh` is not a wrong number), or a branch git could not name for a reason other than a
-  detached `HEAD` is 75. A tied fence's census record names its values under `tied`, and its reach
+  `opaque_entry_refused:` (its Azure DevOps arm under the runner) is passed through as 3. Any other error class, an answer that does not parse, or no answer in
+  20 s is 75. So is a forge CLI that could not be run (the read exited 126, 127 or on a signal:
+  a missing `gh` is not a wrong number), and a branch git could not name for a reason other
+  than a detached `HEAD`. The branch check rests on `ADLC_EXEC_RUN` being set for the call, as
+  the push rule does (REQ-662): with it unset the tie holds the checked-out branch only. A tied fence's census record names its values under `tied`, and its reach
   includes the read. One tied CI call, Phase 7's, therefore lasts at most its wait (`ciWait`
   admits 0 to 60 seconds), the read (at most 20 s) and one forge read.
   The routing rule fails closed. A runner fence does not route, and `fence_census.py --check`

@@ -2408,7 +2408,7 @@ class Orchestrator(object):
             return True
         try:
             return Run.load(path).status in TERMINAL
-        except Refused:
+        except (Refused, KeyError):
             return False
 
     def next_ready(self):
@@ -3210,6 +3210,14 @@ class Orchestrator(object):
                 self.queue.append(run.req)
 
 
+def _one_line(value, limit=200):
+    """``value`` as text that stays on one dashboard line: every character that is not
+    printable (a control character, a line or paragraph separator) becomes a space, and the
+    text is cut at ``limit``. State is the session's to write, and a row holds lines an
+    operator copies (REQ-719)."""
+    return "".join(c if c.isprintable() else " " for c in str(value))[:limit]
+
+
 def render_row(run, violations=()):
     """One dashboard row, and for a run at the gate what approval will perform."""
     state = {}
@@ -3217,7 +3225,10 @@ def render_row(run, violations=()):
         state = run.read_wc_state() or run.read_primary_state()
     except OSError:
         pass
-    phase = state.get("currentPhase", "?")
+    # The state file is the session's to write: a phase that is not 0 to 8 is not shown, and
+    # no value of it can carry a second line into the row (REQ-719).
+    phase = state.get("currentPhase")
+    phase = phase if type(phase) is int and 0 <= phase <= 8 else "?"
     hold = run.doc.get("holdBehind")
     shown = run.status
     if run.status == "approved":
@@ -3278,7 +3289,8 @@ def render_row(run, violations=()):
                      "sprint-exec abort --channel skill '%s'" % run.req)
     closing = run.read_primary_state().get("closeOut")
     if isinstance(closing, dict) and closing.get("status") not in (None, "ok"):
-        lines.append("  close-out: %s — %s" % (closing.get("status"), closing.get("reason")))
+        lines.append("  close-out: %s — %s" % (_one_line(closing.get("status")),
+                                               _one_line(closing.get("reason"))))
     for evidence in violations:
         lines.append("  %s: %s" % (PROTOCOL, evidence))
     for note in run.doc.get("notes", []):

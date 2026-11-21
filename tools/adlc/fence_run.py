@@ -89,7 +89,7 @@ ROOT_RE = re.compile(r"^/[A-Za-z0-9_./-]+$")
 _ID_RE = re.compile(r"^([A-Za-z0-9_./-]+)#([0-9]{1,4}):([0-9a-f]{8})$")
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 #: ``ADLC_EXEC_RUN``, as the orchestrator sets it: the run's REQ id (REQ-662 ADR-9).
-_RUN_ID_RE = re.compile(r"^REQ-[0-9]{3,6}$")
+_RUN_ID_RE = re.compile(r"^REQ-[0-9]{3,6}\Z")
 #: An ``error_class=`` value the adapter prints (partials/forge.sh, BR-4).
 _ERROR_CLASS_RE = re.compile(r"^[a-z][a-z-]{0,39}$")
 #: The ``number`` field of the runner's PR read.

@@ -15,7 +15,8 @@
 # halt token that run_outcome.py maps onto its closed reason list, which holds
 # `aborted` beside REQ-648's values. Only the exec engine's `reject` and `abort`
 # write `rejected` and `aborted` (REQ-719). `rejected` with any engine but exec
-# is a usage error, so this wrapper appends nothing and still exits 0.
+# is a usage error, so this wrapper appends nothing and still exits 0. `aborted`
+# from any engine but exec is written as `other`.
 #
 # It ALWAYS exits 0 (BR-3): telemetry never blocks a pipeline. Every failure is
 # one `run-outcome: <reason>` line on stderr. That is also why there is no

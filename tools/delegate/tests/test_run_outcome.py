@@ -196,6 +196,21 @@ def test_req719_aborted_is_a_reason_of_its_own(tmp_path):
     assert RO.build_record(_state(), "merged", "exec", reason="aborted", now=NOW)["blocked_reason"] == ""
 
 
+def test_req719_aborted_from_any_other_engine_reads_other(tmp_path):
+    """A session writes its own run-outcome line through a fence, with a reason token of its
+    choosing. `aborted` is the exec engine's, an operator's `abort`: from `solo`, `legacy` or
+    `workflow` the line is still written, and its reason reads `other`."""
+    for engine in RO.ENGINES:
+        for terminal in ("failed", "blocked"):
+            rec = RO.build_record(_state(), terminal, engine, reason="aborted", now=NOW)
+            want = "aborted" if engine == RO.REJECTED_ENGINE else "other"
+            assert rec["blocked_reason"] == want, (engine, terminal)
+    out = _run("emit", "--state", str(_write(tmp_path, _state())), "--terminal", "failed",
+               "--engine", "solo", "--reason", "aborted")
+    assert out.returncode == 0, out.stderr
+    assert assert_structural(out.stdout)["blocked_reason"] == "other"
+
+
 # --- REQ-719 BR-21: the workflow engine has no reject ------------------------------
 
 def test_req719_workflow_terminal_enum_is_unchanged():

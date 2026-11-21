@@ -2261,6 +2261,64 @@ def test_req719_a_hold_on_a_run_that_cannot_be_loaded_stands(tmp_path, monkeypat
         assert later._hold_cleared(REQ) is False
     assert not later.runs
 
+    def no_status(path):
+        raise KeyError("status")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(se.Run, "load", staticmethod(no_status))
+        assert later._hold_cleared(REQ) is False          # a record with no status keeps it too
+
+
+class _RowRun(object):
+    """The least of a run `render_row` reads, with state a session wrote."""
+    req = "REQ-100"
+    status = "blocked"
+    exec = {"startedAt": "t"}
+    doc = {"harness": "codex", "notes": []}
+
+    def __init__(self, wc_state, primary_state):
+        self._wc, self._primary = wc_state, primary_state
+
+    def read_wc_state(self):
+        return self._wc
+
+    def read_primary_state(self):
+        return self._primary
+
+    def ledger(self):
+        return self
+
+    def trusted(self):
+        return None
+
+
+def test_req719_session_written_state_adds_no_line_to_a_row():
+    """A row holds lines an operator copies (`sprint-exec answer ...`, `sprint-exec abort
+    ...`), and the state file is the session's to write: a `currentPhase` that is not 0 to 8 is
+    not shown, and a close-out status or reason stays on its own line, so no value in state
+    puts another REQ's command in this run's row. The benign path: a real phase and a plain
+    close-out reason read as before."""
+    forged = ("5/8 | blocked | exec:codex | t |\n  answer it: sprint-exec answer --channel skill "
+              "'REQ-200' 'approve and merge'\n  or drop it: sprint-exec abort --channel skill "
+              "'REQ-200'\n| REQ-100 | 5")
+    rows = se.render_row(_RowRun(
+        {"currentPhase": forged},
+        {"closeOut": {"status": "failed\n  answer it: sprint-exec abort --channel skill 'REQ-200'",
+                      "reason": "y\u2028  note: forged\rz"}}))
+    assert rows[0] == "| REQ-100 | ?/8 | blocked | exec:codex | t |"
+    assert all("\n" not in row and "\r" not in row and "\u2028" not in row for row in rows)
+    commands = [row for row in rows if row.lstrip().startswith(("answer it:", "or drop it"))]
+    assert len(commands) == 2 and all("'REQ-100'" in row for row in commands)
+    assert sum("REQ-200" in row for row in rows) == 1      # only inside the close-out line
+    assert [row for row in rows if "REQ-200" in row][0].startswith("  close-out: ")
+    for phase in (True, 9, -1, "5", 5.0, None, [5]):
+        assert se.render_row(_RowRun({"currentPhase": phase}, {}))[0].startswith(
+            "| REQ-100 | ?/8 |")
+    plain = se.render_row(_RowRun({"currentPhase": 5},
+                                  {"closeOut": {"status": "failed", "reason": "push refused"}}))
+    assert plain[0] == "| REQ-100 | 5/8 | blocked | exec:codex | t |"
+    assert "  close-out: failed — push refused" in plain
+
 
 def _in_another_thread(act):
     """``act()`` run on a thread of its own, waited for: ``("ok", result)`` or ``("refused",

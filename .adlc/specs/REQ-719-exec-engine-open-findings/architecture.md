@@ -273,9 +273,11 @@ per check.
 
 - The diff fence takes `<worktree>`, `<integrationBranch>` and `<branch>`, fetches with ADR-2's
   line, errors when `HEAD` is not `origin/<branch>`, and prints `git diff -M
-  origin/<integrationBranch>...HEAD`. As built it runs `git diff -M --no-ext-diff
-  --no-textconv`, so a `diff.external` or textconv driver the session wrote into the
-  repository's config is not run by the diff (found by the security review).
+  origin/<integrationBranch>...HEAD`. As built it runs `git --no-pager diff -M
+  --no-ext-diff --no-textconv`, so a `diff.external`, a textconv driver or a `core.pager` the
+  session wrote into the repository's config is not run by the diff (found by the security
+  review). Its `git fetch` still honours the repository's config, as every fetch a fence makes
+  does: that is the declared residual (REQ-662 BR-19 (f)), left to the sandbox proposal (BR-12).
 - The CI fence is `sleep '<ciWait>'` and then `adlc_forge_pr_checks '<prNumber>'`. `ciWait` is
   a new placeholder holding 0 to 60 seconds (90 before the review). The first read passes 0,
   and each later read passes `proceed.ci.interval_s`. Under an exec run one call is the wait

@@ -631,7 +631,12 @@ is cut per `RELEASING.md`.
     read twice and `fail` on the last read went on to the merge.
   - A first `none` from the CI read is no longer final: Phase 7 reads once more after one
     interval, since the forge may not have registered the checks for the push yet, and only a
-    second `none` in a row means no CI checks.
+    second `none` in a row means no CI checks. Past `proceed.ci.max_reads` one extra read is
+    made in all, so a forge that alternates `none` and an error cannot keep the wait open.
+  - A dashboard row shows `currentPhase` only when it is 0 to 8, and a close-out status or
+    reason on one line: text a session writes into its state file can no longer add a line,
+    such as another REQ's `sprint-exec abort` command, to its row.
+  - The run-outcome reason `aborted` is written as `other` from any engine but `exec`.
   - `proceed.ci.interval_s` is capped at 60 seconds (was 90), and the fence runner gives its PR
     read 20 seconds (was 60), so one tied CI call, the wait, that read and one forge read,
     stays under a harness's 120-second shell limit.
@@ -656,8 +661,9 @@ is cut per `RELEASING.md`.
     longer passes the tie for that PR.
   - Every inline `python3 -c` helper in `partials/forge.sh` runs as `python3 -I -c`, so a
     module such as `json.py` planted in the working copy is not imported.
-  - Phase 7's diff fence runs `git diff --no-ext-diff --no-textconv`, so a `diff.external` or
-    textconv driver the session wrote into the repository's config is not run.
+  - Phase 7's diff fence runs `git --no-pager diff --no-ext-diff --no-textconv`, so a
+    `diff.external`, a textconv driver or a pager the session wrote into the repository's
+    config is not run.
 - **`ask-tier-deny` can prove a codex baseline from `runner-baseline` (REQ-664 BR-17(e),
   amended 2026-11-17).** Codex's model never attempts a command no allow names, so
   `ask-tier-deny`'s `baseline` stayed `not-attempted` and `deny-under-allow` undecided
