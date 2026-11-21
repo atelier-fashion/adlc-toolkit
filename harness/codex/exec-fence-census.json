@@ -306,7 +306,7 @@
       ]
     },
     {
-      "id": "proceed/phases-6-8-ship.md#2:f6a8d63e",
+      "id": "proceed/phases-6-8-ship.md#2:cc626468",
       "route": "runner",
       "placeholders": [
         "branch",
@@ -630,6 +630,7 @@
         "MAPPER_PATHS",
         "REQ"
       ],
+      "untied": "the footprint publish takes $prnum from the pipeline-state.json that $REQ selects, a file the session writes: an older gap of BR-13's kind, kept routed until its owner decides (REQ-719 Phase 5)",
       "sources": [
         "forge"
       ],

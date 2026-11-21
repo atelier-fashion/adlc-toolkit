@@ -3,6 +3,7 @@ one census per exec-capable adapter (REQ-662 BR-3, ADR-8, ADR-9)."""
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -379,6 +380,9 @@ def test_req719_every_operation_but_create_and_list_takes_a_pr():
     ('for n in "<n>" 7; do adlc_forge_pr_ready "$n"; done', "$n (assigned from <n>)"),
     ("while read -r n; do adlc_forge_pr_edit \"$n\" --title x; done <<'EOF'\n<n>\nEOF",
      "$n (assigned from <n>)"),
+    # A line `read` from a pipe whose producer prints a model-supplied value (REQ-719 review).
+    ('printf "%s\\n" "<n>" | while read -r p; do adlc_forge_pr_edit "$p" --title x; done',
+     "$p (assigned from <n>)"),
 ])
 def test_req719_an_unmarked_pr_argument_is_unroutable(code, what):
     """BR-13: a PR operation whose PR argument holds a model-supplied value without the mark,
@@ -397,10 +401,23 @@ def test_req719_an_unmarked_pr_argument_is_unroutable(code, what):
     'n="<prNumber>"\nadlc_forge_pr_view "$n" --fields state',
     # An unmarked value elsewhere in the call is not the PR.
     'adlc_forge_pr_edit "$prNumber" --title "<short title>" --body "<n>"',
-    # BR-14: a number the fence fills from a command's output is not the model's.
+    "adlc_forge_pr_view '<prNumber>' --fields state",
+    # BR-14: what adlc_forge_pr_create or adlc_forge_pr_list prints is the forge's answer,
+    # whatever their arguments hold.
     'pr=$(adlc_forge_pr_create --title "<short title>" | sed -n "s/^number=//p")\n'
     'adlc_forge_pr_view "$pr" --fields state',
-    'printf "%s\\n" "<n>" | while read -r p; do adlc_forge_pr_edit "$p" --title x; done',
+    "n=$(adlc_forge_pr_create --title '<short title>' --base main)\n"
+    'adlc_forge_pr_view "$n" --fields state',
+    "n=$(adlc_forge_pr_create --title '<short title>')\necho \"created $n\"\n"
+    "adlc_forge_pr_edit \"$n\" --title '<short title>'",
+    "n=$(adlc_forge_pr_create --title '<short title>')\nprintf 'PR %s\\n' \"$n\"\n"
+    'adlc_forge_pr_view "$n" --fields state',
+    'adlc_forge_pr_list --head x --state all | while read -r n; do '
+    'adlc_forge_pr_view "$n" --fields state; done',
+    # No PR argument at all: the current branch's PR, outside xargs, eval or `sh -c`.
+    "adlc_forge_pr_view --fields state",
+    # A value after an option the adapter consumes is that option's, not the PR.
+    "adlc_forge_pr_edit <prNumber> --body-file <id>",
 ])
 def test_req719_a_marked_or_fence_made_pr_argument_routes(code):
     """BR-13, BR-14: a marked value, or a number the fence's own commands produce, routes."""
@@ -433,6 +450,135 @@ def test_req719_an_unmarked_pr_argument_does_not_route(copy):
     architect = next(r for r in records if r["id"].startswith("architect/SKILL.md#") and
                      "MAPPER_PATHS" in r["placeholders"])
     assert architect["route"] == "runner" and "tied" not in architect, architect
+    # Its `$prnum` comes from the state file `$REQ` selects: it routes only through
+    # DECLARED_UNTIED, and its record says so (REQ-719 review).
+    assert architect["untied"] == fc.DECLARED_UNTIED[architect["id"]]
     code = fc.fences(fc.view(copy, "architect/SKILL.md"), "architect/SKILL.md")[
         int(architect["id"].split("#")[1].split(":")[0]) - 1].code
-    assert 'adlc_forge_pr_edit "$prnum"' in code and "prnum" not in fc.tainted_vars(code)
+    assert 'adlc_forge_pr_edit "$prnum"' in code and "prnum" in fc.tainted_vars(code)
+
+
+# --------------------------------------------------------------------------- REQ-719 review
+#: ``(shape, code, operation, what the reason names)``: each passed `plan()` before the review
+#: (F1 a to g, F11), each now refused with its operation and its value named.
+UNTRACED = [
+    ("a: a substitution of a command handed the value",
+     'n=$(printf %s "<id>")\nadlc_forge_pr_view "$n" --fields state',
+     "adlc_forge_pr_view", "$n (assigned from <id>)"),
+    ("b: read in a brace group fed by a pipe",
+     'printf "%s\\n" "<id>" | { read n; adlc_forge_pr_view "$n" --fields state; }',
+     "adlc_forge_pr_view", "$n (assigned from <id>)"),
+    ("b: read in a while loop fed by a pipe",
+     'printf "<id>" | while read -r p; do adlc_forge_pr_edit "$p" --title x; done',
+     "adlc_forge_pr_edit", "$p (assigned from <id>)"),
+    ("c: a here-string",
+     'read n <<< "<id>"\nadlc_forge_pr_view "$n" --fields state',
+     "adlc_forge_pr_view", "$n (assigned from <id>)"),
+    ("d: set --", 'set -- <id>\nadlc_forge_pr_edit "$1" --title x',
+     "adlc_forge_pr_edit", "$1 (a positional parameter)"),
+    ("e: a function's argument",
+     'f() { adlc_forge_pr_view "$1" --fields state; }; f <id>',
+     "adlc_forge_pr_view", "$1 (a positional parameter)"),
+    ("f: an option the adapter does not consume",
+     "adlc_forge_pr_view --state <id> --fields state", "adlc_forge_pr_view", "<id>"),
+    ("g: -R", "adlc_forge_pr_edit -R other/repo '<prNumber>' --title x",
+     "adlc_forge_pr_edit", "-R"),
+    ("g: --repo=", "adlc_forge_pr_edit --repo=other/repo '<prNumber>' --title x",
+     "adlc_forge_pr_edit", "--repo=other/repo"),
+    ("g: -R joined to its value", "adlc_forge_pr_edit -Rother/repo '<prNumber>' --title x",
+     "adlc_forge_pr_edit", "-Rother/repo"),
+    ("F11: xargs", "echo <id> | xargs adlc_forge_pr_edit --title x",
+     "adlc_forge_pr_edit", "xargs"),
+    ("F11: eval", "eval adlc_forge_pr_edit '<prNumber>'", "adlc_forge_pr_edit", "eval"),
+    ("F11: sh -c", "sh -c 'adlc_forge_pr_edit 5 --title x'", "adlc_forge_pr_edit", "sh -c"),
+    ("F11: bash -c", 'bash -c "adlc_forge_pr_view 5"', "adlc_forge_pr_view", "sh -c"),
+]
+
+
+@pytest.mark.parametrize("shape,code,op,what", UNTRACED, ids=[u[0] for u in UNTRACED])
+def test_req719_an_untraced_pr_argument_is_refused(shape, code, op, what):
+    """F1, F11: each shape the review found passing `plan()` is unroutable, and the reason
+    names the operation and the value (or the construct that hides it)."""
+    with pytest.raises(fc.Unroutable) as caught:
+        fc.plan(code)
+    assert op in str(caught.value) and what in str(caught.value), str(caught.value)
+
+
+@pytest.mark.parametrize("code,what", [
+    # A value written to a file and read back, by a redirection or through a command's
+    # arguments.
+    ("printf %s '<id>' > f.txt\nn=$(cat f.txt)\nadlc_forge_pr_view \"$n\"", "f.txt"),
+    ("t=$(mktemp)\nprintf %s '<id>' | tee \"$t\" >/dev/null\nn=$(cat \"$t\")\n"
+     "adlc_forge_pr_view \"$n\"", "$t"),
+    # Ways of setting a name the check does not read as assignments.
+    ("n=1\nprintf -v n %s '<id>'\nadlc_forge_pr_view \"$n\"", "$n"),
+    ('n=1\n: "${n:=<id>}"\nadlc_forge_pr_view "$n"', "$n"),
+    ('x=<id>; n=0\n((n=x))\nadlc_forge_pr_view "$n"', "an arithmetic command"),
+    ('x=<id>; n=0\nlet n=x\nadlc_forge_pr_view "$n"', "let"),
+    ('v=n; n=1\nread "$v" <<< "<id>"\nadlc_forge_pr_view "$n"', "$n"),
+    ("v=n; n=1\nprintf -v \"$v\" %s '<id>'\nadlc_forge_pr_view \"$n\"", "$n"),
+    # A name read by its bare name in arithmetic, or inside another expansion.
+    ('x=<id>\nn=$((x))\nadlc_forge_pr_view "$n"', "$x (assigned from <id>)"),
+    ('u=\nx=<id>\nn=${u:-$x}\nadlc_forge_pr_view "$n"', "$x (assigned from <id>)"),
+    # Input the check cannot trace.
+    ('read n\nadlc_forge_pr_view "$n"', "the fence's standard input"),
+    ('x=$(read n; echo "$n")\nadlc_forge_pr_view "$x"', "the fence's standard input"),
+    ('for n; do adlc_forge_pr_view "$n"; done', "a positional parameter"),
+    ('cat <<EOF | while read n; do adlc_forge_pr_view "$n"; done\n<id>\nEOF', "<id>"),
+    # Values that are not the fence's own and carry no mark.
+    ('adlc_forge_pr_view "$HOME" --fields state', "$HOME (a variable the fence never assigns)"),
+    ('adlc_forge_pr_view "$?" --fields state', "$? (a special parameter)"),
+    # The repository or directory the tie read is changed, or the option name is a value.
+    ("GH_REPO=o/r adlc_forge_pr_view '<prNumber>'", "GH_REPO"),
+    ("unset GH_REPO\nadlc_forge_pr_view '<prNumber>'", "GH_REPO"),
+    ("x=$(GH_REPO=o/r adlc_forge_pr_view '<prNumber>')", "GH_REPO"),
+    ("cd /tmp && adlc_forge_pr_view '<prNumber>'", "changes directory (cd)"),
+    ('adlc_forge_pr_edit "<prNumber>" -"<short title>"', "whose name holds a value"),
+    # A fence that sets the runner's own bound values.
+    ("ADLC_ARG_pr=5\nadlc_forge_pr_view '<prNumber>'", "ADLC_ARG_"),
+])
+def test_req719_what_the_check_cannot_trace_does_not_route(code, what):
+    """Fail closed (REQ-719 BR-13): a value moved through a file, a name set in a way the check
+    does not read, input it cannot place, a value that is not the fence's own, and a change to
+    where the forge resolves its repository each make the fence unroutable."""
+    with pytest.raises(fc.Unroutable) as caught:
+        fc.plan(code)
+    assert what in str(caught.value), str(caught.value)
+
+
+def test_req719_the_option_table_is_read_from_the_adapter():
+    """F1 f: every PR operation `partials/forge.sh` defines has an entry, and each entry names
+    a function there; `view` consumes only `--fields`, `checks` nothing. An option the table
+    does not name for an operation takes no value."""
+    with open(os.path.join(TOOLKIT, "partials", "forge.sh"), encoding="utf-8") as fh:
+        defined = set(re.findall(r"^(adlc_forge_pr_[a-z_]+)\(\)", fh.read(), re.M))
+    assert set(fc.PR_OP_VALUE_OPTIONS) == {op for op in defined if fc.is_pr_operation(op)}
+    assert fc.PR_OP_VALUE_OPTIONS["adlc_forge_pr_view"] == {"--fields"}
+    assert fc.PR_OP_VALUE_OPTIONS["adlc_forge_pr_checks"] == frozenset()
+    assert fc._pr_positionals("adlc_forge_pr_view", ["adlc_forge_pr_view", "--state", "<id>",
+                                                     "--fields", "state"]) == ["<id>"]
+    assert fc._pr_positionals("adlc_forge_pr_new", ["adlc_forge_pr_new", "--title", "x"]) == \
+        ["x"]
+
+
+def test_req719_declared_untied_is_one_fence_that_needs_it(records):
+    """DECLARED_UNTIED holds exactly the architect footprint fence, whose id is still in the
+    census, which routes only through the table: its code hands a PR operation an unmarked
+    value, the same code under any other id is refused, and its record and the goldens name
+    the reason under `untied`."""
+    assert list(fc.DECLARED_UNTIED) == ["architect/SKILL.md#2:587fb45d"]
+    fid = "architect/SKILL.md#2:587fb45d"
+    rec = next(r for r in records if r["id"] == fid)
+    assert rec["route"] == "runner" and rec["untied"] == fc.DECLARED_UNTIED[fid]
+    code = fc.fences(fc.view(TOOLKIT, "architect/SKILL.md"), "architect/SKILL.md")[1].code
+    assert fc.unmarked_pr_arguments(code), "the exemption is no longer needed: drop it"
+    with pytest.raises(fc.Unroutable, match="carries no PR mark"):
+        fc.plan(code)
+    with pytest.raises(fc.Unroutable, match="carries no PR mark"):
+        fc.plan(code, "architect/SKILL.md#2:00000000")
+    fc.plan(code, fid)
+    for adapter in fc.exec_adapters(TOOLKIT):
+        with open(os.path.join(TOOLKIT, fc.golden_path(adapter.name)), encoding="utf-8") as fh:
+            golden = {r["id"]: r for r in json.load(fh)["fences"]}
+        assert golden[fid]["untied"] == fc.DECLARED_UNTIED[fid], adapter.name
+    assert [r["id"] for r in records if r.get("untied")] == [fid]

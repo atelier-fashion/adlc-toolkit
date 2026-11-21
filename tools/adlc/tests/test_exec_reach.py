@@ -88,7 +88,7 @@ def test_no_runner_fence_reaches_deny_tier(records, adapter):
     for rec in runners:
         rel, ordinal = rec["id"].split(":")[0].split("#")
         fence = fc.fences(fc.view(TOOLKIT, rel), rel)[int(ordinal) - 1]
-        found, _sources = fc.plan(fence.code)
+        found, _sources = fc.plan(fence.code, fence.id)
         # A tied fence's reach includes the runner's own PR read (REQ-719 BR-12).
         code = fc.reach_text(fence.code, found)
         assert (fc.pr_tie_text("pr") in code) is ("pr" in rec.get("tied", [])), rec["id"]

@@ -12,6 +12,7 @@ calls are counted under a scenario that is not one.
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -276,6 +277,12 @@ def test_req719_an_unreadable_forge_is_unverified_not_a_pass(cached, tmp_path, m
     ((1, "", "opaque_entry_refused: forge: x"), fr.UNVERIFIED),
     ((3, "\n", "opaque_entry_refused: forge: the Azure DevOps backend"), fr.REFUSED),
     (None, fr.UNVERIFIED),
+    # A backend the shell could not run, or that was killed, is unverified whatever class the
+    # adapter printed for it (REQ-719 review: `gh: command not found` read as not found).
+    ((127, "error_class=pr-not-found\nraw=sh: gh: command not found\n", ""), fr.UNVERIFIED),
+    ((126, "error_class=pr-not-found\n", ""), fr.UNVERIFIED),
+    ((137, "error_class=pr-not-found\n", ""), fr.UNVERIFIED),
+    ((-9, "", ""), fr.UNVERIFIED),
 ])
 def test_req719_the_verdict_reads_four_fields_and_fails_closed(answer, status):
     """ADR-3's table, on the answer alone: all four fields right runs; a field that differs,
@@ -384,3 +391,107 @@ def test_req719_a_fence_that_takes_no_pr_number_reads_no_pr(cached, tmp_path):
     for rec in cached:
         if rec["route"] == "runner":
             assert rec.get("tied", []) == sorted(set(rec["placeholders"]) & marked), rec["id"]
+
+
+# ------------------------------------------------------------------------ REQ-719 review
+def _path_without(tmp_path, missing):
+    """A PATH directory holding what the runner and its PR read call, less ``missing``."""
+    bin_dir = tmp_path / ("no-" + "-".join(missing))
+    bin_dir.mkdir(parents=True)
+    for name in ("git", "gh", "dirname", "basename", "mktemp", "cat", "rm", "sed", "awk", "grep",
+                 "tr", "head", "tail", "uname", "env", "python3"):
+        real = shutil.which(name)
+        if real and name not in missing:
+            os.symlink(real, str(bin_dir / name))
+    return str(bin_dir)
+
+
+def test_req719_a_backend_that_is_not_there_is_unverified(cached, tmp_path, no_fence):
+    """F2: with no `gh` on PATH the adapter's read exits 127, and its classifier used to read the
+    shell's `gh: command not found` as `pr-not-found`, which the runner turned into 65, "correct
+    that value". It is 75, `fence_run_unverified:`, and the fence never starts."""
+    forge = Forge(tmp_path)
+    env = dict(forge.env, PATH=_path_without(tmp_path, ["gh"]),
+               ADLC_FORGE_PROVIDER_OVERRIDE="github")
+    env.pop("ADLC_FORGE_MOCK")
+    for rec in (_phase6(cached), _lite(cached)):
+        rc, err = forge.run(rec, _argv(rec, forge.wc, "101"), env=env)
+        assert rc == fr.UNVERIFIED, (rec["id"], rc, err)
+        line = _one_line(err, "fence_run_unverified: %s: " % rec["id"])
+        assert "status 127" in line, line
+    assert no_fence == []
+
+
+def test_req719_a_branch_that_cannot_be_read_is_unverified(cached, tmp_path, no_fence):
+    """F3: a git failure that is not a detached HEAD (a config git refuses, or no git at all)
+    says nothing about which branch is checked out: 75, `fence_run_unverified:`, before any
+    forge read. A detached HEAD is still 3."""
+    forge = Forge(tmp_path)
+    with open(os.path.join(str(forge.wc), ".git", "config"), "a", encoding="utf-8") as fh:
+        fh.write("[[[ not a section\n")
+    with pytest.raises(fr.BranchUnread, match="exited 128"):
+        fr.checked_out_branch(str(forge.wc), forge.env)
+    p6 = _phase6(cached)
+    rc, err = forge.run(p6, _argv(p6, forge.wc, "101"))
+    assert rc == fr.UNVERIFIED, err
+    line = _one_line(err, "fence_run_unverified: %s: " % p6["id"])
+    assert "could not be read" in line and "bad config" in line, line
+    assert forge.calls() == [] and no_fence == []
+    good = Forge(tmp_path / "nogit")
+    env = dict(good.env, PATH=_path_without(tmp_path, ["git"]))
+    rc, err = good.run(p6, _argv(p6, good.wc, "101"), env=env)
+    assert rc == fr.UNVERIFIED and "git could not be run" in err, err
+    assert good.calls() == [] and no_fence == []
+    _git("-C", str(good.wc), "checkout", "-q", "--detach")
+    assert fr.checked_out_branch(str(good.wc), good.env) == ""
+    rc, err = good.run(p6, _argv(p6, good.wc, "101"))
+    assert rc == fr.REFUSED and "no branch is checked out here" in err, err
+    assert good.calls() == [] and no_fence == []
+
+
+OWN, SIBLING = "feat/REQ-100-own", "feat/REQ-200-sibling"
+
+
+def _sibling_forge(tmp_path):
+    """REQ-100's exec run: PR 101 open on its branch and PR 202 open on REQ-200's, and the
+    session has made a local branch named after REQ-200's head, never pushed."""
+    forge = Forge(tmp_path, prs=[mock_pr(101, OWN), mock_pr(202, SIBLING)],
+                  wc=repo_wc(tmp_path / "wc", branch=OWN, commit=True))
+    _git("-C", str(forge.wc), "checkout", "-q", "-b", SIBLING)
+    forge.env = dict(forge.env, ADLC_EXEC_RUN="REQ-100")
+    return forge
+
+
+def test_req719_a_branch_named_after_another_reqs_head_is_refused(cached, tmp_path, no_fence):
+    """F8: under an exec run the PR tie takes only a branch of the run's own REQ (BR-9). A
+    local branch named after a sibling REQ's head, with the sibling's PR number, is refused
+    with 3 before any forge read, and the sibling's PR keeps its title, body and draft state.
+    The same for the Phase 6 fence and the lite escalation fence."""
+    forge = _sibling_forge(tmp_path)
+    before = forge.pr(202)
+    for rec in (_phase6(cached), _lite(cached)):
+        rc, err = forge.run(rec, _argv(rec, forge.wc, "202"))
+        assert rc == fr.REFUSED, (rec["id"], rc, err)
+        line = _one_line(err, "opaque_entry_refused: %s: " % rec["id"])
+        assert "%s, is not this exec run's" % SIBLING in line and "REQ-100" in line, line
+        assert forge.calls() == []
+    after = forge.pr(202)
+    assert (after["title"], after["body"], after["isDraft"]) == \
+        (before["title"], before["body"], before["isDraft"]) == \
+        ("title of 202", "body of 202", True)
+    assert no_fence == []
+
+
+def test_req719_the_runs_own_branch_and_pr_still_run(cached, tmp_path):
+    """F8's benign twin: with the run's own branch checked out and its own PR, each tied fence
+    runs under ADLC_EXEC_RUN as it does outside one."""
+    forge = _sibling_forge(tmp_path)
+    _git("-C", str(forge.wc), "checkout", "-q", OWN)
+    p6, lite = _phase6(cached), _lite(cached)
+    rc, err = forge.run(p6, _argv(p6, forge.wc, "101"))
+    assert rc == 0 and "fence_run_" not in err and "opaque_entry_refused" not in err, err
+    assert forge.pr(101)["title"] == "The final title" and forge.pr(101)["isDraft"] is False
+    rc, err = forge.run(lite, _argv(lite, forge.wc, "101"))
+    assert rc == 0 and "fence_run_" not in err, err
+    assert "**Escalated to the full lane**: a reason" in forge.pr(101)["body"]
+    assert forge.pr(202) == mock_pr(202, SIBLING)

@@ -1077,6 +1077,69 @@ check "pr_checks ado under fence-run: az never ran" "" "$(cat "$CKREC")"
 PATH=$OLDPATH6; export PATH
 unset ADLC_FORGE_PROVIDER_OVERRIDE ADLC_TOOLKIT_ROOT CK_CASE CK_JSON CKREC
 
+# ===========================================================================
+# 11. REQ-719 review: a missing CLI, planted modules, line separators
+# ===========================================================================
+# A shell's command-not-found holds "not found" but is not the forge's answer.
+for msg in 'sh: gh: command not found' 'bash: line 1: gh: command not found' \
+           'zsh: command not found: gh' 'sh: 1: gh: not found' 'ksh: az: not found'; do
+  check "classify a missing CLI is not pr-not-found: $msg" "network" "$(_adlc_forge_classify "$msg")"
+done
+check "classify the forge's own not-found stays pr-not-found" "pr-not-found" \
+  "$(_adlc_forge_classify 'HTTP 404: Not Found (https://api.github.com/repos/o/r/pulls/9)')"
+# The real thing, in this shell: no gh on PATH at all.
+NOGH="$SBX/nogh"; mkdir -p "$NOGH"
+for tool in mktemp cat rm head; do
+  ln -s "$(command -v "$tool")" "$NOGH/$tool"
+done
+out=$(PATH="$NOGH"; export PATH; ADLC_FORGE_PROVIDER_OVERRIDE=github; export ADLC_FORGE_PROVIDER_OVERRIDE
+      adlc_forge_pr_view 5 --fields number,state,headRefName,isCrossRepository 2>&1); rc=$?
+check "no gh on PATH: rc is the shell's 127" "127" "$rc"
+check "no gh on PATH: not read as pr-not-found" "error_class=network" "$(first "$out")"
+contains "no gh on PATH: the shell's line is kept" "raw=" "$out"
+
+# Inline interpreters run isolated: a json.py or unicodedata.py planted in the working
+# directory is never imported. A gh stub answers view and checks.
+PLANT="$SBX/planted"; mkdir -p "$PLANT"; PLANT_MARK="$SBX/planted.mark"
+for mod in json unicodedata; do
+  printf 'open(%s, "a").write("%s\\n")\nraise SystemExit(0)\n' "'$PLANT_MARK'" "$mod" > "$PLANT/$mod.py"
+done
+VGDIR="$SBX/vgbin"; mkdir -p "$VGDIR"
+cat > "$VGDIR/gh" <<'VGH'
+#!/bin/sh
+case "$1 $2" in
+  "pr view")   printf '{"number":9,"state":"OPEN","isCrossRepository":false}\n' ;;
+  "pr checks") printf 'pass\tbuild\n' ;;
+  *) exit 2 ;;
+esac
+VGH
+chmod +x "$VGDIR/gh"
+printf '[{"ruleset_id":7},{"ruleset_id":3}]\n' > "$SBX/rules.json"
+# Positive control (LESSON-602): from that directory a bare `python3 -c` does import it.
+(cd "$PLANT" && python3 -c 'import json' >/dev/null 2>&1)
+check "planted json.py: a bare python3 -c imports it (control)" "json" "$(cat "$PLANT_MARK" 2>/dev/null)"
+rm -f "$PLANT_MARK"
+pout=$(cd "$PLANT" && PATH="$VGDIR:$PATH"; export PATH; ADLC_FORGE_PROVIDER_OVERRIDE=github
+       export ADLC_FORGE_PROVIDER_OVERRIDE; adlc_forge_pr_view 9 --fields number,state 2>&1)
+check "planted modules: pr_view --fields still answers" \
+  "$(printf 'number=9\nstate=OPEN\nisCrossRepository=false')" "$pout"
+pout=$(cd "$PLANT" && PATH="$VGDIR:$PATH"; export PATH; ADLC_FORGE_PROVIDER_OVERRIDE=github
+       export ADLC_FORGE_PROVIDER_OVERRIDE; adlc_forge_pr_checks 9 2>&1)
+check "planted modules: pr_checks still answers" "$(printf 'checks=pass\ncheck=pass\tbuild')" "$pout"
+pout=$(cd "$PLANT" && printf '{"status":"active","pullRequestId":3}\n' | _adlc_forge_ado_view_to_kv)
+contains "planted modules: the ADO view normalizer still answers" "state=OPEN" "$pout"
+pout=$(cd "$PLANT" && printf '[]\n' | _adlc_forge_ado_list_norm)
+check "planted modules: the ADO list normalizer still answers" "[]" "$pout"
+pout=$(cd "$PLANT" && _adlc_forge_ruleset_ids "$SBX/rules.json")
+check "planted modules: the ruleset reader still answers" "$(printf '3\n7')" "$pout"
+check "planted modules: none was imported" "" "$(cat "$PLANT_MARK" 2>/dev/null)"
+
+# U+2028 and U+2029 split a line for Python's splitlines(): a check name holding one is
+# one line too.
+pout=$(printf 'pass\tline\342\200\250sep\342\200\251par\n' | _adlc_forge_checks_norm tsv)
+check "pr_checks: a line or paragraph separator in a name becomes a space" \
+  "$(printf 'checks=pass\ncheck=pass\tline sep par')" "$pout"
+
 rm -rf "$SBX"
 
 echo ""

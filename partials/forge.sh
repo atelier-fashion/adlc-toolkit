@@ -274,6 +274,13 @@ _adlc_forge_classify() {
   case "$adlc_fc_raw" in
     *"not logged"*|*"auth status"*|*"authentication"*|*"Unauthorized"*|*"TF400813"*|*"PAT"*"not set"*|*"auth-missing"*|*"az login"*|*"gh auth login"*|*"Please run"*"login"*|*"credentials"*)
       echo "auth-missing" ;;
+    # A shell's own answer for a backend CLI that is not on PATH: `command not found` (bash,
+    # zsh) or `<cmd>: not found` (dash, ash, ksh), with exit 127. It holds "not found" but is
+    # not the forge saying a PR does not exist, so it never reads `pr-not-found`, which a
+    # caller treats as a wrong value to correct (REQ-719). No class names a missing CLI: it
+    # takes the default, and the raw= line says what happened.
+    *"command not found"*|*"gh: not found"*|*"az: not found"*|*"git: not found"*|*"python3: not found"*)
+      echo "network" ;;
     # `Could not resolve to a PullRequest` is gh 2.103.3's whole answer for an unknown PR
     # number (`GraphQL: … with the number of <n>. (repository.pullRequest)`, measured
     # 2026-11-20): no "Not Found" in it, so it used to fall to `network` (REQ-719).
@@ -937,9 +944,14 @@ adlc_forge_pr_checks() {
 }
 
 # --- JSON -> key=value helpers (no jq dependency; gh emits compact JSON) -----
+# Every inline interpreter runs `command python3 -I`: isolated mode puts neither the working
+# directory nor a PYTHON* variable nor the user site on its path, so a `json.py` the session
+# planted in its working copy is never imported, outside the sandbox, with the run's
+# credential (REQ-719). The helpers are standard library only, and `command` bypasses a
+# function named python3, as _adlc_forge_py does (REQ-609 D5).
 # GitHub: pass-through state. Minimal parser for the flat fields gh --json emits.
 _adlc_forge_json_to_kv() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -961,7 +973,7 @@ if isinstance(d, dict):
 
 # The ids of the rulesets an effective-rules response names, one per line.
 _adlc_forge_ruleset_ids() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     with open(sys.argv[1]) as fh:
@@ -976,7 +988,7 @@ if isinstance(rules, list):
 
 # ADO: normalize `status` -> state {OPEN,MERGED,CLOSED}; surface url/number/title.
 _adlc_forge_ado_view_to_kv() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -1013,7 +1025,7 @@ print("files=[]")
 
 # ADO: `az repos pr list` to the GitHub shape of the --head form (REQ-659 BR-26 b).
 _adlc_forge_ado_list_norm() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     rows = json.load(sys.stdin)
@@ -1039,18 +1051,19 @@ print(json.dumps(out))
 # Mode `tsv` reads gh's `[.bucket, .name] | @tsv` rows, undoing @tsv's escapes; mode `ado`
 # reads the JSON array of an Azure DevOps PR's policy evaluations, keeping the Build and
 # Status ones (their type ids, for an organisation whose display names are translated).
-# A name's tabs, newlines and other control characters become spaces, so each check is
+# A name's tabs, newlines, other control characters and the line and paragraph separators
+# (U+2028, U+2029, which Python's splitlines() splits on) become spaces, so each check is
 # one line. A state the mapping does not know reads pending, never pass. An answer that
 # is not a JSON array is an error, never `none`.
 _adlc_forge_checks_norm() {
-  command python3 -c '
+  command python3 -I -c '
 import json, sys, unicodedata
 mode = sys.argv[1]
 text = sys.stdin.buffer.read().decode("utf-8", "replace")
 def obj(value):
     return value if isinstance(value, dict) else {}
 def one_line(name):
-    return "".join(" " if unicodedata.category(c) == "Cc" else c for c in str(name))
+    return "".join(" " if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c for c in str(name))
 def unescape(field):
     out, i = [], 0
     while i < len(field):

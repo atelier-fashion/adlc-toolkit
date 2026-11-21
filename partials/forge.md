@@ -163,6 +163,18 @@ Two consequences for anyone editing the classifier:
   still wins. Note that `You're not authorized to push to this branch` is a
   *policy* refusal, not `auth-missing`: the credential is fine, the permission is
   the point.
+- **A missing CLI is not a missing PR (REQ-719).** With `gh` or `az` off `PATH` the
+  shell answers `gh: command not found` (bash, zsh) or `gh: not found` (dash), with
+  exit 127. Both hold "not found", and used to read `pr-not-found`, which a caller
+  treats as a wrong value to correct. They now fall to the default, and
+  `fence-run`'s PR read counts any exit of 126, 127 or above 128 as unverified
+  before it looks at the class.
+
+**Inline interpreters run isolated (REQ-719).** The JSON helpers at the end of
+`forge.sh` run `command python3 -I -c '…'`. Without `-I` Python puts the working
+directory first on its path, so a `json.py` or `unicodedata.py` the session left in
+its working copy would run, outside any harness sandbox, with the run's credential.
+They are standard library only, so isolated mode costs nothing.
 
 **State normalization:** `pr_view.state ∈ {OPEN, MERGED, CLOSED}`. GitHub states
 pass through; ADO `active→OPEN`, `completed→MERGED`, `abandoned→CLOSED`.
