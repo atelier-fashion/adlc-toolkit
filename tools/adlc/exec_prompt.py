@@ -306,6 +306,24 @@ _UNATTENDED_PAIRS = (
      "`Terminal state: <awaiting_approval|blocked|failed>`."),
 )
 
+#: BUG-290: what a refused command means, and where scratch files go. Launch 9 of
+#: ``codex-exec-manual.md`` chained ``rm -f /tmp/… && git add … && git commit …``: the harness
+#: refused the line, and the session reported the commit blocked by the sandbox without running
+#: it on a line of its own. One line, in the pipeline's notes and the close-out's head. A solo
+#: ``/proceed`` reads neither: its deny tier asks a person, and no line is refused.
+REFUSED_LINE_NOTE = (
+    "The harness refuses some commands outright in this run, `rm -f` and `rm -rf` among them. "
+    "A refused line ran none of its commands, the allowed ones chained on it included. "
+    "A refusal is not a sandbox failure and not a blocker, and it says nothing about the other "
+    "commands on the line: run those again on a line of their own, leave the refused command "
+    "out and do not retry it under another spelling, and report a blocker only for a command "
+    "that fails when run that way. "
+    "Never put a cleanup on the same line as a `git add`, a `git commit`, a push or a fence "
+    "call. "
+    "Keep scratch files inside your working copy, never under `/tmp`; remove each with a plain "
+    "`rm <path>` on a line of its own, or, if that is refused too, leave it and name it in "
+    "your report; never commit one.\n")
+
 _EXEC_NOTES = """The argument to this pipeline is {req}, on branch `{branch}`.
 Every companion file the text names is inlined in this prompt, so do not look for them on disk.
 `git -C` is not on your allowlist: where the text writes `git -C <worktree> <command>`, run `<command>` from your working copy.
@@ -313,7 +331,7 @@ Toolkit skills and agents are not loaded in this session. Wherever the text says
 Dispatch no toolkit agent by name: none is loaded, and a name the Agent tool does not list runs a generic agent without the checklist. Run each agent's checklist inline from `{runner} show agents/<name>.md`, as the dispatch paragraph's inline arm says: an inline review reports findings only, applies no fixes, and runs no test runner, build tool, package manager or interpreter.
 A fence shown as a `{runner} run <id>` call runs only that way. Replace each `'<…>'` stub with its value as one single-quoted literal, every `'` in it written `'\\''`, or pass a file with `--arg-file NAME=PATH`: the runner reads only a file inside your working copy, so write it there, and delete it afterwards without committing it. Run each such call as a command of its own, never chained after another command: a chained call can run inside the harness's sandbox, where it cannot push, fetch or write `<state>`. Exit 69 with a `fence_run_sandboxed:` line is that case and not a refusal: nothing ran, so run the same line again on its own; if it answers the same way a second time, report the line and stop. Exit 65 with a `fence_run_bad_value:` line means a value you passed has the wrong shape, such as a relative path where the fence takes an absolute one, or an `--arg-file` outside your working copy: nothing ran, so correct the value the line names and run the call again. For a PR number, 65 can also mean it is not the open PR of your working copy's branch: correct it from `repos[<id>].prNumber` in the state file and run the line once more, and if a second 65 names the same value, report it as a blocker and stop instead of retrying. Only exit 3 with an `opaque_entry_refused:` line is a refusal; the line the runner prints names the case, never the number alone. Never source a partial yourself: no allow admits `.` or `source`. Exit 3 with an `opaque_entry_refused:` line is the runner refusing, so report the line and stop as the gate protocol says.
 Exit 75 with a `fence_run_unverified:` line means the runner could not read the forge to check that a PR number you passed is the open PR of your working copy's branch: nothing ran, so run the same line once more, and if it answers the same way, report it as a blocker and stop.
-"""
+""" + REFUSED_LINE_NOTE
 
 
 def ethos_text(toolkit, primary):
@@ -642,7 +660,7 @@ def closeout_prompt(toolkit, req, branch, worktree, evidence, deploy_command="",
             "worktree, on branch `%s`, which the orchestrator created from the integration "
             "branch. It is unattended: no operator is present. You never merge. A fence shown "
             "as a `%s run <id>` call runs only that way, as earlier in this session.\n\n"
-            % (worktree, req, branch, _runner(toolkit)))
+            % (worktree, req, branch, _runner(toolkit))) + REFUSED_LINE_NOTE + "\n"
     if state_file:
         head = STATE_FILE_NOTE % state_file + head
     tail = "\n--- RUN EVIDENCE ---\n%s\n--- END RUN EVIDENCE ---\n" % evidence

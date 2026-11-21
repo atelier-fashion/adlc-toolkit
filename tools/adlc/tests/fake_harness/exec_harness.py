@@ -31,7 +31,10 @@ Both profiles read the whole prompt from stdin, and fail loudly (exit 86 and
 Scenario keys per REQ, besides REQ-659's: ``stderr`` (text written to stderr at exit),
 ``commands`` (shell commands run in the working copy mid-run; the jsonl profile reports each
 as a ``command_execution`` item), and for the jsonl profile ``refused`` (commands the harness
-refuses: its rejection line on stderr and no item), ``stream`` (``no-terminal``: no
+refuses: its rejection line on stderr and no item; a ``[line, prefix]`` pair is a chained line
+refused for one command on it, which the rejection names as ``prefix``, as codex does, BUG-290;
+the fake is scripted, so it shows what the engine reads of a refusal and never what a model
+does after one), ``stream`` (``no-terminal``: no
 ``turn.completed``; ``cut``: the last line cut short with no newline; ``not-json``: plain
 text) and ``no_last_message`` (no ``-o`` file).
 
@@ -174,7 +177,8 @@ def jsonl_result(text, spec, sid):
     the last message in the -o file."""
     opts = RUN["opts"]
     for command in spec.get("refused", []):
-        sys.stderr.write(REJECTED % (command, command))
+        line, prefix = command if isinstance(command, list) else (command, command)
+        sys.stderr.write(REJECTED % (line, prefix))
     if not opts.get("json"):
         print(text)
         sys.stderr.write("session id: %s\n" % sid)

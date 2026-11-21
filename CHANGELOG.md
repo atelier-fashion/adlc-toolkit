@@ -730,6 +730,33 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **One denied command on a chained line no longer costs an exec run silently (BUG-290).** A
+  real Codex session finished its REQ, tests passing, and then ran
+  `rm -f /tmp/… && git add … && git commit …` on one line. `rm -f` is in the exec deny tier,
+  so Codex refused the whole line. The session reported `blocked`, saying the sandbox would
+  not let Git commit, and never ran the commit on a line of its own. The refusal was in the
+  session's stderr log and nowhere the operator looked. Now:
+  - the exec prompt says what a refusal means: the line ran none of its commands, it is not a
+    sandbox failure and not a blocker, and the other commands run again on a line of their
+    own, without the refused one and without respelling it. It says never to chain a cleanup
+    with a `git add`, a `git commit`, a push or a fence call, and to keep scratch files inside
+    the working copy and remove them with a plain `rm <path>`. The note is in the pipeline
+    prompt and the close-out prompt of every exec adapter. A solo `/proceed` does not read
+    it: there the deny tier asks a person;
+  - when a run ends `blocked` or `failed` on the session's own account and the harness
+    recorded a refusal (Codex's line on stderr, Claude's denial list), the dashboard row
+    gains `note: launch <n>: the harness refused a command, …` with what the harness
+    recorded. The terminal and the run-outcome line are unchanged: the engine does not decide
+    whether the refusal was the cause. A run that reaches the merge gate gets no note;
+  - a refusal line over 300 characters is cut in the middle, keeping its start and Codex's
+    own words. Cut from the left, the line of this launch ended before `rejected: policy
+    forbids commands starting with` and never named `rm -f`.
+  - The deny tier is unchanged, and no rule file is. The tests drive the fake harness, which
+    is scripted: they pin what the prompt says and what the engine shows, not what a model
+    does after reading it. No real launch has run against the fix.
+  - **Action for `/sprint --exec` operators:** none. When a blocked row carries the note,
+    `sprint-exec answer` with the commands to run on a line of their own relaunches the run.
+
 - **`/architect`'s footprint fence is held to the caller's PR (BUG-288).** Step 5's fence
   read `prNumber` from `pipeline-state.json` and handed it to `adlc_forge_pr_view` and
   `adlc_forge_pr_edit`. Under `/sprint --exec` the session writes that file and the fence runs

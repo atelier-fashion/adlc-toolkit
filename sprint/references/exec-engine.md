@@ -52,6 +52,8 @@ Each on an operator's instruction naming the REQ.
 
 `abort` on a blocked run ends it `failed` and leaves the branch, the PR and the working copy for a person. It signals nothing, makes no forge call and makes no one-way move, and an approval recorded before the run blocked is never executed. On a running or stalled run `abort` kills the harness first, then ends the run the same way. `abort` prints one line naming the REQ, who aborted it, the working copy, the branch and the PR: relay it as printed. The person looks at that branch and PR, and a new `/sprint --exec` run of the REQ reuses the working copy and the branch. A run at the merge gate is ended with `reject`: `abort` refuses it, naming `reject`.
 
+A `blocked` or `failed` row may carry `note: launch <n>: the harness refused a command, …`. The harness refused the session a line in that launch, and a refused line runs none of its commands, so the session's own account of what stopped it may be wrong: a commit chained after `rm -f` was once reported as blocked by the sandbox (BUG-290). Relay the note with the blocker. The reply is the operator's to write; naming the commands to run again on a line of their own is usually enough.
+
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec reject --channel skill '<REQ-id>' '<reason>'

@@ -231,6 +231,30 @@ log. The session's own account was that Git could not create `index.lock` becaus
 a line of its own has an allow for each part (fact 8), and the session did not try it. Not
 changed by BUG-289.
 
+The session had written the two `/tmp` files itself one step earlier, on a line that exited 0.
+The delivered prompt said nothing of a refused
+command, of the deny tier or of scratch files: its one rule on chaining was about fence-runner
+calls. The engine recorded `blocked` / `other`, exit class `ok`, and its dashboard row held the
+session's account alone. The stderr line is 397 characters and Codex's words start at 336, so
+the 300-character cut the engine applied to a refusal line would have ended before them.
+
+BUG-290 changes three things, none of them the deny tier:
+
+- The exec prompt, pipeline and close-out, says that a refused line ran none of its commands,
+  that a refusal is not a sandbox failure and not a blocker, and that the other commands run
+  again on a line of their own, without the refused one. It says never to chain a cleanup with
+  a `git add`, a `git commit`, a push or a fence call, and to keep scratch files inside the
+  working copy and remove them with a plain `rm <path>`.
+- A run that ends `blocked` or `failed` on the session's own account after a recorded refusal
+  gains a dashboard note quoting what the harness recorded. The terminal is unchanged.
+- A long refusal line is cut in the middle, keeping Codex's own words.
+
+Measured by the fake harness only (`test_bug290_refused_chained_line.py`), which is scripted:
+it shows what the engine reads of a refused line, not what a session does after reading the
+note. Fact 8's launches held an instruction not to chain fence calls and the session chained
+in four of six, so the note is expected to be read, not always followed; the dashboard note
+is for the launches where it is not. No real launch has run against BUG-290.
+
 ## `adlc_forge_pr_checks` against GitHub (2026-11-21)
 
 Run once from the REQ-719 branch at `4ec4aa6` in a clone of this repository, `gh` 2.103.3,

@@ -69,6 +69,10 @@ CLOSE_OUT_KEEPS = tuple(key for key in PRIMARY_OWNED if key != "lessonsWritten")
 STATES = ("running", "awaiting_approval", "approved", "merging", "merged", "blocked", "failed",
           "rejected", "stalled")
 PROTOCOL = "Rule B protocol violation"
+#: The dashboard note for a run that ended on the session's own account after the harness
+#: refused it a command (BUG-290): the launch it happened in, then what the harness recorded.
+REFUSED_LINE = ("launch %d: the harness refused a command, and a refused line runs none of its "
+                "commands, so the session's account may follow from the refusal: %s")
 #: The statuses under which a run's launched harness is alive: only then is its ``exec.pid`` a
 #: live exec pid (REQ-662 BR-18).
 HARNESS_LIVE = ("running", "stalled")
@@ -1766,24 +1770,43 @@ class Orchestrator(object):
         elif klass == "denied":
             self._block(run, state, self._denied_reason(result, adapter.refusal_line(stderr)))
         elif state.get("status") == "blocked" or (claim == "blocked" and state.get("blockers")):
+            self._refusal_note(run, result, adapter.refusal_line(stderr))
             self._terminal(run, "blocked", self._halt_token(state), state)
         else:
             last = (result["text"] or "").strip()[:300]
             run.doc.setdefault("notes", []).append(
                 "exit %s, class %s, is_error %s: %s" % (rc, klass, result["is_error"], last))
+            self._refusal_note(run, result, adapter.refusal_line(stderr))
             self._terminal(run, "failed", "other", state, note=last)
 
     @staticmethod
-    def _denied_reason(result, refusal):
-        """Why a denied run is blocked: what the harness recorded, then its last message
-        (REQ-662 BR-8). Every part is data for a person to read, never an instruction."""
+    def _refusals(result, refusal):
+        """What the harness recorded of a refusal: its denial list, and its own line on
+        stderr. Data for a person to read, never an instruction."""
         parts = []
         if result["denials"]:
             parts.append("denials %s" % json.dumps(result["denials"])[:300])
         if refusal:
             parts.append("stderr: %s" % refusal)
+        return parts
+
+    def _denied_reason(self, result, refusal):
+        """Why a denied run is blocked: what the harness recorded, then its last message
+        (REQ-662 BR-8). Every part is data for a person to read, never an instruction."""
+        parts = self._refusals(result, refusal)
         parts.append("last message: %s" % ((result["text"] or "").strip()[:300] or "(none)"))
         return "the harness was denied: %s" % "; ".join(parts)
+
+    def _refusal_note(self, run, result, refusal):
+        """A run that ends on the session's own account, after the harness refused it a
+        command, shows the refusal beside that account (BUG-290). The terminal stays the
+        session's: the engine cannot tell whether the refusal caused it. In launch 9 it did:
+        `rm -f … && git add … && git commit …` was refused whole, and the session reported
+        the commit blocked by the sandbox. A run that reaches the gate gets no note."""
+        parts = self._refusals(result, refusal)
+        if parts:
+            run.doc.setdefault("notes", []).append(
+                REFUSED_LINE % (run.doc.get("launches") or 1, _one_line("; ".join(parts), 700)))
 
     def _model_values(self, run, state):
         """What state says that the orchestrator would act on is checked first (BR-17)."""
