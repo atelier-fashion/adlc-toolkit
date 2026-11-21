@@ -119,6 +119,116 @@ def test_bad_terminal_or_engine_is_usage(tmp_path):
     assert _run("emit", "--state", path, "--terminal", "merged", "--engine", "cloud").returncode == 2
 
 
+# --- REQ-719 BR-18 / AC-14: `rejected`, the exec engine's own terminal ------------
+
+def test_req719_rejected_is_an_exec_only_terminal(tmp_path):
+    # A close-out that failed would give a merged line `close-out-failed`; a
+    # rejected line keeps an empty reason whatever the state says.
+    state = _state(closeOut={"status": "failed", "reason": "chore PR blocked"},
+                   verify={"findings": [{"severity": "Major", "class": "a-class", "title": "t"}], "loops": 1})
+    path = str(_write(tmp_path, state))
+    operator_text = "not this quarter, the API is frozen"
+
+    # must-not-fire: the exec engine writes it, one line, no reason
+    out = _run("emit", "--state", path, "--terminal", "rejected", "--engine", "exec",
+               "--reason", operator_text)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.count("\n") == 1
+    rec = assert_structural(out.stdout)
+    assert (rec["terminal"], rec["engine"], rec["blocked_reason"]) == ("rejected", "exec", "")
+    assert operator_text not in out.stdout and "frozen" not in out.stdout
+    assert rec["findings_major"] == "1" and rec["finding_classes"] == "a-class", "the run's own record is kept"
+    plain = RO.build_record(_state(), "rejected", "exec", now=NOW)
+    assert plain["blocked_reason"] == ""
+
+    # every other engine: a usage error, nothing printed
+    for engine in ("solo", "legacy", "workflow"):
+        refused = _run("emit", "--state", path, "--terminal", "rejected", "--engine", engine)
+        assert refused.returncode == 2, (engine, refused.stderr)
+        assert refused.stdout == "", engine
+        assert refused.stderr.startswith("run-outcome: --terminal rejected"), refused.stderr
+        with pytest.raises(RO.UsageError):
+            RO.build_record(state, "rejected", engine, now=NOW)
+
+    # must-not-fire: REQ-648's four terminals stay open to every engine
+    for engine in RO.ENGINES:
+        for terminal in ("merged", "pr-ready", "blocked", "failed"):
+            assert RO.build_record(_state(), terminal, engine, now=NOW)["terminal"] == terminal
+
+    # through the wrapper: a refused line leaves the log byte-identical, rc 0
+    wrapper = DELEGATE_DIR / "emit-run-outcome.sh"
+    log = tmp_path / "logs" / "run-outcomes.log"
+    log.parent.mkdir()
+    log.write_text('{"earlier":"line"}\n', encoding="utf-8")
+    before = log.read_bytes()
+    env = dict(os.environ, ADLC_RUN_OUTCOMES_LOG=str(log))
+    for engine in ("solo", "legacy", "workflow"):
+        wrapped = subprocess.run(["sh", str(wrapper), "--state", path, "--terminal", "rejected",
+                                  "--engine", engine], env=env, capture_output=True, text=True)
+        assert wrapped.returncode == 0, wrapped.stderr
+        assert any(l.startswith("run-outcome: emit failed (rc 2)")
+                   for l in wrapped.stderr.splitlines()), wrapped.stderr
+        assert wrapped.stdout == "", engine
+        assert log.read_bytes() == before, engine
+    appended = subprocess.run(["sh", str(wrapper), "--state", path, "--terminal", "rejected",
+                               "--engine", "exec"], env=env, capture_output=True, text=True)
+    assert appended.returncode == 0 and appended.stderr == "", appended.stderr
+    added = log.read_text(encoding="utf-8").splitlines()[1:]
+    assert len(added) == 1
+    assert assert_structural(added[0])["terminal"] == "rejected"
+
+
+# --- REQ-719 BR-19: `aborted` ---------------------------------------------------
+
+def test_req719_aborted_is_a_reason_of_its_own(tmp_path):
+    assert "aborted" in RO.BLOCKED_REASONS
+    out = _run("emit", "--state", str(_write(tmp_path, _state())), "--terminal", "failed",
+               "--engine", "exec", "--reason", "aborted")
+    assert out.returncode == 0, out.stderr
+    rec = assert_structural(out.stdout)
+    assert (rec["terminal"], rec["blocked_reason"]) == ("failed", "aborted")
+    assert RO.normalize_blocked_reason(" Aborted ") == "aborted"
+    # it takes nothing from its neighbours: those still map where they did
+    assert RO.normalize_blocked_reason("other") == "other"
+    assert RO.normalize_blocked_reason("lane-check") == "other"
+    assert RO.normalize_blocked_reason("close-out-failed") == "close-out-failed"
+    # a reason passed with a non-halt terminal is still ignored
+    assert RO.build_record(_state(), "merged", "exec", reason="aborted", now=NOW)["blocked_reason"] == ""
+
+
+def test_req719_aborted_from_any_other_engine_reads_other(tmp_path):
+    """A session writes its own run-outcome line through a fence, with a reason token of its
+    choosing. `aborted` is the exec engine's, an operator's `abort`: from `solo`, `legacy` or
+    `workflow` the line is still written, and its reason reads `other`."""
+    for engine in RO.ENGINES:
+        for terminal in ("failed", "blocked"):
+            rec = RO.build_record(_state(), terminal, engine, reason="aborted", now=NOW)
+            want = "aborted" if engine == RO.REJECTED_ENGINE else "other"
+            assert rec["blocked_reason"] == want, (engine, terminal)
+    out = _run("emit", "--state", str(_write(tmp_path, _state())), "--terminal", "failed",
+               "--engine", "solo", "--reason", "aborted")
+    assert out.returncode == 0, out.stderr
+    assert assert_structural(out.stdout)["blocked_reason"] == "other"
+
+
+# --- REQ-719 BR-21: the workflow engine has no reject ------------------------------
+
+def test_req719_workflow_terminal_enum_is_unchanged():
+    text = (REPO_ROOT / "workflows" / "adlc-sprint.workflow.js").read_text(encoding="utf-8")
+    start = text.index("const TERMINAL = {")
+    match = re.search(r"state:\s*\{\s*type:\s*'string',\s*enum:\s*\[([^\]]*)\]", text[start:])
+    assert match, "TERMINAL.state is no longer a string enum"
+    enum = re.findall(r"'([^']*)'", match.group(1))
+    assert enum == ["merged", "pr-ready", "blocked", "failed"]
+    # the workflow passes TERMINAL.state verbatim, so its whole enum is accepted,
+    # and the one terminal it cannot hold is the one it may not write
+    assert set(enum) == set(RO.TERMINALS) - {"rejected"}
+    for terminal in enum:
+        assert RO.build_record(_state(), terminal, "workflow", now=NOW)["terminal"] == terminal
+    with pytest.raises(RO.UsageError):
+        RO.build_record(_state(), "rejected", "workflow", now=NOW)
+
+
 # --- AC-4: a state file written before this REQ -----------------------------------
 
 def test_absent_keys_emit_dash_and_zero(tmp_path):

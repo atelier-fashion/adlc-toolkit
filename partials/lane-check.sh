@@ -3,8 +3,8 @@
 # Source this partial, then call adlc_lane_check WITHIN THE SAME fenced block, after the
 # fence's ToolkitRoot root line (conventions.md "Bash in skills"):
 #   if [ -f .adlc/partials/lane-check.sh ]; then . .adlc/partials/lane-check.sh; else . "$ADLC_TOOLKIT_ROOT/partials/lane-check.sh"; fi
-#   git -C "$worktree" fetch origin "$integration_branch"     # caller refreshes the base
-#   adlc_lane_check "$worktree" "origin/$integration_branch"; rc=$?
+#   git -C "$wt" fetch origin "+refs/heads/$ib:refs/remotes/origin/$ib" "+refs/heads/$br:refs/remotes/origin/$br"
+#   adlc_lane_check "$wt" "origin/$ib"; rc=$?
 #   case $rc in
 #     0) : ;;                     # pass — the change stayed inside the lite lane
 #     *) echo "crossed a line" ;; # 1 escalate, 2 error — an error is never a pass
@@ -21,8 +21,11 @@
 # code whose first line does not match it — is replaced by the three-line error contract
 # (`lane_check=error`, `trigger=check-error`, `detail=...`) and rc 2: an error is never a
 # pass (LESSON-581). It does NOT fetch; the caller passes an already-fetched
-# `origin/<integrationBranch>` (LESSON-391, never local `main`). Full contract, rule table,
-# defaults and the closed vocabulary: partials/lane-check.md.
+# `origin/<integrationBranch>` (LESSON-391, never local `main`). The caller's fetch is the
+# explicit form above: `$wt` the worktree, `$ib` the integration branch, `$br` the REQ's
+# branch, each refspec naming its destination, so both remote-tracking refs are written even
+# in a `--single-branch` clone, whose `remote.origin.fetch` names one branch only (REQ-719
+# BR-6). Full contract, rule table, defaults and the closed vocabulary: partials/lane-check.md.
 #
 # The engine is ALWAYS the installed toolkit's, <ToolkitRoot>/tools/adlc/lane_check.py —
 # never a copy in the tree under check, which could certify itself (REQ-652 review M1,

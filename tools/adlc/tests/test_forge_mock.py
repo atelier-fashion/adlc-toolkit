@@ -148,3 +148,102 @@ def test_make_head_kinds(forge):
                                    universal_newlines=True)
     assert "120000" in tree and "100755" in tree and "160000" in tree and "b.txt" in tree
     assert "\ta.txt" not in tree
+
+
+# --- REQ-719 BR-23, AC-17: pr_checks ---------------------------------------------------------
+
+def _checks(store, ref="101", scenario=None):
+    out = run(store, "pr_checks", ref, scenario=scenario)
+    return out.returncode, out.stdout.splitlines()
+
+
+def test_req719_pr_checks_scenarios(forge):
+    """Each verdict scenario prints the contract and returns 0; pending-then-pass counts per PR
+    and needs a store; an error-class scenario is the forge error; an unknown PR is refused, as
+    gh refuses it; every other op reads a checks-* scenario as ok."""
+    store, _ = forge
+    run(store, "make-head", "feat/x", "main", "b.txt=b\n")
+    run(store, "pr_create", "--base", "main", "--head", "feat/x")
+    run(store, "pr_create", "--base", "main", "--head", "feat/y")
+    expect = {
+        "checks-pass": ["checks=pass", "check=pass\tbuild", "check=skipped\tdocs"],
+        "checks-fail": ["checks=fail", "check=fail\tbuild", "check=pass\tlint"],
+        "checks-pending": ["checks=pending", "check=pending\tbuild", "check=pass\tlint"],
+        "checks-none": ["checks=none"],
+    }
+    for scenario, lines in expect.items():
+        assert _checks(store, scenario=scenario) == (0, lines), scenario
+    # A store's recorded list is not what the scenario reads.
+    assert run(store, "set-checks", "101", "fail=recorded").returncode == 0
+    assert _checks(store, scenario="checks-pass")[1][0] == "checks=pass"
+
+    then = "checks-pending-then-pass"
+    assert _checks(store, scenario=then) == (0, ["checks=pending", "check=pending\tbuild"])
+    assert _checks(store, scenario=then) == (0, ["checks=pass", "check=pass\tbuild"])
+    assert _checks(store, scenario=then) == (0, ["checks=pass", "check=pass\tbuild"])
+    # The count is per PR: the second PR's first read is still pending.
+    assert _checks(store, "102", scenario=then)[1][0] == "checks=pending"
+    assert json.loads((store / "checks_reads.json").read_text()) == {"101": 3, "102": 1}
+    rc, lines = _checks("", scenario=then)
+    assert rc == 1 and lines[0] == "error_class=feature-unsupported", lines
+    assert "ADLC_FORGE_MOCK_STORE" in lines[1]
+
+    for klass in ("auth-missing", "network", "pr-not-found"):
+        rc, lines = _checks(store, scenario=klass)
+        assert rc == 1 and lines[0] == "error_class=%s" % klass, (klass, lines)
+    rc, lines = _checks(store, "999999", scenario="checks-pass")
+    assert rc == 1 and lines[0] == "error_class=pr-not-found", lines
+    # Without a store the mock answers for its one default PR, and refuses any other.
+    assert _checks("", scenario="checks-fail")[1][0] == "checks=fail"
+    assert _checks("", "9", scenario="checks-pass")[1][0] == "error_class=pr-not-found"
+
+    # Benign path: under every checks-* scenario the other ops answer as under ok.
+    for scenario in list(expect) + [then]:
+        for args in (["pr_view", "101", "--fields", "number,state,headRefName,files"],
+                     ["pr_list", "--head", "feat/x", "--state", "all", "--json", "number,url"],
+                     ["branch_protection", "main"], ["commit_prs", "f" * 40],
+                     ["pr_comment", "101", "--body", "hi"]):
+            ok = run(store, *args)
+            got = run(store, *args, scenario=scenario)
+            assert (got.returncode, got.stdout) == (ok.returncode, ok.stdout), (scenario, args)
+
+
+def test_req719_pr_checks_from_the_store(forge):
+    """A PR with no checks recorded reads none; set-checks writes the list a read prints, in
+    order, each name on one line; set-checks is a helper, not a recorded forge op."""
+    store, _ = forge
+    run(store, "pr_create", "--base", "main", "--head", "feat/x")
+    assert _checks(store) == (0, ["checks=none"])
+
+    assert run(store, "set-checks", "101", "pass=build", "skipped=docs", "pending=e2e",
+               "fail=lint=strict").returncode == 0
+    assert _checks(store) == (0, ["checks=fail", "check=pass\tbuild", "check=skipped\tdocs",
+                                  "check=pending\te2e", "check=fail\tlint=strict"])
+    assert run(store, "set-checks", "101", "pass=build", "pending=e2e").returncode == 0
+    assert _checks(store)[1][0] == "checks=pending"
+    # Skipped checks alone read pass: one is reported, and none failed or is in flight.
+    assert run(store, "set-checks", "101", "skipped=docs").returncode == 0
+    assert _checks(store) == (0, ["checks=pass", "check=skipped\tdocs"])
+    # A name holding a tab, a newline or another control character stays on its line.
+    assert run(store, "set-checks", "101", "pass=unit\ttests\nlinux\x01x").returncode == 0
+    assert _checks(store) == (0, ["checks=pass", "check=pass\tunit tests linux x"])
+    # No spec records an empty list, which reads none again; the PR is found by head too.
+    assert run(store, "set-checks", "feat/x").returncode == 0
+    assert _checks(store) == (0, ["checks=none"])
+    # A state set-checks did not write reads pending, never pass.
+    doc = json.loads((store / "prs.json").read_text())
+    doc["prs"][0]["checks"] = [{"name": "odd", "state": "neutral"}]
+    (store / "prs.json").write_text(json.dumps(doc))
+    assert _checks(store) == (0, ["checks=pending", "check=pending\todd"])
+
+    for bad in (["101", "green=build"], ["101", "build"], []):
+        out = run(store, "set-checks", *bad)
+        assert out.returncode == 2 and out.stdout == "", bad
+    assert run(store, "set-checks", "999", "pass=build").returncode == 1
+    assert run("", "set-checks", "101", "pass=build").returncode == 2
+    # An error-class scenario does not touch the helper, as it does not touch make-head.
+    assert run(store, "set-checks", "101", "pass=build", scenario="network").returncode == 0
+    assert _checks(store)[1][0] == "checks=pass"
+
+    ops = [json.loads(ln)["op"] for ln in (store / "calls.log").read_text().splitlines()]
+    assert "pr_checks" in ops and "set-checks" not in ops

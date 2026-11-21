@@ -143,6 +143,14 @@ _Permissions: not applicable._
 - [ ] REQ-603 noted the delegation log's `api-error` reason is overloaded and said the split "belongs to whatever REQ takes up telemetry". Different log, different readers — default: out of scope (below).
 - [ ] Should Recurrence also join bug files' `introduced_by` (REQ-593) to show "REQs in this sprint that later caused a bug"? Natural join key, but it is a cross-sprint derive-at-read report, not a per-sprint one.
 
+## Amendment (2026-11-20, REQ-719)
+
+**The two vocabularies gain one value each (REQ-719 BR-18 to BR-21).** This extends the RunOutcome entity's `terminal` and `blocked_reason` and BR-5's rule, one vocabulary for one fact.
+
+- **`terminal` is `merged | pr-ready | blocked | failed | rejected`.** `rejected` is the exec engine's terminal for a run an operator declined at its merge gate, and the record carries that engine's own status as it carries the workflow engine's `TERMINAL.state`. `run_outcome.py emit` accepts `rejected` only with `--engine exec`; any other engine with it is a usage error that appends nothing. A `rejected` line has an empty `blocked_reason`, and the operator's reason text is not written to the log: the approval ledger holds it. The workflow engine's `TERMINAL.state` enum is unchanged.
+- **`blocked_reason` gains `aborted`.** The exec engine's `abort` writes it under `terminal: failed`, in place of `other`, from either arm. A run that blocked and was then dropped has two lines, `blocked` and then `failed` / `aborted`.
+- **Readers.** `check-run-outcomes.sh` counts `rejected` in a column of its own after `top_classes`, so no existing column moves, and a `rejected` line counts toward no failure figure. No existing line is rewritten: a run rejected before this change stays recorded `failed` / `other`.
+
 ## Out of Scope
 
 - Splitting the delegation log's `api-error` reason (REQ-603's deferred item).

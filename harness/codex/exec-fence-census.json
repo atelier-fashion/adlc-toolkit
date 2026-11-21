@@ -281,6 +281,9 @@
         "NEW_BODY",
         "prNumber"
       ],
+      "tied": [
+        "prNumber"
+      ],
       "sources": [
         "forge"
       ],
@@ -303,6 +306,50 @@
       ]
     },
     {
+      "id": "proceed/phases-6-8-ship.md#2:833d59c1",
+      "route": "runner",
+      "placeholders": [
+        "branch",
+        "integrationBranch",
+        "worktree"
+      ],
+      "reach": [
+        "git diff",
+        "git fetch",
+        "git rev-parse"
+      ]
+    },
+    {
+      "id": "proceed/phases-6-8-ship.md#3:d9acd654",
+      "route": "runner",
+      "placeholders": [
+        "ciWait",
+        "pr"
+      ],
+      "tied": [
+        "pr"
+      ],
+      "sources": [
+        "forge"
+      ],
+      "reach": [
+        "$adlc_fp_py",
+        "$adlc_mkp_py",
+        "az",
+        "cat",
+        "find",
+        "gh",
+        "gh pr checks",
+        "gh pr view",
+        "git",
+        "git remote",
+        "mktemp",
+        "python3",
+        "rm",
+        "sleep"
+      ]
+    },
+    {
       "id": "proceed/phases-lite.md#1:727c7156",
       "route": "runner",
       "reach": [
@@ -310,7 +357,7 @@
       ]
     },
     {
-      "id": "proceed/phases-lite.md#2:a75800ba",
+      "id": "proceed/phases-lite.md#2:d0c98c51",
       "route": "runner",
       "placeholders": [
         "branch",
@@ -335,6 +382,9 @@
       "route": "runner",
       "placeholders": [
         "lane_escalated",
+        "pr"
+      ],
+      "tied": [
         "pr"
       ],
       "sources": [
@@ -580,6 +630,7 @@
         "MAPPER_PATHS",
         "REQ"
       ],
+      "untied": "the footprint publish takes $prnum from the pipeline-state.json that $REQ selects, a file the session writes: an older gap of BR-13's kind, kept routed until its owner decides (REQ-719 Phase 5)",
       "sources": [
         "forge"
       ],

@@ -27,6 +27,20 @@ This bare form is the contract; the skills call it through the guarded fence in
 `.adlc/partials` or `.adlc/tools`. The partial does **not** fetch. The caller fetches `origin/<integrationBranch>`
 first and passes that ref, never local `main` (LESSON-391).
 
+The caller's fetch names each ref's destination (REQ-719 BR-6), with `$wt` the
+worktree, `$ib` the integration branch and `$br` the REQ's branch:
+
+```sh
+git -C "$wt" fetch origin "+refs/heads/$ib:refs/remotes/origin/$ib" "+refs/heads/$br:refs/remotes/origin/$br"
+```
+
+A plain `git fetch origin "$ib" "$br"` writes a remote-tracking ref only where
+`remote.origin.fetch` maps the branch. In a `--single-branch` clone it maps the
+cloned branch only, so `origin/<branch>` is never written, neither by that
+fetch nor by `git push -u`, and the fence's `rev-parse "origin/$br"` fails
+(measured on git 2.54.0). With the destinations named, both refs are written
+whatever `remote.origin.fetch` says.
+
 ## Return contract
 
 | rc | `lane_check=` | Meaning |

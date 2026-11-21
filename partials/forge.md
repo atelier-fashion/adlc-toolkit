@@ -72,10 +72,56 @@ time, never echoed, logged, or sent to telemetry.
 | `adlc_forge_pr_list [flags]` | `gh pr list` | `az repos pr list` |
 | `adlc_forge_pr_merge <n\|url> [--squash] [--delete-branch]` | `gh pr merge` | `az repos pr update --status completed --squash true --delete-source-branch true` |
 | `adlc_forge_pr_comment <n\|url> --body` | `gh pr comment` | `feature-unsupported` (v1) |
+| `adlc_forge_pr_checks <n\|url>` | `gh pr checks <n> --json name,bucket --jq '.[] \| [.bucket, .name] \| @tsv'` | `az repos pr policy list --id <n> --output json` |
 
 The GitHub backend is **byte-compatible** with the pre-migration direct `gh pr`
 calls (BR-3): the same command and flags, so existing GitHub installs see zero
 behavior change.
+
+## Reading CI: `adlc_forge_pr_checks` (REQ-719 BR-22, ADR-6)
+
+One call is **one read**, and it never waits. A caller that wants a settled verdict
+reads again later; the wait between reads is the caller's, so no call outlasts a
+harness's shell limit. On every successful read it returns 0 and prints:
+
+```
+checks=<pass|fail|pending|none>
+check=<pass|fail|pending|skipped><TAB><name>     # one line per check, in the backend's order
+```
+
+The verdict is `fail` when any check failed, else `pending` when any is in flight,
+else `pass` when at least one check is reported, else `none`. Every reported check
+counts, required or not. A `skipped` check does not change the verdict, so a PR
+whose only checks are skipped reads `pass`. A PR with no checks is `none`: not an
+error and not a failure, whatever the backend's own command exits with. A forge
+error is the usual `error_class=` block and a non-zero return. A check name's tabs,
+newlines and other control characters become spaces, so each check is one line. A
+state the mapping does not know reads `pending`, never `pass`. A PR ref is required:
+with none, nothing is read and the answer is `pr-not-found`.
+
+| Backend | Check | `pass` | `fail` | `pending` | `skipped` |
+|---|---|---|---|---|---|
+| GitHub | every row `gh pr checks` reports, by its `bucket` | `pass` | `fail`, `cancel` | `pending` | `skipping` |
+| Azure DevOps | each policy evaluation whose type is `Build` or `Status` | `approved` | `rejected`, `broken` | `queued`, `running` | `notApplicable` |
+
+**GitHub's exit status is part of its answer.** Measured on `gh` 2.103.3
+(2026-11-20): a failing check exits 1 and still prints its rows, a pending one exits
+8, a PR with no checks exits 1 with `no checks reported on the '<branch>' branch` on
+stderr and nothing on stdout, and an unknown PR exits 1 with `GraphQL: Could not
+resolve to a PullRequest with the number of <n>.` So this op does not go through
+`_adlc_forge_run`, which takes any non-zero status for a failure. When rows come
+back with status 0, 1 or 8, they decide the verdict. With no rows, `no checks
+reported` (or status 0) is `none`, and anything else is classified like every other
+op's stderr; the unknown-PR line is `pr-not-found`. `@tsv` writes a name's tab,
+newline and backslash as `\t`, `\n` and `\\`, and the adapter reads them back.
+
+**Azure DevOps** reads the PR's policy evaluations through `_adlc_forge_run`, so
+`fence-run`'s refusal of that backend holds for this op too. A reviewer policy
+(minimum reviewers, required reviewers, comments, work items) is not CI and is not
+listed. A Build or Status policy is recognized by its type id as well as its display
+name, for an organisation whose display names are translated. The name is the
+policy's display name, else the status check's `genre/name`, else the build
+definition's name. An answer that is not a JSON array is an error, never `none`.
 
 ## Normalized result / error surface (BR-4)
 
@@ -117,6 +163,18 @@ Two consequences for anyone editing the classifier:
   still wins. Note that `You're not authorized to push to this branch` is a
   *policy* refusal, not `auth-missing`: the credential is fine, the permission is
   the point.
+- **A missing CLI is not a missing PR (REQ-719).** With `gh` or `az` off `PATH` the
+  shell answers `gh: command not found` (bash, zsh) or `gh: not found` (dash), with
+  exit 127. Both hold "not found", and used to read `pr-not-found`, which a caller
+  treats as a wrong value to correct. They now fall to the default, and
+  `fence-run`'s PR read counts any exit of 126, 127 or above 128 as unverified
+  before it looks at the class.
+
+**Inline interpreters run isolated (REQ-719).** The JSON helpers at the end of
+`forge.sh` run `command python3 -I -c '…'`. Without `-I` Python puts the working
+directory first on its path, so a `json.py` or `unicodedata.py` the session left in
+its working copy would run, outside any harness sandbox, with the run's credential.
+They are standard library only, so isolated mode costs nothing.
 
 **State normalization:** `pr_view.state ∈ {OPEN, MERGED, CLOSED}`. GitHub states
 pass through; ADO `active→OPEN`, `completed→MERGED`, `abandoned→CLOSED`.
@@ -170,7 +228,8 @@ documented degradation.
 - `ADLC_FORGE_MOCK_SCENARIO` — `ok` (default) or any error-class name, which
   means *every* class the classifier can emit, `local-git` included (before
   BUG-201 that one fell to the unknown-scenario arm and came back as `network` —
-  the same mislabel, reproduced inside the harness)
+  the same mislabel, reproduced inside the harness), or a `checks-*` scenario
+  (below), which every op but `pr_checks` reads as `ok`
 
 The mock honors the same provider semantics (ADO `pr_comment` →
 `feature-unsupported`, normalized state) so it is a faithful stand-in, not a stub
@@ -215,3 +274,21 @@ the store read at each call, selects `head-advances`, `pr-replaced`, `pr-other-r
 value. `forge_mock.py make-head` builds a PR-head commit with plumbing, for fixtures
 that need a rename, a symlink, a gitlink or a mode. Without a store, a call that uses
 none of the above gets the fixed strings it always got.
+
+**`pr_checks` on the mock (REQ-719 BR-23).** `pr_checks` always goes to
+`forge_mock.py`, store or no store. It reads the PR record's `checks` list, and a PR
+with none recorded reads `none`. An unknown PR is `pr-not-found`, as on the forge.
+Five scenarios replace the list:
+
+| Scenario | Read |
+|---|---|
+| `checks-pass` | `pass`: one passing check and one skipped |
+| `checks-fail` | `fail`: one failing check and one passing |
+| `checks-pending` | `pending`: one pending check and one passing |
+| `checks-none` | `none` |
+| `checks-pending-then-pass` | `pending` on a PR's first read, `pass` on every later one. It counts reads per PR in the store's `checks_reads.json`, so without a store it is a `feature-unsupported` error |
+
+The error-class scenarios are the forge error, as for every op. `forge_mock.py
+set-checks <pr> [<state>=<name>]...` writes a PR's list in the store, in order (no
+spec writes an empty one). Like `make-head` it is a test helper, not a forge op: it
+is not recorded in `calls.log`, and no scenario applies to it.

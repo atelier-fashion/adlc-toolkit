@@ -24,6 +24,14 @@
 # State normalization (BR-4): pr_view.state in {OPEN, MERGED, CLOSED}. GitHub
 # passes through; ADO active->OPEN, completed->MERGED, abandoned->CLOSED.
 #
+# CI read (REQ-719 BR-22, ADR-6): adlc_forge_pr_checks <pr> makes ONE read and never
+# waits; the wait is the caller's. On a successful read it returns 0 and prints
+#   checks=<pass|fail|pending|none>
+#   check=<pass|fail|pending|skipped><TAB><name>      one line per check
+# fail when any check failed, else pending when any is in flight, else pass when at
+# least one is reported (skipped ones count), else none. No checks reported is `none`,
+# never an error, whatever the backend's own command exits with.
+#
 # Backends: github (gh), azure-devops (az repos). The GitHub path is BYTE-COMPATIBLE
 # with the pre-migration direct `gh pr` calls (BR-3). ADLC_FORGE_MOCK=1 routes every
 # op to an offline fixture dispatcher (BR-10) — no gh/az/network.
@@ -47,6 +55,8 @@
 #   pr_merge  -> PATCH .../pullrequests/{id}  body {"status":"completed",
 #                "completionOptions":{"deleteSourceBranch":true,"mergeStrategy":"squash"}}
 #   pr_comment-> POST  .../pullrequests/{id}/threads (thread API) — feature-unsupported in v1
+#   pr_checks -> GET   {org}/{proj}/_apis/policy/evaluations?artifactId=
+#                      vstfs:///CodeReview/CodeReviewId/{projectId}/{id}&api-version=7.1-preview.1
 # Auth header: `Authorization: Basic base64(:$PAT)`. A future REQ implements this
 # behind the same adapter functions without changing any call site.
 
@@ -264,7 +274,17 @@ _adlc_forge_classify() {
   case "$adlc_fc_raw" in
     *"not logged"*|*"auth status"*|*"authentication"*|*"Unauthorized"*|*"TF400813"*|*"PAT"*"not set"*|*"auth-missing"*|*"az login"*|*"gh auth login"*|*"Please run"*"login"*|*"credentials"*)
       echo "auth-missing" ;;
-    *"not found"*|*"Not Found"*|*"could not resolve"*|*"no pull request"*|*"TF401174"*)
+    # A shell's own answer for a backend CLI that is not on PATH: `command not found` (bash,
+    # zsh) or `<cmd>: not found` (dash, ash, ksh), with exit 127. It holds "not found" but is
+    # not the forge saying a PR does not exist, so it never reads `pr-not-found`, which a
+    # caller treats as a wrong value to correct (REQ-719). No class names a missing CLI: it
+    # takes the default, and the raw= line says what happened.
+    *"command not found"*|*"gh: not found"*|*"az: not found"*|*"git: not found"*|*"python3: not found"*)
+      echo "network" ;;
+    # `Could not resolve to a PullRequest` is gh 2.103.3's whole answer for an unknown PR
+    # number (`GraphQL: … with the number of <n>. (repository.pullRequest)`, measured
+    # 2026-11-20): no "Not Found" in it, so it used to fall to `network` (REQ-719).
+    *"not found"*|*"Not Found"*|*"could not resolve"*|*"Could not resolve to a PullRequest"*|*"no pull request"*|*"TF401174"*)
       echo "pr-not-found" ;;
     *"policy"*|*"Policy"*|*"required review"*|*"branch protection"*|*"TF402455"*|*"not mergeable"*|*"blocked"*)
       echo "merge-blocked-by-policy" ;;
@@ -305,6 +325,8 @@ _adlc_forge_classify() {
 # ADLC_FORGE_MOCK_SCENARIO). SCENARIO defaults to `ok`; set it to an error-class
 # name to drive the failure path. Honors provider semantics faithfully:
 # ADO pr_comment is feature-unsupported; state normalization differs by provider.
+# The `checks-*` scenarios (REQ-719 BR-23) are pr_checks's, which forge_mock.py always
+# answers; every other op reads them as `ok`.
 _adlc_forge_mock() {
   adlc_mk_op=$1
   adlc_mk_prov="${ADLC_FORGE_MOCK_PROVIDER:-github}"
@@ -332,7 +354,7 @@ _adlc_forge_mock() {
     return 1
   fi
   case "$adlc_mk_scn" in
-    ok) : ;;
+    ok|checks-pass|checks-fail|checks-pending|checks-none|checks-pending-then-pass) : ;;
     auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|local-git|network)
       _adlc_forge_err "$adlc_mk_scn" "mock backend ($adlc_mk_prov): simulated $adlc_mk_scn for $adlc_mk_op"
       return 1 ;;
@@ -361,7 +383,7 @@ _adlc_forge_mock_new() {
   adlc_mkn_op=$1
   shift
   case "$adlc_mkn_op" in
-    branch_protection|commit_prs) return 0 ;;
+    branch_protection|commit_prs|pr_checks) return 0 ;;
     pr_view|pr_list|pr_merge)
       for adlc_mkn_a in "$@"; do
         case "$adlc_mkn_a" in
@@ -854,10 +876,82 @@ adlc_forge_pr_comment() {
   esac
 }
 
+# adlc_forge_pr_checks <number|url> — ONE read of a PR's CI state (REQ-719 BR-22, ADR-6).
+#
+# It never waits: a caller that wants a settled verdict reads again, and the time between
+# reads is the caller's. The output contract is in the header above. Every reported check
+# counts, required or not. A PR ref is required: gh with no ref reads the current branch's
+# PR, which is not necessarily the one the caller holds.
+#
+# GitHub. `gh pr checks` answers with its exit status as well as its rows: 1 when a check
+# failed, 8 while one is pending, and 1 with `no checks reported on the '<branch>' branch`
+# on stderr for a PR that has none (gh 2.103.3, measured 2026-11-20). _adlc_forge_run takes
+# any non-zero status for a failure, so this arm captures gh itself. Rows decide the
+# verdict whenever there are any; stderr is read only when there are none.
+#
+# Azure DevOps. The PR's policy evaluations: only Build and Status policies are CI, so a
+# reviewer policy is not listed. `az` goes through _adlc_forge_run, so fence-run's refusal
+# of the Azure DevOps backend (REQ-682 BR-5) holds for this op too.
+adlc_forge_pr_checks() {
+  [ "${ADLC_FORGE_MOCK:-0}" = "1" ] && { _adlc_forge_mock pr_checks "$@"; return $?; }
+  adlc_fk_ref=${1:-}
+  if [ -z "$adlc_fk_ref" ]; then
+    _adlc_forge_err "pr-not-found" "adlc_forge_pr_checks: no PR number or url was given, so nothing was read"
+    return 1
+  fi
+  adlc_forge_provider "${ADLC_FORGE_REPO:-.}" >/dev/null || return 2
+  case "$ADLC_FORGE_PROVIDER" in
+    github)
+      adlc_fk_errf=$(mktemp 2>/dev/null || mktemp -t forge)
+      adlc_fk_rows=$(gh pr checks "$adlc_fk_ref" --json name,bucket --jq '.[] | [.bucket, .name] | @tsv' 2>"$adlc_fk_errf")
+      adlc_fk_rc=$?
+      adlc_fk_err=$(cat "$adlc_fk_errf" 2>/dev/null)
+      adlc_fk_none=0
+      if [ -n "$adlc_fk_rows" ]; then
+        # 0 all settled, 1 one failed, 8 one pending: each is an answer when rows came back.
+        case "$adlc_fk_rc" in
+          0|1|8)
+            rm -f "$adlc_fk_errf"
+            printf '%s\n' "$adlc_fk_rows" | _adlc_forge_checks_norm tsv
+            return $? ;;
+        esac
+      elif [ "$adlc_fk_rc" -eq 0 ]; then
+        adlc_fk_none=1
+      else
+        case "$adlc_fk_err" in
+          *"no checks reported"*) adlc_fk_none=1 ;;
+        esac
+      fi
+      if [ "$adlc_fk_none" -eq 1 ]; then
+        rm -f "$adlc_fk_errf"
+        printf 'checks=none\n'
+        return 0
+      fi
+      adlc_fk_class=$(_adlc_forge_classify "$adlc_fk_err")
+      _adlc_forge_err "$adlc_fk_class" "$adlc_fk_errf"
+      rm -f "$adlc_fk_errf"
+      return "$adlc_fk_rc" ;;
+    azure-devops)
+      adlc_fk_json=$(_adlc_forge_run -- az repos pr policy list --id "$adlc_fk_ref" --output json); adlc_fk_rc=$?
+      if [ "$adlc_fk_rc" -ne 0 ]; then
+        [ -n "$adlc_fk_json" ] && printf '%s\n' "$adlc_fk_json"
+        return "$adlc_fk_rc"
+      fi
+      printf '%s\n' "$adlc_fk_json" | _adlc_forge_checks_norm ado
+      return $? ;;
+    *) _adlc_forge_err "feature-unsupported" "adlc_forge_pr_checks has no backend for provider '$ADLC_FORGE_PROVIDER'"; return 1 ;;
+  esac
+}
+
 # --- JSON -> key=value helpers (no jq dependency; gh emits compact JSON) -----
+# Every inline interpreter runs `command python3 -I`: isolated mode puts neither the working
+# directory nor a PYTHON* variable nor the user site on its path, so a `json.py` the session
+# planted in its working copy is never imported, outside the sandbox, with the run's
+# credential (REQ-719). The helpers are standard library only, and `command` bypasses a
+# function named python3, as _adlc_forge_py does (REQ-609 D5).
 # GitHub: pass-through state. Minimal parser for the flat fields gh --json emits.
 _adlc_forge_json_to_kv() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -879,7 +973,7 @@ if isinstance(d, dict):
 
 # The ids of the rulesets an effective-rules response names, one per line.
 _adlc_forge_ruleset_ids() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     with open(sys.argv[1]) as fh:
@@ -894,7 +988,7 @@ if isinstance(rules, list):
 
 # ADO: normalize `status` -> state {OPEN,MERGED,CLOSED}; surface url/number/title.
 _adlc_forge_ado_view_to_kv() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -931,7 +1025,7 @@ print("files=[]")
 
 # ADO: `az repos pr list` to the GitHub shape of the --head form (REQ-659 BR-26 b).
 _adlc_forge_ado_list_norm() {
-  python3 -c '
+  command python3 -I -c '
 import sys, json
 try:
     rows = json.load(sys.stdin)
@@ -951,4 +1045,78 @@ for d in rows if isinstance(rows, list) else []:
                 "state": {"active": "OPEN", "completed": "MERGED", "abandoned": "CLOSED"}.get(status, status.upper())})
 print(json.dumps(out))
 '
+}
+
+# The CI rows of one read, printed as adlc_forge_pr_checks's contract (REQ-719 ADR-6).
+# Mode `tsv` reads gh's `[.bucket, .name] | @tsv` rows, undoing @tsv's escapes; mode `ado`
+# reads the JSON array of an Azure DevOps PR's policy evaluations, keeping the Build and
+# Status ones (their type ids, for an organisation whose display names are translated).
+# A name's tabs, newlines, other control characters and the line and paragraph separators
+# (U+2028, U+2029, which Python's splitlines() splits on) become spaces, so each check is
+# one line. A state the mapping does not know reads pending, never pass. An answer that
+# is not a JSON array is an error, never `none`.
+_adlc_forge_checks_norm() {
+  command python3 -I -c '
+import json, sys, unicodedata
+mode = sys.argv[1]
+text = sys.stdin.buffer.read().decode("utf-8", "replace")
+def obj(value):
+    return value if isinstance(value, dict) else {}
+def one_line(name):
+    return "".join(" " if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c for c in str(name))
+def unescape(field):
+    out, i = [], 0
+    while i < len(field):
+        if field[i] == "\\" and i + 1 < len(field):
+            out.append({"t": "\t", "n": "\n", "r": "\r", "\\": "\\"}.get(field[i + 1], field[i:i + 2]))
+            i += 2
+        else:
+            out.append(field[i])
+            i += 1
+    return "".join(out)
+rows = []
+if mode == "tsv":
+    buckets = {"pass": "pass", "fail": "fail", "cancel": "fail", "pending": "pending",
+               "skipping": "skipped"}
+    for line in text.split("\n"):
+        if line:
+            bucket, _, name = line.partition("\t")
+            rows.append((buckets.get(bucket.strip(), "pending"), unescape(name)))
+else:
+    try:
+        evaluations = json.loads(text)
+    except ValueError:
+        evaluations = None
+    if not isinstance(evaluations, list):
+        print("error_class=network")
+        print("raw=adlc_forge_pr_checks: the policy evaluations are not a JSON array")
+        sys.exit(1)
+    ci_types = ("0609b952-1397-4640-95ec-e00a01b2c241", "cbdc66da-9728-4af8-aada-9a5a32e4a226")
+    statuses = {"approved": "pass", "rejected": "fail", "broken": "fail", "queued": "pending",
+                "running": "pending", "notapplicable": "skipped"}
+    for ev in evaluations:
+        conf = obj(obj(ev).get("configuration"))
+        kind = obj(conf.get("type"))
+        if kind.get("displayName") not in ("Build", "Status") and \
+                str(kind.get("id") or "").lower() not in ci_types:
+            continue
+        settings = obj(conf.get("settings"))
+        name = settings.get("displayName") or settings.get("defaultDisplayName")
+        if not name and settings.get("statusName"):
+            name = "/".join(p for p in (settings.get("statusGenre"), settings.get("statusName")) if p)
+        name = name or obj(ev.get("context")).get("buildDefinitionName") or \
+            kind.get("displayName") or "check"
+        rows.append((statuses.get(str(ev.get("status") or "").lower(), "pending"), name))
+states = [state for state, _ in rows]
+if "fail" in states:
+    verdict = "fail"
+elif "pending" in states:
+    verdict = "pending"
+elif states:
+    verdict = "pass"
+else:
+    verdict = "none"
+lines = ["checks=" + verdict] + ["check=%s\t%s" % (state, one_line(name)) for state, name in rows]
+sys.stdout.buffer.write(("\n".join(lines) + "\n").encode("utf-8"))
+' "$1"
 }

@@ -286,11 +286,11 @@ Read the printed `rc=` line, then the output above it:
 - `rc=absent`, or `rc=0` with nothing above it (no log file): **skip silently** — emit nothing for the dimension and continue to Step 2.
 - `rc=0` and the single line `no runs in 7d window`: emit `/analyze: harness-fidelity — no runs in 7d window`.
 - `rc=1` (a log none of whose lines parse) or any other non-zero: emit `/analyze: harness-fidelity audit unavailable` and continue. `/analyze` never fails loud on this dimension.
-- `rc=0` and a TSV: its header is `toolkit_version runs merged pr_ready blocked failed mean_validate_retries verify_loop_rate critical major minor nit top_classes`, one row per toolkit version. Emit the block below, one entry per row:
+- `rc=0` and a TSV: its header is `toolkit_version runs merged pr_ready blocked failed mean_validate_retries verify_loop_rate critical major minor nit top_classes rejected`, one row per toolkit version. `rejected` counts PRs a person declined at the exec engine's merge gate: they are runs, not failures, so never add them to `blocked` or `failed`. A row from an older reader has no `rejected` column; read it as `0`. Emit the block below, one entry per row:
 
 ```
 ## harness-fidelity (Step 1.10, last 7d)
-- toolkit <toolkit_version>: <runs> run(s) — <merged> merged, <pr_ready> pr-ready, <blocked> blocked, <failed> failed; mean validate retries <mean_validate_retries>; verify re-loop rate <verify_loop_rate>; findings <critical> Critical / <major> Major / <minor> Minor / <nit> Nit; top classes <top_classes>
+- toolkit <toolkit_version>: <runs> run(s) — <merged> merged, <pr_ready> pr-ready, <blocked> blocked, <failed> failed; mean validate retries <mean_validate_retries>; verify re-loop rate <verify_loop_rate>; findings <critical> Critical / <major> Major / <minor> Minor / <nit> Nit; top classes <top_classes>; <rejected> rejected at the merge gate
 ```
 
 A class in `top_classes` that also appears in an earlier version's row is a pattern the harness change did not remove; name it. A `--window <N>d` other than 7 is passed through when the user asked for one, and the heading says the same window.

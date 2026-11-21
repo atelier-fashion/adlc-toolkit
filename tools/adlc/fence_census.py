@@ -49,6 +49,19 @@ is never re-read as shell, and the interpreter check keeps a value out of every 
 code. A placeholder inside single quotes, a here-document, or an interpreter's arguments makes
 the fence unroutable.
 
+**The PR tie** (REQ-719 ADR-3): a placeholder whose value is a PR number carries the PR mark
+(``Placeholder.pr``). ``fence-run`` reads each marked value back from the forge before the
+fence runs (:func:`pr_tie_text`, the one text of that read), a tied fence's reach is read with
+that read included, and its record names the values under ``tied``. Every call of an
+``adlc_forge_pr_*`` operation must be one of a closed set of shapes, or the fence is
+unroutable (:func:`unmarked_pr_arguments`): its one PR argument first, as a marked
+placeholder, a marked variable or a name set once from ``adlc_forge_pr_create`` or
+``adlc_forge_pr_list``, then literal options and their values. The check does not follow
+where a value came from; what is not a shape is refused. So is a fence whose PR operations
+the check cannot read or the tie cannot cover (:func:`pr_operation_problems`). A fence added
+later starts tied or does not route. The one exception is :data:`DECLARED_UNTIED`, keyed by
+full fence id, whose records name the reason under ``untied``.
+
 Standard library only.
 """
 
@@ -169,9 +182,13 @@ SCOPES = {
 
 
 class Placeholder(object):
-    __slots__ = ("key", "arg", "pattern", "multi", "file", "empty_ok", "path", "scope")
+    """``pr`` is the PR mark (REQ-719 ADR-3): a value bound to a marked placeholder is checked
+    by the runner to be the open PR of the branch checked out where it was called, before any
+    command of the fence runs (:func:`pr_tie_text`)."""
+    __slots__ = ("key", "arg", "pattern", "multi", "file", "empty_ok", "path", "scope", "pr")
 
-    def __init__(self, key, arg, pattern, multi=False, file=False, path=False, scope=None):
+    def __init__(self, key, arg, pattern, multi=False, file=False, path=False, scope=None,
+                 pr=False):
         self.key = key
         self.arg = arg
         # ``$`` also matches before a final newline: an ``--arg`` value is held to the whole
@@ -181,6 +198,7 @@ class Placeholder(object):
         self.file = file
         self.path = path
         self.scope = scope
+        self.pr = pr
         self.empty_ok = bool(self.pattern.match(""))
 
     def check_scope(self, value, cwd):
@@ -214,6 +232,10 @@ def _ph(key, arg, pattern, **kw):
     return key, Placeholder(key, arg, pattern, **kw)
 
 
+#: A PR number's pattern. Every placeholder that holds one carries the PR mark (REQ-719 BR-13).
+PR_NUMBER = r"[0-9]{1,9}"
+
+
 #: ``<name>`` placeholders, by the literal text between the angle brackets (ADR-3). Closed:
 #: a name not listed here makes its fence unroutable.
 PLACEHOLDERS = dict([
@@ -238,7 +260,11 @@ PLACEHOLDERS = dict([
     _ph("token, or empty", "reason", r"[a-z-]{0,40}"),
     _ph("owner/repo", "repo", r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}"),
     _ph("short title", "title", _LINE),
-    _ph("prNumber", "pr", r"[0-9]{1,9}"),
+    _ph("prNumber", "pr", PR_NUMBER, pr=True),
+    # Phase 7's wait before one CI read (REQ-719 ADR-6): 0 to 60 seconds and nothing else. The
+    # fence is tied, so one call lasts at most the runner's PR read (fence_run.PR_TIE_TIMEOUT,
+    # 20 s), this wait (60 s) and one forge read, under a harness's shell limit.
+    _ph("ciWait", "ciWait", r"[0-9]|[1-5][0-9]|60"),
     _ph("id", "id", r"(?:(?:REQ|BUG|TASK|LESSON|ASSUME)-)?[0-9]{3,6}"),
     _ph("slug", "slug", r"[a-z0-9]+(?:-[a-z0-9]+){0,12}"),
     _ph("mark", "mark", r"adlc-transcript-mark-[0-9a-f]{16}"),
@@ -253,7 +279,7 @@ LITERAL_PLACEHOLDERS = dict([
 #: Free shell variables the prose tells the model to set before the fence (ADR-3): each is
 #: bound as ``ADLC_ARG_<name>`` like a placeholder. Closed, like PLACEHOLDERS.
 VAR_PLACEHOLDERS = dict([
-    _ph("prNumber", "prNumber", r"[0-9]{1,9}"),
+    _ph("prNumber", "prNumber", PR_NUMBER, pr=True),
     _ph("NEW_BODY", "NEW_BODY", r"[^\x00]{1,1048576}", file=True),
     _ph("FINAL_TITLE", "FINAL_TITLE", _LINE),
     # The path `skill-flag.sh create` prints, and nothing else: `mark` appends to <flag>.state
@@ -573,14 +599,20 @@ def _lookup(key):
     return PLACEHOLDERS.get(key) or LITERAL_PLACEHOLDERS.get(key)
 
 
-def plan(code):
+def plan(code, fid=None):
     """``(placeholders, sources)`` of a body the runner can run, or :class:`Unroutable`.
 
     ``placeholders`` is a list of :class:`Placeholder` (``<name>`` ones, literal ones and
-    free variables) and ``sources`` the partials the body sources, in order.
+    free variables) and ``sources`` the partials the body sources, in order. ``fid`` is the
+    fence's id: a fence :data:`DECLARED_UNTIED` names routes with an unmarked PR argument.
     """
     sources = []
     found = []
+    if "ADLC_ARG" in _dequote(code):
+        # The runner's bound values, however the name is quoted: a fence that set one could
+        # replace a value after the runner checked it, and one that read one would take a
+        # value by another name than its placeholder's (REQ-719 BR-13).
+        raise Unroutable("names ADLC_ARG_*, which only the runner sets")
     for line in code.split("\n"):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -608,7 +640,450 @@ def plan(code):
     # Dry-run the rewrite with every value bound once, so a placeholder in a position the
     # runner will not rewrite is found now, not at run time.
     transform(code, {ph.arg: ["x"] for ph in found}, root="/abs/tk")
+    problems = pr_operation_problems(code)
+    if problems:
+        raise Unroutable(problems[0])
+    unmarked = unmarked_pr_arguments(code)
+    if unmarked and fid not in DECLARED_UNTIED:
+        op, word = unmarked[0]
+        if word is None:
+            raise Unroutable("calls %s with no PR argument: gh would take the PR of the "
+                             "branch's own configuration, which the session can write and the "
+                             "runner's tie never reads (REQ-719 BR-13)" % op)
+        raise Unroutable("hands %s the word %s, which is none of the shapes its arguments may "
+                         "take: its one PR argument first, alone in its word, as a marked "
+                         "placeholder (`<prNumber>`), a marked variable (`\"$prNumber\"`) or "
+                         "`\"$n\"` set once from `$(adlc_forge_pr_create …)` or "
+                         "`$(adlc_forge_pr_list …)`; then literal options, the one-word value "
+                         "of an option the adapter consumes, and redirections (REQ-719 BR-13)"
+                         % (op, word))
     return found, sources
+
+
+# --------------------------------------------------------------------------- the PR tie
+#: The fields the runner's PR read asks for (REQ-719 ADR-3), in the ``--fields`` form both
+#: backends and the mock normalize to ``key=value`` lines (REQ-659 BR-26).
+PR_TIE_FIELDS = ("number", "state", "headRefName", "isCrossRepository")
+
+
+def pr_tie_text(arg):
+    """The shell of the runner's read of one PR-marked value (REQ-719 ADR-3), the one text of
+    it: ``fence-run`` runs it after the fence's own preload and in the fence's own environment,
+    and :func:`reach_text` adds it to what a tied fence's static reach is read from, so the
+    read the runner makes and the read the audit sees cannot drift (LESSON-845)."""
+    return 'adlc_forge_pr_view "$%s" --fields %s' % (_env_name(arg), ",".join(PR_TIE_FIELDS))
+
+
+def tied_args(placeholders):
+    """The argument names of ``placeholders`` that carry the PR mark, sorted, once each."""
+    return sorted(dict.fromkeys(ph.arg for ph in placeholders if ph.pr))
+
+
+def reach_text(code, placeholders, root="/abs/tk"):
+    """The text a runner fence's static reach is read from: the runner's PR read for each tied
+    value (:func:`pr_tie_text`), then the body as the runner runs it, with a sample value
+    bound to each placeholder."""
+    tie = "".join(pr_tie_text(arg) + "\n" for arg in tied_args(placeholders))
+    return tie + transform(code, {ph.arg: ["x"] for ph in placeholders}, root=root)
+
+
+# --------------------------------------------------------------------------- BR-13
+#: The ``adlc_forge_pr_*`` operations that take no PR: every other one is read as taking it
+#: (REQ-719 BR-13: view, edit, ready, comment, checks, merge), so an operation added to the
+#: adapter later starts checked (LESSON-781).
+NOT_PR_OPERATIONS = frozenset(("adlc_forge_pr_create", "adlc_forge_pr_list"))
+
+
+def is_pr_operation(name):
+    """Whether ``name`` is a forge operation whose positional argument is a PR."""
+    return name.startswith("adlc_forge_pr_") and name not in NOT_PR_OPERATIONS
+
+
+#: Per PR operation, the options whose next word the adapter consumes as the option's value,
+#: read from each function in ``partials/forge.sh`` (LESSON-716: parse as the reader does).
+#: Where the GitHub arm hands its whole argv to ``gh``, an option is listed only when ``gh``
+#: and the Azure DevOps arm both consume a value for it. ``view`` finds its PR itself and skips
+#: only the word after ``--fields`` (its raw mode is :data:`PR_VIEW_RAW_OPTIONS`); ``checks``
+#: takes ``$1``; ``merge``'s own reading of its PR skips only the word after
+#: ``--match-head-commit``. Any other option, and every option of an operation not named here,
+#: takes no value, so a word after it is a word of its own and is refused unless it is a shape.
+PR_OP_VALUE_OPTIONS = {
+    "adlc_forge_pr_view": frozenset(("--fields",)),
+    "adlc_forge_pr_edit": frozenset(("--title", "--body", "--body-file", "--base")),
+    "adlc_forge_pr_comment": frozenset(("--body", "--body-file")),
+    "adlc_forge_pr_merge": frozenset(("--match-head-commit",)),
+    "adlc_forge_pr_ready": frozenset(),
+    "adlc_forge_pr_checks": frozenset(),
+}
+#: ``adlc_forge_pr_view``'s raw mode: with ``--json``, ``-q``, ``--jq``, ``-R`` or ``--repo``
+#: and no ``--fields`` value, it hands its whole argv to ``gh pr view``, which consumes a value
+#: for these options.
+PR_VIEW_RAW_OPTIONS = frozenset(("--json", "-q", "--jq", "-t", "--template"))
+_VIEW_RAW_TRIGGERS = frozenset(("--json", "-q", "--jq", "-R", "--repo"))
+
+#: Fences that route although a PR operation in them takes an argument that is none of the
+#: shapes :func:`unmarked_pr_arguments` admits, each with why, by full fence id: any edit to the
+#: fence changes its id and drops its entry. Each such record names the reason under
+#: ``untied``, in the census and in the goldens.
+DECLARED_UNTIED = {
+    "architect/SKILL.md#2:587fb45d":
+        "the footprint publish takes $prnum from the pipeline-state.json that $REQ selects, a "
+        "file the session writes: an older gap of BR-13's kind, kept routed until its owner "
+        "decides (REQ-719 Phase 5)",
+}
+
+_ASSIGN_WORD = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
+#: The PR operations a fence names, wherever it names them.
+_PR_OP_NAME = re.compile(r"adlc_forge_pr_(?!(?:create|list)(?![A-Za-z0-9_]))[A-Za-z0-9_]+")
+#: Names whose value changes which repository, host, configuration or program the forge
+#: resolves: a fence that sets one, or changes directory, would act where the runner's PR read
+#: never looked.
+_FORGE_ENV = re.compile(r"^(?:GH_[A-Z0-9_]*|GIT_[A-Z0-9_]*|ADLC_FORGE_[A-Z0-9_]*|HOME|"
+                        r"XDG_CONFIG_HOME|PATH)(?:\+?=|$)")
+#: The commands that run the command after them as it is, for finding a call's head.
+_PASS_THROUGH = ("command", "exec", "nohup", "time")
+_PROCESS_SUBST = re.compile(r"[<>]\(")
+#: Commands that change what a name runs: an alias, a hashed path, a disabled builtin.
+_RENAMERS = frozenset(("alias", "unalias", "hash", "enable"))
+#: A PR argument in one of its exact spellings: a placeholder alone in its word, bare or
+#: quoted, or a variable alone in double quotes.
+_PR_PLACEHOLDER_WORD = re.compile(r"(['\"]?)<([^<>\n]+)>\1")
+_PR_VARIABLE_WORD = re.compile(r'"\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})"')
+
+
+def _dequote(word):
+    """``word`` with its quotes and backslashes taken out, as the shell reads a plain word."""
+    return re.sub(r"\\(.)", r"\1", word).replace('"', "").replace("'", "")
+
+
+def _call_head(words, through=_PASS_THROUGH):
+    """``(index, name)`` of the word that runs, after leading assignments, redirections and
+    the pass-through commands; ``(len(words), "")`` when nothing runs."""
+    k = 0
+    while k < len(words):
+        word = words[k]
+        if _ASSIGN_WORD.match(word):
+            k += 1
+            continue
+        name = _dequote(word)
+        if name in through and not (name == "command" and k + 1 < len(words) and
+                                    words[k + 1] in ("-v", "-V")):
+            k += 1
+            if name == "command" and k < len(words) and words[k] == "-p":
+                k += 1
+            continue
+        return k, name
+    return len(words), ""
+
+
+def _is_placeholder_word(word):
+    match = _PH_RE.fullmatch(word)
+    return bool(match and _lookup(match.group(1)))
+
+
+def _is_repo_option(bare):
+    """Whether ``bare`` names a repository to ``gh``: ``--repo``, ``--repo=…``, or ``-R`` alone,
+    joined to its value, or among other one-letter options (``-dR``)."""
+    return bare == "--repo" or bare.startswith("--repo=") or \
+        (bare.startswith("-") and not bare.startswith("--") and "R" in bare)
+
+
+def _unquoted(word):
+    """The characters of ``word`` the shell reads outside any quotes, escapes dropped and each
+    closed-table placeholder blanked: the runner binds a placeholder as one quoted expansion,
+    wherever it sits (:func:`transform`)."""
+    word = _PH_RE.sub(lambda m: "_" if _lookup(m.group(1)) else m.group(0), word)
+    out = []
+    i = 0
+    while i < len(word):
+        c = word[i]
+        if c == "\\":
+            i += 2
+        elif c in ("'", '"'):
+            i = _skip_quoted(word, i)
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _literal_option(word):
+    """Whether ``word`` is a literal option: text starting with ``-``, holding no expansion,
+    substitution, placeholder or unquoted glob, and naming no repository (``-R``, ``--repo``).
+    ``-`` and ``--`` are not options to ``gh``'s parser, so they are not."""
+    bare = _dequote(word)
+    return bare.startswith("-") and bare not in ("-", "--") and not _is_repo_option(bare) and \
+        not re.search(r"[$`]", word) and not _PH_RE.search(word) and \
+        not set(_unquoted(word)) & set("*?[{")
+
+
+def _plain_value(word):
+    """Whether ``word`` can stand as an option's value: anything that stays one word, so no
+    unquoted expansion, substitution, glob or brace, which field splitting or pathname
+    expansion could turn into more words."""
+    return not set(_unquoted(word)) & set("$`*?[{")
+
+
+def _value_options(op, args):
+    """The options of ``op`` whose next word is their value in this call (``args``, its words
+    after the operation, redirections removed), as the adapter decides it."""
+    if op != "adlc_forge_pr_view":
+        return PR_OP_VALUE_OPTIONS.get(op, frozenset())
+    bare = [_dequote(a) for a in args]
+    fields = [b for a, b in zip(bare, bare[1:]) if a == "--fields" and b]
+    if fields or not _VIEW_RAW_TRIGGERS & set(bare):
+        return PR_OP_VALUE_OPTIONS[op]
+    return PR_VIEW_RAW_OPTIONS
+
+
+def _forge_output(value):
+    """Whether ``value``, an assignment's whole value, is one command substitution of one call
+    of ``adlc_forge_pr_create`` or ``adlc_forge_pr_list``, chained to nothing, whose output is
+    the forge's answer, not a value the model supplies (BR-14). It names no other repository
+    (``-R``), and ``adlc_forge_pr_list``'s arguments, which choose the PR it prints, are
+    literal."""
+    if not value.startswith("$(") or value.startswith("$((") or \
+            _skip_paren(value, 1) != len(value):
+        return False
+    toks = shell_tokens(value[2:-1].strip())
+    words = [v for k, v in toks if k == "word"]
+    if any(k == "op" for k, _v in toks) or not words or words[0] not in NOT_PR_OPERATIONS:
+        return False
+    if any(_is_repo_option(_dequote(w)) for w in words[1:]):
+        return False
+    return words[0] != "adlc_forge_pr_list" or \
+        not any(re.search(r"[$`]", w) or _PH_RE.search(w) for w in words[1:])
+
+
+def _forge_made(code):
+    """The names ``code`` writes exactly once, by an assignment word standing alone whose whole
+    value is :func:`_forge_output`, and names nowhere else but as ``$name`` or ``${name}``:
+    not as a ``read``, ``for``, ``printf -v`` or ``export`` target, not in ``${name:=…}`` or
+    arithmetic, not even as text. What else could write the name is not modelled; a name it
+    could be is refused."""
+    bodies = {}
+    toks = shell_tokens(code, bodies)
+    words = []
+    alone = []                   # (index into words, name, value)
+    segment = []
+    for kind, val in toks + [("op", "\n")]:
+        if kind == "word":
+            segment.append(len(words))
+            words.append(val)
+            continue
+        if kind != "op":
+            continue
+        while segment and words[segment[0]] in _SKIP_WORDS:
+            segment.pop(0)
+        if segment and all(_ASSIGN_WORD.match(words[k]) for k in segment):
+            alone += [(k,) + _ASSIGN_WORD.match(words[k]).groups() for k in segment]
+        segment = []
+    made = set()
+    for k, name, value in alone:
+        if not _forge_output(value):
+            continue
+        ident = re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % name)
+        seen = 0
+        clean = True
+        for j, text in enumerate(words + list(bodies.values())):
+            if j < len(words) and re.fullmatch(r"-[A-Za-z]+", text):
+                continue         # an option's letters (`[ -n "$n" ]`) write no name
+            for match in ident.finditer(text):
+                start, end = match.start(), match.end()
+                if j == k and start == 0:
+                    seen += 1
+                elif text[start - 1:start] == "$" and text[end:end + 1] != "[":
+                    continue
+                elif text[start - 2:start] == "${" and text[end:end + 1] == "}":
+                    continue
+                else:
+                    clean = False
+        if clean and seen == 1:
+            made.add(name)
+    return made
+
+
+def _pr_shape(word, free, made):
+    """Whether ``word`` is a PR argument in one of its exact spellings: a marked placeholder
+    alone in its word (``<prNumber>``, ``'<prNumber>'``, ``"<prNumber>"``); a marked free
+    variable alone in double quotes (``"$prNumber"``, ``"${prNumber}"``), which the runner binds;
+    or ``"$n"`` for a name :func:`_forge_made` admits."""
+    match = _PR_PLACEHOLDER_WORD.fullmatch(word)
+    if match:
+        ph = _lookup(match.group(2))
+        return bool(ph is not None and ph.pr)
+    match = _PR_VARIABLE_WORD.fullmatch(word)
+    if not match:
+        return False
+    name = match.group(1) or match.group(2)
+    ph = VAR_PLACEHOLDERS.get(name)
+    return bool(ph is not None and ph.pr and name in free) or name in made
+
+
+def _pr_calls(code):
+    """``[(operation, words)]`` for each call of a PR operation in ``code``, substitutions
+    included, read through every wrapper :func:`_unwrap` knows."""
+    out = []
+    for words in simple_commands(code):
+        words = _unwrap(words) or []
+        if words and is_pr_operation(_dequote(words[0])):
+            out.append((_dequote(words[0]), words))
+    return out
+
+
+def unmarked_pr_arguments(code):
+    """``[(operation, word)]`` for each call in ``code`` of a PR operation
+    (:func:`is_pr_operation`) whose argv is not a closed shape (REQ-719 BR-13): ``word`` is the
+    first word that breaks it, as the fence spells it, or ``None`` for a call whose only fault
+    is that it has no PR argument. Empty when every call is a shape.
+
+    The check is a lint on the fence's authors, not a model of the shell: it does not follow
+    where a value came from, it admits these shapes and refuses everything else. After its
+    redirections are set aside, a call's words are:
+
+    1. its PR argument, exactly one, first, in a spelling :func:`_pr_shape` admits. With none,
+       ``gh`` would take the PR of the branch's own configuration, which the session can write
+       and the runner's tie never reads;
+    2. then only literal options (:func:`_literal_option`), each followed, when the adapter
+       consumes a value for it (:func:`_value_options`), by that value, which may be anything
+       that stays one word (:func:`_plain_value`).
+
+    A bare word, an unquoted or mixed expansion, a positional or special parameter, a variable
+    of any other origin, and text beside a placeholder in its word are each refused."""
+    calls = _pr_calls(code)
+    if not calls:
+        return []
+    free = set(free_vars(code))
+    made = _forge_made(code)
+    found = []
+    for op, words in calls:
+        args = []
+        target = False
+        for word in words[1:]:
+            if target:
+                target = False
+                continue
+            red = None if _is_placeholder_word(word) else _REDIRECT_WORD.match(word)
+            if red:
+                target = not red.group(1)
+                continue
+            args.append(word)
+        takes = _value_options(op, args)
+        bad = []
+        rest = args[1:]
+        if not args or not _pr_shape(args[0], free, made):
+            bad.append(None)          # no PR argument first
+            rest = args
+        value = False
+        for word in rest:
+            if value:
+                value = False
+                if not _plain_value(word):
+                    bad.append(word)
+            elif _literal_option(word):
+                value = _dequote(word) in takes
+            else:
+                bad.append(word)
+        if bad:
+            found.append((op, next((w for w in bad if w is not None), None)))
+    return found
+
+
+def _all_words(code):
+    """Every word of ``code``, the words of its command substitutions included."""
+    out = []
+    for kind, val in shell_tokens(code):
+        if kind == "word":
+            out.append(val)
+        elif kind == "subst":
+            out += _all_words(val)
+    return out
+
+
+def _functions_defined(code):
+    """The names ``code`` defines functions for, its substitutions included."""
+    out = []
+    toks = shell_tokens(code)
+    for k, (kind, val) in enumerate(toks):
+        if kind == "subst":
+            out += _functions_defined(val)
+        elif kind == "word" and val == "function" and k + 1 < len(toks) and \
+                toks[k + 1][0] == "word":
+            out.append(toks[k + 1][1])
+        elif kind == "word" and toks[k + 1:k + 3] == [("op", "("), ("op", ")")]:
+            out.append(val)
+    return out
+
+
+def pr_operation_problems(code):
+    """Why ``code``'s PR operations cannot be checked at all (REQ-719 BR-13), each a reason the
+    fence does not route, or empty. It holds for every fence, a :data:`DECLARED_UNTIED` one
+    included:
+
+    - a PR operation named anywhere but as the command of a call the check reads: through
+      ``xargs``, ``eval``, ``sh -c``, a variable or a string, its argv is not words it can see;
+    - ``-R``/``--repo`` on a PR operation, in any spelling ``gh`` reads: the runner's PR read is
+      made without it, so the operation would act in a repository the tie never read;
+    - setting ``GH_*``, ``GIT_*``, ``ADLC_FORGE_*``, ``HOME``, ``XDG_CONFIG_HOME`` or ``PATH``,
+      or changing directory, in a fence with a PR operation, for the same reason;
+    - a function, an alias, ``unalias``, ``unset -f``, ``hash`` or ``enable`` in a fence with a
+      PR operation: the adapter's functions run ``gh``, ``printf``, ``mktemp`` and more by name,
+      so a name that runs something else changes what an operation does or prints;
+    - a process substitution (``<(…)``, ``>(…)``): the check's reader ends a command at ``(``,
+      so a word after one would be an argument of the operation it never read. ``/bin/sh``,
+      which runs a fence, has none anyway."""
+    bodies = {}
+    toks = shell_tokens(code, bodies)
+    texts = [_dequote(v) for k, v in toks if k == "word"] + list(bodies.values())
+    named = [m.group(0) for t in texts for m in _PR_OP_NAME.finditer(t)]
+    if not named:
+        return []
+    problems = []
+    direct = []
+    for words in simple_commands(code):
+        _k, head = _call_head(words)
+        if is_pr_operation(head):
+            direct.append(head)
+    for op in sorted(set(named)):
+        if named.count(op) > direct.count(op):
+            problems.append("names %s outside a call the check reads (through xargs, eval, "
+                            "`sh -c`, a variable or a string), so its arguments cannot be "
+                            "checked (REQ-719 BR-13)" % op)
+    for op, words in _pr_calls(code):
+        for word in words[1:]:
+            if _is_repo_option(_dequote(word)):
+                problems.append("names the repository of %s with %s: the runner's PR read is "
+                                "made without it, so the operation would act in a repository "
+                                "the tie never read (REQ-719 BR-13)" % (op, word))
+    for val in _all_words(code):
+        if _FORGE_ENV.match(_dequote(val)):
+            problems.append("sets %s in a fence with a PR operation: the runner's PR read is "
+                            "made without it, so the operation would act where the tie never "
+                            "read (REQ-719 BR-13)" % _dequote(val).split("=", 1)[0])
+    for line in code.split("\n"):
+        if not line.lstrip().startswith("#") and _PROCESS_SUBST.search(line):
+            problems.append("uses a process substitution (%s) in a fence with a PR operation: "
+                            "the check reads what follows it as another command, so a word "
+                            "after it would reach the operation unread (REQ-719 BR-13)"
+                            % _PROCESS_SUBST.search(line).group(0))
+            break
+    for name in _functions_defined(code):
+        problems.append("defines the function %s in a fence with a PR operation: the adapter "
+                        "runs `gh`, `printf` and more by name, so a function can change what "
+                        "an operation does or prints (REQ-719 BR-13)" % name)
+    for words in simple_commands(code):
+        _k, head = _call_head(words, through=_PASS_THROUGH + ("builtin",))
+        args = [_dequote(w) for w in words[_k + 1:]]
+        if head in ("cd", "pushd", "popd"):
+            problems.append("changes directory (%s) in a fence with a PR operation: the "
+                            "runner's PR read is made where it was called, so the operation "
+                            "would act where the tie never read (REQ-719 BR-13)" % head)
+        elif head in _RENAMERS or (head == "unset" and
+                                   any(a.startswith("-") and "f" in a for a in args)):
+            problems.append("runs %s in a fence with a PR operation: it changes what a name "
+                            "runs, and the adapter runs `gh`, `printf` and more by name "
+                            "(REQ-719 BR-13)" % head)
+    return list(dict.fromkeys(problems))
 
 
 def _env_name(arg, index=None):
@@ -1091,23 +1566,28 @@ def _substs_in(text):
 _WORD_END = " \t\n;&|()"
 
 
-def shell_tokens(text):
+def shell_tokens(text, bodies=None):
     """``("word", raw)``, ``("op", op)`` and ``("subst", inner)`` tokens of shell ``text``.
 
     Quotes, ``${…}`` and ``$(…)`` stay inside their word, and each command substitution's
     inner text is also yielded, to be read as commands in turn. Comments and here-document
     bodies are dropped. A reading for the reach audit, not a shell: it is conservative where
-    it is unsure, because an unknown word fails the audit rather than passing it."""
+    it is unsure, because an unknown word fails the audit rather than passing it.
+
+    Each here-document operator is the word ``<<``. With ``bodies`` (a dict), the body of the
+    k-th one is stored under ``k``; one whose body cannot be found has no entry."""
     out = []
     docs = []
     i = 0
     n = len(text)
+    count = 0
     while i < n:
         c = text[i]
         if c == "\n":
             out.append(("op", "\n"))
             i += 1
-            for delim in docs:
+            for delim, k in docs:
+                lines = []
                 while i < n:
                     end = text.find("\n", i)
                     end = n if end == -1 else end
@@ -1115,6 +1595,9 @@ def shell_tokens(text):
                     i = end + 1
                     if line.strip() == delim:
                         break
+                    lines.append(line)
+                if bodies is not None:
+                    bodies[k] = "\n".join(lines)
             docs = []
             continue
         if c in " \t":
@@ -1143,7 +1626,8 @@ def shell_tokens(text):
                 m += 1
             delim = text[k:m].strip("'\"")
             if delim:
-                docs.append(delim)
+                docs.append((delim, count))
+            count += 1
             out.append(("word", "<<"))
             i = m
             continue
@@ -1574,13 +2058,13 @@ def _route(fence, policy, index, root, denies):
         rec["route"] = "direct"
         return rec
     try:
-        found, sources = plan(code)
+        found, sources = plan(code, fence.id)
     except Unroutable as exc:
         rec["route"], rec["reason"] = "unrouted", str(exc)
         rec["refused"] = _refused(policy, code)
         return rec
-    sample = {ph.arg: ["x"] for ph in found}
-    body = transform(code, sample, root="/abs/tk")
+    # A tied fence's reach includes the runner's own PR read (REQ-719 BR-12, LESSON-845).
+    body = reach_text(code, found)
     externals, problems, funcs = reach(body, index, (), root, denies)
     if problems:
         rec["route"] = "unrouted"
@@ -1590,6 +2074,11 @@ def _route(fence, policy, index, root, denies):
         return rec
     rec["route"] = "runner"
     rec["placeholders"] = sorted(dict.fromkeys(ph.arg for ph in found))
+    tied = tied_args(found)
+    if tied:
+        rec["tied"] = tied
+    if fence.id in DECLARED_UNTIED:
+        rec["untied"] = DECLARED_UNTIED[fence.id]
     rec["sources"] = sources
     rec["reach"] = externals
     rec["functions"] = funcs
@@ -1658,7 +2147,7 @@ def unrouted(records):
 
 def golden_doc(records):
     """The committed golden: every id with its route, placeholders and reach."""
-    keep = ("id", "route", "reason", "placeholders", "sources", "reach", "push")
+    keep = ("id", "route", "reason", "placeholders", "tied", "untied", "sources", "reach", "push")
     return {"comment": "REQ-682 exec fence census. Regenerate with "
                        "`python3 tools/adlc/fence_census.py --write`; a diff here is a fence "
                        "whose route, values or reach changed.",

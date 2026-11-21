@@ -117,7 +117,7 @@ If the user passed `--workflow` but the `Workflow` tool is unavailable, say so e
 
 6. **Summarise the sprint (REQ-648 BR-7).** When no REQ is left waiting on a reply, produce the summary from the final `{results}`: the Completed and Blocked tables and the Close-out table of Step 6's template, and its **Recurrence** section, built by the fence there over this run's REQ list. The engine already emitted one run-outcome line per REQ after its close-out pass, so the script has its input.
 
-**If the engine is `exec`:** Read `sprint/references/exec-engine.md` and follow it before you continue. It holds the launch, the dashboard, the rule for `approve`, and the operator verbs. Nothing in this file replaces it.
+**If the engine is `exec`:** Read `sprint/references/exec-engine.md` and follow it before you continue. It holds the launch, the dashboard, the rule for `approve`, and the operator verbs, among them the two ways out of a blocked run: `answer` relaunches it with the operator's reply, and `abort` drops it, leaving its branch, PR and working copy for a person. Nothing in this file replaces it.
 
 **Else (the engine is `legacy`)** — run Steps 1–6 below exactly as written. This is the existing background-`pipeline-runner` orchestration, unchanged.
 

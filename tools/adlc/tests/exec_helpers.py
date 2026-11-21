@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -322,6 +323,24 @@ class Sandbox(object):
         path = self.store / "calls.log"
         rows = [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
         return [r for r in rows if op is None or r["op"] == op]
+
+    def outcomes(self, req=None):
+        """The run-outcome log's lines (``ADLC_RUN_OUTCOMES_LOG``), parsed, in order: every
+        REQ's, or ``req``'s alone."""
+        path = self.environ["ADLC_RUN_OUTCOMES_LOG"]
+        rows = [json.loads(ln) for ln in read_text(path).splitlines() if ln] \
+            if os.path.exists(path) else []
+        return [r for r in rows if req is None or r.get("req") == req]
+
+    def blocked(self, req="REQ-901", blockers=None, **behaviour):
+        """Script ``req``'s fake to end ``blocked``, with no live process once it exits: its
+        session writes ``status: blocked`` and ``blockers`` (by default one reflector question)
+        and claims ``blocked``, after it has pushed its branch and opened its PR."""
+        behaviour.setdefault("status", "blocked")
+        behaviour.setdefault("claim", "blocked")
+        behaviour["blockers"] = blockers or [{"reason": "reflector-questions",
+                                              "question": "which?"}]
+        self.req(req, **behaviour)
 
     def log(self, run):
         with open(run.file("orchestrator.log"), encoding="utf-8") as fh:
@@ -714,6 +733,30 @@ def commit_on_main(box, files):
 def events(box, run, kind):
     """The run log's ``kind`` events' ``detail`` payloads, in order."""
     return [r["detail"] for r in box.log(run) if r["kind"] == kind]
+
+
+def status_rows(text):
+    """The dashboard ``text`` (``adlc sprint-exec status``) as each REQ's row: the REQ id to
+    its ``| REQ-xxx | …`` line and every indented line under it."""
+    rows = {}
+    current = None
+    for line in text.splitlines():
+        match = re.match(r"^\| (REQ-[0-9]+) \|", line)
+        if match:
+            current = match.group(1)
+            rows[current] = [line]
+        elif current and line.startswith("  "):
+            rows[current].append(line)
+        else:
+            current = None
+    return rows
+
+
+def ways_out(lines):
+    """Each ``sprint-exec answer …`` or ``sprint-exec abort …`` command a row's ``lines`` show,
+    as the argv after ``sprint-exec``."""
+    return [shlex.split(match.group(1)) for line in lines
+            for match in [re.search(r"sprint-exec ((?:answer|abort)\b.*)$", line)] if match]
 
 
 def popen_fails(monkeypatch, binary, when):

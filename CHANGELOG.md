@@ -594,6 +594,78 @@ is cut per `RELEASING.md`.
 
 ### Changed
 
+- **The exec engine's open findings from its first real run (REQ-719).** BUG-287 left six
+  findings that needed a decision first. Each is settled here, and no gate changes:
+  - `abort` drops a `blocked` run that has no live process. The run ends `failed`: nothing is
+    signalled, no forge call is made, and the branch, the PR and the working copy are left
+    for a person. An approval recorded before the run blocked is never executed. A blocked
+    run's dashboard row names both ways out, `answer` and `abort`, and `abort` on a run at
+    the merge gate is refused, naming `reject`. Both arms of `abort` record `exec.abortedFrom`
+    and print one line naming the REQ, who aborted it, the working copy, the branch and the PR.
+  - The run-outcome log gains the terminal `rejected`, which only engine `exec` writes, with
+    an empty reason, and the reason `aborted`, which `abort` writes under `failed`.
+    `check-run-outcomes.sh` counts `rejected` in a new last column, so no column moves. No
+    line is rewritten: a run rejected before this change stays `failed` / `other`.
+  - `fence-run` holds a PR-number value to the caller's PR, the open, same-repository PR whose
+    head is the branch checked out where the runner was called, with one read through the
+    forge adapter before the fence runs. Any other PR is exit 65, `fence_run_bad_value:`. When
+    the forge cannot be read for that check nothing runs, and the runner exits with the new
+    status 75 and one `fence_run_unverified:` line.
+  - `fence-run --arg-file` opens the file from a handle on the working directory and follows
+    no symlink at any component, so no path is checked and then opened again. A symlink inside
+    the working copy that points inside it was accepted and is now refused. A hard link is not
+    detected.
+  - The lite lane check fetches both branches each to its `refs/remotes/origin/<name>`, so on
+    a `--single-branch` clone it reaches the lane check's verdict instead of erroring.
+  - `partials/forge.sh` gains `adlc_forge_pr_checks <pr>`: one read that never waits, printing
+    `checks=<pass|fail|pending|none>` and then one `check=<state>` TAB `<name>` line per check,
+    on GitHub, Azure DevOps and the mock forge. Phase 7 of `/proceed` reads CI with it and its
+    diff from the local repository, so Phase 7 names no `gh` command. A `pending` verdict is
+    read again every `proceed.ci.interval_s` seconds (30) for at most `proceed.ci.max_reads`
+    reads (20), and a wait that ends still `pending` is never reported green. `gh pr checks`
+    stays a direct call in `/wrapup`, `/bugfix` and the workflow engine's Phase 7 prompt.
+  - Phase 7 has one rule for a CI wait that ends without green: the reads run out with checks
+    still pending or still failing, or a forge error answers twice in a row. The run never
+    reports green and does not leave Phase 7: a solo run asks you, and a `/sprint` run ends
+    `blocked` with a `ci-pending`, `ci-failed` or `ci-unread` blocker. Before, a forge error
+    read twice and `fail` on the last read went on to the merge.
+  - A first `none` from the CI read is no longer final: Phase 7 reads once more after one
+    interval, since the forge may not have registered the checks for the push yet, and only a
+    second `none` in a row means no CI checks. Past `proceed.ci.max_reads` one extra read is
+    made in all, so a forge that alternates `none` and an error cannot keep the wait open.
+  - A dashboard row shows `currentPhase` only when it is 0 to 8, and a close-out status or
+    reason on one line: text a session writes into its state file can no longer add a line,
+    such as another REQ's `sprint-exec abort` command, to its row.
+  - The run-outcome reason `aborted` is written as `other` from any engine but `exec`.
+  - `proceed.ci.interval_s` is capped at 60 seconds (was 90), and the fence runner gives its PR
+    read 20 seconds (was 60), so one tied CI call, the wait, that read and one forge read,
+    stays under a harness's 120-second shell limit.
+  - `abort` and `answer` are refused, with nothing changed, while the merge worker is rebasing
+    that run after another REQ merged: run the command again in a moment.
+  - `abort`'s line names the repositories of a cross-repo plan that had already merged
+    (`; already merged: <repo ids>`), and a `prUrl` in state with a trailing newline or a
+    non-ASCII character is no longer printed.
+  - A missing forge CLI, or a branch git cannot name, reads `fence_run_unverified` (75), not
+    a wrong PR number (65), and the runner gives a fence `/dev/null` as stdin.
+  - An approval held behind a run is released once that run is terminal on disk, or has no
+    run on disk, so an `abort` or `reject` made with no supervisor running no longer leaves a
+    later `resume` waiting forever.
+  - The census check on PR arguments is a closed set of shapes: every call of an
+    `adlc_forge_pr_*` operation is its one PR argument first (a marked placeholder, a marked
+    variable, or the number `adlc_forge_pr_create` printed in the same fence), then literal
+    options and their one-word values. Any other word does not route, nor does a call with no
+    PR argument, `-R`/`--repo`, a function or alias beside a PR operation, or an operation
+    reached through `xargs`, `eval` or `sh -c`.
+    `/architect`'s footprint fence, which takes its PR number from the session-written state
+    file, is the one fence declared untied (`DECLARED_UNTIED`, `untied` in both census files).
+  - Under an exec run the PR tie also refuses a checked-out branch that is not the run's own
+    (exit 3, before any forge read), so a local branch named after another PR's head no
+    longer passes the tie for that PR.
+  - Every inline `python3 -c` helper in `partials/forge.sh` runs as `python3 -I -c`, so a
+    module such as `json.py` planted in the working copy is not imported.
+  - Phase 7's diff fence runs `git -c core.pager=cat diff --no-ext-diff --no-textconv`, so a
+    `diff.external`, a textconv driver or a pager the session wrote into the repository's
+    config is not run.
 - **`ask-tier-deny` can prove a codex baseline from `runner-baseline` (REQ-664 BR-17(e),
   amended 2026-11-17).** Codex's model never attempts a command no allow names, so
   `ask-tier-deny`'s `baseline` stayed `not-attempted` and `deny-under-allow` undecided

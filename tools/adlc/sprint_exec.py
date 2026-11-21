@@ -75,6 +75,11 @@ HARNESS_LIVE = ("running", "stalled")
 #: The statuses of a run with no harness at work for it: a trust grant it still records
 #: outlived the harness, and the sweep revokes it (REQ-662 BR-5).
 SWEPT = TERMINAL + ("blocked",)
+#: What an `abort` carries into the primary path's state (`Orchestrator._aborted`): the
+#: working copy's state, as after the kill of a harness that was writing it, or only what the
+#: engine owns, as `reject` does, for a blocked run whose session has long exited (REQ-719 BR-2).
+CARRY_WORKING_COPY = "working-copy"
+CARRY_ENGINE_OWNED = "engine-owned"
 
 
 class Refused(Exception):
@@ -495,6 +500,9 @@ class Orchestrator(object):
         self.pending = []
         self.batch = None
         self.lock = threading.RLock()
+        # Per held REQ the merge worker is rebasing and relaunching after a merge, the REQ that
+        # merged. Changed under `lock`; `abort` and `answer` refuse a REQ in it (REQ-719 BR-3).
+        self.rebasing = {}
         self.worker = None
         self.sup_dir = None
         # --allow-unverified reaches this invocation from its own command line alone, never
@@ -880,7 +888,9 @@ class Orchestrator(object):
                         "promptPath": "prompt.txt", "logPath": "stdout.json", "stalledAt": None,
                         "trustMechanism": batch.adapter.trust_grant, "trustGrantedAt": None,
                         "trustRevokedAt": None, "exitCode": None, "exitClass": None,
-                        "abortedBy": None, "abortedAt": None}}
+                        # Who aborted the run, when, and the status `abort` found it in
+                        # (`running`, `stalled` or `blocked`; REQ-719 BR-19).
+                        "abortedBy": None, "abortedAt": None, "abortedFrom": None}}
         if batch.policy is not None:
             # What this run checks the user policy folder against, before each launch and
             # resume and when each harness exits (REQ-662 BR-4); a newer, unmarked record of the
@@ -1855,7 +1865,10 @@ class Orchestrator(object):
     def _block(self, run, state, why):
         merged = state.get("blockers") if isinstance(state.get("blockers"), list) else []
         state = dict(state, blockers=merged + [{"reason": why, "at": el.now()}])
-        self._terminal(run, "blocked", "other", state)
+        # The status, the carry and the run-outcome line are one step: an `abort` landing
+        # between them would leave `blocked` as the last line, after its `failed` (REQ-719 BR-3).
+        with self.lock:
+            self._terminal(run, "blocked", "other", state)
 
     def _touched(self, run, state):
         """The touched repos in merge order. State is data: each id is checked."""
@@ -2171,7 +2184,9 @@ class Orchestrator(object):
             self.revoke_trust(run)
             self._carry(run, {})
             self.restore_surfaces(run)          # the working copy is left (REQ-662 BR-17)
-            self._emit(run, "failed", "other")
+            # The engine's own terminal, with no reason: the operator's text is the ledger's
+            # alone, never the run-outcome log's (REQ-719 BR-18).
+            self._emit(run, "rejected", "")
             self.say("%s rejected: %s" % (req, reason))
             self._release_holds()
 
@@ -2183,6 +2198,7 @@ class Orchestrator(object):
         with self.lock:
             run = self._run(req)
             self.caller_guard(run, caller_env, caller_pid)
+            self._rebasing_guard(req)
             if run.status != "blocked":
                 raise Refused("%s is %s, not blocked" % (req, run.status))
             self._relaunch(run, text, allow_unverified, invocation)
@@ -2221,13 +2237,15 @@ class Orchestrator(object):
             raise Refused(why)
 
     def abort(self, req, by="", caller_pid=None, caller_env=None):
-        """The only way a running or stalled harness is killed (BR-20). A recorded pid is
-        signalled only while it is still the process recorded (:func:`same_process`): one the
-        OS has given another process since is never signalled, and reads as no live process
-        (REQ-662 BR-18)."""
+        """The only way a running or stalled harness is killed (BR-20), and the way a blocked
+        run with no live process is dropped (REQ-719 BR-1). A recorded pid is signalled only
+        while it is still the process recorded (:func:`same_process`): one the OS has given
+        another process since is never signalled, and reads as no live process (REQ-662
+        BR-18). Returns the line it printed."""
         with self.lock:
             run = self._run(req)
             self.caller_guard(run, caller_env, caller_pid)
+            self._rebasing_guard(req)
             pid = run.exec.get("pid")
             close = run.exec.get("closeOutPid")
             alive = same_process(pid, run.exec.get("pidStart"))
@@ -2237,11 +2255,20 @@ class Orchestrator(object):
                     os.killpg(int(close), signal.SIGTERM)
                 except OSError:
                     pass
-                self.say("%s close-out aborted by %s" % (req, by))
-                return
+                line = "%s close-out aborted by %s" % (req, by)
+                self.say(line)
+                return line
+            if not alive and run.status == "blocked":
+                # The drop (REQ-719 ADR-1): nothing is signalled and nothing goes to the forge.
+                # The branch, the PR and the working copy are left to a person.
+                self.restore_surfaces(run)      # the working copy is left (REQ-662 BR-17)
+                return self._aborted(run, by, "blocked", CARRY_ENGINE_OWNED)
             if not alive:
-                raise Refused("%s has no live process; its last status is %s"
-                              % (req, run.status))
+                gate = ", and a run at the gate is ended with `reject`, not `abort`" \
+                    if run.status == "awaiting_approval" else ""
+                raise Refused("%s has no live process; its last status is %s%s"
+                              % (req, run.status, gate))
+            found = run.status
             try:
                 os.killpg(int(pid), signal.SIGTERM)
             except OSError:
@@ -2256,12 +2283,58 @@ class Orchestrator(object):
             if proc is not None:
                 proc.poll()
             self.restore_surfaces(run)          # the working copy is left (REQ-662 BR-17)
-            run.exec.update({"abortedBy": by, "abortedAt": el.now()})
-            run.status = "failed"
-            self.revoke_trust(run)
-            self._carry(run)
-            self._emit(run, "failed", "other")
-            self.say("%s aborted by %s; working copy left at %s" % (req, by, run.wc))
+            return self._aborted(run, by, found, CARRY_WORKING_COPY)
+
+    def _aborted(self, run, by, found, carry):
+        """What both arms of :meth:`abort` do once no harness is at work for ``run``: it ends
+        ``failed``, recording who aborted it, when and the status ``found``; its trust is
+        revoked and its state carried as ``carry`` says (:data:`CARRY_WORKING_COPY` or
+        :data:`CARRY_ENGINE_OWNED`); any approval token held for it is discarded and it leaves
+        the merge queue, so an approval recorded before it was blocked is never executed; one
+        run-outcome line, ``failed`` / ``aborted``; one printed line, naming any repository
+        the engine already merged for it; and an approval held behind it is released (REQ-719
+        BR-2, BR-19)."""
+        run.exec.update({"abortedBy": by, "abortedAt": el.now(), "abortedFrom": found})
+        run.status = "failed"
+        self.revoke_trust(run)
+        self._carry(run, None if carry == CARRY_WORKING_COPY else {})
+        self.tokens.pop(run.req, None)
+        if run.req in self.queue:
+            self.queue.remove(run.req)
+        self._emit(run, "failed", "aborted")
+        urls = self._pr_urls(run)
+        merged = [rid for rid in run.doc.get("mergedRepos") or [] if rid in run.doc["repos"]]
+        line = "%s aborted by %s; working copy left at %s, branch %s%s%s" % (
+            run.req, by, run.wc, run.doc["branch"], ", PR %s" % ", ".join(urls) if urls else "",
+            "; already merged: %s" % ", ".join(merged) if merged else "")
+        self.say(line)
+        self._release_holds()
+        return line
+
+    def _pr_urls(self, run):
+        """The PR URLs recorded for ``run``: its plan's, the engine's own record, else each
+        repo's ``prUrl`` in the primary path's state that parses as a PR on the run's forge
+        host and holds nothing but printable ASCII. State is the model's data, so a value
+        that does not parse is not printed, and the printed line stays one line: the PR URL
+        pattern's ``$`` admits a trailing newline."""
+        doc = run.ledger().trusted()
+        if doc and isinstance(doc.get("plan"), dict):
+            return [pr["url"] for pr in doc["plan"].get("prs") or [] if pr.get("url")]
+        repos = run.read_primary_state().get("repos")
+        repos = repos if isinstance(repos, dict) else {}
+        out = []
+        for rid in [run.primary_repo] + sorted(r for r in run.doc["repos"]
+                                               if r != run.primary_repo):
+            entry = repos.get(rid)
+            url = entry.get("prUrl") if isinstance(entry, dict) else None
+            try:
+                es.parse_pr_url(url, self.host_of(run))
+            except es.SafetyError:
+                continue
+            if any(not "!" <= ch <= "~" for ch in url):
+                continue
+            out.append(url)
+        return out
 
     def _run(self, req):
         es.valid_req(req)
@@ -2317,10 +2390,26 @@ class Orchestrator(object):
     def _release_holds(self):
         for run in self.all_runs():
             hold = run.doc.get("holdBehind")
-            if hold and self.runs.get(hold) is not None \
-                    and self.runs[hold].status in TERMINAL:
+            if hold and self._hold_cleared(hold):
                 run.doc["holdBehind"] = None
                 run.save()
+
+    def _hold_cleared(self, hold):
+        """Whether nothing is left to wait for behind ``hold``: its run here is terminal, or,
+        when this supervisor has not loaded it, its newest run on disk is terminal or it has
+        none. An `abort` or a `reject` made with no supervisor loads only the run it ends, and
+        `resume` skips a terminal run, so the hold is read from disk (REQ-719 BR-2). A run
+        that cannot be loaded keeps the hold."""
+        ahead = self.runs.get(hold)
+        if ahead is not None:
+            return ahead.status in TERMINAL
+        path = el.find_run(self.primary, hold, self.environ)
+        if path is None:
+            return True
+        try:
+            return Run.load(path).status in TERMINAL
+        except (Refused, KeyError):
+            return False
 
     def next_ready(self):
         self._release_holds()
@@ -2369,6 +2458,11 @@ class Orchestrator(object):
 
     def execute(self, run):
         """Everything one approval covers, in order (BR-11, BR-13, BR-14)."""
+        with self.lock:
+            if run.status in TERMINAL:
+                # It ended after it left the queue: a terminal run is never merged.
+                self.say("%s is %s: nothing is merged for it" % (run.req, run.status))
+                return
         box = self.box(run)
         try:
             doc = run.ledger().trusted()
@@ -2471,16 +2565,18 @@ class Orchestrator(object):
             eg.remove_worktree(box, repo, path)
 
     def _hold(self, run, files, attempts):
-        state = run.read_primary_state()
         entry = {"blockedBy": "manual", "conflictFiles": files, "holdState": "needs-manual-rebase",
                  "rebaseAttempts": attempts,
                  "unblockCondition": "resolve the conflict on the branch by hand, then push"}
-        state["blockers"] = [entry]
-        run.status = "blocked"
-        self.revoke_trust(run)
-        self._carry(run, state)
-        self._emit(run, "blocked", "merge-conflict")
-        self.say("%s blocked: a person must resolve %s" % (run.req, ", ".join(files)))
+        # One step, as in `_block`: an `abort` waits until the run-outcome line is written.
+        with self.lock:
+            state = run.read_primary_state()
+            state["blockers"] = [entry]
+            run.status = "blocked"
+            self.revoke_trust(run)
+            self._carry(run, state)
+            self._emit(run, "blocked", "merge-conflict")
+            self.say("%s blocked: a person must resolve %s" % (run.req, ", ".join(files)))
 
     def _rebase(self, run, rid, pr, plan):
         """BR-12, in a detached worktree of the orchestrator's own."""
@@ -2568,6 +2664,12 @@ class Orchestrator(object):
         box.log("pr_ready", [url, str(res.returncode)], repo, res.returncode)
 
     def _note_merged(self, run, rid):
+        """Record that ``rid``'s PR merged: in the primary path's state, which the model's state
+        is carried into, and in the run record, which only the engine writes and which is what
+        `abort` names (REQ-719 BR-2)."""
+        merged_repos = run.doc.setdefault("mergedRepos", [])
+        if rid not in merged_repos:
+            merged_repos.append(rid)
         state = run.read_primary_state()
         repos = state.get("repos") if isinstance(state.get("repos"), dict) else {}
         entry = repos.get(rid) if isinstance(repos.get(rid), dict) else {}
@@ -2883,6 +2985,27 @@ class Orchestrator(object):
             self._rebase_held(run, merged.req)
 
     def _rebase_held(self, run, blocker):
+        """Rebase and relaunch ``run``, held behind ``blocker``, which has merged. Its status is
+        read again under the lock, and until the relaunch has started or failed `abort` and
+        `answer` refuse it (:meth:`_rebasing_guard`), so neither acts on the same run between
+        the check and the relaunch (REQ-719 BR-3)."""
+        with self.lock:
+            if run.status != "blocked":
+                return
+            self.rebasing[run.req] = blocker
+        try:
+            self._rebase_and_relaunch(run, blocker)
+        finally:
+            with self.lock:
+                self.rebasing.pop(run.req, None)
+
+    def _rebasing_guard(self, req):
+        """Refuse an op on ``req`` while the merge worker rebases it. Nothing changes."""
+        if req in self.rebasing:
+            raise Refused("%s is being rebased after %s merged; run the command again in a "
+                          "moment" % (req, self.rebasing[req]))
+
+    def _rebase_and_relaunch(self, run, blocker):
         box = self.box(run)
         ib = run.doc["integrationBranch"]
         repo = run.primary_path
@@ -2991,7 +3114,9 @@ class Orchestrator(object):
             allow, invocation = self._op_allowance(request, pid)
             self.answer(request["req"], request.get("text", ""), pid, env, allow, invocation)
         elif op == "abort":
-            self.abort(request["req"], request.get("decidedBy", ""), pid, env)
+            # The line the supervisor printed, so the client prints it too.
+            return {"ok": True, "result": self.abort(request["req"], request.get("decidedBy", ""),
+                                                     pid, env)}
         elif op == "reissue":
             run = self._run(request["req"])
             if run.status != "awaiting_approval":
@@ -3085,6 +3210,14 @@ class Orchestrator(object):
                 self.queue.append(run.req)
 
 
+def _one_line(value, limit=200):
+    """``value`` as text that stays on one dashboard line: every character that is not
+    printable (a control character, a line or paragraph separator) becomes a space, and the
+    text is cut at ``limit``. State is the session's to write, and a row holds lines an
+    operator copies (REQ-719)."""
+    return "".join(c if c.isprintable() else " " for c in str(value))[:limit]
+
+
 def render_row(run, violations=()):
     """One dashboard row, and for a run at the gate what approval will perform."""
     state = {}
@@ -3092,7 +3225,10 @@ def render_row(run, violations=()):
         state = run.read_wc_state() or run.read_primary_state()
     except OSError:
         pass
-    phase = state.get("currentPhase", "?")
+    # The state file is the session's to write: a phase that is not 0 to 8 is not shown, and
+    # no value of it can carry a second line into the row (REQ-719).
+    phase = state.get("currentPhase")
+    phase = phase if type(phase) is int and 0 <= phase <= 8 else "?"
     hold = run.doc.get("holdBehind")
     shown = run.status
     if run.status == "approved":
@@ -3146,9 +3282,15 @@ def render_row(run, violations=()):
     if run.status == "blocked":
         for item in run.read_primary_state().get("blockers") or []:
             lines.append("  blocked: a person must look: %s" % json.dumps(item)[:300])
+        # Both ways out, each a line the CLI parses: `--channel` before the REQ id, so the
+        # reply after it is read as one (REQ-719 BR-5).
+        lines.append("  answer it: sprint-exec answer --channel skill '%s' '<reply>'" % run.req)
+        lines.append("  or drop it, leaving its branch, PR and working copy: "
+                     "sprint-exec abort --channel skill '%s'" % run.req)
     closing = run.read_primary_state().get("closeOut")
     if isinstance(closing, dict) and closing.get("status") not in (None, "ok"):
-        lines.append("  close-out: %s — %s" % (closing.get("status"), closing.get("reason")))
+        lines.append("  close-out: %s — %s" % (_one_line(closing.get("status")),
+                                               _one_line(closing.get("reason"))))
     for evidence in violations:
         lines.append("  %s: %s" % (PROTOCOL, evidence))
     for note in run.doc.get("notes", []):

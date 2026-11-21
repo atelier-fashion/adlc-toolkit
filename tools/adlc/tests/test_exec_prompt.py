@@ -427,6 +427,43 @@ def test_bug287_prompt_says_how_to_call_the_runner():
     assert (fr.REFUSED, fr.BAD_VALUE, fr.SANDBOXED) == (3, 65, 69)
 
 
+def test_req719_prompt_says_what_75_means():
+    """AC-9: the delivered prompt says what the runner's exit 75 means and bounds the retry to
+    one, after the BUG-287 notes, which stay byte for byte; the scan passes, and the sentence
+    holds no token the scan refuses."""
+    text = pipeline().decode("utf-8")
+    sentence = ("Exit 75 with a `fence_run_unverified:` line means the runner could not read "
+                "the forge to check that a PR number you passed is the open PR of your "
+                "working copy's branch: nothing ran, so run the same line once more, and if it "
+                "answers the same way, report it as a blocker and stop.")
+    assert sentence in text and sentence in ep._EXEC_NOTES
+    assert ep._EXEC_NOTES.index(sentence) > ep._EXEC_NOTES.index(
+        "report the line and stop as the gate protocol says.")
+    assert not [t for t in ep.EMPTY_ALLOWLIST if t and t in sentence]
+    assert ep.scan(sentence) == []
+    assert fr.UNVERIFIED == 75 and fr.UNVERIFIED not in (fr.REFUSED, fr.BAD_VALUE, fr.SANDBOXED)
+
+
+def test_req719_prompt_bounds_the_retry_of_a_65():
+    """F4 (LESSON-892): since the PR tie, a 65 can mean a PR number that is not the working
+    copy's branch's open PR. The prompt says so, says where the right number is, and bounds the
+    retry to one: a second 65 for the same value is a blocker. The BUG-287 sentence before it
+    and the 75 sentence after it are kept; the scan passes."""
+    text = pipeline().decode("utf-8")
+    sentence = ("For a PR number, 65 can also mean it is not the open PR of your working copy's "
+                "branch: correct it from `repos[<id>].prNumber` in the state file and run the "
+                "line once more, and if a second 65 names the same value, report it as a "
+                "blocker and stop instead of retrying.")
+    assert sentence in text and sentence in ep._EXEC_NOTES
+    notes = ep._EXEC_NOTES
+    assert notes.index("so correct the value the line names and run the call again.") < \
+        notes.index(sentence) < notes.index("Only exit 3 with an `opaque_entry_refused:` line")
+    assert "Exit 75 with a `fence_run_unverified:` line means" in text
+    assert not [t for t in ep.EMPTY_ALLOWLIST if t and t in sentence]
+    assert ep.scan(sentence) == []
+    assert fr.BAD_VALUE == 65
+
+
 def test_bug287_prompt_tells_the_session_to_read_the_clock():
     """Run 5: every timestamp was `T00:00:00Z`, and the merged line reported 79,318 s."""
     for text in (pipeline().decode("utf-8"), _bug287()):

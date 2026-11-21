@@ -144,13 +144,69 @@ minutes. In launch 6 the timestamps were real.
 Costs, as Codex reported them: launch 5 used 2.1 M input tokens to the gate and 6.6 M in the
 resumed close-out, nearly all of it cached.
 
+## Two launches for REQ-719 (2026-11-21)
+
+`adlc sprint-exec run --harness codex REQ-900` again, the same lite REQ and the same staging as
+the BUG-287 launches: a throwaway clone of this toolkit (single-branch, at `main`) with a local
+bare `origin`, the stateful mock forge, a throwaway `ADLC_HOME`, `XDG_STATE_HOME` and
+run-outcome log, and the operator's real `HOME` for the Codex login. `codex-cli 0.166.0`. The
+engine ran from the REQ-719 branch at `4ec4aa6`, after the Phase 5 fixes. Nothing was approved.
+
+| Launch | Ended | Time | Why |
+|---|---|---|---|
+| 7 | `blocked`, Step 0, then `failed` by `abort` | 55 s to the block | The session ran the harness stamp (R1) as soon as it had read the telemetry file, before Step 0's lessons fence, which is what creates the primary path's state file under an exec run. R1 printed `state file not found`, and the session reported `blocked` / `setup-error` instead of going on to the lessons fence. `sprint-exec abort --channel skill REQ-900` then dropped the blocked run: one line naming the REQ, who aborted it, the working copy and the branch; the supervisor exited; the log gained `failed` / `aborted` |
+| 8 | `awaiting_approval`, then `rejected` | 7 min 28 s to the gate | No `answer` was given. The session made the same early R1 call, got the same message, ran the lessons fence and stamped again. Phase 6 made PR 101 ready through the tied fence. Phase 7 read the diff with the diff fence and CI with `adlc_forge_pr_checks`, and went on to the gate. `reject` ended it, and the log gained `rejected` with an empty reason |
+
+What launch 8 measured of REQ-719 on a real harness:
+
+- **The lane check on a single-branch clone** (BR-6). `proceed/phases-lite.md#2` fetched
+  `feat/REQ-900-space-copy-requirement` with an explicit destination and read
+  `lane_check=pass`, twice. In launch 3 of the BUG-287 runs the same clone shape read
+  `check-error`.
+- **The PR tie** (BR-10). The Phase 6 fence and the Phase 7 CI fence each ran with
+  `prNumber` 101, the open PR of the run's own branch, after the runner's own read of it.
+- **Phase 7 without `gh`** (BR-24, BR-25). The diff fence printed the three-dot diff from the
+  local repository. The CI fence was called four times, with waits of 0, 0, 30 and 30 seconds,
+  and read `checks=none` each time: the mock's PR has no checks recorded. The session went on
+  with "CI reported no checks", and never stopped for an operator, where launch 6 had.
+- **A chained call is still answered with 69.** Two calls were chained after a command with no
+  allow, read `fence_run_sandboxed`, and were rerun alone.
+- **`abort` on a blocked run and `rejected` in the log** (BR-1, BR-18, BR-19), as the table says.
+- **Trust and the user config.** `~/.codex/config.toml` had the same checksum before the
+  launches, between them and after them, held no entry for the clone afterwards, and no
+  recovery marker was left.
+
+Launch 8 used 4.8 M input tokens, 4.7 M of them cached, and 17 k output tokens.
+
+**10. A session may stamp the harness before the state file exists.** Both sessions ran R1
+before Step 0's lessons fence, though `proceed/phase-0-setup.md` places it after. R1 always
+exits 0 and prints why it did nothing; launch 8 read that and carried on, launch 7 stopped.
+Under an exec run only the runner writes the primary path's state file, so the order matters
+there and nowhere else. Not changed by REQ-719.
+
+## `adlc_forge_pr_checks` against GitHub (2026-11-21)
+
+Run once from the REQ-719 branch at `4ec4aa6` in a clone of this repository, `gh` 2.103.3,
+sourcing `partials/forge.sh` from that tree. The repository has no CI workflow.
+
+| Call | stdout | Status |
+|---|---|---|
+| `adlc_forge_pr_checks 304` (an open PR) | `checks=none` | 0 |
+| `adlc_forge_pr_checks 288` (a merged PR) | `checks=none` | 0 |
+| `adlc_forge_pr_checks 999999` (no such PR) | `error_class=pr-not-found` and a `raw=` line holding GitHub's "Could not resolve to a PullRequest" | 1 |
+
+`gh pr checks` itself exits 1 with "no checks reported" for the first two, which the adapter
+reads as `none`, not as an error. A PR with a passing, failing or pending check was not read
+against GitHub: those three verdicts are measured only against a stubbed `gh` and the mock.
+
 ## What these do not show
 
 - Whether Codex re-reads a rule file edited during a session (`rules_reload: unknown`).
 - A run against a real forge. Every launch above used the mock forge and a local origin, so
   no draft PR met GitHub's merge, no credential reached a forge, and Phase 7 had no CI to read:
-  `gh pr diff` and `gh pr checks` are direct `gh` calls, and the session either worked from the
-  local diff (launch 5) or stopped (launch 6).
+  in launches 1 to 6 `gh pr diff` and `gh pr checks` were direct `gh` calls, and the session
+  either worked from the local diff (launch 5) or stopped (launch 6); in launch 8 the CI read
+  went through the adapter and the mock answered `none`.
 - A close-out with every fix in. Launch 5's close-out ran before the engine flipped a PR to
   ready, and launch 6 was rejected at the gate.
 - Whether a session chains fence calls on a harness with no sandbox. There the chained call
