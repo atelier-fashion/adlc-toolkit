@@ -729,6 +729,18 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **A harness stamp made too early no longer reads as a failed setup (BUG-289).** Two real
+  Codex sessions ran the harness stamp (R1) as soon as they had read
+  `proceed/phases-telemetry.md`, before Step 0's lessons fence had created the primary path's
+  `pipeline-state.json`. The fence exited 0 and printed `state file not found`; one session
+  went on, the other reported `blocked` / `setup-error` and the launch was lost. Now the
+  telemetry file says that no fence runs on reading it, that R1 waits for Step 0 item 8, and
+  that `state file not found` means only that the lessons fence has not created the file yet:
+  run that fence, then the stamp again, and never stop for it. The line `run_outcome.py`
+  prints says the same, and `emit-run-outcome.sh`'s `failed` line ends "telemetry never halts
+  the pipeline, so carry on". The stamp still creates no file. A solo `/proceed` reads the
+  same text and does nothing differently: there the lessons fence has always run first. Not
+  verified by a real launch: the tests drive the fake harness.
 - **`/sprint --exec` gets a real session to the merge gate, and to a merge a forge accepts
   (BUG-287).** The first whole pipeline run on a real harness (`codex-cli 0.166.0`, six
   launches of one lite REQ against the mock forge) ended before the gate four times and then

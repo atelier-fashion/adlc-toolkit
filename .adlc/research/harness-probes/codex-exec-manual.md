@@ -184,6 +184,18 @@ exits 0 and prints why it did nothing; launch 8 read that and carried on, launch
 Under an exec run only the runner writes the primary path's state file, so the order matters
 there and nowhere else. Not changed by REQ-719.
 
+Changed by BUG-289 (2026-11-21), in the text and in the line, not in what R1 writes.
+`proceed/phases-telemetry.md`, which every engine reads and the exec prompt inlines, now says
+that no fence runs on reading the file, that R1 waits for Step 0 item 8, that on a fresh run
+the lessons fence is what creates `<state>`, and that `state file not found` is never a
+blocker: run the lessons fence if it has not run, then the fence again. R1's own line now says
+the same (`state file not found: <path> (nothing recorded, and not a blocker: …)`), and the
+wrapper's `failed` line ends "telemetry never halts the pipeline, so carry on". R1 still
+creates no file: the first writer of `<state>` decides fresh or resume. The fake session makes
+launch 7's early call under the engine and reaches the gate
+(`test_bug289_early_harness_stamp.py`). **No real launch has verified it**: whether a real
+model now goes on where launch 7 stopped is not measured.
+
 ## `adlc_forge_pr_checks` against GitHub (2026-11-21)
 
 Run once from the REQ-719 branch at `4ec4aa6` in a clone of this repository, `gh` 2.103.3,

@@ -20,6 +20,13 @@ it prints and continue, because telemetry never halts the pipeline (BR-3).
 ("Pipeline State Tracking") (the worktree's copy when that spec directory does not exist on the
 primary checkout).
 
+No fence here runs on reading this file: each waits for the step that names it, and the
+first, R1, waits for Step 0 item 8. On a fresh run `<state>` does not exist until item 7's
+lessons fence (`proceed/phase-0-setup.md`) has created it. A `run-outcome: state file not found`
+line therefore means only that the file is not there yet; it is never a blocker, a
+`setup-error` or a reason to stop. If the lessons fence has not run, run it, then run this
+fence again; if the line prints a second time, relay it and continue (BUG-289).
+
 **R1 — the harness stamp** (Step 0 item 8 in `proceed/phase-0-setup.md`, before item 8a's push). `<mode>` is
 `--fresh` on a fresh run and empty on a resume: the same decision Step 0 item 7
 makes for the lessons, read from the progress record and never from whether a

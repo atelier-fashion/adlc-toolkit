@@ -434,6 +434,48 @@ def test_record_harness_plugin_cache_has_no_sha(tmp_path):
     assert json.loads(missing.read_text())["harness"] == {"version": "-", "sha": "-"}
 
 
+def test_bug289_a_stamp_with_no_state_file_writes_nothing_and_says_what_to_do(tmp_path):
+    """BUG-289: an exec session stamped the harness before Step 0's lessons fence had created
+    the state file, and read the bare `state file not found` as a failed setup. The stamp
+    still creates nothing, because the file's first writer decides fresh or resume, and its
+    one line now says the file is not there yet, that this is no blocker, and which fence
+    creates it. Through the wrapper the status is 0 and the second line says to carry on."""
+    root = tmp_path / "cache"
+    root.mkdir()
+    (root / "VERSION").write_text("5.4.0\n", encoding="utf-8")
+    spec_dir = tmp_path / "spec"
+    spec_dir.mkdir()
+    state = spec_dir / "pipeline-state.json"
+    for mode in ([], ["--fresh"]):
+        out = _run("record-harness", "--state", str(state), "--toolkit-root", str(root), *mode)
+        assert out.returncode == 1 and out.stdout == "", (mode, out.stdout)
+        [line] = out.stderr.splitlines()
+        assert line.startswith(f"run-outcome: state file not found: {state} ("), line
+        assert "not a blocker" in line and "Step 0's lessons fence creates this file" in line
+        assert "run it, then this one again" in line
+        assert list(spec_dir.iterdir()) == [], "the stamp creates no file"
+    wrapper = DELEGATE_DIR / "emit-run-outcome.sh"
+    wrapped = subprocess.run(["sh", str(wrapper), "record-harness", "--state", str(state),
+                              "--toolkit-root", str(root), "--fresh"],
+                             capture_output=True, text=True)
+    assert wrapped.returncode == 0 and wrapped.stdout == ""
+    first, second = wrapped.stderr.splitlines()
+    assert first.startswith("run-outcome: state file not found: ") and "not a blocker" in first
+    assert second == ("run-outcome: record-harness failed (rc 1) — state not updated; "
+                      "telemetry never halts the pipeline, so carry on")
+    assert list(spec_dir.iterdir()) == []
+    # must-not-fire: once the file exists the same call stamps it and prints neither line.
+    state.write_text(json.dumps({"lessons": {"step0": {"lessons": []}}}), encoding="utf-8")
+    wrapped = subprocess.run(["sh", str(wrapper), "record-harness", "--state", str(state),
+                              "--toolkit-root", str(root), "--fresh"],
+                             capture_output=True, text=True)
+    assert wrapped.returncode == 0 and wrapped.stderr == "", wrapped.stderr
+    assert wrapped.stdout.strip() == "harness: 5.4.0 -"
+    data = json.loads(state.read_text())
+    assert data["harness"] == {"version": "5.4.0", "sha": "-"}
+    assert data["lessons"] == {"step0": {"lessons": []}}, "the lessons fence's key survives"
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_toolkit_sha_comes_from_state_not_disk(tmp_path):
     """AC-1: the line carries the Step-0 sha even after the clone moved on."""

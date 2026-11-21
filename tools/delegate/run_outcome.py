@@ -401,7 +401,12 @@ def read_state(path, missing_ok=False):
     except FileNotFoundError:
         if missing_ok:
             return None
-        raise RunOutcomeError(f"state file not found: {path}")
+        # BUG-289: a session read the bare message as a failed setup and ended its run. The
+        # line says what it means and what to do; nothing is created here, because the file's
+        # first writer decides fresh or resume (Step 0 item 7).
+        raise RunOutcomeError(f"state file not found: {path} (nothing recorded, and not a "
+                              "blocker: Step 0's lessons fence creates this file, so if that "
+                              "fence has not run, run it, then this one again)")
     except (OSError, ValueError) as exc:
         raise RunOutcomeError(f"cannot read state file {path}: {exc}") from exc
     if not isinstance(data, dict):

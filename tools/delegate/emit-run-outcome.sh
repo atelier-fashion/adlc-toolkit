@@ -44,7 +44,7 @@ fi
 
 case "${1-}" in
   record-harness|record-validate|record-verify|record-lessons-written|record-carry)
-    "$PY" "$MODULE" "$@" || echo "run-outcome: $1 failed (rc $?) — state not updated" >&2
+    "$PY" "$MODULE" "$@" || echo "run-outcome: $1 failed (rc $?) — state not updated; telemetry never halts the pipeline, so carry on" >&2
     exit 0
     ;;
   emit) shift ;;
