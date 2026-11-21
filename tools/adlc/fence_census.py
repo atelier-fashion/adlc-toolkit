@@ -52,18 +52,19 @@ the fence unroutable.
 **The PR tie** (REQ-719 ADR-3): a placeholder whose value is a PR number carries the PR mark
 (``Placeholder.pr``). ``fence-run`` reads each marked value back from the forge before the
 fence runs (:func:`pr_tie_text`, the one text of that read), a tied fence's reach is read with
-that read included, and its record names the values under ``tied``. A fence that hands an
-unmarked value to an ``adlc_forge_pr_*`` operation as its PR argument is unroutable
-(:func:`unmarked_pr_arguments`, which fails closed on what it cannot trace), and so is one
-whose PR operations the check cannot read or the tie cannot cover
-(:func:`pr_operation_problems`), so a fence added later starts tied or does not route. The
-one exception is :data:`DECLARED_UNTIED`, keyed by full fence id, whose records name the
-reason under ``untied``.
+that read included, and its record names the values under ``tied``. Every call of an
+``adlc_forge_pr_*`` operation must be one of a closed set of shapes, or the fence is
+unroutable (:func:`unmarked_pr_arguments`): its one PR argument first, as a marked
+placeholder, a marked variable or a name set once from ``adlc_forge_pr_create`` or
+``adlc_forge_pr_list``, then literal options and their values. The check does not follow
+where a value came from; what is not a shape is refused. So is a fence whose PR operations
+the check cannot read or the tie cannot cover (:func:`pr_operation_problems`). A fence added
+later starts tied or does not route. The one exception is :data:`DECLARED_UNTIED`, keyed by
+full fence id, whose records name the reason under ``untied``.
 
 Standard library only.
 """
 
-import functools
 import hashlib
 import json
 import os
@@ -607,9 +608,10 @@ def plan(code, fid=None):
     """
     sources = []
     found = []
-    if "ADLC_ARG_" in code:
-        # The runner's bound values: a fence that set one could replace a value after the
-        # runner checked it (REQ-719 BR-13).
+    if "ADLC_ARG" in _dequote(code):
+        # The runner's bound values, however the name is quoted: a fence that set one could
+        # replace a value after the runner checked it, and one that read one would take a
+        # value by another name than its placeholder's (REQ-719 BR-13).
         raise Unroutable("names ADLC_ARG_*, which only the runner sets")
     for line in code.split("\n"):
         stripped = line.strip()
@@ -643,10 +645,18 @@ def plan(code, fid=None):
         raise Unroutable(problems[0])
     unmarked = unmarked_pr_arguments(code)
     if unmarked and fid not in DECLARED_UNTIED:
-        op, what = unmarked[0]
-        raise Unroutable("passes %s, which carries no PR mark, as the PR argument of %s: the "
-                         "runner checks a PR number the model supplies only through a marked "
-                         "placeholder (REQ-719 BR-13)" % (what, op))
+        op, word = unmarked[0]
+        if word is None:
+            raise Unroutable("calls %s with no PR argument: gh would take the PR of the "
+                             "branch's own configuration, which the session can write and the "
+                             "runner's tie never reads (REQ-719 BR-13)" % op)
+        raise Unroutable("hands %s the word %s, which is none of the shapes its arguments may "
+                         "take: its one PR argument first, alone in its word, as a marked "
+                         "placeholder (`<prNumber>`), a marked variable (`\"$prNumber\"`) or "
+                         "`\"$n\"` set once from `$(adlc_forge_pr_create …)` or "
+                         "`$(adlc_forge_pr_list …)`; then literal options, the one-word value "
+                         "of an option the adapter consumes, and redirections (REQ-719 BR-13)"
+                         % (op, word))
     return found, sources
 
 
@@ -693,10 +703,10 @@ def is_pr_operation(name):
 #: read from each function in ``partials/forge.sh`` (LESSON-716: parse as the reader does).
 #: Where the GitHub arm hands its whole argv to ``gh``, an option is listed only when ``gh``
 #: and the Azure DevOps arm both consume a value for it. ``view`` finds its PR itself and skips
-#: only the word after ``--fields``; ``checks`` takes ``$1``; ``merge``'s own reading of its PR
-#: skips only the word after ``--match-head-commit``. Any other option, and every option of an
-#: operation not named here, takes no value: the word after it is checked as the PR, which can
-#: only refuse more.
+#: only the word after ``--fields`` (its raw mode is :data:`PR_VIEW_RAW_OPTIONS`); ``checks``
+#: takes ``$1``; ``merge``'s own reading of its PR skips only the word after
+#: ``--match-head-commit``. Any other option, and every option of an operation not named here,
+#: takes no value, so a word after it is a word of its own and is refused unless it is a shape.
 PR_OP_VALUE_OPTIONS = {
     "adlc_forge_pr_view": frozenset(("--fields",)),
     "adlc_forge_pr_edit": frozenset(("--title", "--body", "--body-file", "--base")),
@@ -705,10 +715,16 @@ PR_OP_VALUE_OPTIONS = {
     "adlc_forge_pr_ready": frozenset(),
     "adlc_forge_pr_checks": frozenset(),
 }
+#: ``adlc_forge_pr_view``'s raw mode: with ``--json``, ``-q``, ``--jq``, ``-R`` or ``--repo``
+#: and no ``--fields`` value, it hands its whole argv to ``gh pr view``, which consumes a value
+#: for these options.
+PR_VIEW_RAW_OPTIONS = frozenset(("--json", "-q", "--jq", "-t", "--template"))
+_VIEW_RAW_TRIGGERS = frozenset(("--json", "-q", "--jq", "-R", "--repo"))
 
-#: Fences that route although they hand a PR operation a value the check finds unmarked, each
-#: with why, by full fence id: any edit to the fence changes its id and drops its entry. Each
-#: such record names the reason under ``untied``, in the census and in the goldens.
+#: Fences that route although a PR operation in them takes an argument that is none of the
+#: shapes :func:`unmarked_pr_arguments` admits, each with why, by full fence id: any edit to the
+#: fence changes its id and drops its entry. Each such record names the reason under
+#: ``untied``, in the census and in the goldens.
 DECLARED_UNTIED = {
     "architect/SKILL.md#2:587fb45d":
         "the footprint publish takes $prnum from the pipeline-state.json that $REQ selects, a "
@@ -716,32 +732,22 @@ DECLARED_UNTIED = {
         "decides (REQ-719 Phase 5)",
 }
 
-#: A positional parameter, or their count: the runner hands a fence none, so one is always a
-#: value the fence put there itself (``set --``, a function's argument).
-_POSITIONAL_RE = re.compile(r"\$(?:[1-9@*#]|\{(?:#?[0-9]+|#?[@*]|#)(?:[^A-Za-z0-9_}][^}]*)?\})")
-#: A special parameter that is not a positional one: a status, a pid, the flags, the shell.
-_SPECIAL_RE = re.compile(r"\$(?:[?$!0-]|\{[?$!0-]\})")
-_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_NAME_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_VAR_AT = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
-_ASSIGN_WORD = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\+?=(.*)$", re.S)
-_REDIR_RE = re.compile(r"^([0-9]*)(<<<|<>|<&|>&|>>|>\||&>>|&>|<|>)(.*)$", re.S)
-_INPUT_OPS = ("<", "<<", "<<<", "<>", "<&")
-_OUTPUT_OPS = (">", ">>", ">|", "&>", "&>>", "<>")
-#: A name an arithmetic expression assigns: ``n=``, ``n+=``, ``n<<=``, ``n++``, ``--n``.
-_ARITH_SET = re.compile(r"(?:\+\+|--)\s*([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)\s*"
-                        r"(?:\+\+|--|(?:[-+*/%&|^]|<<|>>)?=(?!=))")
+_ASSIGN_WORD = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
 #: The PR operations a fence names, wherever it names them.
 _PR_OP_NAME = re.compile(r"adlc_forge_pr_(?!(?:create|list)(?![A-Za-z0-9_]))[A-Za-z0-9_]+")
-#: Names whose value changes which repository, host or configuration the forge resolves: a
-#: fence that sets one, or changes directory, would act where the runner's PR read never looked.
+#: Names whose value changes which repository, host, configuration or program the forge
+#: resolves: a fence that sets one, or changes directory, would act where the runner's PR read
+#: never looked.
 _FORGE_ENV = re.compile(r"^(?:GH_[A-Z0-9_]*|GIT_[A-Z0-9_]*|ADLC_FORGE_[A-Z0-9_]*|HOME|"
-                        r"XDG_CONFIG_HOME)(?:\+?=|$)")
+                        r"XDG_CONFIG_HOME|PATH)(?:\+?=|$)")
 #: The commands that run the command after them as it is, for finding a call's head.
 _PASS_THROUGH = ("command", "exec", "nohup", "time")
-#: What the fence's standard input is said to hold: under ``fence-run`` it is /dev/null, but
-#: the check does not rest on that.
-_STDIN = "the fence's standard input"
+#: Commands that change what a name runs: an alias, a hashed path, a disabled builtin.
+_RENAMERS = frozenset(("alias", "unalias", "hash", "enable"))
+#: A PR argument in one of its exact spellings: a placeholder alone in its word, bare or
+#: quoted, or a variable alone in double quotes.
+_PR_PLACEHOLDER_WORD = re.compile(r"(['\"]?)<([^<>\n]+)>\1")
+_PR_VARIABLE_WORD = re.compile(r'"\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})"')
 
 
 def _dequote(word):
@@ -774,798 +780,143 @@ def _is_placeholder_word(word):
     return bool(match and _lookup(match.group(1)))
 
 
-class _Node(object):
-    """One command of :func:`_parse`'s tree: ``simple`` (``words``), ``group`` (``{…}`` or
-    ``(…)``), ``if``, ``loop`` (``while``, ``until``), ``for``, ``select``, ``case``, ``func`` or
-    ``arith`` (``((…))``), with its redirections as ``(operator, target)``, a here-document's
-    target being its body. ``body`` is a list of pipelines; ``pipe`` is the one this node is an
-    element of; ``header`` a ``for`` list or ``case`` word, ``None`` for a ``for`` with none."""
-    __slots__ = ("kind", "words", "redirs", "body", "parent", "pipe", "name", "header")
-
-    def __init__(self, kind, parent):
-        self.kind = kind
-        self.words = []
-        self.redirs = []
-        self.body = []
-        self.parent = parent
-        self.pipe = None
-        self.name = None
-        self.header = None
+def _is_repo_option(bare):
+    """Whether ``bare`` names a repository to ``gh``: ``--repo``, ``--repo=…``, or ``-R`` alone,
+    joined to its value, or among other one-letter options (``-dR``)."""
+    return bare == "--repo" or bare.startswith("--repo=") or \
+        (bare.startswith("-") and not bare.startswith("--") and "R" in bare)
 
 
-class _Parser(object):
-    """A reading of :func:`shell_tokens`'s tokens into :class:`_Node` trees, for the PR
-    argument check. Not a shell: what it does not recognize it steps over, and it sets
-    ``broken`` when a construct does not close, so its reader can fail closed."""
-
-    def __init__(self, tokens):
-        self.toks = tokens
-        self.i = 0
-        self.broken = False
-
-    def peek(self, k=0):
-        j = self.i + k
-        return self.toks[j] if j < len(self.toks) else (None, None)
-
-    def at_word(self, *vals):
-        kind, val = self.peek()
-        return kind == "word" and (not vals or val in vals)
-
-    def expect(self, val):
-        if self.peek()[1] == val:
-            self.i += 1
+def _unquoted(word):
+    """The characters of ``word`` the shell reads outside any quotes, escapes dropped and each
+    closed-table placeholder blanked: the runner binds a placeholder as one quoted expansion,
+    wherever it sits (:func:`transform`)."""
+    word = _PH_RE.sub(lambda m: "_" if _lookup(m.group(1)) else m.group(0), word)
+    out = []
+    i = 0
+    while i < len(word):
+        c = word[i]
+        if c == "\\":
+            i += 2
+        elif c in ("'", '"'):
+            i = _skip_quoted(word, i)
         else:
-            self.broken = True
-
-    def newlines(self):
-        while self.peek() in (("op", "\n"), ("op", ";")):
-            self.i += 1
-
-    def statements(self, parent, ends):
-        """The pipelines up to a word or operator in ``ends`` (not consumed), or the end."""
-        pipes = []
-        while self.i < len(self.toks):
-            kind, val = self.peek()
-            if kind == "op" and val in (";", "&", "\n", "&&", "||"):
-                self.i += 1
-                continue
-            if val in ends:
-                break
-            pipe = self.pipeline(parent, ends)
-            if pipe:
-                pipes.append(pipe)
-            else:
-                self.i += 1
-                self.broken = True
-        return pipes
-
-    def pipeline(self, parent, ends):
-        pipe = []
-        if self.at_word("!"):
-            self.i += 1
-        while True:
-            node = self.command(parent, ends)
-            if node is None:
-                break
-            node.pipe = pipe
-            pipe.append(node)
-            if self.peek() != ("op", "|"):
-                break
-            self.i += 1
-            while self.peek() == ("op", "\n"):
-                self.i += 1
-        return pipe
-
-    def command(self, parent, ends):
-        kind, val = self.peek()
-        if kind is None or (kind == "word" and val in ends):
-            return None
-        if kind == "doc":
-            return self.simple(parent)
-        if kind == "op":
-            if val != "(":
-                return None
-            if self.peek(1) == ("op", "("):
-                return self.arith(parent)
-            self.i += 1
-            node = _Node("group", parent)
-            node.body = self.statements(node, (")",))
-            self.expect(")")
-            return self.redirects(node)
-        if val == "{":
-            self.i += 1
-            node = _Node("group", parent)
-            node.body = self.statements(node, ("}",))
-            self.expect("}")
-            return self.redirects(node)
-        if val == "if":
-            self.i += 1
-            node = _Node("if", parent)
-            while True:
-                node.body += self.statements(node, ("then", "elif", "else", "fi"))
-                if not self.at_word("then", "elif", "else"):
-                    break
-                self.i += 1
-            self.expect("fi")
-            return self.redirects(node)
-        if val in ("while", "until"):
-            self.i += 1
-            node = _Node("loop", parent)
-            node.body = self.statements(node, ("do",))
-            self.expect("do")
-            node.body += self.statements(node, ("done",))
-            self.expect("done")
-            return self.redirects(node)
-        if val in ("for", "select"):
-            return self.for_loop(parent, val)
-        if val == "case":
-            return self.case(parent)
-        if val == "function" and self.peek(1)[0] == "word":
-            name = self.peek(1)[1]
-            self.i += 2
-            if self.peek() == ("op", "(") and self.peek(1) == ("op", ")"):
-                self.i += 2
-            return self.function(parent, name)
-        if _NAME_OK.match(val) and self.peek(1) == ("op", "(") and self.peek(2) == ("op", ")"):
-            self.i += 3
-            return self.function(parent, val)
-        return self.simple(parent)
-
-    def for_loop(self, parent, keyword):
-        self.i += 1
-        node = _Node(keyword, parent)
-        if not self.at_word():
-            self.broken = True
-            return node
-        node.name = self.peek()[1]
-        self.i += 1
-        while self.peek() == ("op", "\n"):
-            self.i += 1
-        if self.at_word("in"):
-            self.i += 1
-            node.header = []
-            while self.at_word():
-                node.header.append(self.peek()[1])
-                self.i += 1
-        self.newlines()
-        self.expect("do")
-        node.body = self.statements(node, ("done",))
-        self.expect("done")
-        return self.redirects(node)
-
-    def case(self, parent):
-        self.i += 1
-        node = _Node("case", parent)
-        if self.at_word():
-            node.header = [self.peek()[1]]
-            self.i += 1
-        while self.peek() == ("op", "\n"):
-            self.i += 1
-        self.expect("in")
-        while self.i < len(self.toks):
-            self.newlines()
-            if self.at_word("esac"):
-                break
-            while self.i < len(self.toks) and self.peek() != ("op", ")"):
-                self.i += 1
-            self.i += 1
-            node.body += self.statements(node, (";;", "esac"))
-            if self.peek() == ("op", ";;"):
-                self.i += 1
-        self.expect("esac")
-        return self.redirects(node)
-
-    def function(self, parent, name):
-        node = _Node("func", parent)
-        node.name = name
-        while self.peek() == ("op", "\n"):
-            self.i += 1
-        body = self.command(node, ())
-        if body is None:
-            self.broken = True
-        else:
-            body.pipe = [body]
-            node.body = [body.pipe]
-        return node
-
-    def arith(self, parent):
-        node = _Node("arith", parent)
-        self.i += 2
-        depth = 0
-        while self.i < len(self.toks):
-            kind, val = self.peek()
-            self.i += 1
-            if kind == "op" and val == "(":
-                depth += 1
-            elif kind == "op" and val == ")":
-                if depth == 0:
-                    self.expect(")")
-                    return self.redirects(node)
-                depth -= 1
-            elif kind == "word":
-                node.words.append(val)
-        self.broken = True
-        return node
-
-    def simple(self, parent):
-        node = _Node("simple", parent)
-        self.collect(node)
-        return node
-
-    def redirects(self, node):
-        self.collect(node)
-        if node.kind != "simple" and node.words:
-            self.broken = True       # words after a compound command's close
-        return node
-
-    def collect(self, node):
-        """The words and here-documents up to the next operator, split into ``node``'s words
-        and redirections. A closed-table ``<name>`` word is a placeholder, not a redirection."""
-        words = []
-        while True:
-            kind, val = self.peek()
-            if kind == "word":
-                words.append(val)
-            elif kind == "doc":
-                node.redirs.append(("<<", val))
-            else:
-                break
-            self.i += 1
-        k = 0
-        while k < len(words):
-            word = words[k]
-            red = None if _is_placeholder_word(word) else _REDIR_RE.match(word)
-            if red is None:
-                node.words.append(word)
-                k += 1
-                continue
-            target = red.group(3)
-            if not target and k + 1 < len(words):
-                k += 1
-                target = words[k]
-            elif not target:
-                self.broken = True
-                target = None
-            node.redirs.append((red.group(2), target))
-            k += 1
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
-def _parse(code):
-    """``(pipelines, broken)`` of shell ``code``: see :class:`_Parser`. A here-document whose
-    body cannot be found, or a ``<<`` inside a word, which the tokenizer does not split,
-    marks the reading broken."""
+def _literal_option(word):
+    """Whether ``word`` is a literal option: text starting with ``-``, holding no expansion,
+    substitution, placeholder or unquoted glob, and naming no repository (``-R``, ``--repo``).
+    ``-`` and ``--`` are not options to ``gh``'s parser, so they are not."""
+    bare = _dequote(word)
+    return bare.startswith("-") and bare not in ("-", "--") and not _is_repo_option(bare) and \
+        not re.search(r"[$`]", word) and not _PH_RE.search(word) and \
+        not set(_unquoted(word)) & set("*?[{")
+
+
+def _plain_value(word):
+    """Whether ``word`` can stand as an option's value: anything that stays one word, so no
+    unquoted expansion, substitution, glob or brace, which field splitting or pathname
+    expansion could turn into more words."""
+    return not set(_unquoted(word)) & set("$`*?[{")
+
+
+def _value_options(op, args):
+    """The options of ``op`` whose next word is their value in this call (``args``, its words
+    after the operation, redirections removed), as the adapter decides it."""
+    if op != "adlc_forge_pr_view":
+        return PR_OP_VALUE_OPTIONS.get(op, frozenset())
+    bare = [_dequote(a) for a in args]
+    fields = [b for a, b in zip(bare, bare[1:]) if a == "--fields" and b]
+    if fields or not _VIEW_RAW_TRIGGERS & set(bare):
+        return PR_OP_VALUE_OPTIONS[op]
+    return PR_VIEW_RAW_OPTIONS
+
+
+def _forge_output(value):
+    """Whether ``value``, an assignment's whole value, is one command substitution of one call
+    of ``adlc_forge_pr_create`` or ``adlc_forge_pr_list``, chained to nothing, whose output is
+    the forge's answer, not a value the model supplies (BR-14). It names no other repository
+    (``-R``), and ``adlc_forge_pr_list``'s arguments, which choose the PR it prints, are
+    literal."""
+    if not value.startswith("$(") or value.startswith("$((") or \
+            _skip_paren(value, 1) != len(value):
+        return False
+    toks = shell_tokens(value[2:-1].strip())
+    words = [v for k, v in toks if k == "word"]
+    if any(k == "op" for k, _v in toks) or not words or words[0] not in NOT_PR_OPERATIONS:
+        return False
+    if any(_is_repo_option(_dequote(w)) for w in words[1:]):
+        return False
+    return words[0] != "adlc_forge_pr_list" or \
+        not any(re.search(r"[$`]", w) or _PH_RE.search(w) for w in words[1:])
+
+
+def _forge_made(code):
+    """The names ``code`` writes exactly once, by an assignment word standing alone whose whole
+    value is :func:`_forge_output`, and names nowhere else but as ``$name`` or ``${name}``:
+    not as a ``read``, ``for``, ``printf -v`` or ``export`` target, not in ``${name:=…}`` or
+    arithmetic, not even as text. What else could write the name is not modelled; a name it
+    could be is refused."""
     bodies = {}
-    toks = []
-    count = 0
-    broken = False
-    for kind, val in shell_tokens(code, bodies):
-        if kind == "subst":
+    toks = shell_tokens(code, bodies)
+    words = []
+    alone = []                   # (index into words, name, value)
+    segment = []
+    for kind, val in toks + [("op", "\n")]:
+        if kind == "word":
+            segment.append(len(words))
+            words.append(val)
             continue
-        if kind == "word" and val == "<<":
-            toks.append(("doc", bodies.get(count)))
-            broken = broken or count not in bodies
-            count += 1
+        if kind != "op":
             continue
-        if kind == "word" and re.search(r"(?<!<)<<(?!<)", _strip_quoted(val)):
-            broken = True
-        toks.append((kind, val))
-    parser = _Parser(toks)
-    pipes = parser.statements(None, ())
-    return pipes, broken or parser.broken
-
-
-def _strip_quoted(word):
-    """``word`` without its single-quoted parts: text no shell reads as syntax."""
-    return re.sub(r"'[^']*'", "", word)
-
-
-def _walk(pipes):
-    """Every node of ``pipes``, outer before inner."""
-    for pipe in pipes:
-        for node in pipe:
-            yield node
-            for inner in _walk(node.body):
-                yield inner
-
-
-def _own_texts(node):
-    """The texts ``node`` holds itself, not counting the commands in its body: its words, its
-    ``for`` list or ``case`` word, and its redirections' targets and here-document bodies."""
-    return node.words + (node.header or []) + [t for _op, t in node.redirs if t is not None]
-
-
-def _exempt(node):
-    """Whether ``node`` calls ``adlc_forge_pr_create`` or ``adlc_forge_pr_list``, whose output is
-    the forge's answer, not a value the model supplies, whatever their arguments hold (BR-14)."""
-    return node.kind == "simple" and _call_head(node.words)[1] in NOT_PR_OPERATIONS
-
-
-def _node_text(node):
-    """All the text of ``node`` and the commands inside it that can carry a value into what
-    it prints, every exempt call left out (:func:`_exempt`)."""
-    parts = []
-    for one in [node] + list(_walk(node.body)):
-        if not _exempt(one):
-            parts += [_filtered(t) for t in _own_texts(one)]
-    return " ".join(parts)
-
-
-@functools.lru_cache(maxsize=4096)
-def _commands_text(code):
-    """:func:`_node_text` of every top-level command of ``code``."""
-    pipes, _broken = _parse(code)
-    return " ".join(_node_text(node) for pipe in pipes for node in pipe)
-
-
-@functools.lru_cache(maxsize=4096)
-def _filtered(text):
-    """``text`` with each command substitution replaced by :func:`_commands_text` of what it
-    runs, so a substitution of an exempt call adds nothing (BR-14). Arithmetic stays as it is."""
-    out = []
-    i = 0
-    while i < len(text):
-        if text.startswith("$((", i):
-            end = _skip_paren(text, i + 1)
-            out.append(text[i:end])
-            i = end
-        elif text.startswith("$(", i):
-            end = _skip_paren(text, i + 1)
-            out.append(" %s " % _commands_text(text[i + 2:end - 1]))
-            i = end
-        elif text[i] == "`":
-            end = text.find("`", i + 1)
-            end = len(text) if end == -1 else end
-            out.append(" %s " % _commands_text(text[i + 1:end]))
-            i = end + 1
-        else:
-            out.append(text[i])
-            i += 1
-    return "".join(out)
-
-
-def _strip_substitutions(text):
-    """``text`` with each command substitution (``$(…)`` and backticks) taken out, for reading
-    what a word itself spells; an arithmetic ``$((…))`` is text, and stays."""
-    out = []
-    i = 0
-    while i < len(text):
-        if text.startswith("$((", i):
-            end = _skip_paren(text, i + 1)
-            out.append(text[i:end])
-            i = end
-        elif text.startswith("$(", i):
-            i = _skip_paren(text, i + 1)
-        elif text[i] == "`":
-            end = text.find("`", i + 1)
-            i = len(text) if end == -1 else end + 1
-        else:
-            out.append(text[i])
-            i += 1
-    return "".join(out)
-
-
-def _substitutions(text):
-    """The inner text of each command substitution in ``text``, outermost only."""
-    out = []
-    i = 0
-    while i < len(text):
-        if text.startswith("$((", i):
-            end = _skip_paren(text, i + 1)
-            out += _substitutions(text[i + 3:end - 2])
-            i = end
-        elif text.startswith("$(", i):
-            end = _skip_paren(text, i + 1)
-            out.append(text[i + 2:end - 1])
-            i = end
-        elif text[i] == "`":
-            end = text.find("`", i + 1)
-            end = len(text) if end == -1 else end
-            out.append(text[i + 1:end])
-            i = end + 1
-        else:
-            i += 1
-    return out
-
-
-def _var_refs(text):
-    """The names ``text`` reads: each ``$name`` and ``${name…}``, the names inside ``${…}``'s
-    operand, and every name inside an arithmetic expansion, a subscript or a substring offset,
-    which read a variable by its bare name."""
-    names = []
-    i = 0
-    while i < len(text):
-        if text.startswith("$((", i):
-            end = _skip_paren(text, i + 1)
-            names += _IDENT_RE.findall(text[i + 3:end - 2])
-            i = end
-        elif text.startswith("${", i):
-            end = _skip_brace(text, i + 1)
-            inner = text[i + 2:end - 1]
-            head = re.match(r"[#!]?([A-Za-z_][A-Za-z0-9_]*)", inner)
-            if head:
-                names.append(head.group(1))
-                rest = inner[head.end():]
-                if rest.startswith("[") or (rest.startswith(":") and rest[1:2] not in "-=+?"):
-                    names += _IDENT_RE.findall(rest)
+        while segment and words[segment[0]] in _SKIP_WORDS:
+            segment.pop(0)
+        if segment and all(_ASSIGN_WORD.match(words[k]) for k in segment):
+            alone += [(k,) + _ASSIGN_WORD.match(words[k]).groups() for k in segment]
+        segment = []
+    made = set()
+    for k, name, value in alone:
+        if not _forge_output(value):
+            continue
+        ident = re.compile(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % name)
+        seen = 0
+        clean = True
+        for j, text in enumerate(words + list(bodies.values())):
+            if j < len(words) and re.fullmatch(r"-[A-Za-z]+", text):
+                continue         # an option's letters (`[ -n "$n" ]`) write no name
+            for match in ident.finditer(text):
+                start, end = match.start(), match.end()
+                if j == k and start == 0:
+                    seen += 1
+                elif text[start - 1:start] == "$" and text[end:end + 1] != "[":
+                    continue
+                elif text[start - 2:start] == "${" and text[end:end + 1] == "}":
+                    continue
                 else:
-                    names += _var_refs(rest)
-            else:
-                names += _var_refs(inner)
-            i = end
-        else:
-            match = _VAR_AT.match(text, i)
-            if match:
-                names.append(match.group(1))
-                i = match.end()
-            else:
-                i += 1
-    return names
+                    clean = False
+        if clean and seen == 1:
+            made.add(name)
+    return made
 
 
-class _Flow(object):
-    """What :func:`_flow` found: ``tainted`` ``{name: what}``, ``assigned`` (every name the
-    fence gives a value), ``free`` (:func:`free_vars`) and ``paths`` ``{path: what}``, the files
-    a fence writes from tainted text, named by a literal path."""
-    __slots__ = ("tainted", "assigned", "free", "paths")
-
-
-def _taint_in(text, flow):
-    """The first model-supplied value without the PR mark ``text`` holds, spelled as the fence
-    spells it, or ``None``: a ``<name>`` or literal placeholder whose entry is unmarked, a free
-    variable a table names without the mark, a positional parameter, a tainted variable, or a
-    file the fence wrote from tainted text. A command substitution counts what it runs, less
-    every exempt call (:func:`_filtered`)."""
-    text = _filtered(text)
-    for match in _PH_RE.finditer(text):
-        ph = _lookup(match.group(1))
-        if ph is not None and not ph.pr:
-            return "<%s>" % match.group(1)
-    for lit, ph in LITERAL_PLACEHOLDERS.items():
-        if lit in text and not ph.pr:
-            return lit
-    match = _POSITIONAL_RE.search(text)
+def _pr_shape(word, free, made):
+    """Whether ``word`` is a PR argument in one of its exact spellings: a marked placeholder
+    alone in its word (``<prNumber>``, ``'<prNumber>'``, ``"<prNumber>"``); a marked free
+    variable alone in double quotes (``"$prNumber"``, ``"${prNumber}"``), which the runner binds;
+    or ``"$n"`` for a name :func:`_forge_made` admits."""
+    match = _PR_PLACEHOLDER_WORD.fullmatch(word)
     if match:
-        return "%s (a positional parameter)" % match.group(0)
-    for name in _var_refs(text):
-        if name in flow.tainted:
-            return "$%s (assigned from %s)" % (name, flow.tainted[name])
-        ph = VAR_PLACEHOLDERS.get(name)
-        if name in flow.free and ph is not None and not ph.pr:
-            return "$%s" % name
-    for path, what in sorted(flow.paths.items()):
-        if path in text:
-            return "%s (a file written from %s)" % (path, what)
-    return None
-
-
-def _feeder(node):
-    """``(text, None)``: the text that feeds ``node``'s standard input (its own input
-    redirections, or the commands piped into it or into a command around it); or ``(None,
-    why)`` when that is a descriptor or here-document the check cannot place, a function's
-    caller, or the fence's own standard input."""
-    cur = node
-    while cur is not None:
-        ins = [(op, t) for op, t in cur.redirs if op in _INPUT_OPS]
-        if ins:
-            if any(op == "<&" or t is None for op, t in ins):
-                return None, "a descriptor or here-document the check cannot place"
-            return " ".join(t for _op, t in ins), None
-        if cur.pipe and cur.pipe[0] is not cur:
-            k = next(j for j, other in enumerate(cur.pipe) if other is cur)
-            return " ".join(_node_text(other) for other in cur.pipe[:k]), None
-        if cur.kind == "func":
-            return None, "the caller of function %s" % cur.name
-        cur = cur.parent
-    return None, _STDIN
-
-
-def _unseen(word, data=False):
-    """The names ``word`` may give a value in a way :func:`_flow` does not follow: every name
-    it holds that is not a read (``$x``, ``${x…}`` without ``=``), a name an arithmetic
-    expansion only reads, an option's letters, an escaped character (``\\n``) or a segment of
-    a path. With ``data`` (a
-    here-document body) only an assigning expansion or arithmetic counts."""
-    w = _strip_substitutions(word)
-    found = set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*):?:?=", w))
-    out = []
-    i = 0
-    while i < len(w):
-        if w.startswith("$((", i):
-            end = _skip_paren(w, i + 1)
-            for match in _ARITH_SET.finditer(w[i + 3:end - 2]):
-                found.add(match.group(1) or match.group(2))
-            out.append(" ")
-            i = end
-        else:
-            out.append(w[i])
-            i += 1
-    if data:
-        return found
-    w = re.sub(r"\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*", "${", "".join(out))
-    w = _VAR_AT.sub("$", w)
-    if _dequote(w).startswith("-"):
-        w = w.split("=", 1)[1] if "=" in w else ""
-    for match in _IDENT_RE.finditer(w):
-        before = w[match.start() - 1] if match.start() else ""
-        after = w[match.end():match.end() + 2]
-        if before in ("/", ".", "\\") or (after[:1] in ("/", ".") and after != "/="):
-            continue
-        found.add(match.group(0))
-    return found
-
-
-def _flow(code):
-    """Which variables ``code`` gives a model-supplied value without the PR mark (REQ-719
-    BR-13), as a :class:`_Flow`.
-
-    Flow-insensitive: a name ever given a tainted value is tainted everywhere, so reusing a
-    name is refused, and control flow is not followed (a value the fence spells itself is its
-    own, whichever branch chose it). A value is tainted when its text holds an unmarked
-    placeholder, an unmarked free variable a table names, a positional parameter or a tainted
-    variable (:func:`_taint_in`). That text is an assignment's value with what its command
-    substitutions run, a ``for`` list, and for a ``read`` what feeds it (:func:`_feeder`): a
-    here-document, a here-string, a redirected file's name, or the commands piped in. What
-    ``adlc_forge_pr_create`` and ``adlc_forge_pr_list`` print adds nothing (BR-14).
-
-    Fail closed: a ``read`` from a descriptor, a function's caller or the fence's standard
-    input; ``for x`` over the positional parameters; ``select``; an arithmetic command and
-    ``let``; a ``getopts``; a name given a value through a computed name, which taints every
-    name; and a name that occurs anywhere the check does not read as a read or one of the
-    assignments above (``printf -v``, ``${x:=…}``, ``declare``) are tainted. A file a command
-    writes from tainted text taints the variable naming it, or its literal path, and so does
-    a command handed tainted text for each variable its arguments name (it may write that
-    file); the forge's own operations write none. Reaching the end, the iteration stops."""
-    flow = _Flow()
-    flow.free = set(free_vars(code))
-    assigns = []        # ([names], text): each name is given text's value
-    always = {}         # name: what, tainted whatever any text holds
-    weak = {}           # the same, for a construct the check does not follow: a value it can
-    #                     trace wins the message
-    file_writes = []    # ([names], literal path or None, input text, label)
-    words = []          # (word, set of names its leading `name=` is read as assigning, data)
-    computed = []
-
-    def visit(text):
-        pipes, broken = _parse(text)
-        for node in _walk(pipes):
-            for t in _own_texts(node):
-                for sub in _substitutions(t):
-                    visit(sub)
-            for op, t in node.redirs:
-                if op == "<<" and t is not None:
-                    words.append((t, (), True))
-            if node.kind == "simple":
-                simple(node, broken)
-            elif node.kind in ("for", "select"):
-                if node.header is None:
-                    always.setdefault(node.name, "a positional parameter (`for %s`)" % node.name)
-                else:
-                    assigns.append(([node.name], " ".join(node.header)))
-                    words.extend((w, (), False) for w in node.header)
-                if node.kind == "select":
-                    always.setdefault(node.name, _STDIN)
-                    always.setdefault("REPLY", _STDIN)
-            elif node.kind == "arith":
-                for w in node.words:
-                    for name in _IDENT_RE.findall(w):
-                        always.setdefault(name, "an arithmetic command")
-            elif node.kind == "case":
-                words.extend((w, (), False) for w in node.header or ())
-            writes(node)
-
-    def writes(node):
-        outs = [t for op, t in node.redirs if op in _OUTPUT_OPS and t is not None]
-        outs = [t for t in outs if _dequote(t) not in ("/dev/null", "/dev/stderr", "/dev/stdout")]
-        if not outs:
-            return
-        fed, why = _feeder(node)
-        text = _node_text(node) + " " + (fed or "")
-        for target in outs:
-            names = [n for n in _var_refs(target) if n not in flow.free]
-            literal = None if "$" in target else _dequote(target)
-            if why:
-                for name in names:
-                    always.setdefault(name, "a file written from %s" % why)
-                if literal:
-                    flow.paths.setdefault(literal, why)
-            else:
-                file_writes.append((names, literal, text, "a file written from %s"))
-            words.append((target, (), False))
-
-    def simple(node, broken):
-        ws = node.words
-        k, head = _call_head(ws, through=_PASS_THROUGH + ("builtin",))
-        for j, w in enumerate(ws):
-            match = _ASSIGN_WORD.match(w) if j < k else None
-            if match:
-                assigns.append(([match.group(1)], match.group(2)))
-                words.append((w, (match.group(1),), False))
-        args = ws[k + 1:]
-        if head in ("export", "readonly", "local") and not any(a.startswith("-") for a in args):
-            for a in args:
-                match = _ASSIGN_WORD.match(a)
-                if match:
-                    assigns.append(([match.group(1)], match.group(2)))
-                    words.append((a, (match.group(1),), False))
-                elif not _NAME_OK.match(a):
-                    words.append((a, (), False))
-                    if "$" in a.split("=", 1)[0]:
-                        computed.append(a)
-            return
-        if head == "unset":
-            words.extend((a, (), False) for a in args if not _NAME_OK.match(a))
-            return
-        if head in ("read", "mapfile", "readarray"):
-            targets = [a for a in args if _NAME_OK.match(a)]
-            fed, why = _feeder(node)
-            if broken:
-                fed, why = None, "a here-document the check cannot place"
-            if any(a.startswith("-") and ("u" in a or "p" in a) for a in args):
-                fed, why = None, "a descriptor or coprocess the check does not follow"
-            computed.extend(a for a in args if not _NAME_OK.match(a) and "$" in a)
-            targets = targets or ["REPLY" if head == "read" else "MAPFILE"]
-            if why:
-                for name in targets:
-                    always.setdefault(name, why)
-            else:
-                assigns.append((targets, fed))
-            words.extend((a, (), False) for a in args if not _NAME_OK.match(a))
-            return
-        if head == "getopts":
-            for name in ["OPTARG", "OPTIND"] + [a for a in args[1:2] if _NAME_OK.match(a)]:
-                always.setdefault(name, "getopts")
-        if head == "let":
-            for a in args:
-                for name in _IDENT_RE.findall(a):
-                    always.setdefault(name, "let")
-        if head in ("declare", "typeset", "export", "readonly", "local") and \
-                any("$" in a.split("=", 1)[0] for a in args if not a.startswith("-")):
-            computed.append(head)
-        if head in ("printf", "print") and \
-                any(a == "-v" and "$" in b for a, b in zip(args, args[1:])):
-            computed.append(head)
-        words.extend((w, (), False) for w in ws[k:])
-        if not head.startswith("adlc_forge_"):
-            names = [n for a in args for n in _var_refs(_strip_substitutions(a))
-                     if n not in flow.free]
-            if names:
-                fed, _why = _feeder(node)
-                file_writes.append((names, None, " ".join(args) + " " + (fed or ""),
-                                    "an argument of a command handed %s"))
-
-    flow.paths = {}
-    visit(code)
-    assigned = set(always)
-    for names, _text in assigns:
-        assigned.update(names)
-    for word, recognized, data in words:
-        lead = ""
-        for name in recognized:
-            match = re.match(r"%s\+?=" % name, word)
-            lead = match.group(0) if match else ""
-        for name in _unseen(word[len(lead):], data) & assigned:
-            weak.setdefault(name, "a construct the check does not follow (%s)" % word[:60])
-    # A name the fence assigns in a way none of the above reads (it is not free, yet nothing
-    # here gives it a value): what it holds is not followed either.
-    regex_assigned = {v for v in _all_assigned(code)} - assigned
-    for name in regex_assigned:
-        weak.setdefault(name, "an assignment the check does not follow")
-        assigned.add(name)
-    if computed:
-        for name in assigned:
-            weak.setdefault(name, "a variable whose name the fence computes (%s)"
-                            % computed[0][:60])
-    flow.assigned = assigned
-    flow.tainted = dict(always)
-    _spread(flow, assigns, file_writes)
-    for name, what in weak.items():
-        flow.tainted.setdefault(name, what)
-    _spread(flow, assigns, file_writes)
-    return flow
-
-
-def _spread(flow, assigns, file_writes):
-    """Taint each name given a value from tainted text, to a fixed point (:func:`_flow`)."""
-    changed = True
-    while changed:
-        changed = False
-        for names, text in assigns:
-            what = _taint_in(text, flow)
-            for name in names:
-                if what is not None and name not in flow.tainted:
-                    flow.tainted[name] = what
-                    changed = True
-        for names, literal, text, label in file_writes:
-            what = _taint_in(text, flow)
-            if what is None:
-                continue
-            for name in names:
-                if name not in flow.tainted:
-                    flow.tainted[name] = label % what
-                    changed = True
-            if literal and literal not in flow.paths:
-                flow.paths[literal] = what
-                changed = True
-
-
-def _all_assigned(code):
-    """Every name :func:`free_vars` reads as assigned in ``code``."""
-    names = set()
-    for line in code.split("\n"):
-        if line.lstrip().startswith("#"):
-            continue
-        names |= {m.group(1) for m in _ASSIGN_RE.finditer(line)}
-        for m in _FOR_READ_RE.finditer(line):
-            names |= set(m.group(1).split()) - {"in", "do"}
-    return names
-
-
-def tainted_vars(code):
-    """``{name: what}``: each variable ``code`` gives a model-supplied value without the PR
-    mark, directly or through another variable (REQ-719 BR-13, :func:`_flow`). ``what`` names
-    the value, as the fence spells it."""
-    return _flow(code).tainted
-
-
-def _pr_positionals(op, words):
-    """The words of one call of the PR operation ``op`` that can be its PR: every word after the
-    operation that is neither an option, the value of an option :data:`PR_OP_VALUE_OPTIONS`
-    names for ``op``, nor a redirection."""
-    takes = PR_OP_VALUE_OPTIONS.get(op, frozenset())
-    out = []
-    skip = False
-    for word in words[1:]:
-        if skip:
-            skip = False
-            continue
-        bare = _bare(word)
-        # A bare `<prNumber>` is a placeholder the runner rewrites, not a redirection.
-        red = None if _PH_RE.match(word) else _REDIRECT_WORD.match(word)
-        if red:
-            skip = not red.group(1)
-            continue
-        if bare.startswith("-"):
-            skip = bare in takes
-            continue
-        out.append(word)
-    return out
-
-
-def _pr_word_problem(word, flow):
-    """What makes ``word``, a PR argument, carry no PR mark, spelled as the fence spells it, or
-    ``None``. Outside its command substitutions every placeholder must be marked and every
-    variable a marked free one or one the fence assigns and :func:`_flow` finds clean; a
-    positional or special parameter, or a variable the fence never assigns, is refused. A
-    substitution is held to :func:`_taint_in`."""
-    direct = _strip_substitutions(word)
-    for match in _PH_RE.finditer(direct):
-        ph = _lookup(match.group(1))
-        if ph is not None and not ph.pr:
-            return "<%s>" % match.group(1)
-    for lit, ph in LITERAL_PLACEHOLDERS.items():
-        if lit in direct and not ph.pr:
-            return lit
-    match = _POSITIONAL_RE.search(direct)
-    if match:
-        return "%s (a positional parameter)" % match.group(0)
-    match = _SPECIAL_RE.search(direct)
-    if match:
-        return "%s (a special parameter)" % match.group(0)
-    for name in _var_refs(direct):
-        ph = VAR_PLACEHOLDERS.get(name)
-        if name in flow.free and ph is not None and name not in flow.assigned:
-            if not ph.pr:
-                return "$%s" % name
-            continue
-        if name in flow.tainted:
-            return "$%s (assigned from %s)" % (name, flow.tainted[name])
-        if name not in flow.assigned:
-            return "$%s (a variable the fence never assigns)" % name
-    for sub in _substitutions(word):
-        what = _taint_in("$(%s)" % sub, flow)
-        if what is not None:
-            return what
-    return None
+        ph = _lookup(match.group(2))
+        return bool(ph is not None and ph.pr)
+    match = _PR_VARIABLE_WORD.fullmatch(word)
+    if not match:
+        return False
+    name = match.group(1) or match.group(2)
+    ph = VAR_PLACEHOLDERS.get(name)
+    return bool(ph is not None and ph.pr and name in free) or name in made
 
 
 def _pr_calls(code):
@@ -1579,57 +930,62 @@ def _pr_calls(code):
     return out
 
 
-def pr_operation_problems(code):
-    """Why ``code``'s PR operations cannot be checked at all (REQ-719 BR-13), each a reason the
-    fence does not route, or empty:
+def unmarked_pr_arguments(code):
+    """``[(operation, word)]`` for each call in ``code`` of a PR operation
+    (:func:`is_pr_operation`) whose argv is not a closed shape (REQ-719 BR-13): ``word`` is the
+    first word that breaks it, as the fence spells it, or ``None`` for a call whose only fault
+    is that it has no PR argument. Empty when every call is a shape.
 
-    - a PR operation named anywhere but as the command of a call the check reads: through
-      ``xargs``, ``eval``, ``sh -c``, a variable or a string, its PR is not a word it can see;
-    - ``-R``/``--repo`` on a PR operation, in any spelling ``gh`` reads: the runner's PR read is
-      made without it, so the operation would act in a repository the tie never read;
-    - setting ``GH_*``, ``GIT_*``, ``ADLC_FORGE_*``, ``HOME`` or ``XDG_CONFIG_HOME``, or changing
-      directory, in a fence with a PR operation, for the same reason;
-    - an option of a PR operation whose name holds a value, which could spell either."""
-    bodies = {}
-    toks = shell_tokens(code, bodies)
-    texts = [_dequote(v) for k, v in toks if k == "word"] + list(bodies.values())
-    named = [m.group(0) for t in texts for m in _PR_OP_NAME.finditer(t)]
-    if not named:
+    The check is a lint on the fence's authors, not a model of the shell: it does not follow
+    where a value came from, it admits these shapes and refuses everything else. After its
+    redirections are set aside, a call's words are:
+
+    1. its PR argument, exactly one, first, in a spelling :func:`_pr_shape` admits. With none,
+       ``gh`` would take the PR of the branch's own configuration, which the session can write
+       and the runner's tie never reads;
+    2. then only literal options (:func:`_literal_option`), each followed, when the adapter
+       consumes a value for it (:func:`_value_options`), by that value, which may be anything
+       that stays one word (:func:`_plain_value`).
+
+    A bare word, an unquoted or mixed expansion, a positional or special parameter, a variable
+    of any other origin, and text beside a placeholder in its word are each refused."""
+    calls = _pr_calls(code)
+    if not calls:
         return []
-    problems = []
-    direct = []
-    for words in simple_commands(code):
-        k, head = _call_head(words)
-        if is_pr_operation(head):
-            direct.append(head)
-    for op in sorted(set(named)):
-        if named.count(op) > direct.count(op):
-            problems.append("names %s outside a call the check reads (through xargs, eval, "
-                            "`sh -c`, a variable or a string), so its PR argument cannot be "
-                            "checked (REQ-719 BR-13)" % op)
-    for op, words in _pr_calls(code):
+    free = set(free_vars(code))
+    made = _forge_made(code)
+    found = []
+    for op, words in calls:
+        args = []
+        target = False
         for word in words[1:]:
-            bare = _dequote(word)
-            if bare == "--repo" or bare.startswith("--repo=") or \
-                    (bare.startswith("-") and not bare.startswith("--") and "R" in bare):
-                problems.append("names the repository of %s with %s: the runner's PR read is "
-                                "made without it, so the operation would act in a repository "
-                                "the tie never read (REQ-719 BR-13)" % (op, word))
-            elif bare.startswith("-") and re.search(r"[$<`]", word.split("=", 1)[0]):
-                problems.append("hands %s the option %s, whose name holds a value: the check "
-                                "cannot tell it from the PR or -R (REQ-719 BR-13)" % (op, word))
-    for val in _all_words(code):
-        if _FORGE_ENV.match(_dequote(val)):
-            problems.append("sets %s in a fence with a PR operation: the runner's PR read is "
-                            "made without it, so the operation would act where the tie never "
-                            "read (REQ-719 BR-13)" % _dequote(val).split("=", 1)[0])
-    for words in simple_commands(code):
-        _k, head = _call_head(words)
-        if head in ("cd", "pushd", "popd"):
-            problems.append("changes directory (%s) in a fence with a PR operation: the "
-                            "runner's PR read is made where it was called, so the operation "
-                            "would act where the tie never read (REQ-719 BR-13)" % head)
-    return list(dict.fromkeys(problems))
+            if target:
+                target = False
+                continue
+            red = None if _is_placeholder_word(word) else _REDIRECT_WORD.match(word)
+            if red:
+                target = not red.group(1)
+                continue
+            args.append(word)
+        takes = _value_options(op, args)
+        bad = []
+        rest = args[1:]
+        if not args or not _pr_shape(args[0], free, made):
+            bad.append(None)          # no PR argument first
+            rest = args
+        value = False
+        for word in rest:
+            if value:
+                value = False
+                if not _plain_value(word):
+                    bad.append(word)
+            elif _literal_option(word):
+                value = _dequote(word) in takes
+            else:
+                bad.append(word)
+        if bad:
+            found.append((op, next((w for w in bad if w is not None), None)))
+    return found
 
 
 def _all_words(code):
@@ -1643,25 +999,80 @@ def _all_words(code):
     return out
 
 
-def unmarked_pr_arguments(code):
-    """``[(operation, what)]`` for each call in ``code`` of a PR operation
-    (:func:`is_pr_operation`) whose PR argument holds a model-supplied value without the PR
-    mark (REQ-719 BR-13), as :func:`_pr_word_problem` names it. A number the fence fills from
-    ``adlc_forge_pr_create`` or ``adlc_forge_pr_list`` is the forge's, not the model's (BR-14).
-    Empty when every such argument is marked. A call with no PR argument at all (the current
-    branch's PR) has none to check."""
-    calls = _pr_calls(code)
-    if not calls:
+def _functions_defined(code):
+    """The names ``code`` defines functions for, its substitutions included."""
+    out = []
+    toks = shell_tokens(code)
+    for k, (kind, val) in enumerate(toks):
+        if kind == "subst":
+            out += _functions_defined(val)
+        elif kind == "word" and val == "function" and k + 1 < len(toks) and \
+                toks[k + 1][0] == "word":
+            out.append(toks[k + 1][1])
+        elif kind == "word" and toks[k + 1:k + 3] == [("op", "("), ("op", ")")]:
+            out.append(val)
+    return out
+
+
+def pr_operation_problems(code):
+    """Why ``code``'s PR operations cannot be checked at all (REQ-719 BR-13), each a reason the
+    fence does not route, or empty. It holds for every fence, a :data:`DECLARED_UNTIED` one
+    included:
+
+    - a PR operation named anywhere but as the command of a call the check reads: through
+      ``xargs``, ``eval``, ``sh -c``, a variable or a string, its argv is not words it can see;
+    - ``-R``/``--repo`` on a PR operation, in any spelling ``gh`` reads: the runner's PR read is
+      made without it, so the operation would act in a repository the tie never read;
+    - setting ``GH_*``, ``GIT_*``, ``ADLC_FORGE_*``, ``HOME``, ``XDG_CONFIG_HOME`` or ``PATH``,
+      or changing directory, in a fence with a PR operation, for the same reason;
+    - a function, an alias, ``unalias``, ``unset -f``, ``hash`` or ``enable`` in a fence with a
+      PR operation: the adapter's functions run ``gh``, ``printf``, ``mktemp`` and more by name,
+      so a name that runs something else changes what an operation does or prints."""
+    bodies = {}
+    toks = shell_tokens(code, bodies)
+    texts = [_dequote(v) for k, v in toks if k == "word"] + list(bodies.values())
+    named = [m.group(0) for t in texts for m in _PR_OP_NAME.finditer(t)]
+    if not named:
         return []
-    flow = _flow(code)
-    found = []
-    for op, words in calls:
-        for word in _pr_positionals(op, words):
-            what = _pr_word_problem(word, flow)
-            if what is not None:
-                found.append((op, what))
-                break
-    return found
+    problems = []
+    direct = []
+    for words in simple_commands(code):
+        _k, head = _call_head(words)
+        if is_pr_operation(head):
+            direct.append(head)
+    for op in sorted(set(named)):
+        if named.count(op) > direct.count(op):
+            problems.append("names %s outside a call the check reads (through xargs, eval, "
+                            "`sh -c`, a variable or a string), so its arguments cannot be "
+                            "checked (REQ-719 BR-13)" % op)
+    for op, words in _pr_calls(code):
+        for word in words[1:]:
+            if _is_repo_option(_dequote(word)):
+                problems.append("names the repository of %s with %s: the runner's PR read is "
+                                "made without it, so the operation would act in a repository "
+                                "the tie never read (REQ-719 BR-13)" % (op, word))
+    for val in _all_words(code):
+        if _FORGE_ENV.match(_dequote(val)):
+            problems.append("sets %s in a fence with a PR operation: the runner's PR read is "
+                            "made without it, so the operation would act where the tie never "
+                            "read (REQ-719 BR-13)" % _dequote(val).split("=", 1)[0])
+    for name in _functions_defined(code):
+        problems.append("defines the function %s in a fence with a PR operation: the adapter "
+                        "runs `gh`, `printf` and more by name, so a function can change what "
+                        "an operation does or prints (REQ-719 BR-13)" % name)
+    for words in simple_commands(code):
+        _k, head = _call_head(words, through=_PASS_THROUGH + ("builtin",))
+        args = [_dequote(w) for w in words[_k + 1:]]
+        if head in ("cd", "pushd", "popd"):
+            problems.append("changes directory (%s) in a fence with a PR operation: the "
+                            "runner's PR read is made where it was called, so the operation "
+                            "would act where the tie never read (REQ-719 BR-13)" % head)
+        elif head in _RENAMERS or (head == "unset" and
+                                   any(a.startswith("-") and "f" in a for a in args)):
+            problems.append("runs %s in a fence with a PR operation: it changes what a name "
+                            "runs, and the adapter runs `gh`, `printf` and more by name "
+                            "(REQ-719 BR-13)" % head)
+    return list(dict.fromkeys(problems))
 
 
 def _env_name(arg, index=None):

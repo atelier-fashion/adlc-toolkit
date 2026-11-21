@@ -495,3 +495,25 @@ def test_req719_the_runs_own_branch_and_pr_still_run(cached, tmp_path):
     assert rc == 0 and "fence_run_" not in err, err
     assert "**Escalated to the full lane**: a reason" in forge.pr(101)["body"]
     assert forge.pr(202) == mock_pr(202, SIBLING)
+
+
+def test_req719_a_bound_value_cannot_be_replaced_by_the_fence(tmp_path):
+    """The runner makes every bound value readonly before the fence body runs, so a value it
+    checked, and a PR number it tied, cannot be replaced afterwards by any spelling of its name
+    (`read` or `printf -v` into a computed name), which the census's text check cannot see."""
+    pr = fc.PLACEHOLDERS["prNumber"]
+    component = fc.PLACEHOLDERS["component"]
+    values = {"pr": ["101"], "component": ["a", "b"]}
+    assert fr.bound_names([pr, component], values) == \
+        ["ADLC_ARG_pr", "ADLC_ARG_component_0", "ADLC_ARG_component_1"]
+    body = ('v=ADLC_\nread "${v}ARG_pr" 2>/dev/null <<EOF\n6\nEOF\n'
+            'printf -v "${v}ARG_pr" 7 2>/dev/null\necho "pr=$ADLC_ARG_pr"\n')
+    fence = fc.Fence("x.md", 1, "sh", body, "", 0, 0)
+    script = fr.script_for(fence, {"pr": ["101"]}, TOOLKIT, [pr])
+    assert "\nreadonly ADLC_ARG_pr\n" in script
+    env = fr.child_env(dict(os.environ), [pr], {"pr": ["101"]}, TOOLKIT)
+    proc = subprocess.run(["/bin/sh", "-c", script], cwd=str(tmp_path), env=env,
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, universal_newlines=True)
+    assert "pr=6" not in proc.stdout and "pr=7" not in proc.stdout, proc.stdout
+    assert proc.stdout.strip() in ("pr=101", ""), (proc.stdout, proc.stderr)

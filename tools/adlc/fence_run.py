@@ -372,6 +372,17 @@ def git_env(environ):
     return env
 
 
+def bound_names(placeholders, values):
+    """The ``ADLC_ARG_*`` names :func:`child_env` binds for ``placeholders``, in order."""
+    names = []
+    for ph in placeholders:
+        if ph.multi:
+            names += [fc._env_name(ph.arg, k) for k in range(len(values.get(ph.arg, [])))]
+        else:
+            names.append(fc._env_name(ph.arg))
+    return names
+
+
 def child_env(environ, placeholders, values, root):
     """The fence's environment: the inherited one, with every caller ``ADLC_ARG_*`` and the
     toolkit-only flag dropped and its git state replaced (:func:`git_env`), then the bound
@@ -396,9 +407,14 @@ def preload(root):
     return '. "%s/partials/adlc-home.sh"\n. "%s/partials/forge.sh"\n' % (root, root)
 
 
-def script_for(fence, values, root):
-    """The preload closure, by absolute path, then the transformed fence (ADR-4)."""
-    return preload(root) + fc.transform(fence.code, values, root)
+def script_for(fence, values, root, placeholders=()):
+    """The preload closure, by absolute path, then each bound value made readonly, then the
+    transformed fence (ADR-4). A value is checked, and a PR number tied, before the fence runs:
+    readonly keeps the fence from replacing one afterwards, by any spelling of its name
+    (``printf -v``, ``read``, a computed name), which the census's text check cannot see."""
+    names = bound_names(placeholders, values)
+    lock = "readonly %s\n" % " ".join(names) if names else ""
+    return preload(root) + lock + fc.transform(fence.code, values, root)
 
 
 def find(fid, root):
@@ -731,6 +747,10 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
                 "line again.\n" % (fid, exc.reason))
             return BAD_VALUE
         for name in head_args(rec):
+            # A branch that cannot be read is the push's refusal (3), where the PR tie answers
+            # 75 (:func:`pr_tie`). The push's guard (REQ-662 ADR-9) answers only "run" or 3, and
+            # pushes nothing on any doubt about the branch; the tie's 75 bounds one retry of a
+            # read that can fail in passing. A failed git read is not transient either way.
             try:
                 head = checked_out_branch(cwd, environ)
             except BranchUnread as exc:
@@ -741,7 +761,7 @@ def run(fid, argv, root, environ=None, cwd=None, err=None):
             why = run_branch_refusal(head, environ)
             if why:
                 raise Refusal(None, why)
-        script = script_for(fence, values, root)
+        script = script_for(fence, values, root, placeholders)
     except Refusal as exc:
         return refuse(exc.subject or fid, exc.reason, err)
     except fc.Unroutable as exc:
