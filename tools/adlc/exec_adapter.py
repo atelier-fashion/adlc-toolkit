@@ -738,8 +738,10 @@ class ExecAdapter(object):
             return None
         found = re.compile(pattern)
         for line in stderr.splitlines():
-            if found.search(line):
-                return line.strip()[:300]
+            hit = found.search(line)
+            if hit:
+                lead = len(line) - len(line.lstrip())
+                return _cut_keeping(line.strip(), max(0, hit.start() - lead))
         return None
 
     def exit_class(self, rc, result, claim, stderr=""):
@@ -765,6 +767,18 @@ class ExecAdapter(object):
         if rc is None:
             return False
         return (self.block.get("exit_codes") or {}).get(str(rc)) == "denied"
+
+
+def _cut_keeping(line, start, limit=300, keep=200):
+    """``line`` within ``limit`` characters, with the ``keep`` characters from ``start`` in it.
+
+    A refusal line quotes the whole command before the harness's own words, so a cut from the
+    left can end before them: launch 9's line is 397 characters and `rejected:` starts at 336
+    (BUG-290). When the kept part already fits the plain cut, the plain cut is returned."""
+    kept = line[start:start + keep]
+    if start + len(kept) <= limit:
+        return line[:limit]
+    return line[:limit - len(kept) - 3] + " … " + kept
 
 
 def _lines(text):
