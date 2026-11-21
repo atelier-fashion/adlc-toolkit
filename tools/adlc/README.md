@@ -803,8 +803,10 @@ executable:
   (`run_branch_refusal`, the check a push fence gets): any other is 3, with an
   `opaque_entry_refused:` line, before any read. Without it a session could check out a local
   branch named after another PR's head and pass the tie for that PR. The adapter's own
-  `opaque_entry_refused:` (its Azure DevOps arm under the runner) is passed through as 3. Any other error class, an answer that does not parse, or no answer in
-  20 s is 75. A tied fence's census record names its values under `tied`, and its reach
+  `opaque_entry_refused:` (its Azure DevOps arm under the runner) is passed through as 3. Any other error class, an answer that does not parse, no answer in
+  20 s, a forge CLI that could not be run (the read exited 126, 127 or on a signal: a missing
+  `gh` is not a wrong number), or a branch git could not name for a reason other than a
+  detached `HEAD` is 75. A tied fence's census record names its values under `tied`, and its reach
   includes the read. One tied CI call, Phase 7's, therefore lasts at most its wait (`ciWait`
   admits 0 to 60 seconds), the read (at most 20 s) and one forge read.
   The routing rule fails closed. A runner fence does not route, and `fence_census.py --check`
@@ -817,8 +819,16 @@ executable:
   holds. Only what `adlc_forge_pr_create` or `adlc_forge_pr_list` prints is exempt (BR-14).
   Option values are skipped only for the options the adapter's own parser consumes a value
   for, so a word after any other option is checked as the PR, and `-R`/`--repo` on a PR
-  operation is refused: the tie's read is made without it. The check is flow-insensitive, so
-  a name ever assigned from tainted text is tainted wherever it is used.
+  operation is refused: the tie's read is made without it. Refused for the same reason is
+  anything else in a fence with a PR operation that would move the operation away from what
+  the tie read, or out of the check's sight: an assignment to a `GH_*`, `GIT_*`,
+  `ADLC_FORGE_*` name or to `HOME`, a `cd`, an `ADLC_ARG_*` name written in the fence, and a
+  PR operation reached through `xargs`, `eval`, `sh -c`, a variable or a string instead of
+  being a command the check reads. What cannot be traced at all counts as tainted: a `read`
+  from the fence's own stdin (the runner gives a fence `/dev/null` there), a `for` with no
+  list, `printf -v`, `${x:=…}`, arithmetic assignment and a value written to a file and read
+  back. The check is flow-insensitive, so a name ever assigned from tainted text is tainted
+  wherever it is used.
   **One fence is declared untied.** `/architect`'s footprint fence (`architect/SKILL.md`)
   takes its PR number from `pipeline-state.json`, which the session writes, so it is not held
   to the caller's PR. `fence_census.py` names it in a closed table, `DECLARED_UNTIED`, keyed
@@ -894,7 +904,9 @@ discarded, the run leaves the merge queue, and approvals held behind it are rele
 `awaiting_approval` with no live process `abort` is refused, naming `reject`. Both arms record
 `exec.abortedFrom`, the status `abort` found (`running`, `stalled` or `blocked`), beside
 `exec.abortedBy` and `exec.abortedAt`, and print one line naming the REQ, who aborted it, the
-working copy, the branch and the PR. The kill arm also discards the token, takes the run out
+working copy, the branch and the PR, and, when the run was blocked after some repositories
+of a cross-repo plan had merged, `; already merged: <repo ids>`, read from `mergedRepos` in
+the run record, which only the engine writes. The kill arm also discards the token, takes the run out
 of the merge queue and releases approvals held behind it. `abort` and `answer` are refused,
 with nothing changed, while the merge worker is rebasing that run after another REQ merged:
 run the command again once the worker has relaunched it or halted it again. A hold is released

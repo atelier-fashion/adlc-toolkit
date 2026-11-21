@@ -77,7 +77,12 @@ held for the run, takes the run out of the merge queue, emits `failed` / `aborte
 line and releases holds. The printed line names the REQ, who aborted it, the working copy, the
 branch and the PR URL when one is recorded: the approval plan's, else each repo's `prUrl` in
 the primary path's state that parses as a PR on the run's forge host, so a malformed value in
-state is not printed. Two races the review found are closed:
+state is not printed (a value that is not printable ASCII is dropped too, and `PR_URL` ends in
+`\Z`, so a trailing newline no longer parses). When repositories of a cross-repo plan merged
+before the run blocked, the line ends `; already merged: <repo ids>`: `_note_merged` now
+writes `mergedRepos` into the run record, which only the engine writes, since the per-repo
+`merged` flag in the state file is the session's to write. `execute` refuses a run whose
+status is terminal, with one line and no forge call. Two races the review found are closed:
 
 - **The unblock pass.** After a merge the worker restores a held run's surfaces, rebases it,
   force-pushes and relaunches it, outside the supervisor's lock. The Orchestrator keeps the set
@@ -178,6 +183,17 @@ that failed open).** It fails closed: what the check cannot trace does not route
 - The one exemption is BR-14's: a substitution or pipeline whose command is
   `adlc_forge_pr_create` or `adlc_forge_pr_list` contributes no taint, whatever its arguments
   hold.
+- What cannot be traced counts as tainted: a `read` from the fence's own stdin (the runner
+  gives a fence `/dev/null` there), a `for` with no list, `printf -v`, `${x:=…}`, arithmetic
+  assignment, a computed variable name, and a value written to a file and read back.
+- A PR operation must be a command the check reads. One reached through `xargs`, `eval`,
+  `sh -c`, a variable or a string is refused, and so is anything in the fence that would move
+  the operation away from what the tie read: `-R`/`--repo` in any spelling, an assignment to
+  a `GH_*`, `GIT_*`, `ADLC_FORGE_*` name or to `HOME`, a `cd`, and an `ADLC_ARG_*` name.
+- The runner's verdicts gained two unverified cases (75): a forge CLI that could not be run
+  (the read exited 126, 127 or on a signal; the classifier files a shell's "command not
+  found" under `network`, not `pr-not-found`), and a branch git could not name for a reason
+  other than a detached `HEAD`. A directory that is not a repository still reads 3.
 - A positional parameter (`$1` to `$9`, `${1}`, `$@`, `$*`) as a PR argument is refused: the
   runner hands a fence none, so one is always something the fence put there (`set --`, a
   function's arguments).

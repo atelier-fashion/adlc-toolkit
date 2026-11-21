@@ -637,6 +637,11 @@ is cut per `RELEASING.md`.
     stays under a harness's 120-second shell limit.
   - `abort` and `answer` are refused, with nothing changed, while the merge worker is rebasing
     that run after another REQ merged: run the command again in a moment.
+  - `abort`'s line names the repositories of a cross-repo plan that had already merged
+    (`; already merged: <repo ids>`), and a `prUrl` in state with a trailing newline or a
+    non-ASCII character is no longer printed.
+  - A missing forge CLI, or a branch git cannot name, reads `fence_run_unverified` (75), not
+    a wrong PR number (65), and the runner gives a fence `/dev/null` as stdin.
   - An approval held behind a run is released once that run is terminal on disk, or has no
     run on disk, so an `abort` or `reject` made with no supervisor running no longer leaves a
     later `resume` waiting forever.

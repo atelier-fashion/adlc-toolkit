@@ -66,6 +66,25 @@ def test_validators():
         es.parse_pr_url("https://github.com/acme/w/pull/12;rm", "github.com")
 
 
+def test_req719_a_pr_url_with_a_trailing_newline_does_not_parse():
+    """`$` matches before a final newline, so `PR_URL` ends in `\\Z`: a `prUrl` in state that
+    ends in a newline is not a PR URL, for every caller (REQ-719, the abort line's finding)."""
+    for bad in ("https://github.com/acme/w/pull/12\n", "https://github.com/acme/w/pull/12\r\n",
+                "https://github.com/acme/w/pull/12\n\n"):
+        with pytest.raises(es.SafetyError, match="prUrl"):
+            es.parse_pr_url(bad, "github.com")
+
+
+def test_req719_no_identifier_pattern_admits_a_trailing_newline():
+    """The same anchor in the other closed patterns: a REQ id, a repo id, a branch, an oid and a
+    slug that end in a newline are refused, so none of them can split a printed line."""
+    for pattern, good in ((es.VALID_REQ, "REQ-901"), (es.VALID_REPO_ID, "api"),
+                          (es.VALID_BRANCH, "feat/REQ-901-x"), (es.VALID_OID, "a" * 40),
+                          (es.VALID_SLUG, "a-slug")):
+        assert pattern.match(good)
+        assert not pattern.match(good + "\n")
+
+
 def test_origin_parts():
     assert es.origin_parts("git@github.com:acme/w.git") == ("github.com", "acme", "w")
     assert es.origin_parts("https://github.com/acme/w") == ("github.com", "acme", "w")

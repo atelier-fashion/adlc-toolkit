@@ -23,13 +23,13 @@ import time
 
 import exec_ledger as el
 
-VALID_REQ = re.compile(r"^REQ-[0-9]{3,6}$")
-VALID_REPO_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-VALID_BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
-VALID_OID = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
-VALID_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,120}$")
+VALID_REQ = re.compile(r"^REQ-[0-9]{3,6}\Z")
+VALID_REPO_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}\Z")
+VALID_BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,200}\Z")
+VALID_OID = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?\Z")
+VALID_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,120}\Z")
 PR_URL = re.compile(r"^https://([A-Za-z0-9.-]+)/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)"
-                    r"/pull/([0-9]{1,10})$")
+                    r"/pull/([0-9]{1,10})\Z")
 #: `git` and `sh` are needed for anything at all; the rest are resolved when present.
 REQUIRED_TOOLS = ("git", "python3", "sh")
 OPTIONAL_TOOLS = ("gh", "az", "ssh")
