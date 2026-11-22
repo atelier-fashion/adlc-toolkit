@@ -10,8 +10,8 @@ domain: "adlc"
 stack: ["python", "codex"]
 concerns: ["reliability", "unattended", "developer-experience"]
 tags: ["sprint-exec", "exec-prompt", "deny-tier", "refusal", "compound-command", "codex", "stderr", "dashboard"]
-introduced_by: []
-attribution: none
+introduced_by: [REQ-659, REQ-662]
+attribution: derived
 ---
 
 ## Description
@@ -74,7 +74,7 @@ LESSON-893 applies directly, and with a warning: the instruction not to chain fe
 
 LESSON-899 and LESSON-892 give the shape of the sentence: say whether to stop, name the next action, and bound it. The note says a refusal is not a blocker, that the other commands are run again on a line of their own, and that a blocker is reported only for a command that fails when run that way. It also says not to retry the refused command under another spelling, so that "not a blocker" is not read as "work around it".
 
-Attribution: `git blame` on the three ranges returns four REQs: REQ-659 and REQ-682 and REQ-719 (the exec notes), REQ-659 and REQ-662 (the exit branch), REQ-662 (`refusal_line`). Four candidates, so nothing is written: the operator chooses.
+Attribution: `git blame` on the three ranges returns four REQs: REQ-659 and REQ-682 and REQ-719 (the exec notes), REQ-659 and REQ-662 (the exit branch), REQ-662 (`refusal_line`). Four candidates, so nothing was written when the bug was resolved: the operator chooses. On 2026-11-21 the owner chose REQ-659 and REQ-662.
 
 ## Resolution
 
@@ -112,11 +112,13 @@ Failing-first tests were still written, in `tools/adlc/tests/test_bug290_refused
 - `test_bug290_a_blocked_run_shows_the_refusal_beside_the_sessions_account`: on the shipped Codex block the fake session is refused launch 9's line and reports launch 9's blocker. The run is `blocked` / `other`, class `ok`, and its dashboard row carries the note. A run refused the same line that reaches the gate has none; one that claims `failed` has one; an `answer` relaunches the blocked run to the gate.
 - `test_bug290_a_denial_claude_lists_is_shown_the_same_way`: the same on the shipped Claude block, from the result's denial list.
 
-What the fake cannot show: it is scripted, so it models the harness refusing a line and the session's report, never a model choosing what to do after reading the note. Whether a real session now reruns the rest of the line is not measured. No real `codex` or `claude` launch has run against this fix.
+What the fake cannot show: it is scripted, so it models the harness refusing a line and the session's report, never a model choosing what to do after reading the note. Whether a real session now reruns the rest of the line is not measured. No real `codex` or `claude` launch had run against this fix when it merged; Deployment records the one that has since.
 
 ## Deployment
 
-Merged as `79ff3a7` ([#310](https://github.com/atelier-fashion/adlc-toolkit/pull/310)) on 2026-11-21, pinned to the tested head `a30d552`. The regression gate read `off`. The toolkit has no deploy target: the fix is live for a symlink install when its clone pulls `main`, and for a plugin install at the next release. No real `codex` or `claude` launch has run against it.
+Merged as `79ff3a7` ([#310](https://github.com/atelier-fashion/adlc-toolkit/pull/310)) on 2026-11-21, pinned to the tested head `a30d552`. The regression gate read `off`. The toolkit has no deploy target: the fix is live for a symlink install when its clone pulls `main`, and for a plugin install at the next release.
+
+One real `codex` launch has run against it since: launch 10 in `.adlc/research/harness-probes/codex-exec-manual.md`, engine and clone at `62f2311`, which reached the merge gate and was rejected there. No line in it was refused. The session kept its one scratch file inside the working copy, removed it with a plain `rm` on a line of its own, and chained no cleanup with a commit, so the note's scratch-file rule was followed once. What a session does after a refusal, and the dashboard note, are still measured only by the fake. No `claude` launch has run.
 
 ## Lessons
 
