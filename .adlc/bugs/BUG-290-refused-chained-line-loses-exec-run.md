@@ -1,7 +1,7 @@
 ---
 id: BUG-290
 title: "An exec session whose chained line holds one denied command loses the run: the whole line is refused, the session reports another cause, and the engine does not show the refusal"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-21
 updated: 2026-11-21
@@ -113,3 +113,11 @@ Failing-first tests were still written, in `tools/adlc/tests/test_bug290_refused
 - `test_bug290_a_denial_claude_lists_is_shown_the_same_way`: the same on the shipped Claude block, from the result's denial list.
 
 What the fake cannot show: it is scripted, so it models the harness refusing a line and the session's report, never a model choosing what to do after reading the note. Whether a real session now reruns the rest of the line is not measured. No real `codex` or `claude` launch has run against this fix.
+
+## Deployment
+
+Merged as `79ff3a7` ([#310](https://github.com/atelier-fashion/adlc-toolkit/pull/310)) on 2026-11-21, pinned to the tested head `a30d552`. The regression gate read `off`. The toolkit has no deploy target: the fix is live for a symlink install when its clone pulls `main`, and for a plugin install at the next release. No real `codex` or `claude` launch has run against it.
+
+## Lessons
+
+- LESSON-902: an agent's account of why it stopped is a guess when the harness refused its line, so the harness's own record is shown beside it whatever the agent claims.
