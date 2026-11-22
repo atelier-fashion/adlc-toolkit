@@ -4,14 +4,14 @@ title: "The first real `/sprint --exec` pipeline run ends before the gate four t
 status: resolved
 severity: high
 created: 2026-11-19
-updated: 2026-11-19
+updated: 2026-11-21
 component: "adlc/tools/adlc/sprint-exec"
 domain: "adlc"
 stack: ["python", "markdown", "bash"]
 concerns: ["correctness", "reliability", "developer-experience"]
 tags: ["sprint-exec", "exec-prompt", "fence-run", "codex", "sandbox", "draft-pr", "dogfood", "mock-forge", "telemetry"]
-introduced_by: []
-attribution: none
+introduced_by: [REQ-659]
+attribution: derived
 ---
 
 ## Description
@@ -125,10 +125,10 @@ Per gap:
    `exec_safety.BASE_ENV` gives the orchestrator's own tools.
 9. Nothing in the prompt says where a timestamp comes from, and a model does not have one.
 
-`introduced_by` is left empty. `git blame` on the root-cause lines returns REQ-659 and REQ-682
-for the prompt and the runner, and REQ-483, REQ-520 and REQ-669 for the Phase 6 prose, whose
-authors did not write it for the exec engine. With more than one candidate the choice is the
-operator's.
+`git blame` on the root-cause lines returns REQ-659 and REQ-682 for the prompt and the runner,
+and REQ-483, REQ-520 and REQ-669 for the Phase 6 prose, whose authors did not write it for the
+exec engine. With more than one candidate the choice is the operator's, and `introduced_by`
+was left empty when the bug was resolved. On 2026-11-21 the owner chose REQ-659.
 
 ## Resolution
 

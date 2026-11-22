@@ -10,7 +10,7 @@ bug: BUG-290
 created: 2026-11-21
 updated: 2026-11-21
 kind: process
-evidence: "BUG-290; .adlc/research/harness-probes/codex-exec-manual.md launch 9, fact 11 (codex-cli 0.166.0, engine f53f322): `rm -f /tmp/… && git add … && git commit …` was refused whole for `rm -f`, the refusal was on stderr only, and the session reported `blocked` / `git-commit-blocked` (index.lock outside the writable roots) without running the commit alone; the engine recorded blocked / other, class ok. tools/adlc/tests/test_bug290_refused_chained_line.py failed on 2aa844a and passes on 79ff3a7. No real launch has run against the fix: what a session does after reading the new note is not measured"
+evidence: "BUG-290; .adlc/research/harness-probes/codex-exec-manual.md launch 9, fact 11 (codex-cli 0.166.0, engine f53f322): `rm -f /tmp/… && git add … && git commit …` was refused whole for `rm -f`, the refusal was on stderr only, and the session reported `blocked` / `git-commit-blocked` (index.lock outside the writable roots) without running the commit alone; the engine recorded blocked / other, class ok. tools/adlc/tests/test_bug290_refused_chained_line.py failed on 2aa844a and passes on 79ff3a7. One real launch has run against the fix (launch 10, engine 62f2311) and no line in it was refused: what a session does after a refusal is not measured"
 confidence: medium
 enforcement: test:tools/adlc/tests/test_bug290_refused_chained_line.py
 generalizes: []

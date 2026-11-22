@@ -193,9 +193,9 @@ the same (`state file not found: <path> (nothing recorded, and not a blocker: �
 wrapper's `failed` line ends "telemetry never halts the pipeline, so carry on". R1 still
 creates no file: the first writer of `<state>` decides fresh or resume. The fake session makes
 launch 7's early call under the engine and reaches the gate
-(`test_bug289_early_harness_stamp.py`). One real launch has run against it since, launch 9
-below: its session ran the fences in order, so the text was followed once and the line's new
-wording met no real session.
+(`test_bug289_early_harness_stamp.py`). Two real launches have run against it since, launches
+9 and 10 below: both sessions ran the fences in order, so the text was followed twice and the
+line's new wording met no real session.
 
 ## One launch for BUG-289 (2026-11-21)
 
@@ -253,7 +253,57 @@ Measured by the fake harness only (`test_bug290_refused_chained_line.py`), which
 it shows what the engine reads of a refused line, not what a session does after reading the
 note. Fact 8's launches held an instruction not to chain fence calls and the session chained
 in four of six, so the note is expected to be read, not always followed; the dashboard note
-is for the launches where it is not. No real launch has run against BUG-290.
+is for the launches where it is not. One real launch has run against BUG-290 since, launch 10
+below, and no line in it was refused.
+
+## One launch for BUG-289 and BUG-290 (2026-11-21)
+
+`adlc sprint-exec run --harness codex REQ-900` once more, the same lite REQ and the same staging
+as launches 7 to 9, `codex-cli 0.166.0`, started at 2026-11-22T05:55:44Z. The clone and the
+engine were both `main` at `62f2311`, which holds the BUG-289 and the BUG-290 text. Nothing was
+approved.
+
+| Launch | Ended | Time | Why |
+|---|---|---|---|
+| 10 | `awaiting_approval`, then `rejected` | 5 min 6 s to the gate | No `answer` was given. Step 0 ran in the order the files give: the lessons fence, then R1, which stamped `harness: 5.4.0 62f2311` on its first and only call. The session implemented the REQ, its tests passed, 54 of 54, and it committed on a line that held only `git add … && git commit …`. It pushed and opened PR 101 through the fences, ran the lite review and the lane check, made the PR ready through the tied fence, read CI three times and stopped at the gate. `reject` ended it, and the log gained `rejected` with an empty reason |
+
+What launch 10 shows:
+
+- **BUG-289, the order, a second time.** The lessons fence ran before R1, no telemetry fence
+  ran before it, and no fence printed `state file not found`. Two launches of one model now
+  followed the text. The line's new wording has still met no real session.
+- **BUG-290, and no line was refused.** The session's stderr log holds one line, Codex's own
+  `Reading prompt from stdin...`, and no rejection. The session wrote one scratch file, the PR
+  body, inside the working copy (`.adlc/REQ-900-pr-body.md`), handed it to the Phase 6 fence
+  and removed it with `rm <path>` on a line of its own. No recorded command names `/tmp` or
+  uses `rm -f`, and none puts a cleanup on a line with a `git add`, a `git commit`, a push or
+  a fence call. That is what the new note asks for, once, from one model. What a session does after a
+  refusal is still measured only by the fake, and so is the dashboard note: with no refusal
+  recorded the engine printed none, which is its designed behaviour and not a test of it.
+- **No fence call was chained.** The session made 13 fence-runner `run` calls, each on a line
+  of its own, and none was answered with 69. Fact 8's sessions chained in four launches of
+  six, and launch 8's did.
+- **Phase 7.** The diff fence printed the three-dot diff. The CI fence was called three times,
+  with waits of 0, 30 and 30 seconds, and read `checks=none` each time.
+- **Trust and the user config.** `~/.codex/config.toml` had the same checksum before the
+  launch and after it, held no entry for the clone, and no recovery marker was left.
+
+Launch 10 used 3.1 M input tokens, 3.0 M of them cached, and 10 k output tokens.
+
+**12. A session can report a failed command that left no record.** After the Phase 5 lane
+check the session wrote that the lifecycle commit "hit a filesystem denial" while Git tried to
+create `.git/worktrees/REQ-900/index.lock`. The `--json` stream holds no command item between
+the lane check and that message, and the item ids on either side are consecutive. It holds no
+`file_change` for the spec's status edit, and the stderr log holds no refusal. The next
+`git status` did show `requirement.md` modified, so something had run. The session looked for
+a lock file, found none, then ran `git add` and `git commit` each on a line of its own, and
+both exited 0.
+
+So the engine's records cannot say what the failed attempt was. One reading is a chained line
+that ran sandboxed, where the edit inside the working copy succeeded and the write to the
+common git directory did not; that is an inference from fact 8, and nothing recorded shows it.
+Unlike launch 9's session, this one tried the parts alone before reporting anything, and the
+run went on. Nothing in the engine reads an attempt of this kind, and none of this is changed.
 
 ## `adlc_forge_pr_checks` against GitHub (2026-11-21)
 
@@ -286,4 +336,6 @@ against GitHub: those three verdicts are measured only against a stubbed `gh` an
   sandbox's writable area, so the row shows the runner left the sandbox, not that a
   credential reached a forge.
 - Whether a sandboxed `git commit` can write a linked worktree's common git directory:
-  `git commit` is a routine allow, so in an engine run it does not run sandboxed.
+  `git commit` is a routine allow, so in an engine run it does not run sandboxed. Launch 10's
+  session reported such a failure, and the attempt left no record to check it against
+  (fact 12).
