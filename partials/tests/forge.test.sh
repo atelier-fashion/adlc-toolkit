@@ -68,7 +68,7 @@ contains "ado create state=OPEN"  "state=OPEN"   "$(adlc_forge_pr_create --base 
 # ===========================================================================
 for prov in github azure-devops; do
   export ADLC_FORGE_MOCK_PROVIDER="$prov"
-  for cls in auth-missing pr-not-found merge-blocked-by-policy feature-unsupported network; do
+  for cls in auth-missing pr-not-found pr-already-exists merge-blocked-by-policy feature-unsupported network; do
     export ADLC_FORGE_MOCK_SCENARIO="$cls"
     out=$(adlc_forge_pr_view 1 2>&1); rc=$?
     contains "$prov/$cls error_class" "error_class=$cls" "$out"
@@ -169,6 +169,19 @@ check "BR-4 header names every emitted class" "" "$MISSING"
 # Non-vacuity: the extraction must actually have found the class set.
 contains "emitted-class extraction non-vacuous" "merge-blocked-by-policy" "$EMITTED"
 contains "documented-class extraction non-vacuous" "merge-blocked-by-policy" "$DOCUMENTED"
+# BUG-292: forge.md prints the same enumeration and is the contract a caller reads, so it is
+# held to the emitted set as well. The guard above reads forge.sh's header alone.
+DOCUMENTED_MD=$(awk '/^error_class=</{f=1} f{print} f&&/>/{exit}' "$PARTIALS/forge.md" \
+  | tr '<>|' '\n\n\n' | sed -n 's/^ *\([a-z][a-z-]*\)$/\1/p' | sort -u)
+_emf=$(mktemp 2>/dev/null || mktemp -t forge_em)
+_dcf=$(mktemp 2>/dev/null || mktemp -t forge_dc)
+printf '%s\n' "$EMITTED" > "$_emf"
+printf '%s\n' "$DOCUMENTED_MD" > "$_dcf"
+MISSING_MD=$(comm -23 "$_emf" "$_dcf" | tr '\n' ' ' | sed 's/  *$//')
+rm -f "$_emf" "$_dcf"
+check "forge.md names every emitted class" "" "$MISSING_MD"
+contains "forge.md class extraction non-vacuous" "merge-blocked-by-policy" "$DOCUMENTED_MD"
+contains "the classifier emits pr-already-exists" "pr-already-exists" "$EMITTED"
 
 # ---------------------------------------------------------------------------
 # 4d. The mock (BR-10) must honor every class the classifier emits. Before
@@ -181,7 +194,54 @@ contains "mock honors local-git scenario" "error_class=local-git" "$(adlc_forge_
 export ADLC_FORGE_MOCK_SCENARIO=merge-blocked-by-policy
 contains "mock pr_merge policy refusal" "error_class=merge-blocked-by-policy" \
   "$(adlc_forge_pr_merge 101 --squash --delete-branch 2>&1)"
+export ADLC_FORGE_MOCK_SCENARIO=pr-already-exists
+contains "mock honors pr-already-exists scenario" "error_class=pr-already-exists" \
+  "$(adlc_forge_pr_create --base main --head feat/x --title T --body B 2>&1)"
 unset ADLC_FORGE_MOCK ADLC_FORGE_MOCK_PROVIDER ADLC_FORGE_MOCK_SCENARIO
+
+# ---------------------------------------------------------------------------
+# 4e. BUG-292: a forge refuses a second open PR for one head and base, and that
+# refusal has a class of its own. Before it, both forges' words fell to `network`,
+# the class that invites a retry, when the PR named is the caller's own and the
+# create will be refused every time. gh's sentence is the format string in the
+# gh 2.103.3 binary. GitHub's server-side sentence is as third-party code that
+# catches it quotes it, and TF401179's prose is unconfirmed: the code is what is
+# matched. None of the three was read off a live forge (forge.md).
+# ---------------------------------------------------------------------------
+dup() { check "classify duplicate PR: $1" "pr-already-exists" "$(_adlc_forge_classify "$2")"; }
+NL='
+'
+dup "gh's pre-check, with the PR's URL on its second line" \
+  "a pull request for branch \"feat/REQ-900-thing\" into branch \"main\" already exists:${NL}https://github.com/acme/widgets/pull/101"
+dup "gh's pre-check, a cross-repository head" \
+  "a pull request for branch \"fork:feat/x\" into branch \"main\" already exists:${NL}https://github.com/acme/widgets/pull/7"
+dup "GitHub's own refusal, when gh's pre-check did not see the PR" \
+  'pull request create failed: GraphQL: A pull request already exists for acme:feat/x. (createPullRequest)'
+dup "Azure DevOps, bare" \
+  'TF401179: An active pull request for the source and target branch already exists.'
+dup "Azure DevOps, as az frames it" \
+  'ERROR: TF401179: An active pull request for the source and target branch already exists.'
+# Order: the refusal quotes the head, the base and the PR's URL, which are the project's own
+# words. A branch or repository named for a policy, a credential or a missing thing must not
+# move the refusal to the class one of those words belongs to, so this arm is tried first.
+dup "a head branch named for a policy" \
+  "a pull request for branch \"feat/REQ-12-branch-protection-policy\" into branch \"main\" already exists:${NL}https://github.com/acme/widgets/pull/3"
+dup "a head branch named for credentials" \
+  "a pull request for branch \"fix/credentials-not-found\" into branch \"release/blocked\" already exists:${NL}https://github.com/acme/widgets/pull/4"
+dup "a repository named for a policy" \
+  "a pull request for branch \"feat/x\" into branch \"main\" already exists:${NL}https://github.com/acme/policy-engine/pull/5"
+dup "GitHub's own refusal, a head named for authentication" \
+  'pull request create failed: GraphQL: A pull request already exists for acme:fix/authentication-unsupported. (createPullRequest)'
+# Negative anchors: other things that already exist are not this class, and no PR for a
+# branch is still pr-not-found.
+check "classify a branch that already exists stays local-git" "local-git" \
+  "$(_adlc_forge_classify "fatal: a branch named 'feat/x' already exists")"
+check "classify a label that already exists stays the default" "network" \
+  "$(_adlc_forge_classify 'label with name "bug" already exists; use `--force` to update its color and description')"
+check "classify no PR for a branch stays pr-not-found" "pr-not-found" \
+  "$(_adlc_forge_classify 'no pull requests found for branch "feat/x"')"
+check "classify a missing PR on ADO stays pr-not-found" "pr-not-found" \
+  "$(_adlc_forge_classify 'ERROR: TF401174: The pull request does not exist')"
 
 # ===========================================================================
 # 5. Provider auto-detect + fail-loud (no mock)
@@ -1139,6 +1199,46 @@ check "planted modules: none was imported" "" "$(cat "$PLANT_MARK" 2>/dev/null)"
 pout=$(printf 'pass\tline\342\200\250sep\342\200\251par\n' | _adlc_forge_checks_norm tsv)
 check "pr_checks: a line or paragraph separator in a name becomes a space" \
   "$(printf 'checks=pass\ncheck=pass\tline sep par')" "$pout"
+
+# ===========================================================================
+# 12. BUG-292: adlc_forge_pr_create against a backend that refuses a duplicate
+# ===========================================================================
+# The stubs print what each CLI prints for a head and base that already have an open PR
+# (4e says where each sentence is from) and exit as it does. The op returns the backend's
+# status, the new class, and every stderr line, the PR's URL among them.
+DUPDIR="$SBX/dupbin"; mkdir -p "$DUPDIR"; DUPREC="$SBX/dup.rec"; : > "$DUPREC"
+cat > "$DUPDIR/gh" <<DUPGH
+#!/bin/sh
+printf 'gh %s\n' "\$*" >> "$DUPREC"
+printf 'a pull request for branch "feat/REQ-900-thing" into branch "main" already exists:\n' >&2
+printf 'https://github.com/acme/widgets/pull/101\n' >&2
+exit 1
+DUPGH
+cat > "$DUPDIR/az" <<DUPAZ
+#!/bin/sh
+printf 'az %s\n' "\$*" >> "$DUPREC"
+printf 'ERROR: TF401179: An active pull request for the source and target branch already exists.\n' >&2
+exit 1
+DUPAZ
+chmod +x "$DUPDIR/gh" "$DUPDIR/az"
+OLDPATH7=$PATH; PATH="$DUPDIR:$PATH"; export PATH
+ADLC_FORGE_PROVIDER_OVERRIDE=github; export ADLC_FORGE_PROVIDER_OVERRIDE
+out=$(adlc_forge_pr_create --draft --base main --head feat/REQ-900-thing --title T --body B 2>&1); rc=$?
+check "duplicate PR github: rc is gh's" "1" "$rc"
+check "duplicate PR github: the block" \
+  "$(printf 'error_class=pr-already-exists\nraw=a pull request for branch "feat/REQ-900-thing" into branch "main" already exists:\nraw=https://github.com/acme/widgets/pull/101')" \
+  "$out"
+ADLC_FORGE_PROVIDER_OVERRIDE=azure-devops; export ADLC_FORGE_PROVIDER_OVERRIDE
+out=$(adlc_forge_pr_create --draft --base main --head feat/REQ-900-thing --title T --body B 2>&1); rc=$?
+check "duplicate PR ado: rc is az's" "1" "$rc"
+check "duplicate PR ado: the block" \
+  "$(printf 'error_class=pr-already-exists\nraw=ERROR: TF401179: An active pull request for the source and target branch already exists.')" \
+  "$out"
+check "duplicate PR: each backend was asked once" \
+  "$(printf 'gh pr create --draft --base main --head feat/REQ-900-thing --title T --body B\naz repos pr create --draft --target-branch main --source-branch feat/REQ-900-thing --title T --description B')" \
+  "$(cat "$DUPREC")"
+PATH=$OLDPATH7; export PATH
+unset ADLC_FORGE_PROVIDER_OVERRIDE
 
 rm -rf "$SBX"
 

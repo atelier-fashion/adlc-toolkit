@@ -49,8 +49,8 @@ import unicodedata
 
 import forge_protection
 
-ERROR_CLASSES = ("auth-missing", "pr-not-found", "merge-blocked-by-policy",
-                 "feature-unsupported", "local-git", "network")
+ERROR_CLASSES = ("auth-missing", "pr-not-found", "pr-already-exists",
+                 "merge-blocked-by-policy", "feature-unsupported", "local-git", "network")
 BASE_FIELDS = ("number", "url", "state", "mergedAt", "body", "title", "isDraft", "createdAt",
                "headRefName", "headRefOid", "baseRefName", "isCrossRepository", "files",
                "mergeCommit")
@@ -241,10 +241,11 @@ def op_pr_create(argv):
             # As the forges do (BUG-291). The mock used to open a second PR for one head and
             # base, which is how a session that ran the draft-PR fence twice met no error and
             # worked on the wrong PR to the gate. The class is the one `_adlc_forge_classify`
-            # gives each forge's own words, which is `network`: no class names this case.
-            # `gh pr create`'s wording is from its source, Azure DevOps's from its error
-            # TF401179; neither was read off a live forge for this.
-            print("error_class=network")
+            # gives each forge's own words: `pr-already-exists` (BUG-292; it was `network`
+            # while no class named the case). `gh pr create`'s wording is the format string in
+            # its binary, Azure DevOps's is its error TF401179; neither was read off a live
+            # forge for this.
+            print("error_class=pr-already-exists")
             if _provider() == "azure-devops":
                 print("raw=TF401179: An active pull request for the source and target branch "
                       "already exists.")

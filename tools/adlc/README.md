@@ -958,9 +958,10 @@ scenarios `checks-pass`, `checks-fail`, `checks-pending`, `checks-none` and
   before, where a real forge refuses a duplicate itself. The fence names only the two forge
   operations that take no PR, so it is untied and routes `runner` on every exec adapter; its
   reach gains `gh pr list`. `forge_mock.py` now refuses `pr_create` for a head and base that
-  already have an open PR, as `error_class=network` with the forge's own words (`gh`'s, with
-  the PR's URL on a second `raw=` line; `TF401179` under the `azure-devops` provider):
-  `network` is what `_adlc_forge_classify` gives those words, since no class names the case.
+  already have an open PR, as `error_class=pr-already-exists` with the forge's own words
+  (`gh`'s, with the PR's URL on a second `raw=` line; `TF401179` under the `azure-devops`
+  provider): that is the class `_adlc_forge_classify` gives those words (BUG-292; it was
+  `network` until then, and still is from a vendored `forge.sh` older than the class).
   Its `pr_list` filters on `--base`, and under the `github` provider models one `--jq` program
   shape, `.[] | "<text with \(.field) and \n>"`; any other program prints the JSON document.
 

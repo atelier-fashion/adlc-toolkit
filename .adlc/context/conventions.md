@@ -160,7 +160,8 @@ DevOps backend uses `az repos`. Provider resolution is per-project `.adlc/config
 `forge.provider` > machine config > `auto` (origin-URL detection; unrecognized host
 fails loud). Results/errors are normalized to one vocabulary (`state ∈
 {OPEN,MERGED,CLOSED}`; error classes `auth-missing` | `pr-not-found` |
-`merge-blocked-by-policy` | `feature-unsupported` | `network`, with raw backend stderr
+`pr-already-exists` | `merge-blocked-by-policy` | `feature-unsupported` | `local-git` |
+`network`, with raw backend stderr
 preserved beneath the class). `forge.auth` stores a credential **source name** only
 (`gh`/`az`/an env-var NAME holding a PAT) — never a key value (a key-shaped value is
 refused). Two `gh` calls stay direct on purpose: `gh pr diff` (a local read-only

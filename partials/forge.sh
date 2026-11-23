@@ -16,8 +16,8 @@
 #
 # Result/error surface (BR-4), normalized — identical field names from BOTH
 # backends. On success: newline-delimited `key=value` lines. On failure:
-#   error_class=<auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|
-#                local-git|network>
+#   error_class=<auth-missing|pr-not-found|pr-already-exists|merge-blocked-by-policy|
+#                feature-unsupported|local-git|network>
 #   raw=<verbatim backend stderr>          # never swallowed (LESSON-008)
 # and a non-zero return. Distinct failures never collapse into one label.
 #
@@ -272,6 +272,19 @@ _adlc_forge_err() {
 _adlc_forge_classify() {
   adlc_fc_raw=$1
   case "$adlc_fc_raw" in
+    # BUG-292: a forge refuses a second open PR for one head and base. Three sentences say so:
+    # `gh pr create`'s own pre-check (`a pull request for branch "<head>" into branch "<base>"
+    # already exists:`, then the PR's URL), GitHub's refusal of the create itself when that
+    # pre-check did not see the PR (`A pull request already exists for <owner>:<head>.`), and
+    # Azure DevOps's TF401179. They used to fall to `network`, which invites a retry of a
+    # create that is refused every time. FIRST, against the order below, because the refusal
+    # quotes the head, the base and the PR's URL, which are the project's own words: a branch
+    # named `fix/credentials-policy` would otherwise read `auth-missing`. No branch name can
+    # forge the signature itself: a ref holds no space. gh's sentence is the format string in
+    # the gh 2.103.3 binary. GitHub's own is as third-party code that catches it quotes it, and
+    # TF401179 is matched by its code alone. None was read off a live forge (forge.md).
+    *"a pull request for branch "*" already exists"*|*"ull request already exists for "*|*"TF401179"*)
+      echo "pr-already-exists" ;;
     *"not logged"*|*"auth status"*|*"authentication"*|*"Unauthorized"*|*"TF400813"*|*"PAT"*"not set"*|*"auth-missing"*|*"az login"*|*"gh auth login"*|*"Please run"*"login"*|*"credentials"*)
       echo "auth-missing" ;;
     # A shell's own answer for a backend CLI that is not on PATH: `command not found` (bash,
@@ -355,7 +368,7 @@ _adlc_forge_mock() {
   fi
   case "$adlc_mk_scn" in
     ok|checks-pass|checks-fail|checks-pending|checks-none|checks-pending-then-pass) : ;;
-    auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|local-git|network)
+    auth-missing|pr-not-found|pr-already-exists|merge-blocked-by-policy|feature-unsupported|local-git|network)
       _adlc_forge_err "$adlc_mk_scn" "mock backend ($adlc_mk_prov): simulated $adlc_mk_scn for $adlc_mk_op"
       return 1 ;;
     *)

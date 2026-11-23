@@ -131,8 +131,8 @@ Success: newline-delimited `key=value` lines (`url=`, `number=`, `state=`,
 Failure: a non-zero return plus
 
 ```
-error_class=<auth-missing|pr-not-found|merge-blocked-by-policy|feature-unsupported|
-             local-git|network>
+error_class=<auth-missing|pr-not-found|pr-already-exists|merge-blocked-by-policy|
+             feature-unsupported|local-git|network>
 raw=<verbatim backend stderr, one raw= line per stderr line>
 ```
 
@@ -151,14 +151,15 @@ Azure DevOps completion refusals whose prose says "policies" — plural, which
 `*"policy"*` does not match. Both backends share the one classifier, so a missing
 pattern is never a single-backend defect.
 
-Two consequences for anyone editing the classifier:
+Consequences for anyone editing the classifier:
 
 - **Add the signature *and* pin it.** `partials/tests/forge.test.sh` §4b holds the
   table of real backend stderr strings mapped to the class each must produce, and
   §4c fails if the classifier can emit a class the header does not document — the
   guard that caught `local-git` having been added by BUG-150 without updating the
   contract line.
-- **Order is load-bearing.** Patterns are tried most-specific-first, so an
+- **Order is load-bearing.** After the `pr-already-exists` arm (below), patterns are
+  tried most-specific-first, so an
   `auth-missing` or `pr-not-found` signature that happens to mention a policy word
   still wins. Note that `You're not authorized to push to this branch` is a
   *policy* refusal, not `auth-missing`: the credential is fine, the permission is
@@ -169,6 +170,37 @@ Two consequences for anyone editing the classifier:
   treats as a wrong value to correct. They now fall to the default, and
   `fence-run`'s PR read counts any exit of 126, 127 or above 128 as unverified
   before it looks at the class.
+
+**`pr-already-exists` is the caller's own PR, not a failure to retry (BUG-292).** A
+forge holds one open PR for a head and base, and refuses a second.
+`adlc_forge_pr_create` is the op that meets the refusal. Three sentences carry it:
+
+| Said by | Words | Names the PR |
+|---|---|---|
+| `gh pr create`, its own check before it creates | `a pull request for branch "<head>" into branch "<base>" already exists:` | yes: its URL is the next `raw=` line |
+| GitHub, when that check did not see the PR | `A pull request already exists for <owner>:<head>.` | no |
+| Azure DevOps | `TF401179: An active pull request for the source and target branch already exists.` | no |
+
+Before this class all three read `network`, and a retry of the create is refused
+every time. A caller that reads `pr-already-exists` uses the open PR: the one the
+`raw=` line names, else the one `adlc_forge_pr_list --head <head> --base <base>
+--state open` prints. It never opens one under another title or from another
+branch to get past the refusal. The op still returns the backend's status and
+prints no `url=`: finding the PR is the caller's read.
+
+This arm is tried **first**, the one exception to most-specific-first. The refusal
+quotes the head, the base and the PR's URL, which are the project's own words, so a
+branch named `fix/credentials-policy` would otherwise read `auth-missing`. A ref
+holds no space, so no branch name can forge the signature itself.
+
+Not measured: none of the three was read off a live forge, since that takes
+opening a duplicate PR. `gh`'s sentence is the format string the `gh` 2.103.3
+binary holds. GitHub's own is as third-party code that catches it quotes it
+(`A pull request already exists for`), found by a web search and not in GitHub's
+reference. `TF401179` is confirmed as this refusal by a community module that
+catches the code; its prose is unconfirmed, and only the code is matched. A project
+whose vendored `forge.sh` is older than this class still reads `network` for the
+same words.
 
 **Inline interpreters run isolated (REQ-719).** The JSON helpers at the end of
 `forge.sh` run `command python3 -I -c '…'`. Without `-I` Python puts the working
@@ -271,9 +303,11 @@ every mock call to it: PRs as JSON, a `calls.log` of the argv each op received, 
 gate sees what a forge would leave. `ADLC_FORGE_MOCK_SCENARIO`, or a `scenario` file in
 the store read at each call, selects `head-advances`, `pr-replaced`, `pr-other-repo`,
 `cross-repo`, `second-open-pr`, `base-other`, `head-other`, `merged` or a `protection-*`
-value. `forge_mock.py make-head` builds a PR-head commit with plumbing, for fixtures
-that need a rename, a symlink, a gitlink or a mode. Without a store, a call that uses
-none of the above gets the fixed strings it always got.
+value. Its `pr_create` refuses a head and base that already have an open PR, with
+`pr-already-exists` and the provider's own words (BUG-291, BUG-292). `forge_mock.py
+make-head` builds a PR-head commit with plumbing, for fixtures that need a rename, a
+symlink, a gitlink or a mode. Without a store, a call that uses none of the above gets
+the fixed strings it always got.
 
 **`pr_checks` on the mock (REQ-719 BR-23).** `pr_checks` always goes to
 `forge_mock.py`, store or no store. It reads the PR record's `checks` list, and a PR

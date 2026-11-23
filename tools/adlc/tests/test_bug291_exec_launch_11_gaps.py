@@ -263,8 +263,9 @@ def test_bug291_the_mock_refuses_a_second_open_pr_for_one_head_and_base(tmp_path
     """GitHub refuses a second open PR for the same head and base, and so does Azure DevOps.
     The mock used to open one, which is how a session that ran the fence twice got a second PR
     and no error (LESSON-891: a double no kinder than the real service). The refusal carries
-    the class the adapter gives the forge's own words. Another base, or the same pair once the
-    first PR is no longer open, still opens."""
+    the class the adapter gives the forge's own words, which is `pr-already-exists` since
+    BUG-292 and was `network` before it. Another base, or the same pair once the first PR is
+    no longer open, still opens."""
     store = _store(tmp_path)
     make = ["pr_create", "--draft", "--base", "main", "--head", "feat/x", "--title", "t",
             "--body", "b"]
@@ -274,9 +275,10 @@ def test_bug291_the_mock_refuses_a_second_open_pr_for_one_head_and_base(tmp_path
     assert again.returncode == 1
     said = 'a pull request for branch "feat/x" into branch "main" already exists:'
     assert again.stdout.splitlines() == [
-        "error_class=network", "raw=%s" % said,
+        "error_class=pr-already-exists", "raw=%s" % said,
         "raw=https://mock.forge/acme/widgets/pull/101"]
-    assert _classify("%s\nhttps://github.com/acme/widgets/pull/101" % said) == "network"
+    assert _classify("%s\nhttps://github.com/acme/widgets/pull/101" % said) == \
+        "pr-already-exists"
     other = _mock(store, "pr_create", "--base", "develop", "--head", "feat/x", "--title", "t",
                   "--body", "b")
     assert other.returncode == 0 and "number=102" in other.stdout
@@ -291,9 +293,9 @@ def test_bug291_the_mock_refuses_a_second_open_pr_for_one_head_and_base(tmp_path
     assert _mock(ado, *make, provider="azure-devops").returncode == 0
     refused = _mock(ado, *make, provider="azure-devops")
     assert refused.returncode == 1 and refused.stdout.splitlines() == [
-        "error_class=network",
+        "error_class=pr-already-exists",
         "raw=TF401179: An active pull request for the source and target branch already exists."]
-    assert _classify(refused.stdout.splitlines()[1][4:]) == "network"
+    assert _classify(refused.stdout.splitlines()[1][4:]) == "pr-already-exists"
 
 
 def test_bug291_the_mock_lists_by_base_and_prints_what_the_fence_asks_for(tmp_path):
@@ -356,7 +358,8 @@ def test_bug291_the_fence_as_a_solo_session_runs_it(tmp_path):
     assert _run_fence(tmp_path, ado, "azure-devops").returncode == 0
     refused = _run_fence(tmp_path, ado, "azure-devops")
     assert refused.returncode != 0, refused
-    assert "error_class=network" in refused.stdout and "TF401179" in refused.stdout, refused
+    assert "error_class=pr-already-exists" in refused.stdout, refused
+    assert "TF401179" in refused.stdout, refused
     assert "pr_exists" not in refused.stdout
     assert len(json.loads((ado / "prs.json").read_text())["prs"]) == 1
 
