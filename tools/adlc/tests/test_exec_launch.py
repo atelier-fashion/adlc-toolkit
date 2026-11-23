@@ -343,6 +343,8 @@ def test_stall(box):
     run.doc["config"]["stall_minutes"] = 1
     old = time.time() - 120
     os.utime(run.wc_state_path(), (old, old))
+    # Idle time runs from the later of the last state write and this launch's start (BUG-291).
+    run.exec["launchedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(old))
     orch.poll_once()
     assert run.status == "stalled"
     assert "stalled" in box.out.getvalue() and "pid %s alive" % run.exec["pid"] in box.out.getvalue()

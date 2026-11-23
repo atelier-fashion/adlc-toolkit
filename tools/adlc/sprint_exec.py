@@ -73,6 +73,16 @@ PROTOCOL = "Rule B protocol violation"
 #: refused it a command (BUG-290): the launch it happened in, then what the harness recorded.
 REFUSED_LINE = ("launch %d: the harness refused a command, and a refused line runs none of its "
                 "commands, so the session's account may follow from the refusal: %s")
+#: Git's own line when it cannot create its index lock (BUG-291), as launch 11's stream held it
+#: for a `git add` chained after a command with no allow. Matched in the launch's own log.
+SANDBOXED_GIT = re.compile(r"Unable to create '[^'\n]{1,400}index\.lock': Operation not permitted")
+#: The dashboard note for a run that ended on the session's own account in a launch whose log
+#: holds that line, on a harness that runs an unmatched command in a sandbox (BUG-291).
+SANDBOXED_GIT_LINE = ("launch %d: the session's log holds Git's `%s`. A `git add` or a `git "
+                      "commit` chained after a command with no allow runs in the harness's "
+                      "sandbox, where Git cannot write its index, so the session's account may "
+                      "follow from the chaining and not from a real blocker: an `answer` naming "
+                      "the two commands, each on a line of its own, is usually enough")
 #: The statuses under which a run's launched harness is alive: only then is its ``exec.pid`` a
 #: live exec pid (REQ-662 BR-18).
 HARNESS_LIVE = ("running", "stalled")
@@ -1565,9 +1575,10 @@ class Orchestrator(object):
         run.doc["launches"] = launch
         proc = self._spawn(run, argv, run.file(prompt_name), run.wc, stem)
         self.children[run.req] = proc
+        # `launchedAt` is this launch's start; `startedAt` stays the run's first (BUG-291).
         run.exec.update({"pid": proc.pid, "pidStart": None, "promptPath": prompt_name,
                          "logPath": stem + ".json", "exitCode": None, "exitClass": None,
-                         "sessionId": None, "stalledAt": None})
+                         "sessionId": None, "stalledAt": None, "launchedAt": el.now()})
         run.status = "running"
         run.save()
         # Saved with the pid first, so a nested launch finds it at once (REQ-662 BR-18).
@@ -1616,11 +1627,18 @@ class Orchestrator(object):
         self.start_pending()
 
     def _stall_check(self, run):
+        """Idle time runs from the later of the working copy's last state write and the start
+        of the launch now at work (BUG-291). The state file alone is not enough: a run that
+        waited two hours for its operator's `answer` holds a file two hours old, and its
+        relaunched session read `stalled` on the first poll. A run record written before
+        `launchedAt` existed falls back to `startedAt`, the run's first start."""
         limit = float(run.doc["config"]["stall_minutes"]) * 60
+        launched = run.exec.get("launchedAt") or run.exec["startedAt"]
+        stamp = calendar.timegm(time.strptime(launched, "%Y-%m-%dT%H:%M:%SZ"))
         try:
-            stamp = os.stat(run.wc_state_path()).st_mtime
+            stamp = max(stamp, os.stat(run.wc_state_path()).st_mtime)
         except OSError:
-            stamp = calendar.timegm(time.strptime(run.exec["startedAt"], "%Y-%m-%dT%H:%M:%SZ"))
+            pass
         idle = time.time() - stamp
         if idle > limit:
             if run.status != "stalled":
@@ -1771,12 +1789,14 @@ class Orchestrator(object):
             self._block(run, state, self._denied_reason(result, adapter.refusal_line(stderr)))
         elif state.get("status") == "blocked" or (claim == "blocked" and state.get("blockers")):
             self._refusal_note(run, result, adapter.refusal_line(stderr))
+            self._sandboxed_git_note(run, stem)
             self._terminal(run, "blocked", self._halt_token(state), state)
         else:
             last = (result["text"] or "").strip()[:300]
             run.doc.setdefault("notes", []).append(
                 "exit %s, class %s, is_error %s: %s" % (rc, klass, result["is_error"], last))
             self._refusal_note(run, result, adapter.refusal_line(stderr))
+            self._sandboxed_git_note(run, stem)
             self._terminal(run, "failed", "other", state, note=last)
 
     @staticmethod
@@ -1807,6 +1827,23 @@ class Orchestrator(object):
         if parts:
             run.doc.setdefault("notes", []).append(
                 REFUSED_LINE % (run.doc.get("launches") or 1, _one_line("; ".join(parts), 700)))
+
+    def _sandboxed_git_note(self, run, stem):
+        """A run that ends on the session's own account, in a launch whose log holds Git's
+        `index.lock … Operation not permitted`, says what that line usually is and that an
+        `answer` is the way out (BUG-291). In launch 11 the session's account named the error
+        and was wrong only that it was a blocker, and the operator's answer came 109 minutes
+        later. Only on a harness whose adapter says an unmatched command runs in a sandbox:
+        elsewhere the engine has no cause to offer. The log is the launch's own stdout, so the
+        line may be one the model quoted; it is shown as data, the terminal stays the session's,
+        and a run that reaches the gate gets no note."""
+        caps = self.adapter(run).adapter.get("capabilities") or {}
+        if caps.get("unmatched_default") != "sandbox":
+            return
+        found = SANDBOXED_GIT.search(self._read_text(run.file(stem)) or "")
+        if found:
+            run.doc.setdefault("notes", []).append(
+                SANDBOXED_GIT_LINE % (run.doc.get("launches") or 1, _one_line(found.group(0), 500)))
 
     def _model_values(self, run, state):
         """What state says that the orchestrator would act on is checked first (BR-17)."""

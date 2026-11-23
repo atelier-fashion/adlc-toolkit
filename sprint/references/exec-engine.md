@@ -54,6 +54,10 @@ Each on an operator's instruction naming the REQ.
 
 A `blocked` or `failed` row may carry `note: launch <n>: the harness refused a command, …`. The harness refused the session a line in that launch, and a refused line runs none of its commands, so the session's own account of what stopped it may be wrong: a commit chained after `rm -f` was once reported as blocked by the sandbox (BUG-290). Relay the note with the blocker. The reply is the operator's to write; naming the commands to run again on a line of their own is usually enough.
 
+A row may instead carry `note: launch <n>: the session's log holds Git's … index.lock': Operation not permitted …`. On a harness that runs an unmatched command in a sandbox, a `git add` or a `git commit` chained after a command with no allow runs there, where Git cannot write its index. The session's account of the error is then accurate, and it is still not a blocker: an `answer` naming `git add` and `git commit`, each to be run on a line of its own, is usually enough (BUG-291). Relay this note with the blocker too. The line is read from the launch's own log, so it can be one the session quoted.
+
+A run relaunched by `answer` reads `running`, however long it waited for the reply: `stalled` is measured from the later of the working copy's last state write and the start of the launch now at work. The run-outcome line's `elapsed_s` still counts the wait. It runs from the pipeline's start to the terminal for every engine, so on an answered run it is not the time the sessions took.
+
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
 python3 "$ADLC_TOOLKIT_ROOT/tools/adlc/adlc.py" sprint-exec reject --channel skill '<REQ-id>' '<reason>'

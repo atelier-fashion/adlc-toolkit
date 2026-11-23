@@ -372,7 +372,8 @@ def test_req719_no_forge_call_before_the_value_and_sandbox_checks(cached, tmp_pa
 # ------------------------------------------------------------------------ BR-14, AC-8
 def test_req719_a_fence_that_takes_no_pr_number_reads_no_pr(cached, tmp_path):
     """Only a value bound to a marked placeholder is read: Step 0's draft-PR fence takes no PR
-    number and runs with no PR read before its own calls. `/architect` Step 5 takes the
+    number and runs with no PR read before its own calls, which are its look for an open PR
+    of the branch and, finding none, the create (BUG-291). `/architect` Step 5 takes the
     marked `$prNumber` and is tied on it (BUG-288). Every runner record is tied on exactly its
     marked values."""
     forge = Forge(tmp_path, prs=[])
@@ -382,7 +383,7 @@ def test_req719_a_fence_that_takes_no_pr_number_reads_no_pr(cached, tmp_path):
                                 "--arg", "branch=%s" % PR_BRANCH, "--arg", "req=REQ-901",
                                 "--arg", "title=A title"])
     assert rc == 0 and "fence_run_" not in err and "opaque_entry_refused" not in err, err
-    assert [op for op, _argv in forge.calls()] == ["pr_create"]
+    assert [op for op, _argv in forge.calls()] == ["pr_list", "pr_create"]
     assert forge.pr(101)["headRefName"] == PR_BRANCH
     architect = _fence(cached, "architect/SKILL.md", "MAPPER_PATHS")
     assert architect["tied"] == ["prNumber"]
