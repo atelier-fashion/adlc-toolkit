@@ -1,7 +1,7 @@
 ---
 id: BUG-291
 title: "Three gaps one answered exec launch found: a sandboxed git write reported as a blocker, a relaunched run read `stalled` at once, and a relaunched session opened a second PR"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-23
 updated: 2026-11-23
@@ -66,7 +66,7 @@ Prior lessons consulted:
 - LESSON-892 — An agent told to stop on a refusal will stop on a typo: give a correctable input error its own channel
 - LESSON-616 — Gate commits on the runner's exit code, and keep agent verification runs targeted
 
-Three defects with three causes. What they share is the operator's `answer`: launch 11 was the first real run to block, wait and be relaunched, and two of the three live on that path.
+Three defects with three causes. What they share is the operator's `answer`, and two of the three live on that path. One real run had been answered before, launch 6, at Phase 7 with its PR already recorded. Launch 11 was the first answered after a long wait, and from a phase before the PR number had been written down.
 
 1. **The prompt never says what Git's lock error means on a chained line.** `_EXEC_NOTES` (`tools/adlc/exec_prompt.py`) says a chained *fence call* can run sandboxed and names its line, `fence_run_sandboxed`, exit 69 (LESSON-893). `REFUSED_LINE_NOTE` covers a line the harness refuses (BUG-290). A `git add` chained after a command with no allow is neither: no fence runner is on the line and nothing is refused. The line runs, in the sandbox, and Git prints `index.lock … Operation not permitted`. The session had been given no sentence for that line, and BUG-290's note had told it that a refusal is "not a sandbox failure", which leaves a real sandbox failure reading as something else: a blocker. LESSON-899 and LESSON-892 apply directly: a model acts on the specific line a tool has just printed, so the meaning of that line, the next action and its bound have to be given for that line.
 2. **`_stall_check` measures a relaunch from a file the previous launch wrote.** `Orchestrator._stall_check` (`tools/adlc/sprint_exec.py`) took the working copy's state file's mtime as the last sign of life and fell back to `exec["startedAt"]` only when the file was missing. `startedAt` is written once, when the run is prepared. `_launch_first`, which every relaunch goes through, recorded a pid, a prompt and a log for the new launch and no start time. So nothing the engine held said when the launch now at work began, and after an `answer` the file's age was the operator's wait.
@@ -132,3 +132,15 @@ Failing-first tests were still written, in `tools/adlc/tests/test_bug291_exec_la
 - `test_bug291_the_mock_lists_by_base_and_prints_what_the_fence_asks_for`, `test_bug291_the_fence_as_a_solo_session_runs_it`, `test_bug291_the_fence_routes_and_the_goldens_hold_it`: the mock's read, the fence run as a solo session runs it (GitHub's shape, and the Azure DevOps shape where the create is refused and no second PR exists), and the route and goldens.
 
 What these cannot show. The fake harness and the mock forge are scripted. Nothing here shows that a real model, having read the new line, reruns `git add` and `git commit` alone: launch 10's session did so unprompted and launch 11's did not. The wording of GitHub's refusal is `gh pr create`'s as its source spells it, and Azure DevOps's is error TF401179; neither was read off a live forge for this bug. The fence's read was: `gh` 2.103.3, run by hand against this repository, printed the three lines for a head and base that have a PR, and nothing, with status 0, for a head with no open PR and for another base. No real `codex` or `claude` launch has run against this fix.
+
+## Deployment
+
+Merged as `5303ecf` ([#317](https://github.com/atelier-fashion/adlc-toolkit/pull/317)) on 2026-11-23, pinned to the tested head `052af2e`. The regression gate read `off`. The toolkit has no deploy target: the fix is live for a symlink install when its clone pulls `main`, and for a plugin install at the next release.
+
+No real `codex` or `claude` launch has run against it. The prompt line, the dashboard note, the stall after an `answer` and the draft-PR fence run twice are measured by the fake harness and the mock forge only.
+
+`introduced_by` is still empty: blame returned five REQs and the operator has not chosen.
+
+## Lessons
+
+- LESSON-903: a second attempt inherits what the first left behind, so it is timed from its own start, and a create asks the system of record instead of a note the agent was to write.
