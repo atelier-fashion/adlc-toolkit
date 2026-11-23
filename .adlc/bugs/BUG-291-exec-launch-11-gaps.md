@@ -10,8 +10,8 @@ domain: "adlc"
 stack: ["python", "shell", "codex"]
 concerns: ["reliability", "unattended", "developer-experience"]
 tags: ["sprint-exec", "exec-prompt", "sandbox", "index-lock", "stall", "relaunch", "answer", "draft-pr", "forge-mock", "codex"]
-introduced_by: []
-attribution: none
+introduced_by: [REQ-659, REQ-662]
+attribution: derived
 ---
 
 ## Description
@@ -74,7 +74,7 @@ Three defects with three causes. What they share is the operator's `answer`, and
 
 The run-outcome line's `elapsed_s` (fact 14's second half) is not a defect of this bug. `tools/delegate/run_outcome.py` computes it from the pipeline state's `startedAt` to the terminal, and REQ-648 defines it so: "spans any pause on a resumed run (documented, no reader depends on it)". It is one field for the solo, legacy and exec engines. It is left alone and the operator reference now says what it counts.
 
-Attribution: `git blame` on the root-cause ranges at `1d40f47` returns five REQs. The exec notes (`exec_prompt.py` 327-334): REQ-659, REQ-682, REQ-719. `_stall_check` (`sprint_exec.py` 1618-1634): REQ-659. `_launch_first` (1558-1572): REQ-659, REQ-662. Item 8a's fence and resume rule (`proceed/phase-0-setup.md` 141-150): REQ-661, REQ-662, REQ-682. The mock's `op_pr_create` (`forge_mock.py` 227-245): REQ-659. Five candidates, so nothing is written: the operator chooses.
+Attribution: `git blame` on the root-cause ranges at `1d40f47` returns five REQs. The exec notes (`exec_prompt.py` 327-334): REQ-659, REQ-682, REQ-719. `_stall_check` (`sprint_exec.py` 1618-1634): REQ-659. `_launch_first` (1558-1572): REQ-659, REQ-662. Item 8a's fence and resume rule (`proceed/phase-0-setup.md` 141-150): REQ-661, REQ-662, REQ-682. The mock's `op_pr_create` (`forge_mock.py` 227-245): REQ-659. Five candidates, so nothing was written when the bug was resolved: the operator chooses. On 2026-11-23 the owner chose REQ-659 and REQ-662.
 
 ## Resolution
 
@@ -138,8 +138,6 @@ What these cannot show. The fake harness and the mock forge are scripted. Nothin
 Merged as `5303ecf` ([#317](https://github.com/atelier-fashion/adlc-toolkit/pull/317)) on 2026-11-23, pinned to the tested head `052af2e`. The regression gate read `off`. The toolkit has no deploy target: the fix is live for a symlink install when its clone pulls `main`, and for a plugin install at the next release.
 
 No real `codex` or `claude` launch has run against it. The prompt line, the dashboard note, the stall after an `answer` and the draft-PR fence run twice are measured by the fake harness and the mock forge only.
-
-`introduced_by` is still empty: blame returned five REQs and the operator has not chosen.
 
 ## Lessons
 
