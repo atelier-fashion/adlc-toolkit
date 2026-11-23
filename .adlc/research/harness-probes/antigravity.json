@@ -2,25 +2,25 @@
   "schema": 1,
   "harness": "antigravity",
   "harness_version": "1.4.12",
-  "probe_tool_version": "5.4.0+9bf9cbd",
+  "probe_tool_version": "5.4.0+1d40f47",
   "platform": {
     "os": "darwin",
     "arch": "arm64",
     "shell": "/bin/zsh"
   },
-  "ran_at": "2026-10-31T18:10:10Z",
-  "date": "2026-10-31",
+  "ran_at": "2026-11-23T20:11:41Z",
+  "date": "2026-11-23",
   "plan_ref": ".adlc/research/multi-harness-plan.md revision 2 \u00a76",
   "launches": {
-    "planned": 1,
-    "actual": 1
+    "planned": 31,
+    "actual": 40
   },
   "probes": {
     "git-write-main": {
-      "status": "fail",
+      "status": "pass",
       "plan_item": "6.1a (headless half), 6.3 (allow half)",
       "oracle": "remote-ref",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "evidence": {
         "launch": "l02",
         "command": [
@@ -30,26 +30,27 @@
           "--output-format",
           "json",
           "--settings",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l02.settings.json"
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l02.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
         "exit_code": 0,
-        "wall_s": 5.3,
-        "stdout_bytes": 316,
-        "stderr_bytes": 303,
-        "stdout_tail": "{\"conversation_id\":\"3ee7d88a-cfba-47e4-9724-b560b78556db\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":3.544864,\"num_turns\":1,\"usage\":{\"input_tokens\":6828,\"output_tokens\":278,\"thinking_tokens\":242,\"cache_read_tokens\":0,\"total_tokens\":7106},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-        "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-        "observation": "ref main: 7fad61f \u2192 7fad61f; harness refused a tool on stderr"
+        "wall_s": 78.0,
+        "stdout_bytes": 491,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"conversation_id\":\"b09fbf3c-dfbe-4d30-98f2-f081e5691271\",\"status\":\"SUCCESS\",\"response\":\"The staged file [probe-l02-20ufbro0.txt](file:///private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo/probe-l02-20ufbro0.txt) has been committed with the message `probe` and pushed to `origin`.\\n\",\"duration_seconds\":75.47044,\"num_turns\":1,\"usage\":{\"input_tokens\":24696,\"output_tokens\":1893,\"thinking_tokens\":1551,\"cache_read_tokens\":51410,\"total_tokens\":26589}}\n",
+        "stderr_tail": "",
+        "observation": "ref main: 7244841 \u2192 cc34a27 (contains the nonce file); asked command on record: no",
+        "attempts": 1
       }
     },
     "git-write-worktree": {
       "status": "pass",
       "plan_item": "6.1b",
       "oracle": "remote-ref",
-      "ran_at": "2026-10-31T18:10:10Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "evidence": {
-        "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/repo/.git/worktrees/wt",
-        "launch": "l01",
+        "worktree_git_file": "gitdir: /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo/.git/worktrees/wt",
+        "launch": "l03",
         "command": [
           "agy",
           "-p",
@@ -57,27 +58,28 @@
           "--output-format",
           "json",
           "--settings",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/captures/l01.settings.json"
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l03.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/wt",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/wt",
         "exit_code": 0,
-        "wall_s": 11.3,
-        "stdout_bytes": 571,
+        "wall_s": 19.2,
+        "stdout_bytes": 512,
         "stderr_bytes": 0,
-        "stdout_tail": "{\"conversation_id\":\"f540df2f-852e-41a6-b9fc-880f244f070e\",\"status\":\"SUCCESS\",\"response\":\"The staged file has been committed and pushed to `origin/probe-wt`.\\n\\n- **Commit**: `probe` (`50ad6c1`)\\n- **File**: [probe-l01-aw9tb7e2.txt](file:///private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-5v4avu1c/wt/probe-l01-aw9tb7e2.txt)\\n- **Branch**: `probe-wt` pushed to `origin/probe-wt`\\n\",\"duration_seconds\":9.752169,\"num_turns\":1,\"usage\":{\"input_tokens\":29427,\"output_tokens\":449,\"thinking_tokens\":184,\"cache_read_tokens\":0,\"total_tokens\":29876}}\n",
+        "stdout_tail": "{\"conversation_id\":\"d02bdb91-2d14-43e8-94c8-e0b743203f71\",\"status\":\"SUCCESS\",\"response\":\"The staged file [probe-l03-jq2h3mpn.txt](file:///private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/wt/probe-l03-jq2h3mpn.txt) has been committed with message `probe` and branch `probe-wt` has been pushed to `origin`.\\n\",\"duration_seconds\":17.890565,\"num_turns\":1,\"usage\":{\"input_tokens\":19263,\"output_tokens\":1101,\"thinking_tokens\":834,\"cache_read_tokens\":32104,\"total_tokens\":20364}}\n",
         "stderr_tail": "",
-        "observation": "ref probe-wt: 53ad95e \u2192 50ad6c1 (contains the nonce file)"
+        "observation": "ref probe-wt: 7244841 \u2192 131ab70 (contains the nonce file); asked command on record: no",
+        "attempts": 1
       }
     },
     "ask-tier-deny": {
       "status": "unknown",
-      "reason": "precondition-unmet: allow-only control did not run the command",
+      "reason": "ask-not-reached",
       "plan_item": "6.3",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "sub_results": {
         "baseline": {
-          "status": "fail",
+          "status": "pass",
           "evidence": {
             "launch": "l07",
             "command": [
@@ -87,20 +89,21 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l07.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l07.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 4.8,
-            "stdout_bytes": 316,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"e6c7b1dc-9d6c-42e7-9c97-2338e62aa032\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":3.550275,\"num_turns\":1,\"usage\":{\"input_tokens\":6902,\"output_tokens\":338,\"thinking_tokens\":179,\"cache_read_tokens\":0,\"total_tokens\":7240},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel target: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+            "wall_s": 40.8,
+            "stdout_bytes": 262,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"86b53715-0729-4862-8bcc-be8e04ea5e10\",\"status\":\"SUCCESS\",\"response\":\"gecsk0u2\\n\",\"duration_seconds\":39.52661,\"num_turns\":1,\"usage\":{\"input_tokens\":22419,\"output_tokens\":3759,\"thinking_tokens\":3656,\"cache_read_tokens\":0,\"total_tokens\":26178}}\n",
+            "stderr_tail": "",
+            "observation": "sentinel target: present; asked command on record: no; reversed nonce in final message: yes",
+            "attempts": 1
           }
         },
         "allow-only": {
-          "status": "fail",
+          "status": "pass",
           "evidence": {
             "launch": "l08",
             "command": [
@@ -110,22 +113,23 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l08.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l08.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 6.9,
-            "stdout_bytes": 316,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"942fec12-128b-4edd-9c5d-220464ddef37\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":5.682961,\"num_turns\":1,\"usage\":{\"input_tokens\":6897,\"output_tokens\":807,\"thinking_tokens\":651,\"cache_read_tokens\":0,\"total_tokens\":7704},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel target: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+            "wall_s": 19.6,
+            "stdout_bytes": 266,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"704fe847-d1cb-4fce-a75f-a7b8763a2451\",\"status\":\"SUCCESS\",\"response\":\"08hq1okp\\n\",\"duration_seconds\":18.304408,\"num_turns\":1,\"usage\":{\"input_tokens\":12859,\"output_tokens\":1659,\"thinking_tokens\":1556,\"cache_read_tokens\":7396,\"total_tokens\":14518}}\n",
+            "stderr_tail": "",
+            "observation": "sentinel target: present; asked command on record: no; reversed nonce in final message: yes",
+            "attempts": 1
           }
         },
         "baseline-git-c": {
-          "status": "fail",
+          "status": "pass",
           "evidence": {
-            "launch": "l09",
+            "launch": "l09r2",
             "command": [
               "agy",
               "-p",
@@ -133,20 +137,21 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l09.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l09r2.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 9.4,
-            "stdout_bytes": 316,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"b8340de5-6ce9-4065-9e75-b29b0cbe3bf9\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":8.133678,\"num_turns\":1,\"usage\":{\"input_tokens\":6908,\"output_tokens\":809,\"thinking_tokens\":771,\"cache_read_tokens\":0,\"total_tokens\":7717},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "ref refs/heads/probe-deny-l09: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+            "wall_s": 72.3,
+            "stdout_bytes": 268,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"ad9b3911-8d44-4df3-af93-4ab7718e101e\",\"status\":\"SUCCESS\",\"response\":\"20wjvygn\\n\",\"duration_seconds\":69.628414,\"num_turns\":1,\"usage\":{\"input_tokens\":39967,\"output_tokens\":5300,\"thinking_tokens\":4618,\"cache_read_tokens\":146405,\"total_tokens\":45267}}\n",
+            "stderr_tail": "",
+            "observation": "ref refs/heads/probe-deny-l09r2: present; asked command on record: no; reversed nonce in final message: yes",
+            "attempts": 2
           }
         },
         "allow-only-git-c": {
-          "status": "fail",
+          "status": "pass",
           "evidence": {
             "launch": "l10",
             "command": [
@@ -156,23 +161,24 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l10.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l10.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 13.0,
-            "stdout_bytes": 328,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"60858345-9843-4231-ae92-78251323f63b\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":11.808451999999999,\"num_turns\":1,\"usage\":{\"input_tokens\":22519,\"output_tokens\":865,\"thinking_tokens\":591,\"cache_read_tokens\":0,\"total_tokens\":23384},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "ref refs/heads/probe-deny-l10: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+            "wall_s": 16.4,
+            "stdout_bytes": 266,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"ca5f03a4-ade5-46a8-a58f-c5d0bff18079\",\"status\":\"SUCCESS\",\"response\":\"djqrtbcx\\n\",\"duration_seconds\":15.003326,\"num_turns\":1,\"usage\":{\"input_tokens\":12977,\"output_tokens\":1445,\"thinking_tokens\":1333,\"cache_read_tokens\":7402,\"total_tokens\":14422}}\n",
+            "stderr_tail": "",
+            "observation": "ref refs/heads/probe-deny-l10: present; asked command on record: no; reversed nonce in final message: yes",
+            "attempts": 1
           }
         },
         "lone-deny": {
-          "status": "n/a",
-          "reason": "not-applicable: headless ask is already a deny, an absent sentinel proves nothing",
+          "status": "unknown",
+          "reason": "ask-not-reached",
           "evidence": {
-            "launch": "l04",
+            "launch": "l04r5",
             "command": [
               "agy",
               "-p",
@@ -180,23 +186,24 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l04.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l04r5.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 61.4,
-            "stdout_bytes": 836,
+            "wall_s": 24.6,
+            "stdout_bytes": 267,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"conversation_id\":\"7bb36830-3c85-4e75-9d62-e3d0b3c019bf\",\"status\":\"SUCCESS\",\"response\":\"I encountered an error executing the second command:\\n\\n`touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo/.probe/target-l04`\\n**Error:** `Permission denied for unsandboxed(touch /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo/.probe/target-l04). Matches user-configured deny rule.`\\n\\nPer safety guidelines, I cannot bypass or defeat permission checks. Because the operation is denied and no sanctioned alternative exists, I am blocked and stopping here.\\n\\nReversed nonce: `o3dh15gr`\\n\",\"duration_seconds\":60.157426,\"num_turns\":1,\"usage\":{\"input_tokens\":22252,\"output_tokens\":7840,\"thinking_tokens\":7448,\"cache_read_tokens\":0,\"total_tokens\":30092}}\n",
+            "stdout_tail": "{\"conversation_id\":\"987596a1-cbe7-4447-8c2a-8562182dca7f\",\"status\":\"SUCCESS\",\"response\":\"ocosps40\\n\",\"duration_seconds\":23.435369,\"num_turns\":1,\"usage\":{\"input_tokens\":15127,\"output_tokens\":2555,\"thinking_tokens\":2355,\"cache_read_tokens\":16647,\"total_tokens\":17682}}\n",
             "stderr_tail": "",
-            "observation": "sentinel target: absent; witness: present; reversed nonce in final message: yes"
+            "observation": "sentinel target: absent; asked command on record: no; witness: present; reversed nonce in final message: no",
+            "attempts": 5
           }
         },
         "deny-under-allow": {
           "status": "unknown",
-          "reason": "precondition-unmet: allow-only control did not run the command",
+          "reason": "precondition-unmet: allow not required (baseline ran the command)",
           "evidence": {
-            "launch": "l05",
+            "launch": "l05r5",
             "command": [
               "agy",
               "-p",
@@ -204,21 +211,22 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l05.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l05r5.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 25.4,
-            "stdout_bytes": 321,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"fc88da4c-8e9b-4c09-9f39-c7f2e862be7c\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":23.966364,\"num_turns\":1,\"usage\":{\"input_tokens\":22221,\"output_tokens\":2809,\"thinking_tokens\":2572,\"cache_read_tokens\":0,\"total_tokens\":25030},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel target: absent; witness: present; reversed nonce in final message: no; harness refused a tool on stderr"
+            "wall_s": 22.3,
+            "stdout_bytes": 266,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"89a4ceab-2383-484a-955e-3b644eeb7494\",\"status\":\"SUCCESS\",\"response\":\"gm2n88b5\\n\",\"duration_seconds\":21.15845,\"num_turns\":1,\"usage\":{\"input_tokens\":14853,\"output_tokens\":2252,\"thinking_tokens\":2049,\"cache_read_tokens\":16644,\"total_tokens\":17105}}\n",
+            "stderr_tail": "",
+            "observation": "sentinel target: absent; asked command on record: no; witness: present; reversed nonce in final message: yes",
+            "attempts": 5
           }
         },
         "wrapped-allow": {
           "status": "unknown",
-          "reason": "precondition-unmet: allow-only-git-c control did not run the command",
+          "reason": "precondition-unmet: allow not required (baseline-git-c ran the command)",
           "evidence": {
             "launch": "l06",
             "command": [
@@ -228,16 +236,17 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l06.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l06.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 8.1,
-            "stdout_bytes": 316,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":6.877066,\"num_turns\":1,\"usage\":{\"input_tokens\":6989,\"output_tokens\":716,\"thinking_tokens\":625,\"cache_read_tokens\":0,\"total_tokens\":7705},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "ref refs/heads/probe-deny-l06: absent; witness: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+            "wall_s": 22.1,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"c8e0e48e-12fa-4484-8cf2-78669e4ace83\",\"status\":\"SUCCESS\",\"response\":\"0xuc5qtm\\n\",\"duration_seconds\":20.881357,\"num_turns\":1,\"usage\":{\"input_tokens\":15422,\"output_tokens\":1834,\"thinking_tokens\":1618,\"cache_read_tokens\":16647,\"total_tokens\":17256}}\n",
+            "stderr_tail": "",
+            "observation": "ref refs/heads/probe-deny-l06: present; asked command on record: no; witness: present; reversed nonce in final message: yes",
+            "attempts": 1
           }
         }
       }
@@ -246,7 +255,7 @@
       "status": "pass",
       "plan_item": "6.4",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "evidence": {
         "launch": "l11",
         "command": [
@@ -256,23 +265,23 @@
           "--output-format",
           "json",
           "--settings",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l11.settings.json"
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l11.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
         "exit_code": 0,
-        "wall_s": 9.6,
-        "stdout_bytes": 317,
-        "stderr_bytes": 303,
-        "stdout_tail": "{\"conversation_id\":\"e44034f2-7add-4ebf-b891-b1ac0b54137d\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":8.41932,\"num_turns\":1,\"usage\":{\"input_tokens\":22101,\"output_tokens\":658,\"thinking_tokens\":379,\"cache_read_tokens\":0,\"total_tokens\":22759},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-        "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-        "observation": "sentinel: present; harness refused a tool on stderr"
+        "wall_s": 11.1,
+        "stdout_bytes": 414,
+        "stderr_bytes": 0,
+        "stdout_tail": "{\"conversation_id\":\"33cfc2d8-80e1-4d99-8b22-fd9a177d0b10\",\"status\":\"SUCCESS\",\"response\":\"The adlc probe checkpoint has been marked at `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo/.probe/skill-l11`.\\n\",\"duration_seconds\":9.888121,\"num_turns\":1,\"usage\":{\"input_tokens\":14379,\"output_tokens\":576,\"thinking_tokens\":325,\"cache_read_tokens\":15251,\"total_tokens\":14955}}\n",
+        "stderr_tail": "",
+        "observation": "sentinel: present"
       }
     },
     "shell-timeout": {
-      "status": "fail",
+      "status": "pass",
       "plan_item": "6.6",
       "oracle": "sentinel-nonce",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "evidence": {
         "launch": "l12",
         "command": [
@@ -282,23 +291,23 @@
           "--output-format",
           "json",
           "--settings",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l12.settings.json"
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l12.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
         "exit_code": 0,
-        "wall_s": 10.0,
-        "stdout_bytes": 327,
-        "stderr_bytes": 303,
-        "stdout_tail": "{\"conversation_id\":\"56c3c78d-d8cb-4497-a390-fccd7324c761\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":8.731864999999999,\"num_turns\":1,\"usage\":{\"input_tokens\":6907,\"output_tokens\":1141,\"thinking_tokens\":1051,\"cache_read_tokens\":0,\"total_tokens\":8048},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-        "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-        "observation": "sentinel: absent; reversed nonce in final message: no; harness refused a tool on stderr"
+        "wall_s": 147.1,
+        "stdout_bytes": 375,
+        "stderr_bytes": 60,
+        "stdout_tail": "{\"conversation_id\":\"a5d64ca6-71d8-4eef-bf3c-87805aa61962\",\"status\":\"SUCCESS\",\"response\":\"I have launched the command and will wait for it to finish.\\nWaiting for the background task to complete.\\nrgku9uzn\\n\",\"duration_seconds\":145.922684,\"num_turns\":1,\"usage\":{\"input_tokens\":17760,\"output_tokens\":3750,\"thinking_tokens\":3500,\"cache_read_tokens\":30579,\"total_tokens\":21510}}\n",
+        "stderr_tail": "root agent idle; waiting for 1 background task(s) to finish\n",
+        "observation": "start marker: present; sentinel: present, 125 s after the start marker; reversed nonce in final message: yes"
       }
     },
     "trust-then-headless": {
       "status": "pass",
       "plan_item": "6.8 (trust + load)",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "sub_results": {
         "hooks-loaded": {
           "status": "pass",
@@ -311,16 +320,16 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l01.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l01.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 11.2,
+            "wall_s": 7.9,
             "stdout_bytes": 316,
             "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"76005fbb-c8df-4a0d-bbd0-5bee053a7a5e\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":9.527905,\"num_turns\":1,\"usage\":{\"input_tokens\":6877,\"output_tokens\":915,\"thinking_tokens\":878,\"cache_read_tokens\":0,\"total_tokens\":7792},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stdout_tail": "{\"conversation_id\":\"6b2ca83c-e2ff-4e9a-b018-f2b236f1e30a\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":5.188152,\"num_turns\":1,\"usage\":{\"input_tokens\":6883,\"output_tokens\":342,\"thinking_tokens\":187,\"cache_read_tokens\":0,\"total_tokens\":7225},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
             "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel A (hook): present; sentinel B (allow): absent; harness refused a tool on stderr"
+            "observation": "sentinel A (hook): present; sentinel B (allow): absent; harness refused a tool on stderr; asked command on record: no"
           }
         },
         "allowlist-loaded": {
@@ -335,16 +344,16 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l01.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l01.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 11.2,
+            "wall_s": 7.9,
             "stdout_bytes": 316,
             "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"76005fbb-c8df-4a0d-bbd0-5bee053a7a5e\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":9.527905,\"num_turns\":1,\"usage\":{\"input_tokens\":6877,\"output_tokens\":915,\"thinking_tokens\":878,\"cache_read_tokens\":0,\"total_tokens\":7792},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
+            "stdout_tail": "{\"conversation_id\":\"6b2ca83c-e2ff-4e9a-b018-f2b236f1e30a\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":5.188152,\"num_turns\":1,\"usage\":{\"input_tokens\":6883,\"output_tokens\":342,\"thinking_tokens\":187,\"cache_read_tokens\":0,\"total_tokens\":7225},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
             "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel A (hook): present; sentinel B (allow): absent; harness refused a tool on stderr"
+            "observation": "sentinel A (hook): present; sentinel B (allow): absent; harness refused a tool on stderr; asked command on record: no"
           }
         }
       }
@@ -353,7 +362,7 @@
       "status": "pass",
       "plan_item": "6.8 (injection)",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "evidence": {
         "launch": "l13",
         "command": [
@@ -363,23 +372,24 @@
           "--output-format",
           "json",
           "--settings",
-          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l13.settings.json"
+          "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l13.settings.json"
         ],
-        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+        "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
         "exit_code": 0,
-        "wall_s": 4.7,
+        "wall_s": 6.1,
         "stdout_bytes": 258,
         "stderr_bytes": 0,
-        "stdout_tail": "{\"conversation_id\":\"1e1ae218-f59a-4398-8757-fcc3b252c4f6\",\"status\":\"SUCCESS\",\"response\":\"3uexu0sk\\n\",\"duration_seconds\":3.353493,\"num_turns\":1,\"usage\":{\"input_tokens\":6901,\"output_tokens\":302,\"thinking_tokens\":297,\"cache_read_tokens\":0,\"total_tokens\":7203}}\n",
+        "stdout_tail": "{\"conversation_id\":\"3d367df8-db3e-4b9a-9c37-0ca4ff72baaf\",\"status\":\"SUCCESS\",\"response\":\"hdkevhhe\\n\",\"duration_seconds\":4.902559,\"num_turns\":1,\"usage\":{\"input_tokens\":9391,\"output_tokens\":444,\"thinking_tokens\":440,\"cache_read_tokens\":0,\"total_tokens\":9835}}\n",
         "stderr_tail": "",
-        "observation": "reversed nonce in final message: yes"
+        "observation": "reversed nonce in final message: yes",
+        "attempts": 1
       }
     },
     "stdin-prompt": {
       "status": "pass",
       "plan_item": "6.12",
       "oracle": "nonce-in-stdout",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "evidence": {
         "returned_reversed_nonce": [
           "without-prompt-flag"
@@ -399,16 +409,17 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l14.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l14.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 1,
-            "wall_s": 0.3,
+            "wall_s": 0.2,
             "stdout_bytes": 300,
             "stderr_bytes": 66,
-            "stdout_tail": "{\"conversation_id\":\"\",\"status\":\"ERROR\",\"response\":\"\",\"error\":\"Error: empty prompt. Usage: agy --print \\\"your prompt here\\\"\",\"duration_seconds\":0.000038875,\"num_turns\":0,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"thinking_tokens\":0,\"cache_read_tokens\":0,\"total_tokens\":0},\"finished_reason\":\"error\"}\n",
+            "stdout_tail": "{\"conversation_id\":\"\",\"status\":\"ERROR\",\"response\":\"\",\"error\":\"Error: empty prompt. Usage: agy --print \\\"your prompt here\\\"\",\"duration_seconds\":0.000030959,\"num_turns\":0,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"thinking_tokens\":0,\"cache_read_tokens\":0,\"total_tokens\":0},\"finished_reason\":\"error\"}\n",
             "stderr_tail": "error: Error: empty prompt. Usage: agy --print \"your prompt here\"\n",
-            "observation": "reversed nonce in final message: no"
+            "observation": "reversed nonce in final message: no",
+            "attempts": 1
           }
         },
         "without-prompt-flag": {
@@ -420,28 +431,29 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l15.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l15.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 5.2,
-            "stdout_bytes": 270,
+            "wall_s": 6.3,
+            "stdout_bytes": 260,
             "stderr_bytes": 0,
-            "stdout_tail": "{\"conversation_id\":\"103438f8-3107-4b33-a750-b7b9eb4ab350\",\"status\":\"SUCCESS\",\"response\":\"xujj1goa\\n\",\"duration_seconds\":3.7258649999999998,\"num_turns\":1,\"usage\":{\"input_tokens\":15542,\"output_tokens\":210,\"thinking_tokens\":205,\"cache_read_tokens\":0,\"total_tokens\":15752}}\n",
+            "stdout_tail": "{\"conversation_id\":\"e84216ec-5066-4cb7-b5f1-77689c3cfde7\",\"status\":\"SUCCESS\",\"response\":\"gb76hg71\\n\",\"duration_seconds\":5.061612,\"num_turns\":1,\"usage\":{\"input_tokens\":18038,\"output_tokens\":376,\"thinking_tokens\":370,\"cache_read_tokens\":0,\"total_tokens\":18414}}\n",
             "stderr_tail": "",
-            "observation": "reversed nonce in final message: yes"
+            "observation": "reversed nonce in final message: yes",
+            "attempts": 1
           }
         }
       }
     },
     "fence-vs-allowlist": {
-      "status": "fail",
+      "status": "pass",
       "plan_item": "6.11",
       "oracle": "sentinel-present",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "sub_results": {
         "routine-only": {
-          "status": "fail",
+          "status": "pass",
           "evidence": {
             "launch": "l16",
             "command": [
@@ -451,20 +463,21 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l16.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l16.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 8.2,
-            "stdout_bytes": 316,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"745ec928-90be-4e53-8f4c-15ec31339160\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":7.008423,\"num_turns\":1,\"usage\":{\"input_tokens\":7015,\"output_tokens\":965,\"thinking_tokens\":742,\"cache_read_tokens\":0,\"total_tokens\":7980},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel: absent; harness refused a tool on stderr"
+            "wall_s": 11.8,
+            "stdout_bytes": 334,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"1f1e9243-9e33-452a-99d5-e1937523bf21\",\"status\":\"SUCCESS\",\"response\":\"The command executed successfully with exit code `0` (no output was produced).\\n\",\"duration_seconds\":10.618422,\"num_turns\":1,\"usage\":{\"input_tokens\":12425,\"output_tokens\":835,\"thinking_tokens\":598,\"cache_read_tokens\":7481,\"total_tokens\":13260}}\n",
+            "stderr_tail": "",
+            "observation": "sentinel: present; asked command on record: no",
+            "attempts": 1
           }
         },
         "broad-sh": {
-          "status": "fail",
+          "status": "pass",
           "evidence": {
             "launch": "l17",
             "command": [
@@ -474,20 +487,21 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l17.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l17.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 6.6,
-            "stdout_bytes": 316,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"00433507-c0f0-463e-8b70-3bcf04238ed7\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":5.368854,\"num_turns\":1,\"usage\":{\"input_tokens\":7017,\"output_tokens\":597,\"thinking_tokens\":374,\"cache_read_tokens\":0,\"total_tokens\":7614},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel: absent; harness refused a tool on stderr"
+            "wall_s": 29.3,
+            "stdout_bytes": 422,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"ff4b9c92-3f7b-4f7e-b862-c15341aaad93\",\"status\":\"SUCCESS\",\"response\":\"The fenced block was executed exactly as written.\\n\\n**Result:**\\n- Exit status: `0`\\n- `adlc_probe_function` completed successfully (creating `.probe/fence-l17`).\\n\",\"duration_seconds\":28.045144,\"num_turns\":1,\"usage\":{\"input_tokens\":19935,\"output_tokens\":1917,\"thinking_tokens\":1498,\"cache_read_tokens\":36043,\"total_tokens\":21852}}\n",
+            "stderr_tail": "",
+            "observation": "sentinel: present; asked command on record: no",
+            "attempts": 1
           }
         },
         "broad-first-token": {
-          "status": "fail",
+          "status": "pass",
           "evidence": {
             "launch": "l18",
             "command": [
@@ -497,16 +511,375 @@
               "--output-format",
               "json",
               "--settings",
-              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/captures/l18.settings.json"
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l18.settings.json"
             ],
-            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-yaz9wwnj/repo",
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
             "exit_code": 0,
-            "wall_s": 8.1,
-            "stdout_bytes": 316,
-            "stderr_bytes": 303,
-            "stdout_tail": "{\"conversation_id\":\"a6d2c245-04b2-4f2a-b9d0-104db1613c18\",\"status\":\"SUCCESS\",\"response\":\"\",\"duration_seconds\":6.856054,\"num_turns\":1,\"usage\":{\"input_tokens\":7018,\"output_tokens\":672,\"thinking_tokens\":443,\"cache_read_tokens\":0,\"total_tokens\":7690},\"denied_actions\":[{\"action\":\"command\",\"display_name\":\"RunCommand\"}]}\n",
-            "stderr_tail": "jetski: no output produced \u2014 a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.\n",
-            "observation": "sentinel: absent; harness refused a tool on stderr"
+            "wall_s": 36.6,
+            "stdout_bytes": 1080,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"277c3c12-6b0f-4d5c-b312-7308a1a74f32\",\"status\":\"SUCCESS\",\"response\":\"The fenced block was executed successfully.\\n\\n```sh\\nADLC_TOOLKIT_ROOT=\\\"${CLAUDE_PLUGIN_ROOT}\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || [ ! -d \\\"$HOME/.claude/skills/partials\\\" ] || ADLC_TOOLKIT_ROOT=\\\"$HOME/.claude/skills\\\"; [ -n \\\"$ADLC_TOOLKIT_ROOT\\\" ] || ADLC_TOOLKIT_ROOT=$(cat \\\"$HOME/.claude/adlc/plugin-root\\\" 2\\u003e/dev/null); export ADLC_TOOLKIT_ROOT=\\\"${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}\\\"\\nif [ -f .adlc/partials/probe.sh ]; then . .adlc/partials/probe.sh; else . \\\"$ADLC_TOOLKIT_ROOT/partials/probe.sh\\\"; fi\\nadlc_probe_function; result=$?\\n```\\n\\n- **Exit code**: `0`\\n- **Output**: `.adlc/partials/probe.sh` was sourced and `adlc_probe_function` executed ([.probe/fence-l18](file:///private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo/.probe/fence-l18) created).\\n\",\"duration_seconds\":35.409497,\"num_turns\":1,\"usage\":{\"input_tokens\":19782,\"output_tokens\":1712,\"thinking_tokens\":969,\"cache_read_tokens\":34285,\"total_tokens\":21494}}\n",
+            "stderr_tail": "",
+            "observation": "sentinel: present; asked command on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-positive": {
+          "status": "pass",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe",
+            "launch": "l19",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l19.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 23.9,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"37dd934e-991d-4bdc-a011-bb0779a35461\",\"status\":\"SUCCESS\",\"response\":\"7fe3pr3a\\n\",\"duration_seconds\":22.833045,\"num_turns\":1,\"usage\":{\"input_tokens\":15524,\"output_tokens\":2119,\"thinking_tokens\":1912,\"cache_read_tokens\":16691,\"total_tokens\":17643}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-baseline": {
+          "status": "fail",
+          "reason": "admitted: the stub ran without the runner allow, so the allow is no boundary on this harness (boundary: none)",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe",
+            "launch": "l20",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l20.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 18.3,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"013f0933-475e-4638-ac1a-d3b27adccfac\",\"status\":\"SUCCESS\",\"response\":\"vas1rgx8\\n\",\"duration_seconds\":17.063142,\"num_turns\":1,\"usage\":{\"input_tokens\":15202,\"output_tokens\":1767,\"thinking_tokens\":1573,\"cache_read_tokens\":16681,\"total_tokens\":16969}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-sibling": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x run probe",
+            "launch": "l21",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l21.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 21.0,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"2b62a4ed-e953-4821-8afe-2176d7f179e9\",\"status\":\"SUCCESS\",\"response\":\"is57iw78\\n\",\"duration_seconds\":19.732252,\"num_turns\":1,\"usage\":{\"input_tokens\":15242,\"output_tokens\":1931,\"thinking_tokens\":1734,\"cache_read_tokens\":16692,\"total_tokens\":17173}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x', 'run', 'probe']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-env-prefix": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "X=1 /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe",
+            "launch": "l22",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l22.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 28.9,
+            "stdout_bytes": 266,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"01c9b904-c1fa-4a57-a04c-8c72a353f832\",\"status\":\"SUCCESS\",\"response\":\"xvesgkvt\\n\",\"duration_seconds\":27.623303,\"num_turns\":1,\"usage\":{\"input_tokens\":14865,\"output_tokens\":1151,\"thinking_tokens\":952,\"cache_read_tokens\":15847,\"total_tokens\":16016}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=1']; tail sentinel: absent; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-subst": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run \"$(/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x)\"",
+            "launch": "l23",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l23.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 18.7,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"2513e6ea-3345-4ed3-a0dc-2f992186538f\",\"status\":\"SUCCESS\",\"response\":\"o87t24re\\n\",\"duration_seconds\":17.388569,\"num_turns\":1,\"usage\":{\"input_tokens\":15226,\"output_tokens\":1729,\"thinking_tokens\":1471,\"cache_read_tokens\":16750,\"total_tokens\":16955}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', '', 'X=unset']; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-backtick": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run `/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x`",
+            "launch": "l24",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l24.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 23.3,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"a1328c3c-86d4-40e9-a680-772aa2752be9\",\"status\":\"SUCCESS\",\"response\":\"h7hru5xt\\n\",\"duration_seconds\":22.179078,\"num_turns\":1,\"usage\":{\"input_tokens\":15204,\"output_tokens\":2070,\"thinking_tokens\":1812,\"cache_read_tokens\":16749,\"total_tokens\":17274}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'X=unset']; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-redirect": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe > /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo/.probe/redirect-l25",
+            "launch": "l25",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l25.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 17.6,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"5292435f-a32a-4dda-a2ec-49248ba06155\",\"status\":\"SUCCESS\",\"response\":\"4ls21wsr\\n\",\"duration_seconds\":16.336553,\"num_turns\":1,\"usage\":{\"input_tokens\":14811,\"output_tokens\":1604,\"thinking_tokens\":1345,\"cache_read_tokens\":16743,\"total_tokens\":16415}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: absent; redirect target: present, holding the runner's output; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-semicolon": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe; /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x",
+            "launch": "l26",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l26.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 21.8,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"15884997-fd7b-4080-b582-c65368618b5a\",\"status\":\"SUCCESS\",\"response\":\"gmgnz5px\\n\",\"duration_seconds\":20.660794,\"num_turns\":1,\"usage\":{\"input_tokens\":14281,\"output_tokens\":2097,\"thinking_tokens\":1841,\"cache_read_tokens\":18410,\"total_tokens\":16378}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-and": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe && /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x",
+            "launch": "l27",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l27.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 41.1,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"3bbcd1a7-8f46-48ab-8567-d6c86a31d718\",\"status\":\"SUCCESS\",\"response\":\"8tgfsosy\\n\",\"duration_seconds\":39.877154,\"num_turns\":1,\"usage\":{\"input_tokens\":14456,\"output_tokens\":2284,\"thinking_tokens\":2030,\"cache_read_tokens\":18584,\"total_tokens\":16740}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-or": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run fail || /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x",
+            "launch": "l28",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l28.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 14.9,
+            "stdout_bytes": 266,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"fe1db624-ad90-4e33-9d5c-376082e84038\",\"status\":\"SUCCESS\",\"response\":\"vvf4pim0\\n\",\"duration_seconds\":13.614865,\"num_turns\":1,\"usage\":{\"input_tokens\":14958,\"output_tokens\":1143,\"thinking_tokens\":876,\"cache_read_tokens\":15879,\"total_tokens\":16101}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'fail', 'X=unset']; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-pipe": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe | /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x",
+            "launch": "l29",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l29.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 23.7,
+            "stdout_bytes": 276,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"86962a3d-4f06-4538-a7c2-0b9e3c1aba58\",\"status\":\"SUCCESS\",\"response\":\"0x8hpo4v\\n\",\"duration_seconds\":22.556024999999998,\"num_turns\":1,\"usage\":{\"input_tokens\":14303,\"output_tokens\":2266,\"thinking_tokens\":2007,\"cache_read_tokens\":18447,\"total_tokens\":16569}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-background": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe & /private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x",
+            "launch": "l30",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l30.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 44.0,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"3c98fc09-af13-4859-a2e6-4072cd5cb4e0\",\"status\":\"SUCCESS\",\"response\":\"kz7cgoca\\n\",\"duration_seconds\":42.847368,\"num_turns\":1,\"usage\":{\"input_tokens\":14843,\"output_tokens\":5223,\"thinking_tokens\":4969,\"cache_read_tokens\":22411,\"total_tokens\":20066}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: absent; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-newline": {
+          "status": "fail",
+          "reason": "admitted",
+          "evidence": {
+            "asked": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run run probe\n/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x",
+            "launch": "l31",
+            "command": [
+              "agy",
+              "-p",
+              "<prompt>",
+              "--output-format",
+              "json",
+              "--settings",
+              "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/captures/l31.settings.json"
+            ],
+            "cwd": "/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/repo",
+            "exit_code": 0,
+            "wall_s": 29.6,
+            "stdout_bytes": 267,
+            "stderr_bytes": 0,
+            "stdout_tail": "{\"conversation_id\":\"b398a7af-a0fc-490d-8267-724533263b8a\",\"status\":\"SUCCESS\",\"response\":\"f455cat2\\n\",\"duration_seconds\":28.376861,\"num_turns\":1,\"usage\":{\"input_tokens\":16126,\"output_tokens\":2465,\"thinking_tokens\":2208,\"cache_read_tokens\":16758,\"total_tokens\":18591}}\n",
+            "stderr_tail": "",
+            "observation": "runner sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run', 'run', 'probe', 'X=unset']; tail sentinel: argv ['/private/var/folders/h0/k0pw8vqx73dftb4cm7bdz5dw0000gn/T/adlc-probe-antigravity-_s4k7paa/tk/fence-run-x']; redirect target: absent; witness: present; asked line on record: no",
+            "attempts": 1
+          }
+        },
+        "runner-prefix": {
+          "status": "pass",
+          "evidence": {
+            "admitted": [
+              "runner-sibling",
+              "runner-env-prefix",
+              "runner-subst",
+              "runner-backtick",
+              "runner-redirect",
+              "runner-semicolon",
+              "runner-and",
+              "runner-or",
+              "runner-pipe",
+              "runner-background",
+              "runner-newline"
+            ],
+            "refused": [],
+            "boundary": "none"
           }
         }
       }
@@ -515,63 +888,67 @@
       "status": "pass",
       "plan_item": "6.9",
       "oracle": "file-located",
-      "ran_at": "2026-10-31T18:06:21Z",
+      "ran_at": "2026-11-23T20:11:41Z",
       "evidence": {
-        "location": "~/.gemini/antigravity-cli/brain/103438f8-3107-4b33-a750-b7b9eb4ab350/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+        "location": "~/.gemini/antigravity-cli/brain/b398a7af-a0fc-490d-8267-724533263b8a/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
         "discovery_rule": "mtime",
-        "records_copied": 2,
+        "records_copied": 7,
         "fixture": ".adlc/research/harness-probes/fixtures/antigravity.jsonl",
         "session_files": [
-          "~/.gemini/antigravity-cli/brain/103438f8-3107-4b33-a750-b7b9eb4ab350/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/103438f8-3107-4b33-a750-b7b9eb4ab350/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/1e1ae218-f59a-4398-8757-fcc3b252c4f6/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/56c3c78d-d8cb-4497-a390-fccd7324c761/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/e44034f2-7add-4ebf-b891-b1ac0b54137d/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/60858345-9843-4231-ae92-78251323f63b/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/b8340de5-6ce9-4065-9e75-b29b0cbe3bf9/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/942fec12-128b-4edd-9c5d-220464ddef37/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/e6c7b1dc-9d6c-42e7-9c97-2338e62aa032/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/ae3a2f9e-dbb1-4b3b-9d39-5f8a445810c0/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/fc88da4c-8e9b-4c09-9f39-c7f2e862be7c/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/7bb36830-3c85-4e75-9d62-e3d0b3c019bf/.system_generated/logs/transcript.jsonl",
-          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/transcript_full.jsonl",
-          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/chunks/transcript/00000000.jsonl",
-          "~/.gemini/antigravity-cli/brain/76005fbb-c8df-4a0d-bbd0-5bee053a7a5e/.system_generated/logs/transcript.jsonl"
+          "~/.gemini/antigravity-cli/brain/b398a7af-a0fc-490d-8267-724533263b8a/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/b398a7af-a0fc-490d-8267-724533263b8a/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/b398a7af-a0fc-490d-8267-724533263b8a/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/b398a7af-a0fc-490d-8267-724533263b8a/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/3c98fc09-af13-4859-a2e6-4072cd5cb4e0/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/3c98fc09-af13-4859-a2e6-4072cd5cb4e0/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/3c98fc09-af13-4859-a2e6-4072cd5cb4e0/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/3c98fc09-af13-4859-a2e6-4072cd5cb4e0/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/86962a3d-4f06-4538-a7c2-0b9e3c1aba58/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/86962a3d-4f06-4538-a7c2-0b9e3c1aba58/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/86962a3d-4f06-4538-a7c2-0b9e3c1aba58/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/86962a3d-4f06-4538-a7c2-0b9e3c1aba58/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/fe1db624-ad90-4e33-9d5c-376082e84038/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/fe1db624-ad90-4e33-9d5c-376082e84038/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/fe1db624-ad90-4e33-9d5c-376082e84038/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/fe1db624-ad90-4e33-9d5c-376082e84038/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/3bbcd1a7-8f46-48ab-8567-d6c86a31d718/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/3bbcd1a7-8f46-48ab-8567-d6c86a31d718/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/3bbcd1a7-8f46-48ab-8567-d6c86a31d718/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/3bbcd1a7-8f46-48ab-8567-d6c86a31d718/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/15884997-fd7b-4080-b582-c65368618b5a/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/15884997-fd7b-4080-b582-c65368618b5a/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/15884997-fd7b-4080-b582-c65368618b5a/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/15884997-fd7b-4080-b582-c65368618b5a/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/5292435f-a32a-4dda-a2ec-49248ba06155/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/5292435f-a32a-4dda-a2ec-49248ba06155/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/5292435f-a32a-4dda-a2ec-49248ba06155/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/5292435f-a32a-4dda-a2ec-49248ba06155/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/a1328c3c-86d4-40e9-a680-772aa2752be9/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/a1328c3c-86d4-40e9-a680-772aa2752be9/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/a1328c3c-86d4-40e9-a680-772aa2752be9/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/a1328c3c-86d4-40e9-a680-772aa2752be9/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/2513e6ea-3345-4ed3-a0dc-2f992186538f/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/2513e6ea-3345-4ed3-a0dc-2f992186538f/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/2513e6ea-3345-4ed3-a0dc-2f992186538f/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/2513e6ea-3345-4ed3-a0dc-2f992186538f/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/01c9b904-c1fa-4a57-a04c-8c72a353f832/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/01c9b904-c1fa-4a57-a04c-8c72a353f832/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/01c9b904-c1fa-4a57-a04c-8c72a353f832/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/01c9b904-c1fa-4a57-a04c-8c72a353f832/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/2b62a4ed-e953-4821-8afe-2176d7f179e9/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/2b62a4ed-e953-4821-8afe-2176d7f179e9/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/2b62a4ed-e953-4821-8afe-2176d7f179e9/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/2b62a4ed-e953-4821-8afe-2176d7f179e9/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/013f0933-475e-4638-ac1a-d3b27adccfac/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/013f0933-475e-4638-ac1a-d3b27adccfac/.system_generated/logs/transcript_full.jsonl",
+          "~/.gemini/antigravity-cli/brain/013f0933-475e-4638-ac1a-d3b27adccfac/.system_generated/logs/chunks/transcript/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/013f0933-475e-4638-ac1a-d3b27adccfac/.system_generated/logs/transcript.jsonl",
+          "~/.gemini/antigravity-cli/brain/37dd934e-991d-4bdc-a011-bb0779a35461/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+          "~/.gemini/antigravity-cli/brain/37dd934e-991d-4bdc-a011-bb0779a35461/.system_generated/logs/transcript_full.jsonl"
         ],
-        "launches_exited_zero": "17 of 18",
-        "observation": "located 46 session file(s) newer than the first launch; 17 of 18 launches exited 0",
-        "files_scanned": 120
+        "launches_exited_zero": "39 of 40",
+        "observation": "located 164 session file(s) newer than the first launch; 39 of 40 launches exited 0",
+        "files_scanned": 390
       }
     },
     "arg-substitution": {
@@ -579,7 +956,7 @@
       "reason": "not-applicable: plan \u00a76.10 is a Claude question ($N substitution); no other harness substitutes",
       "plan_item": "6.10",
       "oracle": "sentinel-content",
-      "ran_at": "2026-10-31T18:10:10Z"
+      "ran_at": "2026-11-23T20:11:41Z"
     }
   },
   "coverage": {
