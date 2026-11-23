@@ -397,9 +397,9 @@ BUG-291 changes these, none of them the deny tier:
 - **Fact 15.** Step 0's draft-PR fence reads the open PR of the branch into its base first
   (`adlc_forge_pr_list --head … --base … --state open`) and, when there is one, prints it with
   a last line `pr_exists=1` and creates nothing. The mock forge refuses a second open PR for
-  one head and base, with the words `gh pr create` uses and the class the adapter gives them,
-  `network`. Where the read cannot show the PR (the Azure DevOps list prints JSON whatever
-  `--jq` says), the fence goes on to the create and the forge's refusal is what the session
+  one head and base, with the words `gh pr create` uses and the class the adapter gives them:
+  `network` when this was recorded, `pr-already-exists` since BUG-292. Where the read cannot
+  show the PR (the Azure DevOps list prints JSON whatever `--jq` says), the fence goes on to the create and the forge's refusal is what the session
   reads; the text beside the fence says that PR is the REQ's own and not a failed setup.
 
 Measured by the fake harness and the mock only (`test_bug291_exec_launch_11_gaps.py`). The

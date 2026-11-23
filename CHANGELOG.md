@@ -730,6 +730,31 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **A forge's refusal of a second PR for one head and base reads `pr-already-exists`, not
+  `network` (BUG-292).** `_adlc_forge_classify` had no pattern for it, so `gh pr create`'s `a
+  pull request for branch "<head>" into branch "<base>" already exists:`, GitHub's own `A pull
+  request already exists for <owner>:<head>.` and Azure DevOps's `TF401179` all took the
+  fall-through class, the one that reads as transient and invites a retry. The create is
+  refused every time, and the PR is the caller's own. Now:
+  - the three sentences read `error_class=pr-already-exists`, a seventh class. Its arm is tried
+    first, because the refusal quotes the branch names and the PR's URL: a head named
+    `fix/credentials-policy` used to move the same refusal to `auth-missing`;
+  - `partials/forge.md` says what a caller does with it: use the open PR, the one the `raw=`
+    line names or the one `adlc_forge_pr_list --head … --base … --state open` prints, and
+    never open one under another title;
+  - the mock forge's refusal carries the class, `pr-already-exists` is an
+    `ADLC_FORGE_MOCK_SCENARIO`, and the sentence beside Step 0's draft-PR fence names it;
+  - no reader of `error_class` changes. Each either names one class (`pr-not-found` in the
+    fence runner's PR read, `merge-blocked-by-policy` in the exec engine's merge) and treats
+    every other alike, or reads none by name. Neither of those two reads a create.
+  - Not measured: none of the three sentences was read off a live forge, which would take
+    opening a duplicate PR. `gh`'s is the format string in the `gh` 2.103.3 binary. GitHub's
+    own is as third-party code that catches it quotes it. `TF401179`'s prose is unconfirmed,
+    and only the code is matched.
+  - **Action for a project with vendored partials:** none required. A vendored `forge.sh`
+    older than this still prints `network` for the same words, and the text beside the fence
+    says so; re-sync `forge.sh` to get the class.
+
 - **An answered exec run is no longer `stalled` at once, told a sandboxed commit is a blocker,
   or given a second PR (BUG-291).** One real Codex launch blocked at its commit, was answered
   109 minutes later, and then failed at the gate over two open PRs. Now:
