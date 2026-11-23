@@ -305,6 +305,79 @@ common git directory did not; that is an inference from fact 8, and nothing reco
 Unlike launch 9's session, this one tried the parts alone before reporting anything, and the
 run went on. Nothing in the engine reads an attempt of this kind, and none of this is changed.
 
+## One launch, answered once, meant for an approval at the gate (2026-11-23)
+
+`adlc sprint-exec run --harness codex REQ-900` once more, the same lite REQ and the same staging
+as launches 7 to 10, `codex-cli 0.166.0`, started at 2026-11-23T16:08:47Z. The clone and the
+engine were both `main` at `0d3a62b`. The plan was to approve the run at the gate, so that the
+engine's merge and close-out ran with every fix in. The run never reached the gate, and nothing
+was approved.
+
+| Launch | Ended | Time | Why |
+|---|---|---|---|
+| 11 | `blocked`, Phase 4, then `failed` after one `answer` | 3 min 2 s to the block, 3 min 36 s for the answered session | Step 0 ran in order and opened draft PR 101. The session implemented the REQ, 54 of 54 tests, then put `git add … && git commit …` at the end of a line that began with four reads. The line ran in the sandbox, Git could not create the index lock, and the session reported `blocked` / `commit-permission` (fact 13). The operator answered, the relaunched session committed and went on to Phase 7, but it opened a second PR for the branch, and the engine ended the run `failed` / `no-pr` instead of printing a gate (fact 15) |
+
+What launch 11 shows:
+
+- **BUG-289, the order, a third time.** The lessons fence ran before R1, which stamped on its
+  first call. No fence printed `state file not found`.
+- **BUG-290, and again no line was refused.** Neither session's stderr log holds a rejection.
+  The answered session kept its PR body inside the working copy and removed it with `rm <path>`
+  on a line of its own.
+- **`answer` works on a real run.** `sprint-exec answer --channel skill REQ-900 '<reply>'`
+  printed `REQ-900: answer recorded` and started a second process with its own prompt and log
+  (`prompt.2.txt`, `stdout.2.json`). The reply named the two commands to run on a line each.
+  The session ran `git add` alone and `git commit` alone, both exit 0, and went on.
+- **The engine did not print a gate over two PRs.** The session's last message was
+  `Terminal state: awaiting_approval`. The engine's own read found two open PRs for the head,
+  wrote `failed` / `no-pr` with `2 open PRs for feat/REQ-900-space-copy-requirement, expected
+  one`, and the supervisor exited 0. No token was printed.
+- **Trust and the user config.** `~/.codex/config.toml` had the same checksum before the
+  launch, between the two sessions and after them, held no entry for the clone, and no
+  recovery marker was left.
+
+The first session used 2.0 M input tokens, 1.9 M of them cached, and 8.2 k output tokens. The
+answered one used 2.4 M, 2.4 M cached, and 7.4 k.
+
+**13. A git write chained after a command with no allow fails in the sandbox, and the session
+may report a blocker.** The line was `git show main:space/index.html | rg … && rg … && git diff
+--check && git status --short && git add … && git commit …`. By fact 8 it ran sandboxed, and
+Git answered `fatal: Unable to create '…/.git/worktrees/REQ-900/index.lock': Operation not
+permitted`, exit 128. So a sandboxed `git add` cannot write a linked worktree's git directory.
+This time the stream holds the item and its output.
+
+No fence runner was on the line, so nothing printed `fence_run_sandboxed`: Git's own message
+was all the session had. The prompt's sentence on the sandbox is about a chained fence call and
+exit 69, and the BUG-290 note is about a refused line. Neither says that a `git add` or a
+`git commit` chained after other commands can fail this way, or that the two are then run again
+on a line of their own. Launch 10's session described the same failure (fact 12) and did rerun
+them alone. This one wrote the blocker without trying. The engine recorded `blocked` / `other`,
+exit class `ok`, and its dashboard row held the session's account, which here was accurate
+about the error and wrong that it was a blocker. Not changed.
+
+**14. A relaunched run reads `stalled` on its first poll.** Right after the `answer`, the
+supervisor printed `REQ-900 stalled: no state write for 109 minutes, pid 69692 alive`, and the
+status row read `stalled since 2026-11-23T18:01:18Z`, the second the new process started.
+`_stall_check` measures from the working copy's state file, and that file was last written
+when the run blocked: the 109 minutes are the wait for the operator. The row read `running`
+again later in the session, after a state write. A stall kills nothing, so the row was wrong
+for a while and nothing else followed. The run-outcome line's
+`elapsed_s` counts the same wait: 6913 for two sessions that ran under seven minutes together.
+Not changed.
+
+**15. A relaunched session can open a second PR for its branch.** The first session wrote the
+working copy's state file before it ran the draft-PR fence, with `prNumber: null`, and did not
+write the number back after the fence printed `number=101`. Step 0's resume rule is "if
+`prNumber` is already set, reuse it", and the fence itself does not look for an open PR of the
+branch. The relaunched session read `null`, ran the fence again, and the mock forge opened PR
+102 for the same head and base. It then worked on 102 through Phase 6 and Phase 7, with the PR
+tie passing each time: 102 is an open PR of the run's own branch.
+
+The engine caught it at the gate, as the table says, and the run was lost there. The mock is
+kinder than GitHub here: GitHub refuses a second open PR for the same head and base, so on a
+real forge the second create would have failed and the session would have met an error, not a
+second PR. Which of the two a session handles better is not measured. Not changed.
+
 ## `adlc_forge_pr_checks` against GitHub (2026-11-21)
 
 Run once from the REQ-719 branch at `4ec4aa6` in a clone of this repository, `gh` 2.103.3,
@@ -329,13 +402,11 @@ against GitHub: those three verdicts are measured only against a stubbed `gh` an
   either worked from the local diff (launch 5) or stopped (launch 6); in launch 8 the CI read
   went through the adapter and the mock answered `none`.
 - A close-out with every fix in. Launch 5's close-out ran before the engine flipped a PR to
-  ready, and launch 6 was rejected at the gate.
+  ready, and launch 6 was rejected at the gate. Launch 11 was meant to be approved and did not
+  reach the gate.
 - Whether a session chains fence calls on a harness with no sandbox. There the chained call
   simply works.
 - A push to a remote over the network. The origin is a local bare repository outside the
   sandbox's writable area, so the row shows the runner left the sandbox, not that a
   credential reached a forge.
-- Whether a sandboxed `git commit` can write a linked worktree's common git directory:
-  `git commit` is a routine allow, so in an engine run it does not run sandboxed. Launch 10's
-  session reported such a failure, and the attempt left no record to check it against
-  (fact 12).
+- What a session does with a real forge's refusal of a second PR for its branch (fact 15).
