@@ -353,7 +353,7 @@ exit 69, and the BUG-290 note is about a refused line. Neither says that a `git 
 on a line of their own. Launch 10's session described the same failure (fact 12) and did rerun
 them alone. This one wrote the blocker without trying. The engine recorded `blocked` / `other`,
 exit class `ok`, and its dashboard row held the session's account, which here was accurate
-about the error and wrong that it was a blocker. Not changed.
+about the error and wrong that it was a blocker. Changed by BUG-291, below.
 
 **14. A relaunched run reads `stalled` on its first poll.** Right after the `answer`, the
 supervisor printed `REQ-900 stalled: no state write for 109 minutes, pid 69692 alive`, and the
@@ -363,7 +363,7 @@ when the run blocked: the 109 minutes are the wait for the operator. The row rea
 again later in the session, after a state write. A stall kills nothing, so the row was wrong
 for a while and nothing else followed. The run-outcome line's
 `elapsed_s` counts the same wait: 6913 for two sessions that ran under seven minutes together.
-Not changed.
+The stall is changed by BUG-291, below; `elapsed_s` is not.
 
 **15. A relaunched session can open a second PR for its branch.** The first session wrote the
 working copy's state file before it ran the draft-PR fence, with `prNumber: null`, and did not
@@ -376,7 +376,40 @@ tie passing each time: 102 is an open PR of the run's own branch.
 The engine caught it at the gate, as the table says, and the run was lost there. The mock is
 kinder than GitHub here: GitHub refuses a second open PR for the same head and base, so on a
 real forge the second create would have failed and the session would have met an error, not a
-second PR. Which of the two a session handles better is not measured. Not changed.
+second PR. Which of the two a session handles better is not measured. Changed by BUG-291.
+
+BUG-291 changes these, none of them the deny tier:
+
+- **Fact 13.** The exec prompt, pipeline and close-out, gains one line after the refused-line
+  note: a `git add` or a `git commit` chained after another command can run in the sandbox,
+  where it fails with `index.lock` and `Operation not permitted` and changes nothing; that is
+  not a blocker; run `git add`, then `git commit`, each on a line of its own; report a
+  blocker only if one fails that way alone. A run that still ends `blocked` or `failed` on the
+  session's own account, in a launch whose log holds Git's line, gains a dashboard note
+  saying what the line usually is and that an `answer` naming the two commands is usually
+  enough. The terminal is unchanged. The note is written only on a harness whose adapter
+  declares `unmatched_default: sandbox`, which today is Codex.
+- **Fact 14.** Each launch records its start, `exec.launchedAt`, and a run is `stalled` when
+  the later of the last state write and that start is older than `stall_minutes`.
+  `exec.startedAt` is still the run's first start. `elapsed_s` is left as REQ-648 defines it,
+  from the pipeline's `startedAt` to the terminal, any wait for an operator included: it is
+  the same field for every engine and no reader depends on it.
+- **Fact 15.** Step 0's draft-PR fence reads the open PR of the branch into its base first
+  (`adlc_forge_pr_list --head … --base … --state open`) and, when there is one, prints it with
+  a last line `pr_exists=1` and creates nothing. The mock forge refuses a second open PR for
+  one head and base, with the words `gh pr create` uses and the class the adapter gives them,
+  `network`. Where the read cannot show the PR (the Azure DevOps list prints JSON whatever
+  `--jq` says), the fence goes on to the create and the forge's refusal is what the session
+  reads; the text beside the fence says that PR is the REQ's own and not a failed setup.
+
+Measured by the fake harness and the mock only (`test_bug291_exec_launch_11_gaps.py`). The
+fake is scripted, so nothing here shows what a session does after reading the new line: launch
+10's session reran the two commands unprompted and launch 11's did not. The wording of
+GitHub's refusal is `gh`'s as its source spells it, and Azure DevOps's is error TF401179;
+neither was read off a live forge for this. The fence's read was run against GitHub once, by
+hand, `gh` 2.103.3, against this repository: for a head and base that have a PR it printed
+the `url=`, `number=` and `state=OPEN` lines, and for a head with no open PR, or another
+base, it printed nothing and exited 0. No real launch has run against BUG-291.
 
 ## `adlc_forge_pr_checks` against GitHub (2026-11-21)
 
@@ -410,3 +443,7 @@ against GitHub: those three verdicts are measured only against a stubbed `gh` an
   sandbox's writable area, so the row shows the runner left the sandbox, not that a
   credential reached a forge.
 - What a session does with a real forge's refusal of a second PR for its branch (fact 15).
+  Since BUG-291 the fence looks for the open PR first, so a session meets the refusal only
+  where that read fails or cannot show the PR.
+- A launch against BUG-291: the sandboxed-git line in the prompt, the stall after an `answer`
+  and the draft-PR fence run twice are measured by the fake harness and the mock forge only.

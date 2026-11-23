@@ -925,6 +925,45 @@ scenarios `checks-pass`, `checks-fail`, `checks-pending`, `checks-none` and
 `forge_mock.py set-checks`, a helper and not a forge op: like `make-head` it is not written to
 `calls.log`, so a test's record of forge calls never shows it, and no scenario applies to it.
 
+**What BUG-291 changes.** Three gaps one answered Codex launch found
+(`codex-exec-manual.md`, facts 13 to 15).
+
+- *A relaunch is not stalled by the wait before it.* Every launch records its start in
+  `exec.launchedAt`; `exec.startedAt` stays the run's first start, and the dashboard row still
+  shows that one. A run is `stalled` when the later of the working copy's last state write and
+  `launchedAt` is older than `sprint.exec.stall_minutes`. Measured from the state file alone,
+  a run answered after a 109-minute wait read `stalled` on its first poll. A run record
+  written before the field existed is measured from `startedAt`. The run-outcome line's
+  `elapsed_s` is unchanged: REQ-648 defines it as the pipeline's `startedAt` to the terminal,
+  spanning any pause, for every engine, and no reader depends on it. Changing it for `exec`
+  alone would give one field two meanings, so on an answered run it is wall-clock time and
+  not the time the sessions took.
+- *Git's lock error on a chained line.* The exec notes gain `exec_prompt.SANDBOXED_GIT_NOTE`,
+  after the refused-line note in the pipeline prompt and in the close-out's head: a `git add`
+  or `git commit` chained after another command can run in the sandbox, where it fails with
+  `index.lock` and `Operation not permitted`; that is not a blocker; the two are run again,
+  each on a line of its own; a blocker is reported only if one fails that way alone. A solo
+  `/proceed` does not read it, having no such sandbox. When a run ends `blocked` or `failed` on
+  the session's own account and the launch's stdout log holds Git's line
+  (`sprint_exec.SANDBOXED_GIT`), the run gains the note `launch <n>: the session's log holds
+  Git's …`, on a harness whose adapter declares `capabilities.unmatched_default: sandbox` and
+  on no other. The terminal, the exit class and the run-outcome line are unchanged, and a run
+  that reaches the gate gets no note. The log is the session's own output, so the line can be
+  one the model quoted: it is shown to a person and decides nothing.
+- *Step 0's draft PR opens once.* The fence of `proceed/phase-0-setup.md` item 8a reads
+  `adlc_forge_pr_list -R … --head … --base … --state open --json number,url --jq …` first.
+  When that prints a PR, the fence prints it (`url=`, `number=`, `state=OPEN`), then
+  `pr_exists=1`, and creates nothing. Anything else, an empty answer, an error or the JSON
+  the Azure DevOps list prints whatever `--jq` says, goes on to `adlc_forge_pr_create` as
+  before, where a real forge refuses a duplicate itself. The fence names only the two forge
+  operations that take no PR, so it is untied and routes `runner` on every exec adapter; its
+  reach gains `gh pr list`. `forge_mock.py` now refuses `pr_create` for a head and base that
+  already have an open PR, as `error_class=network` with the forge's own words (`gh`'s, with
+  the PR's URL on a second `raw=` line; `TF401179` under the `azure-devops` provider):
+  `network` is what `_adlc_forge_classify` gives those words, since no class names the case.
+  Its `pr_list` filters on `--base`, and under the `github` provider models one `--jq` program
+  shape, `.[] | "<text with \(.field) and \n>"`; any other program prints the JSON document.
+
 ## `adlc agents render` (REQ-516)
 
 Every agent in [`agents/`](../../agents) declares a stable **tier class** in its

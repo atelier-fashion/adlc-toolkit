@@ -730,6 +730,32 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **An answered exec run is no longer `stalled` at once, told a sandboxed commit is a blocker,
+  or given a second PR (BUG-291).** One real Codex launch blocked at its commit, was answered
+  109 minutes later, and then failed at the gate over two open PRs. Now:
+  - the exec prompt, pipeline and close-out, says that a `git add` or a `git commit` chained
+    after another command can run in the harness's sandbox, where Git fails with `index.lock`
+    and `Operation not permitted`; that this is not a blocker; and that the two are run again,
+    each on a line of its own. A solo `/proceed` does not read it;
+  - when a run still ends `blocked` or `failed` on the session's own account and the launch's
+    log holds Git's line, the dashboard row gains `note: launch <n>: the session's log holds
+    Git's …`, saying an `answer` naming the two commands is usually enough. Only on a harness
+    whose adapter declares a sandbox for unmatched commands; the terminal is unchanged;
+  - a run relaunched by `answer` reads `running`: `stalled` is measured from the later of the
+    last state write and the start of the launch at work (`exec.launchedAt`, new).
+    `exec.startedAt` and the run-outcome line's `elapsed_s` are unchanged, and `elapsed_s`
+    still counts the wait for the operator;
+  - Step 0's draft-PR fence looks for an open PR of the branch into its base first and prints
+    that one, with a last line `pr_exists=1`, instead of opening another. This is in the
+    `/proceed` text every engine reads. The mock forge refuses a second open PR for one head
+    and base, as GitHub does.
+  - The deny tier is unchanged, and no rule file is. `harness/*/exec-fence-census.json` are
+    regenerated: the fence's id changed and its reach gains `gh pr list`. The tests drive the
+    fake harness and the mock forge, which are scripted. No real launch has run against the
+    fix.
+  - **Action for `/sprint --exec` operators:** none. **For a project with vendored partials:**
+    none; the fence uses `adlc_forge_pr_list` as every vendored `forge.sh` has it.
+
 - **One denied command on a chained line no longer costs an exec run silently (BUG-290).** A
   real Codex session finished its REQ, tests passing, and then ran
   `rm -f /tmp/… && git add … && git commit …` on one line. `rm -f` is in the exec deny tier,

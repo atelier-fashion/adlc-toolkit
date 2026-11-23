@@ -16,6 +16,10 @@ The store::
     calls.log      one JSON line per call: {op, argv, repo}
     scenario       optional: one ADLC_FORGE_MOCK_SCENARIO value, read at each call
 
+``pr_create`` refuses a second open PR for one head and base, as GitHub and Azure DevOps do
+(BUG-291). ``pr_list`` filters on ``--head``, ``--base`` and ``--state``, and under the github
+provider models one ``--jq`` program shape (:data:`_JQ_EACH`).
+
 ``merge`` is a real squash into the bare remote. Scenarios (BR-26 g): ``head-advances``,
 ``pr-replaced``, ``pr-other-repo``, ``cross-repo``, ``second-open-pr``, ``base-other``,
 ``merged``, ``protection-ok``, ``protection-no-pr``, ``protection-bypass``,
@@ -231,6 +235,24 @@ def op_pr_create(argv):
         print("url=%s\nnumber=101\nstate=OPEN" % _url(101))
         return 0
     doc = _load("prs.json", {"next": 101, "prs": []})
+    for pr in doc["prs"]:
+        if pr.get("state", "OPEN") == "OPEN" and pr["headRefName"] == head and \
+                pr["baseRefName"] == base:
+            # As the forges do (BUG-291). The mock used to open a second PR for one head and
+            # base, which is how a session that ran the draft-PR fence twice met no error and
+            # worked on the wrong PR to the gate. The class is the one `_adlc_forge_classify`
+            # gives each forge's own words, which is `network`: no class names this case.
+            # `gh pr create`'s wording is from its source, Azure DevOps's from its error
+            # TF401179; neither was read off a live forge for this.
+            print("error_class=network")
+            if _provider() == "azure-devops":
+                print("raw=TF401179: An active pull request for the source and target branch "
+                      "already exists.")
+            else:
+                print('raw=a pull request for branch "%s" into branch "%s" already exists:'
+                      % (head, base))
+                print("raw=%s" % pr["url"])
+            return 1
     number = doc["next"]
     url = _url(number)
     pr = {"number": number, "url": url, "state": "OPEN", "mergedAt": "",
@@ -309,12 +331,23 @@ def op_pr_view(argv):
     return 0
 
 
+#: The one `--jq` program shape `pr_list` models (BUG-291): each row through one string, as
+#: `.[] | "url=\(.url)\nnumber=\(.number)"` prints a `key=value` line per field. `gh` prints a
+#: string result raw. Any other program prints the JSON document, as before, and so does the
+#: Azure DevOps provider, whose list in `partials/forge.sh` passes no `--jq` to `az`.
+_JQ_EACH = re.compile(r'^\.\[\] \| "((?:[^"\\]|\\\(\.[A-Za-z]+\)|\\n)*)"$')
+_JQ_PART = re.compile(r"\\\(\.([A-Za-z]+)\)|\\n")
+
+
 def op_pr_list(argv):
     scenario = _scenario()
     prs = _all_prs()
     head = _flag(argv, "--head")
     wanted = _flag(argv, "--json")
     selected = [p for p in prs if head is None or p["headRefName"] == head]
+    base = _flag(argv, "--base")
+    if base is not None:
+        selected = [p for p in selected if p["baseRefName"] == base]
     state = (_flag(argv, "--state") or "open").upper()
     if state != "ALL":
         selected = [p for p in selected if p.get("state", "OPEN") == state]
@@ -327,6 +360,12 @@ def op_pr_list(argv):
             if "url" in extra:
                 extra["url"] = re.sub(r"[0-9]+$", str(extra.get("number", 0)), extra["url"])
             rows.append(extra)
+        template = _JQ_EACH.match(_flag(argv, "--jq") or _flag(argv, "-q") or "")
+        if template and _provider() != "azure-devops":
+            for row in rows:
+                print(_JQ_PART.sub(lambda m: "\n" if m.group(1) is None
+                                   else str(row.get(m.group(1), "null")), template.group(1)))
+            return 0
         print(json.dumps(rows))
         return 0
     for pr in selected:

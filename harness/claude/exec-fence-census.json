@@ -203,7 +203,7 @@
       "route": "direct"
     },
     {
-      "id": "proceed/phase-0-setup.md#7:7b76cb2c",
+      "id": "proceed/phase-0-setup.md#7:b0728544",
       "route": "runner",
       "placeholders": [
         "branch",
@@ -223,9 +223,11 @@
         "find",
         "gh",
         "gh pr create",
+        "gh pr list",
         "git",
         "git remote",
         "mktemp",
+        "python3",
         "rm"
       ]
     },

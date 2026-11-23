@@ -2622,6 +2622,8 @@ def test_req719_abort_of_a_stalled_run_records_aborted_from_stalled(box, reaped)
     run.doc["config"]["stall_minutes"] = 1
     old = time.time() - 120
     os.utime(run.wc_state_path(), (old, old))
+    # Idle time runs from the later of the last state write and this launch's start (BUG-291).
+    run.exec["launchedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(old))
     orch.poll_once()
     assert run.status == "stalled"
     pid = run.exec["pid"]
