@@ -305,6 +305,14 @@ adlc_intake_range() {
 #   * it must sit under a real temp root (TMPDIR / /tmp / /var/folders)
 #   * its basename must be exactly the name this partial creates
 # A user-supplied source file is NEVER deleted — only what intake itself created.
+#
+# TMPDIR counts as a temp root only when it is an absolute path other than `/`
+# (BUG-293). The arm used to be `"${TMPDIR%/}"/*`, which is the pattern `/*` when
+# TMPDIR is unset, empty or `/` (unset is the usual state on Linux), and `/*`
+# matches every absolute path: the directory of any absolute source named
+# inline-request.txt was removed. A relative TMPDIR is refused too, because it names
+# a different place in every working directory. A refused TMPDIR costs at most a
+# leaked temp dir; an admitted one that is not a temp root costs a user's directory.
 adlc_intake_cleanup() {
     _ai_corp="$1"
     _ai_srcf="$2"
@@ -318,8 +326,27 @@ adlc_intake_cleanup() {
     _ai_pdir=$(dirname "$_ai_srcf")
     case "$_ai_pdir" in
         ''|'.'|'/'|"$HOME") return 0 ;;
-        "${TMPDIR%/}"/*|/tmp/*|/var/folders/*) rm -rf "$_ai_pdir" ;;
-        *) return 0 ;;
+    esac
+
+    # Strip every trailing slash, not one: `/` and `//` both become empty and are
+    # refused below, and `<root>//` still matches a directory under `<root>`.
+    _ai_troot=${TMPDIR-}
+    while :; do
+        case "$_ai_troot" in
+            */) _ai_troot=${_ai_troot%/} ;;
+            *) break ;;
+        esac
+    done
+    case "$_ai_troot" in
+        /?*)
+            case "$_ai_pdir" in
+                "$_ai_troot"/*) rm -rf "$_ai_pdir"; return 0 ;;
+            esac
+            ;;
+    esac
+
+    case "$_ai_pdir" in
+        /tmp/*|/var/folders/*) rm -rf "$_ai_pdir" ;;
     esac
     return 0
 }

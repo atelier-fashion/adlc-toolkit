@@ -281,6 +281,70 @@ check "cleanup: non-temp dir refused even with matching basename" "0" \
   "$( [ -d "$NONTMP" ] && echo 0 || echo 1 )"
 rm -rf "$NONTMP"
 
+# BUG-293: the case above passed only because the suite ran with TMPDIR set. The
+# TMPDIR arm was `"${TMPDIR%/}"/*`, which is the pattern `/*` when TMPDIR is unset,
+# empty or `/`, and that matches every absolute path: the guard then removed any
+# directory holding a file named inline-request.txt. Each case below sets TMPDIR
+# itself, in a subshell, so none depends on the environment the suite was started
+# in. The fixture is rebuilt per case because the defect deletes it.
+bug293_refused() { # bug293_refused <label> unset | bug293_refused <label> set <TMPDIR>
+  mkdir -p "$NONTMP"
+  printf 'x\n' > "$NONTMP/inline-request.txt"
+  if [ "$2" = unset ]; then
+    ( unset TMPDIR; adlc_intake_cleanup "" "$NONTMP/inline-request.txt" )
+  else
+    ( TMPDIR=$3; export TMPDIR; adlc_intake_cleanup "" "$NONTMP/inline-request.txt" )
+  fi
+  check "BUG-293 cleanup: non-temp dir refused with TMPDIR $1" "0" \
+    "$( [ -d "$NONTMP" ] && echo 0 || echo 1 )"
+}
+bug293_refused "unset" unset
+bug293_refused "empty" set ""
+bug293_refused "'/'" set "/"
+# Passed before the fix too (`//*` matches no ordinary path): pins that stripping
+# every trailing slash does not leave an empty root that matches everything.
+bug293_refused "'//'" set "//"
+
+# A relative TMPDIR names a different place in every working directory, so it is not
+# a temp root: `TMPDIR=.` made `./*` the pattern, which matched any `./dir/` source.
+mkdir -p "$NONTMP"
+printf 'x\n' > "$NONTMP/inline-request.txt"
+( TMPDIR=.; export TMPDIR; adlc_intake_cleanup "" "./.intake-guard-fixture/inline-request.txt" )
+check "BUG-293 cleanup: non-temp dir refused with a relative TMPDIR" "0" \
+  "$( [ -d "$NONTMP" ] && echo 0 || echo 1 )"
+rm -rf "$NONTMP"
+
+# The TMPDIR arm must still work. This root is under the repo, outside /tmp and
+# /var/folders, so only the TMPDIR arm can admit a directory inside it.
+TROOT="$ROOT/.intake-guard-tmproot"
+bug293_removed() { # bug293_removed <label> <TMPDIR>
+  mkdir -p "$TROOT/adlc-intake.fixture"
+  printf 'x\n' > "$TROOT/adlc-intake.fixture/inline-request.txt"
+  ( TMPDIR=$2; export TMPDIR
+    adlc_intake_cleanup "" "$TROOT/adlc-intake.fixture/inline-request.txt" )
+  check "BUG-293 cleanup: dir under TMPDIR removed, TMPDIR $1" "1" \
+    "$( [ -d "$TROOT/adlc-intake.fixture" ] && echo 0 || echo 1 )"
+}
+bug293_removed "as given" "$TROOT"
+bug293_removed "with a trailing slash" "$TROOT/"
+# Left behind before the fix: only one trailing slash was stripped.
+bug293_removed "with two trailing slashes" "$TROOT//"
+# The temp root itself is never the directory removed.
+printf 'x\n' > "$TROOT/inline-request.txt"
+( TMPDIR=$TROOT; export TMPDIR; adlc_intake_cleanup "" "$TROOT/inline-request.txt" )
+check "BUG-293 cleanup: TMPDIR itself is not removed" "0" \
+  "$( [ -d "$TROOT" ] && echo 0 || echo 1 )"
+rm -rf "$TROOT"
+
+# With TMPDIR unset a materialized inline dir is still removed: mktemp puts it under
+# /tmp or /var/folders, and those arms do not depend on TMPDIR.
+check "BUG-293 cleanup: materialized inline dir removed with TMPDIR unset" "removed" \
+  "$( unset TMPDIR
+      adlc_intake_detect "$LONG" >/dev/null 2>&1
+      _d=$(dirname "$ADLC_INTAKE_PATH")
+      adlc_intake_cleanup "" "$ADLC_INTAKE_PATH"
+      [ -d "$_d" ] && echo "left: $_d" || echo removed )"
+
 # The real case: a materialized inline source IS removed, corpus and all.
 adlc_intake_detect "$LONG"
 REAL_SRC="$ADLC_INTAKE_PATH"
