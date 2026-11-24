@@ -1,7 +1,7 @@
 ---
 id: BUG-297
 title: "Five of the dataset export's own credential patterns backtrack quadratically, or worse, on one long line"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-24
 updated: 2026-11-24
@@ -201,3 +201,10 @@ What was not measured:
 - `.adlc/context/architecture.md`: one sentence where the dataset export is described.
 - `CHANGELOG.md`: one entry under Fixed, and a pointer from BUG-295's.
 - `.adlc/bugs/BUG-297-dataset-credential-patterns-superlinear.md`: this report.
+
+## Deployment
+
+- Merged to `main` on 2026-11-24 as `46df645`, the squash of PR #334. The regression gate reported `off` for this project before the merge.
+- No staging or production service: the toolkit is installed from a checkout. `tools/dataset` is a maintainer tool run from a clone, so an export has the fix once the clone is at `46df645` or later. Nothing is vendored into a project.
+- The lesson from the fix is LESSON-911.
+- Still open: the two email patterns under "Weighed and not done", which BUG-298 takes up.
