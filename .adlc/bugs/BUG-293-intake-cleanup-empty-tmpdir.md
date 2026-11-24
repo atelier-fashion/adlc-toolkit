@@ -1,10 +1,10 @@
 ---
 id: BUG-293
 title: "Intake cleanup removes any directory holding an inline-request.txt when TMPDIR is unset, empty or /: the temp-root guard's pattern becomes /*"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-23
-updated: 2026-11-23
+updated: 2026-11-24
 component: "adlc/partials/intake"
 domain: "adlc"
 stack: ["shell"]
@@ -140,3 +140,14 @@ What was not measured:
 - `partials/tests/intake.test.sh`: ten cases in section 4b.
 - `CHANGELOG.md`: one entry under Fixed.
 - `.adlc/bugs/BUG-293-intake-cleanup-empty-tmpdir.md`: this report.
+
+## Deployment
+
+- Merged to `main` on 2026-11-24 as `24f90c5`, the squash of PR #323, by the owner. The regression gate reads `off` for this project.
+- Checked on `main` at `6ac492e` afterwards: `partials/tests/intake.test.sh` passes, 132 of 132, under bash, zsh, sh and dash, with and without `TMPDIR` in the environment. The count is 132 because BUG-295 has since added five cases to the same file. The full `partials/tests/run.sh` was not run again on `main`.
+- No staging or production service: the toolkit is installed from a checkout. A machine has the fix once its toolkit checkout is at `24f90c5` or later. A project that vendored `.adlc/partials/` has it once the project is re-synced.
+- The `..` and symlink paths left under Resolution are being worked on as a bug of their own. Nothing of that is in `main` yet.
+
+## Lessons
+
+- LESSON-909: a guard pattern built from a variable and a literal becomes the literal when the variable is empty, and a test that inherits that variable passes wherever it is set.
