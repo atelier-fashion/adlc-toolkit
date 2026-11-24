@@ -19,7 +19,19 @@ _R = r"(?![A-Za-z0-9])"
 
 #: (a) A whole JWT, header to signature. It runs before the shared chains: the
 #: wide chain's JWT arm stops at the second dot and would leave the signature.
-JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
+#: The header is read three ways, so that no ``eyJ`` in a long run reads the run
+#: to its end (BUG-297): up to 255 characters after any ``eyJ``; any length
+#: after an ``eyJ`` that begins its run of header characters, which is where a
+#: real header sits; or exactly 255 header characters, with or without an
+#: ``eyJ`` among them, as the wide chain reads a longer header. Only the third
+#: changes what is replaced, and only where 255 or more header characters that
+#: do not begin with ``eyJ`` stand before the header's dot: the replacement
+#: then starts 255 characters before that dot. So the head of a longer header
+#: glued to a word stays, and a short JWT glued to the end of such a run takes
+#: 255 characters of it along.
+JWT_RE = re.compile(
+    r"(?:eyJ[A-Za-z0-9_-]{1,255}|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+|[A-Za-z0-9_-]{255})"
+    r"\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
 
 #: (a) Credential shapes the shared chains do not cover, applied by the dataset
 #: scrub only, after them: Hugging Face, Google and underscore-style ``sk_`` keys,
@@ -28,12 +40,25 @@ JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
 #: whitespace or a closing quote, a hex run longer than a SHA, and a 40+
 #: character mixed-class base64 run. ASCII classes, as the shell chains run
 #: under ``LC_ALL=C``.
+#:
+#: Every arm is linear in the length of a line (BUG-297): ``re`` backtracks, so a
+#: repeat that can begin at any character of a long run reads the run again from
+#: each. The assignment's name is therefore read in one of two ways. At the
+#: start of a run of name characters: the run holds a keyword, then the whole
+#: run, once, whatever its length. Anywhere else, which a search reaches only
+#: where another arm's match ended inside the run: 64 name characters on each
+#: side of the keyword, as the wide chain reads them.
+#: ``tests/test_dataset_credential_linear.py`` times each pattern at two line
+#: lengths, so keep any new repeat bounded or anchored to the start of its run.
+_KEY = (r"(?i:secret|passw(?:or)?d|pass|api[-_]?key|access[-_]?key|private[-_]?key"
+        r"|token|credential)")
 EXTRA_CREDENTIAL = re.compile(
     r"hf_[A-Za-z0-9]{30,}|ya29\.[A-Za-z0-9_-]{20,}|sk_[A-Za-z0-9_-]{20,}"
     r"|(?i:bearer|basic)[ \t]+[A-Za-z0-9._~+/=-]{16,}"
     r"|(?<![A-Za-z0-9])-u[ \t]+[^\s:]+:[^\s]{6,}"
-    r"|[\"']?[A-Za-z_-]*(?i:secret|passw(?:or)?d|pass|api[-_]?key|access[-_]?key|private[-_]?key"
-    r"|token|credential)[A-Za-z_-]*[\"']?[ \t]*[:=][ \t]*[\"']?[^\s\"'`]{8,}"
+    r"|[\"']?(?:(?<![A-Za-z_-])(?=[A-Za-z_-]*" + _KEY + r")[A-Za-z_-]*"
+    r"|[A-Za-z_-]{0,64}" + _KEY + r"[A-Za-z_-]{0,64})"
+    r"[\"']?[ \t]*[:=][ \t]*[\"']?[^\s\"'`]{8,}"
     r"|(?<![0-9a-fA-F])[0-9a-f]{41,}(?![0-9a-fA-F])"
     r"|(?<![A-Za-z0-9+/=_-])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])"
     r"(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{40,}={0,2}",

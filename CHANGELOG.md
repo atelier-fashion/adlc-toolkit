@@ -752,6 +752,34 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **The dataset export's own credential patterns are linear in the length of a line
+  (BUG-297).** `tools/dataset` scrubs with patterns of its own beside the shared chains,
+  and its residue pass searches with a second set. Five of them re-read a long run from
+  every character of it in Python's `re`: `detectors.JWT_RE`, the key-like assignment arm
+  of `detectors.EXTRA_CREDENTIAL`, and in `residue.py` the JWT arm, the key-like
+  assignment and the base64 run. Four times the line cost sixteen times the CPU, and the
+  assignment arm did not finish 10,000 characters of the repeated word `token` in 20
+  seconds. Each now begins at the start of its run, behind a lookbehind, and reads the
+  run once:
+  - the residue pass's three only ask whether a line is a hit, and the same lines are
+    hits as before, at any length;
+  - the scrub's assignment arm reads a name of any length whole, as before. Only where
+    another arm's match ended inside the name does it read 64 characters on each side of
+    the keyword, as the shared wide chain does;
+  - `JWT_RE` reads a header of any length whole when `eyJ` begins its run of header
+    characters, and a header of up to 255 characters anywhere. Of a longer header glued
+    to a word it reads the last 255 characters, as the wide chain does, so the head of
+    that header stays; the payload and the signature still go.
+
+  `tools/dataset/tests/test_dataset_credential_linear.py` times each pattern, and the
+  scrub's and the residue pass's whole credential step, at two line lengths, and compares
+  the patterns with the ones they replaced over a table of real-shaped lines and 6,000
+  seeded random ones. An export of this repository's own `.adlc/` tree is byte-identical
+  with the old patterns and the new.
+
+  Not changed: the two email patterns, `detectors.EMAIL_RE` and `residue._EMAIL`, which
+  measure superlinear on the same kind of line and are not credential patterns. Until
+  they are fixed, a scrub or a residue pass over one very long line is still superlinear.
 - **Intake cleanup no longer removes a directory outside every temp root when the source
   path leaves the root through `..` or a symlink (BUG-296).** `adlc_intake_cleanup`
   (`partials/intake.sh`) decided "under a temp root" by matching the text of the source's
@@ -808,7 +836,7 @@ is cut per `RELEASING.md`.
   `agents/delegate-pre-pass.md` fences) keep `[A-Z_]+`, which measured linear there, so
   those four and `partials/intake.sh` now differ on a name longer than 64 characters. Nor
   `tools/dataset`'s own extra patterns (`detectors.py`, `residue.py`), three of which
-  measure superlinear too. A project with a vendored `.adlc/partials/intake.sh` or
+  measure superlinear too (BUG-297, above). A project with a vendored `.adlc/partials/intake.sh` or
   `lesson-check.sh` keeps the unbounded regex until it is re-synced; that copy also runs
   only in `sed` and `grep`.
 - **The id recheck knows its own reservation after the ref's commit SHA has changed

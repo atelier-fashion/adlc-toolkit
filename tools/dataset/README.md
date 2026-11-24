@@ -209,6 +209,9 @@ against the launch tools' tests as well.
 python3 -m pytest tools/dataset tools/adlc/tests/test_credential_redact.py -q
 ```
 
-The suite needs no network and no install. The publish tests replace the Hub
-client with a stub. The at-publish cases skip unless the two variables above are
-set.
+The suite needs no network and no install. `tests/test_dataset_credential_linear.py`
+times each of the tool's own credential patterns at two line lengths and fails
+on a ratio, not a time: a repeat that can begin at any character of a long run
+re-reads the run from each, so bound it or anchor it to the start of its run
+(BUG-297). The publish tests replace the Hub client with a stub. The at-publish
+cases skip unless the two variables above are set.
