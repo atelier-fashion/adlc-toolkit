@@ -84,8 +84,38 @@ HOME_PATH_RE = re.compile(
 
 #: (c) An email address. Only letters and digits end it, so markdown emphasis
 #: (``_a@b.com_``) does not hide one.
-EMAIL_RE = re.compile(
-    r"(?<![A-Za-z0-9.%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}" + _R)
+#:
+#: This is the rule, and :func:`emails` is how to run it. Searched as it stands
+#: it may begin after every underscore of a run of local-part characters, and
+#: reads the rest of the run from each (BUG-298).
+_LOCAL = r"[A-Za-z0-9._%+-]"
+_ADDRESS = _LOCAL + r"+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}" + _R
+EMAIL_RE = re.compile(r"(?<![A-Za-z0-9.%+-])" + _ADDRESS)
+#: The same address, begun only at the start of its run of local-part characters.
+_EMAIL_RUN_RE = re.compile("(?<!" + _LOCAL + ")" + _ADDRESS)
+#: From where a match ended to just past the next underscore of the same run.
+_TO_UNDERSCORE_RE = re.compile(r"[A-Za-z0-9.%+-]*_")
+
+
+def emails(line):
+    """The matches of ``EMAIL_RE.finditer(line)``, each run of the line read once.
+
+    Every address ends its run of local-part characters at the ``@``, so a run
+    holds an address from one start exactly when it holds one from every start,
+    and the leftmost is the start of the run: ``_EMAIL_RUN_RE`` finds the same
+    match as ``EMAIL_RE`` and skips the rest of a run that holds none.
+
+    One start it cannot see. A search resumes where the last match ended, which
+    is inside a run when an underscore follows the address
+    (``a@b.com_c@d.org``), and ``EMAIL_RE`` begins again after that underscore.
+    So that one position is tried with ``EMAIL_RE`` itself, once for each match.
+    """
+    m = _EMAIL_RUN_RE.search(line)
+    while m:
+        yield m
+        end = m.end()
+        skip = _TO_UNDERSCORE_RE.match(line, end)
+        m = (skip and EMAIL_RE.match(line, skip.end())) or _EMAIL_RUN_RE.search(line, end)
 
 #: (e) A commit SHA: 7 to 40 hex characters, either case, with at least one
 #: digit, so an all-letter English word (``defaced``) is not one.
@@ -101,6 +131,21 @@ PROSE_BEFORE = frozenset(" \t(\"'*_")
 PROSE_AFTER = frozenset(" \t.,;:!?)\"'*_")
 
 _NAME = r"[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?"
+
+_CELL_END_RE = re.compile(r"[ \t]*\|")
+
+
+def _after_pipe(line, end):
+    """True when ``line[:end]`` ends in ``|`` and blanks: ``\\|[ \\t]*$`` is found in it.
+
+    Read from ``end`` backwards, so a line that holds a name many times is not
+    read from its start once for each of them (BUG-298).
+    """
+    if end and line[end - 1] == "\n":
+        end -= 1  # ``$`` also matches before a final newline
+    while end and line[end - 1] in " \t":
+        end -= 1
+    return end > 0 and line[end - 1] == "|"
 
 
 def _bare(name):
@@ -165,7 +210,7 @@ class Detectors(object):
     # --- per-line queries --------------------------------------------------
 
     def email_hits(self, line):
-        return [m for m in EMAIL_RE.finditer(line) if m.group(0).lower() not in self.emails]
+        return [m for m in emails(line) if m.group(0).lower() not in self.emails]
 
     def private_url_hits(self, line):
         return [m for m in self.owner_url_re.finditer(line)
@@ -190,7 +235,7 @@ class Detectors(object):
             return False
         if line[end:end + 4].lower() == ".git":
             return False
-        if re.search(r"\|[ \t]*$", line[:start]) and re.match(r"[ \t]*\|", line[end:]):
+        if _after_pipe(line, start) and _CELL_END_RE.match(line, end):
             return False  # a whole table cell
         return True
 

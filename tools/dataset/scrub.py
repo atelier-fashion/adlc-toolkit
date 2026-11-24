@@ -31,7 +31,28 @@ RULES = ("credential", "email", "home-path", "private-url", "org-namespace",
          "private-sha", "denylist", "person")
 
 _WORKTREE_PREFIX_RE = re.compile(r"^(?:\.worktrees/[^/]+/|\.claude/worktrees/[^/]+/)")
-_SENTENCE_START_RE = re.compile(r"(?:^[ \t>*#|-]*|[.!?:][ \t]+)$")
+#: What may stand in front of the first word of a line: blanks and markdown's
+#: quote, list, heading and table marks.
+_LINE_LEAD = " \t>*#|-"
+
+
+def _starts_sentence(line, start, lead):
+    """True when ``line[start:]`` begins a sentence.
+
+    That is, when ``(?:^[ \\t>*#|-]*|[.!?:][ \\t]+)$`` is found in ``line[:start]``:
+    nothing but line-leading marks stands before it, or a sentence end and
+    blanks. ``lead`` is the length of the line's leading run of
+    :data:`_LINE_LEAD`. Read from ``start`` backwards, so a line that names a
+    person many times is not read from its start once for each (BUG-298).
+    """
+    if start and line[start - 1] == "\n":
+        start -= 1  # ``$`` also matches before a final newline
+    if start <= lead:
+        return True
+    end = start
+    while end and line[end - 1] in " \t":
+        end -= 1
+    return 0 < end < start and line[end - 1] in ".!?:"
 
 
 def _home_path_replacement(path, public_repos):
@@ -48,12 +69,19 @@ def _home_path_replacement(path, public_repos):
 
 
 def _replace_spans(line, spans, replacement):
-    """Replace non-overlapping ``spans`` (any order) with ``replacement``."""
-    out = line
-    for s, e in sorted(set(spans), reverse=True):
-        rep = replacement(out[s:e], out[:s]) if callable(replacement) else replacement
-        out = out[:s] + rep + out[e:]
-    return out
+    """Replace non-overlapping ``spans`` (any order) with ``replacement``.
+
+    ``replacement`` is the new text, or a function of a span's text and its
+    start. The line is put together once, not once for each span (BUG-298).
+    """
+    out = []
+    pos = 0
+    for s, e in sorted(set(spans)):
+        out.append(line[pos:s])
+        out.append(replacement(line[s:e], s) if callable(replacement) else replacement)
+        pos = e
+    out.append(line[pos:])
+    return "".join(out)
 
 
 class Scrubber(object):
@@ -114,8 +142,10 @@ class Scrubber(object):
         if det.people_re is not None:
             spans = [m.span() for m in det.people_re.finditer(line)]
 
-            def placeholder(_, before, ph=det.people_placeholder):
-                if _SENTENCE_START_RE.search(before):
+            lead = len(line) - len(line.lstrip(_LINE_LEAD))
+
+            def placeholder(_, start, line=line, ph=det.people_placeholder):
+                if _starts_sentence(line, start, lead):
                     return ph[:1].upper() + ph[1:]
                 return ph
             line = _replace_spans(line, spans, placeholder)
