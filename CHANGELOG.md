@@ -752,6 +752,32 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **Intake cleanup no longer removes a directory outside every temp root when the source
+  path leaves the root through `..` or a symlink (BUG-296).** `adlc_intake_cleanup`
+  (`partials/intake.sh`) decided "under a temp root" by matching the text of the source's
+  parent directory against `TMPDIR`, `/tmp` and `/var/folders`. `/tmp/../../Users/x/docs`
+  matches `/tmp/*`, and so does `/tmp/link/sub` where `link` points out of `/tmp`; `rm -rf`
+  then followed each path to where it led. Now:
+  - the text still picks the root, and the claim is then checked on the filesystem: the
+    parent and the root are both resolved with `cd -P` and `pwd -P`, and the directory is
+    removed only when the resolved parent is under the resolved root. A temp root that is a
+    symlink itself is admitted in its resolved form, as `/tmp` and `/var/folders` are on
+    macOS;
+  - the directory removed is the resolved one, and it must be the same directory as the one
+    named (`-ef`). A root that resolves to `/` is refused, and so is a parent that resolves
+    to `$HOME`: `<root>/x/../home` got past the `$HOME` refusal, which compared text;
+  - the resolution drops any function named `cd` or `pwd` in its own subshell and stops
+    alias expansion, so a `cd` the executor shell has replaced cannot hand it another
+    directory (LESSON-717);
+  - a parent that cannot be entered is left alone, and nothing in the guard ends a caller
+    that runs `set -e`. A refusal leaks a temp directory; an admission deletes a user's one;
+  - `partials/tests/intake.test.sh` gains 21 cases, each with its own fixtures and its own
+    `TMPDIR`.
+
+  A project with a vendored `.adlc/partials/intake.sh` keeps the old function until it is
+  re-synced. Not changed: a `TMPDIR` that is an absolute path but not a temp root is still
+  taken at its word.
+
 - **The credential chains are linear in the length of a line (BUG-295).** Three arms
   backtracked on one long line in the engines that backtrack, Python's `re` and the Space's
   JavaScript: the intake chain's `[A-Z_]+_(API_KEY|TOKEN)` arm, and the wide chain's
@@ -820,8 +846,8 @@ is cut per `RELEASING.md`.
     whenever it was set.
 
   A project with a vendored `.adlc/partials/intake.sh` keeps the old function until it is
-  re-synced: `/spec` sources the vendored copy first. Not changed: a path that leaves a temp
-  root through `..` or a symlink still matches by its text.
+  re-synced: `/spec` sources the vendored copy first. A path that leaves a temp root through
+  `..` or a symlink was a defect of its own, BUG-296 above.
 - **A forge's refusal of a second PR for one head and base reads `pr-already-exists`, not
   `network` (BUG-292).** `_adlc_forge_classify` had no pattern for it, so `gh pr create`'s `a
   pull request for branch "<head>" into branch "<base>" already exists:`, GitHub's own `A pull

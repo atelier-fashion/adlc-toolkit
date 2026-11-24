@@ -294,6 +294,25 @@ adlc_intake_range() {
 }
 
 # --- Cleanup of intake's own temp artifacts -------------------------------------
+# Prints the physical path of a directory, with every symlink and `..` resolved.
+# Prints nothing and returns non-zero when the directory cannot be entered.
+# `realpath` and `readlink -f` are not portable; `cd -P` and `pwd -P` are POSIX.
+#
+# The shell that runs a fence can hold a function or an alias named `cd` (a
+# directory jumper, a snapshot of the user's profile), and one that lands somewhere
+# else would hand the caller the wrong directory to delete (LESSON-717). So the
+# subshell drops any such function first, and the backslash stops alias expansion.
+# `command cd` is not the remedy here: under zsh it runs the external /usr/bin/cd,
+# which changes no directory, and `builtin` is not in dash.
+#
+# `|| :` because zsh returns 1 from `unset -f` of a name that is no function, and
+# under a caller's `set -e` that would end the subshell before it resolved anything.
+_adlc_intake_realdir() {
+    ( unset -f cd 2>/dev/null || :
+      unset -f pwd 2>/dev/null || :
+      CDPATH= \cd -P -- "$1" >/dev/null 2>&1 && \pwd -P )
+}
+
 # Removes the corpus and, ONLY for a materialized inline source, its temp dir.
 #
 # This exists so no call site has to write `rm -rf "$(dirname "$SOMEVAR")"`. That
@@ -313,6 +332,17 @@ adlc_intake_range() {
 # inline-request.txt was removed. A relative TMPDIR is refused too, because it names
 # a different place in every working directory. A refused TMPDIR costs at most a
 # leaked temp dir; an admitted one that is not a temp root costs a user's directory.
+#
+# "Under a temp root" is decided twice (BUG-296). The text of the parent directory
+# picks the root it claims to sit under, as before. The claim is then checked on the
+# filesystem: the parent and that root are both resolved (`cd -P`, `pwd -P`), and the
+# directory is removed only when the resolved parent is under the resolved root. The
+# text alone admitted `/tmp/../../Users/x/docs`, and `<root>/link/sub` where `link`
+# points out of the root, and `rm -rf` followed both to where they really led. The
+# root is resolved too because a temp root is often a symlink itself: on macOS /tmp
+# is /private/tmp and /var/folders is /private/var/folders. What is removed is the
+# resolved directory, so the path that was checked is the path that is deleted. A
+# parent that cannot be entered, or that resolves anywhere else, is left alone.
 adlc_intake_cleanup() {
     _ai_corp="$1"
     _ai_srcf="$2"
@@ -337,16 +367,48 @@ adlc_intake_cleanup() {
             *) break ;;
         esac
     done
+    # The text of the parent names the one root it claims to sit under.
+    _ai_root=
     case "$_ai_troot" in
         /?*)
             case "$_ai_pdir" in
-                "$_ai_troot"/*) rm -rf "$_ai_pdir"; return 0 ;;
+                "$_ai_troot"/*) _ai_root=$_ai_troot ;;
             esac
             ;;
     esac
+    if [ -z "$_ai_root" ]; then
+        case "$_ai_pdir" in
+            /tmp/*) _ai_root=/tmp ;;
+            /var/folders/*) _ai_root=/var/folders ;;
+            *) return 0 ;;
+        esac
+    fi
 
-    case "$_ai_pdir" in
-        /tmp/*|/var/folders/*) rm -rf "$_ai_pdir" ;;
+    # The claim is checked against where the two paths really lead (BUG-296).
+    _ai_rdir=$(_adlc_intake_realdir "$_ai_pdir") || return 0
+    _ai_rroot=$(_adlc_intake_realdir "$_ai_root") || return 0
+    # The resolved directory must be the same directory as the parent named above.
+    # This holds whatever `cd` did, and it refuses a link whose target has a name
+    # ending in a newline: `$(...)` strips that, and what is left can name a sibling.
+    [ "$_ai_rdir" -ef "$_ai_pdir" ] || return 0
+    # A root that resolves to `/` is no temp root, as a TMPDIR of `/` is not (BUG-293).
+    case "$_ai_rroot" in
+        /?*) ;;
+        *) return 0 ;;
+    esac
+    # The `$HOME` refusal above compared text; `<root>/x/../home` got past it.
+    # An `if`, and `||` on the assignment: a $HOME that cannot be entered must not
+    # end a caller that runs `set -e`.
+    _ai_rhome=
+    if [ -n "${HOME-}" ]; then
+        _ai_rhome=$(_adlc_intake_realdir "$HOME") || _ai_rhome=
+    fi
+    case "$_ai_rdir" in
+        ''|'/'|"${HOME-}"|"$_ai_rhome") return 0 ;;
+    esac
+
+    case "$_ai_rdir" in
+        "$_ai_rroot"/*) rm -rf "$_ai_rdir" ;;
     esac
     return 0
 }
