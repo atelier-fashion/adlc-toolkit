@@ -287,35 +287,34 @@ def test_an_output_too_large_to_render_fails_oversize(tmp_path):
     assert failures == [rc.Failure("oversize", "the recording's output is too large to check")]
 
 
-def test_the_credential_windows_cover_every_short_span():
-    """Each span of at most CREDENTIAL_OVERLAP characters in a line is whole in a window."""
-    size, overlap = rc.CREDENTIAL_WINDOW, rc.CREDENTIAL_OVERLAP
-    for length in (0, 1, size, size + 1, 3 * size - 2 * overlap, 3 * size + 7):
-        windows = list(rc._windows("ab\n" + "x" * length))
-        assert windows[0] == (0, "ab")
-        spans = [(start, start + len(piece)) for start, piece in windows[1:]]
-        assert spans[-1][1] == 3 + length
-        for at in range(3, 3 + max(length - overlap, 0) + 1):
-            assert any(lo <= at and at + min(overlap, length) <= hi for lo, hi in spans), at
-
-
 def test_a_credential_in_a_very_long_line_is_found_in_bounded_time(tmp_path):
-    """A credential pattern is quadratic on a long run of letters: the check runs it over
-    windows, so a 200,000-character line is read in bounded time, and a credential across
-    a window's end is found whole in the next window."""
+    """The credential chains are linear in a line's length (BUG-295), so a line is read
+    whole, however long: a 200,000-character line is read in bounded time, and a
+    credential far into it is found where it starts."""
     token = "gh" + "p_" + "AbCd" * 9  # letters only: the filler's run goes on through it
-    step = rc.CREDENTIAL_WINDOW - rc.CREDENTIAL_OVERLAP
-    at = 2 * step + rc.CREDENTIAL_WINDOW - len(token) // 2  # across the third window's end
+    at = 5000 - len(token) // 2
     line = "a" * at + token
     line += "a" * (200000 - len(line))
     started = time.time()
     failures = rc.check(write_cast(tmp_path, [(1.0, "o", line + "\n")]), denylist=DL)
     assert failures == [rc.Failure("credential", "a credential shape at event 1 (cast line 2)")]
     assert rc._first_credential(line) == at
+    assert rc._first_credential("ab\n" + line) == 3 + at
     for n, clean in enumerate(["a" * 40000, "lorem ipsum " * 16667]):
         cast = write_cast(tmp_path, [(1.0, "o", clean + "\n")], "clean-%d.cast" % n)
         assert rc.check(cast, denylist=DL) == [], n
     assert time.time() - started < 10  # generous: the machine may be loaded
+
+
+def test_a_credential_longer_than_2000_characters_is_found():
+    """BUG-295: the chains used to be read in 2,000-character windows, because one was
+    quadratic on a long line, and a shape longer than a window was whole in none. A JWT
+    with a 3,000-character payload is such a shape."""
+    jwt = "ey" + "J" + "hbGciOiJIUzI1NiJ9" + ".ey" + "J" + "c3D4" * 750 + ".c2ln"
+    for before in (0, 8, 1900, 5000):
+        line = "x " * (before // 2) + jwt + " tail"
+        assert rc._first_credential(line) == before, before
+    assert rc._first_credential("no shape here\n" + "y" * 5000) is None
 
 
 def test_a_progress_line_redrawn_with_carriage_returns_passes(tmp_path):

@@ -287,6 +287,39 @@ test('redaction matches the real sed chain, line for line', () => {
   }
 });
 
+// BUG-295: the assignment alternative re-read a long line from every position, so a
+// pasted line of capitals froze the page. Two sizes and their ratio, never an absolute
+// time: four times the input costs about 4 times the CPU when it is linear, 16 when not.
+test('BUG-295: redaction is linear in the length of a line', () => {
+  const families = {
+    'capitals and underscores': (n) => 'AB_'.repeat(Math.ceil(n / 3)).slice(0, n),
+    '_TOKEN repeated': (n) => `_${'TOKEN'}`.repeat(Math.ceil(n / 6)).slice(0, n),
+    'a long run before _API_KEY': (n) => `${'A'.repeat(n)}_API_${'KEY'}`,
+  };
+  const cost = (line) => {
+    let best = Infinity;
+    for (let i = 0; i < 3; i += 1) {
+      const start = process.cpuUsage();
+      assert.equal(intake.redact(line, toolkit).count, 0);
+      const used = process.cpuUsage(start);
+      best = Math.min(best, used.user + used.system);
+    }
+    return best;
+  };
+  for (const [name, make] of Object.entries(families)) {
+    const small = cost(make(10000));
+    const big = cost(make(40000));
+    assert.ok(big <= Math.max(small, 500) * 8, `${name}: ${small} µs at 10,000 characters, ${big} µs at 40,000`);
+  }
+});
+
+test('BUG-295: the bounded name still redacts the value, and a real name whole', () => {
+  const tok = 'TOKEN';
+  assert.equal(intake.redact(`export GITHUB_${tok}=abc123 next`, toolkit).text, 'export [REDACTED] next');
+  assert.equal(intake.redact(`${'A'.repeat(64)}_${tok}: v`, toolkit).text, '[REDACTED]');
+  assert.equal(intake.redact(`${'A'.repeat(70)}_${tok}: v`, toolkit).text, `${'A'.repeat(6)}[REDACTED]`);
+});
+
 test('a model that omits Open Questions still gets its blocking gaps listed, without the placeholder', async () => {
   const md = toolkit.requiredSections
     .filter((s) => s !== 'Open Questions')

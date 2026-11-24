@@ -752,6 +752,39 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **The credential chains are linear in the length of a line (BUG-295).** Three arms
+  backtracked on one long line in the engines that backtrack, Python's `re` and the Space's
+  JavaScript: the intake chain's `[A-Z_]+_(API_KEY|TOKEN)` arm, and the wide chain's
+  assignment arm and JWT arm. Four times the line cost sixteen times the CPU, and the wide
+  chain did not finish 10,000 characters of the repeated word `token` in 45 seconds. macOS
+  `sed -E` and `grep -E` were linear on the same lines, before and after. Now:
+  - the name before `_API_KEY` or `_TOKEN` is read for 64 characters
+    (`[A-Z_]{1,64}`) in `partials/intake.sh` and in the copies pinned to it:
+    `tools/adlc/credential_redact.py`, `tools/adlc/harness_probe.py` and the Space's
+    generated `space/toolkit-data.js`;
+  - the wide chain (`partials/lesson-check.sh`, `credential_redact.py`) reads 64
+    identifier characters on each side of its assignment keyword, and a JWT header of up to
+    255 characters, or the last 255 characters of a longer one;
+  - `tools/launch/recording_check.py` reads each line whole. Its 2,000-character windows
+    were the workaround, and a shape longer than a window, a JWT with a 3,000-character
+    payload for one, was found in none of them.
+
+  What the chains match on real input is unchanged: `tools/adlc/tests/test_credential_redact.py`
+  compares the bounded chains with the unbounded ones over a table of real-shaped lines,
+  through Python, the real `sed` and the real `grep`, and times each bounded arm at two line
+  lengths. Past the bounds: a name longer than 64 characters keeps its head and still loses
+  its value; an assignment whose keyword is followed by more than 64 identifier characters
+  before the `=` is no longer read; a JWT whose header is longer than 255 characters is
+  still found, and a substitution leaves the head of that header in place.
+
+  Not changed: the copies of the five-arm chain that only `sed` runs
+  (`tools/delegate/emit-telemetry.sh` and the `/proceed`, `/wrapup` and
+  `agents/delegate-pre-pass.md` fences) keep `[A-Z_]+`, which measured linear there, so
+  those four and `partials/intake.sh` now differ on a name longer than 64 characters. Nor
+  `tools/dataset`'s own extra patterns (`detectors.py`, `residue.py`), three of which
+  measure superlinear too. A project with a vendored `.adlc/partials/intake.sh` or
+  `lesson-check.sh` keeps the unbounded regex until it is re-synced; that copy also runs
+  only in `sed` and `grep`.
 - **The id recheck knows its own reservation after the ref's commit SHA has changed
   (BUG-294).** The own-reservation ledger identified a reservation by the SHA of the
   commit this machine pushed. A history rewrite gives every `refs/adlc/ids/*` commit

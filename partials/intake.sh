@@ -352,10 +352,14 @@ adlc_intake_cleanup() {
 }
 
 # --- Credential redaction -------------------------------------------------------
-# The same 5-pattern BSD-sed chain /proceed Phase 5 applies to its verify diff. The
-# broader [A-Z_]+_(API_KEY|TOKEN) arm subsumes MOONSHOT_API_KEY, so no separate
-# pattern is needed. `-i.bak` (not bare `-i ''`) is the form that works on both BSD
-# and GNU sed; the .bak is removed immediately.
+# The 5-pattern BSD-sed chain /proceed Phase 5 applies to its verify diff, with one
+# difference (below). The broader [A-Z_]{1,64}_(API_KEY|TOKEN) arm subsumes
+# MOONSHOT_API_KEY, so no separate pattern is needed. `-i.bak` (not bare `-i ''`) is
+# the form that works on both BSD and GNU sed; the .bak is removed immediately.
+# The name is read for 64 characters here, where /proceed's copy has `+` (BUG-295):
+# this regex is the one copied into backtracking engines (Python, the Space's
+# JavaScript), and unbounded they re-read a long line from every start. A longer name
+# keeps its head and still loses its value. The copies that only sed runs keep `+`.
 # Mirrored in tools/adlc/credential_redact.py and pinned by tools/adlc/tests/test_credential_redact.py.
 adlc_intake_redact() {
     _ai_f="$1"
@@ -363,7 +367,7 @@ adlc_intake_redact() {
         echo "adlc_intake_redact: file not writable: ${_ai_f:-<empty>}" >&2
         return 2
     fi
-    sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]+_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$_ai_f" || {
+    sed -i.bak -E 's/(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}|Bearer [A-Za-z0-9._-]{20,}|[A-Z_]{1,64}_(API_KEY|TOKEN)[[:space:]]*[=:][[:space:]]*[^[:space:]]+)/[REDACTED]/g' "$_ai_f" || {
         echo "adlc_intake_redact: sed failed on ${_ai_f}" >&2
         rm -f "$_ai_f.bak"
         return 2
