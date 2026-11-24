@@ -4,7 +4,7 @@ title: "The exec engine's config checks read a Codex user config that holds mult
 status: draft
 deployable: false
 created: 2026-11-23
-updated: 2026-11-23
+updated: 2026-11-24
 component: "adlc/harness"
 domain: "adlc"
 stack: ["python", "toml"]
@@ -192,11 +192,11 @@ All under a sandbox `HOME`.
 
 ## Open Questions
 
-None blocks the draft. Three are for the owner at review.
+None blocks the draft. Two are for the owner at review; the third was answered on 2026-11-24.
 
 - [ ] **`[[array-of-tables]]` stays a refusal here.** If a Codex release writes one into the user config by itself, an operator clears this requirement's refusal and meets that one next. The repository does not say whether it does. Proposed: check a Codex-written config before `/architect`; if it does, add a rule that reads a `[[name]]` header as a table no watched key lives in, and refuses one whose name is, or is under, `projects` or a watched table.
 - [ ] **The reader joins a header's parts with dots.** Found while drafting: `[projects."/a".b]` and `[projects."/a.b"]` both read as `projects./a.b`, so a `trust_level` under the first is read as trusting the path `/a.b`, and the grant would record `pre_existing` and write nothing. BR-21 (a) compares part by part and will fail on it. Proposed: fix it in this requirement, since it is the same reader and the differential test needs it; the alternative is a bug report and a named exception in the corpus.
-- [ ] **One reader narrows REQ-655 BR-5 (decision 6, BR-5).** The alternative is a mode that only the exec engine's two checks turn on, leaving the renderer's merge as strict as it is. The draft takes one reader because two readings of one file is the fault LESSON-716 describes, and because an operator with multi-line `args` is refused by `--writable-root` today for the same reason. It reverses a recorded rule, so it needs the owner's yes.
+- [x] **One reader narrows REQ-655 BR-5 (decision 6, BR-5). The owner confirmed it on 2026-11-24, after the spec PR (#316) merged: one reader, no exec-only mode.** The renderer's merge reads the same three constructs, BR-14 holds its writes, and BR-24's amendment to REQ-655 BR-5 is owed with the implementation. The question as first written: the alternative is a mode that only the exec engine's two checks turn on, leaving the renderer's merge as strict as it is. The draft takes one reader because two readings of one file is the fault LESSON-716 describes, and because an operator with multi-line `args` is refused by `--writable-root` today for the same reason. It reverses a recorded rule, so it needed the owner's yes.
 
 ## Out of Scope
 
