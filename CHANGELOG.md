@@ -752,6 +752,35 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **A whole scrub of a line, and a whole residue pass over it, are linear in the line's
+  length (BUG-298).** After BUG-297 two things in `tools/dataset` still were not:
+  - the two email patterns. `residue._EMAIL` began at every character of a run with no
+    `@` and read the rest of the run from each: 0.21 s for 10,000 letters and 3.2 s for
+    40,000. `detectors.EMAIL_RE` did the same after every underscore, which its
+    lookbehind leaves out and its repeat reads;
+  - what was done once for each hit. The scrub and the residue pass each searched the
+    line from its start to ask whether a name stands in a table cell, the scrub did so to
+    ask whether a person's name starts a sentence, and it put the line together again
+    for each replacement: 1.4 s for 40,000 characters of one name repeated.
+
+  The two patterns are unchanged and are no longer searched. `detectors.emails` and
+  `residue._emails` search with the same pattern anchored to the start of its run of
+  local-part characters. A search that has found one address resumes where it ended,
+  which can be inside a run (`a@b.com_c@d.org`), so after each address they try the
+  pattern itself at the one position where it could begin again in that run: where the
+  address ended, for the residue pass, and just past the next underscore, for the scrub.
+  They give the matches `finditer` gave, on every line. The two per-hit questions are
+  answered by reading backwards from the hit, and the line is put together once.
+
+  `tools/dataset/tests/test_dataset_line_linear.py` times `Scrubber.scrub_line` and
+  `Checker.scan_line` whole on 46 line families at two line lengths, and holds every
+  changed piece and both whole functions to what they gave before, over a table of
+  real-shaped lines and 10,000 seeded random ones. An export of this repository's own
+  `.adlc/` tree is byte-identical before and after.
+
+  Not changed: `tools/adlc/harness_probe.py` has an email pattern of its own with no
+  lookbehind at all, which measures superlinear on a long run of letters (0.09 s at
+  10,000 characters, 1.4 s at 40,000).
 - **The dataset export's own credential patterns are linear in the length of a line
   (BUG-297).** `tools/dataset` scrubs with patterns of its own beside the shared chains,
   and its residue pass searches with a second set. Five of them re-read a long run from
@@ -779,7 +808,8 @@ is cut per `RELEASING.md`.
 
   Not changed: the two email patterns, `detectors.EMAIL_RE` and `residue._EMAIL`, which
   measure superlinear on the same kind of line and are not credential patterns. Until
-  they are fixed, a scrub or a residue pass over one very long line is still superlinear.
+  they are fixed, a scrub or a residue pass over one very long line is still superlinear
+  (BUG-298, above).
 - **Intake cleanup no longer removes a directory outside every temp root when the source
   path leaves the root through `..` or a symlink (BUG-296).** `adlc_intake_cleanup`
   (`partials/intake.sh`) decided "under a temp root" by matching the text of the source's

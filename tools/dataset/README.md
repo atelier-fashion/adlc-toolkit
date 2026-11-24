@@ -213,5 +213,10 @@ The suite needs no network and no install. `tests/test_dataset_credential_linear
 times each of the tool's own credential patterns at two line lengths and fails
 on a ratio, not a time: a repeat that can begin at any character of a long run
 re-reads the run from each, so bound it or anchor it to the start of its run
-(BUG-297). The publish tests replace the Hub client with a stub. The at-publish
-cases skip unless the two variables above are set.
+(BUG-297). `tests/test_dataset_line_linear.py` does the same for a whole
+`Scrubber.scrub_line` and a whole `Checker.scan_line` on every line family. Two
+rules follow from it: run the email rules through `detectors.emails` and
+`residue._emails`, which never search them, and answer a question asked once
+for each hit by reading backwards from the hit, not by searching the line from
+its start (BUG-298). The publish tests replace the Hub client with a stub. The
+at-publish cases skip unless the two variables above are set.

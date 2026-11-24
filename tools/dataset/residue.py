@@ -43,8 +43,14 @@ _EXTRA_CREDENTIAL = (
                r"(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{40,}", re.ASCII),
 )
 _HOME = re.compile(r"/users/|(?<![a-z0-9_.-])/(?:home|private)/|[a-z]:\\users\\", re.IGNORECASE)
-_EMAIL = re.compile(r"[^\s@<>()\[\]{}\"'`,;|:/=]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*"
-                    r"\.[A-Za-z]{2,}(?![A-Za-z0-9])")
+#: An address: this is the check, and :func:`_emails` is how to run it. Searched
+#: as it stands it begins at every character of a run with no ``@`` and reads the
+#: rest of the run from each (BUG-298).
+_LOCAL = r"[^\s@<>()\[\]{}\"'`,;|:/=]"
+_ADDRESS = _LOCAL + r"+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?![A-Za-z0-9])"
+_EMAIL = re.compile(_ADDRESS)
+#: The same address, begun only at the start of its run of local-part characters.
+_EMAIL_RUN = re.compile("(?<!" + _LOCAL + ")" + _ADDRESS)
 _REF = re.compile(r"(?<![a-z0-9])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}(?![a-z0-9])|(?<!&)#[0-9]+(?![A-Za-z0-9])",
                   re.IGNORECASE)
 _SCRUB_MARK = re.compile(r"consumer-repo-[0-9]+|private-repo|\[link removed\]")
@@ -61,6 +67,39 @@ def _words(name, separator=r"[-_ ]?"):
 
 #: Hyphens of every kind, read as ``-`` after normalization.
 _DASHES = dict.fromkeys(list(range(0x2010, 0x2016)) + [0x2212, 0xfe63, 0xff0d], "-")
+
+
+def _emails(line):
+    """The matches of ``_EMAIL.finditer(line)``, each run of the line read once.
+
+    An address ends its run of local-part characters at the ``@``, so a run holds
+    an address from one start exactly when it holds one from every start, and the
+    leftmost is the start of the run: ``_EMAIL_RUN`` finds the same match as
+    ``_EMAIL`` and skips the rest of a run that holds none. Only where the last
+    match ended can a search begin inside a run (``a@b.com.c@d.org``), so that
+    one position is tried with ``_EMAIL`` itself, once for each match.
+    """
+    m = _EMAIL_RUN.search(line)
+    while m:
+        yield m
+        end = m.end()
+        m = _EMAIL.match(line, end) or _EMAIL_RUN.search(line, end)
+
+
+_CELL_END = re.compile(r"[ \t]*\|")
+
+
+def _after_pipe(line, end):
+    """True when ``line[:end]`` ends in ``|`` and blanks: ``\\|[ \\t]*$`` is found in it.
+
+    Read from ``end`` backwards, so a line that holds a name many times is not
+    read from its start once for each of them (BUG-298).
+    """
+    if end and line[end - 1] == "\n":
+        end -= 1  # ``$`` also matches before a final newline
+    while end and line[end - 1] in " \t":
+        end -= 1
+    return end > 0 and line[end - 1] == "|"
 
 
 def _word_re(names):
@@ -109,7 +148,7 @@ class Checker(object):
             return True
         if line[e:e + 4].lower() == ".git":
             return True
-        return bool(re.search(r"\|[ \t]*$", line[:s]) and re.match(r"[ \t]*\|", line[e:]))
+        return bool(_after_pipe(line, s) and _CELL_END.match(line, e))
 
     def scan_line(self, line):
         fired = []
@@ -118,7 +157,7 @@ class Checker(object):
                 p.search(masked) for p in _EXTRA_CREDENTIAL):
             fired.append("credential")
         if any(m.group(0).lower().strip(".") not in self.allow_email
-               for m in _EMAIL.finditer(line)):
+               for m in _emails(line)):
             fired.append("email")
         if _HOME.search(line):
             fired.append("home-path")
