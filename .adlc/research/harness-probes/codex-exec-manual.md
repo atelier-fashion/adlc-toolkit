@@ -409,7 +409,93 @@ GitHub's refusal is `gh`'s as its source spells it, and Azure DevOps's is error 
 neither was read off a live forge for this. The fence's read was run against GitHub once, by
 hand, `gh` 2.103.3, against this repository: for a head and base that have a PR it printed
 the `url=`, `number=` and `state=OPEN` lines, and for a head with no open PR, or another
-base, it printed nothing and exited 0. No real launch has run against BUG-291.
+base, it printed nothing and exited 0. Launch 12, below, is the first real launch against
+BUG-291.
+
+## One launch against BUG-291, approved at the gate (2026-11-23 and 2026-11-24)
+
+`adlc sprint-exec run --harness codex REQ-900` once more, the same lite REQ and the same staging
+as launches 7 to 11, `codex-cli 0.166.0`, started at 2026-11-23T20:45:40Z. The clone and the
+engine were both `main` at `a0eeab8`, which holds BUG-291. This is the first launch the engine
+merged with every fix in, and the first whose gate waited a day.
+
+| Launch | Ended | Time | Why |
+|---|---|---|---|
+| 12 | `merged`, close-out `failed` | 4 min 38 s to the gate, 25 h 48 min at the gate, 34 s for the close-out | The session ran Step 0 to Phase 7 without a block and the engine printed the gate over PR 101. The run was approved the next day, the engine flipped the PR to ready and merged it pinned to the gate's oid, and the resumed close-out session ran five commands before Codex ended the turn on the plan's usage limit (fact 16) |
+
+What launch 12 shows of BUG-291:
+
+- **The prompt line, and no lock error.** The pipeline prompt and the close-out prompt each
+  hold the sandboxed-git line once. The session ran `git add` on a line of its own and then
+  `git commit` on a line of its own, twice, all four exit 0. No output in the stream holds
+  `index.lock`. Launch 10's session reran them alone with no such line in its prompt, so
+  this is one run that never chained them, and not a measure of what the line changes.
+- **The draft-PR fence, run once.** The mock's log holds `pr_list --head … --base main --state
+  open --json number,url --jq …` and then `pr_create`, from one run of the fence through the
+  runner. It printed PR 101 and no `pr_exists` line. The session wrote `prNumber: 101` to the
+  state file straight after, which launch 11's first session did not. It wrote `prCreatedAt`
+  as its own start time, not the forge's.
+- **`exec.launchedAt`.** The run record holds it, equal to `exec.startedAt` for a run with
+  one launch. Fourteen status reads over the session all read `running` or the gate.
+- **A chained fence call, once more.** One fence call chained after another command exited
+  69 with `fence_run_sandboxed`, and the session ran it again alone (fact 8). It also typed
+  the runner's path wrong once, exit 127, and then right. Its stderr log holds only
+  `Reading prompt from stdin...`: no line was refused.
+
+The gate, the wait and the merge:
+
+- **The gate row** named PR 101 by number, head ref and head oid, the `--force-with-lease`
+  push if a rebase were needed, `deploy: none`, the close-out and the cleanup, and printed a
+  token.
+- **A day at the gate.** The supervisor stayed one process from 2026-11-23T20:45:40Z until it
+  exited at 2026-11-24T22:39Z. The status row read `Awaiting approval` each time it was read
+  in between, and never `stalled`: the session's process had ended, and the stall check reads
+  a live one. The session that staged the launch did not approve it: its operator's reply
+  named no REQ and carried no token, which the operator reference requires, so it showed the
+  row and stopped.
+- **The approval.** `approval.json` records `approved` through the `skill` channel, decided
+  under the operator's account at 2026-11-24T22:38:52Z from another process, with no gate change
+  acknowledged. In the two seconds after it the engine fetched `main` and the head, read the
+  PR, trial-merged the head onto `origin/main` in a throwaway working copy, called `pr_ready`
+  on the draft, and merged with `--squash --delete-branch --match-head-commit` on the oid the
+  gate had printed. Origin's `main` gained one commit, `feat(space): copy drafted requirement
+  [REQ-900] (#101)`. This is the first real run in which the engine flipped a draft to ready.
+- **After it.** When the close-out failed the engine still cleaned up: it removed both working
+  copies and deleted both local branches. The clone held no branch but `main`, still at the
+  launch tip, and its only remote-tracking ref was `origin/main`. The mock held PR 101
+  `MERGED` and no other PR, so no chore PR was opened.
+- **Trust and the user config.** `~/.codex/config.toml` had the same checksum before the
+  launch, at the gate, the next day and after the close-out, and after the close-out no line
+  of it named the clone. It was not read while either session ran.
+
+The pipeline session used 3.4 M input tokens, 3.3 M of them cached, and 10.1 k output tokens.
+The close-out's turn failed, so its stream reports no usage.
+
+**16. A close-out the harness ends itself reads `ended None, rc 1`, and the harness's reason
+stays in the stream.** The engine started the close-out two seconds after the approval, as a
+resume of the pipeline session's thread, in a working copy of its own on
+`chore/REQ-900-close-out`. The session ran the wrapup context fence through the runner, a line
+of reads, `fence-run show partials/forge.sh` (exit 3, `opaque_entry_refused`: the file is not
+in the exec file set), `fence-run show wrapup/SKILL.md`, and one more line of reads. Then the
+stream holds an `error` event and a `turn.failed` event with Codex's words: the plan's usage
+limit was reached, and the time it resets, on 2026-11-30. The process exited 1, 34 seconds
+after it started, and its stderr log is empty.
+
+The engine printed `REQ-900 close-out: failed — the resumed session ended None, rc 1` and then
+`REQ-900 merged`, and the supervisor exited 0. The status row reads `merged` with the same
+line under it, the primary state holds `closeOut` `failed` with that reason, and the
+run-outcome line reads `merged` with `close-out-failed` and an `elapsed_s` of 93201, the day
+at the gate included. All of that is as designed: the merge stands, and the spec, the state
+and the knowledge capture were not finalized.
+
+What the operator does not get is why. `None` is the missing terminal claim, and nothing the
+engine prints or records says the harness refused the turn, that the cause is the account and
+not the REQ, or when a retry could work. The Codex adapter declares two events to read,
+`thread.started` and `turn.completed`, and neither `error` nor `turn.failed`. By a reading
+of `harness/codex.yml`, a pipeline session that ended this way would take the `error` class
+from its exit code, with no reason either; that is not measured. The engine has no command
+that runs a failed close-out again, and `resume` skips a run that is `merged`, so the
+operator finishes it by hand with `/wrapup`. None of this is changed.
 
 ## `adlc_forge_pr_checks` against GitHub (2026-11-21)
 
@@ -436,7 +522,8 @@ against GitHub: those three verdicts are measured only against a stubbed `gh` an
   went through the adapter and the mock answered `none`.
 - A close-out with every fix in. Launch 5's close-out ran before the engine flipped a PR to
   ready, and launch 6 was rejected at the gate. Launch 11 was meant to be approved and did not
-  reach the gate.
+  reach the gate. Launch 12 was approved and merged, and its close-out ended after five
+  commands on the plan's usage limit (fact 16).
 - Whether a session chains fence calls on a harness with no sandbox. There the chained call
   simply works.
 - A push to a remote over the network. The origin is a local bare repository outside the
@@ -445,5 +532,11 @@ against GitHub: those three verdicts are measured only against a stubbed `gh` an
 - What a session does with a real forge's refusal of a second PR for its branch (fact 15).
   Since BUG-291 the fence looks for the open PR first, so a session meets the refusal only
   where that read fails or cannot show the PR.
-- A launch against BUG-291: the sandboxed-git line in the prompt, the stall after an `answer`
-  and the draft-PR fence run twice are measured by the fake harness and the mock forge only.
+- The rest of BUG-291 on a real run. Launch 12 read the sandboxed-git line and ran the
+  draft-PR fence once. It did not block, so the stall after an `answer`, the fence run twice
+  (`pr_exists=1`) and the dashboard note are still measured by the fake harness and the mock
+  forge only.
+- What the engine records when the harness ends a pipeline session on a usage limit. Fact 16
+  is a close-out.
+- A stall at the gate. A run waiting for approval has no live session, so launch 12's day
+  there says nothing about a session that stops writing state.
