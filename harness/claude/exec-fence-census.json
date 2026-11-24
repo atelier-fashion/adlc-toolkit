@@ -553,6 +553,7 @@
         "awk",
         "dirname",
         "gh api repos/$adlc_an_owner/contents/$adlc_an_apath",
+        "git cat-file",
         "git fetch",
         "git ls-remote",
         "git ls-tree",

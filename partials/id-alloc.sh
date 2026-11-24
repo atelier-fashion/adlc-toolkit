@@ -344,15 +344,29 @@ adlc_reservation_nonce() {
 # (LESSON-435 — a number-keyed probe cannot self-identify; the ledger supplies the
 # missing identity as the exact object SHA this machine pushed, which is precise per
 # allocation EVENT — the same user on a second machine correctly does NOT match).
-# One line per won push: `<kind> <num> <sha>`. The ledger is advisory
-# self-identification data, NEVER an authority: a missing ledger or missing entry
-# safely degrades to the collision behavior. Symlink refusal mirrors the counter
-# files (LESSON-014); the append runs inside the allocation lock on the alloc path.
+# Two lines per won push (BUG-294):
+#   <kind> <num> <sha>            the commit this machine pushed
+#   <kind> <num> nonce=<nonce>    the nonce in that commit's subject
+# The SHA names the object, and an object does not survive a history rewrite: the
+# rewritten commit has another SHA, and the SHA line alone then called the machine's
+# own id a collision (LESSON-905). The nonce is in the commit's subject, which a rewrite
+# of commit metadata keeps, so the recheck falls back to it when the SHA has changed.
+# The nonce is a line of its own, not a fourth field on the SHA line, because a reader
+# from before BUG-294 matches the SHA line whole (`grep -qxF "<kind> <num> <sha>"`): a
+# consumer's vendored id-recheck.sh would stop recognizing every new reservation if
+# that line grew. `nonce=` cannot be read as a SHA, so that reader ignores the line.
+# adlc_recheck_id (id-recheck.sh) is the reader; id-recheck-rewrite.test.sh runs the
+# two together.
+# The ledger is advisory self-identification data, NEVER an authority: a missing ledger
+# or missing entry safely degrades to the collision behavior. Symlink refusal mirrors
+# the counter files (LESSON-014); the append runs inside the allocation lock on the
+# alloc path.
 adlc_id_own_ledger() {
   adlc_io_home=$(_adlc_id_home) || return 1
   echo "$adlc_io_home/.adlc-own-reservations"
 }
 
+# adlc_record_own_reservation <kind> <num> <sha> [<nonce>]
 adlc_record_own_reservation() {
   adlc_ro_ledger=$(adlc_id_own_ledger) || return 1
   if [ -L "$adlc_ro_ledger" ]; then
@@ -360,8 +374,12 @@ adlc_record_own_reservation() {
     return 1
   fi
   # Best-effort append: a failed record only costs a future false-collision (safe
-  # direction), never the allocation itself.
-  printf '%s %s %s\n' "$1" "$2" "$3" >> "$adlc_ro_ledger" 2>/dev/null || :
+  # direction), never the allocation itself. One printf, so the two lines land together.
+  if [ -n "${4:-}" ]; then
+    printf '%s %s %s\n%s %s nonce=%s\n' "$1" "$2" "$3" "$1" "$2" "$4" >> "$adlc_ro_ledger" 2>/dev/null || :
+  else
+    printf '%s %s %s\n' "$1" "$2" "$3" >> "$adlc_ro_ledger" 2>/dev/null || :
+  fi
 }
 
 # --- atomic reservation push (REQ-546 BR-1/BR-2/BR-5/BR-6) ---------------------------
@@ -387,7 +405,11 @@ adlc_reserve_id() {
   # allocator identity (git config user.name/email) and author time natively (BR-2).
   adlc_ri_tree=$(git -C "$adlc_ri_repo" hash-object -t tree /dev/null 2>/dev/null)
   [ -n "$adlc_ri_tree" ] || adlc_ri_tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904
-  adlc_ri_msg="adlc-id-reservation kind=$adlc_ri_kind num=$adlc_ri_num nonce=$(adlc_reservation_nonce)"
+  # The subject is the reservation's identity beyond its SHA (BUG-294): the ledger keeps
+  # the nonce, and adlc_recheck_id reads this exact line back from the remote commit.
+  # Change its shape in both places or in neither.
+  adlc_ri_nonce=$(adlc_reservation_nonce)
+  adlc_ri_msg="adlc-id-reservation kind=$adlc_ri_kind num=$adlc_ri_num nonce=$adlc_ri_nonce"
   adlc_ri_obj=$(printf '%s\n' "$adlc_ri_msg" | git -C "$adlc_ri_repo" commit-tree "$adlc_ri_tree" 2>/dev/null)
   # Could not even build the object (e.g. git identity unset) -> degraded, non-blocking.
   [ -n "$adlc_ri_obj" ] || return 2
@@ -401,8 +423,9 @@ adlc_reserve_id() {
   if [ "$adlc_ri_rc" -eq 0 ]; then
     # Won: record the pushed object SHA so the recheck can self-identify this
     # reservation later (BUG-145) — without the ledger entry, the recheck would
-    # report the allocator's own ref as a collision (the renumber treadmill).
-    adlc_record_own_reservation "$adlc_ri_kind" "$adlc_ri_num" "$adlc_ri_obj"
+    # report the allocator's own ref as a collision (the renumber treadmill). The
+    # nonce goes with it, for the day the SHA no longer names the ref's commit (BUG-294).
+    adlc_record_own_reservation "$adlc_ri_kind" "$adlc_ri_num" "$adlc_ri_obj" "$adlc_ri_nonce"
     return 0
   fi
   case "$adlc_ri_out" in

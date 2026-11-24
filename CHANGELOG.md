@@ -752,6 +752,26 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **The id recheck knows its own reservation after the ref's commit SHA has changed
+  (BUG-294).** The own-reservation ledger identified a reservation by the SHA of the
+  commit this machine pushed. A history rewrite gives every `refs/adlc/ids/*` commit
+  another SHA, so `adlc_recheck_id` (`partials/id-recheck.sh`) reported `COLLISION` on the
+  machine's own id and printed a renumber command for it; `/proceed REQ-672` halted that
+  way at Step 0 (LESSON-905). Now:
+  - `adlc_reserve_id` (`partials/id-alloc.sh`) records the reservation's nonce too, as a
+    second ledger line, `<kind> <num> nonce=<nonce>`. The `<kind> <num> <sha>` line is
+    unchanged, so a vendored `id-recheck.sh` from before this fix still matches it;
+  - when the SHA does not match and the ledger holds a nonce for the kind and number, the
+    recheck reads the ref's commit and accepts it when the first line of its message is
+    that reservation's subject with a recorded nonce. The fetch names no destination and
+    writes no ref and no `FETCH_HEAD`; it needs git 2.29, and an older git halts as before;
+  - a ledger entry for the same kind and number is never proof by itself. A colleague's
+    reservation of the id, a subject for another kind or number, a nonce that is a prefix
+    or an extension of a recorded one, and a symlinked ledger all stay a collision;
+  - a reservation recorded before this fix has no nonce in the ledger. If its ref was
+    rewritten it still halts, and the halt now says the ledger holds an entry for the id
+    and to read the ref's commit before renumbering.
+
 - **Intake cleanup no longer removes a directory outside every temp root when `TMPDIR` is
   unset, empty or `/` (BUG-293).** `adlc_intake_cleanup` (`partials/intake.sh`) admitted a
   directory by the pattern `"${TMPDIR%/}"/*`, which is `/*` when `TMPDIR` is unset, empty or

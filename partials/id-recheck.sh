@@ -19,9 +19,12 @@
 # Self-identification (BUG-145 — LESSON-435): number-keyed probes cannot tell "taken
 # by someone else" from "taken by this work item / this machine". Two self signals:
 #   - Own reservation: adlc_alloc_id records every won push to the own-reservation
-#     ledger (`<kind> <num> <sha>`, adlc_id_own_ledger). A reservation hit whose ref
-#     SHA whole-line-matches the ledger is self -> not a collision. No ledger entry
-#     -> collision (safe default).
+#     ledger (`<kind> <num> <sha>` and `<kind> <num> nonce=<nonce>`,
+#     adlc_id_own_ledger). A reservation hit whose ref SHA whole-line-matches the
+#     ledger is self -> not a collision. So is one whose commit subject carries a
+#     nonce the ledger holds for that kind and number: a history rewrite changes the
+#     SHA and keeps the subject (BUG-294, LESSON-905). No ledger entry, or an entry
+#     for the kind and number that matches neither way -> collision (safe default).
 #   - Own merged artifact: pass the caller's own full artifact name as the OPTIONAL
 #     3rd arg (spec dir basename for req; file basename otherwise). A same-number
 #     artifact hit whose full name equals it is self; a different name still halts.
@@ -65,6 +68,45 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
 else
   _ADLC_RECHECK_DIR=""
 fi
+
+# _adlc_rc_reservation_nonce <repo> <kind> <num> <sha> — print the nonce in the subject of
+# the reservation commit <sha>, the commit refs/adlc/ids/<kind>/<num> points at on
+# <repo>'s origin; print nothing when it cannot be read or is not that reservation's
+# subject (BUG-294). Always returns 0: an empty answer is the caller's "not proven".
+#
+# ls-remote gives the ref's SHA only, so the commit is fetched when the working copy
+# does not hold it: one root commit on the empty tree. The fetch names no destination,
+# takes no tags, writes no FETCH_HEAD, runs no hook and starts no maintenance, and
+# `--refmap=` turns off the update of any tracking ref a configured refspec maps the
+# reservation to (a clone with `+refs/*:refs/remotes/origin/*` would otherwise gain
+# one), so the working copy's refs are as they were. `--no-write-fetch-head` and
+# `--no-auto-maintenance` need git 2.29; an older git fails the fetch, nothing is
+# printed, and the recheck halts as it did before this function existed.
+#
+# Everything read here is remote data. <sha> reaches git only as a full hex object
+# name. The message's FIRST line must be exactly the subject adlc_reserve_id
+# (id-alloc.sh) builds for THIS kind and number, `adlc-id-reservation kind=<kind>
+# num=<num> nonce=<nonce>`, and what follows `nonce=` must be made of the characters
+# adlc_reservation_nonce produces (digits, a-f, `-`) and nothing else. The commit is
+# read with `cat-file`, which no log or pretty-format setting changes.
+_adlc_rc_reservation_nonce() {
+  case "$4" in '' | *[!0-9a-f]*) return 0 ;; esac
+  [ "${#4}" -ge 40 ] || return 0
+  if ! git -C "$1" cat-file -e "${4}^{commit}" 2>/dev/null; then
+    GIT_TERMINAL_PROMPT=0 git -C "$1" -c core.hooksPath=/dev/null fetch -q \
+      --no-tags --no-write-fetch-head --no-recurse-submodules --no-auto-maintenance \
+      --refmap= origin "refs/adlc/ids/$2/$3" >/dev/null 2>&1 || return 0
+  fi
+  adlc_rcn_subject=$(git -C "$1" cat-file commit "$4" 2>/dev/null | awk 'body { print; exit } /^$/ { body = 1 }')
+  adlc_rcn_want="adlc-id-reservation kind=$2 num=$3 nonce="
+  case "$adlc_rcn_subject" in
+    "$adlc_rcn_want"*) adlc_rcn_found=${adlc_rcn_subject#"$adlc_rcn_want"} ;;
+    *) return 0 ;;
+  esac
+  case "$adlc_rcn_found" in '' | *[!0-9a-f-]*) return 0 ;; esac
+  printf '%s' "$adlc_rcn_found"
+  return 0
+}
 
 # Source the allocation partial for the kind mappers + adlc_remote_high. Prefer the
 # resolved sibling dir, then the two-level convention fallback used at every call site.
@@ -176,6 +218,8 @@ adlc_recheck_id() {
   esac
 
   adlc_rc_hit=""
+  # Set by the reservation probe; a global, so it is reset on every call (LESSON-773).
+  adlc_rc_res_known=""
   # zsh NOMATCH guard — same rationale as adlc_remote_high (BUG-116).
   if [ -n "${ZSH_VERSION:-}" ]; then setopt localoptions nullglob 2>/dev/null; fi
   # Positional parameters, as adlc_remote_high builds its set (`for x in $var` does not
@@ -269,13 +313,43 @@ adlc_recheck_id() {
       # reservation, or even this user's from another machine, has a different
       # object). Missing/symlinked ledger or no matching line -> collision
       # (historical behavior — the safe direction).
+      #
+      # The SHA is the fast path, not the only proof (BUG-294, LESSON-905). A history
+      # rewrite gives the ref's commit another SHA and keeps its subject, so the
+      # ledger also holds `<kind> <num> nonce=<nonce>` and a ref whose subject carries
+      # a recorded nonce for this kind and number is the allocator's own too. A ledger
+      # line for the same kind and number proves nothing by itself: a colleague's
+      # reservation of the id has another nonce, and stays a collision.
+      #
+      # The ledger is read once, into a variable, behind the symlink refusal, so the
+      # matches below cannot see two different files (LESSON-014).
       adlc_rc_res_sha=$(printf '%s\n' "$adlc_rc_res" | awk '{print $1; exit}')
       adlc_rc_ledger=$(adlc_id_own_ledger)
-      if [ -f "$adlc_rc_ledger" ] && [ ! -L "$adlc_rc_ledger" ] \
-           && grep -qxF "$adlc_rc_kind $adlc_rc_num $adlc_rc_res_sha" "$adlc_rc_ledger" 2>/dev/null; then
-        echo "id recheck: reservation refs/adlc/ids/$adlc_rc_kind/$adlc_rc_num in '$adlc_rc_repo' was pushed by THIS machine's allocator — self, not a collision (BUG-145)." >&2
+      adlc_rc_own_lines=""
+      if [ -f "$adlc_rc_ledger" ] && [ ! -L "$adlc_rc_ledger" ]; then
+        adlc_rc_own_lines=$(grep "^$adlc_rc_kind $adlc_rc_num " "$adlc_rc_ledger" 2>/dev/null)
+      fi
+      adlc_rc_res_self=""
+      if [ -z "$adlc_rc_own_lines" ]; then
+        :
+      elif printf '%s\n' "$adlc_rc_own_lines" | grep -qxF "$adlc_rc_kind $adlc_rc_num $adlc_rc_res_sha"; then
+        adlc_rc_res_self="was pushed by THIS machine's allocator — self, not a collision (BUG-145)"
+      elif printf '%s\n' "$adlc_rc_own_lines" | grep -q "^$adlc_rc_kind $adlc_rc_num nonce="; then
+        # Only now is the ref's commit read: the ledger holds a nonce for this id, so
+        # there is something to compare. A reservation this machine has no nonce for
+        # costs no fetch.
+        adlc_rc_res_nonce=$(_adlc_rc_reservation_nonce "$adlc_rc_repo" "$adlc_rc_kind" "$adlc_rc_num" "$adlc_rc_res_sha")
+        if [ -n "$adlc_rc_res_nonce" ] \
+             && printf '%s\n' "$adlc_rc_own_lines" | grep -qxF "$adlc_rc_kind $adlc_rc_num nonce=$adlc_rc_res_nonce"; then
+          adlc_rc_res_self="carries the nonce THIS machine's allocator recorded for it, under another commit SHA than it was pushed with — self, not a collision (BUG-294)"
+        fi
+      fi
+      if [ -n "$adlc_rc_res_self" ]; then
+        echo "id recheck: reservation refs/adlc/ids/$adlc_rc_kind/$adlc_rc_num in '$adlc_rc_repo' $adlc_rc_res_self." >&2
       else
         adlc_rc_hit="$adlc_rc_repo (reservation ref)"
+        # For the halt message: the ledger knows this id and could not prove the ref.
+        [ -z "$adlc_rc_own_lines" ] || adlc_rc_res_known=1
         break
       fi
     fi
@@ -297,6 +371,17 @@ adlc_recheck_id() {
         echo "    adlc renumber $adlc_rc_id $adlc_rc_newid"
         echo
         echo "(then re-run; the renumber helper re-checks the new id against the remote.)"
+      fi
+      if [ "$adlc_rc_res_known" = 1 ]; then
+        # LESSON-905: renumbering a merged artifact is the expensive wrong answer, so say
+        # what the ledger knows. The halt stands: nothing here proved the ref.
+        echo
+        echo "NOTE: this machine's own-reservation ledger holds an entry for $adlc_rc_kind $adlc_rc_num, but nothing in"
+        echo "it proved this ref: the ref's commit SHA is not recorded, and no recorded nonce was"
+        echo "read from its subject. If the ref's commit was rewritten after the id was allocated"
+        echo "(a history rewrite) and the ledger entry is older than BUG-294, the reservation may"
+        echo "still be this machine's own: read the ref's commit before renumbering, above all"
+        echo "when the id's artifact is already merged."
       fi
     } >&2
     return 1
