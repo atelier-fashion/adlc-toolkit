@@ -1,7 +1,7 @@
 ---
 id: BUG-292
 title: "A forge's refusal of a second PR for one head and base has no error class, so both backends report it as error_class=network"
-status: open
+status: resolved
 severity: low
 created: 2026-11-23
 updated: 2026-11-23
@@ -142,3 +142,17 @@ What these cannot show.
 - **A forge that words it differently** still reads `network`, as before: a GitHub Enterprise Server release, a translated Azure DevOps organisation where the prose differs (the `TF401179` code is matched, not the prose), or a later `gh`.
 - **What a session does with the class.** The stub CLIs and the mock are scripted. No real `codex` or `claude` launch has run against this, and nothing shows that a model reading `error_class=pr-already-exists` records the PR and goes on.
 - **`_merge_pinned`'s row in the table above** is from reading the code. No test drives a merge that answers with this class, since no forge does.
+
+## Deployment
+
+Merged as `78500a2` ([#321](https://github.com/atelier-fashion/adlc-toolkit/pull/321)) on 2026-11-23, pinned to the tested head `14e5498`. The regression gate read `off`. The toolkit has no deploy target: the class is live for a symlink install when its clone pulls `main`, and for a plugin install at the next release. A project with a vendored `forge.sh` keeps reading `network` for the refusal until it re-syncs that file.
+
+The suites ran on `14e5498`, which is `a0eeab8` plus the fix: `tools/adlc/tests` 2828 passed and 2 skipped, `partials/tests/run.sh` 9749 cases under bash, zsh, sh and dash, `tools/lint-skills/check.sh` 0, `fence_census.py --check` 0. They were not run again on `78500a2`. The one commit between, #320, touches four research and spec files and none of these.
+
+No refusal sentence was read off a live forge, and no real `codex` or `claude` launch has run against the class. LESSON-438 asks that a classifier's markers be copied from captured output of the induced failure, never from documentation or recollection. Two of the three here are not: inducing this one means opening a duplicate PR on a real forge. The first duplicate create a real run meets is the measurement; its `raw=` lines are what to compare with `forge.test.sh` §4e.
+
+`introduced_by` stays empty: blame returned REQ-520 and REQ-719 and the operator has not chosen.
+
+## Lessons
+
+- LESSON-904: a message that quotes a name the project chose can be moved to any class by that name, so its arm matches what no name can hold and is tried before the arms a name can reach.
