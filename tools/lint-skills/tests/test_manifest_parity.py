@@ -1144,8 +1144,14 @@ def _doc_surface() -> list[Path]:
 def test_readme_keeps_claude_first_and_no_replacement_claim():
     """BR-6, AC-10: Claude Code stays first, and no line trades its route away."""
     readme = _doc("README.md")
+    # REQ-672 ADR-9: the plugin commands lead, on the first screen above the first `##`,
+    # and `## Install` keeps what follows them.
+    first_heading = readme.index("\n## ")
+    for command in ("claude plugin marketplace add atelier-fashion/adlc-toolkit",
+                    "claude plugin install adlc@adlc-toolkit"):
+        assert readme.index(command) < first_heading, command
+    assert "\n## Install\n" in readme
     order = [readme.index(mark) for mark in (
-        "## Install\n",
         "claude plugin marketplace add atelier-fashion/adlc-toolkit",
         "## Contributing and live install",
         "### Other agent harnesses: `~/.agents/skills`",

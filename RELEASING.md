@@ -39,6 +39,23 @@ Do these in order. `X.Y.Z` is the new version throughout.
    sh tools/adlc/tests/e2e/plugin-sandbox.sh --with-model --throwaway-repo OWNER/adlc-e2e-YYYYMMDD --keep
    ```
 
+   The quickstart end-to-end test (REQ-672) also **exits 0**. It runs the typed steps of
+   [`docs/quickstart.md`](docs/quickstart.md), as the page writes them, with a temporary
+   `HOME`, and needs the same model credential, `GH_TOKEN` and kind of throwaway repo as
+   `plugin-sandbox.sh`, in a repo of its own. This gate run installs the plugin from
+   GitHub's default branch, `main`, at the commit being released, before the tag exists:
+   run it while `main` there is the commit you checked out. The plugin it installs still
+   reports the previous version, because the bump is step 2. Exit 0 clears this gate, and
+   exit 2, a skipped check, does not. Keep the minutes its summary line prints for step 4,
+   then delete the repo:
+
+   ```bash
+   python3 tools/launch/quickstart_e2e.py --with-model --throwaway-repo OWNER/adlc-e2e-quickstart-YYYYMMDD
+   ```
+
+   Its `--marketplace` option, pointed at the release checkout, is a pre-release check
+   only. The gate run installs from GitHub.
+
 2. **Bump `VERSION`** to `X.Y.Z`, the bare version and a newline. Then regenerate the
    Space's toolkit data, which carries the version (REQ-670), so the release commit
    holds the file the Space will serve:
@@ -83,6 +100,34 @@ Do these in order. `X.Y.Z` is the new version throughout.
    If vendored partials, templates, `ETHOS.md` or the workflow engine changed in the
    release, the entry says which ones, because `/template-drift` reports them `stale` in
    every consumer project until it re-runs `/init` (`/adlc:init` on the plugin install).
+
+   **Then bring the quickstart's timing line and the demo recording up to the release**,
+   in the same commit:
+
+   - In [`docs/quickstart.md`](docs/quickstart.md), set the `quickstart-verified` line to
+     `release=X.Y.Z minutes=N date=YYYY-MM-DD`. `release=` is the release being verified:
+     the version the release commit carries, `X.Y.Z`. Step 1's gate run installed the
+     plugin from GitHub's default branch at the commit being released, before the tag
+     existed, so the plugin it installed reported the previous version; the line still
+     records `X.Y.Z`. `N` and the date are the minutes the driver printed and the day of
+     that run. Rewrite the `Timing:` sentence under it to
+     match. If anything on the quickstart's path changes after that run, such as a skill
+     it runs, `examples/quickstart/` or the page's steps, repeat the run and record its
+     figures instead. The page's tests allow its "What has not been checked" section only
+     while that line says `none`, so fold what the run did not show into the steps it
+     concerns, and remove the links to that section.
+   - When none is committed, or the release changes what it shows, regenerate the demo
+     recording. It needs `asciinema`, `agg` and a throwaway repo of its own, like the
+     quickstart run:
+
+     ```bash
+     python3 tools/launch/record_demo.py --with-model --throwaway-repo OWNER/adlc-e2e-demo-YYYYMMDD
+     ```
+
+     It writes `docs/demo.cast` and `docs/demo.gif` only when its checks pass. Commit the
+     two together, with the README's `<!-- first-screen: recording -->` marker and the
+     image under it: the `readme-first-screen` lint fails when the pair and the marker
+     disagree. Then delete the repo.
 
 5. **Merge to `main`.** Steps 2 to 4 go in one commit on the release branch, merged
    through a pull request with every gate from step 1 green on it.
@@ -199,3 +244,7 @@ with no code change (BR-9).
   from the release with the one command in
   [`tools/dataset/README.md`](tools/dataset/README.md), then read the report. Publishing
   the new revision is a separate step, and the maintainer's call.
+- **The launch and the adoption snapshot (REQ-672).**
+  [`docs/launch-checklist.md`](docs/launch-checklist.md) sequences the launch and is where
+  its progress is written. [`tools/launch/README.md`](tools/launch/README.md) documents
+  its tools, among them the adoption snapshot, which runs at least weekly.

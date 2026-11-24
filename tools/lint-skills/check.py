@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """SKILL.md corruption linter — orthogonal per-file checks plus per-root checks
 (REQ-425, REQ-433, REQ-436, REQ-520, REQ-516, REQ-525, REQ-522, REQ-609,
-BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654, BUG-254, REQ-661, REQ-665).
+BUG-228, BUG-230, REQ-646, REQ-652, REQ-669, REQ-654, BUG-254, REQ-661, REQ-665,
+REQ-672).
 
 Run from the repo root:
 
@@ -74,6 +75,16 @@ order:
 * ``check_session_gitignore`` — ``session-gitignore`` (REQ-660 BR-7, BR-15) —
   ``.adlc/.session/`` as a whole line inside a fence of ``init/SKILL.md``'s
   ``### Step 5``, the gitignore lines ``/init`` writes.
+* ``check_readme_first_screen`` — ``readme-first-screen`` (REQ-672 BR-1, BR-11) — above
+  the README's first ``##``, the ``<!-- first-screen: <name> -->`` markers in
+  ``FIRST_SCREEN_MARKERS`` order, each over its item (one sentence, three outcomes, the
+  recording iff ``FIRST_SCREEN_RECORDING_FILES`` exist, the install fence), the skill
+  table below it, and no Hugging Face link before its launch-checklist row is ``live``.
+* ``check_newcomer_docs`` — ``newcomer-docs`` (REQ-672 BR-10) — no closed-set
+  placeholder in README.md or docs/quickstart.md, none in a marked step, no command
+  naming a missing skill, and the quickstart's first two steps equal to the README's
+  install fence. Both REQ-672 checks arm on ``.claude-plugin/plugin.json`` plus any of
+  ``NEWCOMER_ANCHORS``, print the files they read, and report a missing page as a finding.
 
 Each one is gated, so a root it does not apply to yields zero findings, never a
 crash. Model drift, sync-surface, retrieval-status and lesson-rules parity
@@ -5350,6 +5361,9 @@ def run(root: Path) -> tuple[list[Finding], int]:
     findings.extend(check_retired_settings_template(root))
     # Per-root (REQ-656 BR-11, BR-17): the README's loss tables against the adapters.
     findings.extend(check_harness_loss_tables(root))
+    # Per-root (REQ-672 BR-1, BR-10, BR-11): the README's first screen and the newcomer pages.
+    findings.extend(check_readme_first_screen(root))
+    findings.extend(check_newcomer_docs(root))
     return findings, scanned
 
 
@@ -5600,6 +5614,700 @@ def check_harness_loss_tables(root: Path, readme: Path | None = None) -> list[Fi
                 findings.append(Finding(rel, lineno, HARNESS_LOSS_CHECK,
                                         f"{name}: the section {why} (BR-17)"))
     return findings
+
+
+# ---------------------------------------------------------------------------
+# REQ-672 ADR-9: the newcomer path's two checks
+# ---------------------------------------------------------------------------
+README_FIRST_SCREEN_CHECK = "readme-first-screen"
+NEWCOMER_DOCS_CHECK = "newcomer-docs"
+#: The pages a newcomer reads first, and the launch table the README's Hugging Face
+#: links wait on (REQ-672 ADR-8). Root-relative.
+NEWCOMER_README = "README.md"
+NEWCOMER_QUICKSTART = "docs/quickstart.md"
+NEWCOMER_CHECKLIST = "docs/launch-checklist.md"
+#: The recording pair (REQ-672 ADR-6), committed together or not at all.
+FIRST_SCREEN_RECORDING_FILES = ("docs/demo.gif", "docs/demo.cast")
+#: BR-1's four items, in the order the README's first screen gives them. Each is the
+#: name in a `<!-- first-screen: <name> -->` line; `recording` is there if and only if
+#: FIRST_SCREEN_RECORDING_FILES are.
+FIRST_SCREEN_MARKERS = ("what", "outcomes", "recording", "install")
+FIRST_SCREEN_RECORDING = "recording"
+#: A marker is a whole line, so a mention of one in prose is not a marker (LESSON-404).
+_FIRST_SCREEN_MARKER_RE = re.compile(r"^<!-- first-screen: (?P<name>[a-z-]+) -->$")
+_FIRST_SCREEN_MARKER_PREFIX = "<!-- first-screen"
+#: What each of the three `outcomes` items names, in order (BR-1), outside inline code.
+FIRST_SCREEN_OUTCOMES = (("a spec", re.compile(r"\bspec\b", re.I)),
+                         ("a PR", re.compile(r"\bPR\b|\bpull request\b", re.I)),
+                         ("a lesson", re.compile(r"\blesson\b", re.I)))
+#: The two lines the `install` fence holds. The rest of each line is held to the
+#: manifests by tests/test_plugin_manifest.py, and the quickstart's first two steps
+#: to the fence by `newcomer-docs`.
+FIRST_SCREEN_INSTALL_PREFIXES = ("claude plugin marketplace add ", "claude plugin install ")
+#: BR-11: a Hugging Face link waits for its launch-checklist row to be `live`: a
+#: `huggingface.co` or `hf.co` path under `/spaces/`, `/datasets/` or `/blog/`, whatever
+#: follows it, and any Space's own app host, `<name>.hf.space`.
+HF_LINK_RE = re.compile(
+    r"(?<![\w.-])(?:www\.)?(?:huggingface|hf)\.co/(?P<kind>spaces|datasets|blog)/"
+    r"|(?<=[A-Za-z0-9-])\.(?P<host>hf\.space)(?![\w-]|\.[A-Za-z0-9])", re.I)
+HF_LINK_ROWS = {"spaces": "space", "datasets": "dataset", "blog": "article",
+                "hf.space": "space"}
+#: The launch checklist's table (REQ-672 ADR-8), read here with a row parser of its own
+#: so the lint imports no launch tool: a mirror of tools/launch/launch_checklist.py's
+#: ``parse`` (its COLUMNS, cell split and separator rule), which
+#: tests/test_newcomer_docs.py holds to the same rows on the real table and altered ones.
+CHECKLIST_COLUMNS = ("id", "item", "depends on", "owner", "status", "link")
+CHECKLIST_ID_COLUMN = CHECKLIST_COLUMNS.index("id")
+CHECKLIST_STATUS_COLUMN = CHECKLIST_COLUMNS.index("status")
+CHECKLIST_LIVE = "live"
+_CHECKLIST_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+_CHECKLIST_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
+#: The quickstart's step marker: a mirror of MARKER_PATTERN in
+#: tools/launch/quickstart_steps.py, the page's one parser (REQ-672 ADR-2).
+#: tests/test_newcomer_docs.py holds the two equal and parsing the page alike.
+QUICKSTART_STEP_MARKER_PATTERN = r"^<!-- quickstart-step: (?P<kind>\S+)(?: e2e=(?P<e2e>\S+))? -->$"
+_QUICKSTART_STEP_MARKER_RE = re.compile(QUICKSTART_STEP_MARKER_PATTERN)
+_QUICKSTART_STEP_MARKER_PREFIX = "<!-- quickstart-step"
+#: BR-10's closed set of unfilled placeholders: a value that names the reader or this
+#: project, which a reader copying the line would have to fill in.
+#: The set is closed on purpose: `{owner}`, `$OWNER` and `YOUR_USERNAME` are template,
+#: shell or prose spellings this check does not judge (tests pin them as passing).
+NEWCOMER_PLACEHOLDER_RE = re.compile(
+    r"(?i:<(?:owner|org|user|username|repo|your[-_][^<>\s]*)>)"
+    r"|(?<![\w-])OWNER/(?=[A-Za-z0-9_.-])")
+#: Exact phrases in which a closed-set token is a syntax description, not a value to
+#: fill. `gh -R <repo> pr merge` is the exec residual "Flag positions and
+#: equivalents": `<repo>` stands for any repository a prefix rule fails to match, and
+#: tools/adlc/tests/test_exec_docs.py pins the phrase.
+NEWCOMER_PLACEHOLDER_PHRASES = ("gh -R <repo> pr merge",)
+#: Inside a marked quickstart step, any angle-bracket token is unfilled.
+_STEP_ANGLE_TOKEN_RE = re.compile(r"<[^<>\s][^<>]*>")
+#: Inside a marked step, an `xxx` run is unfilled too, except NEWCOMER_STEP_REQ_ID:
+#: the one value the page cannot know (REQ-672 ADR-3), filled from `/adlc:spec`'s output.
+_STEP_X_RUN_RE = re.compile(r"\b(?:[A-Za-z]+-)?(?:xxx+|XXX+)\b")
+NEWCOMER_STEP_REQ_ID = "REQ-xxx"
+#: A command that names a plugin skill. `/adlc:<skill>` itself does not match.
+_ADLC_SKILL_RE = re.compile(r"/adlc:(?P<name>[a-z][a-z0-9-]*)")
+#: A bare command: the whole first token of an inline code span or a marked step.
+_BARE_COMMAND_RE = re.compile(r"^/(?P<name>[a-z][a-z0-9-]*)$")
+#: A marked step that starts Claude Code: what follows ``claude`` is its arguments.
+QUICKSTART_STEP_CLAUDE_RE = re.compile(r"^claude[ \t]+(?P<args>.*)$")
+#: One argument of a `claude …` step, in double or single quotes or bare.
+_CLAUDE_ARG_RE = re.compile(r""""(?P<dq>[^"]*)"|'(?P<sq>[^']*)'|(?P<bare>[^\s"']\S*)""")
+#: The shape of a slash command in a `claude …` step's arguments: the whole of a bare
+#: argument, or a quoted argument's first word. A path such as `/x/y` is not of it.
+_SLASH_COMMAND_RE = re.compile(r"^/[a-z][a-z0-9:-]*$")
+#: Claude Code's own commands that the README or quickstart opens a code span with.
+#: Each is a command Claude Code itself owns, kept to the names the pages use: an
+#: entry is never a way to quiet a hit that is neither a skill nor a built-in.
+#: `hooks`: the README's Codex section approves hooks with `/hooks`, a name Claude
+#: Code's own hook review command has too.
+CLAUDE_CODE_BUILTIN_COMMANDS = ("hooks",)
+#: Not commands at all, so a bare token naming one is not judged as a skill:
+#: top-level directories of a POSIX filesystem (`/tmp` is a path in the README's
+#: sandbox notes), and the word the pages use for "a skill's name" in a syntax
+#: description, bracketed as in `/adlc:<name>` or bare as in the loss tables' `/name`.
+NEWCOMER_ROOT_DIRECTORIES = ("bin", "dev", "etc", "home", "opt", "private", "tmp", "usr",
+                             "var")
+NEWCOMER_SYNTAX_WORDS = ("name", "skill")
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+_MD_FENCE_OPEN_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+#: An ATX heading. Its closing `#` run is stripped in ``_md_heading_title``, not here: a
+#: pattern that also matched the run and the spaces around it backtracked cubically.
+_MD_HEADING_RE = re.compile(r"^ {0,3}(?P<hashes>#{1,6})(?:[ \t]+(?P<title>.*))?$")
+_LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s+(?P<body>.*)$")
+_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]*_]*(?=\s|$)")
+#: The alt text holds no `[` and a link target no `]`, so a scan stops at the next
+#: candidate and a line of `![![…` or `](](…` reads in linear time.
+_IMAGE_RE = re.compile(r"!\[[^\[\]]*\]\((?P<src>[^)\s]+)")
+_MD_LINK_TARGET_RE = re.compile(r"\]\([^)\]]*\)")
+
+
+class NewcomerScan(NamedTuple):
+    """What a REQ-672 check did: its findings, and the root-relative files it read."""
+    findings: list[Finding]
+    scanned: tuple[str, ...]
+
+
+#: What marks a plugin root as one with a newcomer path: either page, or the quickstart's
+#: parser. A staged manifest-only root (the manifest tests' fixtures) has none.
+NEWCOMER_ANCHORS = (NEWCOMER_README, NEWCOMER_QUICKSTART, "tools/launch/quickstart_steps.py")
+
+
+def _newcomer_armed(root: Path) -> bool:
+    """The two checks hold this toolkit's own pages, so they arm on its plugin manifest
+    and any of NEWCOMER_ANCHORS. Once armed, a missing README.md or docs/quickstart.md
+    is a finding, not a skip; on the real tree, tests/test_newcomer_docs.py holds both
+    pages read, so deleting them cannot disarm the checks unnoticed."""
+    return (root / PLUGIN_MANIFEST).is_file() and any(
+        (root / anchor).is_file() for anchor in NEWCOMER_ANCHORS)
+
+
+def _md_lines(text: str) -> list[tuple[int, str, str]]:
+    """``(line number, line, fence)`` for each line. ``fence`` is ``""`` outside a fenced
+    block, else ``open``, ``body`` or ``close``, so it reads as a "fenced" flag too. A
+    backtick fence whose info string holds a backtick is not a fence (CommonMark)."""
+    out: list[tuple[int, str, str]] = []
+    opened: tuple[str, int] | None = None
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if opened is not None:
+            stripped = line.strip()
+            if (not line.startswith("    ") and len(stripped) >= opened[1]
+                    and stripped == opened[0] * len(stripped)):
+                opened = None
+                out.append((lineno, line, "close"))
+            else:
+                out.append((lineno, line, "body"))
+            continue
+        m = _MD_FENCE_OPEN_RE.match(line)
+        if m and not (m.group("fence")[0] == "`" and "`" in m.group("info")):
+            opened = (m.group("fence")[0], len(m.group("fence")))
+            out.append((lineno, line, "open"))
+            continue
+        out.append((lineno, line, ""))
+    return out
+
+
+def _fence_bodies(lines: list[tuple[int, str, str]]) -> list[tuple[int, list[str]]]:
+    """``(opening line number, body lines)`` of each fenced block that opens in ``lines``."""
+    bodies: list[tuple[int, list[str]]] = []
+    current: list[str] | None = None
+    for lineno, line, fence in lines:
+        if fence == "open":
+            current = []
+            bodies.append((lineno, current))
+        elif fence == "body" and current is not None:
+            current.append(line)
+        else:
+            current = None
+    return bodies
+
+
+def _code_free(text: str) -> str:
+    """``text`` with inline code spans and link targets blanked, for prose rules."""
+    text = _INLINE_CODE_RE.sub("code", text)
+    return _MD_LINK_TARGET_RE.sub("]", text)
+
+
+def _md_heading_title(heading: re.Match) -> str:
+    """The title of an ``_MD_HEADING_RE`` match, without its closing ``#`` run: a run of
+    ``#`` that is the whole title or follows a space or tab (CommonMark), so `C#` keeps
+    its ``#``."""
+    title = (heading.group("title") or "").strip()
+    bare = title.rstrip("#")
+    return bare.rstrip() if not bare or bare[-1] in " \t" else title
+
+
+def _inline_code_spans(lines: list[tuple[int, str, str]]) -> list[tuple[int, str]]:
+    """``(line number, content)`` of every inline code span outside fences."""
+    return [(lineno, m.group(2).strip()) for lineno, line, fenced in lines if not fenced
+            for m in _INLINE_CODE_RE.finditer(line)]
+
+
+def _quickstart_steps(text: str) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """``(steps, problems)``: each marked step as ``(line, text)``, read with the marker
+    and fence grammar of tools/launch/quickstart_steps.py (QUICKSTART_STEP_MARKER_PATTERN),
+    and each place that parser refuses the page's structure, on the line it names: a
+    malformed marker, a marker with no fence right after it, a step fence that is never
+    closed, holds other than one command line or ends in a backslash, and an unmarked
+    fence never closed, which hides every step below it. A refused step is not read.
+    The kind and e2e words are the parser's own tests' to judge."""
+    lines = _md_lines(text)
+    steps: list[tuple[int, str]] = []
+    problems: list[tuple[int, str]] = []
+    step_fences: set[int] = set()
+    for i, (lineno, line, fenced) in enumerate(lines):
+        if fenced or not line.strip().startswith(_QUICKSTART_STEP_MARKER_PREFIX):
+            continue
+        if not _QUICKSTART_STEP_MARKER_RE.match(line.rstrip()):
+            problems.append((lineno, "a malformed `quickstart-step` marker: write "
+                             "`<!-- quickstart-step: KIND -->`, optionally with ` e2e=NAME`"))
+            continue
+        if i + 1 >= len(lines) or lines[i + 1][2] != "open":
+            problems.append((lineno, "the `quickstart-step` marker is not followed at once "
+                             "by a fenced block holding the step"))
+            continue
+        open_at = lines[i + 1][0]
+        step_fences.add(open_at)
+        end = i + 2
+        while end < len(lines) and lines[end][2] == "body":
+            end += 1
+        body = [(ln, body_line) for ln, body_line, _f in lines[i + 2:end]]
+        if end >= len(lines):
+            problems.append((open_at, "the step's fenced block is never closed"))
+        elif not any(body_line.strip() for _ln, body_line in body):
+            problems.append((open_at, "the step's fenced block holds no command"))
+        elif len(body) != 1:
+            problems.append((open_at, f"the step's fenced block holds {len(body)} lines: a "
+                             "step is exactly one command line"))
+        elif body[0][1].strip().endswith("\\"):
+            problems.append((body[0][0], "the step's command ends in a backslash: a step is "
+                             "exactly one command line"))
+        else:
+            steps.append((body[0][0], body[0][1].strip()))
+    opens = [lineno for lineno, _line, fence in lines if fence == "open"]
+    unclosed = opens[-1] if lines and lines[-1][2] in ("open", "body") else None
+    if unclosed is not None and unclosed not in step_fences:
+        problems.append((unclosed, "this fenced block is never closed, so no step below it "
+                         "can be read"))
+    return steps, problems
+
+
+def _first_screen(text: str) -> tuple[list[tuple[int, str, str]], int | None]:
+    """The lines above the first ``##`` heading outside a fence, and that heading's line."""
+    lines = _md_lines(text)
+    for i, (lineno, line, fenced) in enumerate(lines):
+        if not fenced and re.match(r"^ {0,3}## ", line):
+            return lines[:i], lineno
+    return lines, None
+
+
+def _install_fence(screen: list[tuple[int, str, str]]) -> tuple[int, list[str]] | None:
+    """The first fenced block under the `install` marker: ``(line, non-blank lines)``."""
+    section = None
+    for i, (_lineno, line, fenced) in enumerate(screen):
+        m = None if fenced else _FIRST_SCREEN_MARKER_RE.match(line.strip())
+        if m:
+            section = m.group("name")
+        elif section == "install" and fenced == "open":
+            open_at, body = _fence_bodies(screen[i:])[0]
+            return open_at, [b.strip() for b in body if b.strip()]
+    return None
+
+
+def _checklist_cells(line: str) -> list[str]:
+    """The stripped cells of a pipe-table line; an escaped ``\\|`` stays in its cell."""
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:]
+    if body.endswith("|") and not body.endswith("\\|"):
+        body = body[:-1]
+    return [cell.strip() for cell in _CHECKLIST_CELL_SPLIT_RE.split(body)]
+
+
+def _checklist_table(text: str) -> tuple[dict[str, str], tuple[int, str] | None]:
+    """``({row id: status}, problem)`` from the launch checklist's table, read as
+    tools/launch/launch_checklist.py's ``parse`` reads it: the one table outside a fence
+    whose header is CHECKLIST_COLUMNS, a separator line under it, then rows of as many
+    cells. ``problem`` is ``(line, why)`` when that parser would refuse the table or read
+    no row from it; the statuses are then ``{}``, so no row reads as live."""
+    lines = _md_lines(text)
+    statuses: dict[str, str] = {}
+    header_at = None
+    first_table = None
+    count = len(CHECKLIST_COLUMNS)
+    i = 0
+    while i < len(lines):
+        lineno, line, fenced = lines[i]
+        i += 1
+        if fenced or not line.lstrip().startswith("|"):
+            continue
+        first_table = first_table or lineno
+        if tuple(_checklist_cells(line)) != CHECKLIST_COLUMNS:
+            continue
+        if header_at is not None:
+            return {}, (lineno, f"a second table with the checklist's columns; the first is "
+                        f"on line {header_at}")
+        header_at = lineno
+        separator = _checklist_cells(lines[i][1]) if i < len(lines) else []
+        if len(separator) != count or not all(
+                _CHECKLIST_SEPARATOR_CELL_RE.match(cell) for cell in separator):
+            return {}, (lineno + 1, f"the header is not followed by a separator line of "
+                        f"{count} cells such as |---|")
+        i += 1
+        while i < len(lines) and lines[i][1].lstrip().startswith("|"):
+            cells = _checklist_cells(lines[i][1])
+            if len(cells) != count:
+                return {}, (lines[i][0], f"a row of {len(cells)} cells; a checklist row has "
+                            f"{count}")
+            statuses.setdefault(cells[CHECKLIST_ID_COLUMN], cells[CHECKLIST_STATUS_COLUMN])
+            i += 1
+    if header_at is None:
+        return {}, (first_table or 1, "no table has the header `| "
+                    f"{' | '.join(CHECKLIST_COLUMNS)} |`")
+    if not statuses:
+        return {}, (header_at, "the table has no row")
+    return statuses, None
+
+
+def _checklist_statuses(path: Path) -> dict[str, str]:
+    """``{row id: status}`` from the launch checklist's table, or ``{}`` when there is
+    no readable checklist or table: then every row reads as not live (BR-11)."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    return _checklist_table(text)[0]
+
+
+def _first_screen_findings(text: str, rel: str, base: Path,
+                           recording: list[tuple[str, Path]]) -> list[Finding]:
+    """BR-1's rules on the text above the README's first ``##`` (see
+    ``scan_readme_first_screen``). ``recording`` is FIRST_SCREEN_RECORDING_FILES as
+    ``(name, path)``; image paths resolve against ``base``, the README's directory."""
+    ID = README_FIRST_SCREEN_CHECK
+    screen, first_h2 = _first_screen(text)
+    if first_h2 is None:
+        return [Finding(rel, 1, ID, "the README has no `##` heading, so it has no first "
+                        "screen: put `## Install` after the marked items (BR-1)")]
+    findings: list[Finding] = []
+    markers: list[tuple[int, str]] = []
+    for lineno, line, fenced in screen:
+        if fenced:
+            continue
+        stripped = line.strip()
+        heading = _MD_HEADING_RE.match(line)
+        if stripped.startswith(_FIRST_SCREEN_MARKER_PREFIX):
+            m = _FIRST_SCREEN_MARKER_RE.match(stripped)
+            if m and m.group("name") in FIRST_SCREEN_MARKERS:
+                markers.append((lineno, m.group("name")))
+            else:
+                findings.append(Finding(rel, lineno, ID, f"{stripped!r} is not a first-screen "
+                                        "marker: write `<!-- first-screen: NAME -->` with NAME "
+                                        f"one of {', '.join(FIRST_SCREEN_MARKERS)} (BR-1)"))
+        elif heading and len(heading.group("hashes")) >= 2:
+            title = _md_heading_title(heading)
+            what = ("the skill table's heading" if title.lower() == "skills"
+                    else f"the heading `{stripped}`")
+            findings.append(Finding(rel, lineno, ID, f"{what} is above the first `##`: the "
+                                    "first screen holds only the marked items, so move it below "
+                                    "the first `##` (BR-1)"))
+        elif re.match(r"^\|\s*Skill\s*\|", stripped):
+            findings.append(Finding(rel, lineno, ID, "the skill table is above the first `##`: "
+                                    "move it under `## What's Included` (BR-1)"))
+    names = [name for _ln, name in markers]
+    first_at = {name: lineno for lineno, name in reversed(markers)}
+    for name in sorted(set(names), key=FIRST_SCREEN_MARKERS.index):
+        if names.count(name) > 1:
+            again = [ln for ln, n in markers if n == name][1]
+            findings.append(Finding(rel, again, ID, f"a second `{name}` marker: keep one (BR-1)"))
+    present = [name for name, path in recording if path.is_file()]
+    recorded = len(present) == len(recording)
+    for name in FIRST_SCREEN_MARKERS:
+        if name not in names and (name != FIRST_SCREEN_RECORDING or recorded):
+            findings.append(Finding(rel, first_h2, ID, f"the first screen has no `<!-- "
+                                    f"first-screen: {name} -->` marker above the first `##` "
+                                    "(BR-1)"))
+    if FIRST_SCREEN_RECORDING in names and not recorded:
+        missing = [name for name, path in recording if not path.is_file()]
+        findings.append(Finding(rel, first_at[FIRST_SCREEN_RECORDING], ID, (
+            f"a `recording` marker while {' and '.join(missing)} does not exist: remove the "
+            "marker and its line until the recording pair is committed (BR-1)")))
+    elif FIRST_SCREEN_RECORDING not in names and present:
+        findings.append(Finding(rel, first_h2, ID, (
+            f"{' and '.join(present)} exists but the first screen has no `recording` marker: "
+            "show the recording under `<!-- first-screen: recording -->`, between `outcomes` "
+            "and `install`, with the pair committed together (BR-1)")))
+    order = [name for i, name in enumerate(names) if name not in names[:i]]
+    if order != sorted(order, key=FIRST_SCREEN_MARKERS.index):
+        findings.append(Finding(rel, markers[0][0], ID, (
+            f"the markers come in the order {', '.join(order)}: BR-1's order is "
+            f"{', '.join(FIRST_SCREEN_MARKERS)}")))
+    # Nothing but the title comes before the first marker (BR-1: "First, one sentence").
+    first_marker = markers[0][0] if markers else first_h2
+    for lineno, line, _fenced in screen:
+        if lineno >= first_marker:
+            break
+        if line.strip() and not re.match(r"^ {0,3}# ", line):
+            findings.append(Finding(rel, lineno, ID, "text above the first marker: the first "
+                                    "screen opens with the `what` sentence, so move this below "
+                                    "the first `##` (BR-1)"))
+            break
+    # What each marker holds: its lines up to the next marker or the first `##`.
+    ends = [ln for ln, _n in markers[1:]] + [first_h2]
+    for (lineno, name), end in zip(markers, ends):
+        body = [entry for entry in screen if lineno < entry[0] < end]
+        filled = [entry for entry in body if entry[1].strip()]
+        if not filled:
+            findings.append(Finding(rel, lineno, ID, f"the `{name}` marker is over nothing: "
+                                    "put its item under it (BR-1)"))
+        elif name == "what":
+            findings.extend(_what_findings(filled, body, rel))
+        elif name == "outcomes":
+            findings.extend(_outcomes_findings(filled, rel, lineno))
+        elif name == FIRST_SCREEN_RECORDING:
+            images = [(ln, m.group("src")) for ln, line, fenced in filled if not fenced
+                      for m in _IMAGE_RE.finditer(line)]
+            if not images:
+                findings.append(Finding(rel, lineno, ID, "the `recording` marker holds no "
+                                        "image: put `![…](docs/demo.gif)` under it (BR-1)"))
+            for ln, src in images:
+                if "://" in src or not (base / src.split("#")[0]).is_file():
+                    findings.append(Finding(rel, ln, ID, f"the recording image `{src}` is not "
+                                            "a file in this repo: show the committed "
+                                            "docs/demo.gif, or remove the line (BR-1)"))
+        elif name == "install" and lineno == first_at["install"]:
+            fence = _install_fence(screen)
+            if fence is None:
+                findings.append(Finding(rel, lineno, ID, "the `install` marker holds no fenced "
+                                        "block: put the two `claude plugin` commands in one "
+                                        "under it (BR-1)"))
+                continue
+            for prefix in FIRST_SCREEN_INSTALL_PREFIXES:
+                if not any(cmd.startswith(prefix) for cmd in fence[1]):
+                    findings.append(Finding(rel, fence[0], ID, (
+                        f"the install fence has no `{prefix}…` line: it holds both plugin "
+                        "install commands (BR-1)")))
+    return findings
+
+
+def _what_findings(filled: list[tuple[int, str, str]], body: list[tuple[int, str, str]],
+                   rel: str) -> list[Finding]:
+    """The `what` marker holds one paragraph of exactly one sentence (BR-1). A sentence
+    ends at ``.``, ``!`` or ``?`` before a space or the end; one inside inline code or a
+    link target does not count."""
+    ID = README_FIRST_SCREEN_CHECK
+    first, last = filled[0][0], filled[-1][0]
+    if any(fenced for _ln, _line, fenced in filled) or any(
+            not line.strip() for ln, line, _f in body if first < ln < last):
+        return [Finding(rel, first, ID, "the `what` marker holds more than one paragraph: "
+                        "say what the toolkit is in one sentence (BR-1)")]
+    prose = _code_free(" ".join(line.strip() for _ln, line, _f in filled)).rstrip()
+    ends = list(_SENTENCE_END_RE.finditer(prose))
+    if len(ends) == 1 and ends[0].end() == len(prose):
+        return []
+    count = "no complete sentence" if not ends else (
+        "one sentence with text after it" if len(ends) == 1 else f"{len(ends)} sentences")
+    return [Finding(rel, first, ID, f"the `what` marker holds {count}: say what the toolkit "
+                    "is in one sentence (BR-1)")]
+
+
+def _outcomes_findings(filled: list[tuple[int, str, str]], rel: str,
+                       marker: int) -> list[Finding]:
+    """Exactly three list items naming a spec, a PR and a lesson, in that order (BR-1)."""
+    ID = README_FIRST_SCREEN_CHECK
+    items: list[tuple[int, str]] = []
+    for ln, line, fenced in filled:
+        m = None if fenced else _LIST_ITEM_RE.match(line)
+        if m:
+            items.append((ln, m.group("body")))
+        elif items and not fenced and line.startswith((" ", "\t")):
+            items[-1] = (items[-1][0], items[-1][1] + " " + line.strip())
+    if len(items) != len(FIRST_SCREEN_OUTCOMES):
+        return [Finding(rel, items[0][0] if items else marker, ID, (
+            f"the `outcomes` list has {len(items)} item(s): it has exactly "
+            f"{len(FIRST_SCREEN_OUTCOMES)}, a validated spec, a reviewed PR and a captured "
+            "lesson (BR-1)"))]
+    findings = []
+    for (ln, item), (what, pattern) in zip(items, FIRST_SCREEN_OUTCOMES):
+        if not pattern.search(_code_free(item)):
+            findings.append(Finding(rel, ln, ID, (
+                f"this `outcomes` item does not name {what}: the three items name a validated "
+                "spec, a reviewed PR and a captured lesson, in that order (BR-1)")))
+    return findings
+
+
+def scan_readme_first_screen(root: Path, readme: Path | None = None,
+                             checklist: Path | None = None) -> NewcomerScan:
+    """REQ-672 BR-1, BR-11 (ADR-9): the README above its first ``##`` holds the `what`,
+    `outcomes`, `recording` and `install` markers in that order, each over its item, with
+    `recording` there if and only if the recording pair is; the skill table is below it;
+    and a Hugging Face Space, dataset or blog link anywhere in the README waits for its
+    launch-checklist row to be `live`. Armed on a toolkit root (``_newcomer_armed``) or
+    when a path is given; a missing README is a finding, never a skip."""
+    if readme is None and checklist is None and not _newcomer_armed(root):
+        return NewcomerScan([], ())
+    readme = readme or root / NEWCOMER_README
+    checklist = checklist or root / NEWCOMER_CHECKLIST
+    rel = _safe_label(readme, root)
+    try:
+        text = readme.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return NewcomerScan([Finding(rel, 1, README_FIRST_SCREEN_CHECK, f"{rel} is missing or "
+                                     "unreadable: scanned 0 files, and a check that read "
+                                     "nothing is not a pass (REQ-672 BR-1)")], ())
+    scanned = [rel]
+    findings = _first_screen_findings(text, rel, readme.parent,
+                                      [(f, root / f) for f in FIRST_SCREEN_RECORDING_FILES])
+    statuses: dict[str, str] = {}
+    try:
+        table = checklist.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        table = None  # a missing checklist reads as every row not live
+    if table is not None:
+        checklist_rel = _safe_label(checklist, root)
+        scanned.append(checklist_rel)
+        statuses, problem = _checklist_table(table)
+        if problem is not None:
+            findings.append(Finding(checklist_rel, problem[0], README_FIRST_SCREEN_CHECK, (
+                f"cannot read the launch checklist's table: {problem[1]}. The check reads "
+                "it to know which Hugging Face rows are live, so it reads none as live: "
+                "fix the table to the form tools/launch/launch_checklist.py reads (BR-11)")))
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for m in HF_LINK_RE.finditer(line):
+            row = HF_LINK_ROWS[(m.group("kind") or m.group("host")).lower()]
+            status = statuses.get(row)
+            if status != CHECKLIST_LIVE:
+                findings.append(Finding(rel, lineno, README_FIRST_SCREEN_CHECK, (
+                    f"a Hugging Face link to the {row} while the launch checklist's `{row}` "
+                    f"row is {('`' + status + '`') if status else 'missing'}, not `live`: "
+                    f"remove the line until {NEWCOMER_CHECKLIST} marks the row live (BR-11)")))
+    return NewcomerScan(findings, tuple(scanned))
+
+
+def _placeholder_findings(text: str, rel: str) -> list[Finding]:
+    """BR-10's closed placeholder set, anywhere in the page, outside the exempt phrases."""
+    findings: list[Finding] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        exempt = [(m.start(), m.end()) for phrase in NEWCOMER_PLACEHOLDER_PHRASES
+                  for m in re.finditer(re.escape(phrase), line)]
+        for m in NEWCOMER_PLACEHOLDER_RE.finditer(line):
+            if any(start <= m.start() and m.end() <= end for start, end in exempt):
+                continue
+            findings.append(Finding(rel, lineno, NEWCOMER_DOCS_CHECK, (
+                f"an unfilled placeholder `{m.group(0)}`: write the real value a newcomer "
+                "types, such as `atelier-fashion/adlc-toolkit` (REQ-672 BR-10)")))
+    return findings
+
+
+def _step_commands(step: str) -> list[str]:
+    """The commands a marked step types. A step that does not start Claude Code types its
+    first word. In a `claude …` step every argument is read, quoted or bare, wherever it
+    sits among the flags (`claude -p "/adlc:init"`, `claude --model x '/adlc:proceed …'`):
+    each one of the slash-command shape (_SLASH_COMMAND_RE), whole when bare or as a
+    quoted argument's first word, is a command the session may run. A path such as `/x/y`
+    is not of that shape; `/tmp` is, and NEWCOMER_ROOT_DIRECTORIES knows it."""
+    m = QUICKSTART_STEP_CLAUDE_RE.match(step)
+    if not m:
+        words = step.split()
+        return words[:1]
+    commands: list[str] = []
+    for arg in _CLAUDE_ARG_RE.finditer(m.group("args")):
+        bare = arg.group("bare")
+        quoted = next((q for q in arg.group("dq", "sq") if q is not None), None)
+        words = quoted.split() if quoted is not None else [bare]
+        if words and _SLASH_COMMAND_RE.match(words[0]):
+            commands.append(words[0])
+    return commands
+
+
+def _command_findings(rel: str, lines: list[tuple[int, str, str]],
+                      steps: list[tuple[int, str]], skills: set[str]) -> list[Finding]:
+    """Every `/adlc:<name>` on the page, fenced or not, names a skill directory. A bare
+    `/<name>` opening a code span names a skill or a Claude Code built-in. A marked step
+    never types a bare skill name, neither as its first word nor as a slash command among
+    a `claude …` step's arguments (``_step_commands``): the quickstart teaches the plugin
+    install, where only `/adlc:<name>` reaches the skill and a bare `/init` runs Claude
+    Code's own built-in."""
+    findings: list[Finding] = []
+    for lineno, line, _fenced in lines:
+        for m in _ADLC_SKILL_RE.finditer(line):
+            if m.group("name") not in skills:
+                findings.append(Finding(rel, lineno, NEWCOMER_DOCS_CHECK, (
+                    f"`/adlc:{m.group('name')}` names no skill: there is no "
+                    f"`{m.group('name')}/SKILL.md`, so fix the name (REQ-672 BR-10)")))
+    known = skills.union(CLAUDE_CODE_BUILTIN_COMMANDS, NEWCOMER_ROOT_DIRECTORIES,
+                         NEWCOMER_SYNTAX_WORDS)
+    candidates = [(lineno, content.split()[0] if content.split() else "", False)
+                  for lineno, content in _inline_code_spans(lines)]
+    candidates += [(lineno, command, True) for lineno, step in steps
+                   for command in _step_commands(step)]
+    for lineno, token, in_step in candidates:
+        m = _BARE_COMMAND_RE.match(token)
+        if m and in_step and m.group("name") in skills:
+            name = m.group("name")
+            collides = (f" and a bare `/{name}` runs Claude Code's own built-in"
+                        if name in BUILTIN_COLLISION_NAMES else "")
+            findings.append(Finding(rel, lineno, NEWCOMER_DOCS_CHECK, (
+                f"the step types `{token}`, a bare skill name: the quickstart teaches the "
+                f"plugin install, where the skill is only `/adlc:{name}`{collides}, so write "
+                f"`/adlc:{name}` (REQ-672 BR-10)")))
+        elif m and m.group("name") not in known:
+            findings.append(Finding(rel, lineno, NEWCOMER_DOCS_CHECK, (
+                f"`{token}` names no skill and no Claude Code built-in this check knows: "
+                f"there is no `{m.group('name')}/SKILL.md`, so fix the name, or add a command "
+                "Claude Code owns to CLAUDE_CODE_BUILTIN_COMMANDS (REQ-672 BR-10)")))
+    return findings
+
+
+def scan_newcomer_docs(root: Path, readme: Path | None = None,
+                       quickstart: Path | None = None) -> NewcomerScan:
+    """REQ-672 BR-10 (ADR-9): README.md and docs/quickstart.md carry no placeholder
+    from NEWCOMER_PLACEHOLDER_RE, no angle-bracket or `xxx` token in a marked step but
+    `REQ-xxx`, and no command naming a skill that is not a ``<name>/SKILL.md`` directory;
+    and the quickstart's first two steps are the README's install fence. Armed like
+    ``scan_readme_first_screen``; a missing page is a finding, never a skip."""
+    if readme is None and quickstart is None and not _newcomer_armed(root):
+        return NewcomerScan([], ())
+    readme = readme or root / NEWCOMER_README
+    quickstart = quickstart or root / NEWCOMER_QUICKSTART
+    skills = set(_plugin_root_skill_dirs(root))
+    findings: list[Finding] = []
+    scanned: list[str] = []
+    fence: tuple[int, list[str]] | None = None
+    steps: list[tuple[int, str]] | None = None
+    for path in (readme, quickstart):
+        rel = _safe_label(path, root)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            findings.append(Finding(rel, 1, NEWCOMER_DOCS_CHECK, f"{rel} is missing or "
+                                    "unreadable: a newcomer page the check could not read is "
+                                    "not a pass (REQ-672 BR-10)"))
+            continue
+        scanned.append(rel)
+        page_steps: list[tuple[int, str]] = []
+        if path is readme:
+            fence = _install_fence(_first_screen(text)[0])
+        else:
+            page_steps, problems = _quickstart_steps(text)
+            steps = page_steps
+            findings.extend(Finding(rel, ln, NEWCOMER_DOCS_CHECK, why) for ln, why in problems)
+            if not page_steps:
+                findings.append(Finding(rel, 1, NEWCOMER_DOCS_CHECK, "the quickstart has no "
+                                        "marked step: mark each typed line with `<!-- "
+                                        "quickstart-step: KIND -->` (REQ-672 ADR-2)"))
+            findings.extend(_step_findings(page_steps, rel))
+        findings.extend(_placeholder_findings(text, rel))
+        findings.extend(_command_findings(rel, _md_lines(text), page_steps, skills))
+    # A missing install fence is readme-first-screen's to report, on the same README.
+    if fence is not None and steps is not None:
+        got = [text for _ln, text in steps[:len(FIRST_SCREEN_INSTALL_PREFIXES)]]
+        if got != fence[1]:
+            findings.append(Finding(
+                _safe_label(quickstart, root), steps[0][0] if steps else 1, NEWCOMER_DOCS_CHECK,
+                f"the quickstart's first two steps are {got!r}, but the README's install "
+                f"fence holds {fence[1]!r}: make them the same two commands (REQ-672 ADR-9)"))
+    return NewcomerScan(findings, tuple(scanned))
+
+
+def _step_findings(steps: list[tuple[int, str]], rel: str) -> list[Finding]:
+    """A marked step holds no angle-bracket token and no `xxx` run but `REQ-xxx`."""
+    findings: list[Finding] = []
+    for lineno, step in steps:
+        for m in _STEP_ANGLE_TOKEN_RE.finditer(step):
+            findings.append(Finding(rel, lineno, NEWCOMER_DOCS_CHECK, (
+                f"the step holds `{m.group(0)}`, which a newcomer cannot type as it is: "
+                "write the value (REQ-672 BR-10)")))
+        for m in _STEP_X_RUN_RE.finditer(step):
+            if m.group(0) != NEWCOMER_STEP_REQ_ID:
+                findings.append(Finding(rel, lineno, NEWCOMER_DOCS_CHECK, (
+                    f"the step holds `{m.group(0)}`, an unfilled value: only "
+                    f"`{NEWCOMER_STEP_REQ_ID}` may stand in a step (REQ-672 ADR-3)")))
+    return findings
+
+
+def _newcomer_report(check_id: str, scan: NewcomerScan) -> list[Finding]:
+    print(f"{check_id}: scanned {len(scan.scanned)} file(s)"
+          f"{' (' + ', '.join(scan.scanned) + ')' if scan.scanned else ''}", file=sys.stderr)
+    return scan.findings
+
+
+def check_readme_first_screen(root: Path, readme: Path | None = None,
+                              checklist: Path | None = None) -> list[Finding]:
+    """Per-root ``readme-first-screen`` findings (see ``scan_readme_first_screen``)."""
+    if readme is None and checklist is None and not _newcomer_armed(root):
+        return []
+    return _newcomer_report(README_FIRST_SCREEN_CHECK,
+                            scan_readme_first_screen(root, readme, checklist))
+
+
+def check_newcomer_docs(root: Path, readme: Path | None = None,
+                        quickstart: Path | None = None) -> list[Finding]:
+    """Per-root ``newcomer-docs`` findings (see ``scan_newcomer_docs``)."""
+    if readme is None and quickstart is None and not _newcomer_armed(root):
+        return []
+    return _newcomer_report(NEWCOMER_DOCS_CHECK, scan_newcomer_docs(root, readme, quickstart))
 
 
 def check_allowlist_fidelity(root: Path) -> list[Finding]:
