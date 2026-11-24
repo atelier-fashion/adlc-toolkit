@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -283,6 +284,18 @@ def _stage_harness(tmp_path: Path, read_bin: str = "", jsonl: str | None = None)
     stub = bindir / "adlc-read"
     stub.write_text('#!/bin/sh\n: > "$ADLC_STUB_MARKER"\nexit 0\n')
     stub.chmod(0o755)
+    # `proceed`'s fence makes its own `$TMPFILE` and writes `git -C "<worktree>"
+    # diff` into it (BUG-299), delegating only if that worked. A `git` that
+    # answers `diff` with a corpus keeps the fence on its delegating branch; any
+    # other git call goes to the real one.
+    real_git = shutil.which("git", path="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin") or "/usr/bin/git"
+    git_stub = bindir / "git"
+    git_stub.write_text(
+        "#!/bin/sh\n"
+        'case " $* " in *" diff "*) printf \'corpus\\n\'; exit 0 ;; esac\n'
+        f'exec "{real_git}" "$@"\n'
+    )
+    git_stub.chmod(0o755)
 
     env = {
         "PATH": f"{bindir}:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -290,9 +303,6 @@ def _stage_harness(tmp_path: Path, read_bin: str = "", jsonl: str | None = None)
         "ADLC_STUB_MARKER": str(marker),
         "ADLC_FN_MARKER": str(fn_marker),
         "ADLC_FAKE_JSONL": str(transcript) if jsonl is None else jsonl,
-        # `proceed`'s fence redacts `$TMPFILE` from its step 2 and delegates only
-        # if that worked, so without a real file it never reaches the invocation.
-        "TMPFILE": str(cwd / "corpus.txt"),
     }
     return cwd, env, marker, fn_marker
 

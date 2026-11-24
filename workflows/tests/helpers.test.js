@@ -1160,3 +1160,50 @@ test('the run-outcome leaves are wired after the close-out pass and never read a
   assert.match(src, /phase: 3, \/\/ REQ-648 validateAttempts\.phase3/);
   assert.match(src, /'class \(REQUIRED, REQ-648/, 'reviewPrompt asks for the class');
 });
+
+// ===========================================================================
+// BUG-299 — CANDIDATES.gateReason admits every reason the gate exports.
+// ===========================================================================
+// partials/delegate-gate.sh exports five reasons, and agents/delegate-pre-pass.md
+// returns the gate's string verbatim. An enum short of one turns a leaf that
+// returned `disabled-via-config` or `not-opted-in` into a schema failure, which
+// the runtime drops to null. The set is read from the gate itself, so a reason
+// added there and not here fails this test.
+const { CANDIDATES } = helpers;
+
+function gateReasons() {
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', '..', 'partials', 'delegate-gate.sh'), 'utf8');
+  const reasons = new Set();
+  for (const m of src.matchAll(/ADLC_DELEGATE_GATE_REASON="([a-z-]+)"/g)) reasons.add(m[1]);
+  for (const m of src.matchAll(/"[01] ([a-z-]+)"/g)) reasons.add(m[1]);
+  reasons.delete('unset'); // the defensive default before the function runs, never a return
+  return [...reasons].sort();
+}
+
+function candidatesValue(gateReason) {
+  return { repo: 'r', invoked: false, exit: -1, gateReason, changedFiles: [], candidates: [] };
+}
+
+test('CANDIDATES.gateReason admits each of the gate\'s five reasons (BUG-299)', () => {
+  const reasons = gateReasons();
+  assert.deepEqual(reasons, ['disabled-via-config', 'disabled-via-env', 'no-binary', 'not-opted-in', 'ok']);
+  for (const reason of reasons) {
+    assert.deepEqual(schemaErrors(CANDIDATES, candidatesValue(reason)), [], reason);
+  }
+  assert.deepEqual([...CANDIDATES.properties.gateReason.enum].sort(), reasons);
+});
+
+test('CANDIDATES.gateReason still refuses a reason the gate never exports (BUG-299)', () => {
+  assert.ok(schemaErrors(CANDIDATES, candidatesValue('unset')).some((e) => /not in enum/.test(e)));
+  assert.ok(schemaErrors(CANDIDATES, candidatesValue('key-absent')).some((e) => /not in enum/.test(e)));
+});
+
+test('a pre-pass leaf dropped to null is logged, not silent (BUG-299)', () => {
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'adlc-sprint.workflow.js'), 'utf8');
+  const at = src.indexOf('if (!CAND) {');
+  assert.ok(at >= 0, 'runPrePass tests for a null leaf');
+  const body = src.slice(at, src.indexOf('continue;', at));
+  assert.match(body, /\blog\(/, 'the null branch logs one line before it continues');
+});

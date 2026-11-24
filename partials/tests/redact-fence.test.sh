@@ -78,11 +78,25 @@ extract "pre-pass delegate" "$TOOLKIT/agents/delegate-pre-pass.md" 'command "$AD
 cat > "$SANDBOX/wrapup.prelude" <<'EOF'
 "$DELEGATE_TOOLS"/skill-flag.sh mark "$flag" jsonl "$FIXTURE"
 EOF
-cat > "$SANDBOX/proceed.prelude" <<'EOF'
-TMPFILE=$(mktemp "$TMPDIR/adlc-verify.XXXXXX") || exit 1
-trap 'rm -f "$TMPFILE" "$TMPFILE.bak"' EXIT
-cp "$FIXTURE" "$TMPFILE"
-EOF
+# proceed's fence makes its own temp file, EXIT trap and diff (BUG-299): its prelude
+# is empty, so a fence that uses $TMPFILE without creating it fails here. The diff
+# runs against a real repository whose local `main` is stale (see below); the
+# placeholders are the only text this harness substitutes.
+: > "$SANDBOX/proceed.prelude"
+REPO="$SANDBOX/repo"
+g() { git -C "$REPO" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
+# A: local main, stale. B: another REQ's merged work, on origin/main only.
+# C: this REQ's change, on top of origin/main, holding the credential line.
+git init -q "$REPO" && g checkout -q -b feat \
+  && echo base > "$REPO/base.txt" && g add base.txt && g commit -q -m A && g branch main \
+  && echo other > "$REPO/other-req.txt" && g add other-req.txt && g commit -q -m B \
+  && g update-ref refs/remotes/origin/main HEAD \
+  && printf 'plain line\nauthorization: %s trailing\n' "$KEY" > "$REPO/feature.txt" \
+  && g add feature.txt && g commit -q -m C
+check "fixture: the repository was built" "0" "$?"
+subst_fence() { # subst_fence <integration branch> <out>
+  "$REAL_SED" -e "s|<worktree>|$REPO|g" -e "s|<integrationBranch>|$1|g" "$SANDBOX/proceed.fence" > "$2"
+}
 cat > "$SANDBOX/prepass.prelude" <<'EOF'
 REQ=REQ-000
 TMP=$(mktemp "$TMPDIR/delegate-pre-pass.XXXXXX") || exit 1
@@ -90,7 +104,10 @@ trap 'rm -f "$TMP" "$TMP.bak"' EXIT
 cp "$FIXTURE" "$TMP"
 EOF
 cat "$SANDBOX/wrapup.prelude" "$SANDBOX/wrapup.fence" > "$SANDBOX/wrapup.script"
-cat "$SANDBOX/proceed.prelude" "$SANDBOX/proceed.fence" > "$SANDBOX/proceed.script"
+subst_fence main "$SANDBOX/proceed.fence.main"
+subst_fence no-such-branch "$SANDBOX/proceed.fence.nobase"
+cat "$SANDBOX/proceed.prelude" "$SANDBOX/proceed.fence.main" > "$SANDBOX/proceed.script"
+cat "$SANDBOX/proceed.prelude" "$SANDBOX/proceed.fence.nobase" > "$SANDBOX/proceed-nobase.script"
 cat "$SANDBOX/prepass.prelude" "$SANDBOX/prepass-redact.fence" "$SANDBOX/prepass-call.fence" > "$SANDBOX/prepass.script"
 
 # ===========================================================================
@@ -169,11 +186,43 @@ expect_delegated wrapup "$SANDBOX/wrapup.script" yes
 
 expect_withheld proceed "$SANDBOX/proceed.script" "/proceed Phase 5: credential redaction failed for repo=<id> — reviewers running without candidates" -
 expect_delegated proceed "$SANDBOX/proceed.script" yes
+# BUG-299 / LESSON-391: the diff base is origin/<integrationBranch>, never local main.
+# Local main is at A, so `main...HEAD` would hand over B, another REQ's work.
+check "proceed_sed_works: the delegate saw this REQ's change" "1" "$(grep -c '^+++ b/feature.txt$' "$D/delegate-saw" 2>/dev/null)"
+check "proceed_sed_works: not another REQ's work under a stale local main" "0" "$(grep -c 'other-req.txt' "$D/delegate-saw" 2>/dev/null)"
+
+# BUG-299: a diff that cannot be taken (the base is not fetched) is a fall-through too.
+run_case proceed_no_base "$SANDBOX/proceed-nobase.script" sed-works
+check "proceed_no_base: rc 0, a fall-through and not an error" "0" "$RC"
+check "proceed_no_base: the delegate is not reached" "no" "$(reached)"
+check "proceed_no_base: one line of our own after git's" \
+  "/proceed Phase 5: diff against origin/no-such-branch failed for repo=<id> — reviewers running without candidates" \
+  "$(printf '%s\n' "$ERR" | tail -1)"
+check "proceed_no_base: invoked stays unset" "" "$(marked invoked)"
+check "proceed_no_base: no temp file or .bak survives" "0" "$(leftovers)"
+
+# BUG-299: Phase 5's prose names the same base as its fence, in all three places.
+check "proceed/SKILL.md: no diff against a local main" "0" "$(grep -c 'diff main\.\.\.HEAD' "$TOOLKIT/proceed/SKILL.md")"
 
 expect_withheld prepass "$SANDBOX/prepass.script" \
   "delegate-pre-pass: credential redaction failed — not invoking the delegate; returning the degraded object" \
   "delegate-pre-pass Phase-5-prepass REQ-000 fail fallback redaction-failed -"
 expect_delegated prepass "$SANDBOX/prepass.script" no
+
+# BUG-299: the protocol's prose names the reason its step-3 fence emits. Step 3's
+# lead-in and the field reference once said `api-error`, the one reason that claims
+# the delegate was really called.
+section() { # section <start regex> <end regex> — the lines from start up to end
+  awk -v s="$1" -v e="$2" '$0 ~ s { on = 1 } on && $0 ~ e && !($0 ~ s) { exit } on' "$TOOLKIT/agents/delegate-pre-pass.md"
+}
+STEP3=$(section '^### 3\. ' '^```')
+check "pre-pass step 3 prose: names redaction-failed" "yes" "$(printf '%s' "$STEP3" | grep -q 'reason="redaction-failed"' && echo yes || echo no)"
+check "pre-pass step 3 prose: never api-error" "0" "$(printf '%s\n' "$STEP3" | grep -c 'api-error')"
+REASONREF=$(section '^- `reason`=' '^- `duration_ms`')
+check "pre-pass field reference: redaction-failed on a redaction failure" "yes" "$(printf '%s' "$REASONREF" | grep -q '`redaction-failed` on a redaction' && echo yes || echo no)"
+check "pre-pass field reference: api-error is not a redaction failure" "0" "$(printf '%s\n' "$REASONREF" | grep -c 'non-zero OR a')"
+GATEREF=$(section '^- `gate`' '^- `mode`')
+check "pre-pass field reference: a redaction failure is gate=fail" "yes" "$(printf '%s' "$GATEREF" | grep -q '`fail` on a$' && printf '%s' "$GATEREF" | grep -q 'redaction (sed) failure too' && echo yes || echo no)"
 
 cat > "$SANDBOX/old-shape.script" <<'EOF'
 TMPFILE=$(mktemp "$TMPDIR/adlc-old.XXXXXX") || exit 1
@@ -188,7 +237,7 @@ check "old_shape_control: the retired shape hands over the unredacted key" "1" "
 # ===========================================================================
 # 4. Floor
 # ===========================================================================
-FLOOR=46
+FLOOR=60
 if [ "$CASES" -lt "$FLOOR" ]; then
   fail "executed-case floor: $CASES < $FLOOR"
 fi

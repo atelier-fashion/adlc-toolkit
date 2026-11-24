@@ -89,7 +89,7 @@ re-add a rationale claiming the gate skips the key.
 
 ```sh
 adlc_delegate_gate_check; gate=$?
-reason="$ADLC_DELEGATE_GATE_REASON"   # ok | no-binary | disabled-via-env
+reason="$ADLC_DELEGATE_GATE_REASON"   # ok | no-binary | disabled-via-env | disabled-via-config | not-opted-in
 # REQ-603: the gate above already resolves the provider AND the key (ADR-3,
 # LESSON-392), so a passing gate proves a usable key resolves. `--print-enabled`
 # does NOT probe the key — it answers opt-in only — so this second call is a
@@ -205,8 +205,9 @@ three-dot form diffs against the merge-base, matching the PR diff.
 Apply the REQ-415 5-pattern redaction sed chain to `$TMP` in place, so no
 secret in the working tree is shipped to the delegate endpoint. CHECK `sed`'s exit
 IMMEDIATELY: if redaction failed, the diff in `$TMP` may still contain secrets,
-so take the FALLBACK path (step 1/step 4 telemetry with `reason="api-error"` and
-`invoked:false`/`exit:-1`) and NEVER send the unredacted diff to `adlc-read`:
+so take the FALLBACK path (a `gate=fail` telemetry record with
+`reason="redaction-failed"`, and `invoked:false`/`exit:-1`) and NEVER send the
+unredacted diff to `adlc-read`:
 
 ```sh
 sed -E -i.bak \
@@ -351,15 +352,16 @@ Reference for the field values across all paths:
 - `gate`  = `pass` on success; `fail` on the gate miss AND on either
   precondition miss (key-absent, and the unusable-resolver `no-binary` refusal).
   A precondition miss invoked nothing, so it is emitted as `gate=fail` and lands
-  on the legitimate gate=fail branch, NOT coerced to `ghost-skip`; `pass` on the
-  api-error and sed-fail fallbacks (the call/redaction was genuinely attempted).
+  on the legitimate gate=fail branch, NOT coerced to `ghost-skip`; `fail` on a
+  redaction (sed) failure too, which invoked nothing; `pass` on the api-error
+  fallback (the call was genuinely made).
 - `mode`  = `delegated` on success; `fallback` on every miss.
 - `reason`= `ok` on success; the gate's own reason string on a gate miss;
   `key-absent` on a present-binary/absent-key miss; `no-binary` when the gate
   passed but `$ADLC_READ_BIN` is not an absolute path, in step 1 or in step 4's
   defensive refusal (the gate's own word for an unusable recipient — REQ-603
-  BR-4 freezes the vocabulary); `api-error` on an `adlc-read` non-zero OR a
-  redaction (sed) failure.
+  BR-4 freezes the vocabulary); `redaction-failed` on a redaction (sed) failure
+  in step 3; `api-error` on an `adlc-read` non-zero, and on nothing else.
 - `duration_ms` = elapsed ms around the `adlc-read` call when measured, else `-`.
 
 Do NOT run the `skill-flag.sh` create/clear dance — the engine's schema
