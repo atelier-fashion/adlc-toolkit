@@ -100,8 +100,8 @@ Not run: the rest of `pytest tools` (over an hour single-process), and a real `/
 
 ## Deployment
 
-- Merged to `main` on 2026-11-24 as `2560fe9`, the squash of PR #341, after a rebase onto `dfae199` that brought in only `.adlc` docs. The regression gate reported `off` for this project before the merge.
-- No staging or production service: the toolkit is installed from a checkout, so a symlink install has the fix once it is at `2560fe9` or later. A project with vendored `.adlc/agents/delegate-pre-pass.md` or `.adlc/workflows/adlc-sprint.workflow.js` keeps the old copies until it re-syncs (`/template-drift`).
+- Merged to `main` on 2026-11-24 as `a413c38`, the squash of PR #341 (whose head was `2560fe9`), after a rebase onto `dfae199` that brought in only `.adlc` docs. The resolution landed as `72e4be0` (#343). The regression gate reported `off` for this project before the merge.
+- No staging or production service: the toolkit is installed from a checkout, so a symlink install has the fix once it is at `a413c38` or later. A project with vendored `.adlc/agents/delegate-pre-pass.md` or `.adlc/workflows/adlc-sprint.workflow.js` keeps the old copies until it re-syncs (`/template-drift`).
 - `introduced_by` is still unwritten: blame names REQ-417, REQ-669, REQ-474 and REQ-515, and the operator has not chosen yet.
 - Still open: `reflect/SKILL.md:45` and `review/SKILL.md:48` still say `git diff main...HEAD`, the same LESSON-391 defect outside the pre-pass, with no bug report yet.
 
