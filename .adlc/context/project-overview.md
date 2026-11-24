@@ -30,7 +30,7 @@ Every toolkit-owned file a skill, partial, agent, workflow or tool reads resolve
 | Agents | `agents/<agent-name>.md` | Specialized subagent definitions with tool restrictions and model selection |
 | Templates | `templates/*.md` | Canonical templates for requirements, bugs, lessons, tasks, assumptions |
 | Ethos | `ETHOS.md` | The ETHOS principles injected into every skill — the non-negotiable constitution |
-| Docs | `README.md`, `RELEASING.md` | Install instructions for both routes (plugin first), the skill catalog, and the maintainer's release and directory-submission sequence |
+| Docs | `README.md`, `RELEASING.md`, `docs/quickstart.md`, `docs/launch-checklist.md` | Install instructions for both routes (plugin first), the skill catalog, the maintainer's release and directory-submission sequence, the newcomer's quickstart to a merged lite-lane REQ (REQ-672), and the launch checklist, the one place launch progress is written |
 | Plugin | `.claude-plugin/`, `hooks/`, `scripts/` | The plugin and marketplace manifests, the SessionStart hook, and the `scripts/adlc` CLI shim (REQ-669) |
 | Alternative manifests | `.cursor-plugin/`, `.github/plugin/` | The pinned catalog mounts for Cursor and Copilot CLI, kept in step by `manifest-parity` (REQ-665) |
 

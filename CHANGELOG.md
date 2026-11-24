@@ -591,6 +591,28 @@ is cut per `RELEASING.md`.
   credential chains of `partials/intake.sh` and `partials/lesson-check.sh`, pinned to
   them by a test. The companion article's draft and number script are in
   `tools/dataset/article/` and `tools/dataset/article_numbers.py`.
+- **A newcomer path, and the maintainer's launch tools (REQ-672).** The README's first
+  screen, above its first `##`, now says what the toolkit is, names the three things a run
+  leaves (a validated spec, a reviewed PR and a captured lesson) and gives the two install
+  commands. `docs/quickstart.md` takes a newcomer from the plugin install to a merged
+  lite-lane REQ in a sample project, `examples/quickstart/`, in eight typed steps. Each
+  step is marked in the page and read by one parser, `tools/launch/quickstart_steps.py`.
+  For the maintainer, `tools/launch/` adds the quickstart's end-to-end test
+  (`quickstart_e2e.py`, a gate in `RELEASING.md` step 1), the demo recording script and
+  its checks (`record_demo.py`, `recording_check.py`), the launch checklist's validator
+  (`launch_checklist.py`, over `docs/launch-checklist.md`, with the posts drafted under
+  `docs/launch/`), and the adoption snapshot (`adoption_snapshot.py`). The snapshot
+  appends one row of GitHub and Hugging Face statistics to a private file under
+  `ADLC_HOME`, reads and never writes toward either platform, and leaves a field it could
+  not read `null`, never `0`. Nothing an installed copy runs calls these tools, and
+  `tools/launch/tests/test_installed_surface.py` holds that, and lists every `gh` call
+  each launch tool may make. `tools/launch/README.md` documents them, with a weekly
+  schedule for the snapshot. Two lint checks: `readme-first-screen` holds the first
+  screen's items in order and allows a README link to the Space, the dataset or the
+  article only once its checklist row is `live`, and `newcomer-docs` fails a placeholder,
+  or a command naming a skill that does not exist, in the README or the quickstart. The
+  model run of the quickstart, the recording and a snapshot against the real platforms
+  are each made at the maintainer's word and tracked in `docs/launch-checklist.md`.
 
 ### Changed
 

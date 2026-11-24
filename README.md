@@ -1,15 +1,29 @@
 # ADLC Toolkit
 
-Skills, agents, and templates for spec-driven development with [Claude Code](https://claude.com/claude-code). Stack-agnostic at the core, with optional preset configs for common stacks (iOS+Firebase+Cloud Run, etc.).
+<!-- first-screen: what -->
 
-## Install
+ADLC Toolkit is a set of [Claude Code](https://claude.com/claude-code) skills, agents and templates that take a change from a written requirement to a merged pull request.
 
-Two commands, run in your own terminal:
+<!-- first-screen: outcomes -->
+
+A run leaves three things in your repository:
+
+- **A validated spec.** `/adlc:spec` writes the requirement, and `/adlc:proceed` validates it before building. A small change on the lite lane skips that separate validation step.
+- **A reviewed PR.** `/adlc:proceed` implements the change, reviews the diff and opens the pull request.
+- **A captured lesson.** `/adlc:wrapup` records what the run taught, or gives a one-line reason when it taught nothing new.
+
+<!-- first-screen: install -->
+
+Install it with two commands in your own terminal:
 
 ```bash
 claude plugin marketplace add atelier-fashion/adlc-toolkit
 claude plugin install adlc@adlc-toolkit
 ```
+
+Next, the [quickstart](docs/quickstart.md) takes you from install to a merged pull request in a sample project.
+
+## Install
 
 This repo is both the marketplace (`adlc-toolkit`) and the plugin (`adlc`). Start a new Claude Code session after installing. On this route every skill is namespaced: type `/adlc:<skill>`, for example `/adlc:init`, `/adlc:spec` or `/adlc:proceed`. The toolkit's agents are registered as `adlc:<name>`. The skill table below uses the bare names; add the `adlc:` prefix on the plugin route.
 
@@ -110,7 +124,7 @@ See [`templates/`](templates/) for the authoritative set (also includes the non-
 
 ### Presets
 
-Stack-shaped starter configs that seed `.adlc/config.yml` for common stacks. See [`presets/`](presets/) for the current list.
+The toolkit is stack-agnostic at the core, with optional preset configs for common stacks (iOS+Firebase+Cloud Run, etc.). Each preset is a stack-shaped starter config that seeds `.adlc/config.yml`. See [`presets/`](presets/) for the current list.
 
 ### Workflows
 
@@ -123,6 +137,7 @@ Standalone command-line utilities (not skills). See:
 - [`tools/adlc/`](tools/adlc/README.md) — the `adlc` umbrella CLI. Its first subcommand, `adlc doctor`, is a read-only health check that diagnoses every install dependency and prints a copy-pasteable fix for each failure. On the plugin route the SessionStart hook puts [`scripts/adlc`](scripts/adlc) on the session's PATH; on the symlink route the root [`install.sh`](#symlink-install) writes `~/bin/adlc`.
 - [`tools/delegate/`](tools/delegate/README.md) — provider-agnostic delegation CLIs (`adlc-read`, `adlc-write`, `extract-chat`) for offloading token-heavy I/O. **Off by default.** Symlink route only: opt in with `./install.sh --with-delegation`.
 - [`tools/dataset/`](tools/dataset/README.md) — Dataset export. A maintainer tool that exports this repo's own `.adlc/` artifacts, scrubbed, as a Hugging Face dataset. Publishing is a separate step the maintainer runs after reading the export's report.
+- [`tools/launch/`](tools/launch/README.md) — Launch tools. Maintainer tools for the quickstart's end-to-end test, the demo recording, the launch checklist and the adoption snapshot. Nothing an install runs calls them.
 
 ## How it works
 

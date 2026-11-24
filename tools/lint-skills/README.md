@@ -790,6 +790,81 @@ a general markdown linter and NOT a general shell linter.
     `.gitignore`, which the check does not read. Tests:
     `tests/test_session_gitignore.py`.
 
+24. **README first screen (`readme-first-screen`)** (REQ-672 BR-1, BR-11, ADR-9):
+    the text above the README's first `##` is what a newcomer sees first, so it
+    says what the toolkit is, what a run produces and how to install it, before
+    any install mechanics. Four marker lines name its items, `<!-- first-screen:
+    what -->`, `outcomes`, `recording` and `install` (`FIRST_SCREEN_MARKERS`),
+    each a whole line outside a fence, so a marker mentioned in prose is not one
+    (LESSON-404). The check fails a missing, unknown, repeated or out-of-order
+    marker, and a marker over nothing. Under `what` it wants one paragraph of one
+    sentence (a period inside inline code or a link target does not count). Under
+    `outcomes` it wants exactly three list items naming a spec, a PR and a lesson,
+    in that order. Under `install` it wants a fence holding a `claude plugin
+    marketplace add` line and a `claude plugin install` line. The `recording`
+    marker is there if and only if `docs/demo.gif` and `docs/demo.cast` exist,
+    with an image of a file that exists. Text before the first marker, a
+    subsection heading and the skill table above the first `##` are findings too.
+    Anywhere in the README, a Hugging Face link (`HF_LINK_RE`) fails unless its
+    row of `docs/launch-checklist.md` is `live`: a `huggingface.co` or `hf.co`
+    path under `/spaces/`, `/datasets/` or `/blog/`, whatever follows the id,
+    waits for the `space`, `dataset` or `article` row, and any Space app host
+    `<name>.hf.space` for the `space` row. The table is read with a row parser of
+    the check's own, not the launch tools', that mirrors
+    `tools/launch/launch_checklist.py`'s; a test holds the two to the same
+    columns, live status and rows on the real table and on altered copies. A
+    missing checklist or row counts as not live. A checklist that exists but whose
+    table that parser would refuse or read no row from (a reordered or extra
+    column, a missing separator, a row of the wrong cell count, a second table)
+    is a finding on the checklist, never every row silently not live. To fix a
+    finding, put the item under its marker, remove the link until the row is
+    live, or fix the table.
+
+25. **Newcomer docs (`newcomer-docs`)** (REQ-672 BR-10, ADR-9): `README.md` and
+    `docs/quickstart.md` are copied from by people who have not read anything
+    else, so neither carries a value the reader would have to fill in, and every
+    command they show names a skill that exists. The check fails a placeholder
+    from the closed set `NEWCOMER_PLACEHOLDER_RE` (`<owner>`, `<org>`, `<user>`,
+    `<username>`, `<repo>`, any `<your-…>` or `<your_…>`, and `OWNER/` before a
+    name) anywhere in either page, outside the exact phrases in
+    `NEWCOMER_PLACEHOLDER_PHRASES` (`gh -R <repo> pr merge`, a syntax description a
+    test pins). The set is closed on purpose: `{owner}`, `$OWNER` and
+    `YOUR_USERNAME` pass, and a test pins that. It fails any angle-bracket token
+    in a marked quickstart step, and any `xxx` run there but `REQ-xxx`, the one id
+    the page cannot know. Steps are read with `QUICKSTART_STEP_MARKER_PATTERN` and
+    the fence grammar of `tools/launch/quickstart_steps.py`, which a test holds
+    equal on the real page and on altered ones (tilde fences, an indented closing
+    fence, an info string, a gap after the marker): where that parser refuses the
+    page (a malformed marker, a marker with no fence right after it, a step fence
+    never closed, holding other than one command line or ending in a backslash, or
+    an unmarked fence never closed) the check reports it on the same line instead
+    of reading fewer steps. Every `/adlc:<name>` must be a `<name>/SKILL.md`
+    directory, fenced or not. A bare `/<name>` is judged only where it is the whole
+    first token of an inline code span or a marked step, so a path such as
+    `/bin/sh` is not a candidate. In a code span it must be a skill directory, a
+    Claude Code built-in in `CLAUDE_CODE_BUILTIN_COMMANDS`, a top-level directory
+    in `NEWCOMER_ROOT_DIRECTORIES` or a syntax word in `NEWCOMER_SYNTAX_WORDS`; the
+    README documents both install routes, so a bare skill name is fine there and
+    in quickstart prose. A marked step teaches the plugin install, where only
+    `/adlc:<name>` reaches a skill and a bare `/init` runs Claude Code's own
+    built-in, so a step whose first token is a bare skill name fails with its
+    `/adlc:` spelling. In a `claude …` step the same rules judge the slash command
+    among its arguments, wherever it sits (`claude -p "/adlc:init"`, double, single
+    or no quotes): each argument of the slash-command shape, whole or as a quoted
+    prompt's first word. A path such as `/x/y` is not of that shape, and `/tmp` is
+    a top-level directory. Add a built-in only when
+    the pages use a command Claude Code owns, never to quiet a hit you cannot
+    name; a test fails an entry no page uses. The quickstart's first two steps
+    must equal the README's install fence. To fix a finding, write the real value
+    or the real skill name.
+
+    Both checks arm on a root with `.claude-plugin/plugin.json` and either page or
+    the quickstart parser (`NEWCOMER_ANCHORS`). Once armed, a missing README or
+    quickstart is a finding, never a skip. Each prints the files it read to stderr
+    (`readme-first-screen: scanned 2 file(s) (README.md,
+    docs/launch-checklist.md)`), and on the real tree the test holds both pages
+    read. Tests: `tests/test_newcomer_docs.py`.
+
 ## REQ-657: the harness adapter framework's checks
 
 - **`allowlist-fidelity`** renders `templates/permissions.yml` at the scope each

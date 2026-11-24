@@ -12,6 +12,8 @@ Every skill and agent is a markdown file. No TypeScript, no Python, no package.j
 
 **Exception — `space/` and `workflows/`:** both hold zero-dependency JavaScript tested with Node's built-in runner (`node --test 'space/tests/*.test.js'`, `node --test 'workflows/tests/*.test.js'`), with no package manager. `space/` is the static Hugging Face Space for `/spec` intake (REQ-670). It has a build step, `node space/build.mjs`, which generates `space/toolkit-data.js` from the toolkit; `--check` fails on drift. Neither directory holds a `SKILL.md`, so neither is a skill.
 
+**`docs/` and `examples/`** hold documentation and the quickstart's sample project, never a `SKILL.md`, and the quickstart's typed steps are marked with `<!-- quickstart-step: … -->` and parsed by `tools/launch/quickstart_steps.py`. The page is the source of the steps; the README's install fence repeats steps 1 and 2, and the `newcomer-docs` lint holds the two equal (REQ-672).
+
 ## File and directory naming
 
 - Skill directories: lowercase, single word or hyphenated (`spec`, `bugfix`, `template-drift`)

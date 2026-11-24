@@ -199,6 +199,10 @@ Run the tests after any change.
 | `publish.py`, `requirements.txt` | the publish step and its one dependency |
 | `article_numbers.py`, `article/` | the article's number script and draft |
 
+Read by other tools: `denylist.py` and `detectors.py` are also read by the launch tools'
+recording check, `recording_check.py`, so a change to their public functions is checked
+against the launch tools' tests as well.
+
 ## Tests
 
 ```bash
