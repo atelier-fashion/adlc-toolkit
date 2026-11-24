@@ -345,6 +345,186 @@ check "BUG-293 cleanup: materialized inline dir removed with TMPDIR unset" "remo
       adlc_intake_cleanup "" "$ADLC_INTAKE_PATH"
       [ -d "$_d" ] && echo "left: $_d" || echo removed )"
 
+# BUG-296: every case above names its directory plainly. The guard matched the TEXT
+# of the parent directory against the temp roots, so a path that only reads as
+# sitting under one was admitted: `<root>/../elsewhere`, or `<root>/link/sub` where
+# `link` points out of the root. `rm -rf` then followed the path to where it really
+# led. The guard now also resolves the parent and the root (`cd -P`, `pwd -P`) and
+# removes the directory only when the resolved one is under the resolved root.
+#
+# Each case builds its own fixtures and sets its own TMPDIR, in a subshell. Three
+# temp roots are used so every arm is reached on every platform:
+#   * $TROOT, under the repo: only the TMPDIR arm can admit a path through it.
+#   * $SANDBOX: a real temp dir, to hold symlinks that point out of it.
+#   * $T296, made as /tmp/...: the /tmp arm. On macOS /tmp is a symlink to
+#     /private/tmp, so this is also the case where the root itself resolves
+#     elsewhere and must still be admitted.
+# More `..` than any temp root is deep: the extra ones stay at `/`. One `..` is not
+# enough on macOS, where `/tmp/..` is `/private`.
+UP296=/../../../../../../../../../../../..
+T296=$(mktemp -d /tmp/adlc-intake-test.XXXXXX)
+bug296_fixture() {
+  rm -rf "$NONTMP" "$TROOT"
+  mkdir -p "$NONTMP/sub" "$TROOT/x" "$TROOT/home" "$TROOT/adlc-intake.fixture"
+  printf 'x\n' > "$NONTMP/inline-request.txt"
+  printf 'x\n' > "$NONTMP/sub/inline-request.txt"
+  printf 'x\n' > "$TROOT/home/inline-request.txt"
+  printf 'x\n' > "$TROOT/adlc-intake.fixture/inline-request.txt"
+}
+bug296_state() { [ -d "$1" ] && echo kept || echo removed; }
+
+check "BUG-296 fixture: a temp dir made as /tmp/..." "0" "$( [ -d "$T296" ] && echo 0 || echo 1 )"
+
+# --- `..` leaves the temp root -------------------------------------------------
+bug296_fixture
+( TMPDIR=$TROOT; export TMPDIR
+  adlc_intake_cleanup "" "$TROOT/../.intake-guard-fixture/inline-request.txt" )
+check "BUG-296 cleanup: '..' out of TMPDIR refused" "kept" "$(bug296_state "$NONTMP")"
+
+bug296_fixture
+( unset TMPDIR
+  adlc_intake_cleanup "" "/tmp$UP296$ROOT/.intake-guard-fixture/inline-request.txt" )
+check "BUG-296 cleanup: '..' out of /tmp refused" "kept" "$(bug296_state "$NONTMP")"
+
+# Fails without the fix only where /var/folders exists (macOS). Elsewhere the path
+# names nothing, and the case passes either way.
+bug296_fixture
+( unset TMPDIR
+  adlc_intake_cleanup "" "/var/folders$UP296$ROOT/.intake-guard-fixture/inline-request.txt" )
+check "BUG-296 cleanup: '..' out of /var/folders refused" "kept" "$(bug296_state "$NONTMP")"
+
+# The `"$HOME"` refusal compared text too: `<root>/x/../home` is not the string $HOME.
+bug296_fixture
+( TMPDIR=$TROOT; HOME=$TROOT/home; export TMPDIR HOME
+  adlc_intake_cleanup "" "$TROOT/x/../home/inline-request.txt" )
+check "BUG-296 cleanup: HOME reached through '..' refused" "kept" "$(bug296_state "$TROOT/home")"
+
+# --- a symlink leaves the temp root --------------------------------------------
+# The link is a middle component, so `rm -rf` follows it. (A link that IS the parent
+# was never followed: rm unlinks it. That case is pinned further down.)
+bug296_fixture
+ln -s "$NONTMP" "$SANDBOX/bug296-link"
+( TMPDIR=$SANDBOX; export TMPDIR
+  adlc_intake_cleanup "" "$SANDBOX/bug296-link/sub/inline-request.txt" )
+check "BUG-296 cleanup: symlink out of TMPDIR refused" "kept" "$(bug296_state "$NONTMP/sub")"
+rm -f "$SANDBOX/bug296-link"
+
+bug296_fixture
+ln -s "$NONTMP" "$T296/link"
+( unset TMPDIR
+  adlc_intake_cleanup "" "$T296/link/sub/inline-request.txt" )
+check "BUG-296 cleanup: symlink out of /tmp refused" "kept" "$(bug296_state "$NONTMP/sub")"
+
+# Passed before the fix too: pins that the target survives when the link is the
+# parent directory itself.
+( unset TMPDIR
+  adlc_intake_cleanup "" "$T296/link/inline-request.txt" )
+check "BUG-296 cleanup: target of a symlinked parent kept" "kept" "$(bug296_state "$NONTMP")"
+rm -f "$T296/link"
+
+# A TMPDIR that is a symlink to `/` is `/`, which BUG-293 refuses by its text.
+bug296_fixture
+ln -s / "$SANDBOX/bug296-rootlink"
+( TMPDIR=$SANDBOX/bug296-rootlink; export TMPDIR
+  adlc_intake_cleanup "" "$SANDBOX/bug296-rootlink$ROOT/.intake-guard-fixture/inline-request.txt" )
+check "BUG-296 cleanup: TMPDIR that is a symlink to '/' refused" "kept" "$(bug296_state "$NONTMP")"
+rm -f "$SANDBOX/bug296-rootlink"
+
+# --- what must still be removed ------------------------------------------------
+# These four passed before the fix and pin it from the other side: the resolved
+# form of a temp root is admitted, so the rule is where a path leads, not how it is
+# spelled.
+bug296_fixture
+ln -s "$TROOT" "$SANDBOX/bug296-troot"
+( TMPDIR=$SANDBOX/bug296-troot; export TMPDIR
+  adlc_intake_cleanup "" "$SANDBOX/bug296-troot/adlc-intake.fixture/inline-request.txt" )
+check "BUG-296 cleanup: dir under a symlinked TMPDIR removed" "removed" \
+  "$(bug296_state "$TROOT/adlc-intake.fixture")"
+rm -f "$SANDBOX/bug296-troot"
+
+mkdir -p "$T296/adlc-intake.fixture"
+printf 'x\n' > "$T296/adlc-intake.fixture/inline-request.txt"
+( unset TMPDIR
+  adlc_intake_cleanup "" "$T296/adlc-intake.fixture/inline-request.txt" )
+check "BUG-296 cleanup: dir under /tmp removed with TMPDIR unset" "removed" \
+  "$(bug296_state "$T296/adlc-intake.fixture")"
+
+bug296_fixture
+( TMPDIR=$TROOT; export TMPDIR
+  adlc_intake_cleanup "" "$TROOT/x/../adlc-intake.fixture/inline-request.txt" )
+check "BUG-296 cleanup: '..' that stays inside TMPDIR removed" "removed" \
+  "$(bug296_state "$TROOT/adlc-intake.fixture")"
+
+# --- a `cd` the executor shell replaced (LESSON-717) ---------------------------
+# The guard resolves a path by running `cd`, and the shell that runs a fence can
+# hold a function of that name (a directory jumper, a snapshot of the user's
+# profile). This one goes where it is told, except that it lands in a decoy under
+# the temp root for the two parent directories the cases below pass in. The guard
+# must not take the decoy for the directory it was given: it drops the function
+# inside its own subshell, and it removes a resolved directory only when that is
+# the same directory as the one named.
+bug296_wrapped() { # bug296_wrapped <source path>
+  ( TMPDIR=$TROOT; export TMPDIR
+    cd() {
+      for _to in "$@"; do :; done
+      case "$_to" in
+        */../*|*/adlc-intake.fixture) _to="$TROOT/decoy" ;;
+      esac
+      if [ -n "${ZSH_VERSION-}" ]; then builtin cd "$_to"; else command cd "$_to"; fi
+    }
+    adlc_intake_cleanup "" "$1" )
+}
+bug296_fixture
+mkdir -p "$TROOT/decoy"
+bug296_wrapped "$TROOT/../.intake-guard-fixture/inline-request.txt"
+check "BUG-296 cleanup: a function over cd does not move the deletion" "kept" \
+  "$(bug296_state "$TROOT/decoy")"
+check "BUG-296 cleanup: '..' out of TMPDIR refused under a function over cd" "kept" \
+  "$(bug296_state "$NONTMP")"
+bug296_wrapped "$TROOT/adlc-intake.fixture/inline-request.txt"
+check "BUG-296 cleanup: dir under TMPDIR removed under a function over cd" "removed" \
+  "$(bug296_state "$TROOT/adlc-intake.fixture")"
+check "BUG-296 cleanup: the decoy survives that removal" "kept" "$(bug296_state "$TROOT/decoy")"
+
+# The resolved path is read through `$(...)`, which strips trailing newlines. A link
+# whose target is named `real<newline>` would resolve to its sibling `real`, so the
+# guard also requires the resolved directory to be the one that was named (`-ef`).
+bug296_fixture
+BUG296_NL='
+'
+mkdir -p "$TROOT/real" "$TROOT/real$BUG296_NL"
+printf 'x\n' > "$TROOT/real$BUG296_NL/inline-request.txt"
+ln -s "$TROOT/real$BUG296_NL" "$TROOT/nl-link"
+( TMPDIR=$TROOT; export TMPDIR
+  adlc_intake_cleanup "" "$TROOT/nl-link/inline-request.txt" )
+check "BUG-296 cleanup: a resolved name cut at a newline does not remove its sibling" "kept" \
+  "$(bug296_state "$TROOT/real")"
+
+# The function is sourced into the caller's shell, and a caller can run `set -e`.
+# Nothing in the guard may end that shell. Two things did in the first version of
+# the fix: `unset -f` of a name that is no function returns 1 in zsh, and the
+# resolution of a $HOME that cannot be entered was the last command of an && list.
+bug296_fixture
+check "BUG-296 cleanup: returns under set -e, and removes the dir" "removed returned" \
+  "$( set -e; TMPDIR=$TROOT; export TMPDIR
+      adlc_intake_cleanup "" "$TROOT/adlc-intake.fixture/inline-request.txt"
+      echo "$(bug296_state "$TROOT/adlc-intake.fixture") returned" )"
+bug296_fixture
+check "BUG-296 cleanup: returns under set -e with a HOME that cannot be entered" "removed returned" \
+  "$( set -e; TMPDIR=$TROOT; HOME=$TROOT/no-such-home; export TMPDIR HOME
+      adlc_intake_cleanup "" "$TROOT/adlc-intake.fixture/inline-request.txt"
+      echo "$(bug296_state "$TROOT/adlc-intake.fixture") returned" )"
+
+# /spec calls cleanup twice on one inline source: the second call finds no parent.
+check "BUG-296 cleanup: a parent that is gone is a quiet no-op" "rc=0 out=" \
+  "$( TMPDIR=$TROOT; export TMPDIR
+      _o=$(adlc_intake_cleanup "" "$TROOT/gone/inline-request.txt" 2>&1)
+      echo "rc=$? out=$_o" )"
+check "BUG-296 cleanup: the temp root survives a parent that is gone" "kept" "$(bug296_state "$TROOT")"
+
+rm -rf "$NONTMP" "$TROOT"
+[ -n "$T296" ] && rm -rf "$T296"
+
 # The real case: a materialized inline source IS removed, corpus and all.
 adlc_intake_detect "$LONG"
 REAL_SRC="$ADLC_INTAKE_PATH"
