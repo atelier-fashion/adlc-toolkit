@@ -20,17 +20,27 @@ import credential_redact
 
 Hit = namedtuple("Hit", "detector line")
 
+#: Searched, never substituted: only whether a line is a hit is used. Three of
+#: these begin at the start of a run (a lookbehind), look ahead for what the run
+#: must hold, and then read the run once: its JWT arm, the key-like assignment
+#: and the base64 run. Begun at every character of a long run instead, each read
+#: the run again from each (BUG-297). A hit is the same line as before; the match
+#: may begin earlier in the run. ``tests/test_dataset_credential_linear.py`` times
+#: every pattern here at two line lengths, so keep any new repeat bounded or
+#: anchored to the start of its run.
 _EXTRA_CREDENTIAL = (
-    re.compile(r"hf_[A-Za-z0-9]{30,}|ya29\.[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]+\.eyJ"
+    re.compile(r"hf_[A-Za-z0-9]{30,}|ya29\.[A-Za-z0-9_-]{20,}"
+               r"|(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*?eyJ[A-Za-z0-9_-])[A-Za-z0-9_-]+\.eyJ"
                r"|sk_[A-Za-z0-9_-]{20,}", re.ASCII),
     re.compile(r"PRIVATE KEY-----"),
     re.compile(r"(?:bearer|basic)[ \t]+[A-Za-z0-9._~+/=-]{16,}", re.IGNORECASE | re.ASCII),
-    re.compile(r"(?:secret|pass|api[-_]?key|access[-_]?key|private[-_]?key|token|credential)"
+    re.compile(r"(?<![A-Za-z_-])(?=[A-Za-z_-]*(?:secret|pass|api[-_]?key|access[-_]?key"
+               r"|private[-_]?key|token|credential))"
                r"[A-Za-z_-]*[\"']?[ \t]*[:=][ \t]*[\"']?[^\s\"'`]{8,}", re.IGNORECASE),
     re.compile(r"(?<![A-Za-z0-9])-u[ \t]+[^\s:]+:[^\s]{6,}"),
     re.compile(r"[0-9a-f]{41,}", re.IGNORECASE),
-    re.compile(r"(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])(?=[A-Za-z0-9+/]*[0-9])"
-               r"[A-Za-z0-9+/]{40,}", re.ASCII),
+    re.compile(r"(?<![A-Za-z0-9+/])(?=[A-Za-z0-9+/]*[A-Z])(?=[A-Za-z0-9+/]*[a-z])"
+               r"(?=[A-Za-z0-9+/]*[0-9])[A-Za-z0-9+/]{40,}", re.ASCII),
 )
 _HOME = re.compile(r"/users/|(?<![a-z0-9_.-])/(?:home|private)/|[a-z]:\\users\\", re.IGNORECASE)
 _EMAIL = re.compile(r"[^\s@<>()\[\]{}\"'`,;|:/=]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*"
