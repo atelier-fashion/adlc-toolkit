@@ -211,7 +211,10 @@ const CANDIDATES = {
     repo: { type: 'string' },
     invoked: { type: 'boolean' },
     exit: { type: 'integer' },
-    gateReason: { type: 'string', enum: ['ok', 'no-binary', 'disabled-via-env'] },
+    // Every reason partials/delegate-gate.sh exports, verbatim (BUG-299): the leaf
+    // passes the gate's string through, and a reason missing here is a schema
+    // failure the runtime drops to null.
+    gateReason: { type: 'string', enum: ['ok', 'no-binary', 'disabled-via-env', 'disabled-via-config', 'not-opted-in'] },
     changedFiles: { type: 'array', items: { type: 'string' } }, // TRUSTED
     candidates: {
       type: 'array',
@@ -2571,7 +2574,13 @@ async function runPrePass(id, P, worktree, repos) {
       agentType: agentTypeFor('delegate-pre-pass', AGENT_NS),
     });
 
-    if (!CAND) { advisoryByRepo[r.repo] = {}; continue; }
+    if (!CAND) {
+      // A leaf that failed CANDIDATES' schema lands here as null too (BUG-299):
+      // say so, or a contract mismatch looks like a pre-pass that found nothing.
+      log(`${id} Phase 5 pre-pass (${r.repo}): no CANDIDATES object returned (dropped, or failed its schema); reviewers run without candidates.`);
+      advisoryByRepo[r.repo] = {};
+      continue;
+    }
 
     const raw = CAND.candidates || [];
     // Ghost-skip assertion: candidates without an actual invocation are rejected.
