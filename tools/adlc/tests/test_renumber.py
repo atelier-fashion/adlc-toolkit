@@ -5,6 +5,7 @@ The remote-collision shell-out is monkeypatched so these tests never touch a rem
 """
 import errno
 import os
+import re
 import subprocess
 
 import pytest
@@ -474,7 +475,15 @@ def test_reserve_new_id_won_pushes_ref(tmp_path, monkeypatch):
     assert "refs/adlc/ids/req/700" in _ls_reservations(repo, "req")
     # BUG-256: the won reservation lands in the sandbox ledger, never the real one.
     with open(os.path.join(state, ".adlc-own-reservations"), encoding="utf-8") as fh:
-        assert fh.read().startswith("req 700 ")
+        lines = fh.read().splitlines()
+    # BUG-294: the SHA line, then the nonce of the commit just pushed.
+    assert len(lines) == 2
+    assert re.fullmatch(r"req 700 [0-9a-f]{40,64}", lines[0])
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s", lines[0].split()[2]],
+        cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    assert subject.startswith("adlc-id-reservation kind=req num=700 nonce=")
+    assert lines[1] == "req 700 nonce=" + subject.rsplit("nonce=", 1)[1]
 
 
 def test_reserve_new_id_degraded_when_no_remote(tmp_path, monkeypatch):
