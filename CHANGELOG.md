@@ -730,6 +730,23 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **Intake cleanup no longer removes a directory outside every temp root when `TMPDIR` is
+  unset, empty or `/` (BUG-293).** `adlc_intake_cleanup` (`partials/intake.sh`) admitted a
+  directory by the pattern `"${TMPDIR%/}"/*`, which is `/*` when `TMPDIR` is unset, empty or
+  `/`, and `/*` matches every absolute path. So `/spec /abs/dir/inline-request.txt`, on a
+  machine with no `TMPDIR` (the usual state on Linux), ran `rm -rf /abs/dir`. Now:
+  - `TMPDIR` counts as a temp root only when it is an absolute path other than `/`. Unset,
+    empty, `/`, `//` and a relative value are refused, and the function falls back to `/tmp`
+    and `/var/folders`, which never depended on it;
+  - every trailing slash is stripped, so `TMPDIR=<root>//` no longer leaves the inline
+    directory behind;
+  - `partials/tests/intake.test.sh` sets `TMPDIR` itself in ten new cases. The suite's one
+    case for a non-temp directory had inherited the variable from whoever ran it, and passed
+    whenever it was set.
+
+  A project with a vendored `.adlc/partials/intake.sh` keeps the old function until it is
+  re-synced: `/spec` sources the vendored copy first. Not changed: a path that leaves a temp
+  root through `..` or a symlink still matches by its text.
 - **A forge's refusal of a second PR for one head and base reads `pr-already-exists`, not
   `network` (BUG-292).** `_adlc_forge_classify` had no pattern for it, so `gh pr create`'s `a
   pull request for branch "<head>" into branch "<base>" already exists:`, GitHub's own `A pull
