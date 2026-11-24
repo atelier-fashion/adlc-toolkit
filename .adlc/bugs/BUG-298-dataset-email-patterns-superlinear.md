@@ -1,7 +1,7 @@
 ---
 id: BUG-298
 title: "A whole scrub of one long line, and a whole residue pass over it, are quadratic: the two email patterns, and what is done once for each hit"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-24
 updated: 2026-11-24
@@ -230,3 +230,10 @@ What was not measured:
 - `.adlc/context/architecture.md`: one sentence where the dataset export is described.
 - `CHANGELOG.md`: one entry under Fixed, and a pointer from BUG-297's.
 - `.adlc/bugs/BUG-298-dataset-email-patterns-superlinear.md`: this report.
+
+## Deployment
+
+- Merged to `main` on 2026-11-24 as `b467fa0`, the squash of PR #338. PR #335 was the same commit against BUG-297's branch; GitHub closed it when that branch was deleted on merge, and #338 replaced it. The regression gate reported `off` for this project before the merge.
+- No staging or production service: the toolkit is installed from a checkout. `tools/dataset` is a maintainer tool run from a clone, so an export has the fix once the clone is at `b467fa0` or later. Nothing is vendored into a project.
+- The lessons from the fix are LESSON-912, on the anchored search and the one attempt after each match, and LESSON-913, on what runs once for each hit.
+- Still open: `tools/adlc/harness_probe.py` has an address pattern of its own with no lookbehind, substituted over a whole transcript. It is outside `tools/dataset` and has no bug report yet.
