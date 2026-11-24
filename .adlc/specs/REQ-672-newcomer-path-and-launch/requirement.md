@@ -113,7 +113,7 @@ people down it:
 
 ## Deferred
 
-Each of these needs the maintainer's word, because it spends the maintainer's model plan,
+Shipped in PR #314 (f58b13d). Each of these needs the maintainer's word, because it spends the maintainer's model plan,
 reads owner-only data or uses their accounts. Each is a row of
 `docs/launch-checklist.md`, which is where its progress is written.
 
