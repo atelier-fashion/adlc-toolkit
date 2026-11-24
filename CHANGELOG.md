@@ -752,6 +752,24 @@ is cut per `RELEASING.md`.
 
 ### Fixed
 
+- **The Phase-5 delegate pre-pass agrees with itself (BUG-299, #341).** Four
+  disagreements in the REQ-417 pre-pass:
+  - `/proceed` Phase 5 diffed against `main...HEAD`, so a local `main` behind `origin`
+    handed reviewers other REQs' merged work. It now diffs against
+    `origin/<integrationBranch>...HEAD` (LESSON-391).
+  - Step 4's fence redacted and delegated a `$TMPFILE` it never made, so the pre-pass
+    always fell through to the redaction-failure path. The fence now makes the temp
+    file, installs the `EXIT` trap and writes the diff itself. A diff that cannot be
+    taken falls through the same way.
+  - `CANDIDATES.gateReason` in `workflows/adlc-sprint.workflow.js` lacked
+    `disabled-via-config` and `not-opted-in`. A leaf returning either was dropped to
+    `null` silently. The enum now has all five, and a `null` leaf is logged.
+  - `agents/delegate-pre-pass.md` called a failed redaction `gate=pass`/`api-error` in
+    its prose, while its fence emits `gate=fail`/`redaction-failed`. The prose now matches.
+
+  A project with vendored `.adlc/agents/delegate-pre-pass.md` or
+  `.adlc/workflows/adlc-sprint.workflow.js` keeps the old copies until it re-syncs.
+
 - **A whole scrub of a line, and a whole residue pass over it, are linear in the line's
   length (BUG-298).** After BUG-297 two things in `tools/dataset` still were not:
   - the two email patterns. `residue._EMAIL` began at every character of a run with no

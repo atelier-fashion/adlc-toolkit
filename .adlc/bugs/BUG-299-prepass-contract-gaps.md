@@ -1,7 +1,7 @@
 ---
 id: BUG-299
 title: "The Phase-5 delegate pre-pass disagrees with itself in four places: a local-main diff base, a temp file the fence never makes, a gateReason enum short of two reasons, and two names for a redaction failure"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-24
 updated: 2026-11-24
@@ -97,3 +97,14 @@ Not run: the rest of `pytest tools` (over an hour single-process), and a real `/
 - `workflows/adlc-sprint.workflow.js`: `CANDIDATES.gateReason` and `runPrePass`'s `null` branch.
 - `harness/claude/exec-fence-census.json`, `harness/codex/exec-fence-census.json`: regenerated; `proceed/SKILL.md#3`'s sha8 only, route unchanged.
 - `partials/tests/redact-fence.test.sh`, `workflows/tests/helpers.test.js`, `tools/lint-skills/tests/test_read_bin_fences.py`: the tests above.
+
+## Deployment
+
+- Merged to `main` on 2026-11-24 as `2560fe9`, the squash of PR #341, after a rebase onto `dfae199` that brought in only `.adlc` docs. The regression gate reported `off` for this project before the merge.
+- No staging or production service: the toolkit is installed from a checkout, so a symlink install has the fix once it is at `2560fe9` or later. A project with vendored `.adlc/agents/delegate-pre-pass.md` or `.adlc/workflows/adlc-sprint.workflow.js` keeps the old copies until it re-syncs (`/template-drift`).
+- `introduced_by` is still unwritten: blame names REQ-417, REQ-669, REQ-474 and REQ-515, and the operator has not chosen yet.
+- Still open: `reflect/SKILL.md:45` and `review/SKILL.md:48` still say `git diff main...HEAD`, the same LESSON-391 defect outside the pre-pass, with no bug report yet.
+
+## Lessons
+
+- `.adlc/knowledge/lessons/LESSON-914-harness-supplies-what-fence-must-make.md`: a test that hands an extracted fence its inputs cannot see that the fence never makes them.
