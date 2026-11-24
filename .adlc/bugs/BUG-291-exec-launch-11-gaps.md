@@ -4,7 +4,7 @@ title: "Three gaps one answered exec launch found: a sandboxed git write reporte
 status: resolved
 severity: medium
 created: 2026-11-23
-updated: 2026-11-23
+updated: 2026-11-24
 component: "adlc/tools/adlc/sprint-exec"
 domain: "adlc"
 stack: ["python", "shell", "codex"]
@@ -137,7 +137,7 @@ What these cannot show. The fake harness and the mock forge are scripted. Nothin
 
 Merged as `5303ecf` ([#317](https://github.com/atelier-fashion/adlc-toolkit/pull/317)) on 2026-11-23, pinned to the tested head `052af2e`. The regression gate read `off`. The toolkit has no deploy target: the fix is live for a symlink install when its clone pulls `main`, and for a plugin install at the next release.
 
-No real `codex` or `claude` launch has run against it. The prompt line, the dashboard note, the stall after an `answer` and the draft-PR fence run twice are measured by the fake harness and the mock forge only.
+One real launch has run against it since: Codex launch 12 of `codex-exec-manual.md`, started 2026-11-23 on `a0eeab8`. Its session read the prompt line, ran `git add` and `git commit` each on a line of its own, ran the draft-PR fence once and reached the gate without a block. The run did not block, so the dashboard note, the stall after an `answer` and the draft-PR fence run twice are still measured by the fake harness and the mock forge only.
 
 ## Lessons
 

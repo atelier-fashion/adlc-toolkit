@@ -8,9 +8,9 @@ concerns: ["reliability", "unattended", "resumability"]
 tags: ["exec-engine", "relaunch", "answer", "resume", "stall", "idempotency", "draft-pr", "forge-mock", "fake-harness", "exec-prompt"]
 bug: BUG-291
 created: 2026-11-23
-updated: 2026-11-23
+updated: 2026-11-24
 kind: process
-evidence: "BUG-291; .adlc/research/harness-probes/codex-exec-manual.md launch 11, facts 13 to 15 (codex-cli 0.166.0, engine 0d3a62b): a run blocked, was answered 109 minutes later, read `stalled: no state write for 109 minutes` on the relaunch's first poll, opened PR 102 beside PR 101 and ended failed / no-pr. tools/adlc/tests/test_bug291_exec_launch_11_gaps.py failed in eight of nine tests on 1d40f47 and passes on 5303ecf: test_bug291_a_relaunched_run_is_not_stalled_by_the_wait_for_its_operator printed the same stalled line before the fix, and test_bug291_the_draft_pr_fence_run_twice_opens_one_pr printed `url=…/pull/102`. No real launch has run against the fix"
+evidence: "BUG-291; .adlc/research/harness-probes/codex-exec-manual.md launch 11, facts 13 to 15 (codex-cli 0.166.0, engine 0d3a62b): a run blocked, was answered 109 minutes later, read `stalled: no state write for 109 minutes` on the relaunch's first poll, opened PR 102 beside PR 101 and ended failed / no-pr. tools/adlc/tests/test_bug291_exec_launch_11_gaps.py failed in eight of nine tests on 1d40f47 and passes on 5303ecf: test_bug291_a_relaunched_run_is_not_stalled_by_the_wait_for_its_operator printed the same stalled line before the fix, and test_bug291_the_draft_pr_fence_run_twice_opens_one_pr printed `url=…/pull/102`. One real launch has run against the fix, launch 12 of the same note, and it did not block: the stall after an answer and the fence run twice are measured by the double only"
 confidence: high
 enforcement: test:tools/adlc/tests/test_bug291_exec_launch_11_gaps.py
 generalizes: []
