@@ -10,8 +10,8 @@ domain: "adlc"
 stack: ["bash", "python"]
 concerns: ["correctness", "developer-experience", "unattended"]
 tags: ["forge-adapter", "error-classification", "pr-create", "draft-pr", "duplicate-pr", "network", "forge-mock", "misleading-diagnostics", "vendored-partial"]
-introduced_by: []
-attribution: none
+introduced_by: [REQ-520]
+attribution: derived
 ---
 
 ## Description
@@ -77,7 +77,7 @@ Who reads `error_class`, and what each does with a class it does not name. Found
 
 So no reader breaks. The two programs that name a class read a `pr_view` and a `pr_merge`, and no forge answers either with this refusal. The one caller that meets it is a session reading a fence's output, and it is the reader the class is for.
 
-Attribution: `git blame` on the classifier (`partials/forge.sh` 272-321 at `a0eeab8`) returns two REQs, REQ-520 and REQ-719. REQ-520 wrote the function, its class set and its `network` default; REQ-719's lines in the range are the missing-CLI arm and one `pr-not-found` pattern, neither of which is this defect. Two candidates, so nothing is written: the operator chooses.
+Attribution: `git blame` on the classifier (`partials/forge.sh` 272-321 at `a0eeab8`) returns two REQs, REQ-520 and REQ-719. REQ-520 wrote the function, its class set and its `network` default; REQ-719's lines in the range are the missing-CLI arm and one `pr-not-found` pattern, neither of which is this defect. Two candidates, so nothing was written when the bug was resolved: the operator chooses. On 2026-11-23 the owner chose REQ-520.
 
 ## Resolution
 
@@ -150,8 +150,6 @@ Merged as `78500a2` ([#321](https://github.com/atelier-fashion/adlc-toolkit/pull
 The suites ran on `14e5498`, which is `a0eeab8` plus the fix: `tools/adlc/tests` 2828 passed and 2 skipped, `partials/tests/run.sh` 9749 cases under bash, zsh, sh and dash, `tools/lint-skills/check.sh` 0, `fence_census.py --check` 0. They were not run again on `78500a2`. The one commit between, #320, touches four research and spec files and none of these.
 
 No refusal sentence was read off a live forge, and no real `codex` or `claude` launch has run against the class. LESSON-438 asks that a classifier's markers be copied from captured output of the induced failure, never from documentation or recollection. Two of the three here are not: inducing this one means opening a duplicate PR on a real forge. The first duplicate create a real run meets is the measurement; its `raw=` lines are what to compare with `forge.test.sh` §4e.
-
-`introduced_by` stays empty: blame returned REQ-520 and REQ-719 and the operator has not chosen.
 
 ## Lessons
 
