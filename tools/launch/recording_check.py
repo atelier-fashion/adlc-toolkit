@@ -21,7 +21,7 @@ code: the tests' fakes write both shapes. The checks:
 - ``home-path``: a ``/Users/<name>/`` (in any case) or ``/home/<name>`` path, except a
   URL's own (:func:`_first_home_path`); or a Windows users directory;
 - ``credential``: a credential shape, by ``tools/adlc/credential_redact.py``'s chains, over
-  each line in overlapping windows (one chain is quadratic on a long line);
+  each line whole (the chains are linear in a line's length, BUG-295);
 - ``oversize``: the output drawn passes :data:`MAX_RENDER` characters: no content check runs;
 - ``denylist``: a name ``tools/dataset/denylist.json`` lists: each private repository and
   its aliases and each person, as whole words in any case with ``-``, ``_``, a space or
@@ -76,8 +76,6 @@ CAST_NAME, GIF_NAME = "demo.cast", "demo.gif"
 
 #: :func:`render`'s widest line, whatever the header says, and the most text it builds.
 MAX_WIDTH, MAX_RENDER = 1000, 4 * 1024 * 1024
-#: The credential chains read a line in windows this long, each overlapping the last by this.
-CREDENTIAL_WINDOW, CREDENTIAL_OVERLAP = 2000, 256
 
 LENGTH, GIF_SIZE, EMPTY, MALFORMED = "length", "gif-size", "empty", "malformed"
 HOME_PATH, CREDENTIAL, DENYLIST, FORBIDDEN = "home-path", "credential", "denylist", "forbidden"
@@ -397,24 +395,17 @@ def _first_home_path(text):
     return None
 
 
-def _windows(text):
-    """``(offset, piece)`` for each line of ``text``, one longer than :data:`CREDENTIAL_WINDOW`
-    in windows that long, each overlapping the last by :data:`CREDENTIAL_OVERLAP`: a shape
-    no longer than that is whole in one of them."""
-    step, offset = CREDENTIAL_WINDOW - CREDENTIAL_OVERLAP, 0
-    for line in text.split("\n"):
-        for start in range(0, max(len(line) - CREDENTIAL_OVERLAP, 1), step):
-            yield offset + start, line[start:start + CREDENTIAL_WINDOW]
-        offset += len(line) + 1
-
-
 def _first_credential(text):
-    """Where a credential shape first appears in ``text``, window by window
-    (:func:`_windows`): a ``credential_redact`` chain is quadratic on a long line."""
+    """Where a credential shape first appears in ``text``, one line at a time, as the
+    chains' shell originals read it. Each line is read whole: the chains are linear in a
+    line's length (BUG-295), and a window would hide a shape longer than itself."""
     patterns = credential_redact.ALL_PATTERNS
-    for offset, piece in _windows(text):
-        if credential_redact.find(piece, patterns):
-            return offset + min(m.start() for m in (p.search(piece) for p in patterns) if m)
+    offset = 0
+    for line in text.split("\n"):
+        starts = [m.start() for m in (p.search(line) for p in patterns) if m]
+        if starts:
+            return offset + min(starts)
+        offset += len(line) + 1
     return None
 
 

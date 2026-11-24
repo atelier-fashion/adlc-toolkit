@@ -520,8 +520,13 @@ adlc_lesson_check() {
   # (partials/lesson-check.md, "Departures from the original ADR-3", says why). The
   # assignment arm matches its keyword in any case but wants `=` and 8+ characters, so
   # `GITHUB_TOKEN: was unset in CI` — prose about a variable — is not a credential.
+  # Three repeats are bounded (BUG-295), because the Python copy runs in a backtracking
+  # engine that re-read a long line from every start: 64 identifier characters on each
+  # side of the assignment keyword, and a JWT header of up to 255 characters. A longer
+  # header is read by its last 255 characters (255 is the largest repeat POSIX
+  # guarantees), an exact count, so no start reads further than that.
   # Mirrored in tools/adlc/credential_redact.py and pinned by tools/adlc/tests/test_credential_redact.py.
-  _alc_cred='sk-[A-Za-z0-9_-]{20,}|(sk|rk)_(live|test)_[A-Za-z0-9]{20,}|(AKIA|ASIA|ABIA|ACCA|AIPA|ANPA|AROA)[A-Z0-9]{16}|(github_pat_|gh[opsur]_)[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36}|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.|-----BEGIN [A-Z ]*PRIVATE KEY|Bearer [A-Za-z0-9._-]{20,}|://[^/ :@]+:[^/ @]+@|[A-Za-z_]*([Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Aa][Pp][Ii]_[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn])[A-Za-z_]*[ [:space:]]*=[ [:space:]]*[^[:space:]]{8,}'
+  _alc_cred='sk-[A-Za-z0-9_-]{20,}|(sk|rk)_(live|test)_[A-Za-z0-9]{20,}|(AKIA|ASIA|ABIA|ACCA|AIPA|ANPA|AROA)[A-Z0-9]{16}|(github_pat_|gh[opsur]_)[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36}|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]{1,255}\.eyJ[A-Za-z0-9_-]+\.|[A-Za-z0-9_-]{255}\.eyJ[A-Za-z0-9_-]+\.|-----BEGIN [A-Z ]*PRIVATE KEY|Bearer [A-Za-z0-9._-]{20,}|://[^/ :@]+:[^/ @]+@|[A-Za-z_]{0,64}([Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Aa][Pp][Ii]_[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn])[A-Za-z_]{0,64}[ [:space:]]*=[ [:space:]]*[^[:space:]]{8,}'
   _alc_cred_why='carries a credential-shaped string (an API key, access token, JWT, private key, URL user:password@ or secret/password/token/api_key assignment) — remove it; the check rejects, it never redacts'
   _alc_report "$(_alc_scan "$_alc_cred" "$_alc_cred_why" "$_alc_cred_why")"
 

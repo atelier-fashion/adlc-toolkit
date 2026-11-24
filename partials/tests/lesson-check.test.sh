@@ -469,6 +469,18 @@ ev_reject credential_google_key_rejected "BUG-249 leaked $AIZA in the log" "cred
 ev_reject credential_jwt_rejected "BUG-249 leaked $JWT in the log" "credential-shaped"
 ev_reject credential_pem_rejected "BUG-249 pasted $PEM into the log" "credential-shaped"
 
+# BUG-295: the assignment arm reads 64 identifier characters on each side of its
+# keyword, and the JWT arm a header of up to 255 characters, or the last 255 of a longer
+# one. Each is the bound that keeps the chain linear in a line's length
+# (tools/adlc/tests/test_credential_redact.py measures it).
+L60=$(printf '%060d' 0 | tr 0 a)
+L300=$(printf '%0300d' 0 | tr 0 a)
+ev_reject credential_long_name_before_keyword_rejected "BUG-249 ran with ${L60}_pass""word=hunter22hunter set" "credential-shaped"
+ev_reject credential_long_name_after_keyword_rejected "BUG-249 ran with pass""word_${L60}=hunter22hunter set" "credential-shaped"
+ev_reject credential_jwt_long_header_rejected "BUG-249 leaked ey""J$L300.ey""JzdWIiOiIxMjM0In0.c2ln in the log" "credential-shaped"
+ev_reject credential_jwt_glued_to_a_word_rejected "BUG-249 leaked id-$JWT in the log" "credential-shaped"
+ev_reject credential_jwt_long_header_glued_to_a_word_rejected "BUG-249 leaked id-ey""J$L300.ey""JzdWIiOiIxMjM0In0.c2ln in the log" "credential-shaped"
+
 # The benign side: a short sk- prefix, and prose that names a token variable.
 ev_accept credential_sk_19_chars_passes "BUG-249 the prefix $SK19 was truncated"
 lesson tokprose "$(six process 'GITHUB_TOKEN: was unset in CI (BUG-123)' high)"

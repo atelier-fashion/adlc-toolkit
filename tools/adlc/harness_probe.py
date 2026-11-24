@@ -107,11 +107,13 @@ def new_nonce() -> str:
 #: partials/intake.sh's five-pattern chain, ported (architecture ADR-3). sed works
 #: line by line, so its ``[[:space:]]`` never matches a newline; the translation
 #: keeps that. ``tests/test_harness_probe_pins.py`` holds this text equal to the
-#: partial's and the two outputs equal over a corpus.
+#: partial's and the two outputs equal over a corpus. The assignment arm reads a
+#: name of at most 64 characters: unbounded, it re-read a long line from every
+#: start (BUG-295).
 REDACT_PATTERN = (
     r"(sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16}|ghp_[A-Za-z0-9]{36,}"
     r"|Bearer [A-Za-z0-9._-]{20,}"
-    r"|[A-Z_]+_(API_KEY|TOKEN)[ \t\r\f\v]*[=:][ \t\r\f\v]*[^ \t\n\r\f\v]+)"
+    r"|[A-Z_]{1,64}_(API_KEY|TOKEN)[ \t\r\f\v]*[=:][ \t\r\f\v]*[^ \t\n\r\f\v]+)"
 )
 REDACT_RE = re.compile(REDACT_PATTERN)
 REDACTED = "[REDACTED]"
@@ -123,7 +125,7 @@ _REDACT_ARMS = tuple(re.compile(arm) for arm in (
     r"AKIA[A-Z0-9]{16}",
     r"ghp_[A-Za-z0-9]{36,}",
     r"Bearer [A-Za-z0-9._-]{20,}",
-    r"[A-Z_]+_(API_KEY|TOKEN)[ \t\r\f\v]*[=:][ \t\r\f\v]*[^ \t\n\r\f\v]+",
+    r"[A-Z_]{1,64}_(API_KEY|TOKEN)[ \t\r\f\v]*[=:][ \t\r\f\v]*[^ \t\n\r\f\v]+",
 ))
 
 

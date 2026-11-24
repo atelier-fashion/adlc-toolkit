@@ -383,6 +383,24 @@ check "redact removes the .bak file" "" "$(ls "$SANDBOX/creds.txt.bak" 2>/dev/nu
 adlc_intake_redact "$SANDBOX/nope.txt" >/dev/null 2>&1
 check "redact rejects unwritable path" "2" "$?"
 
+# BUG-295: the name before _API_KEY or _TOKEN is read for 64 characters, so the arm no
+# longer re-reads a long line from every start. A real name still goes whole. A longer
+# one keeps its head and loses its value, which is the part that matters.
+N64=$(printf '%064d' 0 | tr 0 A)
+N70=$(printf '%070d' 0 | tr 0 A)
+{
+  echo "${N64}_API_KEY=supersecretvalue tail"
+  echo "${N70}_TOKEN: tok_abcdefghijklmnop tail"
+  echo "export ACTIONS_ID_TOKEN_REQUEST_TOKEN=tok_abcdefghijklmnop next"
+  echo "fooBAR_TOKEN=tok_abcdefghijklmnop"
+} > "$SANDBOX/bound.txt"
+adlc_intake_redact "$SANDBOX/bound.txt"
+check "BUG-295 redact rc" "0" "$?"
+check "BUG-295 redact: a 64-character name goes whole" "[REDACTED] tail" "$(sed -n 1p "$SANDBOX/bound.txt")"
+check "BUG-295 redact: a 70-character name keeps six characters and loses its value" "AAAAAA[REDACTED] tail" "$(sed -n 2p "$SANDBOX/bound.txt")"
+check "BUG-295 redact: a real name is redacted as before" "export [REDACTED] next" "$(sed -n 3p "$SANDBOX/bound.txt")"
+check "BUG-295 redact: a name inside a word is redacted as before" "foo[REDACTED]" "$(sed -n 4p "$SANDBOX/bound.txt")"
+
 # ===========================================================================
 # 6. Template-derived gap sections
 # ===========================================================================

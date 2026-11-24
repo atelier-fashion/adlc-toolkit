@@ -43,7 +43,7 @@
       "AKIA[A-Z0-9]{16}",
       "ghp_[A-Za-z0-9]{36,}",
       "Bearer [A-Za-z0-9._-]{20,}",
-      "[A-Z_]+_(API_KEY|TOKEN)[ \\t\\v\\f\\r]*[=:][ \\t\\v\\f\\r]*[^ \\t\\n\\v\\f\\r]+"
+      "[A-Z_]{1,64}_(API_KEY|TOKEN)[ \\t\\v\\f\\r]*[=:][ \\t\\v\\f\\r]*[^ \\t\\n\\v\\f\\r]+"
     ],
     "installCommands": [
       "claude plugin marketplace add atelier-fashion/adlc-toolkit",

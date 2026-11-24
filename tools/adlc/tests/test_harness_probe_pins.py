@@ -14,6 +14,9 @@ import re
 import subprocess
 import sys
 import sysconfig
+import time
+
+import pytest
 
 import harness_probe as hp
 
@@ -93,6 +96,37 @@ def test_redaction_output_matches_intake_chain(tmp_path):
                           str(path)], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     assert path.read_text() == hp.redact(corpus)
+
+
+@pytest.mark.parametrize("unit,tail", [("AB_", ""), ("_TOKEN", ""), ("A", "_API_KEY")],
+                         ids=["capitals and underscores", "_TOKEN repeated",
+                              "a long run before _API_KEY"])
+def test_bug_295_redact_is_linear_in_line_length(unit, tail):
+    """BUG-295: the assignment arm re-read a long line from every start.
+
+    Two sizes and their ratio, never an absolute time: four times the input
+    costs about 4 times the CPU when the arm is linear and 16 when it is not.
+    """
+    def cost(n):
+        line = (unit * (n // len(unit) + 1))[:n] + tail
+        best = None
+        for _ in range(3):
+            start = time.process_time()
+            assert hp.redact(line) == line
+            took = time.process_time() - start
+            best = took if best is None else min(best, took)
+        return best
+
+    small, big = cost(10000), cost(40000)
+    assert big <= max(small, 0.0005) * 8, (
+        "BUG-295: redact took %.4f s at 10,000 characters and %.4f s at 40,000" % (small, big))
+
+
+def test_bug_295_bounded_arm_redacts_as_before():
+    """The name's bound is 64 characters; past it the value still goes."""
+    assert hp.redact("export GITHUB_TOKEN=abc123 next") == "export [REDACTED] next"
+    assert hp.redact("A" * 64 + "_API_KEY: v") == "[REDACTED]"
+    assert hp.redact("A" * 70 + "_API_KEY: v") == "A" * 6 + "[REDACTED]"
 
 
 def _imports(path):
