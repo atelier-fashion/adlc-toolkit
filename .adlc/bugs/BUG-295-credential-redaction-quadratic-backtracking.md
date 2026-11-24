@@ -1,10 +1,10 @@
 ---
 id: BUG-295
 title: "Three arms of the credential chains backtrack quadratically, or worse, on one long line: in Python and in the Space's JavaScript, not in macOS sed or grep"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-23
-updated: 2026-11-23
+updated: 2026-11-24
 component: "adlc/tools/adlc/credential-redact"
 domain: "adlc"
 stack: ["python", "shell", "javascript", "regex"]
@@ -246,3 +246,9 @@ What was not measured:
 - `.adlc/context/architecture.md`: one note where the third copy is described.
 - `CHANGELOG.md`: one entry under Fixed.
 - `.adlc/bugs/BUG-295-credential-redaction-quadratic-backtracking.md`: this report.
+
+## Deployment
+
+- Merged to `main` on 2026-11-24 as `6ac492e`, the squash of PR #330. The regression gate reported `off` for this project before the merge.
+- No staging or production service: the toolkit is installed from a checkout. A machine has the fix once its toolkit checkout is at `6ac492e` or later. A project that vendored `.adlc/partials/` has the bounded `intake.sh` and `lesson-check.sh` once the project is re-synced. The Space has it once it is published again from `6ac492e` or later.
+- The lesson from the fix is LESSON-908.
