@@ -1,7 +1,7 @@
 ---
 id: BUG-296
 title: "Intake cleanup removes a directory outside every temp root when the source path leaves the root through .. or a symlink: the guard matches the text of the path"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-24
 updated: 2026-11-24
@@ -193,3 +193,14 @@ What was not measured:
 - `partials/README.md`: the function's entry says the temp root is checked by text and by resolution.
 - `CHANGELOG.md`: one entry under Fixed, and the BUG-293 entry's last sentence, which said this was not changed.
 - `.adlc/bugs/BUG-296-intake-cleanup-unresolved-path.md`: this report.
+
+## Deployment
+
+- Merged to `main` on 2026-11-24 as `6ec040f`, the squash of PR #333, on the owner's yes. The regression gate reads `off` for this project.
+- Checked on `main` at `6ec040f` afterwards: `partials/tests/intake.test.sh` passes, 153 of 153, under bash, zsh, sh and dash, with and without `TMPDIR` in the environment, under a throwaway `HOME`. The full `partials/tests/run.sh` was not run again on `main`: between the base the two full passes ran on (`6ac492e`) and `6ec040f`, `main` gained this fix and four Markdown files.
+- No staging or production service: the toolkit is installed from a checkout. A machine has the fix once its toolkit checkout is at `6ec040f` or later. A project that vendored `.adlc/partials/` has it once the project is re-synced; none was re-synced here.
+- Still open, as listed under Resolution and under "What was not measured": Linux was not run; a directory whose name ends in a newline has its sibling removed, before the fix and after it; a `TMPDIR` that is absolute but not a temp root is taken at its word.
+
+## Lessons
+
+- LESSON-910: a guard that reads a path as text and a deletion that follows the filesystem can name two directories. Resolve the path and the root it is checked against, then delete what was resolved; and for `cd`, `command` is not the way past a function.
