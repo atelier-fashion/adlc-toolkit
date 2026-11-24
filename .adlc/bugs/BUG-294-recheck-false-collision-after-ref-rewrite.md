@@ -1,10 +1,10 @@
 ---
 id: BUG-294
 title: "The id recheck calls this machine's own reservation a collision once the ref's commit SHA changes: the ledger identifies a reservation by SHA alone"
-status: open
+status: resolved
 severity: medium
 created: 2026-11-23
-updated: 2026-11-23
+updated: 2026-11-24
 component: "adlc/partials/id-recheck"
 domain: "adlc"
 stack: ["shell", "git"]
@@ -198,3 +198,9 @@ What was not measured:
 - `harness/claude/exec-fence-census.json`, `harness/codex/exec-fence-census.json` — regenerated with `fence_census.py --write`. One line each: the `/wrapup` lesson-recheck fence now reaches `git cat-file`. Its route is still `runner`, and `git fetch` was in its reach already.
 - `CHANGELOG.md` — the entry under Unreleased, Fixed.
 - `.adlc/bugs/BUG-294-recheck-false-collision-after-ref-rewrite.md` — this report.
+
+## Deployment
+
+- Merged to `main` on 2026-11-23 as `34a0525`, the squash of PR #326. The regression gate reported `off` for this project before the merge.
+- No staging or production service: the toolkit is installed from a checkout. A machine has the fix once its toolkit checkout is at `34a0525` or later. A project that vendored `.adlc/partials/` has it once the project is re-synced.
+- The lesson from the fix is LESSON-907.
