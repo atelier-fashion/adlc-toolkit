@@ -6,6 +6,9 @@
 name: antigravity
 schema_version: 4
 binary: agy
+# REQ-722 BR-2, BR-3: it can run models of more than one family, so no single family
+# is declared and a cross-family review of its work is skipped.
+model_family: unknown
 
 paths:
   # User-level copies; a project render never writes these. A file without the marker is

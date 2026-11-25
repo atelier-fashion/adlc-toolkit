@@ -714,3 +714,29 @@ def test_req719_the_taint_flow_is_gone():
     machinery it replaced is not kept beside it."""
     for name in ("tainted_vars", "_flow", "_taint_in", "_feeder", "_Parser", "_parse"):
         assert not hasattr(fc, name), name
+
+
+# --------------------------------------------------------------------------- REQ-722 Phase 5
+@pytest.mark.parametrize("value, ok", [
+    ("adlc-toolkit", True), ("api", True), ("web.app", True), ("_x", True), ("a" * 64, True),
+    ("", False), ("-x", False), (".x", False), ("a b", False), ("a;b", False),
+    ("$(id)", False), ("../x", False), ("a" * 65, False), ("a\nb", False),
+])
+def test_repo_id_placeholder_admits_only_the_record_charset(value, ok):
+    """The `<repo-id>` the cross-family fences take: must-fire and must-not-fire (LESSON-906)."""
+    assert (fc.PLACEHOLDERS["repo-id"].check(value) is None) is ok
+
+
+@pytest.mark.parametrize("value, ok", [
+    ("contradicted by a.py:3", True), ("test:tools/x/test_a.py::test_b", True),
+    ("", False), ("-x", False), ("a\nb", False), ("a\x00b", False), ("x" * 241, False),
+])
+def test_decline_reason_placeholder_is_one_line_of_data(value, ok):
+    """`<declineReason>` is one line that never starts an option; the runner binds it as an
+    environment value, so shell text in it stays data (test_fence_run's hostile values)."""
+    assert (fc.PLACEHOLDERS["declineReason"].check(value) is None) is ok
+
+
+def test_cross_family_companion_is_delivered_to_exec_runs():
+    """BR-12: an exec run reads the cross-family companion, so it records the review too."""
+    assert "proceed/phases-cross-family.md" in ep.PIPELINE_SOURCES

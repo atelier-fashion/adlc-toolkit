@@ -17,6 +17,9 @@ The output contract under test (BR-9 / ADR-3), on stdout, exit 0:
 
 `extract-chat` prints the version line only (no delegate config). On a refused
 config the contract is the version line plus a single `config_error:` line.
+When a config file exists, one more line follows `enabled:` — `family: <value>`
+(REQ-722) — and with no config file there is none, so the bare-machine report
+above is unchanged.
 
 BR-4 verification strategy (no eager SDK import) — two complementary checks,
 since neither alone is conclusive:
@@ -55,8 +58,10 @@ EXTRACT_CHAT = os.path.join(TOOLS, "extract-chat")
 # Everything a copied `adlc-read` needs beside it to start at all. `_common`
 # imports `_machine_config` (REQ-609 ADR-1), so a fake checkout carrying only
 # `_common.py` dies on import — and the failure would read as a version bug.
+# `_machine_config` loads `model_family` beside it on first use (REQ-722).
 _ADLC_READ_FILES = (os.path.join(TOOLS, "_common.py"),
                     os.path.join(TOOLS, "_machine_config.py"),
+                    os.path.join(TOOLS, "model_family.py"),
                     ADLC_READ)
 
 ALL_CLIS = (ADLC_READ, ADLC_WRITE, EXTRACT_CHAT)
@@ -272,6 +277,42 @@ def test_config_file_values_appear_in_output(cli, tmp_path):
     assert cfg["base_url"] == "https://cfg.example/v1"
     assert cfg["api_key_env"] == "MY_PROVIDER_KEY"
     assert cfg["enabled"] == "true"
+
+
+# --- REQ-722: `family:` with a config file, and only then -----------------
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+@pytest.mark.parametrize("body,expected", [
+    ('delegate:\n  enabled: true\n  family: moonshot\n', "moonshot"),
+    ('delegate:\n  enabled: true\n', "unknown"),
+    ('forge:\n  provider: github\n', "unknown"),
+    ('delegate:\n  family: Moonshot\n', "unknown"),   # refused file: still exists
+], ids=["declared", "section-without-family", "no-delegate-section", "refused"])
+def test_family_line_is_present_with_a_config_file(cli, tmp_path, body, expected):
+    _write_config(tmp_path, body)
+    r = _version_run(cli, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = r.stdout.rstrip("\n").split("\n")
+    assert lines[-1] == "family: " + expected, r.stdout
+    assert [ln for ln in lines if ln.startswith("family:")] == [lines[-1]]
+    assert set(_config_lines(r.stdout)) == BR9_CONFIG_KEYS | {"family"}
+
+
+@pytest.mark.parametrize("cli", CONFIG_CLIS, ids=os.path.basename)
+def test_family_line_is_absent_without_a_config_file(cli, tmp_path):
+    """The no-config report is the BR-9 lines, exactly, as before REQ-722."""
+    r = _version_run(cli, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "family:" not in r.stdout, r.stdout
+    assert set(_config_lines(r.stdout)) == BR9_CONFIG_KEYS
+
+
+def test_family_line_on_extract_chat_never_appears(tmp_path):
+    """extract-chat has no delegate config, so no family either."""
+    _write_config(tmp_path, 'delegate:\n  family: anthropic\n')
+    r = _version_run(EXTRACT_CHAT, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout == VERSION_LINE + "\n", r.stdout
 
 
 # --- BR-2: the key VALUE is never read or printed --------------------------

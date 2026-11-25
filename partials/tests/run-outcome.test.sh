@@ -16,6 +16,10 @@
 #   rejected_exec      — REQ-719: `rejected` with --engine exec appends one line, no reason
 #   record_passthrough — record-validate writes validateAttempts and relays its line
 #   record_carry       — record-carry fills only the keys the primary copy lacks
+#   pre_req_compat     — REQ-722 AC-15: a state from before REQ-722 emits lines with no
+#                        crossFamily object, elapsed_s still the last key
+#   record_cross_family — REQ-722 BR-5: record-cross-family passes through, a bad reason
+#                        is rc 0 plus one line, and the next line ends with the object
 #   record_failure     — a record on a missing state: rc 0, one stderr line
 #   no_python          — python3 not on PATH: rc 0, one stderr line, no log
 #   module_missing     — the wrapper copied away from run_outcome.py: rc 0, one line
@@ -109,6 +113,29 @@ out=$("$SUT" "$WRAP" record-carry --state "$STATE" --from "$WSTATE" 2>/dev/null)
 check "record_carry: rc" 0 "$rc"
 check "record_carry: relayed line" "carried: phaseHistory" "$out"
 check "record_carry: the primary copy's harness wins" 1 "$(command grep -c '"sha": "c013262"' "$STATE")"
+
+# --- pre_req_compat (REQ-722 AC-15) ---------------------------------------------
+# Every line so far was built from a state that predates REQ-722: none carries the
+# optional crossFamily object, so each still ends at REQ-648's last key.
+check "pre_req_compat: no crossFamily key" 0 "$(command grep -c 'crossFamily' "$LOG")"
+check "pre_req_compat: elapsed_s ends every line" 4 "$(command grep -c '"elapsed_s":"[^"]*"}$' "$LOG")"
+
+# --- record_cross_family (REQ-722 BR-5) ----------------------------------------
+out=$("$SUT" "$WRAP" record-cross-family --state "$STATE" --repo adlc-toolkit --status skipped --reason same-family --implementer anthropic --reviewer anthropic 2>/dev/null); rc=$?
+check "record_cross_family: rc" 0 "$rc"
+check "record_cross_family: relayed line" "crossFamilyReview: adlc-toolkit skipped same-family, 0 finding(s), 0 dropped" "$out"
+check "record_cross_family: key written" 1 "$(command grep -c '"crossFamilyReview"' "$STATE")"
+cp "$STATE" "$SANDBOX/state.before"
+err=$("$SUT" "$WRAP" record-cross-family --state "$STATE" --repo adlc-toolkit --status skipped --reason too-slow --implementer anthropic --reviewer anthropic 2>&1 >/dev/null); rc=$?
+check "record_cross_family: a reason outside the vocabulary is rc 0" 0 "$rc"
+check "record_cross_family: failed line" 1 "$(printf '%s\n' "$err" | command grep -c '^run-outcome: record-cross-family failed (rc 2)')"
+if cmp -s "$SANDBOX/state.before" "$STATE"; then same=yes; else same=no; fi
+check "record_cross_family: state untouched" yes "$same"
+ADLC_RUN_OUTCOMES_LOG="$LOG" "$SUT" "$WRAP" --state "$STATE" --terminal merged --engine solo 2>/dev/null
+# Fixed-string checks: a long BRE with a bracket class and `{` misses on BSD grep.
+check "record_cross_family: the next line carries the object" 1 "$(command grep -c -F ',"crossFamily":{"findings":"0","cross_only":"0","fixed":"0","declined":"0","repos":{"adlc-toolkit":{"status":"skipped","reason":"same-family"}}}}' "$LOG")"
+check "record_cross_family: right after elapsed_s" 1 "$(command grep -c '"elapsed_s":"[0-9-]*","crossFamily":{' "$LOG")"
+check "record_cross_family: as the line's last key" '"same-family"}}}}' "$(tail -c 18 "$LOG")"
 
 # --- record_failure -----------------------------------------------------------
 err=$("$SUT" "$WRAP" record-verify --state "$SANDBOX/absent.json" --findings - < /dev/null 2>&1 >/dev/null); rc=$?

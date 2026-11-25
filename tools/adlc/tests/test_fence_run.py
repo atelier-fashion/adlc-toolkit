@@ -34,6 +34,7 @@ SAMPLES = {
     "mark": "adlc-transcript-mark-0123456789abcdef", "ids": "NO_ENTRY", "req": "REQ-901",
     "req_ids": "", "flag": "{cwd}/adlc-skill-flag.abc123", "REQ": "REQ-901", "LESSON_NUM": "901",
     "FINAL_TITLE": "A title", "ciWait": "0", "REPO_ID": "", "PRIMARY_WORKTREE": "",
+    "repo_id": "adlc-toolkit", "declineReason": "contradicted by a.py:3",
 }
 FILE_SAMPLES = {"NEW_BODY": "A body.\n", "lane_escalated": "a reason", "MAPPER_PATHS": "a/b.py\n"}
 HOSTILE = ("$(touch {s})", "`touch {s}`", "x;touch {s}", "x\ntouch {s}", "--force", "main",

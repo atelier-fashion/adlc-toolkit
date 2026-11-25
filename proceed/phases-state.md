@@ -99,6 +99,23 @@ the same record. Absent means not recorded: the emitter prints `-` or `0` for
 what it derives from a missing key, and nothing reads any of them for control
 flow.
 
+`crossFamilyReview`, and three fields of a `verify` finding, are optional and
+additive (REQ-722). `crossFamilyReview.<repo>` is
+`{ status, reason, implementerFamily, reviewerFamily, findingCount, droppedCount, declinedCount }`:
+`status` is `ran` or `skipped`, `reason` is present only on a skip and is one of
+`cross_family.py`'s `SKIP_REASONS`, and both families are `ModelFamily` values. Its
+one writer is `run_outcome.py record-cross-family`, called by the cross-family
+review partial at the moment the review runs or skips, into the primary-path copy as
+`verify` is; `declinedCount` is derived from `verify` on every write. A finding's
+`source` lists who raised it (`panel`, `cross-family`, or both), `disposition` is
+`fixed`, `deferred` or `declined`, and `declineReason` is the redacted reason for a
+decline. An R3 re-record that omits `disposition` or `declineReason` keeps the
+earlier entry's (same file and normalised title), and `source` only grows, so Step D
+cannot erase a decline. Absent means not recorded (a run before REQ-722, or a lite
+run), never `ran`; `/status`, resume and the emitter read a file without them
+unchanged. `record-harness --fresh` clears `crossFamilyReview` with the other
+run-outcome keys, and the exec engine's close-out keeps the primary path's copy.
+
 `status`, `approval` and `exec` are optional and additive (REQ-659): they exist only on a run of the `/sprint` exec engine, and absent means everything above behaves as it always did. `blockers`, `completed`, `currentPhase`, `completedPhases`, `phaseHistory`, `repos[*].merged`, `conflictsResolved` and `closeOut` keep their meanings. `status` is one of `running`, `awaiting_approval`, `approved`, `merging`, `merged`, `blocked`, `failed`, `rejected`, `stalled`. `approval` is `{ action, repos, prs, deploy, command, requestedAt, decision, decidedAt, decidedBy, channel, callerPid, reason, holdBehind }`: the model writes the first group as display data at the merge gate, and `action` is the closed value `merge`; the decision fields are a mirror of the orchestrator's ledger, which is outside every working copy and is the only record an approval is executed from. `exec` is `{ engine, harness, strategy, workingCopy, pid, closeOutPid, sessionId, startedAt, promptPath, logPath, stalledAt, trustMechanism, trustGrantedAt, trustRevokedAt, exitCode, exitClass, abortedBy, abortedAt, abortedFrom }`, holding file names and never the run directory. While the harness process is alive the orchestrator never writes the working-copy file; its fields go to its own run directory and are merged into the primary-path copy after the process exits, and that copy is then authoritative. The engine's gate on a close-out's chore PR may also leave `closeOut.status` at `needs-review`, with the PR open.
 
 The `repos` block is the canonical registry for this pipeline run. Every cd/commit/push/PR/merge operation reads the target repo's `path` or `worktree` from here — never from cwd inference. `touched: true` means at least one task targets this repo; untouched repos skip Phases 4–8. `mergeOrder` is the list of touched repo ids in the order Phase 8 will merge them (primary is always a member).

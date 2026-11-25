@@ -31,7 +31,7 @@ fence again; if the line prints a second time, relay it and continue (BUG-289).
 `--fresh` on a fresh run and empty on a resume: the same decision Step 0 item 7
 makes for the lessons, read from the progress record and never from whether a
 `harness` key exists (LESSON-719). `--fresh` also clears the `validateAttempts`,
-`verify` and `lessonsWritten` an earlier run of this REQ left behind.
+`verify`, `lessonsWritten` and `crossFamilyReview` an earlier run of this REQ left behind.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -53,7 +53,15 @@ log). One JSON object per consolidated finding: `severity`, `file`, `title`, the
 `class` its reviewer gave it, `lessonId` when it matched a lesson in the Phase-5
 set, and `fixed` (`true` only once its fix commit has landed). `--loops` is `1`
 when Step D re-verified, else `0`. The engine normalises the severity scale and
-the class tiers; pass what the reviewers reported.
+the class tiers; pass what the reviewers reported. When the cross-family reviewer
+ran (REQ-722), also pass each finding's `source` (`["panel"]`, `["cross-family"]`,
+or both), `mustFix: true` on a must-fix finding (the disposition check refuses to let
+one be deferred, and reads it from here), its `line` when it has one, and once Step C
+has decided it, its `disposition` (`fixed`, `deferred` or `declined`) and, for a
+decline, its `declineReason`. A re-record that leaves them
+out keeps the earlier record's, so Step D's call cannot erase a decline. The review's
+own record is written by `record-cross-family`, which the cross-family review partial
+calls when the review runs or skips; no fence in this file makes that call.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"
@@ -79,7 +87,9 @@ halt before you stop (`blocked`, with the halt's token below), and on a `failed`
 terminal. A resumed run that reaches another terminal emits again; readers keep
 the latest line per REQ. Halt tokens: `validation-exhausted` (halt #1),
 `reflector-questions` (#2), `merge-conflict` (#3), `other` (#4, a failed lane
-check). A `failed` terminal passes `setup-error`, `no-worktree` or `no-pr`.
+check). A `failed` terminal passes `setup-error`, `no-worktree` or `no-pr`. When
+the state holds a cross-family review, the line ends with a `crossFamily` object
+that the emitter derives from it (REQ-722 BR-13); you pass nothing more.
 
 ```sh
 ADLC_TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"; [ -n "$ADLC_TOOLKIT_ROOT" ] || [ ! -d "$HOME/.claude/skills/partials" ] || ADLC_TOOLKIT_ROOT="$HOME/.claude/skills"; [ -n "$ADLC_TOOLKIT_ROOT" ] || ADLC_TOOLKIT_ROOT=$(cat "$HOME/.claude/adlc/plugin-root" 2>/dev/null); export ADLC_TOOLKIT_ROOT="${ADLC_TOOLKIT_ROOT:-$HOME/.claude/skills}"

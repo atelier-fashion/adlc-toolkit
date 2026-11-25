@@ -270,6 +270,11 @@ PLACEHOLDERS = dict([
     _ph("LESSON-a,LESSON-b", "ids", r"NO_ENTRY|LESSON-[0-9]{3,6}(?:,LESSON-[0-9]{3,6})*"),
     _ph("the lane_escalated value, verbatim", "lane_escalated", r"[^\x00\n]{1,4000}", file=True),
     _ph("req-ids", "req_ids", r"(?:REQ-[0-9]{3,6}(?: REQ-[0-9]{3,6}){0,30})?"),
+    # REQ-722 Phase 5 (proceed/phases-cross-family.md): the repo id the cross-family review
+    # records under, in the record's own charset (cross_family / isRepoId), and the reason a
+    # decline gives, one line of data that check-decline validates and never executes.
+    _ph("repo-id", "repo_id", r"[A-Za-z0-9_][A-Za-z0-9._-]{0,63}"),
+    _ph("declineReason", "declineReason", _LINE),
 ])
 #: Literal tokens the text tells the model to replace, treated as placeholders.
 LITERAL_PLACEHOLDERS = dict([

@@ -32,6 +32,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _machine_config  # noqa: E402
+import model_family  # noqa: E402
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _DELEGATE = os.path.dirname(_HERE)
@@ -358,6 +359,32 @@ def test_readme_keys_match_schema_constant():
     keys = _schema_table_keys(_read(README))
     assert keys == set(_machine_config.DELEGATE_KEYS), (
         sorted(keys), sorted(_machine_config.DELEGATE_KEYS))
+
+
+def _schema_table_row(text, key):
+    """The cells of the anchored schema table's row for ``key``."""
+    start = text.index(_SCHEMA_START) + len(_SCHEMA_START)
+    table = text[start:text.index(_SCHEMA_END, start)]
+    for line in table.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and cells[0] == "`%s`" % key:
+            return cells
+    raise ValueError("no row for %r in the schema table" % key)
+
+
+def test_readme_table_documents_family_and_its_enum():
+    """REQ-722 BR-10: `family` is in the table (the parity test above already
+    demands it, by way of the constant), and its row names every member of the
+    closed enum, in backticks, read from `model_family` rather than restated.
+    An operator who writes a value off this row must get one the loader takes.
+    """
+    text = _read(README)
+    assert "family" in _schema_table_keys(text)
+    meaning = " | ".join(_schema_table_row(text, "family")[1:])
+    named = set(re.findall(r"`([a-z]+)`", meaning))
+    missing = set(model_family.MODEL_FAMILIES) - named
+    assert not missing, sorted(missing)
+    assert "unknown" in meaning and "Absent" in meaning, meaning
 
 
 def test_schema_table_parser_notices_a_missing_key():

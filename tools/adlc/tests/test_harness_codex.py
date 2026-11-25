@@ -203,7 +203,7 @@ def test_agent_render_restraint_and_ethos(sandbox):
             assert paras[1] == hr.RESTRAINT_SENTENCE
             restrained += 1
         assert "\nmodel = " not in text        # tier_map is unverified
-    assert restrained == 17
+    assert restrained == 18
     again = run_cli(["agents", "render", "--harness", "codex"], project)
     assert "0 changed" in again.stdout
     assert not os.path.exists(os.path.join(str(project), ".codex", "agents"))

@@ -22,6 +22,8 @@ the other (LESSON-397).
 * ``drift``    classifies the project's rendered files with template posture for
   ``/template-drift`` (ADR-11); read-only. ``--opted-in`` adds each shipped adapter
   the project has the main file of.
+* ``family``   prints the model family of the harness this process runs under, one
+  ``ModelFamily`` value, and exits 0 (REQ-722 ADR-2); read-only.
 
 ``--adapter-path <file>`` is the only way a non-detect adapter loads; ``install
 --all`` refuses it. Pure standard library.
@@ -38,7 +40,26 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import harness_adapter as ha  # noqa: E402
 import harness_render as hr  # noqa: E402
 
-VERBS = ("install", "render", "doctor", "drift")
+VERBS = ("install", "render", "doctor", "drift", "family")
+
+#: The exec engine sets this to the run's REQ id in every child it launches (REQ-662 ADR-9).
+EXEC_RUN_ENV = "ADLC_EXEC_RUN"
+#: Claude Code sets this to ``1`` in the shells it starts: observed in a Claude Code 2.1.330
+#: desktop shell on 2026-11-24 (REQ-722 TASK-279). ``checks.py``'s note that it is unverified
+#: predates that observation.
+CLAUDE_CODE_ENV = "CLAUDECODE"
+#: The adapter ``CLAUDE_CODE_ENV`` names.
+CLAUDE_CODE_HARNESS = "claude"
+#: Claude Code's second marker, set beside ``CLAUDECODE`` in the same shells (observed with it,
+#: 2026-11-24). Arm 2 needs both, so a lone inherited ``CLAUDECODE`` is not enough.
+CLAUDE_CODE_ENTRY_ENV = "CLAUDE_CODE_ENTRYPOINT"
+#: Variables another harness sets for the commands it runs. A shell started by Claude Code
+#: passes its markers on to whatever it launches, so a Codex session started from one carries
+#: ``CLAUDECODE=1`` too; Codex sets these in its sandboxed children. Only exact names count:
+#: a configuration or terminal variable (``CODEX_HOME``, ``CURSOR_TRACE_ID``) says nothing
+#: about which harness runs this process. A harness that sets no child marker of its own is a
+#: recorded residual.
+OTHER_HARNESS_ENV = ("CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED")
 
 
 def project_root():
@@ -451,6 +472,87 @@ def cmd_drift(args, out=None, err=None):
     return 1 if any(c in hr.DRIFT_FAILING for _n, _r, c, _d in rows) else 0
 
 
+def exec_run_harness(environ, cwd):
+    """The ``harness`` the exec engine recorded for the run ``ADLC_EXEC_RUN`` names, or None.
+
+    Read from the engine's run record in its state directory, never from a working copy, so
+    the session under review cannot write it (REQ-722 ADR-2). The run is the one whose digest
+    ``ADLC_EXEC_RUN_TAG`` carries, which the engine sets beside ``ADLC_EXEC_RUN`` in every
+    child; without a tag, the newest run of that REQ in the repo ``cwd`` belongs to, the
+    lookup ``sprint-exec`` makes itself. A tag no run matches, a record of another REQ, and a
+    record with no harness are each None: the caller reads ``unknown``, never another source.
+    """
+    import exec_ledger as el
+    import sprint_exec as se
+    req = environ.get(EXEC_RUN_ENV)
+    tag = environ.get(se.RUN_TAG_ENV)
+    if tag:
+        hits = [path for path in el.run_dirs(environ) if se.run_tag(path) == tag]
+        path = hits[0] if len(hits) == 1 else None
+    else:
+        try:
+            path = el.find_run(se.repo_root(cwd), req, environ)
+        except (se.Refused, OSError):
+            path = None
+    if not path:
+        return None
+    doc = el.read_json(os.path.join(path, el.RUN_RECORD), None)
+    if not isinstance(doc, dict) or doc.get("req") != req:
+        return None
+    name = doc.get("harness")
+    return name if isinstance(name, str) and name else None
+
+
+def adapter_family(name, toolkit):
+    """The family ``harness/<name>.yml`` in ``toolkit`` declares, or ``unknown``: a name with
+    no shipped adapter, or one that does not load, establishes nothing (REQ-722 BR-3)."""
+    try:
+        return ha.model_family(ha.resolve_adapter(name, toolkit=toolkit))
+    except ha.AdapterError:
+        return ha.model_families().UNKNOWN
+
+
+def implementer_family(environ, cwd, toolkit):
+    """The ``ModelFamily`` of the model running this process (REQ-722 ADR-2), in fixed order:
+
+    1. ``ADLC_EXEC_RUN`` set: the harness the exec run record names, through that adapter's
+       ``model_family``. A set marker with no readable record is ``unknown``. It never falls
+       through to the next arm, whose marker the session could set itself.
+    2. ``CLAUDECODE=1`` with ``CLAUDE_CODE_ENTRYPOINT`` set, and no other harness's marker
+       (``OTHER_HARNESS_ENV``): the ``claude`` adapter's ``model_family``. A marker is
+       inherited by every process a Claude Code shell starts, so this arm is best effort; a
+       session that sets these itself only mislabels its own review, and gains no
+       transmission, which the delegation gate alone decides.
+    3. Otherwise ``unknown``.
+
+    The family is always the adapter's declaration, never the harness name. Adapters come
+    from ``toolkit``, the installed toolkit, and never from the current directory's
+    ``.adlc/`` (LESSON-718). The model's own claim about what it is never counts.
+    """
+    unknown = ha.model_families().UNKNOWN
+    if environ.get(EXEC_RUN_ENV):
+        name = exec_run_harness(environ, cwd)
+        return adapter_family(name, toolkit) if name else unknown
+    if (environ.get(CLAUDE_CODE_ENV) == "1" and environ.get(CLAUDE_CODE_ENTRY_ENV)
+            and not any(environ.get(key) for key in OTHER_HARNESS_ENV)):
+        return adapter_family(CLAUDE_CODE_HARNESS, toolkit)
+    return unknown
+
+
+def cmd_family(args, out=None, err=None):
+    """Print one ``ModelFamily`` value and exit 0. Any failure reads ``unknown`` with one
+    stderr line: a doubt about the family costs a skipped review, never a false claim."""
+    out, err = _streams(out, err)
+    try:
+        family = implementer_family(os.environ, os.getcwd(), ha.toolkit_dir())
+    except Exception as exc:  # noqa: BLE001 — every failure is `unknown` (ADR-2)
+        err.write("adlc harness family: %s (%s); reading unknown\n"
+                  % (exc.__class__.__name__, exc))
+        family = "unknown"
+    out.write(family + "\n")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="adlc harness", add_help=True)
     sub = parser.add_subparsers(dest="verb")
@@ -485,15 +587,20 @@ def build_parser():
     t.add_argument("--opted-in", action="store_true",
                    help="also compare each shipped adapter the project has a file of")
     t.add_argument("--json", action="store_true")
+    sub.add_parser("family", help="the implementer's model family for this process "
+                                  "(REQ-722; one value, exit 0)")
     return parser
 
 
 def main(argv):
     args = build_parser().parse_args(argv)
+    if args.verb == "family":
+        # Reads no machine state under ADLC_HOME, and its contract is one value and exit 0.
+        return cmd_family(args)
     import adlc_home
     problem = adlc_home.validate()
     if problem:
         sys.stderr.write("adlc harness: %s\n" % problem)
         return 2
     return {"render": cmd_render, "install": cmd_install, "doctor": cmd_doctor,
-            "drift": cmd_drift}[args.verb](args)
+            "drift": cmd_drift, "family": cmd_family}[args.verb](args)

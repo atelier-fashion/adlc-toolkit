@@ -97,6 +97,17 @@ least every input the shell does. Both test the literal `"1"`.
 makes the gate fail closed: delegation is off, safely but silently, reported as
 `not-opted-in`.
 
+```
+adlc-read --print-family   # -> the configured `delegate.family`, e.g. "moonshot"
+```
+
+`--print-family` prints one family from the closed set (see the schema below) and
+exits 0: `unknown` when the key is absent or the config is absent or malformed. It
+is how a shell learns the reviewer family for the cross-family review (REQ-722),
+without parsing YAML itself. It reports and never authorizes, so it works with
+delegation off and with `ADLC_DISABLE_DELEGATE=1`, and makes no network call; a
+caller that will transmit still asks `--print-gate`.
+
 ### Which `adlc-read` runs (REQ-609)
 
 The gate resolves the binary by asking the **filesystem**, never the shell. It
@@ -175,6 +186,8 @@ delegate:
   base_url: "https://api.groq.com/openai/v1"
   model: "llama-3.3-70b-versatile"
   api_key_env: "GROQ_API_KEY"         # the NAME of an env var, never the key
+  family: meta                        # the model's family, declared (see the
+                                      # schema below). Absent => unknown.
 ```
 
 `api_key_env` must be the **name** of an environment variable, in
@@ -186,7 +199,7 @@ network call. The refusal never echoes the offending value.
 ### The `delegate:` schema (REQ-609)
 
 The file is parsed by **PyYAML** (`yaml.safe_load`, never `yaml.load`) behind a
-**closed schema**. The `delegate:` section accepts exactly these four keys and
+**closed schema**. The `delegate:` section accepts exactly these five keys and
 nothing else:
 
 <!-- delegate-schema:start -->
@@ -197,6 +210,7 @@ nothing else:
 | `model` | string | the model name a real call sends |
 | `base_url` | string | the OpenAI-compatible chat-completions endpoint |
 | `api_key_env` | string | the **NAME** of the env var holding the key, never the key |
+| `family` | string, one of a closed set | the declared model family of the configured `model`: exactly one of `anthropic`, `openai`, `moonshot`, `google`, `meta`, `other`, `unknown` (`tools/delegate/model_family.py`). Absent ⇒ `unknown`. Never inferred from `model` or `base_url`. An `ADLC_DELEGATE_MODEL` or `ADLC_DELEGATE_BASE_URL` override that differs from the file makes `--print-family` report `unknown`, because the declaration describes the model the file names (REQ-722). |
 
 <!-- delegate-schema:end -->
 
@@ -207,6 +221,9 @@ skipped:
 - an **unknown key** under `delegate:`, `enbaled: false` included. A typo silently
   ignored is an exfiltration the operator wrote down and did not get (LESSON-483);
   forward compatibility can be versioned when there is a second schema revision.
+- a **`family` outside its set**: a case variant (`Anthropic`), a model name
+  (`kimi-k2.6`) or any other string, and any non-string. Compared by equality only,
+  so nothing is read out of a near miss (REQ-722 BR-2).
 - a **non-boolean `enabled`**. `enabled: "false"` is the *string* `"false"`, which
   Python treats as true; it is refused as ambiguous rather than lowercased into an
   opt-out nobody wrote. YAML 1.1 spellings (`yes`, `no`, `on`, `off`) do arrive as
@@ -391,7 +408,9 @@ file, resolved from the script's own location, so it reports the toolkit's
 version and not anything derived from the directory you ran it in (nor, when the
 toolkit is vendored inside another git repo, that host repo's version) —
 followed by exactly the `base_url`, `model`, `api_key_env`, and `enabled`
-(`true`/`false`) lines.
+(`true`/`false`) lines. When a config file exists, a `family:` line follows them
+with the declared family (`unknown` when the file has no `family` key or cannot be
+read); with no config file there is no `family:` line (REQ-722).
 
 If the printed `base_url` carries credentials (`https://user:pass@host/v1`), the
 userinfo is redacted to `***@host` **on the print path only** — the real call
@@ -433,6 +452,7 @@ created mode 0600. Unlike the delegation tools these need only the system
 `terminal` is one of `merged`, `pr-ready`, `blocked`, `failed` and `rejected`.
 `blocked_reason` is empty, or one of `validation-exhausted`,
 `reflector-questions`, `merge-conflict`, `merge-unverified`, `close-out-failed`,
+`cross-family-dispositions` (the workflow engine's Phase-6 disposition refusal, REQ-722),
 `setup-error`, `no-worktree`, `no-pr`, `aborted` and `other`. Only the exec
 engine writes `rejected` (a person declined the PR at its merge gate) and
 `aborted` (its `abort` verb ended the run, with `terminal` `failed`) (REQ-719):

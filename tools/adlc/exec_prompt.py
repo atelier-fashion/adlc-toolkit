@@ -20,7 +20,7 @@ import re
 PIPELINE_SOURCES = ("proceed/phases-state.md", "proceed/phases-telemetry.md",
                     "proceed/phase-0-setup.md", "proceed/phases-1-3-validation.md",
                     "proceed/phase-4-implementation.md", "proceed/phases-6-8-ship.md",
-                    "proceed/phases-lite.md")
+                    "proceed/phases-lite.md", "proceed/phases-cross-family.md")
 
 #: Tokens no prompt may hold, with an empty allowlist (BR-24).
 EMPTY_ALLOWLIST = ("adlc_forge_pr_merge", "gh pr merge", "az repos pr", "you own the merge",

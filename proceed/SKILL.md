@@ -196,6 +196,8 @@ escalates (trigger `implementer`). See `proceed/phases-lite.md` "Phase 4 (lite)"
 
 **Lite lane:** none of the rest of this phase runs: no delegate pre-pass, no skill flag or telemetry, no reflector, no panel. Run `proceed/phases-lite.md` "Phase 5 (lite)" instead (its findings are recorded with R3 too): one `lite-reviewer` pass over the diff against `origin/<integrationBranch>` with the fresh retrieval set, one fix pass, then the lane check on the fixed, pushed diff. A non-empty `reversals:` section escalates (trigger `reversal`), and so does a non-empty `out_of_lane:` (trigger `implementer`); `unmet` and `partial` rows in `coverage` are must-fix findings; a non-empty `questions:` is legitimate halt #2.
 
+**Cross-family reviewer (REQ-722).** Read `proceed/phases-cross-family.md` and follow it before you continue. It holds the reviewer's fences and rules, which Steps A to D, subagent mode and Phase 6 below each run at the step that names them, never on reading. Nothing in this file replaces it.
+
 **Gather diffs per repo** (prerequisite): for each touched repo, compute the diff inside its worktree (`git -C <worktree> diff origin/<integrationBranch>...HEAD` plus the list of changed files). The base is the remote-tracking integration branch the worktree was cut from, never a local `main`: a local `main` that lags `origin` hands this REQ's reviewers other REQs' merged work (LESSON-391). The reviewers receive per-repo diffs + file lists, plus the cross-repo architecture.md so they can reason about contracts spanning repos.
 
 **Optional verify candidate-list pre-pass via `adlc-read`** (added by REQ-417): for each touched repo, run an advisory delegate pre-pass before the Step A 6-agent dispatch. The pre-pass produces a per-dimension candidate-findings list (correctness, quality, architecture, test-coverage, security) that is passed only to the 5 reviewer agents — **the reflector receives no advisory block** (reflector's value is independent self-assessment of Claude's own work, which advisory candidates would compromise).
@@ -335,10 +337,13 @@ Every one of the six also receives the **Phase-5 LessonSet's loaded text** compu
 5. **test-auditor** agent — repo id, worktree path, changed files, diff, conventions.md. "Audit test coverage only for the diff under review. Report findings only. Do not apply fixes."
 6. **security-auditor** agent — repo id, worktree path, changed files, diff, conventions.md. "Audit security posture only for the diff under review. Report findings only. Do not apply fixes."
 
+**Cross-family reviewer (REQ-722), in Step A.** In the same message, run `proceed/phases-cross-family.md` "Step A" once per touched repo. The six prompts above are unchanged: the `<cross-family-findings>` block it prints goes to Step B only, never to any of the six (BR-7).
+
 **Subagent mode** — sequential inline review:
 For each touched repo, run the reflector checklist, then correctness, quality, architecture (with cross-repo context), test-auditor, and security-auditor checklists sequentially in your own context. Read each checklist from `.adlc/agents/<name>.md`; when `.adlc/agents/` is absent, say that `/init` (`/adlc:init` on the plugin install) vendors it and read `$ADLC_TOOLKIT_ROOT/agents/<name>.md` instead, never an improvised checklist. Do NOT dispatch sub-agents. The Phase-5 LessonSet above is the lesson input to every checklist, the reflector's included: read its loaded text instead of grepping the lessons directory.
+Before the checklists, run the record-only fence in `proceed/phases-cross-family.md` "Subagent mode" once per touched repo: it records `skipped` / `subagent-mode` and sends nothing.
 
-**Step B — Consolidate**: When all agents return (or all checklists complete in subagent mode), dedupe overlapping findings **within each repo** and also flag cross-repo issues (e.g., API contract drift between an api repo and its consumer). Produce a single ranked list by severity, tagging each finding with the repo id it applies to.
+**Step B — Consolidate**: When all agents return (or all checklists complete in subagent mode), dedupe overlapping findings **within each repo** and also flag cross-repo issues (e.g., API contract drift between an api repo and its consumer). Produce a single ranked list by severity, tagging each finding with the repo id it applies to. Add each `<cross-family-findings>` block's findings with `source: ["cross-family"]` and give panel findings `source: ["panel"]`; a dedupe merge unions `source`, and R3 passes it (`proceed/phases-cross-family.md` "Step B").
 
 Then run the **acknowledgement check** (REQ-647 BR-4), once per REQ. An applicable lesson — one in `lessons.phase5` whose `component` is one of the set's components, or that carries `kind: process` — is acknowledged when its id appears in a `Lessons:` commit trailer on the branch or in a task's `## Verification` block (the implementer's BR-2 obligation). The check lists the rest:
 
@@ -363,7 +368,9 @@ Add each printed `Applicable lesson not acknowledged: LESSON-xxx — <title>` li
 3. **Nit / observation**: fix trivial ones inline, skip the rest.
 4. **User-facing questions from reflector**: if any, surface them to the user as a numbered list and wait for answers before continuing.
 
-**Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the (repo, dimension) pairs that had fixes: e.g., if correctness fixes landed only in the api repo, rerun correctness-reviewer for that repo only. In subagent mode, re-run the corresponding reviewer checklists inline.
+Every `cross-family` finding ends `fixed`, `deferred` under item 2, or `declined` with a `declineReason` that `cross_family.py check-decline` accepts; R3 records `disposition` and `declineReason` (`proceed/phases-cross-family.md` "Step C").
+
+**Step D — Re-verify (conditional)**: Re-run ONLY the 5 reviewer agents (not reflector) if Critical or must-fix Major items were fixed — up to 1 confirmation loop. Skip if only minor fixes were applied. Scope re-verify to the (repo, dimension) pairs that had fixes: e.g., if correctness fixes landed only in the api repo, rerun correctness-reviewer for that repo only. In subagent mode, re-run the corresponding reviewer checklists inline. The cross-family reviewer is not re-run: it is no dimension, so no pair names it, and these reviewers confirm its fixes (`proceed/phases-cross-family.md` "Step D").
 
 **Record the fixes (REQ-648 BR-4)**: run R3 again with the same list, `fixed: true` on each finding whose fix commit landed in Step C, and `--loops 1` when Step D re-verified.
 
@@ -374,6 +381,9 @@ Add each printed `Applicable lesson not acknowledged: LESSON-xxx — <title>` li
 ### Phase 6: Create Pull Request(s)
 <!-- companion: proceed/phases-6-8-ship.md -->
 **Gate**: `currentPhase` must be `6`. After completion: append `6`, set `currentPhase=7`.
+
+**First, on the full lane:** `cross_family.py check-dispositions` must exit 0 (`proceed/phases-cross-family.md`
+"Phase 6"). Exit 1 sends you back to Phase 5 Step C for the findings it lists; it is not a halt point.
 
 Push each touched repo's accumulated commits, then **flip the draft PR opened at Step 0
 (step 8a) to ready** with `adlc_forge_pr_ready <prNumber>` (read `prNumber`/`prUrl` from

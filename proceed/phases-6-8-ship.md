@@ -26,6 +26,11 @@ forced-lite REQ in a solo run, is legitimate halt #4).
 
 **Goal**: Package the work into reviewable PRs — one PR per touched repo.
 
+**Precondition (full lane, REQ-722 BR-8):** before step 1, run the disposition check in
+`proceed/phases-cross-family.md` "Phase 6". `cross_family.py check-dispositions` must exit 0
+before any PR is readied. Exit 1 sends you back to Phase 5 Step C for the `cross-family`
+findings it lists, then to this check again; it is not a halt point (ADR-5).
+
 1. For each touched repo:
    - Inside that repo's worktree, ensure all changes are committed and push the feature branch: `git -C <worktree> push -u origin feat/REQ-xxx-short-description`
 2. Set the requirement status to `complete` in its frontmatter (primary repo only).
@@ -75,6 +80,12 @@ forced-lite REQ in a solo run, is legitimate halt #4).
 
      ## Test Coverage
      [Summary of tests added/modified in THIS repo]
+
+     ## Cross-family review
+     [On the full lane, replace this heading and line with what `cross_family.py pr-section
+      --state <state>` prints, verbatim; it starts with this heading (fence:
+      `proceed/phases-cross-family.md` "Phase 6"). Never written by hand: it says per
+      repo whether the review ran or why it was skipped, and lists declined findings.]
 
      ## Reflection Notes
      [Key observations from the reflect phase — risks, assumptions, follow-ups]

@@ -359,6 +359,43 @@ CORPUS = [
           make=_make_nul_path,
           note="os.open raises ValueError, not OSError"),
 
+    # -- the `family` key (REQ-722 BR-10) ------------------------------------
+    #
+    # A closed enum, compared by equality only. A value outside it refuses the
+    # whole file, exactly as a non-boolean `enabled` does: the generic string
+    # branch would have taken any of them (LESSON-614). Names start `family-`,
+    # which is how the "existing configs unchanged" test tells them apart.
+    Entry("family-valid", "parsed",
+          section={"enabled": False, "family": "moonshot"},
+          data=b"delegate:\n  enabled: false\n  family: moonshot\n"),
+    Entry("family-quoted-valid", "parsed", section={"family": "openai"},
+          data=b'delegate:\n  family: "openai"\n',
+          note="a quoted scalar is the same string; quoting is not a variant"),
+    Entry("family-declared-unknown", "parsed", section={"family": "unknown"},
+          data=b"delegate:\n  family: unknown\n",
+          note="`unknown` is a member an operator may write down; it reads "
+               "the same as leaving the key out"),
+    Entry("family-unknown-value", "parsed", section=None,
+          data=b"delegate:\n  enabled: false\n  family: gpt\n",
+          note="not a member; the generic string branch would have accepted "
+               "it and a later equality check would have called it a family"),
+    Entry("family-case-variant", "parsed", section=None,
+          data=b"delegate:\n  family: Anthropic\n",
+          note="no case folding: folding is inference (REQ-722 BR-2)"),
+    Entry("family-model-name", "parsed", section=None,
+          data=b"delegate:\n  family: kimi-k2.6\n",
+          note="a model name is not a family, and no substring of one is"),
+    Entry("family-sequence", "parsed", section=None,
+          data=b"delegate:\n  family: [anthropic]\n"),
+    Entry("family-nested", "parsed", section=None,
+          data=b"delegate:\n  enabled: false\n  family:\n    name: anthropic\n",
+          note="a mapping under the key, the shape that once hoisted a value "
+               "over a written one"),
+    Entry("family-duplicate", "malformed", reason="duplicate-key",
+          data=b"delegate:\n  family: anthropic\n  family: moonshot\n",
+          note="the second value would silently win under stock PyYAML; a "
+               "family that flips on a repeated line is refused whole"),
+
     # -- the one shape that is legitimately ABSENT (BR-3) --------------------
     Entry("absent-path", "absent", section={},
           make=_make_absent,

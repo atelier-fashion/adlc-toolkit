@@ -49,6 +49,8 @@ if [ "${1-}" = "--inner" ]; then
   run_all "$2" "$HERE/fence-toolkit-only.test.sh"
   # BUG-294, on its own line for the same reason (LESSON-738).
   run_all "$2" "$HERE/id-recheck-rewrite.test.sh"
+  # REQ-722, on its own line for the same reason (LESSON-738).
+  run_all "$2" "$HERE/cross-family-review.test.sh"
   exit $RC
 fi
 

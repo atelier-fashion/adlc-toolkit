@@ -6,6 +6,7 @@
   "code-quality-auditor.toml": "restraint",
   "convention-auditor.toml": "restraint",
   "correctness-reviewer.toml": "restraint",
+  "cross-family-reviewer.toml": "restraint",
   "db-perf-scanner.toml": "restraint",
   "delegate-pre-pass.toml": "restraint",
   "feature-tracer.toml": "restraint",

@@ -770,6 +770,13 @@ _ACCEPTS = [
     ({"delegate": {}}, {}),
     ({"delegate": {"model": ""}}, {"model": ""}),
     ({"forge": {"provider": "github"}}, {}),
+    # REQ-722 BR-10: `family` is returned only when written, and as written.
+    ({"delegate": {"family": "moonshot"}}, {"family": "moonshot"}),
+    ({"delegate": {"family": "unknown"}}, {"family": "unknown"}),
+    ({"delegate": {"enabled": True, "model": "m", "base_url": "https://h/v1",
+                   "api_key_env": "MY_KEY", "family": "openai"}},
+     {"enabled": True, "model": "m", "base_url": "https://h/v1",
+      "api_key_env": "MY_KEY", "family": "openai"}),
 ]
 
 _REFUSES = [
@@ -800,6 +807,18 @@ _REFUSES = [
      {"delegate": {"enabled": False, "note": "a reminder"}}),
     ("unknown key alone with a string value", {"delegate": {"note": "hi"}}),
     ("non-string key", {"delegate": {1: True}}),
+    # REQ-722 BR-10: `family` is exactly an enum member. Its own branch is what
+    # refuses the string rows; the generic string branch would take them all
+    # (LESSON-614), so they are the arm's witnesses.
+    ("family is not a member", {"delegate": {"family": "gpt"}}),
+    ("family is a case variant", {"delegate": {"family": "Anthropic"}}),
+    ("family is a model name", {"delegate": {"family": "kimi-k2.6"}}),
+    ("family contains a member", {"delegate": {"family": "openai-compatible"}}),
+    ("family is empty", {"delegate": {"family": ""}}),
+    ("family is a sequence", {"delegate": {"family": ["anthropic"]}}),
+    ("family is a mapping", {"delegate": {"family": {"name": "anthropic"}}}),
+    ("family is null", {"delegate": {"family": None}}),
+    ("family is a boolean", {"delegate": {"family": True}}),
     ("top level is a list", ["delegate"]),
     ("top level is a scalar", "delegate"),
 ]
@@ -851,6 +870,113 @@ def test_delegate_keys_match_the_documented_keys():
     documented = set(re.findall(r"^  ([a-z_]+):", block.group(1), re.M))
     assert documented == set(_machine_config.DELEGATE_KEYS), (
         sorted(documented), sorted(_machine_config.DELEGATE_KEYS))
+
+
+# --- REQ-722 BR-10: the `family` key ---------------------------------------
+
+#: The schema's keys before REQ-722, restated rather than derived: "the existing
+#: keys keep their meaning byte for byte" starts with "the existing keys".
+_PRE_FAMILY_KEYS = frozenset({"enabled", "model", "base_url", "api_key_env"})
+
+
+def test_delegate_key_set_is_pinned():
+    """The closed schema is the four REQ-609 keys plus `family`, and nothing
+    else. A sixth key is a schema change, and should fail here first."""
+    assert _machine_config.DELEGATE_KEYS == _PRE_FAMILY_KEYS | {"family"}
+
+
+@pytest.mark.parametrize("body", [
+    b"delegate:\n  enabled: false\n  family: gpt\n",
+    b"delegate:\n  enabled: false\n  family: [anthropic]\n",
+], ids=["string-outside-the-enum", "sequence"])
+def test_family_key_unknown_value_rejected(body, clean_env, monkeypatch):
+    """BR-10: the strict loader refuses a family outside the enum, and the
+    refusal names the field. It refuses the whole file, as a non-boolean
+    `enabled` does, so the written opt-out stands even with continuity live;
+    and the reason carries the allowed values, never the written one."""
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-legacy")
+    cfg = _common.parse_delegate_config(_write(clean_env, body))
+    assert cfg.get(_common._MALFORMED) is True, cfg
+    reason = cfg[_common._MALFORMED_REASON]
+    assert reason.startswith("schema:"), reason
+    assert "'delegate.family'" in reason, reason
+    assert "gpt" not in reason, reason
+    assert "family" not in cfg
+    assert _common.delegation_enabled(cfg) is False
+    assert _common.resolve_gate_verdict(cfg) == (False, "disabled-via-config")
+    assert _common.resolve_family(cfg) == "unknown"
+
+
+def test_absent_family_reads_unknown(clean_env, monkeypatch):
+    """AC-16: a config without `family` resolves to `unknown`, which BR-3
+    skips. The validated section does not gain the key (so it compares equal
+    to what it always returned); `unknown` is supplied where the family is
+    READ, on every path that has no written one: no file, a file with no
+    `delegate:` section, a section without the key, and a malformed file."""
+    shapes = {
+        "no file": None,
+        "forge section only": b"forge:\n  provider: github\n",
+        "section without family": b"delegate:\n  enabled: true\n  model: m\n",
+        "malformed file": b"delegate:\n  enabled: false\n  enabled: true\n",
+    }
+    for label, body in shapes.items():
+        path = (str(clean_env / "not-there.yml") if body is None
+                else _write(clean_env, body, name=label.replace(" ", "-") + ".yml"))
+        monkeypatch.setenv("ADLC_CONFIG", path)
+        cfg = _common.parse_delegate_config()
+        assert "family" not in cfg, (label, cfg)
+        assert _machine_config.delegate_family(cfg) == "unknown", label
+        assert _common.resolve_family() == "unknown", label
+        assert _common.resolve_provider().family == "unknown", label
+    # The working subject (LESSON-602): a written family is read, so the
+    # `unknown` above is a statement about absence, not a constant.
+    monkeypatch.setenv("ADLC_CONFIG", _write(
+        clean_env, b"delegate:\n  enabled: true\n  family: anthropic\n"))
+    assert _common.resolve_family() == "anthropic"
+    assert _common.resolve_provider().family == "anthropic"
+
+
+def test_existing_configs_resolve_unchanged_with_family_key(clean_env):
+    """BR-10: every shape in the seeded corpus that predates `family` resolves
+    exactly as REQ-609 resolved it. The adapter returns the same dict, with no
+    `family` key; the four provider fields come out of the pre-REQ-722 cascade,
+    restated here from the corpus entry; and the family is `unknown`.
+
+    One loop rather than a parametrisation so a systematic change reads as one
+    list. Each shape gets its own directory, because some shapes (a directory
+    at the path) cannot share one with the others."""
+    failures = []
+    pre_family = [e for e in CORPUS if not e.name.startswith("family-")]
+    assert len(pre_family) >= 50, len(pre_family)
+    for index, entry in enumerate(pre_family):
+        if not _available(entry):
+            continue
+        root = clean_env / ("shape-%02d" % index)
+        root.mkdir()
+        try:
+            path = entry.make(root)
+            cfg = _common.parse_delegate_config(path)
+            provider = _common.resolve_provider(cfg=cfg)
+        finally:
+            entry.cleanup(root)
+        section = {} if entry.adapter_malformed else entry.section
+        expected = {
+            "base_url": section.get("base_url") or _common._DEFAULT_BASE_URL,
+            "model": section.get("model") or _common._DEFAULT_MODEL,
+            "api_key_env": section.get("api_key_env") or _common._DEFAULT_API_KEY_VAR,
+            "enabled": False if entry.adapter_malformed else section.get("enabled", False),
+            "family": "unknown",
+        }
+        got = {field: getattr(provider, field) for field in expected}
+        if got != expected:
+            failures.append("%s: %r != %r" % (entry.name, got, expected))
+        if "family" in cfg:
+            failures.append("%s: the adapter grew a family key: %r" % (entry.name, cfg))
+        if not entry.adapter_malformed and cfg != entry.section:
+            failures.append("%s: %r != %r" % (entry.name, cfg, entry.section))
+        if not entry.adapter_malformed and not set(cfg) <= _PRE_FAMILY_KEYS:
+            failures.append("%s: keys %r" % (entry.name, sorted(cfg)))
+    assert not failures, "\n".join(failures)
 
 
 # --- BR-1 / BR-9: PyYAML is pinned, imported lazily, and refused loudly -----

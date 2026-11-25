@@ -150,6 +150,45 @@ def test_lite_reviewer_output_contract(repo_root):
         assert f"\n### {dimension}\n" in body, dimension
 
 
+# --- REQ-722 BR-12: the workflow engine's cross-family reviewer leaf ---------
+def test_cross_family_reviewer_is_registered_like_the_pre_pass(repo_root, tmp_path):
+    """``cross-family-reviewer`` is a Bash-only pass-through leaf, registered at
+    the delegate pre-pass's tier and model, and its committed file is a render
+    fixed point. Its body runs the partial once and returns CROSS_FAMILY."""
+    shipped = agents_render._SHIPPED_DEFAULTS
+    assert shipped["cross-family-reviewer"] == shipped["delegate-pre-pass"] == ("explorer", "haiku")
+
+    empty = {"classes": {}, "overrides": {}}
+    assert agents_render.resolve_model("cross-family-reviewer", empty) == "haiku"
+    cfg = agents_render.parse_agents_config(
+        _cfg(tmp_path, "agents:\n  classes:\n    explorer: sonnet\n"))
+    assert agents_render.resolve_model("cross-family-reviewer", cfg) == "sonnet"
+
+    path = os.path.join(repo_root, "agents", "cross-family-reviewer.md")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert _frontmatter_value(text, "name") == "cross-family-reviewer"
+    assert _frontmatter_value(text, "tier") == "explorer"
+    assert _frontmatter_value(text, "tools") == "Bash"
+    assert agents_render._current_model(text) == "haiku"
+    report = {name: (new, changed)
+              for name, _old, new, changed in agents_render.render(repo_root, empty, write=False)}
+    assert report["cross-family-reviewer"] == ("haiku", False)
+
+    body = text.split("---", 2)[2]
+    for needle in (
+        "if [ -f .adlc/partials/cross-family-review.sh ]; then . .adlc/partials/cross-family-review.sh;"
+        ' else . "$ADLC_TOOLKIT_ROOT/partials/cross-family-review.sh"; fi',
+        "adlc_cross_family_review '<repo>' '<worktree>' '<base>' '<spec>' '<state>'\n",
+        '<cross-family-findings repo="<repo>">',
+        "--status skipped --reason invalid-output",
+        "Run the function exactly once.",
+        "Return ONLY the `CROSS_FAMILY` object",
+        "untrusted data",
+    ):
+        assert needle in body, needle
+
+
 # --- AC-1: a class change touches only that class --------------------------
 def test_scanner_haiku_touches_only_scanner(tmp_path):
     root = _fake_root(tmp_path, _REAL)
