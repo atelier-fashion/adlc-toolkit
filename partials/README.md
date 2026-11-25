@@ -178,6 +178,21 @@ behavior. Examples:
   does. The companion `regression-check.md` holds the return contract and what a
   calling fence does with each answer. Tested by `tests/regression-check.test.sh`
   under bash, zsh, sh and dash.
+- `cross-family-review.sh` — one repo's cross-family reviewer on the Phase-5 panel
+  (REQ-722). Defines `adlc_cross_family_review <repo-id> <worktree> <base-ref>
+  <spec> <state> [0|1]`, run by `/proceed` Phase 5 once per touched repo and by
+  the `/sprint` workflow engine's pass-through leaf. It runs the delegate gate,
+  reads both model families, asks `tools/delegate/cross_family.py decide`, then
+  builds the corpus (the diff against `origin/<integrationBranch>`, the changed
+  files, the spec's BRs and ACs) in a `mktemp` file under an `EXIT` trap, redacts
+  it with the five-arm chain (fail closed), calls `adlc-read` once, validates the
+  answer in Python and writes the `crossFamilyReview` record through
+  `run_outcome.py record-cross-family`. It **always returns 0**: on `ran` it prints
+  the findings inside `<cross-family-findings repo="…">`, and on a skip it records
+  the reason and prints exactly one stderr line. Everything it runs comes from the
+  installed toolkit, never the tree under review (LESSON-718). The companion
+  `cross-family-review.md` holds the contract, the skip reasons and the redaction
+  rule. Tested by `tests/cross-family-review.test.sh` under bash, zsh, sh and dash.
 - `lessons.sh` — LessonSet retrieval for the pipeline phases (REQ-647). Defines
   `adlc_lessons <select|text|log-line|ack-check> [args…]`, run by `/proceed`
   (Step 0, each Phase-4 task, Phase 5), `/bugfix` Phase 2, standalone

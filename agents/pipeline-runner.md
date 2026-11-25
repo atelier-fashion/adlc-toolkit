@@ -64,6 +64,8 @@ Read the spec's frontmatter `lane` at Step 0. A missing `lane` means `full`: run
 
 Since you cannot dispatch review agents, run these checklists yourself:
 
+**First, the cross-family record (REQ-722, full lane).** You cannot reach the delegate, so the cross-family reviewer does not run in your context. Before the checklists, run the record-only fence in `proceed/phases-cross-family.md` "Subagent mode" once per touched repo, with that repo's id and worktree from `pipeline-state.json`: it records `skipped` / `subagent-mode` for the repo and sends nothing, so the PR body says the panel was single-family rather than omitting the record (BR-12). At Phase 6, run that file's "Phase 6" section too, as `/proceed` Phase 6 says.
+
 ### Reflection Checklist
 - Does the code do what the requirement specifies?
 - Are all acceptance criteria met?

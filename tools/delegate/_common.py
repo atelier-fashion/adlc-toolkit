@@ -276,14 +276,22 @@ class Provider:
     that actually need the network (so --dry-run / guard paths never touch it).
     """
 
-    __slots__ = ("base_url", "model", "api_key_env", "enabled", "source")
+    __slots__ = ("base_url", "model", "api_key_env", "enabled", "source",
+                 "family")
 
-    def __init__(self, base_url, model, api_key_env, enabled, source):
+    def __init__(self, base_url, model, api_key_env, enabled, source,
+                 family=None):
         self.base_url = base_url
         self.model = model
         self.api_key_env = api_key_env
         self.enabled = enabled
         self.source = source
+        # The declared model family (REQ-722 BR-10): `delegate.family` from the
+        # config file and nowhere else, `unknown` when it is not written. Not
+        # derived from `model` or `base_url` (BR-2), so a flag or env override
+        # of either leaves it as the config declared it.
+        self.family = (family if family is not None
+                       else _machine_config.delegate_family(None))
 
 
 def _legacy_key_present():
@@ -571,7 +579,39 @@ def resolve_provider(args_model=None, args_base_url=None, cfg=None):
     else:
         source = "defaults"
 
-    return Provider(base_url, model, api_key_env, delegation_enabled(cfg), source)
+    return Provider(base_url, model, api_key_env, delegation_enabled(cfg), source,
+                    family=_machine_config.delegate_family(cfg))
+
+
+def resolve_family(cfg=None):
+    """The declared model family of the configured delegate (REQ-722 BR-10).
+
+    ``delegate.family`` as the config file's own loader reads it, or
+    ``unknown`` when the key is absent or the file is absent or malformed. This
+    is what ``adlc-read --print-family`` prints, and the only way a shell learns
+    the reviewer family (REQ-722 ADR-2): the file is parsed here, never in
+    shell.
+
+    It reports and never authorizes, so it consults no opt-in and no veto: it
+    transmits nothing, and a family is not a grant. Nothing a config file says
+    makes it raise, so the probe always answers.
+
+    The declaration describes the model and endpoint the config file names. An
+    environment override that points the call elsewhere (``ADLC_DELEGATE_MODEL``
+    or ``ADLC_DELEGATE_BASE_URL`` set to a value the file does not hold) leaves
+    the family unestablished, so it resolves to ``unknown`` (REQ-722 ADR-2: any
+    doubt is ``unknown``). A ``--model`` flag on one call cannot be seen here;
+    the cross-family review never passes one.
+    """
+    if cfg is None:
+        cfg = parse_delegate_config()
+    family = _machine_config.delegate_family(cfg)
+    section = cfg if isinstance(cfg, dict) else {}
+    for env, key in (("ADLC_DELEGATE_MODEL", "model"), ("ADLC_DELEGATE_BASE_URL", "base_url")):
+        override = os.environ.get(env)
+        if override and override != section.get(key):
+            return _machine_config.delegate_family({})
+    return family
 
 
 # --- `--version` reporting (shared by all three CLIs) ----------------------
@@ -799,6 +839,12 @@ def version_report_lines(args_model=None, args_base_url=None, include_config=Tru
     lines.append("model: %s" % _clean_report_value(provider.model))
     lines.append("api_key_env: %s" % _clean_report_value(provider.api_key_env))
     lines.append("enabled: %s" % ("true" if provider.enabled else "false"))
+    # REQ-722: `family:` only when a config file exists, by the loader's own
+    # verdict, so the no-config report keeps exactly the BR-9 lines it always
+    # had. A file that exists but cannot be read reports `unknown`.
+    if (_machine_config.load_machine_config().kind
+            != _machine_config.KIND_ABSENT):
+        lines.append("family: %s" % _clean_report_value(provider.family))
     return lines
 
 

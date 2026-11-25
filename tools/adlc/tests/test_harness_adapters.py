@@ -354,14 +354,14 @@ def test_harness_render_user_scope_writes_copies_project_scope_does_not(tmp_path
         os.path.join(os.environ["HOME"], ".copilot"))
     proc = run_cli(["harness", "render", "--harness", "copilot", "--scope", "user"], proj)
     assert proc.returncode == 0, proc.stderr
-    assert len(os.listdir(os.path.join(os.environ["HOME"], ".copilot", "agents"))) == 19
+    assert len(os.listdir(os.path.join(os.environ["HOME"], ".copilot", "agents"))) == 20
 
 
 def test_install_writes_user_surfaces_only(tmp_path, sandbox):
     proj = git_repo(tmp_path / "proj")
     proc = run_cli(["harness", "install", "--harness", "copilot"], proj)
     assert proc.returncode == 0, proc.stderr
-    assert len(os.listdir(os.path.join(os.environ["HOME"], ".copilot", "agents"))) == 19
+    assert len(os.listdir(os.path.join(os.environ["HOME"], ".copilot", "agents"))) == 20
     assert sorted(os.listdir(os.path.join(os.environ["HOME"], ".copilot"))) == ["agents"]
     assert os.listdir(str(proj)) == [".git"]
     proc = run_cli(["harness", "install", "--harness", "cursor"], proj)
@@ -867,3 +867,82 @@ def test_shipped_goldens_name_the_rendered_files():
                               encoding="utf-8"))
     assert manifest["task-implementer.agent.md"] is None
     assert manifest["correctness-reviewer.agent.md"] == "read, search, execute"
+
+
+# --------------------------------------------------------------------------- REQ-722 model_family
+#: The architecture's table (REQ-722 "Harness adapter `model_family` key"), and the schema
+#: version each adapter declared before the key existed: the key needs no bump.
+MODEL_FAMILIES = {"claude": ("anthropic", 1), "codex": ("openai", 3),
+                  "copilot": ("unknown", 2), "cursor": ("unknown", 2),
+                  "antigravity": ("unknown", 4)}
+
+
+def shipped(name):
+    return os.path.join(TOOLKIT, "harness", name + ".yml")
+
+
+@pytest.mark.parametrize("name", sorted(MODEL_FAMILIES))
+def test_shipped_adapters_declare_model_family(name):
+    """AC: every shipped adapter loads and declares the value in the architecture's table."""
+    adapter = ha.load_adapter(shipped(name), toolkit=TOOLKIT)
+    family, version = MODEL_FAMILIES[name]
+    assert adapter["model_family"] == family
+    assert ha.model_family(adapter) == family
+    assert adapter["schema_version"] == version
+
+
+def test_multi_family_adapters_declare_unknown():
+    """BR-3: a harness that can run more than one family says `unknown` out loud rather than
+    leaving the key out, so no later edit reads its silence as a family."""
+    for name in ("copilot", "cursor", "antigravity"):
+        lines = open(shipped(name), encoding="utf-8").read().split("\n")
+        assert lines.count("model_family: unknown") == 1, name
+        assert ha.model_family(ha.load_adapter(shipped(name), toolkit=TOOLKIT)) == "unknown"
+
+
+@pytest.mark.parametrize("value", ["gpt-5", "Anthropic", "openai-compatible", "\"\"",
+                                   "\" openai\"", "[openai]", "1"])
+def test_model_family_outside_the_enum_is_refused(tmp_path, value):
+    """AC: `model_family: gpt-5` fails to load with the field named. A model name, a case
+    variant, a substring and a non-string are each refused, never folded (BR-2)."""
+    path = variant(tmp_path, shipped("codex"), [("model_family: openai",
+                                                 "model_family: %s" % value)])
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(path, toolkit=TOOLKIT)
+    assert exc.value.field == "model_family"
+    assert "anthropic, openai" in str(exc.value)
+
+
+def test_absent_model_family_reads_unknown(tmp_path):
+    path = variant(tmp_path, shipped("claude"), [("model_family: anthropic\n", "")])
+    adapter = ha.load_adapter(path, toolkit=TOOLKIT)
+    assert "model_family" not in adapter
+    assert ha.model_family(adapter) == "unknown"
+
+
+@pytest.mark.parametrize("name", sorted(MODEL_FAMILIES))
+def test_model_family_needs_no_schema_bump(tmp_path, name):
+    """The version gate: the key is read at every known version, and no fifth version
+    exists. A bump would move claude, codex, copilot and cursor across the schema-3 render
+    rule and the schema-4 doctor SKIP; each adapter keeps its version and its doctor answer."""
+    assert ha.KNOWN_SCHEMA_VERSIONS == (1, 2, 3, 4)
+    adapter = ha.load_adapter(shipped(name), toolkit=TOOLKIT)
+    family, version = MODEL_FAMILIES[name]
+    assert (adapter["schema_version"], adapter["model_family"]) == (version, family)
+    if version < 4:
+        assert harness_doctor.nothing_rendered(adapter, TOOLKIT) is False
+    path = variant(tmp_path, shipped(name), [("schema_version: %d" % version,
+                                              "schema_version: 5")])
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(path, toolkit=TOOLKIT)
+    assert exc.value.field == "schema_version"
+
+
+def test_an_enum_that_will_not_load_refuses_the_adapter(tmp_path, monkeypatch):
+    """Fail closed: with no enum to check against, a declared family is not taken on trust."""
+    def missing():
+        raise OSError("no model_family.py")
+    monkeypatch.setattr(ha, "model_families", missing)
+    with pytest.raises(ha.AdapterError) as exc:
+        ha.load_adapter(shipped("claude"), toolkit=TOOLKIT)
+    assert exc.value.field == "model_family"

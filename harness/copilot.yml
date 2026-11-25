@@ -6,6 +6,9 @@
 name: copilot
 schema_version: 2
 binary: copilot
+# REQ-722 BR-2, BR-3: one session can run Anthropic and OpenAI models, so no single
+# family is declared and a cross-family review of its work is skipped.
+model_family: unknown
 
 paths:
   # Rendered copies, user-level only; a project render never writes these (ADR-9).

@@ -54,6 +54,13 @@ def _build_parser():
         help="print '<enabled> <reason>' and exit — the gate's full verdict "
              "(REQ-603); no files or question required, no network call",
     )
+    parser.add_argument(
+        "--print-family",
+        action="store_true",
+        help="print the configured delegate's declared model family "
+             "(delegate.family; 'unknown' when absent) and exit; no files or "
+             "question required, no network call, no opt-in needed (REQ-722)",
+    )
     parser.add_argument("--paths", nargs="+", help="files to read")
     parser.add_argument("--question", help="question to answer")
     parser.add_argument(
@@ -98,7 +105,8 @@ _VERSION_VALUE_FLAGS = frozenset({
 # than printing the version for a command the user did not write. Kept honest by
 # a test that derives the same set from the parser itself.
 _KNOWN_FLAGS = _VERSION_VALUE_FLAGS | frozenset({
-    "-h", "--help", "--print-enabled", "--print-gate", "--dry-run", "--no-warn",
+    "-h", "--help", "--print-enabled", "--print-gate", "--print-family",
+    "--dry-run", "--no-warn",
 })
 
 
@@ -140,6 +148,15 @@ def main(argv=None):
     if args.print_gate:
         enabled, reason = _common.resolve_gate_verdict()
         print(f"{1 if enabled else 0} {reason}")
+        return 0
+
+    # --print-family: the reviewer family the config file declares (REQ-722
+    # ADR-2), one `model_family` member on stdout, exit 0 on every path. The
+    # only way a shell learns it: the file is parsed by the Python that owns
+    # it, never by a shell read. It sends nothing and grants nothing, so it
+    # needs no opt-in and consults no veto; the caller asks the gate itself.
+    if args.print_family:
+        print(_common.resolve_family())
         return 0
 
     if not args.paths or not args.question:

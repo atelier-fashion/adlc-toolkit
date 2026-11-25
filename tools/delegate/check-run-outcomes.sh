@@ -26,6 +26,16 @@
 #       `rejected` (REQ-719 BR-20) is the last column, so no earlier one moves.
 #       A rejected run counts in `runs` and in no other terminal column, so in
 #       no failure figure; its retries and findings count as any run's do.
+#       When any of those latest lines carries REQ-722's `crossFamily` object,
+#       a separate block follows the table, after one blank line:
+#           Cross-family:
+#           runs reviews ran skipped findings cross_only fixed declined skip_reasons
+#       one row over every such line: `runs` lines, `reviews` repo records
+#       (`ran` + `skipped` + any with no valid status), the summed finding
+#       counts (`cross_only` = raised by the cross-family reviewer and by no
+#       panel member), and `skip_reasons` as reason=count, most first, or `-`.
+#       With no such line nothing is added, so the output for a log written
+#       before REQ-722 is byte-identical (AC-15). The table never changes.
 #       Exit contract — distinct signals for distinct empties (LESSON-571):
 #         log absent                                   -> rc 0, no output
 #         no parsed line inside the window             -> rc 0, `no runs in <N>d window`
@@ -189,6 +199,54 @@ if [ -z "$out" ]; then
     echo "no runs in ${window_days}d window"
     exit 0
 fi
+
+# The REQ-722 cross-family block: a second pass over the same latest lines, so the
+# table's pass above is untouched. The object is the line's last key and every
+# value in it is a quoted string with no `"`, so it is read by scanning, like val().
+cross=$(LC_ALL=C awk -v cutoff="$cutoff" "$PARSE"'
+    { if (!parsed($0)) next
+      ts = val($0, "timestamp"); if (cutoff != "" && ts < cutoff) next
+      line[val($0, "req")] = $0 }
+    END {
+        for (r in line) {
+            p = index(line[r], "\"crossFamily\":{"); if (p == 0) continue
+            C = substr(line[r], p + 15); runs++
+            f += num(val(C, "findings")); o += num(val(C, "cross_only"))
+            x += num(val(C, "fixed")); d += num(val(C, "declined"))
+            s = C
+            while ((q = index(s, "\"status\":\"")) > 0) {
+                s = substr(s, q + 10); e = index(s, "\""); st = substr(s, 1, e - 1); s = substr(s, e + 1)
+                why = "-"
+                if (index(s, ",\"reason\":\"") == 1) {
+                    s = substr(s, 12); e = index(s, "\""); why = substr(s, 1, e - 1); s = substr(s, e + 1)
+                }
+                reviews++
+                if (st == "ran") ran++
+                else if (st == "skipped") { skipped++; if (why != "-" && why != "") rk[why]++ }
+            }
+        }
+        if (runs == 0) exit
+        top = ""
+        while (1) {
+            best = ""; bk = 0
+            for (k in rk) if (!(k in used) && (rk[k] > bk || (rk[k] == bk && k < best))) { best = k; bk = rk[k] }
+            if (best == "") break
+            used[best] = 1; top = top (top == "" ? "" : ",") best "=" bk
+        }
+        printf "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n", runs, reviews, ran, skipped, f, o, x, d,
+            (top == "" ? "-" : top)
+    }' "$LOG")
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "check-run-outcomes: awk failed reading $LOG (rc $rc)" >&2
+    exit 1
+fi
+
 printf 'toolkit_version\truns\tmerged\tpr_ready\tblocked\tfailed\tmean_validate_retries\tverify_loop_rate\tcritical\tmajor\tminor\tnit\ttop_classes\trejected\n'
 printf '%s\n' "$out" | LC_ALL=C sort -t "$TAB" -k1,1
+if [ -n "$cross" ]; then
+    printf '\nCross-family:\n'
+    printf 'runs\treviews\tran\tskipped\tfindings\tcross_only\tfixed\tdeclined\tskip_reasons\n'
+    printf '%s\n' "$cross"
+fi
 exit 0

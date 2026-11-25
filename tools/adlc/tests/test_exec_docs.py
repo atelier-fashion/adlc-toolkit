@@ -653,8 +653,9 @@ REQ719_UNCHANGED_RENDERS = {
         "cd4059767b7a225b7c727e583d31dea7b84b85835299222aeb7427ce76f269ab",
     "harness/codex/rendered/adlc.rules":
         "671ed42360847770e8d6833c8b0c6838db01df320b82c27a2847ac771b68ab89",
+    # REQ-722 TASK-284 added agents/cross-family-reviewer.md, one more manifest row.
     "harness/codex/rendered/agents.json":
-        "f2247d2b60d33a3c59189f4b29528fc18251b696cea62e4e9754e3d055150030",
+        "26d52ed5a43d9f86bb8563704a3dbc34feb6e825cbfb8a7810be100f479b3fc8",
     "harness/codex/rendered/config.toml":
         "c73e8bece7ee8c99689e2c62932ffeb52126a24b55782659b5d9811bfdd253f7",
     "harness/codex/rendered/hooks.json":

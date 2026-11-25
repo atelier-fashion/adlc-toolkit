@@ -47,6 +47,7 @@ _SHIPPED_DEFAULTS = {
     "latency-scanner": ("scanner", "sonnet"),
     "architecture-mapper": ("explorer", "haiku"),
     "convention-auditor": ("explorer", "haiku"),
+    "cross-family-reviewer": ("explorer", "haiku"),
     "delegate-pre-pass": ("explorer", "haiku"),
     "feature-tracer": ("explorer", "haiku"),
     "integration-explorer": ("explorer", "haiku"),

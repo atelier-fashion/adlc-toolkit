@@ -913,14 +913,19 @@ HOSTILE = {"status": "approved", "exec": {"exitClass": "denied", "pid": 1},
            "approval": {"decision": "rejected", "decidedBy": "the model", "action": "deploy"},
            "notes": ["from the close-out"]}
 #: The run-outcome keys the primary path's copy holds before the close-out (REQ-648), written
-#: there by `emit-run-outcome.sh record-*`, and what a close-out's copy sets them to.
+#: there by `emit-run-outcome.sh record-*`, and what a close-out's copy sets them to. REQ-722's
+#: `crossFamilyReview` is written there at the event by `record-cross-family`.
 PRIMARY_KEPT = {"harness": {"version": "5.4.0", "sha": "c013262"},
                 "validateAttempts": {"phase1": 2}, "verify": {"findings": [], "loops": 1},
-                "lessons": {"acknowledged": {"ids": ["LESSON-012"]}}, "lessonsWritten": []}
+                "lessons": {"acknowledged": {"ids": ["LESSON-012"]}}, "lessonsWritten": [],
+                "crossFamilyReview": {"widgets": {
+                    "status": "ran", "implementerFamily": "anthropic", "reviewerFamily": "moonshot",
+                    "findingCount": 1, "droppedCount": 0, "declinedCount": 1}}}
 CLOSE_OUT_SETS = {"harness": {"version": "9.9.9", "sha": "0000000"},
                   "validateAttempts": {"phase1": 9}, "verify": {"findings": [], "loops": 9},
                   "lessons": {"acknowledged": {"ids": ["LESSON-999"]}},
-                  "lessonsWritten": ["LESSON-9001"]}
+                  "lessonsWritten": ["LESSON-9001"],
+                  "crossFamilyReview": {"widgets": {"status": "skipped", "reason": "same-family"}}}
 
 
 def test_a_carried_close_out_state_is_data(tmp_path):
@@ -933,7 +938,8 @@ def test_a_carried_close_out_state_is_data(tmp_path):
     gone, does not parse, nests too deep for the parser, is over the state-file size cap, or is a
     link or a special file is no record: nothing is carried, the linked file's content included,
     and the close-out ends failed with the merge standing. A chore PR that commits the copy is
-    out of bounds and needs review, never merged."""
+    out of bounds and needs review, never merged. REQ-722: `crossFamilyReview` is kept like
+    `verify`, so a close-out cannot rewrite whether Phase 5 had a cross-family reviewer."""
     (tmp_path / "hostile").mkdir()
     box = eh.adapter_sandbox(tmp_path / "hostile", "codex")
     box.req(closeout={"state_extra": dict(HOSTILE, **CLOSE_OUT_SETS)})
@@ -949,12 +955,12 @@ def test_a_carried_close_out_state_is_data(tmp_path):
     assert state["closeOut"]["status"] == "ok" and state["completed"] is True
     assert state["notes"] == ["from the close-out"]
     assert state["lessonsWritten"] == ["LESSON-9001"]
-    for key in ("lessons", "harness", "validateAttempts", "verify"):
+    for key in ("lessons", "harness", "validateAttempts", "verify", "crossFamilyReview"):
         assert state[key] == PRIMARY_KEPT[key], key
     [carried] = eh.events(box, run, "close_out_state_carried")
     assert carried["record"] is True
-    assert carried["ignored"] == ["approval", "exec", "harness", "lessons", "status",
-                                  "validateAttempts", "verify"]
+    assert carried["ignored"] == ["approval", "crossFamilyReview", "exec", "harness", "lessons",
+                                  "status", "validateAttempts", "verify"]
     assert {"closeOut", "completed", "notes", "lessonsWritten"} <= set(carried["taken"])
     assert merged_count(box) == 2
 

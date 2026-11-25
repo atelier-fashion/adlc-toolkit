@@ -6,6 +6,9 @@
 name: cursor
 schema_version: 2
 binary: agent
+# REQ-722 BR-2, BR-3: one session can run Anthropic and OpenAI models, so no single
+# family is declared and a cross-family review of its work is skipped.
+model_family: unknown
 
 paths:
   # Cursor reads Claude Code's agents and hooks itself, so neither is rendered (BR-9).

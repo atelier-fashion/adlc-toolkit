@@ -35,8 +35,14 @@ REQUIRED_TOOLS = ("git", "python3", "sh")
 OPTIONAL_TOOLS = ("gh", "az", "ssh")
 #: Top-level toolkit paths the manifest walks.
 INSTALL_TREES = ("partials", "tools/adlc", "proceed", "wrapup")
+#: Single files outside those trees. The REQ-722 cross-family review runs
+#: partials/cross-family-review.sh (already under `partials`), and through it
+#: cross_family.py, model_family.py and adlc-read with the modules adlc-read loads
+#: (_common.py, _machine_config.py), so the tamper check covers what it runs.
 INSTALL_FILES = ("sprint/SKILL.md", "tools/delegate/emit-run-outcome.sh",
-                 "tools/delegate/run_outcome.py")
+                 "tools/delegate/run_outcome.py", "tools/delegate/cross_family.py",
+                 "tools/delegate/model_family.py", "tools/delegate/adlc-read",
+                 "tools/delegate/_common.py", "tools/delegate/_machine_config.py")
 #: Operator settings a snapshot may carry; a filter driver or pager never is one.
 GITCONFIG_KEEP = re.compile(r"^(user\.|credential\.|url\.|http\.|init\.defaultbranch$|"
                             r"safe\.directory$)")

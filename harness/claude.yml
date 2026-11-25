@@ -4,6 +4,10 @@
 name: claude
 schema_version: 1
 binary: claude
+# The family of every model this harness runs (REQ-722 ADR-2): Claude Code runs only
+# Anthropic models, first-party, Bedrock or Vertex. A proxy to another family defeats it;
+# that is a recorded limit, not a guard. `adlc harness family` reads it.
+model_family: anthropic
 
 paths:
   # Claude Code's own mounts (REQ-654 BR-6): served by install.sh, nothing rendered.

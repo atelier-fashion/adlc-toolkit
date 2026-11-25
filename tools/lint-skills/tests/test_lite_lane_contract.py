@@ -124,6 +124,33 @@ def test_every_consumer_branches_on_every_review_section():
             assert section in text, f"{rel} does not act on `{section}`"
 
 
+def test_lite_path_has_no_cross_family_step():
+    """REQ-722 BR-14 / AC-17: the lite lane keeps `lite-reviewer` as its one review and
+    writes no `crossFamilyReview` record. Its own text names no cross-family step, and
+    every full-lane pointer sits where the lite lane never reads it."""
+    cross = re.compile(r"(?i)cross[-_ ]?family")
+    assert not cross.search(_read("proceed/phases-lite.md"))
+    runner = _read("agents/pipeline-runner.md")
+    lite = runner[runner.index("### Lite lane (REQ-652)"):runner.index("## Phase 5 Inline Review Checklists")]
+    assert not cross.search(lite)
+
+    skill = _read("proceed/SKILL.md")
+    phase5 = skill[skill.index("### Phase 5: Verify"):skill.index("### Phase 6:")]
+    lite_skip = phase5.index("**Lite lane:** none of the rest of this phase runs")
+    assert lite_skip < phase5.index("phases-cross-family.md")
+    phase6 = skill[skill.index("### Phase 6:"):skill.index("### Phase 7:")]
+    assert "**First, on the full lane:** `cross_family.py check-dispositions`" in phase6
+
+    companion = " ".join(_read("proceed/phases-cross-family.md").split())
+    assert "**Full lane only:** on the lite lane none of it runs" in companion
+    assert "a lite run writes no `crossFamilyReview` record (BR-14)" in companion
+    ship = _read("proceed/phases-6-8-ship.md")
+    assert "**Precondition (full lane, REQ-722 BR-8):**" in ship
+    assert "[On the full lane, replace this heading" in ship
+    # Must fire: the same pattern finds a planted mention.
+    assert cross.search("run the Cross-family reviewer here")
+
+
 def test_override_shape_is_documented_in_the_state_schema():
     text = _read("proceed/phases-state.md")  # REQ-661: the state schema moved whole
     assert "`{ at, phase, sha, triggers, pairs, actor }`" in text

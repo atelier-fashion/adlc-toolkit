@@ -2,7 +2,9 @@
 
 The structural test validates an emitted line against the documented key list
 (BR-9): every key present, every value a string (no nested object, no array),
-every count a quoted decimal or ``-``, every enum in its vocabulary. The other
+every count a quoted decimal or ``-``, every enum in its vocabulary. The one
+exception is REQ-722's optional ``crossFamily`` object, last, whose leaves are
+strings too (BR-13); the REQ-722 cases at the end pin its writer and its counts. The other
 cases pin the derivation, the tolerance of a state file written before this REQ
 (AC-4), the class tiers (BR-6), the redaction parity with emit-telemetry.sh's
 sed chain (BR-1, LESSON-441) and the state writers (atomic, merge-preserving,
@@ -57,11 +59,20 @@ def _run(*args, stdin=None):
 
 
 def assert_structural(line):
-    """BR-9: the documented key list, flat scalars, counts quoted, enums closed."""
+    """BR-9: the documented key list, flat scalars, counts quoted, enums closed.
+
+    REQ-722 appends one optional key, `crossFamily`, last: every other key is
+    always present and a flat string; `crossFamily`, when present, is an object
+    whose leaves are all strings (BR-13)."""
     assert "\n" not in line.strip()
     record = json.loads(line)
-    assert list(record) == list(RO.KEYS), "every documented key, in order, nothing else"
+    assert RO.KEYS[-len(RO.OPTIONAL_KEYS):] == RO.OPTIONAL_KEYS == ("crossFamily",)
+    required = [k for k in RO.KEYS if k not in RO.OPTIONAL_KEYS]
+    assert list(record) in (required, list(RO.KEYS)), "every documented key, in order, nothing else"
     for key, value in record.items():
+        if key == "crossFamily":
+            assert_cross_family_shape(value)
+            continue
         assert isinstance(value, str), f"{key} is {type(value).__name__}, not a string"
     for key in RO.COUNT_KEYS:
         assert QUOTED_COUNT.match(record[key]), f"{key}={record[key]!r} is not a quoted count"
@@ -74,6 +85,23 @@ def assert_structural(line):
     for cls in filter(None, record["finding_classes"].split(",")):
         assert RO.CLASS_RE.match(cls), cls
     return record
+
+
+def assert_cross_family_shape(obj):
+    """The `crossFamily` object: the counts as quoted decimals, then `repos`, each
+    a valid repo id mapping to a closed `status` and `reason`, nothing else."""
+    cf = RO._sibling("cross_family")
+    assert isinstance(obj, dict)
+    assert list(obj) == list(RO.CROSS_FAMILY_COUNTS) + ["repos"]
+    for key in RO.CROSS_FAMILY_COUNTS:
+        assert isinstance(obj[key], str) and obj[key].isdigit(), (key, obj[key])
+    assert isinstance(obj["repos"], dict)
+    for repo, entry in obj["repos"].items():
+        assert RO.REPO_ID_RE.match(repo), repo
+        assert list(entry) == ["status", "reason"]
+        assert entry["status"] in cf.REVIEW_STATUSES + ("-",)
+        assert entry["reason"] in cf.SKIP_REASONS + ("-",)
+        assert entry["reason"] == "-" or entry["status"] == "skipped"
 
 
 # --- BR-9 / BR-1: the line --------------------------------------------------------
@@ -616,7 +644,8 @@ def test_record_harness_fresh_restamps_and_clears_a_prior_run(tmp_path):
     _git_repo(old_root, version="1.0.0")
     new_sha = _git_repo(new_root, version="2.0.0")
     state = _write(tmp_path, _state(validateAttempts={"phase1": 3}, verify={"findings": [], "loops": 1},
-                                    lessonsWritten="NO_ENTRY", lessons={"step0": {}}))
+                                    lessonsWritten="NO_ENTRY", lessons={"step0": {}},
+                                    crossFamilyReview={"adlc-toolkit": {"status": "ran"}}))
     _run("record-harness", "--state", str(state), "--toolkit-root", str(old_root))
     assert json.loads(state.read_text())["harness"]["version"] == "1.0.0"
     # a resume keeps everything
@@ -627,7 +656,7 @@ def test_record_harness_fresh_restamps_and_clears_a_prior_run(tmp_path):
     assert _run("record-harness", "--state", str(state), "--toolkit-root", str(new_root), "--fresh").returncode == 0
     fresh = json.loads(state.read_text())
     assert fresh["harness"] == {"version": "2.0.0", "sha": new_sha}
-    for key in ("validateAttempts", "verify", "lessonsWritten"):
+    for key in ("validateAttempts", "verify", "lessonsWritten", "crossFamilyReview"):
         assert key not in fresh, key
     assert fresh["lessons"] == {"step0": {}} and fresh["req"] == "REQ-648"
 
@@ -644,3 +673,449 @@ def test_record_harness_ignores_an_enclosing_repo(tmp_path):
     assert RO.read_harness(str(cache)) == {"version": "5.4.0", "sha": "-"}
     # its own checkout — a directory .git, or a linked worktree's .git file — still counts
     assert RO.SHA_RE.match(RO.read_harness(str(outer))["sha"])
+
+
+# --- REQ-722: the cross-family review record, its findings and its counts --------
+
+CF_PATH = DELEGATE_DIR / "cross_family.py"
+
+
+def _cf():
+    return RO._sibling("cross_family")
+
+
+def _xfam(state, *args):
+    return _run("record-cross-family", "--state", str(state), *args)
+
+
+def _verify(state, findings, *extra):
+    return _run("record-verify", "--state", str(state), "--findings", "-", *extra,
+                stdin=json.dumps(findings))
+
+
+def test_record_cross_family_written_at_event(tmp_path):
+    """BR-5: one call writes the repo's record at once, in one atomic write that
+    keeps every other key; a skip writes its reason, a run writes none; a second
+    repo joins the first; nothing is redacted (LESSON-744)."""
+    before = _state(lessons={"step0": {}}, verify={"findings": [], "loops": 0})
+    state = _write(tmp_path, before)
+    out = _xfam(state, "--repo", "adlc-toolkit", "--status", "ran", "--implementer", "anthropic",
+                "--reviewer", "moonshot", "--findings", "3", "--dropped", "1")
+    assert out.returncode == 0, out.stderr
+    assert out.stdout == "crossFamilyReview: adlc-toolkit ran, 3 finding(s), 1 dropped\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["pipeline-state.json"], "atomic, no temp left"
+    data = json.loads(state.read_text())
+    assert data["crossFamilyReview"] == {"adlc-toolkit": {
+        "status": "ran", "implementerFamily": "anthropic", "reviewerFamily": "moonshot",
+        "findingCount": 3, "droppedCount": 1, "declinedCount": 0}}
+    assert {k: v for k, v in data.items() if k != "crossFamilyReview"} == before
+
+    # a skip, for a second repo whose id the credential chain would otherwise eat
+    repo = "task-" + "x" * 24
+    out = _xfam(state, "--repo", repo, "--status", "skipped", "--reason", "same-family",
+                "--implementer", "openai", "--reviewer", "openai")
+    assert out.returncode == 0, out.stderr
+    assert out.stdout == f"crossFamilyReview: {repo} skipped same-family, 0 finding(s), 0 dropped\n"
+    reviews = json.loads(state.read_text())["crossFamilyReview"]
+    assert list(reviews) == ["adlc-toolkit", repo]
+    assert reviews[repo] == {"status": "skipped", "reason": "same-family", "implementerFamily": "openai",
+                             "reviewerFamily": "openai", "findingCount": 0, "droppedCount": 0,
+                             "declinedCount": 0}
+    assert reviews["adlc-toolkit"]["status"] == "ran", "the first repo's record is kept"
+
+    # every reason in the closed vocabulary is accepted, through the shell wrapper too
+    wrap = DELEGATE_DIR / "emit-run-outcome.sh"
+    for reason in _cf().SKIP_REASONS:
+        out = subprocess.run(["sh", str(wrap), "record-cross-family", "--state", str(state),
+                              "--repo", "widgets", "--status", "skipped", "--reason", reason,
+                              "--implementer", "unknown", "--reviewer", "moonshot"],
+                             capture_output=True, text=True)
+        assert (out.returncode, out.stderr) == (0, ""), reason
+        assert json.loads(state.read_text())["crossFamilyReview"]["widgets"]["reason"] == reason
+
+
+def test_record_cross_family_reason_vocabulary(tmp_path):
+    """BR-4/BR-5: a reason outside SKIP_REASONS, a skip with no reason, a run with
+    one, a family outside the enum, a bad repo id or count: usage (rc 2), and the
+    state file is not touched. SKIP_REASONS is cross_family.py's own tuple."""
+    assert _cf().__file__ == str(CF_PATH)
+    assert '"delegation-disabled"' not in SCRIPT.read_text(encoding="utf-8"), "never a copy"
+    state = _write(tmp_path, _state())
+    original = state.read_text()
+    good = ["--repo", "widgets", "--implementer", "anthropic", "--reviewer", "moonshot"]
+    bad = [
+        ["--status", "skipped", "--reason", "too-slow"],
+        ["--status", "skipped", "--reason", "SAME-FAMILY"],
+        ["--status", "skipped"],
+        ["--status", "ran", "--reason", "same-family"],
+        ["--status", "maybe"],
+        ["--status", "skipped", "--reason", "same-family", "--findings", "2"],
+        ["--status", "ran", "--findings", "-1"],
+        ["--status", "ran", "--dropped", "many"],
+    ]
+    for args in bad:
+        out = _xfam(state, *good, *args)
+        assert out.returncode == 2, args
+        assert out.stderr.startswith("run-outcome: "), args
+    for flag, value in (("--implementer", "Anthropic"), ("--reviewer", "kimi-k2.6"),
+                        ("--reviewer", "openai-compatible"), ("--implementer", "")):
+        args = ["--repo", "widgets", "--status", "ran", "--implementer", "anthropic",
+                "--reviewer", "moonshot"]
+        args[args.index(flag) + 1] = value
+        out = _xfam(state, *args)
+        assert out.returncode == 2, (flag, value)
+        assert value == "" or value not in out.stderr, "the message never echoes the rejected value"
+    for repo in ("", "a/b", 'a"b', "x" * 65):
+        assert _xfam(state, "--repo", repo, "--status", "ran", "--implementer", "anthropic",
+                     "--reviewer", "moonshot").returncode == 2, repo
+    assert _xfam(state, "--status", "ran", "--implementer", "anthropic",
+                 "--reviewer", "moonshot").returncode == 2, "--repo is required"
+    assert state.read_text() == original
+    assert _xfam(tmp_path / "gone.json", *good, "--status", "ran").returncode == 1
+
+
+def test_normalize_findings_keeps_the_cross_family_fields():
+    raw = [
+        {"severity": "Major", "file": "a.py", "title": "T", "class": "a-b",
+         "source": ["cross-family", "panel", "cross-family", "planner"], "disposition": "declined",
+         "declineReason": "a.py:3 guards it; key sk-" + "A" * 24},
+        {"severity": "Minor", "file": "b.py", "title": "U", "source": "cross-family",
+         "disposition": "ignored", "declineReason": "  "},
+        {"severity": "Nit", "file": "c.py", "title": "V", "source": ["planner"], "disposition": "fixed"},
+        {"severity": "Nit", "file": "d.py", "title": "W", "source": 7},
+    ]
+    a, b, c, d = RO.normalize_findings(raw)
+    assert a["source"] == ["cross-family", "panel"], "closed members, sorted, once each"
+    assert a["disposition"] == "declined"
+    assert a["declineReason"] == "a.py:3 guards it; key " + RO.REDACTED, "free text is redacted"
+    assert b["source"] == ["cross-family"], "a lone string is a one-member list"
+    assert "disposition" not in b and "declineReason" not in b
+    assert "source" not in c and c["disposition"] == "fixed", "no known member: absent"
+    assert "source" not in d
+    assert list(a) == ["severity", "file", "title", "class", "fixed", "source", "disposition",
+                       "declineReason"]
+
+
+_KEY = "sk-" + "A" * 24
+_LONG = "tools/risk-assessment-" + "x" * 20 + ".py"
+
+
+def _cited_repo(tmp_path):
+    """A checkout holding the files the decline citations below name, committed."""
+    import subprocess
+    repo = tmp_path / "wt"
+    (repo / "tools").mkdir(parents=True)
+    (repo / "t").mkdir()
+    (repo / "tools" / "risk-assessment-x.py").write_text("x = 1\n" * 20, encoding="utf-8")
+    (repo / _LONG).write_text("x = 1\n" * 20, encoding="utf-8")
+    (repo / "t" / "ui.test.js").write_text(
+        "test('risk-assessment-%s', () => {});\ntest('risk', () => {});\n" % ("x" * 20),
+        encoding="utf-8")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@e")
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"], ["git", "commit", "-qm", "c"]):
+        subprocess.run(cmd, cwd=str(repo), env=env, check=True)
+    return str(repo)
+
+
+@pytest.mark.parametrize("reason,stored", [
+    # The finding's example, exactly: the chain leaves it alone, and so does this.
+    ("tools/risk-assessment-x.py:12 bounds it", "tools/risk-assessment-x.py:12 bounds it"),
+    # A tracked citation with an ``sk-`` run of 20+ inside it: kept whole (must-fire of the fix).
+    (_LONG + ":12 bounds it", _LONG + ":12 bounds it"),
+    (_LONG + ":12-14", _LONG + ":12-14"),
+    ("test:t/ui.test.js::risk-assessment-" + "x" * 20 + " passes",
+     "test:t/ui.test.js::risk-assessment-" + "x" * 20 + " passes"),
+    # The rest of the text is redacted as before (must-not-fire of the exemption).
+    (_LONG + ":12 bounds it; key " + _KEY, _LONG + ":12 bounds it; key " + RO.REDACTED),
+    ("test:t/ui.test.js::risk passes " + _KEY, "test:t/ui.test.js::risk passes " + RO.REDACTED),
+    # A credential shaped like a citation names nothing the repository holds: redacted
+    # (the Step D security regression: each of these used to come back whole).
+    (_KEY + ":12", RO.REDACTED + ":12"),
+    (_KEY + ".py:1", RO.REDACTED + ".py:1"),
+    ("x/" + _KEY + ":1", "x/" + RO.REDACTED + ":1"),
+    ("ghp_" + "A" * 36 + "/x:12", RO.REDACTED + "/x:12"),
+    ("AKIA" + "A" * 16 + "/x.py:3", RO.REDACTED + "/x.py:3"),
+    ("q/OPENAI_API_KEY:123456789", "q/" + RO.REDACTED),
+    ("test:a/b::" + _KEY, "test:a/b::" + RO.REDACTED),
+    ("test:t/ui.test.js::" + _KEY, "test:t/ui.test.js::" + RO.REDACTED),
+    # A real file cited past its end is not a citation that checks out: redacted.
+    (_LONG + ":99", "tools/ri" + RO.REDACTED + ".py:99"),
+    # A match that starts outside a token and runs into it is redacted whole.
+    ("X_TOKEN=a.py:1", RO.REDACTED),
+    ("Bearer " + "b" * 24 + " a.py:1", RO.REDACTED + " a.py:1"),
+    ("no citation, key " + _KEY, "no citation, key " + RO.REDACTED),
+])
+def test_decline_reason_keeps_citations_whole(tmp_path, reason, stored):
+    """REQ-722 BR-8: R3 redacts a ``declineReason`` but keeps every citation that checks
+    out against ``HEAD``, so a reason that qualified at Step C is still the same reason at
+    Phase 6; a credential shaped like a citation is still redacted."""
+    checker = RO._sibling("cross_family").DeclineChecker(_cited_repo(tmp_path))
+    [entry] = RO.normalize_findings([{"severity": "Major", "file": "a.py", "title": "T",
+                                      "source": ["cross-family"], "disposition": "declined",
+                                      "declineReason": reason}], checker)
+    assert entry["declineReason"] == stored
+    assert RO.redact_reason(reason, checker) == stored
+
+
+def test_decline_reason_without_a_checkout_is_plainly_redacted(tmp_path):
+    """No worktree to check against: every chain match is redacted, citations included,
+    and record-verify finds the worktree from the state's primary repo."""
+    assert RO.redact_reason(_LONG + ":12") == "tools/ri" + RO.REDACTED + ".py:12"
+    assert RO.decline_checker(str(tmp_path / "absent.json")) is None
+    repo = _cited_repo(tmp_path)
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"repos": {"r": {"primary": True, "worktree": repo}}}), encoding="utf-8")
+    assert RO.decline_checker(str(state)) is not None
+    state.write_text(json.dumps({"repos": {"r": {"primary": True, "worktree": str(tmp_path / "nope")}}}),
+                     encoding="utf-8")
+    assert RO.decline_checker(str(state)) is None
+
+
+def test_must_fix_is_kept_and_never_shrinks(tmp_path):
+    """check-dispositions refuses ``deferred`` on a must-fix finding, so R3 keeps a
+    true ``mustFix`` and a re-record that leaves it out keeps it still. Only
+    ``true`` is kept, with or without the REQ-722 fields (Step D: a writer that passes
+    it alone must not lose it)."""
+    raw = [
+        {"severity": "Major", "file": "a.py", "title": "T", "source": ["cross-family"], "mustFix": True},
+        {"severity": "Major", "file": "b.py", "title": "U", "source": ["cross-family"], "mustFix": False},
+        {"severity": "Major", "file": "c.py", "title": "V", "source": ["cross-family"], "mustFix": "true"},
+        {"severity": "Major", "file": "d.py", "title": "W", "mustFix": True},
+    ]
+    a, b, c, d = RO.normalize_findings(raw)
+    assert a["mustFix"] is True and d["mustFix"] is True
+    assert all("mustFix" not in e for e in (b, c))
+    state = _write(tmp_path, _state())
+    assert _verify(state, raw[:1]).returncode == 0
+    again = [{"severity": "Major", "file": "a.py", "title": "T", "source": ["cross-family"],
+              "disposition": "deferred"}]
+    assert _verify(state, again, "--loops", "1").returncode == 0
+    [entry] = json.loads(state.read_text())["verify"]["findings"]
+    assert entry["mustFix"] is True and entry["disposition"] == "deferred"
+
+
+def test_normalize_findings_keeps_an_integer_line():
+    """REQ-722 TASK-282: a 1-based integer ``line`` is kept, so the PR section and
+    check-dispositions can name ``file:line``; anything else is left out."""
+    raw = [
+        {"severity": "Major", "file": "a.py", "title": "T", "line": 12, "source": ["cross-family"]},
+        {"severity": "Major", "file": "b.py", "title": "U", "line": True},
+        {"severity": "Major", "file": "c.py", "title": "V", "line": "12"},
+        {"severity": "Major", "file": "d.py", "title": "W", "line": 0},
+        {"severity": "Major", "file": "e.py", "title": "X", "line": 3.0},
+        {"severity": "Major", "file": "f.py", "title": "Y"},
+    ]
+    a, *rest = RO.normalize_findings(raw)
+    assert a["line"] == 12
+    assert list(a) == ["severity", "file", "title", "class", "fixed", "line", "source"]
+    assert all("line" not in entry for entry in rest)
+
+
+def test_dedupe_key_matches_the_workflow_engine():
+    """The carry-forward key is the workflow engine's dedupeKey(): file plus the
+    title lowercased, whitespace runs collapsed, ends trimmed."""
+    cases = [
+        {"file": "a.py", "title": "Missing  Guard"},
+        {"file": "a.py", "title": "\tmissing guard \n"},
+        {"file": "a.py", "title": "missing guard﻿"},
+        {"file": "a.py", "title": "missing  guard"},
+        {"file": "b.py", "title": "missing guard"},
+        {"file": "a.py"},
+        {"title": "Only A Title"},
+    ]
+    keys = [RO.dedupe_key(c) for c in cases]
+    assert keys[0] == keys[1] == keys[2] == keys[3] == ("a.py", "missing guard")
+    assert keys[4] != keys[0] and keys[5] == ("a.py", "") and keys[6] == ("", "only a title")
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not installed: the parity half needs it")
+    loader = REPO_ROOT / "workflows" / "tests" / "_load-pure.js"
+    workflow = REPO_ROOT / "workflows" / "adlc-sprint.workflow.js"
+    script = ("const h = require(process.argv[1])(process.argv[2]);"
+              "const cases = JSON.parse(process.argv[3]);"
+              "process.stdout.write(JSON.stringify(cases.map((c) => h.dedupeKey(c).split('\\x00'))));")
+    out = subprocess.run([node, "-e", script, str(loader), str(workflow), json.dumps(cases)],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert [tuple(k) for k in json.loads(out.stdout)] == keys
+
+
+def test_rerecord_keeps_decline(tmp_path):
+    """BR-8: an R3 re-record that omits `disposition` does not erase a decline
+    recorded earlier for the same dedupe key, nor its reason, nor who raised the
+    finding; a new disposition replaces the old one; another key inherits nothing."""
+    state = _write(tmp_path, _state())
+    first = [
+        {"severity": "Major", "file": "src/a.py", "title": "Missing bounds check", "class": "a-b",
+         "source": ["cross-family"], "disposition": "declined",
+         "declineReason": "src/a.py:12 clamps the index before the read"},
+        {"severity": "Minor", "file": "src/b.py", "title": "Unused import", "source": ["panel"]},
+        {"severity": "Minor", "file": "src/c.py", "title": "Stale comment",
+         "source": ["cross-family"], "disposition": "declined", "declineReason": "src/c.py:4 says so"},
+    ]
+    assert _verify(state, first).returncode == 0
+    # Step D's re-record: the same findings, reworded in case and spacing, with no
+    # disposition, no reason and only the panel named; one now fixed; one new.
+    second = [
+        {"severity": "Major", "file": "src/a.py", "title": "  missing   BOUNDS check", "class": "a-b",
+         "source": ["panel"], "fixed": False},
+        {"severity": "Minor", "file": "src/b.py", "title": "Unused import", "fixed": True},
+        {"severity": "Minor", "file": "src/c.py", "title": "Stale comment", "disposition": "fixed",
+         "fixed": True},
+        {"severity": "Nit", "file": "src/d.py", "title": "Missing bounds check"},
+    ]
+    out = _verify(state, second, "--loops", "1")
+    assert out.returncode == 0, out.stderr
+    a, b, c, d = json.loads(state.read_text())["verify"]["findings"]
+    assert a["disposition"] == "declined"
+    assert a["declineReason"] == "src/a.py:12 clamps the index before the read"
+    assert a["source"] == ["cross-family", "panel"], "who raised it never shrinks"
+    assert a["title"] == "  missing   BOUNDS check", "the new entry's own fields are kept"
+    assert b["source"] == ["panel"] and "disposition" not in b
+    assert c["disposition"] == "fixed" and "declineReason" not in c, "a new disposition wins, alone"
+    assert not any(k in d for k in ("source", "disposition", "declineReason")), "another file"
+    # and a third re-record that omits everything keeps the decline still
+    assert _verify(state, [{"severity": "Major", "file": "src/a.py", "title": "Missing bounds check"}]
+                   ).returncode == 0
+    [again] = json.loads(state.read_text())["verify"]["findings"]
+    assert (again["disposition"], again["source"]) == ("declined", ["cross-family", "panel"])
+    assert again["declineReason"] == "src/a.py:12 clamps the index before the read"
+
+
+def test_declined_count_is_derived_from_verify(tmp_path):
+    """`declinedCount` follows `verify` on every record write: a skip declined
+    nothing; with one repo ran, every cross-family decline is its; with two, a
+    finding names no repo, so their counts are left as they were."""
+    state = _write(tmp_path, _state())
+    run = ["--status", "ran", "--implementer", "anthropic", "--reviewer", "moonshot"]
+    assert _xfam(state, "--repo", "api", *run, "--findings", "2").returncode == 0
+    assert _xfam(state, "--repo", "web", "--status", "skipped", "--reason", "no-binary",
+                 "--implementer", "anthropic", "--reviewer", "unknown").returncode == 0
+    findings = [
+        {"severity": "Major", "file": "a", "title": "a", "source": ["cross-family"],
+         "disposition": "declined", "declineReason": "a:1"},
+        {"severity": "Major", "file": "b", "title": "b", "source": ["panel", "cross-family"],
+         "disposition": "declined", "declineReason": "b:1"},
+        {"severity": "Major", "file": "c", "title": "c", "source": ["panel"], "disposition": "declined",
+         "declineReason": "c:1"},
+    ]
+    assert _verify(state, findings).returncode == 0
+    reviews = json.loads(state.read_text())["crossFamilyReview"]
+    assert reviews["api"]["declinedCount"] == 2, "panel-only declines are not the reviewer's"
+    assert reviews["web"]["declinedCount"] == 0
+    # a re-run of the record keeps the derived count
+    assert _xfam(state, "--repo", "api", *run, "--findings", "2").returncode == 0
+    assert json.loads(state.read_text())["crossFamilyReview"]["api"]["declinedCount"] == 2
+    # a second repo that ran: no attribution, nothing overwritten
+    assert _xfam(state, "--repo", "web", *run).returncode == 0
+    assert _verify(state, findings[:1]).returncode == 0
+    reviews = json.loads(state.read_text())["crossFamilyReview"]
+    assert (reviews["api"]["declinedCount"], reviews["web"]["declinedCount"]) == (2, 0)
+
+
+def test_cross_family_counts_from_state(tmp_path):
+    """BR-13: the line's `crossFamily` object is derived from the state file:
+    per repo the status and reason, and over `verify` the cross-family findings,
+    those the panel did not raise, and how many were fixed and declined. Emit
+    takes no flag for any of it, so the model cannot supply a count."""
+    state = _state(
+        crossFamilyReview={
+            "web": {"status": "skipped", "reason": "same-family", "findingCount": 9},
+            "api": {"status": "ran", "reason": "same-family", "findingCount": 9, "declinedCount": 9},
+            "bad/id": {"status": "ran"},
+            "odd": {"status": "maybe", "reason": "too-slow"},
+            "lost": {"status": "skipped", "reason": "too-slow"},
+        },
+        verify={"findings": [
+            {"severity": "Major", "file": "a", "title": "a", "source": ["cross-family"], "fixed": True},
+            {"severity": "Minor", "file": "b", "title": "b", "source": ["cross-family", "panel"],
+             "fixed": True, "disposition": "declined", "declineReason": "b:1"},
+            {"severity": "Minor", "file": "c", "title": "c", "source": ["cross-family"],
+             "disposition": "deferred"},
+            {"severity": "Nit", "file": "d", "title": "d", "source": ["cross-family"],
+             "disposition": "fixed"},
+            {"severity": "Nit", "file": "e", "title": "e", "source": ["panel"], "fixed": True},
+            {"severity": "Nit", "file": "f", "title": "f", "fixed": True},
+        ], "loops": 1},
+    )
+    out = _run("emit", "--state", str(_write(tmp_path, state)), "--terminal", "merged", "--engine", "solo")
+    assert out.returncode == 0, out.stderr
+    rec = assert_structural(out.stdout)
+    assert list(rec) == list(RO.KEYS)
+    assert rec["crossFamily"] == {
+        "findings": "4", "cross_only": "3", "fixed": "2", "declined": "1",
+        "repos": {
+            "api": {"status": "ran", "reason": "-"},
+            "lost": {"status": "skipped", "reason": "-"},
+            "odd": {"status": "-", "reason": "-"},
+            "web": {"status": "skipped", "reason": "same-family"},
+        },
+    }
+    assert out.stdout.rstrip("\n").endswith("}}}"), "the object is the line's last key"
+    assert _run("emit", "--state", str(tmp_path / "pipeline-state.json"), "--terminal", "merged",
+                "--engine", "solo", "--cross-family", "x").returncode == 2
+
+    # cross-family findings with no record still count; a record with no findings reports zeros
+    only_findings = RO.build_record(_state(verify=state["verify"]), "merged", "solo", now=NOW)
+    assert only_findings["crossFamily"]["findings"] == "4" and only_findings["crossFamily"]["repos"] == {}
+    skipped = _state(crossFamilyReview={"api": {"status": "skipped", "reason": "subagent-mode"}})
+    assert RO.build_record(skipped, "merged", "solo", now=NOW)["crossFamily"] == {
+        "findings": "0", "cross_only": "0", "fixed": "0", "declined": "0",
+        "repos": {"api": {"status": "skipped", "reason": "subagent-mode"}}}
+    # panel-only sources and an empty record are nothing to report
+    panel = _state(crossFamilyReview={}, verify={"findings": [{"title": "x", "source": ["panel"]}]})
+    assert "crossFamily" not in RO.build_record(panel, "merged", "solo", now=NOW)
+
+
+#: The emitted line for PRE_REQ722_STATE, captured from run_outcome.py as it stood
+#: before REQ-722 (commit 2e99a38).
+PRE_REQ722_LINE = (
+    '{"timestamp":"2026-10-29T12:00:00Z","skill":"proceed","step":"run-outcome","req":"REQ-648",'
+    '"repo":"adlc-toolkit","engine":"solo","toolkit_version":"5.4.0","toolkit_sha":"c013262",'
+    '"terminal":"merged","blocked_reason":"","validate_retries":"1","verify_loops":"1",'
+    '"findings_critical":"0","findings_major":"1","findings_minor":"0","findings_nit":"1",'
+    '"finding_classes":"unanchored-marker-regex,LESSON-390","lessons_cited":"LESSON-012,LESSON-571",'
+    '"lessons_written":"LESSON-740","elapsed_s":"3600"}'
+)
+PRE_REQ722_STATE = _state(
+    harness={"version": "5.4.0", "sha": "c013262"},
+    validateAttempts={"phase1": 2, "phase3": 1},
+    verify={"findings": [
+        {"severity": "Major", "file": "a.py", "title": "Unquoted path", "class": "unanchored-marker-regex",
+         "fixed": True},
+        {"severity": "Nit", "file": "b.md", "title": "u", "class": "LESSON-390", "lessonId": "LESSON-390",
+         "fixed": False},
+    ], "loops": 1, "consolidatedAt": "2026-10-29T11:30:00Z"},
+    lessons={"acknowledged": {"ids": ["LESSON-012", "LESSON-571"]}},
+    lessonsWritten=["LESSON-740"],
+    closeOut={"status": "ok"},
+)
+
+
+def test_pre_req_state_reports_unchanged(tmp_path, monkeypatch):
+    """AC-15: a state file written before REQ-722 emits the line it always did,
+    byte for byte, its findings re-record to the same entries, and neither path
+    needs cross_family.py or model_family.py at all."""
+    def unavailable(name):
+        raise AssertionError(f"a pre-REQ-722 state loaded {name}.py")
+
+    monkeypatch.setattr(RO, "_sibling", unavailable)
+    assert RO.encode(RO.build_record(PRE_REQ722_STATE, "merged", "solo", now=NOW)) == PRE_REQ722_LINE
+    raw = [{"severity": "high", "file": "a.py", "title": "T", "class": "x-y", "fixed": True,
+            "lessonId": "LESSON-390", "extra": 1}]
+    assert RO.normalize_findings(raw) == [{"severity": "Major", "file": "a.py", "title": "T",
+                                           "class": "LESSON-390", "fixed": True, "lessonId": "LESSON-390"}]
+    prior = PRE_REQ722_STATE["verify"]["findings"]
+    assert RO.carry_forward(RO.normalize_findings(prior), prior) == RO.normalize_findings(prior)
+    data = json.loads(json.dumps(PRE_REQ722_STATE))
+    RO.sync_declined(data)
+    assert data == PRE_REQ722_STATE
+    monkeypatch.undo()
+    # end to end: a record-verify of the same findings leaves verify as it was, but the stamp
+    state = _write(tmp_path, PRE_REQ722_STATE)
+    assert _verify(state, prior, "--loops", "1").returncode == 0
+    after = json.loads(state.read_text())
+    assert after["verify"]["findings"] == prior and "crossFamilyReview" not in after
+    assert {k: v for k, v in after.items() if k != "verify"} == {
+        k: v for k, v in PRE_REQ722_STATE.items() if k != "verify"}

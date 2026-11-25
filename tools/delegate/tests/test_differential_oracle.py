@@ -16,15 +16,16 @@ corpora. A disagreement is a finding, not a test to update (LESSON-602: an
 exclusion test needs a working subject; here the working subject is the parser
 we are differentiating against).
 
-Three things are restated here rather than imported, deliberately:
+Four things are restated here rather than imported, deliberately:
 
   * the allowed key set,
   * the ``enabled``-must-be-a-bool rule and the three-strings rule,
+  * the ``family`` enum (REQ-722 BR-10),
   * the 64 KiB cap.
 
 Importing them would make the oracle agree with the implementation by
 construction, which is the one thing an oracle must not do. The cost is that a
-deliberate change to any of the three fails this file too — which for a schema
+deliberate change to any of the four fails this file too — which for a schema
 that decides whether a developer's source files leave the machine is the point,
 not the friction.
 """
@@ -59,7 +60,14 @@ MALFORMED = _Malformed()
 
 #: REQ BR-7's key set, restated. Not imported from `_machine_config`: an oracle
 #: that reads the schema off the subject cannot disagree with it.
-_ALLOWED_KEYS = frozenset(("enabled", "model", "base_url", "api_key_env"))
+_ALLOWED_KEYS = frozenset(("enabled", "model", "base_url", "api_key_env",
+                           "family"))
+
+#: REQ-722's closed `ModelFamily` enum, restated for the same reason: an oracle
+#: that imported `model_family.MODEL_FAMILIES` would accept whatever the subject
+#: accepts. `family` must be exactly one of these strings (BR-10, LESSON-614).
+_FAMILIES = frozenset(("anthropic", "openai", "moonshot", "google", "meta",
+                       "other", "unknown"))
 
 #: REQ BR-3's cap, restated for the same reason. The loader reads `cap + 1`
 #: bytes and refuses when it got more, so a file of exactly the cap is fine.
@@ -191,6 +199,7 @@ def oracle_expectation(data):
       * no ``delegate`` key                   -> ``{}``     (BR-6, unconfigured)
       * section is not a mapping              -> malformed (BR-7)
       * an unknown key, a non-bool ``enabled``,
+        a ``family`` outside the enum,
         a non-string elsewhere                -> malformed (BR-7)
       * otherwise                             -> the section
 
@@ -249,6 +258,10 @@ def oracle_expectation(data):
             # `bool`, never `int`: `True` is an int in Python and `1` is not a
             # YAML boolean. A quoted "false" arrives here as a str and refuses.
             if not isinstance(value, bool):
+                return MALFORMED
+        elif key == "family":
+            # A string, and exactly a member: no case folding, no substring.
+            if not isinstance(value, str) or value not in _FAMILIES:
                 return MALFORMED
         elif not isinstance(value, str):
             return MALFORMED

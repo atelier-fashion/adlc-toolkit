@@ -398,6 +398,92 @@
       ]
     },
     {
+      "id": "proceed/phases-cross-family.md#1:70d28020",
+      "route": "runner",
+      "placeholders": [
+        "integrationBranch",
+        "repo_id",
+        "spec",
+        "state",
+        "worktree"
+      ],
+      "sources": [
+        "cross-family-review"
+      ],
+      "reach": [
+        "$ADLC_READ_BIN",
+        "$DELEGATE_TOOLS/emit-run-outcome.sh",
+        "chmod",
+        "dirname",
+        "git",
+        "git diff",
+        "mkdir",
+        "mktemp",
+        "python3",
+        "rm",
+        "sed"
+      ]
+    },
+    {
+      "id": "proceed/phases-cross-family.md#2:20108e82",
+      "route": "runner",
+      "placeholders": [
+        "integrationBranch",
+        "repo_id",
+        "spec",
+        "state",
+        "worktree"
+      ],
+      "sources": [
+        "cross-family-review"
+      ],
+      "reach": [
+        "$ADLC_READ_BIN",
+        "$DELEGATE_TOOLS/emit-run-outcome.sh",
+        "chmod",
+        "dirname",
+        "git",
+        "git diff",
+        "mkdir",
+        "mktemp",
+        "python3",
+        "rm",
+        "sed"
+      ]
+    },
+    {
+      "id": "proceed/phases-cross-family.md#3:a59a122a",
+      "route": "runner",
+      "placeholders": [
+        "declineReason",
+        "worktree"
+      ],
+      "reach": [
+        "python3"
+      ]
+    },
+    {
+      "id": "proceed/phases-cross-family.md#4:956f4fc0",
+      "route": "runner",
+      "placeholders": [
+        "state",
+        "worktree"
+      ],
+      "reach": [
+        "python3"
+      ]
+    },
+    {
+      "id": "proceed/phases-cross-family.md#5:b9a10195",
+      "route": "runner",
+      "placeholders": [
+        "state"
+      ],
+      "reach": [
+        "python3"
+      ]
+    },
+    {
       "id": "wrapup/SKILL.md#1:7e155d18",
       "route": "runner",
       "reach": [

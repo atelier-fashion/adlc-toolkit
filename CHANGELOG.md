@@ -40,6 +40,16 @@ is cut per `RELEASING.md`.
 
 ### Added
 
+- **A cross-family reviewer on the `/proceed` Phase-5 panel (REQ-722).** One reviewer per
+  touched repo, served by the delegate endpoint, whose model family must differ from the
+  implementer's. Families are declared (`delegate.family`, harness `model_family`) and
+  compared for equality; `unknown` skips the review, and every skip is recorded with its
+  reason in `pipeline-state.json` and the PR body. Its findings reach consolidation
+  unfiltered, a decline needs a checkable citation, and Phase 6 refuses to start while a
+  cross-family finding has no disposition. The workflow engine and exec runs record it
+  the same way. New: `partials/cross-family-review.sh`, `tools/delegate/cross_family.py`,
+  `tools/delegate/model_family.py`, `adlc-read --print-family`, `adlc harness family`,
+  `agents/cross-family-reviewer.md`, `proceed/phases-cross-family.md`.
 - **A `runner-prefix` variant for `adlc harness probe`'s `fence-vs-allowlist` (REQ-707).**
   REQ-682 runs every exec fence through `<ToolkitRoot>/tools/adlc/fence-run`, admitted by one
   absolute-path allow, and REQ-662 BR-11 gates each non-Claude exec adapter on that allow

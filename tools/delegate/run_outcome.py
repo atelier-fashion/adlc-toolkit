@@ -11,23 +11,40 @@ stamp and the redaction are computed here.
 Subcommands::
 
     emit --state S --terminal T --engine E [--reason R] [--req REQ-xxx]
-        Print one flat JSON line (every value a string; counts are quoted
-        decimals or "-"). ``emit-run-outcome.sh`` appends it to the log.
+        Print one JSON line (every value a string; counts are quoted decimals
+        or "-"). ``emit-run-outcome.sh`` appends it to the log.
         ``--terminal rejected`` is a usage error with any engine but ``exec``,
-        and its line has an empty ``blocked_reason`` (REQ-719 BR-18).
+        and its line has an empty ``blocked_reason`` (REQ-719 BR-18). The one
+        nested value is the optional ``crossFamily`` object, last, present only
+        when the state recorded a cross-family review (REQ-722 BR-13), so a
+        line for a state written before REQ-722 is unchanged.
     record-harness --state S --toolkit-root DIR [--fresh]
         Write ``harness: {version, sha}`` once; on a resume an existing one is
         kept (BR-10, never re-read). ``--fresh`` — a fresh Step 0, decided from
         the progress record exactly as ``adlc_lessons --fresh`` is (LESSON-719),
         never from whether the key exists — re-stamps it and clears the
-        ``validateAttempts``, ``verify`` and ``lessonsWritten`` an earlier run of
-        the same REQ left in the primary-path copy.
+        ``validateAttempts``, ``verify``, ``lessonsWritten`` and
+        ``crossFamilyReview`` an earlier run of the same REQ left in the
+        primary-path copy.
     record-validate --state S --phase 1|3 --attempt N
         Set ``validateAttempts.phase<N>`` to max(existing, N): absolute and
         monotone, so a replay or a repeated call never double-counts.
     record-verify --state S --findings FILE|- [--loops N]
-        Normalise the findings (severity scale, BR-6 class tiers, ``fixed``)
-        and replace ``verify.findings``; stamp ``consolidatedAt``.
+        Normalise the findings (severity scale, BR-6 class tiers, ``fixed``,
+        an integer ``line``, and REQ-722's ``source``, ``disposition``,
+        ``declineReason`` and a true ``mustFix``) and
+        replace ``verify.findings``; stamp ``consolidatedAt``. A finding that
+        omits ``disposition`` or ``declineReason`` takes them from the earlier
+        entry with the same dedupe key, its ``source`` is the union of both,
+        and a ``mustFix: true`` is kept, so a later re-record cannot erase a
+        decline or make a must-fix finding deferrable (REQ-722 BR-8).
+    record-cross-family --state S --repo ID --status ran|skipped [--reason R]
+                        --implementer F --reviewer F [--findings N] [--dropped N]
+        Write ``crossFamilyReview.<repo>`` at the moment the review runs or
+        skips (REQ-722 BR-5). ``--reason`` is required exactly when skipped
+        and must be one of ``cross_family.SKIP_REASONS``; both families must be
+        members of the ``model_family`` enum. Every value is a constrained id
+        or a count, validated and never redacted (LESSON-744).
     record-lessons-written --state S (--ids LESSON-a,LESSON-b | --no-entry)
         Record ``/wrapup``'s ``### Lessons captured`` outcome.
     record-carry --state S --from W
@@ -64,7 +81,7 @@ REJECTED_ENGINE = "exec"
 BLOCKED_REASONS = (
     "validation-exhausted", "reflector-questions", "merge-conflict",
     "merge-unverified", "close-out-failed", "setup-error", "no-worktree",
-    "no-pr", "aborted", "other",
+    "no-pr", "aborted", "cross-family-dispositions", "other",
 )
 # Reasons only the exec engine writes: its `abort` verb ended the run (REQ-719 BR-19).
 EXEC_ONLY_REASONS = ("aborted",)
@@ -76,13 +93,19 @@ SEVERITY_MAP = {
 }
 
 # The documented key list, in emission order. The structural test pins it.
+# `crossFamily` (REQ-722 BR-13) is last, so a reader that finds a flat key by its
+# first occurrence never reads a nested one, and it is optional: emitted only when
+# the state holds something for it (OPTIONAL_KEYS).
 KEYS = (
     "timestamp", "skill", "step", "req", "repo", "engine", "toolkit_version",
     "toolkit_sha", "terminal", "blocked_reason", "validate_retries",
     "verify_loops", "findings_critical", "findings_major", "findings_minor",
     "findings_nit", "finding_classes", "lessons_cited", "lessons_written",
-    "elapsed_s",
+    "elapsed_s", "crossFamily",
 )
+OPTIONAL_KEYS = ("crossFamily",)
+# The counts inside `crossFamily`, in emission order, before its `repos` map.
+CROSS_FAMILY_COUNTS = ("findings", "cross_only", "fixed", "declined")
 COUNT_KEYS = (
     "validate_retries", "verify_loops", "findings_critical", "findings_major",
     "findings_minor", "findings_nit",
@@ -99,7 +122,19 @@ CLASS_RE = re.compile(
 REQ_ID_RE = re.compile(r"^REQ-[0-9]{3,6}\Z")
 VERSION_RE = re.compile(r"^[0-9A-Za-z._+-]{1,64}\Z")
 SHA_RE = re.compile(r"^[0-9a-f]{4,40}\Z")
+# A `crossFamilyReview` key: a repo id as `pipeline-state.json` `repos` names it
+# (exec_safety.VALID_REPO_ID's charset). No `"` or `\`, so the run-outcome
+# line's awk reader can find it.
+REPO_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}\Z")  # the cross-family repo-id charset
+# The member a finding's `source` names for the six-agent panel (REQ-722 BR-7);
+# the other member is cross_family.SOURCE.
+PANEL_SOURCE = "panel"
 
+# The whitespace a JavaScript `\s` and `String.prototype.trim` match, so
+# dedupe_key() normalises a title exactly as the workflow engine's dedupeKey().
+_JS_SPACE = ("\t\n\v\f\r   " + "".join(chr(c) for c in range(0x2000, 0x200b))
+             + "    　﻿")
+_JS_SPACE_RUN = re.compile("[" + re.escape(_JS_SPACE) + "]+")
 
 
 def _load_credential_redact():
@@ -127,6 +162,33 @@ class RunOutcomeError(Exception):
     """A state file that cannot be read or written (rc 1)."""
 
 
+_SIBLINGS = {}
+
+
+def _sibling(name):
+    """``tools/delegate/<name>.py``, loaded by path on first use and cached.
+
+    ``cross_family`` holds the REQ-722 vocabularies (``SKIP_REASONS``,
+    ``REVIEW_STATUSES``, ``DISPOSITIONS``, ``SOURCE``) and ``model_family`` the
+    one ``ModelFamily`` enum: each is read from its owner, never copied. Loaded
+    lazily, so a state written before REQ-722 never needs either file, and its
+    line is built exactly as before.
+    """
+    # One of four by-path loaders, kept alike: cross_family._model_family,
+    # _machine_config._model_family and tools/adlc/harness_adapter.py's
+    # _model_family. A fix to how one loads (or fails to) belongs in all four.
+    if name not in _SIBLINGS:
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), name + ".py")
+        try:
+            spec = importlib.util.spec_from_file_location("adlc_delegate_" + name, path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        except (OSError, ImportError, SyntaxError) as exc:
+            raise RunOutcomeError(f"cannot load {path}: {exc}") from exc
+        _SIBLINGS[name] = module
+    return _SIBLINGS[name]
+
+
 class UsageError(Exception):
     """A bad argument (rc 2)."""
 
@@ -136,6 +198,53 @@ class UsageError(Exception):
 def redact(text):
     """Replace every credential-shaped run with ``[REDACTED]``."""
     return REDACT_RE.sub(REDACTED, text if isinstance(text, str) else str(text))
+
+
+def redact_reason(text, checker=None):
+    """A ``declineReason`` redacted, its verified citations kept whole (REQ-722 BR-8).
+
+    ``cross_family.py check-decline`` qualified the reason by its citations and checks
+    it again at Phase 6 from what this writes, so a real citation the chain would cut
+    into (``tools/risk-assessment-<20 more>.py:12`` holds an ``sk-`` run) must survive.
+    A chain match is left alone only when it lies wholly inside a span ``checker``
+    (a ``cross_family.DeclineChecker`` over the run's worktree) confirms against
+    ``HEAD``: a tracked file with the line in range, or a test the tracked test file
+    defines. A credential merely shaped like a citation names nothing the repository
+    holds, so it is redacted (Phase-5 Step D security fix). With no ``checker`` (no
+    worktree to check against) every match is redacted, as :func:`redact` would.
+    """
+    text = text if isinstance(text, str) else str(text)
+    kept = checker.confirmed_spans(text) if checker is not None else []
+    out = []
+    at = 0
+    for match in REDACT_RE.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in kept):
+            continue
+        out += [text[at:match.start()], REDACTED]
+        at = match.end()
+    out.append(text[at:])
+    return "".join(out)
+
+
+def decline_checker(state_path):
+    """A ``cross_family.DeclineChecker`` over the primary repo's worktree named in the
+    state file, or ``None`` when the state names none, or none that is a checkout.
+    Only :func:`redact_reason` uses it, and ``None`` there means plain redaction."""
+    try:
+        with open(state_path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    repos = data.get("repos") if isinstance(data, dict) else None
+    if not isinstance(repos, dict):
+        return None
+    for entry in repos.values():
+        if isinstance(entry, dict) and entry.get("primary") is True:
+            worktree = entry.get("worktree")
+            if isinstance(worktree, str) and os.path.isdir(os.path.join(worktree, ".git")) \
+                    or isinstance(worktree, str) and os.path.isfile(os.path.join(worktree, ".git")):
+                return _sibling("cross_family").DeclineChecker(worktree)
+    return None
 
 
 def as_int(value):
@@ -287,6 +396,169 @@ def _findings(state):
     return [f for f in found if isinstance(f, dict)] if isinstance(found, list) else []
 
 
+# --- REQ-722: cross-family findings and the review record ---------------------
+
+def dedupe_key(finding):
+    """A finding's identity across re-records: its file plus its title lowercased,
+    with each whitespace run collapsed to one space and the ends trimmed. The
+    workflow engine's ``dedupeKey()`` and Step B's merge use the same key."""
+    path = finding.get("file") if isinstance(finding.get("file"), str) else ""
+    title = finding.get("title") if isinstance(finding.get("title"), str) else ""
+    return (path, _JS_SPACE_RUN.sub(" ", title.lower()).strip(_JS_SPACE))
+
+
+def finding_sources(value):
+    """``source`` as a sorted, de-duplicated list of the closed members, or None.
+
+    A lone string counts as a one-item list, so a cross-family finding cannot
+    lose its identity by its shape. Unknown members are dropped, and a value
+    with no known member is no ``source`` at all (absent stays absent).
+    """
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return None
+    allowed = (PANEL_SOURCE, _sibling("cross_family").SOURCE)
+    kept = sorted({v for v in value if isinstance(v, str) and v in allowed})
+    return kept or None
+
+
+def finding_extras(finding, checker=None):
+    """The REQ-722 fields of one finding, each kept only when valid: ``source``
+    (closed members), ``disposition`` (``cross_family.DISPOSITIONS``),
+    ``declineReason`` (free text, so redacted, its citations kept:
+    :func:`redact_reason`), and ``mustFix`` when it is ``true``, which
+    ``check-dispositions`` reads (a must-fix finding is never ``deferred``). A
+    finding with none of the first three — every finding written before
+    REQ-722 — gets none, and loads nothing."""
+    extras = {}
+    if not any(k in finding for k in ("source", "disposition", "declineReason")):
+        # mustFix alone is kept too, so a writer that passes it without a REQ-722 key
+        # never loses it (check-dispositions reads it); nothing else loads.
+        if finding.get("mustFix") is True:
+            extras["mustFix"] = True
+        return extras
+    sources = finding_sources(finding.get("source"))
+    if sources:
+        extras["source"] = sources
+    if finding.get("disposition") in _sibling("cross_family").DISPOSITIONS:
+        extras["disposition"] = finding["disposition"]
+    reason = finding.get("declineReason")
+    if isinstance(reason, str) and reason.strip():
+        extras["declineReason"] = redact_reason(reason, checker)
+    if finding.get("mustFix") is True:
+        extras["mustFix"] = True
+    return extras
+
+
+def carry_forward(findings, prior):
+    """Keep what an earlier record knew about each finding (REQ-722 BR-8).
+
+    For every new entry, the first earlier entry with the same :func:`dedupe_key`
+    supplies ``disposition`` when the new one has none, ``declineReason`` when
+    both are ``declined`` and the new one gives no reason, its ``source``
+    members, which join the new entry's: who raised a finding never shrinks,
+    and ``mustFix: true``, which never shrinks either.
+    The earlier values are re-validated, since the state file is data.
+    """
+    earlier = {}
+    for entry in prior if isinstance(prior, list) else []:
+        if isinstance(entry, dict):
+            earlier.setdefault(dedupe_key(entry), entry)
+    for entry in findings:
+        old = earlier.get(dedupe_key(entry))
+        if old is None:
+            continue
+        old = finding_extras(old)
+        if "source" in old:
+            entry["source"] = sorted(set(entry.get("source", [])) | set(old["source"]))
+        if "disposition" not in entry and "disposition" in old:
+            entry["disposition"] = old["disposition"]
+        if old.get("mustFix") is True:
+            entry["mustFix"] = True
+        if ("declineReason" not in entry and "declineReason" in old
+                and entry.get("disposition") == old.get("disposition") == "declined"):
+            entry["declineReason"] = old["declineReason"]
+    return findings
+
+
+def _is_cross_family(finding):
+    sources = finding_sources(finding.get("source")) if "source" in finding else None
+    return bool(sources) and _sibling("cross_family").SOURCE in sources
+
+
+def _is_fixed(finding):
+    """A disposition, when there is one, decides; otherwise the R3 ``fixed`` flag."""
+    if "disposition" in finding:
+        return finding.get("disposition") == "fixed"
+    return finding.get("fixed") is True
+
+
+def cross_family_counts(state):
+    """``{findings, cross_only, fixed, declined}`` over ``verify.findings``: the
+    findings whose ``source`` names the cross-family reviewer, those it alone
+    raised (the panel did not), and how many were fixed and declined."""
+    found = [f for f in _findings(state) if _is_cross_family(f)]
+    only = [f for f in found if finding_sources(f.get("source")) == [_sibling("cross_family").SOURCE]]
+    return {
+        "findings": len(found),
+        "cross_only": len(only),
+        "fixed": sum(1 for f in found if _is_fixed(f)),
+        "declined": sum(1 for f in found if f.get("disposition") == "declined"),
+    }
+
+
+def sync_declined(data):
+    """Derive each ``crossFamilyReview.<repo>.declinedCount`` from ``verify``.
+
+    A skipped review raised nothing, so it declined nothing. A cross-family
+    finding comes only from a repo whose review ran, so when exactly one repo
+    ran, every declined one is that repo's. With two or more, a finding does not
+    name its repo, so their counts are left as they are (``verify`` still has
+    the run's total, which the run-outcome line reports).
+    """
+    reviews = data.get("crossFamilyReview")
+    if not isinstance(reviews, dict):
+        return
+    records = [r for r in reviews.values() if isinstance(r, dict)]
+    ran = [r for r in records if r.get("status") == "ran"]
+    declined = cross_family_counts(data)["declined"] if len(ran) == 1 else None
+    for record in records:
+        if record.get("status") != "ran":
+            record["declinedCount"] = 0
+        elif declined is not None:
+            record["declinedCount"] = declined
+
+
+def cross_family_summary(state):
+    """The run-outcome line's ``crossFamily`` object, or None when the state has
+    nothing for it: no ``crossFamilyReview`` record and no finding with a
+    ``source``, which is every state written before REQ-722 (AC-15).
+
+    Every value is a string: the counts from :func:`cross_family_counts`, then
+    ``repos``, mapping each valid repo id to its ``status`` and ``reason``
+    (``-`` when the record has none, or one outside the vocabulary).
+    """
+    reviews = state.get("crossFamilyReview")
+    reviews = reviews if isinstance(reviews, dict) else {}
+    if not reviews and not any("source" in f for f in _findings(state)):
+        return None
+    counts = cross_family_counts(state)
+    if not reviews and not counts["findings"]:
+        return None
+    cf = _sibling("cross_family")
+    repos = {}
+    for repo in sorted(r for r in reviews if isinstance(r, str) and REPO_ID_RE.match(r)):
+        record = reviews[repo] if isinstance(reviews[repo], dict) else {}
+        status = record.get("status") if record.get("status") in cf.REVIEW_STATUSES else "-"
+        reason = record.get("reason")
+        reason = reason if status == "skipped" and reason in cf.SKIP_REASONS else "-"
+        repos[repo] = {"status": status, "reason": reason}
+    summary = {key: str(counts[key]) for key in CROSS_FAMILY_COUNTS}
+    summary["repos"] = repos
+    return summary
+
+
 def build_record(state, terminal, engine, reason="", req=None, now=None):
     """The RunOutcome dict for ``state`` — every value a string, keys in KEYS order."""
     if terminal not in TERMINALS:
@@ -362,7 +634,10 @@ def build_record(state, terminal, engine, reason="", req=None, now=None):
         "lessons_written": lessons_written,
         "elapsed_s": elapsed,
     }
-    return {k: record[k] for k in KEYS}
+    cross = cross_family_summary(state)
+    if cross is not None:
+        record["crossFamily"] = cross
+    return {k: record[k] for k in KEYS if k in record}
 
 
 def encode(record):
@@ -370,8 +645,12 @@ def encode(record):
     return json.dumps(record, ensure_ascii=True, separators=(",", ":"))
 
 
-def normalize_findings(raw):
-    """The ``verify.findings`` entries for a list of consolidated findings."""
+def normalize_findings(raw, checker=None):
+    """The ``verify.findings`` entries for a list of consolidated findings. The
+    REQ-722 fields follow the REQ-648 ones, each only when given and valid
+    (:func:`finding_extras`), so a finding without them is written as before.
+    ``line`` is kept when it is a 1-based integer (never a bool), so the PR
+    section and ``cross_family.py check-dispositions`` can name ``file:line``."""
     if not isinstance(raw, list):
         raise UsageError("--findings must be a JSON array of finding objects")
     out = []
@@ -388,6 +667,10 @@ def normalize_findings(raw):
         lesson = f.get("lessonId")
         if isinstance(lesson, str) and LESSON_ID_RE.match(lesson):
             entry["lessonId"] = lesson
+        line = f.get("line")
+        if isinstance(line, int) and not isinstance(line, bool) and line >= 1:
+            entry["line"] = line
+        entry.update(finding_extras(f, checker))
         out.append(entry)
     return out
 
@@ -477,7 +760,7 @@ def cmd_emit(args):
     return 0
 
 
-RUN_KEYS = ("validateAttempts", "verify", "lessonsWritten")
+RUN_KEYS = ("validateAttempts", "verify", "lessonsWritten", "crossFamilyReview")
 
 
 def cmd_record_harness(args):
@@ -527,7 +810,7 @@ def cmd_record_verify(args):
                 raw = json.load(handle)
     except (OSError, ValueError) as exc:
         raise UsageError(f"--findings is not readable JSON: {exc}") from exc
-    findings = normalize_findings(raw)
+    findings = normalize_findings(raw, decline_checker(args.state))
     loops = None
     if args.loops is not None:
         loops = as_int(args.loops)
@@ -538,15 +821,72 @@ def cmd_record_verify(args):
         current = data.get("verify") if isinstance(data.get("verify"), dict) else {}
         kept = as_int(current.get("loops"))
         data["verify"] = {
-            "findings": findings,
+            "findings": carry_forward(findings, current.get("findings")),
             "loops": loops if loops is not None else (kept if kept is not None else 0),
             "consolidatedAt": _iso_now(),
         }
+        sync_declined(data)
 
     data = _update(args.state, mutate)
     v = data["verify"]
     fixed = sum(1 for f in v["findings"] if f["fixed"])
     print(f"verify: {len(v['findings'])} finding(s), {fixed} fixed, loops={v['loops']}")
+    return 0
+
+
+def _family_arg(value, flag):
+    try:
+        return _sibling("model_family").parse_family(value)
+    except ValueError as exc:
+        raise UsageError(f"{flag}: {exc}") from exc
+
+
+def cmd_record_cross_family(args):
+    cf = _sibling("cross_family")
+    if not REPO_ID_RE.match(args.repo or ""):
+        raise UsageError("--repo must be a repo id: 1 to 64 of A-Z a-z 0-9 . _ -")
+    if args.status not in cf.REVIEW_STATUSES:
+        raise UsageError(f"--status must be one of {', '.join(cf.REVIEW_STATUSES)}")
+    if args.status == "skipped":
+        if args.reason not in cf.SKIP_REASONS:
+            raise UsageError(f"--status skipped needs --reason, one of {', '.join(cf.SKIP_REASONS)}")
+    elif args.reason is not None:
+        raise UsageError("--reason is given only with --status skipped")
+    implementer = _family_arg(args.implementer, "--implementer")
+    reviewer = _family_arg(args.reviewer, "--reviewer")
+    counts = {}
+    for flag, value in (("--findings", args.findings), ("--dropped", args.dropped)):
+        n = as_int(value) if value is not None else 0
+        if n is None:
+            raise UsageError(f"{flag} must be a non-negative integer")
+        counts[flag] = n
+    if args.status == "skipped" and counts["--findings"]:
+        raise UsageError("a skipped review has no findings: --findings must be 0")
+
+    record = {"status": args.status}
+    if args.status == "skipped":
+        record["reason"] = args.reason
+    record.update({
+        "implementerFamily": implementer,
+        "reviewerFamily": reviewer,
+        "findingCount": counts["--findings"],
+        "droppedCount": counts["--dropped"],
+        "declinedCount": 0,
+    })
+
+    def mutate(data):
+        reviews = data.get("crossFamilyReview")
+        if not isinstance(reviews, dict):
+            reviews = {}
+        reviews[args.repo] = record
+        data["crossFamilyReview"] = reviews
+        sync_declined(data)
+
+    data = _update(args.state, mutate)
+    written = data["crossFamilyReview"][args.repo]
+    print(f"crossFamilyReview: {args.repo} {written['status']}"
+          + (f" {written['reason']}" if "reason" in written else "")
+          + f", {written['findingCount']} finding(s), {written['droppedCount']} dropped")
     return 0
 
 
@@ -616,6 +956,15 @@ def _parser():
     c = sub.add_parser("record-carry", add_help=False)
     c.add_argument("--state", required=True)
     c.add_argument("--from", dest="source", required=True)
+    x = sub.add_parser("record-cross-family", add_help=False)
+    x.add_argument("--state", required=True)
+    x.add_argument("--repo", required=True)
+    x.add_argument("--status", required=True)
+    x.add_argument("--reason")
+    x.add_argument("--implementer", required=True)
+    x.add_argument("--reviewer", required=True)
+    x.add_argument("--findings")
+    x.add_argument("--dropped")
     return p
 
 
@@ -626,6 +975,7 @@ COMMANDS = {
     "record-verify": cmd_record_verify,
     "record-lessons-written": cmd_record_lessons_written,
     "record-carry": cmd_record_carry,
+    "record-cross-family": cmd_record_cross_family,
 }
 
 
@@ -634,7 +984,8 @@ def main(argv=None):
         args = _parser().parse_args(argv)
         if args.command not in COMMANDS:
             raise UsageError("usage: run_outcome.py emit|record-harness|record-validate|"
-                             "record-verify|record-lessons-written|record-carry …")
+                             "record-verify|record-lessons-written|record-carry|"
+                             "record-cross-family …")
         return COMMANDS[args.command](args)
     except UsageError as exc:
         print(f"run-outcome: {exc}", file=sys.stderr)

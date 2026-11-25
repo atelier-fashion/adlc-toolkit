@@ -177,14 +177,25 @@ def test_no_harness_name_in_code():
     assert len(table) == 1 and '("antigravity", ("agy",), "skills-config")' in table[0]
 
 
+#: The lines REQ-722 adds to both adapters: its `model_family` key and the comment above it.
+_REQ_722_LINES = {
+    "+# REQ-722 BR-2, BR-3: one session can run Anthropic and OpenAI models, so no single",
+    "+# family is declared and a cross-family review of its work is skipped.",
+    "+model_family: unknown",
+}
+
+
 def test_other_adapters_are_not_edited():
-    # harness/codex.yml left this list when REQ-662 stage 1 gave it its exec block.
-    out = subprocess.run(["git", "-C", TOOLKIT, "diff", "--name-only", "origin/main", "--",
+    # harness/codex.yml left this list when REQ-662 stage 1 gave it its exec block. REQ-722
+    # declares `model_family` in both: those lines alone may differ from origin/main.
+    out = subprocess.run(["git", "-C", TOOLKIT, "diff", "-U0", "origin/main", "--",
                           "harness/copilot.yml", "harness/cursor.yml"],
                          capture_output=True, text=True)
     if out.returncode:
         pytest.skip("no origin/main here")
-    assert out.stdout == ""
+    changed = [ln for ln in out.stdout.split("\n") if ln[:1] in "+-" and ln
+               and not ln.startswith(("+++", "---"))]
+    assert [ln for ln in changed if ln not in _REQ_722_LINES] == []
 
 
 def test_loader_refusals(tmp_path, sandbox):

@@ -77,7 +77,11 @@ RC_CAP_BYTES = 262144
 #: The closed schema's allowed keys (REQ BR-7). One constant, pinned to the key
 #: list in `tools/delegate/README.md` by a structural test — a closed schema
 #: rots unless something ties it to the doc that describes it (LESSON-331).
-DELEGATE_KEYS = frozenset({"enabled", "model", "base_url", "api_key_env"})
+#: `family` (REQ-722 BR-10) is the declared model family of the endpoint; it
+#: has its own branch in `validate_delegate_section`, never the generic string
+#: one, which would accept any value (LESSON-614).
+DELEGATE_KEYS = frozenset({"enabled", "model", "base_url", "api_key_env",
+                           "family"})
 
 KIND_ABSENT = "absent"
 KIND_PARSED = "parsed"
@@ -777,6 +781,11 @@ def validate_delegate_section(document):
     lowercased into an opt-out the operator never wrote. PyYAML's 1.1 booleans
     (``yes``/``no``/``on``/``off``) arrive as real bools and are accepted — the
     schema refuses strings, so the Norway problem cannot reach an opt-in.
+
+    ``family`` must be exactly one member of ``model_family.MODEL_FAMILIES``
+    (REQ-722 BR-10). It is returned only when written; :func:`delegate_family`
+    is what turns an absent one into ``unknown``, so every section that was
+    valid before ``family`` existed returns the same dict it always did.
     """
     if document is None:
         return {}
@@ -802,13 +811,77 @@ def validate_delegate_section(document):
                 raise SchemaError(
                     "'delegate.enabled' must be a YAML boolean (true or "
                     "false), not %s" % _type_name(value))
+        elif key == "family":
+            # Its own branch, ahead of the generic string one below, which
+            # would take `family: gpt` as readily as `family: openai`
+            # (LESSON-614). Exactly an enum member: no case folding, and no
+            # reading a family out of a model name (REQ-722 BR-2). The message
+            # names the field and the allowed values, never the value.
+            try:
+                _model_family().parse_family(value)
+            except ValueError:
+                raise SchemaError(
+                    "'delegate.family' must be exactly one of %s, not %s"
+                    % (", ".join(_model_family().MODEL_FAMILIES),
+                       "a string outside that set" if isinstance(value, str)
+                       else _type_name(value)))
         elif not isinstance(value, str):
             # Catches a nested mapping and a sequence as well as a number:
-            # the three remaining fields are scalars, and a mapping under one
-            # of them is how `enabled: true` was once hoisted over a written
+            # the remaining fields are scalars, and a mapping under one of
+            # them is how `enabled: true` was once hoisted over a written
             # `false`.
             raise SchemaError(
                 "'delegate.%s' must be a string, not %s"
                 % (key, _type_name(value)))
         out[key] = value
     return out
+
+
+# --- the model family (REQ-722) ---------------------------------------------
+
+_model_family_cache = []
+
+
+def _model_family():
+    """The sibling ``model_family`` module, loaded on first use.
+
+    Loaded by explicit path, beside this file, and only when a family is
+    actually asked for. ``tools/adlc/forge_config.py`` and ``lane_check.py``
+    load THIS file by path, with no ``tools/delegate`` on ``sys.path``, and a
+    test fixture copies it alone into a fake plugin root: a module-level import
+    would break both, for a value neither of them reads. A path, not ``import``,
+    for the reason ``forge_config._loader`` gives: a by-path load shadows
+    nothing and is shadowed by nothing on ``sys.path``.
+    """
+    # One of four by-path loaders, kept alike: cross_family._model_family,
+    # run_outcome._sibling and tools/adlc/harness_adapter.py's _model_family.
+    # A fix to how one loads (or fails to) belongs in all four.
+    if _model_family_cache:
+        return _model_family_cache[0]
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                        "model_family.py")
+    spec = importlib.util.spec_from_file_location("model_family", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _model_family_cache.append(module)
+    return module
+
+
+def delegate_family(section):
+    """The declared model family of a validated ``delegate`` section.
+
+    ``section`` is what :func:`validate_delegate_section` returned, or the
+    adapter's malformed marker dict. A section without ``family`` — including no
+    section, no file, and a file that could not be read — resolves to
+    ``unknown`` (REQ-722 BR-10), which the cross-family review treats as "not
+    established" and skips (BR-3). Anything that is not a member also resolves
+    to ``unknown``: any doubt about a family is ``unknown`` (ADR-2). The four
+    other keys are not read here.
+    """
+    module = _model_family()
+    value = section.get("family") if isinstance(section, dict) else None
+    try:
+        return module.parse_family(value)
+    except ValueError:
+        return module.UNKNOWN

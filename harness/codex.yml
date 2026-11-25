@@ -7,6 +7,9 @@
 name: codex
 schema_version: 3
 binary: codex
+# The family of every model this harness runs (REQ-722 ADR-2): the exec route runs
+# Codex's default model, and `--model` is an operator flag. `adlc harness family` reads it.
+model_family: openai
 
 paths:
   # Rendered copies, user-level only; a project render never writes these, and

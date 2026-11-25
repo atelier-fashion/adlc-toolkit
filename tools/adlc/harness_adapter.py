@@ -42,6 +42,13 @@ import harness_yaml  # noqa: E402
 #: surface and ``capabilities.fence_unmatchable``, and doctor SKIPs an adapter with nothing
 #: rendered. Each field is optional and refused under an older version, so no earlier
 #: adapter changes.
+#: ``model_family`` (REQ-722) is the one optional key read at every version, with no bump.
+#: Every shipped adapter declares it, and a version is not only a field gate: schema 3 makes
+#: ``sandbox_can_reach_common_gitdir`` required (Copilot and Cursor record none) and changes
+#: what ``restores`` passes, and schema 4 lets the doctor SKIP an adapter with nothing
+#: rendered, which is always true of claude's user scope. Moving claude, codex, copilot and
+#: cursor to a fifth version to carry one key would change their doctor and render. An
+#: absent key reads ``unknown``, which is what an older adapter means.
 KNOWN_SCHEMA_VERSIONS = (1, 2, 3, 4)
 
 SURFACES = ("agents", "permissions", "hooks", "instructions", "skills", "config")
@@ -226,7 +233,7 @@ _TOP_KEYS = {
     "accepted_fidelity", "deny_tier_render", "default_mode_map", "exec", "trust",
     "sandbox_can_reach_common_gitdir", "hook_events", "hook_timeout_unit",
     "hook_payload", "doctor_rows", "capabilities", "hook_output", "fidelity_notes",
-    "hook_cwd", "hook_output_envelope",
+    "hook_cwd", "hook_output_envelope", "model_family",
 }
 _REQUIRED_TOP = ("name", "schema_version", "binary", "paths", "formats", "tool_map",
                  "tier_map", "deny_tier_render", "trust", "hook_events", "hook_payload",
@@ -318,6 +325,37 @@ def resolve_adapter(name, adapter_path=None, toolkit=None):
                                name, ", ".join(os.path.basename(p)[:-4]
                                                for p in shipped_adapter_paths(toolkit))))
     return load_adapter(path, toolkit=toolkit)
+
+
+_model_family_cache = []
+
+
+def model_families():
+    """This toolkit's ``tools/delegate/model_family.py``, loaded by path on first use.
+
+    The closed ``ModelFamily`` enum is defined there once (REQ-722). A path, not an
+    import through ``_machine_config``, which may pull PyYAML, and not a ``sys.path``
+    entry, which would shadow or be shadowed by whatever else the process imported:
+    the doctor loads adapters on the system ``python3`` (LESSON-395). Raises
+    ``OSError`` or ``ImportError`` when the file is missing or will not execute.
+    """
+    if _model_family_cache:
+        return _model_family_cache[0]
+    import importlib.util
+    path = os.path.join(toolkit_dir(), "tools", "delegate", "model_family.py")
+    spec = importlib.util.spec_from_file_location("model_family", path)
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load %s" % path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _model_family_cache.append(module)
+    return module
+
+
+def model_family(adapter):
+    """The ``model_family`` a loaded adapter declares, or ``unknown`` without one (REQ-722
+    BR-3). Never read from the adapter's name: a harness can run more than one family."""
+    return adapter.get("model_family") or model_families().UNKNOWN
 
 
 def expand_user_path(path):
@@ -413,6 +451,21 @@ def _need_schema_3(src, field, version):
 
 def _need_schema_4(src, field, version):
     _need_schema(src, field, version, 4)
+
+
+def _model_family(src, value):
+    """``model_family``: exactly one member of the closed enum, at any schema version. A
+    model name (``gpt-5``), a case variant or a padded string is refused, never folded
+    (REQ-722 BR-2). An enum that cannot be loaded refuses the adapter too."""
+    try:
+        families = model_families()
+    except (OSError, ImportError) as exc:
+        raise AdapterError(src, "model_family", "the toolkit's tools/delegate/model_family.py "
+                           "could not be loaded (%s)" % exc.__class__.__name__)
+    try:
+        return families.parse_family(value)
+    except ValueError as exc:
+        raise AdapterError(src, "model_family", "%r is %s" % (value, exc))
 
 
 def _hook_output_envelope(src, data):
@@ -882,6 +935,8 @@ def load_adapter(path, toolkit=None, agents_dir=None, table=None):
                               ", ".join(str(v) for v in KNOWN_SCHEMA_VERSIONS)))
 
     binary = _need_str(src, "binary", data["binary"])
+    if "model_family" in data:
+        _model_family(src, data["model_family"])
     table = detect_table() if table is None else table
     if name in table and binary not in table[name]:
         raise AdapterError(src, "binary", "%r disagrees with `adlc harness detect`'s table "

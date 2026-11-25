@@ -57,8 +57,11 @@ def _forge_repo(origin):
 
 MOCK_HOST = "mock.forge"
 TERMINAL = ("merged", "rejected", "failed")
-#: Keys the primary-path copy keeps over a working copy's (REQ-647, REQ-648).
-PRIMARY_OWNED = ("lessons", "harness", "validateAttempts", "verify", "lessonsWritten")
+#: Keys the primary-path copy keeps over a working copy's (REQ-647, REQ-648). REQ-722's
+#: ``crossFamilyReview`` is written there at the event by ``run_outcome.py
+#: record-cross-family``, so it is one of them.
+PRIMARY_OWNED = ("lessons", "harness", "validateAttempts", "verify", "lessonsWritten",
+                 "crossFamilyReview")
 #: Keys a close-out's carried state file never sets in the primary path's: the engine writes
 #: them (REQ-662 ADR-7).
 CLOSE_OUT_ENGINE_OWNED = ("status", "exec", "approval")

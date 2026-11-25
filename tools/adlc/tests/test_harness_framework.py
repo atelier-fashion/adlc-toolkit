@@ -96,6 +96,10 @@ def toolkit_copy(tmp_path):
                         ignore=shutil.ignore_patterns("tests", "__pycache__"))
     shutil.copytree(os.path.join(TOOLKIT, "tools", "adlc"), str(root / "tools" / "adlc"),
                     ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    # The adapter loader checks `model_family` against the enum defined here (REQ-722).
+    (root / "tools" / "delegate").mkdir()
+    shutil.copy(os.path.join(TOOLKIT, "tools", "delegate", "model_family.py"),
+                str(root / "tools" / "delegate" / "model_family.py"))
     shutil.copy(os.path.join(TOOLKIT, "VERSION"), str(root / "VERSION"))
     return root
 
@@ -749,7 +753,7 @@ def test_agents_copy_render(tmp_path, sandbox):
                                                     "PATH": SYSTEM_PATH}).returncode == 0
     assert subprocess.run(["git", "-C", TOOLKIT, "diff", "--quiet", "--", "agents/"]).returncode == 0
     texts, _p = _render_fake(tmp_path)
-    assert len(texts) == 19
+    assert len(texts) == 20
     no_tools = {"task-implementer", "pipeline-runner"}
     for name, text in texts.items():
         fm, body = hr.split_agent(text)
@@ -790,7 +794,7 @@ def test_agents_copy_render(tmp_path, sandbox):
                           env={"HOME": os.environ["HOME"], "ADLC_HOME": os.environ["ADLC_HOME"],
                                "PATH": SYSTEM_PATH})
     assert proc.returncode == 0, proc.stderr
-    assert len(os.listdir(os.path.join(os.environ["HOME"], ".fake", "agents"))) == 19
+    assert len(os.listdir(os.path.join(os.environ["HOME"], ".fake", "agents"))) == 20
     assert os.listdir(str(proj)) == [".git"]
 
 

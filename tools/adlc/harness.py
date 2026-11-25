@@ -326,7 +326,7 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "probe":
         return _cmd_probe(argv[1:])
-    if argv and argv[0] in ("install", "render", "doctor", "drift"):
+    if argv and argv[0] in ("install", "render", "doctor", "drift", "family"):
         # REQ-657: the adapter framework's verbs (harness_cli.py).
         import harness_cli
         return harness_cli.main(argv)
@@ -342,7 +342,8 @@ def main(argv=None) -> int:
     for verb, text in (("install", "write a harness's user-level surfaces (REQ-657)"),
                        ("render", "render any surface through an adapter; --check is parity"),
                        ("doctor", "harness:<name> and render-currency:<name> (REQ-657)"),
-                       ("drift", "template-posture drift of the project layer (read-only)")):
+                       ("drift", "template-posture drift of the project layer (read-only)"),
+                       ("family", "the implementer's model family for this process (REQ-722)")):
         sub.add_parser(verb, add_help=False, help=text)
     detect = sub.add_parser("detect", help="report the known harnesses (read-only)")
     detect.add_argument("--json", action="store_true",

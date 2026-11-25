@@ -72,6 +72,85 @@ So the engine is **ONE self-contained file** — there are no sibling `schemas.j
    (`runOutcomeArgs`), which the Python normalises onto its closed enum. None of
    these leaves can halt a REQ or change `{results}`, and none reads
    `args.answers`.
+6. **The cross-family reviewer (REQ-722).** Beside the pre-pass, `verify` runs
+   `runCrossFamily`: one `cross-family-reviewer` leaf per touched repo, once per
+   run. The leaf is a pass-through. It sources `partials/cross-family-review.sh`,
+   runs `adlc_cross_family_review` (another model family's review, post-validated
+   in `tools/delegate/cross_family.py`, which also writes the repo's
+   `crossFamilyReview` record), and returns a `CROSS_FAMILY` value. It is not a
+   panel member: `panelMembers()` stays six and `REVIEWER_DIMENSIONS` has no entry
+   for it, so `fixedPairs` never schedules it for the Step D re-verify (BR-1).
+
+   - **`FINDINGS`** items gain three optional fields: `source`, a non-empty list
+     of `FINDING_SOURCES` (`panel`, `cross-family`); `disposition`, one of
+     `fixed`, `deferred`, `declined`; and `declineReason`. A panel finding omits
+     `source`, and an absent `source` means `panel`. The engine owns all three:
+     `joinCrossFamily` drops whatever a review leaf wrote, and sets `source:
+     ["cross-family"]` on the cross-family findings itself.
+   - **`CROSS_FAMILY`** is closed: `status` (`ran` | `skipped`), `reason` (one of
+     `CROSS_FAMILY_SKIP_REASONS`, exactly when skipped), `implementerFamily` and
+     `reviewerFamily` (`MODEL_FAMILIES`), `findings` (the `FINDINGS` item schema),
+     `dropped`, `findingCount` (the record's count, read back by the leaf), and an
+     optional `ruleMarks` (`met`, `partial`, `unmet`). Each
+     vocabulary is a copy of its Python owner (`cross_family.py`,
+     `model_family.py`, `run_outcome.py`), held equal by a test. The skip reasons
+     are REQ-722's eight, not the pre-pass `CANDIDATES.gateReason` enum.
+   - **The leaf's copy is not trusted.** The leaf is a model relaying another
+     model's output, so `crossFamilyOutcome` re-validates every finding it relays
+     (`crossFamilyFinding`): `file` passes `isSafePath`, `validateCitations`' own
+     path rule; `severity` is in the enum; `class` matches
+     `FINDING_CLASS_PATTERN`; the title is cut to `[A-Za-z0-9 .,:/_-]` and 200
+     characters; `source` is forced to `["cross-family"]`; and no other free-text
+     field survives. A finding that fails is dropped and counted into `dropped`.
+     A `ran` result whose `findingCount` is missing or differs from the number of
+     findings it relays is `invalid-output`: the leaf added or removed one.
+     `joinCrossFamily` applies the same rule again.
+   - **Consolidation.** `joinCrossFamily` adds a repo's findings as one extra set
+     with no `dimension`, so they get `dimensions: []`. No panel prompt ever
+     carries them (BR-7). `dedupeAndRank` deduplicates them against the panel's
+     under the unchanged key, unions `source` on merge (sorted, so a finding
+     both raised is `["cross-family", "panel"]`), and blocks on a Critical or
+     `mustFix` one exactly as on a panel finding. A consolidation with no
+     cross-family finding carries no `source`, as before. `mergeReverified` keeps
+     the dimension-less set, so Step D neither re-runs nor drops it, and
+     `verifyEntry` carries `source` into the recorded `verify` findings.
+   - **Step D confirms its blocking findings (BR-1).** `confirmersOf` names the
+     reviewer dimensions that confirm a blocking finding: each of its panel
+     dimensions for a merged one, `CROSS_FAMILY_CONFIRMER` (`correctness`) for a
+     cross-family-only one. `confirmLists` hands each re-check its findings
+     (`file`, `line`, `title`, `class`, sanitized) in the eighth `reviewPrompt`
+     argument, with the instruction to report again any that is still present.
+     Only the re-check prompt carries it; the first pass never does, because BR-7
+     forbids a panel member seeing these findings before consolidation.
+     `retireConfirmedCrossFamily` then drops a blocking finding's cross-family copy
+     only when every dimension handed it re-ran (`reranDimensions`: a null result,
+     or one filed under another dimension, re-ran nothing). A re-raised finding
+     blocks again.
+   - **Dispositions (BR-8).** The engine never declines, so `verifyEntry` records
+     a cross-family finding `fixed` when fixed, `deferred` when it is neither
+     Critical nor `mustFix`, and nothing when it is blocking and unfixed, with
+     `mustFix: true` and `line` when it has them.
+   - **Phase 6 checks first (BR-8, BR-5).** The Phase-6 leaf runs
+     `cross_family.py check-dispositions` from the primary worktree against the
+     primary-path state before it pushes anything. On any non-zero exit it opens
+     nothing and returns PRS `dispositionCheck: "refused"` with the lines the check
+     printed; `dispositionHold` turns that, or a missing `dispositionCheck`, into a
+     `blocked` terminal (`cross-family-dispositions`) before CI or merge. On a pass
+     it puts `cross_family.py pr-section`'s output, verbatim, into every PR body.
+   - **A result the engine cannot use is recorded, never omitted (BR-12).**
+     `crossFamilyOutcome` turns `null` (a leaf that threw, returned nothing or
+     failed the schema) and a value that breaks "reason exactly when skipped" into
+     `skipped` / `invalid-output` with both families `unknown`. A state-write
+     leaf then records it through `emit-run-outcome.sh record-cross-family`,
+     spelling the repo id only when it matches `REPO_ID_PATTERN`
+     (`^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$`, the partial's and the fence census's
+     `repo-id`, held equal by a test). Every repo gets one log line naming its
+     status or skip reason.
+
+   A consumer's vendored `.adlc/workflows/adlc-sprint.workflow.js` that predates
+   REQ-722 is preferred over this copy (see the two-level convention below), so
+   it dispatches no cross-family leaf and writes no `crossFamilyReview` record
+   until `/init` refreshes it. `/template-drift` reports the copy as stale.
 
 The toolkit forbids a build step, so the pure logic stays **inline** and is
 unit-tested via a shared `vm` loader (`tests/_load-pure.js`) that evaluates just
@@ -141,7 +220,7 @@ copy — the engine degrades gracefully rather than breaking.
 ## The agent namespace (`args.agentNamespace`)
 
 The engine names its specialist agents in code (`feature-tracer`, the six panel
-members, `task-implementer`, `delegate-pre-pass`). Claude Code registers the
+members, `task-implementer`, `delegate-pre-pass`, `cross-family-reviewer`). Claude Code registers the
 toolkit's agents by bare name on the symlink route and as `adlc:<name>` on the
 plugin route (REQ-669 `verification.md` row 7). A wrong spelling does not fail
 loudly: on the fork path an unresolved name silently became a generic agent with
