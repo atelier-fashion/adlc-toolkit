@@ -1,10 +1,10 @@
 ---
 id: REQ-720
 title: "A blocked exec run is answered with a one-time token from the operator's dashboard, and a dispatch whose caller the kernel cannot name is refused"
-status: draft
+status: approved
 deployable: false
 created: 2026-11-23
-updated: 2026-11-24
+updated: 2026-11-27
 component: "adlc/sprint"
 domain: "adlc"
 stack: ["python", "markdown"]
@@ -215,7 +215,6 @@ Each refusal below is paired with the case that must not be refused: the operato
 - Binding the answer token to the text of the question shown beside it.
 - The workflow and legacy engines' answer paths (`args.answers`, the legacy re-dispatch). They are driven by the operator's own session and have no supervisor.
 - Splitting `sprint_exec.py`, and the other items REQ-662 deferred: the sandbox and the fence runner's git environment, and the tolerant user-config reader.
-- Engine code. This requirement is a draft; nothing is implemented by it.
 
 ## Retrieved Context
 
